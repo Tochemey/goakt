@@ -339,7 +339,10 @@ type Actor struct {
 	// Specifies the supervisor configuration when explicitly set
 	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
 	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	Reentrancy *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout   *durationpb.Duration `protobuf:"bytes,11,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -444,6 +447,13 @@ func (x *Actor) GetReentrancy() *ReentrancyConfig {
 	return nil
 }
 
+func (x *Actor) GetInitTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.InitTimeout
+	}
+	return nil
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -526,7 +536,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\xdf\x03\n" +
+	"\x14_any_error_directive\"\x9d\x04\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -542,7 +552,8 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
-	"reentrancyB\a\n" +
+	"reentrancy\x12<\n" +
+	"\finit_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vinitTimeoutB\a\n" +
 	"\x05_role\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
@@ -608,13 +619,14 @@ var file_internal_actor_proto_depIdxs = []int32{
 	9,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
 	4,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
 	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
-	7,  // 10: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	7,  // 11: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	7,  // 10: internalpb.Actor.init_timeout:type_name -> google.protobuf.Duration
+	7,  // 11: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	7,  // 12: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }

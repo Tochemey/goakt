@@ -67,6 +67,9 @@ message Actor {
   SupervisorSpec supervisor = 9;
   // Specifies the reentrancy configuration when explicitly set
   ReentrancyConfig reentrancy = 10;
+  // Specifies the init timeout override when explicitly set.
+  // When unset, the hosting node's system-wide init timeout is used.
+  google.protobuf.Duration init_timeout = 11;
 }
 
 message SingletonSpec {

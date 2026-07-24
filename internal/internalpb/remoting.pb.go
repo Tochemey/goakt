@@ -843,7 +843,10 @@ type RemoteSpawnRequest struct {
 	// Specifies the supervisor configuration when explicitly set
 	Supervisor *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
 	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy    *ReentrancyConfig `protobuf:"bytes,12,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	Reentrancy *ReentrancyConfig `protobuf:"bytes,12,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout   *durationpb.Duration `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -958,6 +961,13 @@ func (x *RemoteSpawnRequest) GetSupervisor() *SupervisorSpec {
 func (x *RemoteSpawnRequest) GetReentrancy() *ReentrancyConfig {
 	if x != nil {
 		return x.Reentrancy
+	}
+	return nil
+}
+
+func (x *RemoteSpawnRequest) GetInitTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.InitTimeout
 	}
 	return nil
 }
@@ -2621,7 +2631,10 @@ type RemoteSpawnChildRequest struct {
 	// Specifies the parent actor name
 	Parent string `protobuf:"bytes,10,opt,name=parent,proto3" json:"parent,omitempty"`
 	// Specifies the supervisor configuration when explicitly set
-	Supervisor    *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	Supervisor *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout   *durationpb.Duration `protobuf:"bytes,12,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2733,6 +2746,13 @@ func (x *RemoteSpawnChildRequest) GetSupervisor() *SupervisorSpec {
 	return nil
 }
 
+func (x *RemoteSpawnChildRequest) GetInitTimeout() *durationpb.Duration {
+	if x != nil {
+		return x.InitTimeout
+	}
+	return nil
+}
+
 type RemoteSpawnChildResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the actor address
@@ -2828,7 +2848,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12'\n" +
 	"\x0fwatcher_address\x18\x04 \x01(\tR\x0ewatcherAddress\"\x17\n" +
-	"\x15RemoteUnWatchResponse\"\xa4\x04\n" +
+	"\x15RemoteUnWatchResponse\"\xe2\x04\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -2848,7 +2868,8 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"supervisor\x12<\n" +
 	"\n" +
 	"reentrancy\x18\f \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
-	"reentrancyB\a\n" +
+	"reentrancy\x12<\n" +
+	"\finit_timeout\x18\r \x01(\v2\x19.google.protobuf.DurationR\vinitTimeoutB\a\n" +
 	"\x05_role\"/\n" +
 	"\x13RemoteSpawnResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"T\n" +
@@ -2936,7 +2957,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"w\n" +
 	"!RemotePassivationStrategyResponse\x12R\n" +
-	"\x14passivation_strategy\x18\x01 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\"\xe6\x03\n" +
+	"\x14passivation_strategy\x18\x01 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\"\xa4\x04\n" +
 	"\x17RemoteSpawnChildRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -2955,7 +2976,8 @@ const file_internal_remoting_proto_rawDesc = "" +
 	" \x01(\tR\x06parent\x12:\n" +
 	"\n" +
 	"supervisor\x18\v \x01(\v2\x1a.internalpb.SupervisorSpecR\n" +
-	"supervisor\"4\n" +
+	"supervisor\x12<\n" +
+	"\finit_timeout\x18\f \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\"4\n" +
 	"\x18RemoteSpawnChildResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddressB\xa6\x01\n" +
 	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
@@ -3049,24 +3071,26 @@ var file_internal_remoting_proto_depIdxs = []int32{
 	54, // 6: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
 	55, // 7: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
 	56, // 8: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	57, // 9: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
-	51, // 10: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
-	57, // 11: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
-	57, // 12: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
-	58, // 13: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
-	54, // 14: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
-	59, // 15: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
-	60, // 16: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
-	53, // 17: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	53, // 18: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	54, // 19: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
-	56, // 20: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	55, // 21: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	51, // 9: internalpb.RemoteSpawnRequest.init_timeout:type_name -> google.protobuf.Duration
+	57, // 10: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
+	51, // 11: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	57, // 12: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
+	57, // 13: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
+	58, // 14: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
+	54, // 15: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
+	59, // 16: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
+	60, // 17: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
+	53, // 18: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	53, // 19: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	54, // 20: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
+	56, // 21: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	55, // 22: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	51, // 23: internalpb.RemoteSpawnChildRequest.init_timeout:type_name -> google.protobuf.Duration
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }

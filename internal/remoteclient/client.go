@@ -1310,6 +1310,11 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		return nil, err
 	}
 
+	var initTimeout *durationpb.Duration
+	if childRequest.InitTimeout > 0 {
+		initTimeout = durationpb.New(childRequest.InitTimeout)
+	}
+
 	client := r.NetClient(host, port)
 	request := &internalpb.RemoteSpawnChildRequest{
 		Host:                host,
@@ -1323,6 +1328,7 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		EnableStash:         childRequest.EnableStashing,
 		Reentrancy:          reentrancy,
 		Supervisor:          codec.EncodeSupervisor(childRequest.Supervisor),
+		InitTimeout:         initTimeout,
 	}
 
 	resp, err := client.SendProto(ctx, request)
@@ -2112,6 +2118,11 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		return nil, err
 	}
 
+	var initTimeout *durationpb.Duration
+	if spawnRequest.InitTimeout > 0 {
+		initTimeout = durationpb.New(spawnRequest.InitTimeout)
+	}
+
 	// Get pooled client
 	client := r.NetClient(host, port)
 	request := &internalpb.RemoteSpawnRequest{
@@ -2127,6 +2138,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		Role:                spawnRequest.Role,
 		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
 		Reentrancy:          reentrancy,
+		InitTimeout:         initTimeout,
 	}
 
 	// Send request

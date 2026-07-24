@@ -113,6 +113,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			Reentrancy:          config.reentrancy,
 			Supervisor:          config.supervisor,
 			Role:                config.role,
+			InitTimeout:         pointer.Deref(config.initTimeout, 0),
 		})
 		if err != nil {
 			return nil, err
@@ -312,6 +313,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
 		Supervisor:          config.supervisor,
+		InitTimeout:         pointer.Deref(config.initTimeout, 0),
 	}
 
 	addr, err := x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
@@ -946,6 +948,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 		Dependencies:        config.dependencies,
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
+		InitTimeout:         pointer.Deref(config.initTimeout, 0),
 	})
 
 	if err != nil {
@@ -1081,6 +1084,10 @@ func (x *actorSystem) releaseDepartedEntry(ctx context.Context, name, departedNo
 func (x *actorSystem) wireSpawnOptions(props *internalpb.Actor) ([]SpawnOption, error) {
 	spawnOpts := []SpawnOption{
 		WithPassivationStrategy(codec.DecodePassivationStrategy(props.GetPassivationStrategy())),
+	}
+
+	if props.GetInitTimeout() != nil {
+		spawnOpts = append(spawnOpts, WithInitTimeout(props.GetInitTimeout().AsDuration()))
 	}
 
 	if props.GetEnableStash() {

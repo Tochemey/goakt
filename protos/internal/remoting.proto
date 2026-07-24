@@ -146,6 +146,9 @@ message RemoteSpawnRequest {
   SupervisorSpec supervisor = 11;
   // Specifies the reentrancy configuration when explicitly set
   ReentrancyConfig reentrancy = 12;
+  // Specifies the init timeout override when explicitly set.
+  // When unset, the hosting node's system-wide init timeout is used.
+  google.protobuf.Duration init_timeout = 13;
 }
 
 message RemoteSpawnResponse {
@@ -369,6 +372,9 @@ message RemoteSpawnChildRequest {
   string parent = 10;
   // Specifies the supervisor configuration when explicitly set
   SupervisorSpec supervisor = 11;
+  // Specifies the init timeout override when explicitly set.
+  // When unset, the hosting node's system-wide init timeout is used.
+  google.protobuf.Duration init_timeout = 12;
 }
 
 message RemoteSpawnChildResponse {

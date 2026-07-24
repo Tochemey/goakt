@@ -43,6 +43,21 @@ interface.
 
 If `PreStart` returns an error, the actor is not started and the supervisor handles the failure.
 
+### Init timeout
+
+`PreStart` runs under a deadline. When it does not complete within the init timeout, initialization fails and the actor
+is not started. The system-wide default is set with `WithActorInitTimeout` on the actor system; override it per actor
+with the `WithInitTimeout` spawn option:
+
+```go
+pid, err := system.Spawn(ctx, "loader", NewLoader(),
+    actor.WithInitTimeout(5*time.Second))
+```
+
+A non-positive duration is ignored, leaving the system-wide timeout in effect. Child actors and relocated actors honor
+an explicit `WithInitTimeout`; without one they use the hosting node's system-wide timeout. The override travels with
+remote spawns and cluster relocation so an actor keeps its configured init timeout wherever it is placed.
+
 ## System messages
 
 The framework injects **system messages** into the actor's mailbox to drive lifecycle and coordination. These are plain

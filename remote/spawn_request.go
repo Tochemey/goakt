@@ -173,6 +173,13 @@ type SpawnRequest struct {
 	// Reentrancy defines async request behavior for the spawned actor.
 	// When nil, async requests are disabled (default behavior).
 	Reentrancy *reentrancy.Reentrancy
+
+	// InitTimeout overrides the hosting node's init timeout for the spawned actor.
+	// The init timeout bounds how long the actor's PreStart hook may run before
+	// initialization is considered failed.
+	//
+	// A zero value means the hosting node's system-wide init timeout is used.
+	InitTimeout time.Duration
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
@@ -289,6 +296,13 @@ type SpawnChildRequest struct {
 
 	// Parent specifies the parent actor name.
 	Parent string
+
+	// InitTimeout overrides the hosting node's init timeout for the spawned child.
+	// The init timeout bounds how long the actor's PreStart hook may run before
+	// initialization is considered failed.
+	//
+	// A zero value means the hosting node's system-wide init timeout is used.
+	InitTimeout time.Duration
 }
 
 func (s *SpawnChildRequest) Validate() error {
