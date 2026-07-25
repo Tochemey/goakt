@@ -55,6 +55,18 @@ func (e *Error) Unwrap() error {
 	return e.Cause
 }
 
+// Is matches errors of the same Type, so errors.Is works against the ErrOpen
+// and ErrTimeout sentinels regardless of the state and cause captured on a
+// given instance.
+func (e *Error) Is(target error) bool {
+	t, ok := target.(*Error)
+	if !ok {
+		return false
+	}
+
+	return e.Type == t.Type
+}
+
 var (
 	// ErrOpen is returned when the breaker is open and rejects a call.
 	ErrOpen = &Error{

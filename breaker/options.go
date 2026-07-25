@@ -85,28 +85,36 @@ func defaultOptions() *options {
 	}
 }
 
-// Sanitize adjusts invalid options to their default values.
+// Sanitize replaces invalid option values with the defaults from defaultOptions.
 func (o *options) Sanitize() {
-	if o.buckets <= 0 {
-		o.buckets = 1
+	d := defaultOptions()
+
+	if o.buckets < 1 {
+		o.buckets = d.buckets
 	}
+
 	if o.window <= 0 {
-		o.window = time.Second
+		o.window = d.window
 	}
+
 	if o.failureRate < 0 || o.failureRate > 1 {
-		o.failureRate = 0.5
+		o.failureRate = d.failureRate
 	}
+
 	if o.minRequests < 1 {
-		o.minRequests = 1
+		o.minRequests = d.minRequests
 	}
+
 	if o.openTimeout <= 0 {
-		o.openTimeout = 30 * time.Second
+		o.openTimeout = d.openTimeout
 	}
+
 	if o.halfOpenMaxCalls < 1 {
-		o.halfOpenMaxCalls = 1
+		o.halfOpenMaxCalls = d.halfOpenMaxCalls
 	}
+
 	if o.clock == nil {
-		o.clock = time.Now
+		o.clock = d.clock
 	}
 }
 

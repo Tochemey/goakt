@@ -48,16 +48,17 @@ type bucketWindow struct {
 	clock       func() time.Time
 	windowNanos int64 // cached window duration in nanoseconds
 
-	mu         sync.RWMutex
+	mu         sync.Mutex
 	buf        []bucket
 	cursor     int   // points to current bucket index
-	lastUpdate int64 // last time we advanced buckets
+	lastUpdate int64 // start time of the current bucket (unix nano)
 }
 
 func newBuckets(window time.Duration, n int, clock func() time.Time) *bucketWindow {
 	if n < 1 {
 		n = 1
 	}
+
 	bucketDur := window / time.Duration(n)
 	if bucketDur <= 0 {
 		bucketDur = time.Nanosecond
@@ -70,98 +71,90 @@ func newBuckets(window time.Duration, n int, clock func() time.Time) *bucketWind
 		clock:       clock,
 		windowNanos: window.Nanoseconds(),
 		buf:         make([]bucket, n),
-		cursor:      0,
-		lastUpdate:  now,
 	}
 
-	// Initialize all buckets with current time
-	for i := range bw.buf {
-		bw.buf[i].reset(now)
-	}
+	bw.hardResetLocked(now)
 	return bw
 }
 
+// advanceLocked rotates the window forward so the cursor points at the bucket
+// covering now. Caller must hold bw.mu.
 func (bw *bucketWindow) advanceLocked(now int64) {
-	// Quick check if we need to advance at all
-	if now < bw.lastUpdate+bw.bucketDur.Nanoseconds() {
-		return // still within current bucket
+	bucketNanos := bw.bucketDur.Nanoseconds()
+	elapsed := now - bw.lastUpdate
+	if elapsed < bucketNanos {
+		return // still within the current bucket
 	}
 
-	elapsed := now - bw.lastUpdate
-
-	// If we've moved past the entire window, do a hard reset
-	if elapsed >= bw.windowNanos {
+	steps := elapsed / bucketNanos
+	if steps >= int64(bw.num) {
+		// the whole window has gone stale
 		bw.hardResetLocked(now)
 		return
 	}
 
-	// Calculate how many buckets to advance
-	steps := min(int(elapsed/bw.bucketDur.Nanoseconds()), bw.num-1)
-
-	// Advance buckets efficiently
-	for i := range steps {
+	for range steps {
 		bw.cursor = (bw.cursor + 1) % bw.num
-		bucketStartTime := bw.lastUpdate + int64(i+1)*bw.bucketDur.Nanoseconds()
-		bw.buf[bw.cursor].reset(bucketStartTime)
+		bw.lastUpdate += bucketNanos
+		bw.buf[bw.cursor].reset(bw.lastUpdate)
 	}
-
-	bw.lastUpdate = now
 }
 
+// hardResetLocked clears every bucket and realigns the window at now. Caller
+// must hold bw.mu (or own the window exclusively during construction).
 func (bw *bucketWindow) hardResetLocked(now int64) {
 	for i := range bw.buf {
 		bw.buf[i].reset(now)
 	}
+
 	bw.cursor = 0
 	bw.lastUpdate = now
 }
 
-func (bw *bucketWindow) addSuccess(n uint64) {
+// add records one outcome at now and returns the window totals observed under
+// the same lock acquisition, so callers can evaluate a consistent snapshot
+// without locking twice.
+func (bw *bucketWindow) add(now int64, success bool) (succ, fail uint64) {
 	bw.mu.Lock()
-	now := bw.clock().UnixNano()
 	bw.advanceLocked(now)
-	bw.buf[bw.cursor].succ += n
-	bw.mu.Unlock()
-}
 
-func (bw *bucketWindow) addFailure(n uint64) {
-	bw.mu.Lock()
-	now := bw.clock().UnixNano()
-	bw.advanceLocked(now)
-	bw.buf[bw.cursor].fail += n
-	bw.mu.Unlock()
-}
-
-func (bw *bucketWindow) totals() (succ, fail uint64) {
-	bw.mu.Lock()
-	now := bw.clock().UnixNano()
-	bw.advanceLocked(now)
-	for i := 0; i < bw.num; i++ {
-		b := bw.buf[i]
-		succ += b.succ
-		fail += b.fail
+	if success {
+		bw.buf[bw.cursor].succ++
+	} else {
+		bw.buf[bw.cursor].fail++
 	}
+
+	succ, fail = bw.totalsLocked()
 	bw.mu.Unlock()
-	return
+	return succ, fail
 }
 
-func (bw *bucketWindow) reset() {
-	bw.mu.Lock()
-	now := bw.clock().UnixNano()
+// totalsLocked sums all buckets. Caller must hold bw.mu.
+func (bw *bucketWindow) totalsLocked() (succ, fail uint64) {
 	for i := range bw.buf {
-		bw.buf[i].succ, bw.buf[i].fail = 0, 0
-		bw.buf[i].start = now
+		succ += bw.buf[i].succ
+		fail += bw.buf[i].fail
 	}
-	bw.cursor = 0
-	bw.mu.Unlock()
+
+	return succ, fail
 }
 
-func (bw *bucketWindow) windowBounds() (start, end time.Time) {
+// snapshot returns the window totals and bounds as of now.
+func (bw *bucketWindow) snapshot() (succ, fail uint64, start, end time.Time) {
 	bw.mu.Lock()
 	now := bw.clock()
 	bw.advanceLocked(now.UnixNano())
-	end = now
-	start = now.Add(-bw.bucketDur * time.Duration(bw.num))
+	succ, fail = bw.totalsLocked()
 	bw.mu.Unlock()
-	return
+
+	end = now
+	start = now.Add(-time.Duration(bw.windowNanos))
+	return succ, fail, start, end
+}
+
+// reset clears all counts and realigns the window at the current time.
+func (bw *bucketWindow) reset() {
+	bw.mu.Lock()
+	bw.hardResetLocked(bw.clock().UnixNano())
+	bw.mu.Unlock()
 }

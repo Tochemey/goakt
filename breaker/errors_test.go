@@ -23,6 +23,7 @@
 package breaker
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -75,6 +76,32 @@ func TestError_Error(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestError_Is(t *testing.T) {
+	t.Run("matches sentinel of same type", func(t *testing.T) {
+		err := &Error{Type: ErrorTypeTimeout, State: HalfOpen, Cause: context.Canceled}
+		if !errors.Is(err, ErrTimeout) {
+			t.Error("expected errors.Is to match ErrTimeout by type")
+		}
+	})
+	t.Run("does not match sentinel of different type", func(t *testing.T) {
+		err := &Error{Type: ErrorTypeTimeout, State: Open}
+		if errors.Is(err, ErrOpen) {
+			t.Error("expected errors.Is not to match ErrOpen")
+		}
+	})
+	t.Run("does not match non breaker errors", func(t *testing.T) {
+		err := &Error{Type: ErrorTypeOpen, State: Open}
+		if errors.Is(err, errors.New("boom")) {
+			t.Error("expected errors.Is not to match a plain error")
+		}
+	})
+	t.Run("sentinel causes remain matchable", func(t *testing.T) {
+		if !errors.Is(ErrTimeout, context.DeadlineExceeded) {
+			t.Error("expected ErrTimeout to unwrap to context.DeadlineExceeded")
+		}
+	})
 }
 
 func TestError_Unwrap(t *testing.T) {

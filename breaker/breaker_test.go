@@ -25,6 +25,7 @@ package breaker
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,23 +33,37 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
-// nolint
-func TestNewBreakerWithInvalidOptions(t *testing.T) {
-	t.Run("With valid options", func(t *testing.T) {
-		b, err := NewCircuitBreakerWithValidation(
-			WithFailureRate(0.5),
-			WithMinRequests(2),
-			WithOpenTimeout(50*time.Millisecond),
-			WithWindow(100*time.Millisecond, 2),
-			WithHalfOpenMaxCalls(0), // Invalid
-		)
+// fakeClock is a deterministic clock for tests.
+type fakeClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{now: time.Unix(1_700_000_000, 0)}
+}
+
+func (c *fakeClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.now = c.now.Add(d)
+	c.mu.Unlock()
+}
+
+func TestNewCircuitBreakerWithValidation(t *testing.T) {
+	t.Run("invalid options are rejected", func(t *testing.T) {
+		b, err := NewCircuitBreakerWithValidation(WithHalfOpenMaxCalls(0))
 		require.Error(t, err)
 		require.Nil(t, b)
 	})
-	t.Run("With invalid options", func(t *testing.T) {
+	t.Run("valid options are accepted", func(t *testing.T) {
 		b, err := NewCircuitBreakerWithValidation(
 			WithFailureRate(0.5),
 			WithMinRequests(2),
@@ -58,312 +73,500 @@ func TestNewBreakerWithInvalidOptions(t *testing.T) {
 		)
 		require.NoError(t, err)
 		require.NotNil(t, b)
+		require.Equal(t, Closed, b.State())
 	})
 }
 
-// nolint
-func TestNewBreaker_WithSanitization(t *testing.T) {
+func TestNewCircuitBreakerSanitizesInvalidOptions(t *testing.T) {
 	b := NewCircuitBreaker(
-		WithFailureRate(0.5),
-		WithMinRequests(2),
-		WithOpenTimeout(50*time.Millisecond),
-		WithWindow(100*time.Millisecond, 2),
-		WithHalfOpenMaxCalls(0), // Invalid
+		WithFailureRate(-1),
+		WithMinRequests(0),
+		WithOpenTimeout(0),
+		WithWindow(0, 0),
+		WithHalfOpenMaxCalls(0),
+		WithClock(nil),
 	)
 
 	require.NotNil(t, b)
+	d := defaultOptions()
+	require.Equal(t, d.failureRate, b.opts.failureRate)
+	require.Equal(t, d.minRequests, b.opts.minRequests)
+	require.Equal(t, d.openTimeout, b.opts.openTimeout)
+	require.Equal(t, d.window, b.opts.window)
+	require.Equal(t, d.buckets, b.opts.buckets)
+	require.Equal(t, d.halfOpenMaxCalls, cap(b.semCh))
+	require.NotNil(t, b.opts.clock)
 }
 
-// nolint
-func TestBreakerAllowsAndBlocks(t *testing.T) {
-	b := NewCircuitBreaker(
-		WithFailureRate(0.5),
-		WithMinRequests(2),
-		WithOpenTimeout(50*time.Millisecond),
-		WithWindow(100*time.Millisecond, 2),
-		WithHalfOpenMaxCalls(1),
-	)
-
-	// Initially closed: should allow
-	require.True(t, b.tryAllow())
-
-	// Record 2 failures -> exceeds failure rate
-	b.onFailure()
-	b.onFailure()
-	require.Equal(t, Open, b.State())
-	require.False(t, b.tryAllow())
-
-	// Wait for open timeout to expire
-	pause.For(60 * time.Millisecond)
-	require.True(t, b.tryAllow())
-	require.Equal(t, HalfOpen, b.State())
-
-	// Success alone is not enough (minRequests=2)
-	b.onSuccess()
-	require.Equal(t, HalfOpen, b.State())
-
-	// Add another success to meet MinRequests
-	b.onSuccess()
-	require.Equal(t, Closed, b.State())
-}
-
-// nolint
-func TestBreakerExecuteSuccess(t *testing.T) {
-	b := NewCircuitBreaker(WithClock(func() time.Time {
-		return time.Now()
-	}))
-	ctx := context.Background()
-
-	res, err := b.Execute(ctx, func(_ context.Context) (any, error) {
+func TestExecuteSuccess(t *testing.T) {
+	b := NewCircuitBreaker()
+	res, err := b.Execute(context.Background(), func(context.Context) (any, error) {
 		return "ok", nil
 	})
+
 	require.NoError(t, err)
-	require.Equal(t, "ok", res.(string))
+	require.Equal(t, "ok", res)
 	require.Equal(t, Closed, b.State())
+
+	m := b.Metrics()
+	require.Equal(t, uint64(1), m.Successes)
+	require.Equal(t, uint64(0), m.Failures)
 }
 
-// nolint
-func TestBreakerExecuteFailureAndFallback(t *testing.T) {
+func TestExecuteFailureOpensBreaker(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.5))
-	ctx := context.Background()
+	boom := errors.New("boom")
 
-	// First call fails
-	_, err := b.Execute(ctx, func(_ context.Context) (any, error) {
-		return "", errors.New("boom")
+	_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, boom
+	})
+
+	require.ErrorIs(t, err, boom)
+	require.Equal(t, Open, b.State())
+}
+
+func TestExecuteOpenWithoutFallback(t *testing.T) {
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
+	_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, errors.New("boom")
 	})
 	require.Error(t, err)
 	require.Equal(t, Open, b.State())
 
-	// Should reject and trigger fallback
-	val, err := b.Execute(ctx, func(_ context.Context) (any, error) {
-		panic("should not run")
-	}, func(_ context.Context, cause error) (any, error) {
-		return "fallback", nil
+	_, err = b.Execute(context.Background(), func(context.Context) (any, error) {
+		t.Fatal("must not run while open")
+		return nil, nil
 	})
-	require.NoError(t, err)
-	assert.Equal(t, "fallback", val)
-}
 
-// nolint
-func TestBreakerContextCancellation(t *testing.T) {
-	b := NewCircuitBreaker()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-
-	res, err := b.Execute(ctx, func(_ context.Context) (any, error) {
-		pause.For(30 * time.Millisecond)
-		return "late", nil
-	})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Nil(t, res)
-}
-
-// nolint
-func TestMetricsSnapshot(t *testing.T) {
-	b := NewCircuitBreaker()
-	b.onSuccess()
-	b.onFailure()
-	metrics := b.Metrics()
-	require.Equal(t, uint64(1), metrics.Successes)
-	require.Equal(t, uint64(1), metrics.Failures)
-	require.Equal(t, uint64(2), metrics.Total)
-	require.InDelta(t, 0.5, metrics.FailureRate, 0.0001)
-}
-
-// nolint
-func TestStateTransitions(t *testing.T) {
-	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2))
-
-	b.onFailure()
-	require.Equal(t, Closed, b.State())
-	b.onFailure()
-	require.Equal(t, Open, b.State())
-
-	// Manually force half-open
-	b.toHalfOpen()
-	require.Equal(t, HalfOpen, b.State())
-
-	b.onSuccess()
-	require.Equal(t, HalfOpen, b.State())
-	b.onSuccess()
-	require.Equal(t, Closed, b.State())
-}
-
-// nolint
-func TestSemaphoreHalfOpen(t *testing.T) {
-	b := NewCircuitBreaker(WithHalfOpenMaxCalls(2))
-	b.toHalfOpen()
-	require.Equal(t, HalfOpen, b.State())
-
-	allowed1 := b.tryAllow()
-	allowed2 := b.tryAllow()
-	allowed3 := b.tryAllow()
-
-	require.True(t, allowed1)
-	require.True(t, allowed2)
-	require.False(t, allowed3)
-
-	// Release a permit
-	release := b.acquireRelease()
-	release()
-
-	allowedAgain := b.tryAllow()
-	require.True(t, allowedAgain)
-}
-
-// nolint
-func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
-	b := NewCircuitBreaker(WithFailureRate(0.5), WithMinRequests(2), WithOpenTimeout(20*time.Millisecond))
-
-	b.onFailure()
-	b.onFailure()
-	require.Equal(t, Open, b.State())
-	pause.For(25 * time.Millisecond)
-	// Now TryAllow should move breaker to half-open
-	require.True(t, b.tryAllow())
-	require.Equal(t, HalfOpen, b.State())
-}
-
-// nolint
-func TestHardResetAfterIdle(t *testing.T) {
-	b := NewCircuitBreaker(WithWindow(50*time.Millisecond, 5))
-	b.onFailure()
-	before := b.Metrics()
-	require.Equal(t, uint64(1), before.Failures)
-
-	// Wait beyond full window
-	pause.For(120 * time.Millisecond)
-	b.onSuccess()
-	after := b.Metrics()
-	// Old failures should have been cleared
-	require.Equal(t, uint64(0), after.Failures)
-	require.Equal(t, uint64(1), after.Successes)
-}
-
-// nolint
-func TestBreakerExecuteOpenWithoutFallback(t *testing.T) {
-	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
-	b.onFailure() // forces Open
-	_, err := b.Execute(context.Background(), func(_ context.Context) (any, error) {
-		return "ok", nil
-	})
 	require.ErrorIs(t, err, ErrOpen)
 }
 
-// nolint
-func TestBreakerHalfOpenRejectsExtraProbes(t *testing.T) {
-	b := NewCircuitBreaker(WithHalfOpenMaxCalls(1))
-	b.toHalfOpen()
-	require.True(t, b.tryAllow())
-	require.False(t, b.tryAllow(), "should reject second probe in HalfOpen")
-}
-
-// nolint
-func TestBreakerPanicHandledAsFailure(t *testing.T) {
-	t.Run("With normal panic", func(t *testing.T) {
-		b := NewCircuitBreaker(WithMinRequests(1))
-		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
-			panic("boom")
-		})
-		require.Error(t, err)
-		require.Equal(t, Open, b.State())
+func TestExecuteOpenInvokesFallbackWithErrOpen(t *testing.T) {
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
+	_, _ = b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, errors.New("boom")
 	})
-	t.Run("With general error panic", func(t *testing.T) {
-		b := NewCircuitBreaker(WithMinRequests(1))
-		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
-			panic(errors.New("boom"))
-		})
-		require.Error(t, err)
-		require.Equal(t, Open, b.State())
-	})
-	t.Run("With goakt panicError", func(t *testing.T) {
-		b := NewCircuitBreaker(WithMinRequests(1))
-		_, err := b.Execute(context.Background(), func(ctx context.Context) (any, error) {
-			panic(gerrors.NewPanicError(errors.New("boom")))
-		})
-		require.Error(t, err)
-		require.Equal(t, Open, b.State())
-	})
-}
+	require.Equal(t, Open, b.State())
 
-// nolint
-func TestBreakerEmptyMetricsSnapshot(t *testing.T) {
-	b := NewCircuitBreaker()
-	m := b.Metrics()
-	assert.Equal(t, uint64(0), m.Total)
-	assert.Equal(t, 0.0, m.FailureRate)
-}
-
-// nolint
-func TestBreakerContextCancelledBeforeExecute(t *testing.T) {
-	b := NewCircuitBreaker()
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
-		return "never", nil
-	})
-	assert.ErrorIs(t, err, ErrTimeout)
-}
-
-// nolint
-func TestBreakerFallbackErrorPropagates(t *testing.T) {
-	b := NewCircuitBreaker(WithMinRequests(1))
-	b.onFailure()
-	_, err := b.Execute(context.Background(),
-		func(ctx context.Context) (any, error) { return "ok", nil },
-		func(ctx context.Context, cause error) (any, error) { return "", errors.New("fallback failed") },
+	var got error
+	val, err := b.Execute(context.Background(),
+		func(context.Context) (any, error) { return nil, nil },
+		func(_ context.Context, cause error) (any, error) {
+			got = cause
+			return "fallback", nil
+		},
 	)
+
+	require.NoError(t, err)
+	require.Equal(t, "fallback", val)
+	require.ErrorIs(t, got, ErrOpen)
+}
+
+func TestExecuteFallbackReceivesFunctionError(t *testing.T) {
+	b := NewCircuitBreaker()
+	boom := errors.New("boom")
+
+	val, err := b.Execute(context.Background(),
+		func(context.Context) (any, error) { return nil, boom },
+		func(_ context.Context, cause error) (any, error) { return nil, cause },
+	)
+
+	require.Nil(t, val)
+	require.ErrorIs(t, err, boom)
+}
+
+func TestExecuteFallbackErrorPropagates(t *testing.T) {
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
+	_, _ = b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, errors.New("boom")
+	})
+
+	_, err := b.Execute(context.Background(),
+		func(context.Context) (any, error) { return "ok", nil },
+		func(context.Context, error) (any, error) { return nil, errors.New("fallback failed") },
+	)
+
 	assert.EqualError(t, err, "fallback failed")
 }
 
-// nolint
-func TestBreakerTryAllowClosedAlwaysTrue(t *testing.T) {
-	b := NewCircuitBreaker()
-	assert.True(t, b.tryAllow())
+func TestExecuteContextDoneBeforeExecution(t *testing.T) {
+	t.Run("canceled context", func(t *testing.T) {
+		b := NewCircuitBreaker()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := b.Execute(ctx, func(context.Context) (any, error) {
+			t.Fatal("must not run")
+			return nil, nil
+		})
+
+		require.ErrorIs(t, err, ErrTimeout)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Equal(t, uint64(0), b.Metrics().Total, "nothing should be recorded")
+	})
+	t.Run("expired deadline", func(t *testing.T) {
+		b := NewCircuitBreaker()
+		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
+		defer cancel()
+
+		_, err := b.Execute(ctx, func(context.Context) (any, error) {
+			t.Fatal("must not run")
+			return nil, nil
+		})
+
+		require.ErrorIs(t, err, ErrTimeout)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+	t.Run("with fallback", func(t *testing.T) {
+		b := NewCircuitBreaker()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		val, err := b.Execute(ctx,
+			func(context.Context) (any, error) { return nil, nil },
+			func(context.Context, error) (any, error) { return "fallback", nil },
+		)
+
+		require.NoError(t, err)
+		require.Equal(t, "fallback", val)
+	})
 }
 
-// nolint
-func TestHalfOpenFailureReopensBreaker(t *testing.T) {
+func TestExecuteCallerCancellationIsNotRecorded(t *testing.T) {
+	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.0))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	_, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+		cancel()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, Closed, b.State(), "caller cancellation must not trip the breaker")
+	require.Equal(t, uint64(0), b.Metrics().Total)
+}
+
+func TestExecuteDeadlineExpiryIsRecordedAsFailure(t *testing.T) {
 	b := NewCircuitBreaker(WithMinRequests(1), WithFailureRate(0.5))
-	b.toHalfOpen()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	_, err := b.Execute(ctx, func(ctx context.Context) (any, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, Open, b.State(), "deadline expiry must count as a failure")
+}
+
+func TestExecutePanicHandledAsFailure(t *testing.T) {
+	assertPanicError := func(t *testing.T, err error, b *CircuitBreaker) {
+		t.Helper()
+
+		var be *Error
+		require.ErrorAs(t, err, &be)
+		require.Equal(t, ErrorTypePanic, be.Type)
+
+		var pe *gerrors.PanicError
+		require.ErrorAs(t, err, &pe)
+		require.Equal(t, Open, b.State())
+	}
+
+	t.Run("string panic", func(t *testing.T) {
+		b := NewCircuitBreaker(WithMinRequests(1))
+		_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+			panic("boom")
+		})
+		assertPanicError(t, err, b)
+	})
+	t.Run("error panic", func(t *testing.T) {
+		b := NewCircuitBreaker(WithMinRequests(1))
+		_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+			panic(errors.New("boom"))
+		})
+		assertPanicError(t, err, b)
+	})
+	t.Run("goakt PanicError panic", func(t *testing.T) {
+		b := NewCircuitBreaker(WithMinRequests(1))
+		_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+			panic(gerrors.NewPanicError(errors.New("boom")))
+		})
+		assertPanicError(t, err, b)
+	})
+}
+
+func TestTryAcquireClosedNeedsNoToken(t *testing.T) {
+	b := NewCircuitBreaker()
+	allowed, acquired := b.tryAcquire()
+
+	require.True(t, allowed)
+	require.False(t, acquired)
+	require.Empty(t, b.semCh)
+}
+
+func TestOpenRejectsUntilTimeoutThenRecovers(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithMinRequests(1),
+		WithFailureRate(0.5),
+		WithOpenTimeout(time.Second),
+		WithWindow(10*time.Second, 5),
+	)
+
+	_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, errors.New("boom")
+	})
+	require.Error(t, err)
+	require.Equal(t, Open, b.State())
+
+	allowed, acquired := b.tryAcquire()
+	require.False(t, allowed)
+	require.False(t, acquired)
+
+	clock.Advance(1500 * time.Millisecond)
+
+	res, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		return "ok", nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, "ok", res)
+	require.Equal(t, Closed, b.State(), "successful probe with minRequests=1 must close the breaker")
+}
+
+func TestOpenTimeoutMovesToHalfOpen(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithMinRequests(1),
+		WithFailureRate(0.5),
+		WithOpenTimeout(time.Second),
+	)
+
+	b.record(false)
+	require.Equal(t, Open, b.State())
+
+	clock.Advance(2 * time.Second)
+
+	allowed, acquired := b.tryAcquire()
+	require.True(t, allowed)
+	require.True(t, acquired)
+	require.Equal(t, HalfOpen, b.State())
+	b.release()
+}
+
+func TestHalfOpenCapsConcurrentProbes(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithMinRequests(2),
+		WithFailureRate(0.5),
+		WithOpenTimeout(time.Second),
+		WithHalfOpenMaxCalls(2),
+	)
+
+	b.record(false)
+	b.record(false)
+	require.Equal(t, Open, b.State())
+	clock.Advance(2 * time.Second)
+
+	unblock := make(chan struct{})
+	started := make(chan struct{}, 2)
+	results := make(chan error, 2)
+
+	for range 2 {
+		go func() {
+			_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+				started <- struct{}{}
+				<-unblock
+				return nil, nil
+			})
+			results <- err
+		}()
+	}
+
+	<-started
+	<-started
 	require.Equal(t, HalfOpen, b.State())
 
-	b.onFailure()
+	// both permits are held by the in-flight probes: further calls are rejected
+	_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		t.Error("must not run beyond halfOpenMaxCalls")
+		return nil, nil
+	})
+	require.ErrorIs(t, err, ErrOpen)
 
+	close(unblock)
+	require.NoError(t, <-results)
+	require.NoError(t, <-results)
+	require.Equal(t, Closed, b.State(), "two successful probes meet minRequests and close the breaker")
+	require.Empty(t, b.semCh, "all tokens must be released")
+}
+
+func TestHalfOpenFailureReopensBreaker(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithMinRequests(1),
+		WithFailureRate(0.5),
+		WithOpenTimeout(time.Second),
+	)
+
+	b.record(false)
 	require.Equal(t, Open, b.State())
+	clock.Advance(2 * time.Second)
+
+	_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+		return nil, errors.New("still failing")
+	})
+
+	require.Error(t, err)
+	require.Equal(t, Open, b.State())
+
+	// the open timeout must be re-armed
+	allowed, _ := b.tryAcquire()
+	require.False(t, allowed)
+	require.Empty(t, b.semCh, "the probe token must be released after reopening")
 }
 
-// nolint
-func TestEnsureSemInitializesWhenUnset(t *testing.T) {
-	b := NewCircuitBreaker()
-	b.semCh = nil
-	// force invalid configuration to take default path
-	b.opts.halfOpenMaxCalls = 0
+func TestHalfOpenStaysUntilEnoughSamples(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithMinRequests(3),
+		WithFailureRate(0.5),
+		WithOpenTimeout(time.Second),
+		WithHalfOpenMaxCalls(3),
+	)
 
-	b.ensureSem()
+	b.record(false)
+	b.record(false)
+	b.record(false)
+	require.Equal(t, Open, b.State())
+	clock.Advance(2 * time.Second)
 
-	require.NotNil(t, b.semCh)
-	assert.Equal(t, 1, cap(b.semCh))
-}
+	execute := func() {
+		_, err := b.Execute(context.Background(), func(context.Context) (any, error) {
+			return nil, nil
+		})
+		require.NoError(t, err)
+	}
 
-// nolint
-func TestTransitionToReturnsFalseForSameState(t *testing.T) {
-	b := NewCircuitBreaker()
-
-	changed := b.transitionTo(Closed)
-
-	require.False(t, changed)
+	execute()
+	require.Equal(t, HalfOpen, b.State())
+	execute()
+	require.Equal(t, HalfOpen, b.State())
+	execute()
 	require.Equal(t, Closed, b.State())
 }
 
-// nolint
-func TestTransitionToHalfOpenDefaultsMaxCalls(t *testing.T) {
+func TestTransitionToSameStateReturnsFalse(t *testing.T) {
 	b := NewCircuitBreaker()
-	b.opts.halfOpenMaxCalls = 0
+	require.False(t, b.transitionTo(Closed))
+	require.True(t, b.transitionTo(Open))
+	require.False(t, b.transitionTo(Open))
+}
 
-	b.transitionTo(HalfOpen)
+func TestMetricsSnapshot(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithWindow(time.Minute, 6),
+	)
 
-	require.Equal(t, HalfOpen, b.State())
-	assert.NotNil(t, b.semCh)
-	assert.Equal(t, 1, cap(b.semCh))
+	b.record(true)
+	clock.Advance(time.Second)
+	b.record(false)
+
+	m := b.Metrics()
+	require.Equal(t, Closed, m.State)
+	require.Equal(t, uint64(1), m.Successes)
+	require.Equal(t, uint64(1), m.Failures)
+	require.Equal(t, uint64(2), m.Total)
+	require.InDelta(t, 0.5, m.FailureRate, 0.0001)
+	require.Equal(t, time.Minute, m.Window)
+	require.Equal(t, clock.Now(), m.WindowEnd)
+	require.Equal(t, clock.Now().Add(-time.Minute), m.WindowStart)
+	require.Equal(t, clock.Now(), m.LastFailure)
+	require.Equal(t, clock.Now().Add(-time.Second), m.LastSuccess)
+}
+
+func TestMetricsEmptySnapshot(t *testing.T) {
+	b := NewCircuitBreaker()
+	m := b.Metrics()
+
+	assert.Equal(t, uint64(0), m.Total)
+	assert.Equal(t, 0.0, m.FailureRate)
+	assert.True(t, m.LastFailure.IsZero())
+	assert.True(t, m.LastSuccess.IsZero())
+}
+
+func TestHardResetAfterIdle(t *testing.T) {
+	clock := newFakeClock()
+	b := NewCircuitBreaker(
+		WithClock(clock.Now),
+		WithWindow(50*time.Millisecond, 5),
+	)
+
+	b.record(false)
+	require.Equal(t, uint64(1), b.Metrics().Failures)
+
+	clock.Advance(120 * time.Millisecond)
+	b.record(true)
+
+	m := b.Metrics()
+	require.Equal(t, uint64(0), m.Failures, "counts older than the window must be dropped")
+	require.Equal(t, uint64(1), m.Successes)
+}
+
+func TestExecuteSuccessPathDoesNotAllocate(t *testing.T) {
+	b := NewCircuitBreaker()
+	ctx := context.Background()
+	fn := func(context.Context) (any, error) { return nil, nil }
+
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, err := b.Execute(ctx, fn); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	require.Zero(t, allocs, "closed-state success path must not allocate")
+}
+
+func TestConcurrentExecuteAcrossTransitions(t *testing.T) {
+	b := NewCircuitBreaker(
+		WithFailureRate(0.5),
+		WithMinRequests(1),
+		WithOpenTimeout(time.Millisecond),
+		WithWindow(10*time.Millisecond, 2),
+		WithHalfOpenMaxCalls(2),
+	)
+
+	ctx := context.Background()
+	boom := errors.New("boom")
+	var wg sync.WaitGroup
+
+	for i := range 16 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+
+			for j := range 500 {
+				fail := (i+j)%2 == 0
+				_, _ = b.Execute(ctx, func(context.Context) (any, error) {
+					if fail {
+						return nil, boom
+					}
+					return nil, nil
+				})
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	require.Contains(t, []State{Closed, Open, HalfOpen}, b.State())
+	require.LessOrEqual(t, len(b.semCh), cap(b.semCh))
 }
