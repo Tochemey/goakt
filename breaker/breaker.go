@@ -26,7 +26,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,31 +34,30 @@ import (
 	"github.com/tochemey/goakt/v4/internal/locker"
 )
 
-// executionResult holds the result of a function execution
-type executionResult struct {
-	value any
-	err   error
-}
-
 // CircuitBreaker is a thread-safe circuit breaker implementation.
 type CircuitBreaker struct {
-	_         locker.NoCopy
-	state     int32 // atomic
-	openUntil int64 // unix nano when Open ends
+	_ locker.NoCopy
 
-	opts *options
+	state     atomic.Int32 // current State
+	openUntil atomic.Int64 // unix nano when the Open state ends
 
+	lastFailure atomic.Int64 // unix nano of the most recent failure
+	lastSuccess atomic.Int64 // unix nano of the most recent success
+
+	opts    *options
 	buckets *bucketWindow
-	mu      sync.Mutex // guards transitions & listeners
 
-	// half-open semaphore
+	// semCh bounds concurrent half-open probes. It is created once with capacity
+	// halfOpenMaxCalls and never replaced, so every acquired token is released on
+	// the same channel and accounting stays balanced across state transitions.
 	semCh chan struct{}
 
-	lastFailure atomic.Uint64 // unix nano
-	lastSuccess atomic.Uint64 // unix nano
+	mu sync.Mutex // serializes state transitions
 }
 
-// NewCircuitBreaker constructs a circuit breaker.
+// NewCircuitBreaker constructs a circuit breaker. Invalid option values are
+// replaced with their defaults; use NewCircuitBreakerWithValidation to reject
+// them instead.
 func NewCircuitBreaker(opts ...Option) *CircuitBreaker {
 	o := defaultOptions()
 
@@ -67,24 +65,12 @@ func NewCircuitBreaker(opts ...Option) *CircuitBreaker {
 		fn(o)
 	}
 
-	// Note: We don't return an error from New to maintain backward compatibility
-	// Instead, we apply sensible defaults for invalid values
 	o.Sanitize()
-
-	bw := newBuckets(o.window, o.buckets, o.clock)
-	b := &CircuitBreaker{
-		state:       int32(Closed),
-		openUntil:   0,
-		opts:        o,
-		buckets:     bw,
-		lastFailure: atomic.Uint64{},
-		lastSuccess: atomic.Uint64{},
-	}
-	return b
+	return newCircuitBreaker(o)
 }
 
-// NewCircuitBreakerWithValidation constructs a circuit breaker with validation.
-// Returns an error if the provided options are invalid.
+// NewCircuitBreakerWithValidation constructs a circuit breaker and returns an
+// error if the provided options are invalid.
 func NewCircuitBreakerWithValidation(opts ...Option) (*CircuitBreaker, error) {
 	o := defaultOptions()
 
@@ -96,296 +82,221 @@ func NewCircuitBreakerWithValidation(opts ...Option) (*CircuitBreaker, error) {
 		return nil, err
 	}
 
-	bw := newBuckets(o.window, o.buckets, o.clock)
+	return newCircuitBreaker(o), nil
+}
+
+// newCircuitBreaker builds a breaker from sanitized or validated options.
+func newCircuitBreaker(o *options) *CircuitBreaker {
 	b := &CircuitBreaker{
-		state:       int32(Closed),
-		openUntil:   0,
-		opts:        o,
-		buckets:     bw,
-		lastFailure: atomic.Uint64{},
-		lastSuccess: atomic.Uint64{},
+		opts:    o,
+		buckets: newBuckets(o.window, o.buckets, o.clock),
+		semCh:   make(chan struct{}, o.halfOpenMaxCalls),
 	}
-	return b, nil
+
+	b.state.Store(int32(Closed))
+	return b
 }
 
 // State returns the current breaker state.
-func (b *CircuitBreaker) State() State { return State(atomic.LoadInt32(&b.state)) }
+func (b *CircuitBreaker) State() State { return State(b.state.Load()) }
 
-// Execute runs fn if allowed. If the breaker is open, it optionally calls fallback.
-// It propagates ctx cancellation.
+// Execute runs fn if the breaker allows it, invoking the optional fallback with
+// the causing error otherwise. fn runs synchronously in the calling goroutine
+// and is expected to honor ctx cancellation. A panic in fn is recovered,
+// recorded as a failure and returned as an *Error of type ErrorTypePanic.
+//
+// Failures are recorded for every error returned by fn except when ctx was
+// canceled by the caller: cancellation says nothing about the health of the
+// protected resource, so it neither trips nor heals the breaker. A deadline
+// expiry counts as a failure.
 func (b *CircuitBreaker) Execute(ctx context.Context, fn func(context.Context) (any, error), fallback ...func(context.Context, error) (any, error)) (any, error) {
-	if !b.tryAllow() {
-		return b.handleRejection(ctx, ErrOpen, fallback...)
+	if err := ctx.Err(); err != nil {
+		return b.withFallback(ctx, contextError(b.State(), err), fallback...)
 	}
 
-	release := b.acquireRelease()
-	defer release()
-
-	return b.executeWithTimeout(ctx, fn, fallback...)
-}
-
-// tryAllow returns whether a call is permitted at this moment.
-// If it returns false, callers should not proceed.
-func (b *CircuitBreaker) tryAllow() bool {
-	now := b.opts.clock()
-	s := b.State()
-	if s == Closed {
-		return true
+	allowed, acquired := b.tryAcquire()
+	if !allowed {
+		return b.withFallback(ctx, ErrOpen, fallback...)
 	}
 
-	if s == Open {
-		if now.UnixNano() >= atomic.LoadInt64(&b.openUntil) {
-			b.toHalfOpen()
-			// fallthrough to half-open handling
-		} else {
-			return false
-		}
+	if acquired {
+		defer b.release()
 	}
-	// Half-open: enforce semaphore
-	b.ensureSem()
-	select {
-	case b.semCh <- struct{}{}:
-		return true
+
+	value, err := b.invoke(ctx, fn)
+
+	switch {
+	case err == nil:
+		b.record(true)
+		return value, nil
+	case ctx.Err() == context.Canceled:
+		return b.withFallback(ctx, err, fallback...)
 	default:
-		return false
+		b.record(false)
+		return b.withFallback(ctx, err, fallback...)
 	}
 }
 
-// onSuccess records a successful call.
-func (b *CircuitBreaker) onSuccess() {
-	b.buckets.addSuccess(1)
-	b.lastSuccess.Store(uint64(b.opts.clock().UnixNano()))
-	if b.State() == HalfOpen {
-		// stricter recovery: only close when enough samples collected
-		b.evaluateHalfOpen()
-	} else {
-		b.evaluate()
-	}
-}
-
-// onFailure records a failed call.
-func (b *CircuitBreaker) onFailure() {
-	b.buckets.addFailure(1)
-	b.lastFailure.Store(uint64(b.opts.clock().UnixNano()))
-	if b.State() == HalfOpen {
-		b.evaluateHalfOpen()
-	} else {
-		b.evaluate()
-	}
-}
-
-// evaluate checks in Closed state for Open transition.
-func (b *CircuitBreaker) evaluate() {
-	m := b.Metrics()
-	if m.Total < uint64(b.opts.minRequests) {
-		return
-	}
-	if m.FailureRate >= b.opts.failureRate {
-		b.toOpen()
-	}
-}
-
-// evaluateHalfOpen handles stricter recovery rules.
-func (b *CircuitBreaker) evaluateHalfOpen() {
-	m := b.Metrics()
-	if m.Total < uint64(b.opts.minRequests) {
-		// stay in HalfOpen until enough samples collected
-		return
-	}
-	if m.FailureRate >= b.opts.failureRate {
-		b.toOpen()
-		return
-	}
-	// only now safe to close
-	b.toClosed()
-}
-
-// handleRejection handles the case when the breaker rejects a call
-func (b *CircuitBreaker) handleRejection(ctx context.Context, err error, fallback ...func(context.Context, error) (any, error)) (any, error) {
-	if len(fallback) > 0 {
-		return fallback[0](ctx, err)
-	}
-	return nil, err
-}
-
-// executeWithTimeout executes the function with timeout handling
-func (b *CircuitBreaker) executeWithTimeout(ctx context.Context, fn func(context.Context) (any, error), fallback ...func(context.Context, error) (any, error)) (any, error) {
-	resultCh := make(chan executionResult, 1)
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				err := b.handlePanic(r)
-				resultCh <- executionResult{err: err}
-			}
-		}()
-
-		value, err := fn(ctx)
-		resultCh <- executionResult{value: value, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		b.onFailure()
-		return b.handleRejection(ctx, ErrTimeout, fallback...)
-	case result := <-resultCh:
-		if result.err != nil {
-			b.onFailure()
-			return b.handleRejection(ctx, result.err, fallback...)
-		}
-		b.onSuccess()
-		return result.value, nil
-	}
-}
-
-// handlePanic converts a panic into a structured error
-func (b *CircuitBreaker) handlePanic(r any) error {
-	switch v := r.(type) {
-	case error:
-		var pe *gerrors.PanicError
-		if errors.As(v, &pe) {
-			return &Error{
-				Type:    ErrorTypePanic,
-				State:   b.State(),
-				Message: "panic during execution",
-				Cause:   v,
-			}
-		}
-		// Normal error - wrap with stack trace
-		pc, fn, line, _ := runtime.Caller(3)
-		panicErr := gerrors.NewPanicError(
-			fmt.Errorf("%w at %s[%s:%d]", v, runtime.FuncForPC(pc).Name(), fn, line),
-		)
-		return &Error{
-			Type:    ErrorTypePanic,
-			State:   b.State(),
-			Message: "panic during execution",
-			Cause:   panicErr,
-		}
-	default:
-		// Unknown panic type - enrich with stack trace
-		pc, fn, line, _ := runtime.Caller(3)
-		panicErr := gerrors.NewPanicError(
-			fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
-		)
-		return &Error{
-			Type:    ErrorTypePanic,
-			State:   b.State(),
-			Message: "panic during execution",
-			Cause:   panicErr,
-		}
-	}
-}
-
-// acquireRelease returns a no-op if not half-open; otherwise a function that releases the semaphore slot.
-func (b *CircuitBreaker) acquireRelease() func() {
-	return func() {
-		// Always try to release one permit if present; non-blocking and safe.
-		if b.semCh != nil {
-			select {
-			case <-b.semCh:
-			default:
-			}
-		}
-	}
-}
-
-// Metrics builds Metrics.
+// Metrics builds a snapshot of the rolling counts and state.
 func (b *CircuitBreaker) Metrics() Metrics {
-	wins, wine := b.buckets.windowBounds()
-	succ, fail := b.buckets.totals()
+	succ, fail, start, end := b.buckets.snapshot()
 	m := Metrics{
 		State:       b.State(),
 		Successes:   succ,
 		Failures:    fail,
 		Total:       succ + fail,
-		FailureRate: 0,
 		Window:      b.opts.window,
-		WindowStart: wins,
-		WindowEnd:   wine,
+		WindowStart: start,
+		WindowEnd:   end,
 	}
+
 	if m.Total > 0 {
 		m.FailureRate = float64(m.Failures) / float64(m.Total)
 	}
+
 	if lf := b.lastFailure.Load(); lf > 0 {
-		m.LastFailure = time.Unix(0, int64(lf))
+		m.LastFailure = time.Unix(0, lf)
 	}
+
 	if ls := b.lastSuccess.Load(); ls > 0 {
-		m.LastSuccess = time.Unix(0, int64(ls))
+		m.LastSuccess = time.Unix(0, ls)
 	}
+
 	return m
 }
 
-// ensureSem initializes the half-open semaphore lazily.
-func (b *CircuitBreaker) ensureSem() {
-	if b.semCh != nil {
-		return
+// tryAcquire reports whether a call may proceed and whether it holds a
+// half-open token that must be released once the call completes.
+func (b *CircuitBreaker) tryAcquire() (allowed, acquired bool) {
+	state := b.State()
+	if state == Closed {
+		return true, false
 	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	maxCalls := b.opts.halfOpenMaxCalls
-	if maxCalls <= 0 {
-		maxCalls = 1
+
+	if state == Open {
+		if b.opts.clock().UnixNano() < b.openUntil.Load() {
+			return false, false
+		}
+
+		b.toHalfOpen()
 	}
-	b.semCh = make(chan struct{}, maxCalls)
+
+	select {
+	case b.semCh <- struct{}{}:
+		return true, true
+	default:
+		return false, false
+	}
 }
 
-// resetSemLocked replaces the half-open semaphore with a fresh, empty channel of the given capacity.
-// Caller must hold b.mu.
-func (b *CircuitBreaker) resetSemLocked(newCap int) {
-	if newCap <= 0 {
-		b.semCh = nil
-		return
-	}
-	b.semCh = make(chan struct{}, newCap)
+// release returns a half-open token. It never blocks because only callers that
+// acquired a token release one, on a channel that is never replaced.
+func (b *CircuitBreaker) release() {
+	<-b.semCh
 }
 
-// transitionTo attempts to transition from the current state to the target state
-// Returns true if the transition was successful, false if already in target state
-func (b *CircuitBreaker) transitionTo(targetState State) bool {
+// invoke runs fn, converting a panic into an error.
+func (b *CircuitBreaker) invoke(ctx context.Context, fn func(context.Context) (any, error)) (value any, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			value, err = nil, b.panicError(r)
+		}
+	}()
+
+	return fn(ctx)
+}
+
+// record adds an outcome to the rolling window and re-evaluates the state using
+// the totals observed under the same lock acquisition.
+func (b *CircuitBreaker) record(success bool) {
+	now := b.opts.clock().UnixNano()
+	succ, fail := b.buckets.add(now, success)
+
+	if success {
+		b.lastSuccess.Store(now)
+	} else {
+		b.lastFailure.Store(now)
+	}
+
+	total := succ + fail
+	if total < uint64(b.opts.minRequests) {
+		return
+	}
+
+	if float64(fail)/float64(total) >= b.opts.failureRate {
+		b.toOpen()
+		return
+	}
+
+	// enough samples with an acceptable failure rate: recover if probing
+	if b.State() == HalfOpen {
+		b.toClosed()
+	}
+}
+
+// withFallback invokes the fallback with err if one is provided, otherwise
+// returns err.
+func (b *CircuitBreaker) withFallback(ctx context.Context, err error, fallback ...func(context.Context, error) (any, error)) (any, error) {
+	if len(fallback) > 0 {
+		return fallback[0](ctx, err)
+	}
+
+	return nil, err
+}
+
+// panicError converts a recovered panic value into a structured error.
+func (b *CircuitBreaker) panicError(r any) *Error {
+	var cause error
+
+	switch v := r.(type) {
+	case error:
+		if _, ok := errors.AsType[*gerrors.PanicError](v); ok {
+			cause = v
+		} else {
+			cause = gerrors.NewPanicError(v)
+		}
+	default:
+		cause = gerrors.NewPanicError(fmt.Errorf("%v", r))
+	}
+
+	return &Error{
+		Type:    ErrorTypePanic,
+		State:   b.State(),
+		Message: "panic during execution",
+		Cause:   cause,
+	}
+}
+
+// contextError wraps a context termination cause into a structured error.
+func contextError(state State, cause error) *Error {
+	return &Error{
+		Type:    ErrorTypeTimeout,
+		State:   state,
+		Message: "context done before execution",
+		Cause:   cause,
+	}
+}
+
+// transitionTo moves the breaker to the target state, returning false if it is
+// already there.
+func (b *CircuitBreaker) transitionTo(target State) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	currentState := State(atomic.LoadInt32(&b.state))
-	if currentState == targetState {
+	if State(b.state.Load()) == target {
 		return false
 	}
 
-	// Perform state-specific actions
-	switch targetState {
+	switch target {
 	case Open:
-		b.transitionToOpenLocked()
-	case HalfOpen:
-		b.transitionToHalfOpenLocked()
-	case Closed:
-		b.transitionToClosedLocked()
+		b.openUntil.Store(b.opts.clock().Add(b.opts.openTimeout).UnixNano())
+	case HalfOpen, Closed:
+		// reset the window so probing and recovery evaluate fresh samples
+		b.buckets.reset()
 	}
 
-	atomic.StoreInt32(&b.state, int32(targetState))
+	b.state.Store(int32(target))
 	return true
-}
-
-func (b *CircuitBreaker) transitionToOpenLocked() {
-	until := b.opts.clock().Add(b.opts.openTimeout).UnixNano()
-	atomic.StoreInt64(&b.openUntil, until)
-	// while open, reject everything; ensure half-open semaphore is cleared
-	b.resetSemLocked(0)
-}
-
-func (b *CircuitBreaker) transitionToHalfOpenLocked() {
-	// reset window so probes evaluate fresh
-	b.buckets.reset()
-	// reset semaphore to an empty channel with configured capacity
-	maxCalls := b.opts.halfOpenMaxCalls
-	if maxCalls <= 0 {
-		maxCalls = 1
-	}
-	b.resetSemLocked(maxCalls)
-}
-
-func (b *CircuitBreaker) transitionToClosedLocked() {
-	b.buckets.reset()
-	b.resetSemLocked(0)
 }
 
 func (b *CircuitBreaker) toOpen() {
