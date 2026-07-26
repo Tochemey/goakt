@@ -85,6 +85,11 @@ type grainPID struct {
 	deactivateAfter    atomic.Duration
 	passivationManager *passivationManager
 
+	// timers holds the current activation's timer registry. activate installs a
+	// fresh one and starts it once activation completes; deactivate stops it
+	// before OnDeactivate runs. Nil until the first activation. Guarded by mu.
+	timers *grainTimers
+
 	onPoisonPill atomic.Bool
 
 	// deactivated is closed exactly once when deactivate completes
@@ -130,6 +135,22 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 		logger.Debugf("grain=%s activating", pid.identity.String())
 	}
 
+	// Fresh registry per activation: a reused grainPID must not carry timers (or
+	// a stopped registry) from a previous activation. Timers registered during
+	// OnActivate stay dormant until the registry starts below, so a short-delay
+	// tick cannot fire into the not-yet-active grain and be silently dropped.
+	registry := newGrainTimers(pid.deliverTimerTick)
+	pid.setTimers(registry)
+
+	// Registered before the recover defer so it runs after err is materialized:
+	// on any activation failure the registry stops and timers registered by the
+	// failed OnActivate can never fire.
+	defer func() {
+		if err != nil {
+			registry.stop()
+		}
+	}()
+
 	retries := pid.config.initMaxRetries.Load()
 	timeout := pid.config.initTimeout.Load()
 
@@ -164,7 +185,7 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 	}()
 
 	if err := retrier.RunContext(cctx, func(ctx context.Context) error {
-		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values()))
+		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values(), pid))
 	}); err != nil {
 		cancel()
 		if pid.logger.Enabled(log.ErrorLevel) {
@@ -186,6 +207,8 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 	if pid.shouldAutoPassivate() {
 		pid.startPassivation()
 	}
+
+	registry.start()
 
 	return nil
 }
@@ -222,6 +245,13 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 
 	pid.unregisterPassivation()
 
+	// Stop before OnDeactivate runs: every timer is cancelled, late
+	// registrations from the OnDeactivate hook are rejected, and a tick already
+	// sitting in the mailbox is dropped by the tick handler.
+	if registry := pid.getTimers(); registry != nil {
+		registry.stop()
+	}
+
 	defer func() {
 		pid.activated.Store(false)
 		pid.activatedAt.Store(0)
@@ -243,7 +273,7 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		logger.Debugf("grain=%s deactivating", pid.identity.String())
 	}
 
-	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values())); err != nil {
+	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values(), pid)); err != nil {
 		if pid.logger.Enabled(log.ErrorLevel) {
 			pid.logger.Errorf("grain=%s deactivation failed (hint: check OnDeactivate implementation)", pid.identity.String())
 		}
@@ -334,6 +364,8 @@ func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 	switch grainContext.Message().(type) {
 	case *PoisonPill:
 		pid.handlePoisonPill(grainContext)
+	case *grainTimerTick:
+		pid.handleTimerTick(grainContext)
 	default:
 		pid.handleGrainContext(grainContext)
 	}
@@ -371,6 +403,76 @@ func (pid *grainPID) handleGrainContext(grainContext *GrainContext) {
 	pid.processedCount.Inc()
 	pid.markActivity(time.Now())
 	pid.grain.OnReceive(grainContext)
+}
+
+// deliverTimerTick hands a due timer tick to the grain mailbox as a regular
+// message. It runs on the timer goroutine, so it stays cheap and non-blocking.
+// The registry re-armed the timer before delivering, so a tick dropped here,
+// because the grain is deactivating or the mailbox is full, only loses that one
+// tick; interval and cron timers keep firing.
+func (pid *grainPID) deliverTimerTick(entry *grainTimerEntry) {
+	if !pid.isActive() {
+		return
+	}
+
+	grainContext := getGrainContext()
+	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), entry.tick, false)
+
+	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+		releaseGrainContext(grainContext)
+		if pid.logger.Enabled(log.WarningLevel) {
+			pid.logger.Warnf("grain=%s dropping tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
+		}
+		return
+	}
+
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+}
+
+// handleTimerTick processes a timer tick envelope inside a dispatcher turn,
+// serialized with every other message of the grain. A tick whose timer was
+// cancelled, or that arrives while the grain deactivates, is dropped: grain
+// timers are activation-scoped and must never outlive their activation. A tick
+// counts as passivation activity only when its timer was registered with
+// WithTimerKeepAlive.
+func (pid *grainPID) handleTimerTick(grainContext *GrainContext) {
+	tick := grainContext.Message().(*grainTimerTick)
+	entry := tick.entry
+
+	if !pid.isActive() || entry.cancelled.Load() {
+		return
+	}
+
+	pid.processedCount.Inc()
+	if entry.keepAlive {
+		pid.markActivity(time.Now())
+	}
+
+	pid.runTimerTick(grainContext, entry.message)
+	pid.reportTimerTickFailure(grainContext, entry)
+}
+
+// runTimerTick invokes OnReceive with the timer's message in place of the tick
+// envelope, converting panics into an error on the context like any other turn.
+func (pid *grainPID) runTimerTick(grainContext *GrainContext, message any) {
+	defer pid.recovery(grainContext)
+	grainContext.message = message
+	pid.grain.OnReceive(grainContext)
+}
+
+// reportTimerTickFailure surfaces an error reported while handling a timer tick.
+// Ticks are fire-and-forget: no caller waits on the context's error channel, so
+// without this drain a failure would vanish silently.
+func (pid *grainPID) reportTimerTickFailure(grainContext *GrainContext, entry *grainTimerEntry) {
+	select {
+	case err := <-grainContext.err:
+		if err != nil && pid.logger.Enabled(log.WarningLevel) {
+			pid.logger.Warnf("grain=%s failed to handle tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
+		}
+	default:
+	}
 }
 
 // recovery is called upon after message is processed
@@ -417,6 +519,38 @@ func (pid *grainPID) getGrain() Grain {
 	grain := pid.grain
 	pid.mu.Unlock()
 	return grain
+}
+
+// timerRegistry returns the current activation's timer registry for the public
+// scheduling API. It degrades to ErrGrainTimersStopped when the grain process is
+// absent or has never been activated, so GrainProps built without a process
+// reject scheduling instead of panicking.
+func (pid *grainPID) timerRegistry() (*grainTimers, error) {
+	if pid == nil {
+		return nil, gerrors.ErrGrainTimersStopped
+	}
+
+	registry := pid.getTimers()
+	if registry == nil {
+		return nil, gerrors.ErrGrainTimersStopped
+	}
+	return registry, nil
+}
+
+// getTimers returns the current activation's timer registry, or nil when the
+// grain has never been activated.
+func (pid *grainPID) getTimers() *grainTimers {
+	pid.mu.Lock()
+	registry := pid.timers
+	pid.mu.Unlock()
+	return registry
+}
+
+// setTimers installs the timer registry of a new activation.
+func (pid *grainPID) setTimers(registry *grainTimers) {
+	pid.mu.Lock()
+	pid.timers = registry
+	pid.mu.Unlock()
 }
 
 // getIdentity returns the GrainIdentity of the Grain

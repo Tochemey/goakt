@@ -64,7 +64,7 @@
       },
       {
         "group": "Grains",
-        "pages": ["/grains/overview"],
+        "pages": ["/grains/overview", "/grains/timers"],
         "icon": "box"
       },
       {

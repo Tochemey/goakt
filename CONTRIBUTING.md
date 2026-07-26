@@ -46,7 +46,7 @@ Run `make help` to list every target. The common ones are:
 2. Ensure your code adheres to the project's style and passes tests: `make test`.
 3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
-5. Follow the instructions in the `playground` package to leave a working sample in case it is a bug.
+5. Follow the instructions in the `playground` package to leave a working sample in case it is a bug or a new feature. This will help reviewers understand your changes and verify that they work as expected.
 
 ### Contributor License Agreement (CLA)
 

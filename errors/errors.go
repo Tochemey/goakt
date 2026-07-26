@@ -208,6 +208,14 @@ var (
 	// WithGrainDisableRelocation and WithGrainEagerRelocation, which are mutually exclusive.
 	ErrGrainRelocationConflict = errors.New("grain cannot be both relocation-disabled and eager-relocated")
 
+	// ErrGrainTimersStopped is returned when scheduling or canceling a grain timer on a grain
+	// that is deactivating or deactivated. Grain timers are activation-scoped: they are all
+	// canceled when the grain deactivates and must be registered again on the next activation.
+	ErrGrainTimersStopped = errors.New("grain timers are stopped")
+
+	// ErrInvalidTimerInterval is returned when a grain timer interval is not strictly positive.
+	ErrInvalidTimerInterval = errors.New("timer interval must be greater than zero")
+
 	// ErrUnhanledMessage is returned when a message is received that the actor/grain does not know how to handle.
 	ErrUnhanledMessage = errors.New("unhandled message")
 

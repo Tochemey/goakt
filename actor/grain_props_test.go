@@ -24,9 +24,11 @@ package actor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 )
 
@@ -40,7 +42,7 @@ func TestNewGrainPropsStoresFields(t *testing.T) {
 		NewMockDependency("dep-2", "user-2", "email-2"),
 	}
 
-	props := newGrainProps(identity, sys, deps)
+	props := newGrainProps(identity, sys, deps, nil)
 	require.Equal(t, identity, props.Identity())
 	require.Equal(t, sys, props.ActorSystem())
 	require.Equal(t, deps, props.Dependencies())
@@ -52,8 +54,25 @@ func TestGrainPropsDependenciesNilSafe(t *testing.T) {
 	identity := newGrainIdentity(NewMockGrain(), "nil-deps")
 	sys := &actorSystem{name: "grain-system"}
 
-	props := newGrainProps(identity, sys, nil)
+	props := newGrainProps(identity, sys, nil, nil)
 	require.Equal(t, identity, props.Identity())
 	require.Equal(t, sys, props.ActorSystem())
 	require.Nil(t, props.Dependencies())
+}
+
+func TestGrainPropsTimersWithoutProcessAreRejected(t *testing.T) {
+	t.Parallel()
+
+	props := newGrainProps(newGrainIdentity(NewMockGrain(), "no-process"), &actorSystem{name: "grain-system"}, nil, nil)
+
+	_, err := props.ScheduleOnce("tick", time.Second)
+	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+
+	_, err = props.Schedule("tick", time.Second)
+	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+
+	_, err = props.ScheduleWithCron("tick", "* * * ? * *")
+	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+
+	require.ErrorIs(t, props.CancelSchedule("tick"), gerrors.ErrGrainTimersStopped)
 }

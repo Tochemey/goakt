@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- **Grain timers: activation-scoped timers for grains** ([#1288](https://github.com/Tochemey/goakt/issues/1288)). Grains can now schedule messages to themselves with `ScheduleOnce`, `Schedule`, and `ScheduleWithCron`, available on both `GrainContext` (from `OnReceive`) and `GrainProps` (from `OnActivate`, the canonical place to start a grain's periodic behavior), plus `CancelSchedule` to stop a timer by reference. Ticks are delivered through the grain's mailbox and processed like any other message, so tick handling is serialized with the grain's other messages. Timers are volatile and scoped to the current activation: they are all cancelled when the grain deactivates, they are never persisted, and they never reactivate a passivated grain. Timers registered during `OnActivate` stay dormant until activation completes and are discarded when activation fails. By default a tick does not reset the grain's passivation clock; opt in per timer with `WithTimerKeepAlive`. References are scoped per grain and registering under a reference already in use replaces the existing timer (`WithTimerReference` sets one explicitly). `Schedule` fires at a fixed cadence like the actor scheduler, and cron expressions are evaluated in the process's local timezone with no cluster-wide arbitration needed, since a grain has exactly one activation cluster-wide. Steady-state ticks reuse the timer, the mailbox context, and the tick envelope, so recurring timers allocate almost nothing per fire.
+
 ## v4.4.2 - 2026-07-24
 
 ### ✨ Features
