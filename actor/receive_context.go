@@ -32,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 // ReceiveContext carries per-message context and operations available to an actor
@@ -134,6 +135,13 @@ func (rctx *ReceiveContext) Err(err error) {
 func (rctx *ReceiveContext) Response(resp any) {
 	if rctx.response == nil {
 		if rctx.requestID == "" {
+			return
+		}
+
+		// An empty routed reply is reserved for the grain NoErr protocol;
+		// actors must respond with a message, exactly as before.
+		if resp == nil {
+			rctx.Err(gerrors.ErrInvalidMessage)
 			return
 		}
 
@@ -375,6 +383,52 @@ func (rctx *ReceiveContext) RequestName(actorName string, message any, opts ...R
 	self := rctx.self
 	ctx := rctx.withoutCancel()
 	call, err := self.requestName(ctx, actorName, message, opts...)
+	if err != nil {
+		rctx.Err(err)
+		return nil
+	}
+	return call
+}
+
+// EnableReentrancy enables or retunes the actor's async request policy at
+// runtime, from inside a message handler. It is the runtime counterpart of
+// the WithReentrancy spawn option, for actors that were spawned without
+// reentrancy because the capability is only needed for a particular case.
+//
+// It takes effect for requests issued from this point on; requests already in
+// flight keep the mode they were admitted with. Returns an error when the
+// configuration is nil or invalid.
+func (rctx *ReceiveContext) EnableReentrancy(config *reentrancy.Reentrancy) error {
+	return rctx.self.enableReentrancy(config)
+}
+
+// DisableReentrancy restores the actor's default request policy to Off at
+// runtime. Requests already in flight complete normally, stashed messages are
+// released once the last blocking request finishes, and new Request calls
+// fail with ErrReentrancyDisabled until a later EnableReentrancy. As with a
+// policy configured Off at spawn, a per-call WithReentrancyMode override
+// still admits an individual request. A no-op when reentrancy was never
+// enabled.
+func (rctx *ReceiveContext) DisableReentrancy() {
+	rctx.self.disableReentrancy()
+}
+
+// RequestGrain sends a message to a Grain and returns a RequestCall without
+// blocking the actor.
+//
+// It is the grain-targeted counterpart of Request/RequestName and follows the
+// same rules: the calling actor must have reentrancy enabled, the reply is
+// delivered back through this actor's mailbox, and continuations registered
+// with Then run on the actor's processing thread. The target grain is
+// activated on demand, locally or on its owning node, exactly like any other
+// grain send.
+//
+// On failure the error is recorded on the context and nil is returned,
+// matching Request.
+func (rctx *ReceiveContext) RequestGrain(to *GrainIdentity, message any, opts ...RequestOption) RequestCall {
+	self := rctx.self
+	ctx := rctx.withoutCancel()
+	call, err := self.requestGrain(ctx, to, message, opts...)
 	if err != nil {
 		rctx.Err(err)
 		return nil

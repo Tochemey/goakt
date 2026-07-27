@@ -28,6 +28,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 // GrainRequest describes the parameters used to activate (spawn) a Grain on a remote node.
@@ -75,6 +76,10 @@ type GrainRequest struct {
 	// a surviving node when its hosting node leaves the cluster, instead of the
 	// default lazy behavior (reactivate on next use).
 	EagerRelocation bool
+
+	// Reentrancy is the Grain's async request policy, carried so that remote
+	// activation reconstructs it. Nil when the Grain has no policy.
+	Reentrancy *reentrancy.Reentrancy
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

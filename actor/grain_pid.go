@@ -31,24 +31,39 @@ import (
 	"time"
 
 	"github.com/flowchartsman/retry"
+	"github.com/google/uuid"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 type grainPID struct {
 	grain    Grain
 	identity *GrainIdentity
 	mailbox  *grainMailbox
+
+	// reentrancy tracks this activation's in-flight requests; nil until the
+	// grain is configured with reentrancy, at activation or at runtime through
+	// EnableReentrancy. An atomic pointer because the runtime install happens
+	// on the processing turn while off-turn readers (the envelope-ask gate,
+	// envelope delivery, shutdown) observe it; it transitions nil to non-nil
+	// at most once and is never removed, disabling only flips the state's
+	// default mode to Off. responses is the dedicated queue for async response
+	// envelopes: completions must stay reachable while the user mailbox is
+	// paused, so they never share its queue.
+	reentrancy atomic.Pointer[reentrancyState]
+	responses  *grainMailbox
 
 	// latestReceiveTimeNano holds the latest receive timestamp as
 	// UnixNano. Stored as int64 because atomic.Time boxes time.Time
@@ -102,6 +117,7 @@ type grainPID struct {
 var (
 	_ passivationParticipant = (*grainPID)(nil)
 	_ schedulable            = (*grainPID)(nil)
+	_ asyncErrorSink         = (*grainPID)(nil)
 )
 
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
@@ -109,6 +125,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		grain:                 grain,
 		identity:              identity,
 		mailbox:               newGrainMailbox(config.capacity),
+		responses:             newGrainMailbox(0),
 		actorSystem:           actorSystem,
 		logger:                actorSystem.Logger(),
 		remoting:              actorSystem.getRemoting(),
@@ -124,6 +141,13 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 	pid.onPoisonPill.Store(false)
 	pid.processedCount.Store(0)
 	pid.activatedAt.Store(0)
+
+	// A policy whose mode is Off behaves exactly like no policy; skipping the
+	// state keeps the legacy paths bit for bit until reentrancy is enabled at
+	// runtime.
+	if config.reentrancy != nil && config.reentrancy.Mode() != reentrancy.Off {
+		pid.reentrancy.Store(newReentrancyState(config.reentrancy.Mode(), config.reentrancy.MaxInFlight()))
+	}
 
 	return pid
 }
@@ -343,7 +367,12 @@ func (pid *grainPID) runTurn(w *worker) {
 
 	budget := w.dispatcher.throughput
 	for range budget {
-		grainContext := pid.mailbox.Dequeue()
+		grainContext := pid.dequeueResponse()
+
+		if grainContext == nil && !pid.paused() {
+			grainContext = pid.mailbox.Dequeue()
+		}
+
 		if grainContext == nil {
 			if pid.finishOrReclaim() {
 				return
@@ -356,6 +385,47 @@ func (pid *grainPID) runTurn(w *worker) {
 	w.reschedule(pid)
 }
 
+// dequeueResponse pops the next async response envelope, or nil when the
+// grain has no response queue or the queue is empty. Responses outrank user
+// messages so a paused grain can always reach its completions.
+func (pid *grainPID) dequeueResponse() *GrainContext {
+	if pid.responses == nil {
+		return nil
+	}
+	return pid.responses.Dequeue()
+}
+
+// reentrantEnabled reports whether the grain takes the envelope ask path. A
+// config whose mode is Off, whether configured that way or disabled at
+// runtime, behaves exactly like no config at all: the legacy channel path
+// stays bit for bit.
+func (pid *grainPID) reentrantEnabled() bool {
+	reentrant := pid.reentrancy.Load()
+	return reentrant != nil && reentrant.getMode() != reentrancy.Off
+}
+
+// paused reports whether the grain has stopped consuming its user mailbox
+// because a StashNonReentrant request is in flight. Buffered messages wait in
+// place in arrival order; only response envelopes keep flowing, which is what
+// lets the pause end. Re-evaluated on every turn iteration so a request
+// registered mid-turn pauses immediately and the last completion resumes
+// within the same budget.
+func (pid *grainPID) paused() bool {
+	reentrant := pid.reentrancy.Load()
+	return reentrant != nil && reentrant.blockingCount.Load() > 0
+}
+
+// hasPendingWork reports whether the grain still has processable input. While
+// paused, buffered user messages deliberately do not count: they are
+// unreachable until the last blocking request completes, so counting them
+// would make the reclaim path spin across workers for the whole pause.
+func (pid *grainPID) hasPendingWork() bool {
+	if pid.responses != nil && !pid.responses.IsEmpty() {
+		return true
+	}
+	return !pid.paused() && !pid.mailbox.IsEmpty()
+}
+
 // dispatchOne routes a single message through the appropriate handler.
 // Release is owned by grainMailbox.Dequeue, which reclaims the
 // previous sentinel; dispatchOne must not return the context here or
@@ -366,8 +436,311 @@ func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 		pid.handlePoisonPill(grainContext)
 	case *grainTimerTick:
 		pid.handleTimerTick(grainContext)
+	case *commands.AsyncRequest:
+		pid.handleAsyncRequest(grainContext)
+	case *commands.AsyncResponse:
+		pid.handleAsyncResponse(grainContext)
 	default:
 		pid.handleGrainContext(grainContext)
+	}
+}
+
+// handleAsyncRequest unwraps an async request envelope and dispatches the
+// inner message through the normal receive flow. The correlation ID and the
+// reply target ride on the context so the reply can be routed from that
+// metadata; nothing is signalled through the context itself.
+func (pid *grainPID) handleAsyncRequest(grainContext *GrainContext) {
+	request := grainContext.Message().(*commands.AsyncRequest)
+
+	if request.CorrelationID == "" || request.Message == nil || (request.ReplyTo != nil && !request.ReplyTo.Valid()) {
+		if pid.logger.Enabled(log.WarningLevel) {
+			pid.logger.Warnf("grain=%s dropping malformed async request envelope", pid.getIdentity().String())
+		}
+		return
+	}
+
+	grainContext.requestID = request.CorrelationID
+	grainContext.requestReplyTo = request.ReplyTo
+	grainContext.message = request.Message
+	pid.handleGrainContext(grainContext)
+}
+
+// handleAsyncResponse completes the in-flight request matching the response's
+// correlation ID and runs its continuation inline: the turn is the grain's
+// processing thread, so single-threaded access to grain state holds. An
+// unknown correlation ID is a normal race with timeout or cancellation and is
+// dropped quietly.
+func (pid *grainPID) handleAsyncResponse(grainContext *GrainContext) {
+	defer pid.recovery(grainContext)
+
+	response := grainContext.Message().(*commands.AsyncResponse)
+	pid.markActivity(time.Now())
+
+	// A response without a payload and without an error is a successful reply
+	// with nothing to return (NoErr).
+	var completed bool
+	if response.Error != "" {
+		completed = pid.completeRequest(response.CorrelationID, nil, asyncErrorFromString(response.Error))
+	} else {
+		completed = pid.completeRequest(response.CorrelationID, response.Message, nil)
+	}
+
+	if !completed && pid.logger.Enabled(log.DebugLevel) {
+		pid.logger.Debugf("grain=%s async response dropped: no in-flight request for correlation id=%s", pid.getIdentity().String(), response.CorrelationID)
+	}
+}
+
+// admitRequest resolves the effective reentrancy mode of a grain-issued
+// request, creates its state and admits it against the grain's limits. The
+// caller starts the timeout after delivery succeeds, so a failed delivery
+// never races a timeout completion.
+func (pid *grainPID) admitRequest(reentrant *reentrancyState, opts ...RequestOption) (*requestState, *requestConfig, error) {
+	config := newRequestConfig(opts...)
+
+	mode := reentrant.getMode()
+	if config.modeSet {
+		mode = config.mode
+	}
+
+	if mode == reentrancy.Off {
+		return nil, nil, gerrors.ErrReentrancyDisabled
+	}
+
+	if !reentrancy.IsValidReentrancyMode(mode) {
+		return nil, nil, gerrors.ErrInvalidReentrancyMode
+	}
+
+	state := newRequestState(uuid.NewString(), mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
+		return nil, nil, err
+	}
+
+	pid.markActivity(time.Now())
+	return state, config, nil
+}
+
+// enableReentrancy installs or retunes the grain's async request policy at
+// runtime. In-flight requests keep the mode they were admitted with.
+func (pid *grainPID) enableReentrancy(config *reentrancy.Reentrancy) error {
+	return installReentrancy(&pid.reentrancy, config)
+}
+
+// disableReentrancy turns off async requests without disturbing in-flight
+// ones: they complete normally, a paused grain still unpauses, and new
+// Request calls are rejected until a later enableReentrancy. The envelope ask
+// path reverts to the legacy channel path as well. A no-op when reentrancy
+// was never enabled.
+func (pid *grainPID) disableReentrancy() {
+	if reentrant := pid.reentrancy.Load(); reentrant != nil {
+		reentrant.disable()
+	}
+}
+
+// registerRequestState admits an in-flight request against the grain's
+// limits, mirroring the actor-side admission. A StashNonReentrant
+// registration increments blockingCount, which pauses user-mailbox
+// consumption from the next turn-loop iteration.
+func (pid *grainPID) registerRequestState(state *requestState) error {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return gerrors.ErrReentrancyDisabled
+	}
+
+	if state == nil {
+		return gerrors.ErrInvalidMessage
+	}
+
+	if maxInFlight := reentrant.maxInFlight.Load(); maxInFlight > 0 {
+		for {
+			current := reentrant.inFlightCount.Load()
+			if current >= maxInFlight {
+				return gerrors.ErrReentrancyInFlightLimit
+			}
+
+			if reentrant.inFlightCount.CompareAndSwap(current, current+1) {
+				break
+			}
+		}
+	} else {
+		reentrant.inFlightCount.Inc()
+	}
+
+	if state.mode == reentrancy.StashNonReentrant {
+		reentrant.blockingCount.Inc()
+	}
+
+	reentrant.requestStates.Set(state.id, state)
+	return nil
+}
+
+// completeRequest marks an in-flight request as completed and runs its
+// continuation inline on the current turn. Only the first completion wins; a
+// duplicate reports true without re-running anything. False means no request
+// with that correlation ID is in flight.
+func (pid *grainPID) completeRequest(correlationID string, result any, err error) bool {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return false
+	}
+
+	state, ok := reentrant.requestStates.Get(correlationID)
+	if !ok {
+		return false
+	}
+
+	callback, completed := state.complete(result, err)
+	if !completed {
+		return true
+	}
+
+	pid.deregisterRequestState(state)
+	if callback != nil {
+		callback(result, err)
+	}
+
+	return true
+}
+
+// deregisterRequestState removes an in-flight request and releases its
+// resources. Unlike the actor counterpart there is no unstash step: paused
+// consumption resumes by itself once blockingCount drops to zero, because the
+// turn loop re-evaluates paused() on every iteration and the buffered
+// messages never left the user mailbox.
+func (pid *grainPID) deregisterRequestState(state *requestState) {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil || state == nil {
+		return
+	}
+
+	if _, ok := reentrant.requestStates.Get(state.id); !ok {
+		return
+	}
+
+	reentrant.requestStates.Delete(state.id)
+	reentrant.inFlightCount.Dec()
+
+	if state.mode == reentrancy.StashNonReentrant {
+		reentrant.blockingCount.Dec()
+	}
+
+	state.stopTimeoutIfSet()
+}
+
+// enqueueAsyncError satisfies asyncErrorSink. Timeouts and cancellations
+// originate off the grain's turn, so the error travels through the response
+// queue like any other completion: the wakeup bundled with the enqueue is what
+// lets a paused idle grain get scheduled, process the completion and unpause
+// instead of staying parked with a frozen mailbox.
+func (pid *grainPID) enqueueAsyncError(ctx context.Context, correlationID string, err error) error {
+	if correlationID == "" {
+		return gerrors.ErrInvalidMessage
+	}
+
+	if err == nil {
+		return nil
+	}
+
+	response := &commands.AsyncResponse{
+		CorrelationID: correlationID,
+		Error:         err.Error(),
+	}
+
+	return pid.enqueueEnvelope(ctx, response)
+}
+
+// enqueueEnvelope delivers an async envelope into the grain's queues:
+// requests ride the user mailbox with ordinary messages, responses take the
+// dedicated queue that stays reachable while the grain is paused. Every
+// successful enqueue is followed by the TrySchedule/schedule wakeup pair,
+// mirroring receive; errors are returned, never signalled on a context.
+func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
+	if !pid.isActive() {
+		return gerrors.ErrDead
+	}
+
+	var queue *grainMailbox
+	switch envelope.(type) {
+	case *commands.AsyncRequest:
+		queue = pid.mailbox
+	case *commands.AsyncResponse:
+		queue = pid.responses
+	default:
+		return gerrors.ErrInvalidMessage
+	}
+
+	if queue == nil {
+		return gerrors.ErrReentrancyDisabled
+	}
+
+	grainContext := getGrainContext()
+	grainContext.build(context.WithoutCancel(ctx), pid, pid.actorSystem, pid.getIdentity(), envelope, grainEnvelope)
+
+	if err := queue.Enqueue(grainContext); err != nil {
+		releaseGrainContext(grainContext)
+		return err
+	}
+
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+
+	return nil
+}
+
+// teardownInFlightRequests completes every in-flight request inline with
+// ErrRequestCanceled, then resets the counters and the state map. It runs on
+// the deactivating turn immediately before deactivate: queued completions
+// would either process after OnDeactivate against a dead grain or be dropped
+// as unknown correlations after reset, and a pid whose OnDeactivate failed
+// and is later reactivated must not inherit a non-zero blockingCount, which
+// would be a permanently paused activation.
+func (pid *grainPID) teardownInFlightRequests() {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return
+	}
+
+	for _, state := range reentrant.requestStates.Values() {
+		state.stopTimeoutIfSet()
+
+		if callback, completed := state.complete(nil, gerrors.ErrRequestCanceled); completed && callback != nil {
+			pid.runTeardownCallback(callback)
+		}
+	}
+
+	reentrant.reset()
+}
+
+// runTeardownCallback shields deactivation from a panicking continuation: the
+// panic is contained and logged so the pill that triggered the teardown still
+// reaches deactivate and OnDeactivate runs.
+func (pid *grainPID) runTeardownCallback(callback func(any, error)) {
+	defer func() {
+		if r := recover(); r != nil && pid.logger.Enabled(log.ErrorLevel) {
+			pid.logger.Errorf("grain=%s continuation panicked during teardown: %v", pid.getIdentity().String(), r)
+		}
+	}()
+
+	callback(nil, gerrors.ErrRequestCanceled)
+}
+
+// enqueueInFlightCancellations requests cancellation of every in-flight
+// request from off the grain's turn. Each cancellation is queue-routed
+// through the response queue, so it wakes a paused grain, drops blockingCount
+// on-turn and lets a PoisonPill waiting in the user mailbox proceed;
+// completing the states directly here would zero the counters without a
+// wakeup and skip the continuations. Shutdown calls this before poisoning the
+// grain.
+func (pid *grainPID) enqueueInFlightCancellations() {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return
+	}
+
+	for _, state := range reentrant.requestStates.Values() {
+		if err := state.cancel(); err != nil && pid.logger.Enabled(log.DebugLevel) {
+			pid.logger.Debugf("grain=%s failed to cancel in-flight request id=%s: %v", pid.getIdentity().String(), state.id, err)
+		}
 	}
 }
 
@@ -378,7 +751,7 @@ func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 // draining within the same budget.
 func (pid *grainPID) finishOrReclaim() bool {
 	pid.schedState.reset()
-	if pid.mailbox.IsEmpty() {
+	if !pid.hasPendingWork() {
 		return true
 	}
 
@@ -391,6 +764,8 @@ func (pid *grainPID) finishOrReclaim() bool {
 func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 	pid.onPoisonPill.Store(true)
 	defer pid.recovery(grainContext)
+	pid.teardownInFlightRequests()
+
 	if err := pid.deactivate(grainContext.Context()); err != nil {
 		grainContext.Err(err)
 		return
@@ -416,7 +791,7 @@ func (pid *grainPID) deliverTimerTick(entry *grainTimerEntry) {
 	}
 
 	grainContext := getGrainContext()
-	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), entry.tick, false)
+	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), entry.tick, grainTell)
 
 	if err := pid.mailbox.Enqueue(grainContext); err != nil {
 		releaseGrainContext(grainContext)
@@ -477,32 +852,46 @@ func (pid *grainPID) reportTimerTickFailure(grainContext *GrainContext, entry *g
 
 // recovery is called upon after message is processed
 func (pid *grainPID) recovery(received *GrainContext) {
-	if r := recover(); r != nil {
-		switch err, ok := r.(error); {
-		case ok:
-			if pe, ok := errors.AsType[*gerrors.PanicError](err); ok {
-				received.Err(pe)
-				return
-			}
-
-			// this is a normal error just wrap it with some stack trace
-			// for rich logging purpose
-			pc, fn, line, _ := runtime.Caller(2)
-			received.Err(gerrors.NewPanicError(
-				fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
-			))
-
-		default:
-			// we have no idea what panic it is. Enrich it with some stack trace for rich
-			// logging purpose
-			pc, fn, line, _ := runtime.Caller(2)
-			received.Err(gerrors.NewPanicError(
-				fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
-			))
-		}
-
+	r := recover()
+	if r == nil {
 		return
 	}
+
+	var failure error
+	switch err, ok := r.(error); {
+	case ok:
+		if pe, ok := errors.AsType[*gerrors.PanicError](err); ok {
+			failure = pe
+			break
+		}
+
+		// this is a normal error just wrap it with some stack trace
+		// for rich logging purpose
+		pc, fn, line, _ := runtime.Caller(2)
+		failure = gerrors.NewPanicError(
+			fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
+		)
+
+	default:
+		// we have no idea what panic it is. Enrich it with some stack trace for rich
+		// logging purpose
+		pc, fn, line, _ := runtime.Caller(2)
+		failure = gerrors.NewPanicError(
+			fmt.Errorf("%#v at %s[%s:%d]", r, runtime.FuncForPC(pc).Name(), fn, line),
+		)
+	}
+
+	// A response envelope has no channels and no reply route: the log is the
+	// only signal anyone gets. Request envelopes and channel messages report
+	// through Err, which routes an async reply or signals the channel.
+	if received.err == nil && received.requestID == "" {
+		if pid.logger.Enabled(log.ErrorLevel) {
+			pid.logger.Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
+		}
+		return
+	}
+
+	received.Err(failure)
 }
 
 // uptime returns the number of seconds since the grain has been active
@@ -628,7 +1017,19 @@ func (pid *grainPID) unregisterPassivation() {
 }
 
 func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
-	return wireGrain(pid.identity, pid.config, pid.actorSystem.Host(), pid.actorSystem.Port())
+	wire, err := wireGrain(pid.identity, pid.config, pid.actorSystem.Host(), pid.actorSystem.Port())
+	if err != nil {
+		return nil, err
+	}
+
+	// Snapshot the live policy rather than the activation config, so
+	// reentrancy enabled or retuned at runtime survives eager relocation and
+	// remote activation.
+	if reentrant := pid.reentrancy.Load(); reentrant != nil {
+		wire.Reentrancy = reentrant.toProto()
+	}
+
+	return wire, nil
 }
 
 // wireGrain builds the cluster wire record for a grain from its identity and
@@ -656,5 +1057,6 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 		MailboxCapacity:   new(config.capacity),
 		DisableRelocation: config.disableRelocation,
 		EagerRelocation:   config.eagerRelocation,
+		Reentrancy:        codec.EncodeReentrancy(config.reentrancy),
 	}, nil
 }

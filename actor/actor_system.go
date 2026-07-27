@@ -866,6 +866,9 @@ type ActorSystem interface {
 	// routeAsyncReply delivers a response to whoever awaits the given correlation
 	// ID, using the reply target carried on the originating request.
 	routeAsyncReply(ctx context.Context, from *PID, replyTo *commands.AsyncReplyTo, correlationID string, message any, failure error) error
+	// deliverAsyncEnvelope routes an async envelope to the grain that must
+	// process it, activating the grain or forwarding to its owning node.
+	deliverAsyncEnvelope(ctx context.Context, id *GrainIdentity, envelope any) error
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	grainOf(ctx context.Context, grainType Grain, name string, opts ...GrainOption) (*GrainIdentity, error)
 	decreaseActorsCounter()
@@ -3045,8 +3048,14 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 			continue
 		}
 
+		// Cancel in-flight requests first: the cancellations flow through the
+		// response queue and unpause a grain blocked in StashNonReentrant mode,
+		// so the pill below can be consumed instead of waiting out a pause that
+		// nothing would ever end.
+		grain.enqueueInFlightCancellations()
+
 		gctx := getGrainContext()
-		gctx.build(ctx, grain, x, grain.getIdentity(), new(PoisonPill), false)
+		gctx.build(ctx, grain, x, grain.getIdentity(), new(PoisonPill), grainTell)
 		grain.receive(gctx)
 		pending = append(pending, grain)
 	}

@@ -164,7 +164,7 @@ func withPassivationStrategy(strategy passivation.Strategy) pidOption {
 func withReentrancy(reentrancy *reentrancy.Reentrancy) pidOption {
 	return func(pid *PID) {
 		if reentrancy != nil {
-			pid.reentrancy = newReentrancyState(reentrancy.Mode(), reentrancy.MaxInFlight())
+			pid.reentrancy.Store(newReentrancyState(reentrancy.Mode(), reentrancy.MaxInFlight()))
 		}
 	}
 }

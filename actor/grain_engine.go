@@ -34,6 +34,7 @@ import (
 	"time"
 
 	goset "github.com/deckarep/golang-set/v2"
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
 
@@ -41,6 +42,8 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/remote"
@@ -523,6 +526,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		MailboxCapacity:   grain.GetMailboxCapacity(),
 		DisableRelocation: grain.GetDisableRelocation(),
 		EagerRelocation:   grain.GetEagerRelocation(),
+		Reentrancy:        codec.DecodeReentrancy(grain.GetReentrancy()),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -652,9 +656,21 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		return nil, err
 	}
 
+	// Asks against a reentrancy-enabled grain travel as envelopes so the grain
+	// can keep processing (and defer the reply) while the caller waits. The
+	// async (Tell) branch below stays on the channel path for every target.
+	if synchronous && pid.reentrantEnabled() {
+		return x.envelopeAsk(ctx, pid, message, timeout)
+	}
+
+	mode := grainTell
+	if synchronous {
+		mode = grainAsk
+	}
+
 	// Build and send the grainContext
 	grainContext := getGrainContext()
-	grainContext.build(ctx, pid, x, id, message, synchronous)
+	grainContext.build(ctx, pid, x, id, message, mode)
 	errCh := grainContext.err
 
 	timer := timers.Get(timeout)
@@ -706,6 +722,77 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		timers.Put(timer)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
+}
+
+// envelopeAsk implements the ask against a reentrancy-enabled grain. The
+// caller registers a slot in the node-level pending-asks table and blocks on
+// it; the reply arrives as a routed async response, never through context
+// channels, which is what lets the grain finish its turn (or defer the reply)
+// without pinning anything the mailbox will recycle. A nil reply target on
+// the envelope means exactly this table.
+func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message any, timeout time.Duration) (any, error) {
+	correlationID := uuid.NewString()
+	slot := x.pendingAsks.Register(correlationID)
+
+	envelope := &commands.AsyncRequest{
+		CorrelationID: correlationID,
+		Message:       message,
+	}
+
+	if err := pid.enqueueEnvelope(ctx, envelope); err != nil {
+		x.pendingAsks.Abandon(correlationID)
+		return nil, err
+	}
+
+	timer := timers.Get(timeout)
+
+	select {
+	case response := <-slot:
+		timers.Put(timer)
+		// Decode exactly like the on-turn response handler does: an empty
+		// response is a successful reply without a payload (NoErr).
+		if response.Error != "" {
+			return nil, asyncErrorFromString(response.Error)
+		}
+		return response.Message, nil
+	case <-ctx.Done():
+		timers.Put(timer)
+		x.pendingAsks.Abandon(correlationID)
+		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
+	case <-timer.C:
+		timers.Put(timer)
+		x.pendingAsks.Abandon(correlationID)
+		return nil, gerrors.ErrRequestTimeout
+	}
+}
+
+// deliverAsyncEnvelope routes an async envelope to the grain that must
+// process it, activating the grain when needed and forwarding to the owning
+// node when the cluster places it elsewhere. An already-active local grain is
+// resolved by ensureGrainProcess's own fast path.
+//
+// The stopping gate matters: without it a late envelope would re-activate a
+// grain through ensureGrainProcess after shutdown took its poison snapshot,
+// resurrecting a grain that would never receive a pill. Shutdown's own
+// cancellation delivery bypasses this gate by using the pid-level
+// enqueueEnvelope directly, so the gate cannot deadlock a stopping system.
+func (x *actorSystem) deliverAsyncEnvelope(ctx context.Context, id *GrainIdentity, envelope any) error {
+	if !x.started.Load() || x.isStopping() {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
+	pid, err := x.ensureGrainProcess(ctx, id)
+	if err != nil {
+		var ownerErr *grainOwnerMismatchError
+		if errors.As(err, &ownerErr) {
+			// The owner is remote: the envelope rides the existing tell-grain
+			// remote call, made encodable by the envelope serializers.
+			return x.sendRemoteTellGrainRequest(ctx, ownerErr.owner, envelope)
+		}
+		return err
+	}
+
+	return pid.enqueueEnvelope(ctx, envelope)
 }
 
 // tellGrainAcrossDataCenters sends a message to a Grain across all active datacenters.
@@ -1385,6 +1472,10 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 		if serializedGrain.GetEagerRelocation() {
 			options = append(options, WithGrainEagerRelocation())
+		}
+
+		if reentrancyConfig := codec.DecodeReentrancy(serializedGrain.GetReentrancy()); reentrancyConfig != nil {
+			options = append(options, WithGrainReentrancy(reentrancyConfig))
 		}
 
 		config := newGrainConfig(options...)

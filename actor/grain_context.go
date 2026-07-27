@@ -31,8 +31,24 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/future"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
+)
+
+// grainContextMode selects which reply channels build attaches to a GrainContext.
+type grainContextMode uint8
+
+const (
+	// grainTell carries only the error channel: the caller blocks for an ack.
+	grainTell grainContextMode = iota
+	// grainAsk carries the response and error channels: the caller blocks for a reply.
+	grainAsk
+	// grainEnvelope carries no channels: replies to envelope messages are
+	// routed by the system from the envelope metadata, so nothing can block on
+	// the context and nothing needs draining before it recycles.
+	grainEnvelope
 )
 
 // grainContextCh is a channel-based bounded pool for GrainContext objects.
@@ -91,6 +107,20 @@ type GrainContext struct {
 	synchronous    bool
 	pid            *grainPID
 	responseClosed atomic.Bool
+
+	// requestID and requestReplyTo carry async request metadata stamped by
+	// handleAsyncRequest: the correlation ID of the envelope being processed
+	// and the requester awaiting the reply (nil when a blocked ask on this
+	// node awaits it). Zero for ordinary messages.
+	requestID      string
+	requestReplyTo *commands.AsyncReplyTo
+
+	// replyDeferred records that DeferResponse transferred reply ownership to
+	// a handle: the turn's own reply methods become no-ops. replySent makes
+	// the async reply one-shot, mirroring the CAS guard of the channel path.
+	// Both are turn-owned and need no synchronization.
+	replyDeferred bool
+	replySent     bool
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -159,6 +189,14 @@ func (gctx *GrainContext) Message() any {
 //	    }
 //	}
 func (gctx *GrainContext) Err(err error) {
+	if gctx.requestID != "" {
+		gctx.sendAsyncReply(nil, err)
+		return
+	}
+
+	if gctx.err == nil {
+		return
+	}
 	gctx.err <- err
 }
 
@@ -183,6 +221,12 @@ func (gctx *GrainContext) Err(err error) {
 //	    }
 //	}
 func (gctx *GrainContext) NoErr() {
+	// Envelope path: success without a payload travels as an empty response.
+	if gctx.requestID != "" {
+		gctx.sendAsyncReply(nil, nil)
+		return
+	}
+
 	if gctx.synchronous {
 		// For Ask-based replies, guard against late responses after the caller timed out.
 		// This prevents pooled response channels from receiving stale replies that could
@@ -202,18 +246,28 @@ func (gctx *GrainContext) NoErr() {
 		}
 		return
 	}
+
+	if gctx.err == nil {
+		return
+	}
 	// Asynchronous (Tell) path: only the error channel is used.
 	gctx.err <- nil
 }
 
 // Response sets the message response
 func (gctx *GrainContext) Response(resp any) {
+	if gctx.requestID != "" {
+		gctx.sendAsyncReply(resp, nil)
+		return
+	}
+
 	// For Ask-based replies, guard against late responses after the caller timed out.
 	// This prevents pooled response channels from receiving stale replies that could
 	// be consumed by a later Ask call.
 	if !gctx.responseClosed.CompareAndSwap(false, true) {
 		return
 	}
+
 	select {
 	case gctx.response <- resp:
 	default:
@@ -245,8 +299,214 @@ func (gctx *GrainContext) Response(resp any) {
 //	    }
 //	}
 func (gctx *GrainContext) Unhandled() {
-	msg := gctx.Message()
-	gctx.err <- errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %T", msg))
+	failure := errors.NewErrUnhandledMessage(fmt.Errorf("unhandled message type %T", gctx.Message()))
+
+	if gctx.requestID != "" {
+		gctx.sendAsyncReply(nil, failure)
+		return
+	}
+
+	if gctx.err == nil {
+		return
+	}
+	gctx.err <- failure
+}
+
+// CorrelationID returns the correlation ID of the async request being
+// processed, or the empty string when the current message is not an async
+// request.
+func (gctx *GrainContext) CorrelationID() string {
+	return gctx.requestID
+}
+
+// DeferResponse transfers ownership of the current async request's reply from
+// this turn to the returned handle. After the call, the context's own
+// Response, Err, NoErr and Unhandled become no-ops for this message; exactly
+// one reply owner exists at any time.
+//
+// The handle stays valid indefinitely: it holds only the reply metadata, never
+// the context, so it can complete the request from a continuation or a later
+// turn long after this context has been recycled. Completing the handle more
+// than once is a no-op.
+//
+// For a message that did not arrive as an async request (a Tell, an Ask
+// against a grain without reentrancy, or a timer tick) there is nothing to
+// defer: DeferResponse returns nil and the reply belongs to the turn as usual.
+// The returned nil handle is safe to complete; the calls do nothing.
+func (gctx *GrainContext) DeferResponse() *GrainReply {
+	if gctx.requestID == "" {
+		if logger := gctx.actorSystem.Logger(); logger.Enabled(log.DebugLevel) {
+			logger.Debugf("grain=%s DeferResponse ignored: message is not an async request", gctx.self.String())
+		}
+		return nil
+	}
+
+	gctx.replyDeferred = true
+
+	return &GrainReply{
+		system:        gctx.actorSystem,
+		replyTo:       gctx.requestReplyTo,
+		correlationID: gctx.requestID,
+	}
+}
+
+// sendAsyncReply routes the turn's reply to whoever awaits the async request
+// currently being processed. It is one-shot and yields entirely once
+// DeferResponse has transferred reply ownership. Delivery failures are logged
+// at debug: the requester's timeout is the authoritative failure signal.
+func (gctx *GrainContext) sendAsyncReply(message any, failure error) {
+	if gctx.replyDeferred || gctx.replySent {
+		return
+	}
+	gctx.replySent = true
+
+	if err := gctx.actorSystem.routeAsyncReply(context.WithoutCancel(gctx.ctx), nil, gctx.requestReplyTo, gctx.requestID, message, failure); err != nil {
+		if logger := gctx.actorSystem.Logger(); logger.Enabled(log.DebugLevel) {
+			logger.Debugf("grain=%s failed to deliver reply for correlation id=%s: %v", gctx.self.String(), gctx.requestID, err)
+		}
+	}
+}
+
+// EnableReentrancy enables or retunes the grain's async request policy at
+// runtime, from inside a message handler. It is the runtime counterpart of
+// the WithGrainReentrancy activation option, for grains activated without
+// reentrancy because the capability is only needed for a particular case.
+//
+// It takes effect for requests issued from this point on; requests already in
+// flight keep the mode they were admitted with. Asks against the grain switch
+// to the envelope path, which also makes DeferResponse available for messages
+// received afterward. Returns an error when the configuration is nil or
+// invalid.
+func (gctx *GrainContext) EnableReentrancy(config *reentrancy.Reentrancy) error {
+	return gctx.pid.enableReentrancy(config)
+}
+
+// DisableReentrancy restores the grain's default request policy to Off at
+// runtime. Requests already in flight complete normally, a paused grain still
+// unpauses, asks revert to the legacy channel path, and new Request calls
+// fail with ErrReentrancyDisabled until a later EnableReentrancy. As with a
+// policy configured Off at activation, a per-call WithReentrancyMode override
+// still admits an individual request. A no-op when reentrancy was never
+// enabled.
+func (gctx *GrainContext) DisableReentrancy() {
+	gctx.pid.disableReentrancy()
+}
+
+// RequestGrain sends an asynchronous request to another Grain and returns a
+// RequestCall without blocking the current turn.
+//
+// The grain keeps processing according to its reentrancy mode while the
+// request is in flight, which is what lets request cycles (A asks B while B
+// asks A back) complete instead of deadlocking until a timeout. Register a
+// continuation with Then on the returned call; it runs on this grain's turn
+// when the response arrives, so grain state stays single-threaded.
+//
+// The calling grain must be configured with reentrancy; otherwise the
+// returned call is already completed with ErrReentrancyDisabled. Failures
+// never abort the current message: they surface through the returned call's
+// Then continuation, immediately when the failure is known at call time.
+//
+// Requests default to DefaultGrainRequestTimeout; use WithRequestTimeout to
+// change it per call (a non-positive value disables the timeout) and
+// WithReentrancyMode to override the grain's mode per call.
+func (gctx *GrainContext) RequestGrain(to *GrainIdentity, message any, opts ...RequestOption) RequestCall {
+	pid := gctx.pid
+	if !pid.isActive() {
+		return completedRequestCall(errors.ErrDead)
+	}
+
+	if message == nil {
+		return completedRequestCall(errors.ErrInvalidMessage)
+	}
+
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return completedRequestCall(errors.ErrReentrancyDisabled)
+	}
+
+	if to == nil {
+		return completedRequestCall(errors.ErrInvalidGrainIdentity)
+	}
+
+	if err := to.Validate(); err != nil {
+		return completedRequestCall(errors.NewErrInvalidGrainIdentity(err))
+	}
+
+	state, config, err := pid.admitRequest(reentrant, opts...)
+	if err != nil {
+		return completedRequestCall(err)
+	}
+
+	envelope := &commands.AsyncRequest{
+		CorrelationID: state.id,
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: gctx.Self().String()},
+		Message:       message,
+	}
+
+	if err := gctx.actorSystem.deliverAsyncEnvelope(context.WithoutCancel(gctx.ctx), to, envelope); err != nil {
+		pid.deregisterRequestState(state)
+		return completedRequestCall(err)
+	}
+
+	if timeout := config.grainTimeout(); timeout > 0 {
+		state.startTimeout(timeout)
+	}
+
+	return &requestHandle{state: state}
+}
+
+// RequestActor sends an asynchronous request to a named actor and returns a
+// RequestCall without blocking the current turn.
+//
+// It is the actor-targeted counterpart of RequestGrain and follows the same
+// rules: the calling grain must have reentrancy enabled, failures surface
+// through the returned call, continuations run on this grain's turn, and the
+// request defaults to DefaultGrainRequestTimeout. The target actor replies
+// with Response exactly as it does for actor-to-actor requests.
+func (gctx *GrainContext) RequestActor(actorName string, message any, opts ...RequestOption) RequestCall {
+	pid := gctx.pid
+	if !pid.isActive() {
+		return completedRequestCall(errors.ErrDead)
+	}
+
+	if message == nil {
+		return completedRequestCall(errors.ErrInvalidMessage)
+	}
+
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return completedRequestCall(errors.ErrReentrancyDisabled)
+	}
+
+	ctx := context.WithoutCancel(gctx.ctx)
+
+	cid, err := gctx.actorSystem.ActorOf(ctx, actorName)
+	if err != nil {
+		return completedRequestCall(err)
+	}
+
+	state, config, err := pid.admitRequest(reentrant, opts...)
+	if err != nil {
+		return completedRequestCall(err)
+	}
+
+	envelope := &commands.AsyncRequest{
+		CorrelationID: state.id,
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: gctx.Self().String()},
+		Message:       message,
+	}
+
+	// Tell routes to the network itself when ActorOf resolved a remote handle.
+	if err := gctx.actorSystem.NoSender().Tell(ctx, cid, envelope); err != nil {
+		pid.deregisterRequestState(state)
+		return completedRequestCall(err)
+	}
+
+	if timeout := config.grainTimeout(); timeout > 0 {
+		state.startTimeout(timeout)
+	}
+
+	return &requestHandle{state: state}
 }
 
 // AskActor sends a message to another actor by name and waits for a response.
@@ -624,21 +884,30 @@ func handleGrainCompletion(ctx context.Context, system grainPipeSystem, config *
 }
 
 // build sets the necessary fields of GrainContext.
-func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message any, synchronous bool) *GrainContext {
+func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem ActorSystem, to *GrainIdentity, message any, mode grainContextMode) *GrainContext {
 	gctx.self = to
 	gctx.message = message
 	gctx.ctx = ctx
 	gctx.actorSystem = actorSystem
-	gctx.err = getErrorChannel()
-	gctx.synchronous = synchronous
+	gctx.synchronous = mode == grainAsk
 	gctx.pid = pid
+	gctx.requestID = ""
+	gctx.requestReplyTo = nil
+	gctx.replyDeferred = false
+	gctx.replySent = false
 
 	// Reset CAS guard so Response()/NoErr() succeed for the new message.
 	gctx.responseClosed.Store(false)
 
-	if synchronous {
+	switch mode {
+	case grainAsk:
+		gctx.err = getErrorChannel()
 		gctx.response = getResponseChannel()
-	} else {
+	case grainTell:
+		gctx.err = getErrorChannel()
+		gctx.response = nil
+	default:
+		gctx.err = nil
 		gctx.response = nil
 	}
 
@@ -657,6 +926,10 @@ func (gctx *GrainContext) reset() {
 	gctx.err = nil
 	gctx.synchronous = false
 	gctx.pid = nil
+	gctx.requestID = ""
+	gctx.requestReplyTo = nil
+	gctx.replyDeferred = false
+	gctx.replySent = false
 	// Note: responseClosed is not reset here because build() always sets it
 	// to false for the next message. Avoiding this atomic store saves ~5ns
 	// per message on the release path.

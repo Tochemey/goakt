@@ -749,7 +749,7 @@ func TestGrainTimerScheduleFromOnReceive(t *testing.T) {
 func TestGrainContextTimerAPI(t *testing.T) {
 	fx := spawnTimerProbeGrain(t)
 
-	gctx := getGrainContext().build(context.Background(), fx.pid, fx.system, fx.identity, "probe", false)
+	gctx := getGrainContext().build(context.Background(), fx.pid, fx.system, fx.identity, "probe", grainTell)
 
 	reference, err := gctx.ScheduleOnce("once", time.Hour, WithTimerReference("ctx-once"))
 	require.NoError(t, err)
@@ -795,7 +795,7 @@ func TestGrainContextTimersOnDeactivatedGrain(t *testing.T) {
 	require.NoError(t, fx.pid.deactivate(ctx))
 
 	// every scheduling operation on a deactivated grain is rejected
-	gctx := getGrainContext().build(ctx, fx.pid, fx.system, fx.identity, "probe", false)
+	gctx := getGrainContext().build(ctx, fx.pid, fx.system, fx.identity, "probe", grainTell)
 
 	_, err := gctx.ScheduleOnce("tick", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
@@ -814,7 +814,7 @@ func TestGrainContextTimersOnNeverActivatedGrain(t *testing.T) {
 	pid := newTestGrainPID(grain, "never-activated")
 
 	// a grain process that never activated has no registry to schedule into
-	gctx := getGrainContext().build(context.Background(), pid, nil, pid.getIdentity(), "probe", false)
+	gctx := getGrainContext().build(context.Background(), pid, nil, pid.getIdentity(), "probe", grainTell)
 
 	_, err := gctx.ScheduleOnce("tick", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
@@ -862,7 +862,7 @@ func TestGrainPIDReportTimerTickFailure(t *testing.T) {
 
 	entry := &grainTimerEntry{reference: "tick"}
 	grainContext := getGrainContext()
-	grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, false)
+	grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 
 	// an error reported during the tick is drained and logged
 	grainContext.Err(errors.New("boom"))
@@ -883,7 +883,7 @@ func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
 
 	tickContext := func(entry *grainTimerEntry) *GrainContext {
 		grainContext := getGrainContext()
-		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, false)
+		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 	}
 
 	// cancelled entry: the tick was in the mailbox when its timer was cancelled
@@ -911,7 +911,7 @@ func TestGrainPIDHandleTimerTickActivityMarking(t *testing.T) {
 
 	tickContext := func(entry *grainTimerEntry) *GrainContext {
 		grainContext := getGrainContext()
-		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, false)
+		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 	}
 
 	// a plain tick is delivered with the timer's message but does not count as

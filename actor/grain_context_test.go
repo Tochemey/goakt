@@ -25,6 +25,8 @@ package actor
 import (
 	"context"
 	"errors"
+	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,8 +34,10 @@ import (
 
 	"github.com/tochemey/goakt/v4/breaker"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -604,4 +608,899 @@ func startTestActorSystem(t *testing.T, name string) ActorSystem {
 	})
 
 	return sys
+}
+
+// scriptedGrain runs a per-test OnReceive function.
+type scriptedGrain struct {
+	receive func(*GrainContext)
+}
+
+var _ Grain = (*scriptedGrain)(nil)
+
+func (g *scriptedGrain) OnActivate(context.Context, *GrainProps) error { return nil }
+
+func (g *scriptedGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
+
+func (g *scriptedGrain) OnReceive(gctx *GrainContext) { g.receive(gctx) }
+
+// newRequestTestSystem starts a system for the grain request and reply tests.
+// The logger discards but stays enabled so the debug and error paths execute.
+func newRequestTestSystem(t *testing.T) *actorSystem {
+	t.Helper()
+	ctx := context.Background()
+
+	system, err := NewActorSystem("testSys", WithLogger(log.NewSlog(log.DebugLevel, io.Discard)))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+
+	t.Cleanup(func() {
+		_ = system.Stop(context.Background())
+	})
+
+	return system.(*actorSystem)
+}
+
+// activateReentrantGrain activates grain under name and equips its pid with
+// reentrancy state the way the config plumbing will.
+func activateReentrantGrain(t *testing.T, system *actorSystem, grain Grain, name string) *GrainIdentity {
+	t.Helper()
+
+	identity, err := system.GrainIdentity(context.Background(), name, func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+	pid.responses = newGrainMailbox(0)
+	return identity
+}
+
+func TestGrainEnvelopeReplyModes(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestPing:
+			gctx.Response(&testpb.Reply{Content: "pong"})
+		case *testpb.TestBye:
+			gctx.Err(errors.New("handler failed"))
+		case *testpb.TestSend:
+			gctx.NoErr()
+		default:
+			gctx.Unhandled()
+		}
+	}}
+	identity := activateReentrantGrain(t, system, grain, "replyModesGrain")
+
+	t.Run("Response carries the payload", func(t *testing.T) {
+		response, err := system.AskGrain(ctx, identity, new(testpb.TestPing), time.Second)
+		require.NoError(t, err)
+		reply, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "pong", reply.GetContent())
+	})
+
+	t.Run("Err carries the failure", func(t *testing.T) {
+		response, err := system.AskGrain(ctx, identity, new(testpb.TestBye), time.Second)
+		require.Nil(t, response)
+		require.EqualError(t, err, "handler failed")
+	})
+
+	t.Run("NoErr completes with nil", func(t *testing.T) {
+		response, err := system.AskGrain(ctx, identity, new(testpb.TestSend), time.Second)
+		require.NoError(t, err)
+		require.Nil(t, response)
+	})
+
+	t.Run("Unhandled keeps its identity", func(t *testing.T) {
+		_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.ErrorIs(t, err, gerrors.ErrUnhanledMessage)
+	})
+}
+
+func TestGrainEnvelopeReplyIsOneShot(t *testing.T) {
+	system := newRequestTestSystem(t)
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(&testpb.Reply{Content: "first"})
+		gctx.Response(&testpb.Reply{Content: "second"})
+		gctx.Err(errors.New("late failure"))
+	}}
+	identity := activateReentrantGrain(t, system, grain, "oneShotGrain")
+
+	response, err := system.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
+	require.NoError(t, err)
+
+	reply, ok := response.(*testpb.Reply)
+	require.True(t, ok)
+	require.Equal(t, "first", reply.GetContent())
+	require.Zero(t, system.pendingAsks.Len())
+}
+
+func TestGrainCorrelationID(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	correlations := make(chan string, 2)
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		correlations <- gctx.CorrelationID()
+
+		if gctx.CorrelationID() != "" {
+			gctx.Response(&testpb.Reply{})
+			return
+		}
+		gctx.NoErr()
+	}}
+	identity := activateReentrantGrain(t, system, grain, "correlationGrain")
+
+	_, err := system.AskGrain(ctx, identity, new(testpb.TestPing), time.Second)
+	require.NoError(t, err)
+	require.NotEmpty(t, <-correlations)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+	require.Empty(t, <-correlations)
+}
+
+func TestGrainEnvelopePanicRepliesError(t *testing.T) {
+	system := newRequestTestSystem(t)
+
+	grain := &scriptedGrain{receive: func(*GrainContext) {
+		panic("handler exploded")
+	}}
+	identity := activateReentrantGrain(t, system, grain, "panickyGrain")
+
+	response, err := system.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
+	require.Nil(t, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "handler exploded")
+}
+
+func TestGrainDeferResponse(t *testing.T) {
+	t.Run("completes after the turn", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		var (
+			mu      sync.Mutex
+			pending []*GrainReply
+		)
+		requests := make(chan struct{}, 1)
+
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			switch gctx.Message().(type) {
+			case *testpb.TestPing:
+				mu.Lock()
+				pending = append(pending, gctx.DeferResponse())
+				mu.Unlock()
+				requests <- struct{}{}
+			case *testpb.TestSend:
+				mu.Lock()
+				replies := pending
+				pending = nil
+				mu.Unlock()
+
+				for _, reply := range replies {
+					reply.Response(&testpb.Reply{Content: "deferred"})
+				}
+				gctx.NoErr()
+			}
+		}}
+		identity := activateReentrantGrain(t, system, grain, "deferGrain")
+
+		type askResult struct {
+			response any
+			err      error
+		}
+		results := make(chan askResult, 1)
+
+		go func() {
+			response, err := system.AskGrain(ctx, identity, new(testpb.TestPing), 2*time.Second)
+			results <- askResult{response: response, err: err}
+		}()
+
+		<-requests
+		require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+		select {
+		case result := <-results:
+			require.NoError(t, result.err)
+			reply, ok := result.response.(*testpb.Reply)
+			require.True(t, ok)
+			require.Equal(t, "deferred", reply.GetContent())
+		case <-time.After(2 * time.Second):
+			t.Fatal("deferred reply never completed the ask")
+		}
+	})
+
+	t.Run("in-turn replies after defer are no-ops", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			reply := gctx.DeferResponse()
+
+			// Ownership moved to the handle: none of these must reach the caller.
+			gctx.Response(&testpb.Reply{Content: "wrong"})
+			gctx.Err(errors.New("wrong"))
+			gctx.NoErr()
+
+			reply.Response(&testpb.Reply{Content: "right"})
+		}}
+		identity := activateReentrantGrain(t, system, grain, "deferOwnerGrain")
+
+		response, err := system.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
+		require.NoError(t, err)
+
+		reply, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "right", reply.GetContent())
+	})
+
+	t.Run("double completion is a no-op", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			reply := gctx.DeferResponse()
+			reply.Response(&testpb.Reply{Content: "first"})
+			reply.Response(&testpb.Reply{Content: "second"})
+			reply.Err(errors.New("late failure"))
+		}}
+		identity := activateReentrantGrain(t, system, grain, "deferOnceGrain")
+
+		response, err := system.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
+		require.NoError(t, err)
+
+		reply, ok := response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "first", reply.GetContent())
+	})
+
+	t.Run("nil for ordinary messages", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+
+		handles := make(chan *GrainReply, 1)
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			reply := gctx.DeferResponse()
+			handles <- reply
+
+			// A nil handle is safe to complete; the calls do nothing.
+			reply.Response(&testpb.Reply{})
+			reply.Err(errors.New("ignored"))
+			reply.NoErr()
+			gctx.NoErr()
+		}}
+		identity := activateReentrantGrain(t, system, grain, "deferTellGrain")
+
+		require.NoError(t, system.TellGrain(context.Background(), identity, new(testpb.TestSend)))
+		require.Nil(t, <-handles)
+	})
+}
+
+func TestGrainRequestGrain(t *testing.T) {
+	t.Run("completes with the target's response", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.Response(&testpb.TestCount{Value: 42})
+		}}
+		targetID := activateReentrantGrain(t, system, target, "target-grain")
+
+		results := make(chan *testpb.TestCount, 1)
+		failures := make(chan error, 1)
+
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			call := gctx.RequestGrain(targetID, new(testpb.TestPing))
+			call.Then(func(result any, err error) {
+				if err != nil {
+					failures <- err
+					return
+				}
+				results <- result.(*testpb.TestCount)
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "caller-grain")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case count := <-results:
+			require.EqualValues(t, 42, count.GetValue())
+		case err := <-failures:
+			t.Fatalf("request failed: %v", err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("unhandled keeps its identity across the request", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.Unhandled()
+		}}
+		targetID := activateReentrantGrain(t, system, target, "unhandled-grain")
+
+		failures := make(chan error, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(targetID, new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "caller-grain")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.ErrorIs(t, err, gerrors.ErrUnhanledMessage)
+		case <-time.After(2 * time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("timeout fails the request", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
+
+		failures := make(chan error, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(200*time.Millisecond)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "caller-grain")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout never fired")
+		}
+	})
+
+	t.Run("guard failures complete the handle immediately", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		target := &scriptedGrain{receive: func(*GrainContext) {}}
+		targetID := activateReentrantGrain(t, system, target, "guard-target")
+
+		captured := make(chan error, 5)
+		then := func(_ any, err error) { captured <- err }
+
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(targetID, nil).Then(then)
+			gctx.RequestGrain(nil, new(testpb.TestPing)).Then(then)
+			gctx.RequestGrain(&GrainIdentity{}, new(testpb.TestPing)).Then(then)
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithReentrancyMode(reentrancy.Off)).Then(then)
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithReentrancyMode(reentrancy.Mode(99))).Then(then)
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "guard-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		expected := []error{
+			gerrors.ErrInvalidMessage,
+			gerrors.ErrInvalidGrainIdentity,
+			gerrors.ErrInvalidGrainIdentity,
+			gerrors.ErrReentrancyDisabled,
+			gerrors.ErrInvalidReentrancyMode,
+		}
+
+		for _, want := range expected {
+			select {
+			case got := <-captured:
+				require.ErrorIs(t, got, want)
+			case <-time.After(time.Second):
+				t.Fatalf("missing completed-handle error %v", want)
+			}
+		}
+	})
+
+	t.Run("reentrancy disabled on the caller", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		failures := make(chan error, 1)
+		plain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(&GrainIdentity{kind: "Kind", name: "name"}, new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+
+		identity, err := system.GrainIdentity(ctx, "plain-grain", func(context.Context) (Grain, error) {
+			return plain, nil
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+		case <-time.After(time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("in-flight limit", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
+
+		failures := make(chan error, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			first := gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(0))
+			gctx.RequestGrain(silentID, new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			_ = first.Cancel()
+			gctx.NoErr()
+		}}
+
+		callerID := activateReentrantGrain(t, system, caller, "limited-caller")
+		pid, ok := system.grains.Get(callerID.String())
+		require.True(t, ok)
+		pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 1))
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.ErrorIs(t, err, gerrors.ErrReentrancyInFlightLimit)
+		case <-time.After(time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("delivery failure deregisters the request", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		// An identity whose kind was never registered cannot activate.
+		unknown := newGrainIdentity(&MockGrainActivationFailure{}, "never-registered")
+
+		failures := make(chan error, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(unknown, new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "orphan-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.Error(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("continuation never ran")
+		}
+
+		pid, ok := system.grains.Get(callerID.String())
+		require.True(t, ok)
+		require.Zero(t, pid.reentrancy.Load().inFlightCount.Load())
+	})
+
+	t.Run("default timeout is armed and disable works", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
+
+		issued := make(chan struct{}, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			switch gctx.Message().(type) {
+			case *testpb.TestPing:
+				gctx.RequestGrain(silentID, new(testpb.TestSend))
+			case *testpb.TestBye:
+				gctx.RequestGrain(silentID, new(testpb.TestSend), WithRequestTimeout(0))
+			}
+
+			issued <- struct{}{}
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "timeout-caller")
+		pid, ok := system.grains.Get(callerID.String())
+		require.True(t, ok)
+
+		requireArmed := func(want bool) {
+			states := pid.reentrancy.Load().requestStates.Values()
+			require.Len(t, states, 1)
+
+			state := states[0]
+			state.mu.Lock()
+			armed := state.stopTimeout != nil
+			state.mu.Unlock()
+			require.Equal(t, want, armed)
+
+			// Complete inline to leave the fixture clean for the next case.
+			state.stopTimeoutIfSet()
+			pid.reentrancy.Load().requestStates.Delete(state.id)
+			pid.reentrancy.Load().inFlightCount.Dec()
+		}
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestPing)))
+		<-issued
+		requireArmed(true)
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestBye)))
+		<-issued
+		requireArmed(false)
+	})
+}
+
+func TestGrainDeferResponseFromContinuation(t *testing.T) {
+	// The marquee flow: a grain defers its ask reply, requests another grain
+	// and completes the deferred reply from the continuation, all without
+	// blocking a single turn.
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(&testpb.TestCount{Value: 42})
+	}}
+	targetID := activateReentrantGrain(t, system, target, "answer-grain")
+
+	front := &scriptedGrain{}
+	front.receive = func(gctx *GrainContext) {
+		reply := gctx.DeferResponse()
+
+		gctx.RequestGrain(targetID, new(testpb.TestPing)).Then(func(result any, err error) {
+			if err != nil {
+				reply.Err(err)
+				return
+			}
+			reply.Response(result)
+		})
+	}
+	frontID := activateReentrantGrain(t, system, front, "front-grain")
+
+	response, err := system.AskGrain(ctx, frontID, new(testpb.TestPing), 2*time.Second)
+	require.NoError(t, err)
+
+	count, ok := response.(*testpb.TestCount)
+	require.True(t, ok)
+	require.EqualValues(t, 42, count.GetValue())
+}
+
+func TestGrainRequestActor(t *testing.T) {
+	t.Run("completes with the actor's response", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		_, err := system.Spawn(ctx, "responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+			switch rctx.Message().(type) {
+			case *testpb.TestPing:
+				rctx.Response(&testpb.TestCount{Value: 7})
+			default:
+				rctx.Unhandled()
+			}
+		}})
+		require.NoError(t, err)
+
+		results := make(chan *testpb.TestCount, 1)
+		failures := make(chan error, 1)
+
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestActor("responder", new(testpb.TestPing)).Then(func(result any, err error) {
+				if err != nil {
+					failures <- err
+					return
+				}
+				results <- result.(*testpb.TestCount)
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "actor-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case count := <-results:
+			require.EqualValues(t, 7, count.GetValue())
+		case err := <-failures:
+			t.Fatalf("request failed: %v", err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("unknown actor completes the handle immediately", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		failures := make(chan error, 1)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestActor("missing-actor", new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "actor-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.Error(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+}
+
+func TestGrainChannelLessReplyMethodsAreNoOps(t *testing.T) {
+	// A response envelope context has no channels and no request ID: every
+	// reply method must be a safe no-op instead of blocking the worker.
+	gctx := getGrainContext().build(context.Background(), nil, nil, &GrainIdentity{kind: "Kind", name: "name"}, new(testpb.TestSend), grainEnvelope)
+	t.Cleanup(func() {
+		releaseGrainContext(gctx)
+	})
+
+	require.NotPanics(t, func() {
+		gctx.Err(errors.New("dropped"))
+		gctx.NoErr()
+		gctx.Response(new(testpb.TestReply))
+		gctx.Unhandled()
+	})
+}
+
+func TestGrainSendAsyncReplyDeliveryFailureIsSwallowed(t *testing.T) {
+	system := newRequestTestSystem(t)
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(&testpb.Reply{Content: "unroutable"})
+	}}
+	identity := activateReentrantGrain(t, system, grain, "unroutableReplier")
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	// The reply target names a grain kind that was never registered, so the
+	// reply cannot be delivered; the failure is logged at debug and the turn
+	// completes normally.
+	require.NoError(t, pid.enqueueEnvelope(context.Background(), &commands.AsyncRequest{
+		CorrelationID: "corr",
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: "neverRegistered/nope"},
+		Message:       new(testpb.TestPing),
+	}))
+
+	require.Eventually(t, func() bool {
+		return pid.processedCount.Load() > 0
+	}, 2*time.Second, 10*time.Millisecond)
+}
+
+func TestGrainRequestGuardsWithoutSystem(t *testing.T) {
+	captureError := func(call RequestCall) error {
+		errCh := make(chan error, 1)
+		call.Then(func(_ any, err error) {
+			errCh <- err
+		})
+		return <-errCh
+	}
+
+	t.Run("inactive grain", func(t *testing.T) {
+		gctx := &GrainContext{pid: &grainPID{}}
+		require.ErrorIs(t, captureError(gctx.RequestGrain(&GrainIdentity{}, new(testpb.TestPing))), gerrors.ErrDead)
+		require.ErrorIs(t, captureError(gctx.RequestActor("actor", new(testpb.TestPing))), gerrors.ErrDead)
+	})
+
+	t.Run("nil message", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.activated.Store(true)
+		gctx := &GrainContext{pid: pid}
+		require.ErrorIs(t, captureError(gctx.RequestActor("actor", nil)), gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("reentrancy disabled", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.activated.Store(true)
+		gctx := &GrainContext{pid: pid}
+		require.ErrorIs(t, captureError(gctx.RequestActor("actor", new(testpb.TestPing))), gerrors.ErrReentrancyDisabled)
+	})
+}
+
+func TestGrainRequestActorAdmissionFailure(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	_, err := system.Spawn(ctx, "idle-responder", &reentrancyTestActor{receive: func(*ReceiveContext) {}})
+	require.NoError(t, err)
+
+	failures := make(chan error, 1)
+	caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.RequestActor("idle-responder", new(testpb.TestPing), WithReentrancyMode(reentrancy.Off)).Then(func(_ any, err error) {
+			failures <- err
+		})
+		gctx.NoErr()
+	}}
+	callerID := activateReentrantGrain(t, system, caller, "off-mode-caller")
+
+	require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+	select {
+	case err := <-failures:
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	case <-time.After(time.Second):
+		t.Fatal("continuation never ran")
+	}
+}
+
+// TestGrainEnableReentrancyAtRuntime covers the runtime toggle on grains: a
+// grain activated without reentrancy enables it during message processing,
+// requests, sees asks switch to the envelope path, disables, and reverts.
+func TestGrainEnableReentrancyAtRuntime(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(&testpb.TestCount{Value: 42})
+	}}
+	targetID := activateReentrantGrain(t, system, target, "toggle-target")
+
+	results := make(chan *testpb.TestCount, 2)
+	failures := make(chan error, 4)
+	correlations := make(chan string, 4)
+
+	// TestSend enables, TestBye disables, TestPing requests, TestReply probes
+	// which ask path the message arrived on.
+	toggling := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestSend:
+			if err := gctx.EnableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))); err != nil {
+				failures <- err
+			}
+			gctx.NoErr()
+		case *testpb.TestBye:
+			gctx.DisableReentrancy()
+			gctx.NoErr()
+		case *testpb.TestPing:
+			gctx.RequestGrain(targetID, new(testpb.TestPing)).Then(func(result any, err error) {
+				if err != nil {
+					failures <- err
+					return
+				}
+				results <- result.(*testpb.TestCount)
+			})
+			gctx.NoErr()
+		case *testpb.TestReply:
+			correlations <- gctx.CorrelationID()
+			gctx.Response(&testpb.Reply{Content: "probe"})
+		}
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "toggling-grain", func(context.Context) (Grain, error) {
+		return toggling, nil
+	})
+	require.NoError(t, err)
+
+	// Without reentrancy: requests are rejected and asks take the channel path.
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestPing)))
+	select {
+	case err := <-failures:
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	case <-time.After(time.Second):
+		t.Fatal("expected rejection before enable")
+	}
+
+	_, err = system.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.Empty(t, <-correlations)
+
+	// Enabled at runtime: requests complete and asks switch to the envelope path.
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestPing)))
+	select {
+	case count := <-results:
+		require.EqualValues(t, 42, count.GetValue())
+	case err := <-failures:
+		t.Fatalf("request failed: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("request never completed")
+	}
+
+	_, err = system.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.NotEmpty(t, <-correlations)
+
+	// Disabled again: requests rejected, asks revert to the channel path.
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestBye)))
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestPing)))
+	select {
+	case err := <-failures:
+		require.ErrorIs(t, err, gerrors.ErrReentrancyDisabled)
+	case <-time.After(time.Second):
+		t.Fatal("expected rejection after disable")
+	}
+
+	_, err = system.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.Empty(t, <-correlations)
+}
+
+// TestGrainEnableReentrancyUnderConcurrentAsks exercises the gate flip under
+// the race detector: the grain enables reentrancy while concurrent askers
+// straddle both ask paths.
+func TestGrainEnableReentrancyUnderConcurrentAsks(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		if _, ok := gctx.Message().(*testpb.TestSend); ok {
+			_ = gctx.EnableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))
+			gctx.NoErr()
+			return
+		}
+
+		// Response is dual-mode: it serves the channel path and the envelope
+		// path alike, so both ask generations complete.
+		gctx.Response(&testpb.Reply{Content: "ok"})
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "racing-grain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for range 20 {
+				_, err := system.AskGrain(ctx, identity, new(testpb.TestPing), time.Second)
+				if err != nil {
+					t.Errorf("ask failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+
+	// Flip the gate mid-hammer.
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+	wg.Wait()
+}
+
+func TestGrainEnableReentrancyValidation(t *testing.T) {
+	pid := &grainPID{}
+
+	require.ErrorIs(t, pid.enableReentrancy(nil), gerrors.ErrInvalidReentrancyMode)
+	require.ErrorIs(t, pid.enableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.Mode(99)))), gerrors.ErrInvalidReentrancyMode)
+
+	require.NoError(t, pid.enableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(4))))
+	reentrant := pid.reentrancy.Load()
+	require.NotNil(t, reentrant)
+	require.Equal(t, reentrancy.StashNonReentrant, reentrant.getMode())
+	require.EqualValues(t, 4, reentrant.maxInFlight.Load())
+
+	pid.disableReentrancy()
+	require.Same(t, reentrant, pid.reentrancy.Load())
+	require.Equal(t, reentrancy.Off, reentrant.getMode())
+
+	fresh := &grainPID{}
+	require.NotPanics(t, fresh.disableReentrancy)
+	require.Nil(t, fresh.reentrancy.Load())
 }

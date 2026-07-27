@@ -29,6 +29,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 func TestGrainOptions(t *testing.T) {
@@ -133,4 +135,41 @@ func TestGrainOptions(t *testing.T) {
 		require.False(t, config.eagerRelocation)
 		require.False(t, config.disableRelocation)
 	})
+}
+
+func TestWithGrainReentrancy(t *testing.T) {
+	t.Run("sets and validates the policy", func(t *testing.T) {
+		policy := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(4))
+		config := newGrainConfig(WithGrainReentrancy(policy))
+		require.Same(t, policy, config.reentrancy)
+		require.NoError(t, config.Validate())
+	})
+
+	t.Run("rejects an invalid mode", func(t *testing.T) {
+		config := newGrainConfig(WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.Mode(99)))))
+		require.ErrorIs(t, config.Validate(), gerrors.ErrInvalidReentrancyMode)
+	})
+}
+
+func TestNewGrainPIDBuildsReentrancyState(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	identity := &GrainIdentity{kind: "Kind", name: "configured"}
+	policy := reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(7))
+
+	pid := newGrainPID(identity, NewMockGrain(), sys, newGrainConfig(WithGrainReentrancy(policy)))
+	reentrant := pid.reentrancy.Load()
+	require.NotNil(t, reentrant)
+	require.Equal(t, reentrancy.StashNonReentrant, reentrant.getMode())
+	require.EqualValues(t, 7, reentrant.maxInFlight.Load())
+	require.NotNil(t, pid.responses)
+
+	// An Off policy behaves exactly like no policy.
+	pid = newGrainPID(identity, NewMockGrain(), sys, newGrainConfig(WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.Off)))))
+	require.Nil(t, pid.reentrancy.Load())
+	require.NotNil(t, pid.responses)
 }

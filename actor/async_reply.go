@@ -47,11 +47,9 @@ func (x *actorSystem) routeAsyncReply(ctx context.Context, from *PID, replyTo *c
 		return gerrors.ErrInvalidMessage
 	}
 
-	// A response carries either a payload or a failure reason; neither is not a response.
-	if failure == nil && message == nil {
-		return gerrors.ErrInvalidMessage
-	}
-
+	// A response carrying neither payload nor failure is the wire form of a
+	// successful reply without a payload (NoErr): the requester observes a nil
+	// result and a nil error.
 	response := &commands.AsyncResponse{CorrelationID: correlationID}
 	if failure != nil {
 		response.Error = failure.Error()
@@ -76,6 +74,12 @@ func (x *actorSystem) routeAsyncReply(ctx context.Context, from *PID, replyTo *c
 	switch replyTo.Kind {
 	case commands.ReplyToActor:
 		return x.tellAsyncResponse(ctx, from, replyTo.Actor, response)
+	case commands.ReplyToGrain:
+		identity, err := toIdentity(replyTo.Grain)
+		if err != nil {
+			return err
+		}
+		return x.deliverAsyncEnvelope(ctx, identity, response)
 	default:
 		return gerrors.NewErrInvalidMessage(fmt.Errorf("async reply: unroutable target kind %d", replyTo.Kind))
 	}
@@ -90,8 +94,10 @@ func (x *actorSystem) routeAsyncReply(ctx context.Context, from *PID, replyTo *c
 // routing by address keeps replies working wherever remoting works rather than
 // only where the registry can resolve.
 func (x *actorSystem) tellAsyncResponse(ctx context.Context, from *PID, to *address.Address, response *commands.AsyncResponse) error {
+	// Grain repliers and deferred handles have no PID; the system's NoSender
+	// is the honest sender identity for their responses.
 	if from == nil {
-		return gerrors.ErrInvalidMessage
+		from = x.NoSender()
 	}
 
 	pid, err := x.pidOf(ctx, to)

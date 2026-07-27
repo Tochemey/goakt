@@ -148,6 +148,7 @@ func WithRequestTimeout(timeout time.Duration) RequestOption {
 			return
 		}
 
+		config.timeoutSet = true
 		if timeout <= 0 {
 			config.timeout = nil
 			return
@@ -188,10 +189,52 @@ func (x *requestHandle) Cancel() error {
 	return x.state.cancel()
 }
 
+// completedRequestCall returns a handle that already finished with err, so a
+// Then registered on it fires immediately in the caller's goroutine. Grain
+// request failures surface this way rather than by failing the message being
+// processed.
+func completedRequestCall(err error) RequestCall {
+	state := newRequestState("", reentrancy.AllowAll, nil)
+	state.complete(nil, err)
+	return &requestHandle{state: state}
+}
+
+// installReentrancy installs a runtime-enabled request policy on holder, or
+// retunes the existing one. The pointer transitions nil to non-nil at most
+// once: retuning never replaces the state, so in-flight bookkeeping survives
+// every reconfiguration.
+func installReentrancy(holder *atomic.Pointer[reentrancyState], config *reentrancy.Reentrancy) error {
+	if config == nil {
+		return gerrors.ErrInvalidReentrancyMode
+	}
+
+	if err := config.Validate(); err != nil {
+		return err
+	}
+
+	state := holder.Load()
+	if state == nil {
+		// CAS keeps a concurrent install safe; either way the state loaded
+		// below is the installed one and the retune is idempotent for the
+		// winner.
+		holder.CompareAndSwap(nil, newReentrancyState(config.Mode(), config.MaxInFlight()))
+		state = holder.Load()
+	}
+
+	state.retune(config.Mode(), config.MaxInFlight())
+	return nil
+}
+
 type requestConfig struct {
 	mode    reentrancy.Mode
 	modeSet bool
 	timeout *time.Duration
+	// timeoutSet distinguishes an absent timeout option from an explicit
+	// non-positive one: grain-issued requests default to
+	// DefaultGrainRequestTimeout when the option is absent, while an explicit
+	// non-positive value disables the timeout. Actor-issued requests ignore
+	// this and keep their no-default behavior.
+	timeoutSet bool
 }
 
 // newRequestConfig applies request options with zero-value defaults.
@@ -203,6 +246,20 @@ func newRequestConfig(opts ...RequestOption) *requestConfig {
 		opt(config)
 	}
 	return config
+}
+
+// grainTimeout resolves the effective timeout of a grain-issued request:
+// DefaultGrainRequestTimeout unless the caller set one, the caller's value
+// when positive, and no timeout at all when the caller explicitly disabled it.
+func (config *requestConfig) grainTimeout() time.Duration {
+	if !config.timeoutSet {
+		return DefaultGrainRequestTimeout
+	}
+
+	if config.timeout == nil {
+		return 0
+	}
+	return *config.timeout
 }
 
 // asyncErrorSink injects a synthetic error response into the requester's mailbox.
@@ -341,8 +398,14 @@ func (s *requestState) stopTimeoutIfSet() {
 }
 
 type reentrancyState struct {
-	mode          reentrancy.Mode
-	maxInFlight   int
+	// mode and maxInFlight are the default request policy. They are atomic
+	// because EnableReentrancy/DisableReentrancy retune them at runtime from
+	// the processing turn while off-turn readers (the envelope-ask gate, wire
+	// snapshots, shutdown cancellation) observe them concurrently. In-flight
+	// requests are unaffected by retuning: each carries its own mode on its
+	// requestState.
+	mode          atomic.Int32
+	maxInFlight   atomic.Int64
 	requestStates *xsync.Map[string, *requestState]
 	inFlightCount atomic.Int64
 	blockingCount atomic.Int64
@@ -352,11 +415,32 @@ type reentrancyState struct {
 //
 // Design decision: counters are atomic to avoid blocking the mailbox loop.
 func newReentrancyState(mode reentrancy.Mode, maxInFlight int) *reentrancyState {
-	return &reentrancyState{
-		mode:          mode,
-		maxInFlight:   maxInFlight,
+	state := &reentrancyState{
 		requestStates: xsync.NewMap[string, *requestState](),
 	}
+
+	state.mode.Store(int32(mode))
+	state.maxInFlight.Store(int64(maxInFlight))
+	return state
+}
+
+// getMode returns the default reentrancy mode for new requests.
+func (s *reentrancyState) getMode() reentrancy.Mode {
+	return reentrancy.Mode(s.mode.Load())
+}
+
+// retune replaces the default request policy. Existing in-flight requests
+// keep the mode they were admitted with.
+func (s *reentrancyState) retune(mode reentrancy.Mode, maxInFlight int) {
+	s.mode.Store(int32(mode))
+	s.maxInFlight.Store(int64(maxInFlight))
+}
+
+// disable restores the default mode to Off without touching the in-flight
+// bookkeeping: pending requests complete normally and new ones are rejected,
+// except for per-call mode overrides, until a later enable retunes the mode.
+func (s *reentrancyState) disable() {
+	s.mode.Store(int32(reentrancy.Off))
 }
 
 // reset clears all in-flight state after shutdown or restart.
@@ -373,8 +457,8 @@ func (s *reentrancyState) reset() {
 
 func (s *reentrancyState) toProto() *internalpb.ReentrancyConfig {
 	reentrancy := reentrancy.New(
-		reentrancy.WithMode(s.mode),
-		reentrancy.WithMaxInFlight(s.maxInFlight),
+		reentrancy.WithMode(s.getMode()),
+		reentrancy.WithMaxInFlight(int(s.maxInFlight.Load())),
 	)
 	return codec.EncodeReentrancy(reentrancy)
 }

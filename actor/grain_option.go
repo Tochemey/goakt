@@ -31,6 +31,7 @@ import (
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/internal/xsync"
+	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
 // ActivationStrategy defines the algorithm used by the actor system to determine
@@ -96,6 +97,9 @@ type grainConfig struct {
 	// relocates lazily: its directory entry is cleaned and it re-activates on
 	// next use.
 	eagerRelocation bool
+	// reentrancy is the grain's async request policy; nil disables requests
+	// until enabled at runtime through GrainContext.EnableReentrancy.
+	reentrancy *reentrancy.Reentrancy
 }
 
 // newGrainConfig creates a new grainConfig instance and applies the provided GrainOption(s).
@@ -138,6 +142,13 @@ func (s *grainConfig) Validate() error {
 	if s.disableRelocation && s.eagerRelocation {
 		return gerrors.ErrGrainRelocationConflict
 	}
+
+	if s.reentrancy != nil {
+		if err := s.reentrancy.Validate(); err != nil {
+			return err
+		}
+	}
+
 	for _, dependency := range s.dependencies.Values() {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
@@ -360,6 +371,26 @@ func WithGrainMailboxCapacity(capacity int64) GrainOption {
 func WithGrainDisableRelocation() GrainOption {
 	return func(config *grainConfig) {
 		config.disableRelocation = true
+	}
+}
+
+// WithGrainReentrancy returns a GrainOption that sets the Grain's async
+// request policy at activation time.
+//
+// With reentrancy enabled the Grain can issue non-blocking requests
+// (RequestGrain, RequestActor) and keeps processing according to the
+// configured mode while they are in flight; asks against the Grain take the
+// envelope path, which also enables DeferResponse. Without it, requests fail
+// with ErrReentrancyDisabled until the Grain enables reentrancy at runtime
+// through GrainContext.EnableReentrancy.
+//
+// The policy is an activation-time property like every other grain option: a
+// grain reactivated by a bare send on a stored identity comes back with the
+// default configuration. The policy survives eager relocation and remote
+// activation through the grain's wire record.
+func WithGrainReentrancy(r *reentrancy.Reentrancy) GrainOption {
+	return func(config *grainConfig) {
+		config.reentrancy = r
 	}
 }
 

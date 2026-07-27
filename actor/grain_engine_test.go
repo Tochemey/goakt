@@ -41,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	internalnet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -49,6 +50,7 @@ import (
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mockdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -2178,4 +2180,395 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		require.True(t, got.isActive(), "an already-active grain must not be deactivated")
 		clusterMock.AssertNotCalled(t, "RemoveGrain", mock.Anything, mock.Anything)
 	})
+}
+
+// envelopeReplyingGrain answers envelope asks from within the turn by routing
+// the reply the way the public reply API will: through the system, from the
+// metadata stamped on the context. TestPing replies with a payload, TestBye
+// replies with a failure, and anything else never replies.
+type envelopeReplyingGrain struct{}
+
+var _ Grain = (*envelopeReplyingGrain)(nil)
+
+func (g *envelopeReplyingGrain) OnActivate(context.Context, *GrainProps) error { return nil }
+
+func (g *envelopeReplyingGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
+
+func (g *envelopeReplyingGrain) OnReceive(gctx *GrainContext) {
+	if gctx.requestID == "" {
+		if gctx.err != nil {
+			gctx.NoErr()
+		}
+		return
+	}
+
+	system := gctx.ActorSystem()
+
+	switch gctx.Message().(type) {
+	case *testpb.TestPing:
+		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, &testpb.Reply{Content: "in-turn"}, nil)
+	case *testpb.TestBye:
+		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, nil, errors.New("grain boom"))
+	}
+}
+
+// envelopeDeferringGrain answers envelope asks from a later turn: it stores
+// the request's correlation ID, signals the test, and replies only when a
+// flush message arrives. The reply outliving the turn (and the recycled
+// context) is the property under test.
+type envelopeDeferringGrain struct {
+	mu       sync.Mutex
+	pending  []string
+	requests chan string
+}
+
+var _ Grain = (*envelopeDeferringGrain)(nil)
+
+func (g *envelopeDeferringGrain) OnActivate(context.Context, *GrainProps) error { return nil }
+
+func (g *envelopeDeferringGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
+
+func (g *envelopeDeferringGrain) OnReceive(gctx *GrainContext) {
+	if gctx.requestID != "" {
+		g.mu.Lock()
+		g.pending = append(g.pending, gctx.requestID)
+		g.mu.Unlock()
+
+		select {
+		case g.requests <- gctx.requestID:
+		default:
+		}
+		return
+	}
+
+	if _, ok := gctx.Message().(*testpb.TestSend); ok {
+		system := gctx.ActorSystem()
+
+		g.mu.Lock()
+		pending := g.pending
+		g.pending = nil
+		g.mu.Unlock()
+
+		for _, correlationID := range pending {
+			_ = system.routeAsyncReply(context.Background(), nil, nil, correlationID, &testpb.Reply{Content: "deferred"}, nil)
+		}
+	}
+
+	if gctx.err != nil {
+		gctx.NoErr()
+	}
+}
+
+// startEnvelopeGrainFixture starts a system, activates the given grain and
+// equips its pid with reentrancy state the way the config plumbing will, so
+// asks against it take the envelope path.
+func startEnvelopeGrainFixture(t *testing.T, grain Grain, name string) (*actorSystem, *grainPID, *GrainIdentity) {
+	t.Helper()
+	ctx := context.Background()
+
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+
+	t.Cleanup(func() {
+		_ = system.Stop(context.Background())
+	})
+
+	identity, err := system.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	pid, ok := sys.grains.Get(identity.String())
+	require.True(t, ok)
+
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+	pid.responses = newGrainMailbox(0)
+
+	return sys, pid, identity
+}
+
+func TestEnvelopeAskCompletesInTurn(t *testing.T) {
+	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+
+	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
+	require.NoError(t, err)
+
+	reply, ok := response.(*testpb.Reply)
+	require.True(t, ok)
+	require.Equal(t, "in-turn", reply.GetContent())
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskCarriesFailure(t *testing.T) {
+	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+
+	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestBye), time.Second)
+	require.Nil(t, response)
+	require.EqualError(t, err, "grain boom")
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskDeferredReply(t *testing.T) {
+	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	sys, _, identity := startEnvelopeGrainFixture(t, grain, "deferringGrain")
+	ctx := context.Background()
+
+	type askResult struct {
+		response any
+		err      error
+	}
+	results := make(chan askResult, 1)
+
+	go func() {
+		response, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), 2*time.Second)
+		results <- askResult{response: response, err: err}
+	}()
+
+	select {
+	case <-grain.requests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grain did not receive the request")
+	}
+
+	// The turn that carried the request has ended; the flush replies from a
+	// later one while the caller still blocks.
+	require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	select {
+	case result := <-results:
+		require.NoError(t, result.err)
+		reply, ok := result.response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "deferred", reply.GetContent())
+	case <-time.After(2 * time.Second):
+		t.Fatal("deferred reply never completed the ask")
+	}
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskTimeoutAbandons(t *testing.T) {
+	// TestReply hits the replying grain's default arm: no reply ever comes.
+	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+
+	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), 200*time.Millisecond)
+	require.Nil(t, response)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskCanceledContext(t *testing.T) {
+	sys, pid, _ := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	response, err := sys.envelopeAsk(ctx, pid, new(testpb.TestReply), time.Second)
+	require.Nil(t, response)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskEnqueueFailureAbandons(t *testing.T) {
+	sys, pid, _ := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+
+	pid.activated.Store(false)
+	response, err := sys.envelopeAsk(context.Background(), pid, new(testpb.TestPing), time.Second)
+	pid.activated.Store(true)
+
+	require.Nil(t, response)
+	require.ErrorIs(t, err, gerrors.ErrDead)
+	require.Zero(t, sys.pendingAsks.Len())
+}
+
+func TestEnvelopeAskEmptyResponseCompletesWithNil(t *testing.T) {
+	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	sys, _, identity := startEnvelopeGrainFixture(t, grain, "deferringGrain")
+
+	type askResult struct {
+		response any
+		err      error
+	}
+	results := make(chan askResult, 1)
+
+	go func() {
+		response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), 2*time.Second)
+		results <- askResult{response: response, err: err}
+	}()
+
+	var correlationID string
+	select {
+	case correlationID = <-grain.requests:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grain did not receive the request")
+	}
+
+	// A response carrying neither payload nor error is the wire form of NoErr:
+	// the caller observes success with a nil result.
+	require.True(t, sys.pendingAsks.Complete(&commands.AsyncResponse{CorrelationID: correlationID}))
+
+	select {
+	case result := <-results:
+		require.NoError(t, result.err)
+		require.Nil(t, result.response)
+	case <-time.After(2 * time.Second):
+		t.Fatal("ask did not complete")
+	}
+}
+
+func TestDeliverAsyncEnvelope(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("rejected while stopping", func(t *testing.T) {
+		sys, _, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+
+		sys.shuttingDown.Store(true)
+		err := sys.deliverAsyncEnvelope(ctx, identity, &commands.AsyncRequest{CorrelationID: "late", Message: new(testpb.TestReply)})
+		sys.shuttingDown.Store(false)
+
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+	})
+
+	t.Run("fast path delivers to the active grain", func(t *testing.T) {
+		sys, _, grain, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+
+		require.NoError(t, sys.deliverAsyncEnvelope(ctx, identity, &commands.AsyncRequest{
+			CorrelationID: "fast",
+			Message:       &testpb.Reply{Content: "fast"},
+		}))
+
+		require.Eventually(t, func() bool {
+			return len(grain.recorded()) == 1
+		}, 2*time.Second, 10*time.Millisecond)
+		require.Equal(t, "fast", grain.recorded()[0].requestID)
+	})
+
+	t.Run("activates an idle grain", func(t *testing.T) {
+		sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+
+		// Deactivate the grain so delivery has to go through activation.
+		gctx := getGrainContext().build(ctx, pid, sys, identity, new(PoisonPill), grainTell)
+		pid.receive(gctx)
+
+		select {
+		case <-pid.deactivated:
+		case <-time.After(2 * time.Second):
+			t.Fatal("grain did not deactivate")
+		}
+
+		require.NoError(t, sys.deliverAsyncEnvelope(ctx, identity, &commands.AsyncRequest{
+			CorrelationID: "wake",
+			Message:       new(testpb.TestReply),
+		}))
+
+		process, ok := sys.grains.Get(identity.String())
+		require.True(t, ok)
+		require.True(t, process.isActive())
+	})
+
+	t.Run("propagates activation errors", func(t *testing.T) {
+		sys, _, _, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
+
+		// An identity whose kind was never registered cannot activate.
+		unknown := newGrainIdentity(&MockGrainActivationFailure{}, "never-registered")
+		err := sys.deliverAsyncEnvelope(ctx, unknown, &commands.AsyncRequest{CorrelationID: "corr", Message: new(testpb.TestReply)})
+		require.Error(t, err)
+	})
+
+	t.Run("owner mismatch forwards to the owning node", func(t *testing.T) {
+		grain := &reentrantRecordingGrain{}
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "away", true)
+
+		owner := &internalpb.Grain{
+			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()},
+			Host:    "192.0.2.9",
+			Port:    16000,
+		}
+
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+			Return(nil).Once()
+
+		err := sys.deliverAsyncEnvelope(ctx, identity, &commands.AsyncResponse{
+			CorrelationID: "corr",
+			Message:       new(testpb.TestReply),
+		})
+		require.NoError(t, err)
+	})
+}
+
+func TestWireGrainReentrancy(t *testing.T) {
+	grain := NewMockGrain()
+	sys, _, _, identity := newActivationTestSystem(t, grain, "reentrancy-wire", true)
+
+	wire, err := wireGrain(identity, newGrainConfig(), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.Nil(t, wire.GetReentrancy())
+
+	policy := reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(3))
+	wire, err = wireGrain(identity, newGrainConfig(WithGrainReentrancy(policy)), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	require.NotNil(t, wire.GetReentrancy())
+	require.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT, wire.GetReentrancy().GetMode())
+	require.EqualValues(t, 3, wire.GetReentrancy().GetMaxInFlight())
+}
+
+func TestRecreateGrainPreservesReentrancy(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+
+	identity := newGrainIdentity(&MockGrain{}, "recreate-reentrancy")
+	policy := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(5))
+	wire, err := wireGrain(identity, newGrainConfig(WithGrainReentrancy(policy)), as.Host(), as.Port())
+	require.NoError(t, err)
+
+	require.NoError(t, as.recreateGrain(ctx, wire))
+
+	pid, ok := as.grains.Get(identity.String())
+	require.True(t, ok)
+
+	reentrant := pid.reentrancy.Load()
+	require.NotNil(t, reentrant)
+	require.Equal(t, reentrancy.AllowAll, reentrant.getMode())
+	require.EqualValues(t, 5, reentrant.maxInFlight.Load())
+
+	// The republished wire record keeps the policy.
+	republished, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.NotNil(t, republished.GetReentrancy())
+	require.Equal(t, internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL, republished.GetReentrancy().GetMode())
+}
+
+func TestSendRemoteActivateGrainCarriesReentrancy(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9031, RemotingPort: 9131}
+	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+	grain := NewMockGrain()
+	sys.registry.Register(grain)
+	identity := newGrainIdentity(grain, "remote-reentrancy")
+
+	policy := reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant), reentrancy.WithMaxInFlight(2))
+	wire, err := wireGrain(identity, newGrainConfig(WithGrainReentrancy(policy)), "192.0.2.7", 16000)
+	require.NoError(t, err)
+
+	rem.EXPECT().RemoteActivateGrain(ctx, "192.0.2.7", 16000, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+		return req != nil &&
+			req.Reentrancy != nil &&
+			req.Reentrancy.Mode() == reentrancy.StashNonReentrant &&
+			req.Reentrancy.MaxInFlight() == 2
+	})).Return(nil).Once()
+
+	require.NoError(t, sys.sendRemoteActivateGrain(ctx, wire))
 }

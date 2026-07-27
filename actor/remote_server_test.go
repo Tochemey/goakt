@@ -39,6 +39,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -48,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -2767,4 +2769,161 @@ func TestSpawnErrorToProto(t *testing.T) {
 		got := spawnErrorToProto(fmt.Errorf("spawn: %w", gerrors.ErrWriteQuorum))
 		require.Equal(t, gerrors.ErrWriteQuorum.Error(), got.GetMessage())
 	})
+}
+
+// TestRemoteGrainEnvelopeDelivery sends an async request envelope across two
+// remoting-only nodes. The receiving handler must route it into the grain's
+// queues via deliverAsyncEnvelope rather than blocking in localSend, and the
+// grain must observe the request metadata that traveled on the wire.
+func TestRemoteGrainEnvelopeDelivery(t *testing.T) {
+	ctx := context.Background()
+	ports := inet.Get(2)
+
+	node1, err := NewActorSystem("node1", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig("127.0.0.1", ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, node1.Start(ctx))
+	t.Cleanup(func() { _ = node1.Stop(context.Background()) })
+
+	node2, err := NewActorSystem("node2", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig("127.0.0.1", ports[1])))
+	require.NoError(t, err)
+	require.NoError(t, node2.Start(ctx))
+	t.Cleanup(func() { _ = node2.Stop(context.Background()) })
+
+	grain := &reentrantRecordingGrain{}
+	identity, err := node2.GrainIdentity(ctx, "remoteEnvelopeGrain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+	pid.responses = newGrainMailbox(0)
+
+	envelope := &commands.AsyncRequest{
+		CorrelationID: "remote-req",
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: identity.String()},
+		Message:       &testpb.Reply{Content: "over-the-wire"},
+	}
+
+	grainRequest := &remote.GrainRequest{Name: identity.Name(), Kind: identity.Kind()}
+	require.NoError(t, node1.(*actorSystem).getRemoting().RemoteTellGrain(ctx, "127.0.0.1", ports[1], grainRequest, envelope))
+
+	require.Eventually(t, func() bool {
+		return len(grain.recorded()) == 1
+	}, 3*time.Second, 10*time.Millisecond)
+
+	record := grain.recorded()[0]
+	require.Equal(t, "remote-req", record.requestID)
+	require.NotNil(t, record.replyTo)
+	require.Equal(t, commands.ReplyToGrain, record.replyTo.Kind)
+	require.Equal(t, identity.String(), record.replyTo.Grain)
+
+	reply, ok := record.message.(*testpb.Reply)
+	require.True(t, ok)
+	require.Equal(t, "over-the-wire", reply.GetContent())
+}
+
+// TestRemoteEnvelopeAskDeferredAcrossNodes runs an external ask from node1
+// against a reentrant grain on node2 that defers its reply to a later turn.
+// The handler on node2 blocks in the envelope ask path, the deferred reply
+// completes node2's pending-asks table, and the response crosses back to the
+// caller.
+func TestRemoteEnvelopeAskDeferredAcrossNodes(t *testing.T) {
+	ctx := context.Background()
+	ports := inet.Get(2)
+
+	node1, err := NewActorSystem("node1", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig("127.0.0.1", ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, node1.Start(ctx))
+	t.Cleanup(func() { _ = node1.Stop(context.Background()) })
+
+	node2, err := NewActorSystem("node2", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig("127.0.0.1", ports[1])))
+	require.NoError(t, err)
+	require.NoError(t, node2.Start(ctx))
+	t.Cleanup(func() { _ = node2.Stop(context.Background()) })
+
+	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	identity, err := node2.GrainIdentity(ctx, "remoteDeferringGrain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+	pid.responses = newGrainMailbox(0)
+
+	type askResult struct {
+		response any
+		err      error
+	}
+	results := make(chan askResult, 1)
+
+	go func() {
+		grainRequest := &remote.GrainRequest{Name: identity.Name(), Kind: identity.Kind()}
+		response, err := node1.(*actorSystem).getRemoting().RemoteAskGrain(ctx, "127.0.0.1", ports[1], grainRequest, new(testpb.TestReply), 5*time.Second)
+		results <- askResult{response: response, err: err}
+	}()
+
+	select {
+	case <-grain.requests:
+	case <-time.After(3 * time.Second):
+		t.Fatal("grain did not receive the remote request")
+	}
+
+	// Flush from a later turn on node2 while the remote caller still blocks.
+	require.NoError(t, node2.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	select {
+	case result := <-results:
+		require.NoError(t, result.err)
+		reply, ok := result.response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "deferred", reply.GetContent())
+	case <-time.After(3 * time.Second):
+		t.Fatal("remote deferred ask never completed")
+	}
+	require.Zero(t, node2.(*actorSystem).pendingAsks.Len())
+}
+
+// TestRemoteTellGrainHandlerEnvelopeFailure pins the error arm of the
+// handler's envelope branch: a delivery refused by the stopping gate surfaces
+// as an internal error instead of falling through to the blocking localSend.
+func TestRemoteTellGrainHandlerEnvelopeFailure(t *testing.T) {
+	ctx := context.Background()
+	ports := inet.Get(1)
+
+	system, err := NewActorSystem("node", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig("127.0.0.1", ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { _ = system.Stop(context.Background()) })
+
+	grain := &reentrantRecordingGrain{}
+	identity, err := system.GrainIdentity(ctx, "envelopeFailureGrain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	envelope := &commands.AsyncRequest{CorrelationID: "late", Message: new(testpb.TestReply)}
+	marshaled, err := (&commands.AsyncRequestSerializer{}).Serialize(envelope)
+	require.NoError(t, err)
+
+	req := &internalpb.RemoteTellGrainRequest{
+		Grain: &internalpb.Grain{
+			Host:    "127.0.0.1",
+			Port:    int32(ports[0]),
+			GrainId: &internalpb.GrainId{Kind: identity.Kind(), Name: identity.Name(), Value: identity.String()},
+		},
+		Message: marshaled,
+	}
+
+	sys := system.(*actorSystem)
+	sys.shuttingDown.Store(true)
+	resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
+	sys.shuttingDown.Store(false)
+
+	require.NoError(t, err)
+	requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
+	require.Empty(t, grain.recorded())
 }
