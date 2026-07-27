@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/atomic"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
@@ -1024,4 +1025,510 @@ func TestGrainRegisterRequestStateValidation(t *testing.T) {
 	pid = &grainPID{}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	require.ErrorIs(t, pid.registerRequestState(nil), gerrors.ErrInvalidMessage)
+}
+
+// deactivationCountingGrain counts OnDeactivate invocations so the tests can
+// assert it runs exactly once.
+type deactivationCountingGrain struct {
+	deactivations atomic.Int32
+}
+
+var _ Grain = (*deactivationCountingGrain)(nil)
+
+func (g *deactivationCountingGrain) OnActivate(context.Context, *GrainProps) error { return nil }
+
+func (g *deactivationCountingGrain) OnDeactivate(context.Context, *GrainProps) error {
+	g.deactivations.Inc()
+	return nil
+}
+
+func (g *deactivationCountingGrain) OnReceive(gctx *GrainContext) { gctx.NoErr() }
+
+// passivationEntryState reports whether the manager tracks the grain and
+// whether its entry is paused.
+func passivationEntryState(system *actorSystem, pid *grainPID) (exists, paused bool) {
+	manager := system.passivationManager()
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+
+	entry, ok := manager.entries[pid.passivationID()]
+	if !ok {
+		return false, false
+	}
+	return true, entry.paused
+}
+
+// TestGrainPassivationWaitsForInFlight is the end-to-end Step 9 flow: a
+// pending request pauses the passivation manager past the idle deadline
+// without deactivation or spinning, and completion resumes the lifecycle so
+// the grain passivates normally afterward.
+func TestGrainPassivationWaitsForInFlight(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	silent := &scriptedGrain{receive: func(gctx *GrainContext) {
+		if gctx.CorrelationID() != "" {
+			return // never reply to requests; completion comes from cancellation
+		}
+		gctx.NoErr()
+	}}
+	silentID, err := system.GrainIdentity(ctx, "silent-target", func(context.Context) (Grain, error) {
+		return silent, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	calls := make(chan RequestCall, 1)
+	requester := &scriptedGrain{receive: func(gctx *GrainContext) {
+		calls <- gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(0))
+		gctx.NoErr()
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "waiting-grain", func(context.Context) (Grain, error) {
+		return requester, nil
+	},
+		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		WithGrainDeactivateAfter(300*time.Millisecond))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+	call := <-calls
+	require.NotNil(t, call)
+
+	// Far past the idle deadline the grain is still active: the manager entry
+	// is paused, not firing, not spinning.
+	pause.For(600 * time.Millisecond)
+	require.True(t, pid.isActive())
+
+	exists, paused := passivationEntryState(system, pid)
+	require.True(t, exists)
+	require.True(t, paused)
+
+	// Completion (via cancellation) resumes the passivation lifecycle; the
+	// grain deactivates after a fresh idle period.
+	require.NoError(t, call.Cancel())
+
+	require.Eventually(t, func() bool {
+		return !pid.isActive()
+	}, 3*time.Second, 20*time.Millisecond)
+}
+
+func TestGrainPassivationPillChecks(t *testing.T) {
+	newFixture := func(t *testing.T) (*actorSystem, *grainPID) {
+		t.Helper()
+		system := newRequestTestSystem(t)
+
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
+		identity, err := system.GrainIdentity(context.Background(), "pill-grain", func(context.Context) (Grain, error) {
+			return grain, nil
+		},
+			WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+			WithGrainDeactivateAfter(time.Minute))
+		require.NoError(t, err)
+
+		pid, ok := system.grains.Get(identity.String())
+		require.True(t, ok)
+		return system, pid
+	}
+
+	t.Run("in-flight requests drop the pill without re-registering", func(t *testing.T) {
+		system, pid := newFixture(t)
+
+		state := newRequestState("in-flight", reentrancy.AllowAll, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		t.Cleanup(func() { pid.deregisterRequestState(state) })
+
+		// Registration paused the manager entry.
+		exists, paused := passivationEntryState(system, pid)
+		require.True(t, exists)
+		require.True(t, paused)
+
+		// A stale pill fired before the registration must not deactivate the
+		// grain nor touch the paused entry: re-entry belongs to completion.
+		pid.handlePassivationPill()
+		require.True(t, pid.isActive())
+
+		exists, paused = passivationEntryState(system, pid)
+		require.True(t, exists)
+		require.True(t, paused)
+	})
+
+	t.Run("a paused grain is never deactivated", func(t *testing.T) {
+		_, pid := newFixture(t)
+
+		state := newRequestState("blocking", reentrancy.StashNonReentrant, pid)
+		require.NoError(t, pid.registerRequestState(state))
+
+		t.Cleanup(func() { pid.deregisterRequestState(state) })
+
+		pid.handlePassivationPill()
+		require.True(t, pid.isActive())
+	})
+
+	t.Run("a recently active grain re-registers instead of deactivating", func(t *testing.T) {
+		system, pid := newFixture(t)
+
+		// Simulate the manager entry deleted by the fired pill.
+		system.passivationManager().Unregister(pid)
+		pid.markActivity(time.Now())
+
+		pid.handlePassivationPill()
+		require.True(t, pid.isActive())
+
+		exists, paused := passivationEntryState(system, pid)
+		require.True(t, exists)
+		require.False(t, paused)
+	})
+
+	t.Run("an expired idle grain deactivates on the pill", func(t *testing.T) {
+		_, pid := newFixture(t)
+
+		pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+		pid.handlePassivationPill()
+		require.False(t, pid.isActive())
+	})
+
+	t.Run("inactive and poisoning grains drop the pill", func(t *testing.T) {
+		system, pid := newFixture(t)
+
+		pid.onPoisonPill.Store(true)
+		pid.handlePassivationPill()
+		require.True(t, pid.isActive())
+		pid.onPoisonPill.Store(false)
+
+		pid.activated.Store(false)
+		system.passivationManager().Unregister(pid)
+		pid.handlePassivationPill()
+
+		exists, _ := passivationEntryState(system, pid)
+		require.False(t, exists)
+		pid.activated.Store(true)
+	})
+}
+
+func TestGrainResumePassivationFallback(t *testing.T) {
+	system := newRequestTestSystem(t)
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
+	identity, err := system.GrainIdentity(context.Background(), "fallback-grain", func(context.Context) (Grain, error) {
+		return grain, nil
+	},
+		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		WithGrainDeactivateAfter(time.Minute))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	state := newRequestState("orphaned", reentrancy.AllowAll, pid)
+	require.NoError(t, pid.registerRequestState(state))
+
+	// The pill fired while the request was in flight and deleted the entry;
+	// the last completion must register fresh instead of resuming nothing.
+	system.passivationManager().Unregister(pid)
+	pid.deregisterRequestState(state)
+
+	exists, paused := passivationEntryState(system, pid)
+	require.True(t, exists)
+	require.False(t, paused)
+}
+
+func TestGrainPassivationPillThenPoisonPillDeactivatesOnce(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	grain := &deactivationCountingGrain{}
+	identity, err := system.GrainIdentity(ctx, "counting-grain", func(context.Context) (Grain, error) {
+		return grain, nil
+	},
+		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		WithGrainDeactivateAfter(time.Minute))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	// Expired idle grain: the manager fires the pill, then shutdown poisons.
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+	require.True(t, pid.passivationTry("idle"))
+
+	gctx := getGrainContext().build(ctx, pid, system, identity, new(PoisonPill), grainTell)
+	pid.receive(gctx)
+
+	select {
+	case <-pid.deactivated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grain did not deactivate")
+	}
+
+	require.Eventually(t, func() bool {
+		return pid.mailbox.IsEmpty()
+	}, 2*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, grain.deactivations.Load())
+	require.False(t, pid.isActive())
+}
+
+func TestGrainPassivationPillRejectedByFullMailbox(t *testing.T) {
+	pid := &grainPID{
+		identity: &GrainIdentity{kind: "Kind", name: "full"},
+		mailbox:  newGrainMailbox(1),
+		logger:   log.DiscardLogger,
+	}
+	pid.activated.Store(true)
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+	require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+
+	before := time.Now().UnixNano()
+	require.False(t, pid.passivationTry("idle"))
+
+	// The refused pill touches activity so the manager's refreshed deadline
+	// lands a full deactivateAfter away instead of hot-looping.
+	require.GreaterOrEqual(t, pid.latestReceiveTimeNano.Load(), before)
+	require.True(t, pid.isActive())
+}
+
+func TestGrainPassivationPillDeactivationFailureLogged(t *testing.T) {
+	system := newRequestTestSystem(t)
+
+	identity, err := system.GrainIdentity(context.Background(), "failing-grain", func(context.Context) (Grain, error) {
+		return &MockGrainDeactivationFailure{}, nil
+	},
+		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		WithGrainDeactivateAfter(time.Minute))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+
+	require.NotPanics(t, pid.handlePassivationPill)
+	require.False(t, pid.isActive())
+}
+
+func TestGrainResumePassivationWithoutManager(t *testing.T) {
+	pid := &grainPID{}
+	pid.activated.Store(true)
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+
+	state := newRequestState("no-manager", reentrancy.AllowAll, pid)
+	require.NoError(t, pid.registerRequestState(state))
+	require.NotPanics(t, func() {
+		pid.deregisterRequestState(state)
+	})
+	require.Zero(t, pid.reentrancy.Load().inFlightCount.Load())
+}
+
+// TestGrainStashHoldsTimerTicksDuringPause registers an interval timer and
+// then pauses the grain with a blocking request. Ticks keep arriving in the
+// user mailbox but must wait unprocessed until the reply lifts the pause,
+// while the response itself still completes through the paused grain.
+func TestGrainStashHoldsTimerTicksDuringPause(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	replies := make(chan *GrainReply, 1)
+	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		replies <- gctx.DeferResponse()
+	}}
+
+	targetID, err := system.GrainIdentity(ctx, "tick-target", func(context.Context) (Grain, error) {
+		return target, nil
+	})
+	require.NoError(t, err)
+
+	ticks := atomic.NewInt64(0)
+	completions := make(chan error, 1)
+	failures := make(chan error, 1)
+
+	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestSend:
+			if _, err := gctx.Schedule(new(testpb.TestBye), 50*time.Millisecond); err != nil {
+				failures <- err
+				return
+			}
+
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(0)).Then(func(_ any, err error) {
+				completions <- err
+			})
+			gctx.NoErr()
+		case *testpb.TestBye:
+			ticks.Inc()
+		}
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "tick-stasher", func(context.Context) (Grain, error) {
+		return stasher, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+	require.NoError(t, err)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	var reply *GrainReply
+
+	select {
+	case reply = <-replies:
+	case err := <-failures:
+		t.Fatalf("timer registration failed: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("target never received the blocking request")
+	}
+
+	// Several intervals elapse while the grain is paused: ticks accumulate in
+	// the mailbox but none may process.
+	pause.For(300 * time.Millisecond)
+	require.Zero(t, ticks.Load())
+
+	reply.NoErr()
+
+	select {
+	case err := <-completions:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("blocking request never completed")
+	}
+
+	require.Eventually(t, func() bool {
+		return ticks.Load() > 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+// TestGrainTellAgainstPausedGrain pins decision 12's consequence: a TellGrain
+// toward a grain paused in StashNonReentrant mode times out on its
+// acknowledgement even though the message is delivered and processes normally
+// once the pause lifts.
+func TestGrainTellAgainstPausedGrain(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	replies := make(chan *GrainReply, 1)
+	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		replies <- gctx.DeferResponse()
+	}}
+
+	targetID, err := system.GrainIdentity(ctx, "pause-tell-target", func(context.Context) (Grain, error) {
+		return target, nil
+	})
+	require.NoError(t, err)
+
+	processed := make(chan struct{}, 1)
+	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestPing:
+			gctx.RequestGrain(targetID, new(testpb.TestSend), WithRequestTimeout(0))
+			gctx.NoErr()
+		case *testpb.TestBye:
+			processed <- struct{}{}
+			gctx.NoErr()
+		}
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "pause-tell-stasher", func(context.Context) (Grain, error) {
+		return stasher, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+	require.NoError(t, err)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestPing)))
+
+	var reply *GrainReply
+
+	select {
+	case reply = <-replies:
+	case <-time.After(time.Second):
+		t.Fatal("target never received the blocking request")
+	}
+
+	// The acknowledgement wait runs against a paused mailbox: the caller
+	// observes ErrRequestTimeout even though the message was enqueued.
+	tellCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, system.TellGrain(tellCtx, identity, new(testpb.TestBye)), gerrors.ErrRequestTimeout)
+
+	select {
+	case <-processed:
+		t.Fatal("paused grain processed a user message")
+	default:
+	}
+
+	// Lifting the pause replays the buffered tell.
+	reply.NoErr()
+
+	select {
+	case <-processed:
+	case <-time.After(time.Second):
+		t.Fatal("stashed message never processed after resume")
+	}
+}
+
+// TestGrainShutdownRePauseWindow reproduces the shutdown race the plan calls
+// the re-pause window: a user message queued ahead of the PoisonPill starts a
+// fresh blocking request after the cancellation pre-pass already ran. The
+// request's own timeout must lift the pause so the pill still deactivates the
+// grain.
+func TestGrainShutdownRePauseWindow(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	silent := &scriptedGrain{receive: func(*GrainContext) {}}
+	silentID, err := system.GrainIdentity(ctx, "repause-silent", func(context.Context) (Grain, error) {
+		return silent, nil
+	})
+	require.NoError(t, err)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	outcomes := make(chan error, 1)
+
+	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+		if _, ok := gctx.Message().(*testpb.TestPing); !ok {
+			return
+		}
+
+		entered <- struct{}{}
+		<-release
+
+		gctx.RequestGrain(silentID, new(testpb.TestSend), WithRequestTimeout(500*time.Millisecond)).Then(func(_ any, err error) {
+			outcomes <- err
+		})
+		gctx.NoErr()
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "repause-stasher", func(context.Context) (Grain, error) {
+		return stasher, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+	require.NoError(t, err)
+
+	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestPing)) }()
+	<-entered
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	// Mirror poisonAllGrains while the user message still holds the turn: the
+	// cancellation pre-pass finds nothing in flight, then the pill queues
+	// behind the message about to start a request.
+	pid.enqueueInFlightCancellations()
+
+	pill := getGrainContext().build(ctx, pid, system, identity, new(PoisonPill), grainTell)
+	pid.receive(pill)
+	close(release)
+
+	select {
+	case err := <-outcomes:
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the fresh request never completed")
+	}
+
+	select {
+	case <-pid.deactivated:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grain did not deactivate after the pause lifted")
+	}
+
+	require.False(t, pid.isActive())
 }

@@ -1504,3 +1504,286 @@ func TestGrainEnableReentrancyValidation(t *testing.T) {
 	require.NotPanics(t, fresh.disableReentrancy)
 	require.Nil(t, fresh.reentrancy.Load())
 }
+
+// TestGrainRequestCycle drives the marquee reentrancy scenario across two
+// grains: A requests B while B, still owing its reply, requests A back. Both
+// run AllowAll, so every hop processes without pausing and the cycle completes
+// without ErrRequestTimeout.
+func TestGrainRequestCycle(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	results := make(chan *testpb.TestCount, 1)
+	failures := make(chan error, 2)
+
+	var identityA *GrainIdentity
+
+	grainB := &scriptedGrain{receive: func(gctx *GrainContext) {
+		if _, ok := gctx.Message().(*testpb.TestPing); !ok {
+			return
+		}
+
+		reply := gctx.DeferResponse()
+		gctx.RequestGrain(identityA, new(testpb.TestGetCount)).Then(func(result any, err error) {
+			if err != nil {
+				failures <- err
+				return
+			}
+			reply.Response(result.(*testpb.TestCount))
+		})
+	}}
+	identityB := activateReentrantGrain(t, system, grainB, "cycle-b")
+
+	grainA := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestSend:
+			gctx.RequestGrain(identityB, new(testpb.TestPing)).Then(func(result any, err error) {
+				if err != nil {
+					failures <- err
+					return
+				}
+				results <- result.(*testpb.TestCount)
+			})
+			gctx.NoErr()
+		case *testpb.TestGetCount:
+			gctx.Response(&testpb.TestCount{Value: 42})
+		}
+	}}
+	identityA = activateReentrantGrain(t, system, grainA, "cycle-a")
+
+	require.NoError(t, system.TellGrain(ctx, identityA, new(testpb.TestSend)))
+
+	select {
+	case count := <-results:
+		require.EqualValues(t, 42, count.GetValue())
+	case err := <-failures:
+		t.Fatalf("cycle failed: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("reentrant cycle never completed")
+	}
+}
+
+// TestGrainSelfRequest verifies a grain can request itself under AllowAll: the
+// request queues behind the current turn and the reply completes the
+// continuation on a later turn.
+func TestGrainSelfRequest(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	results := make(chan *testpb.TestCount, 1)
+	failures := make(chan error, 1)
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestSend:
+			gctx.RequestGrain(gctx.Self(), new(testpb.TestGetCount)).Then(func(result any, err error) {
+				if err != nil {
+					failures <- err
+					return
+				}
+				results <- result.(*testpb.TestCount)
+			})
+			gctx.NoErr()
+		case *testpb.TestGetCount:
+			gctx.Response(&testpb.TestCount{Value: 7})
+		}
+	}}
+	identity := activateReentrantGrain(t, system, grain, "self-request-grain")
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	select {
+	case count := <-results:
+		require.EqualValues(t, 7, count.GetValue())
+	case err := <-failures:
+		t.Fatalf("self-request failed: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("self-request never completed")
+	}
+}
+
+// TestGrainMaxInFlightBurst issues more requests in one turn than maxInFlight
+// admits and pins the counter bookkeeping end to end through the real config
+// plumbing: exactly the configured number are admitted, the excess fail with
+// ErrReentrancyInFlightLimit, and completions drain the counter back to zero.
+func TestGrainMaxInFlightBurst(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	replies := make(chan *GrainReply, 4)
+	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		replies <- gctx.DeferResponse()
+	}}
+
+	targetID, err := system.GrainIdentity(ctx, "burst-target", func(context.Context) (Grain, error) {
+		return target, nil
+	})
+	require.NoError(t, err)
+
+	outcomes := make(chan error, 4)
+	caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		for range 4 {
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(0)).Then(func(_ any, err error) {
+				outcomes <- err
+			})
+		}
+		gctx.NoErr()
+	}}
+
+	callerID, err := system.GrainIdentity(ctx, "burst-caller", func(context.Context) (Grain, error) {
+		return caller, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(2))))
+	require.NoError(t, err)
+
+	require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+	// The two rejections complete their handles in-turn, before any admitted
+	// request can finish: the target still holds every reply.
+	for range 2 {
+		select {
+		case err := <-outcomes:
+			require.ErrorIs(t, err, gerrors.ErrReentrancyInFlightLimit)
+		case <-time.After(time.Second):
+			t.Fatal("expected an in-flight limit rejection")
+		}
+	}
+
+	pid, ok := system.grains.Get(callerID.String())
+	require.True(t, ok)
+	require.EqualValues(t, 2, pid.reentrancy.Load().inFlightCount.Load())
+
+	for range 2 {
+		select {
+		case reply := <-replies:
+			reply.NoErr()
+		case <-time.After(time.Second):
+			t.Fatal("target never received the admitted request")
+		}
+	}
+
+	for range 2 {
+		select {
+		case err := <-outcomes:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("admitted request never completed")
+		}
+	}
+
+	require.Eventually(t, func() bool {
+		return pid.reentrancy.Load().inFlightCount.Load() == 0
+	}, time.Second, 10*time.Millisecond)
+}
+
+// TestGrainRequestLateReplyIdempotence completes a request through timeout or
+// Cancel first and then lets the genuine reply arrive late. The late response
+// must drop without effect: one continuation invocation, counters at zero.
+func TestGrainRequestLateReplyIdempotence(t *testing.T) {
+	t.Run("timeout then late reply", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		replies := make(chan *GrainReply, 1)
+		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+			replies <- gctx.DeferResponse()
+		}}
+
+		targetID, err := system.GrainIdentity(ctx, "late-target", func(context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		outcomes := make(chan error, 2)
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(150*time.Millisecond)).Then(func(_ any, err error) {
+				outcomes <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "late-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-outcomes:
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		case <-time.After(time.Second):
+			t.Fatal("timeout never completed the request")
+		}
+
+		var reply *GrainReply
+
+		select {
+		case reply = <-replies:
+		case <-time.After(time.Second):
+			t.Fatal("target never received the request")
+		}
+
+		// The genuine reply lands after the timeout already completed the
+		// state: it must drop as an unknown correlation.
+		reply.Response(&testpb.Reply{Content: "late"})
+		pause.For(200 * time.Millisecond)
+
+		pid, ok := system.grains.Get(callerID.String())
+		require.True(t, ok)
+		require.Zero(t, pid.reentrancy.Load().inFlightCount.Load())
+		require.Empty(t, outcomes)
+	})
+
+	t.Run("cancel then late reply", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		replies := make(chan *GrainReply, 1)
+		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+			replies <- gctx.DeferResponse()
+		}}
+
+		targetID, err := system.GrainIdentity(ctx, "late-cancel-target", func(context.Context) (Grain, error) {
+			return target, nil
+		})
+		require.NoError(t, err)
+
+		calls := make(chan RequestCall, 1)
+		outcomes := make(chan error, 2)
+
+		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+			call := gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(0))
+			call.Then(func(_ any, err error) {
+				outcomes <- err
+			})
+			calls <- call
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "late-cancel-caller")
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		var reply *GrainReply
+
+		select {
+		case reply = <-replies:
+		case <-time.After(time.Second):
+			t.Fatal("target never received the request")
+		}
+
+		call := <-calls
+		require.NoError(t, call.Cancel())
+
+		select {
+		case err := <-outcomes:
+			require.ErrorIs(t, err, gerrors.ErrRequestCanceled)
+		case <-time.After(time.Second):
+			t.Fatal("cancel never completed the request")
+		}
+
+		// The genuine reply after the cancellation must drop without effect.
+		reply.Response(&testpb.Reply{Content: "late"})
+		pause.For(200 * time.Millisecond)
+
+		pid, ok := system.grains.Get(callerID.String())
+		require.True(t, ok)
+		require.Zero(t, pid.reentrancy.Load().inFlightCount.Load())
+		require.Empty(t, outcomes)
+	})
+}

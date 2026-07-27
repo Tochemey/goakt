@@ -197,6 +197,122 @@ func TestRequestNameAcrossNodes(t *testing.T) {
 	srv.Shutdown()
 }
 
+// TestGrainRequestEdgesAcrossNodes drives the three cross-kind request edges
+// over a two-node cluster: grain to grain, grain to actor and actor to grain.
+// Every request and reply envelope crosses the wire, because each requester
+// lives on node1 while its target lives on node2.
+func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+
+	pause.For(time.Second)
+
+	targetGrain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestPing:
+			gctx.Response(&testpb.TestCount{Value: 42})
+		default:
+			gctx.Unhandled()
+		}
+	}}
+	targetID, err := node2.GrainIdentity(ctx, "edge-target-grain", func(context.Context) (Grain, error) {
+		return targetGrain, nil
+	})
+	require.NoError(t, err)
+
+	_, err = node2.Spawn(ctx, "edge-target-actor", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		switch rctx.Message().(type) {
+		case *testpb.TestPing:
+			rctx.Response(&testpb.TestCount{Value: 42})
+		default:
+			rctx.Unhandled()
+		}
+	}})
+	require.NoError(t, err)
+
+	results := make(chan *testpb.TestCount, 1)
+	errCh := make(chan error, 1)
+	forward := func(result any, err error) {
+		if err != nil {
+			reportScenarioError(errCh, err)
+			return
+		}
+
+		count, ok := result.(*testpb.TestCount)
+		if !ok {
+			reportScenarioError(errCh, errors.New("unexpected reply type"))
+			return
+		}
+		results <- count
+	}
+
+	// TestSend drives the grain edge, TestBye the actor edge.
+	requesterGrain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		switch gctx.Message().(type) {
+		case *testpb.TestSend:
+			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(5*time.Second)).Then(forward)
+			gctx.NoErr()
+		case *testpb.TestBye:
+			gctx.RequestActor("edge-target-actor", new(testpb.TestPing), WithRequestTimeout(5*time.Second)).Then(forward)
+			gctx.NoErr()
+		default:
+			gctx.Unhandled()
+		}
+	}}
+	requesterID, err := node1.GrainIdentity(ctx, "edge-requester-grain", func(context.Context) (Grain, error) {
+		return requesterGrain, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	expectCount := func(edge string) {
+		t.Helper()
+
+		select {
+		case err := <-errCh:
+			t.Fatalf("%s request failed: %v", edge, err)
+		case count := <-results:
+			require.EqualValues(t, 42, count.GetValue())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("expected reply from the %s request", edge)
+		}
+	}
+
+	require.NoError(t, node1.TellGrain(ctx, requesterID, new(testpb.TestSend)))
+	expectCount("grain-to-grain")
+
+	require.NoError(t, node1.TellGrain(ctx, requesterID, new(testpb.TestBye)))
+	expectCount("grain-to-actor")
+
+	requester, err := node1.Spawn(ctx, "edge-requester-actor", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
+			return
+		}
+
+		call := rctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(5*time.Second))
+		if call == nil {
+			reportScenarioError(errCh, rctx.getError())
+			return
+		}
+		call.Then(forward)
+	}}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	pause.For(time.Second)
+	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
+	expectCount("actor-to-grain")
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd2.Close())
+	srv.Shutdown()
+}
+
 func TestRequestRequiresReentrancy(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "target", responderWithDelay(0, nil))

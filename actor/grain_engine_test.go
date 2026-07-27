@@ -2572,3 +2572,104 @@ func TestSendRemoteActivateGrainCarriesReentrancy(t *testing.T) {
 
 	require.NoError(t, sys.sendRemoteActivateGrain(ctx, wire))
 }
+
+// reactivationGrain survives reflective re-instantiation: a bare send on a
+// stored identity recreates the grain as a zero value, so it must handle
+// messages without any wiring.
+type reactivationGrain struct{}
+
+var _ Grain = (*reactivationGrain)(nil)
+
+func (*reactivationGrain) OnActivate(context.Context, *GrainProps) error { return nil }
+
+func (*reactivationGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
+
+func (*reactivationGrain) OnReceive(gctx *GrainContext) { gctx.NoErr() }
+
+// TestGrainReactivationUsesDefaultConfig pins the documented lifecycle
+// property: reentrancy is an activation-time option, so a grain that
+// passivated on idleness comes back from a bare send with default config and
+// no reentrancy state.
+func TestGrainReactivationUsesDefaultConfig(t *testing.T) {
+	ctx := context.Background()
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { _ = system.Stop(context.Background()) })
+
+	sys := system.(*actorSystem)
+
+	identity, err := system.GrainIdentity(ctx, "reactivated-grain", func(context.Context) (Grain, error) {
+		return new(reactivationGrain), nil
+	},
+		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		WithGrainDeactivateAfter(200*time.Millisecond))
+	require.NoError(t, err)
+
+	pid, ok := sys.grains.Get(identity.String())
+	require.True(t, ok)
+	require.NotNil(t, pid.reentrancy.Load())
+
+	require.Eventually(t, func() bool {
+		_, exists := sys.grains.Get(identity.String())
+		return !exists
+	}, 3*time.Second, 20*time.Millisecond)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	pid, ok = sys.grains.Get(identity.String())
+	require.True(t, ok)
+	require.Nil(t, pid.reentrancy.Load())
+}
+
+// TestNonReentrantAskSkipsPendingAsks proves the legacy channel ask stays in
+// place for non-reentrant targets: while the handler holds the ask, no
+// pending-asks entry exists, so the envelope path was never involved.
+func TestNonReentrantAskSkipsPendingAsks(t *testing.T) {
+	ctx := context.Background()
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { _ = system.Stop(context.Background()) })
+
+	sys := system.(*actorSystem)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		entered <- struct{}{}
+		<-release
+		gctx.Response(&testpb.Reply{Content: "legacy"})
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "legacy-ask-grain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	type askResult struct {
+		response any
+		err      error
+	}
+	results := make(chan askResult, 1)
+
+	go func() {
+		response, err := system.AskGrain(ctx, identity, new(testpb.TestPing), 2*time.Second)
+		results <- askResult{response: response, err: err}
+	}()
+
+	<-entered
+	require.Zero(t, sys.pendingAsks.Len())
+	close(release)
+
+	select {
+	case result := <-results:
+		require.NoError(t, result.err)
+		reply, ok := result.response.(*testpb.Reply)
+		require.True(t, ok)
+		require.Equal(t, "legacy", reply.GetContent())
+	case <-time.After(2 * time.Second):
+		t.Fatal("legacy ask never completed")
+	}
+}

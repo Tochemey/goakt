@@ -120,6 +120,11 @@ var (
 	_ asyncErrorSink         = (*grainPID)(nil)
 )
 
+// grainPassivationPill carries the passivation manager's deactivation decision
+// onto the grain's serialized turn stream, where it cannot race an on-turn
+// request registration.
+type grainPassivationPill struct{}
+
 func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, config *grainConfig) *grainPID {
 	pid := &grainPID{
 		grain:                 grain,
@@ -436,6 +441,8 @@ func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
 		pid.handlePoisonPill(grainContext)
 	case *grainTimerTick:
 		pid.handleTimerTick(grainContext)
+	case grainPassivationPill:
+		pid.handlePassivationPill()
 	case *commands.AsyncRequest:
 		pid.handleAsyncRequest(grainContext)
 	case *commands.AsyncResponse:
@@ -550,6 +557,8 @@ func (pid *grainPID) registerRequestState(state *requestState) error {
 		return gerrors.ErrInvalidMessage
 	}
 
+	var first bool
+
 	if maxInFlight := reentrant.maxInFlight.Load(); maxInFlight > 0 {
 		for {
 			current := reentrant.inFlightCount.Load()
@@ -558,11 +567,12 @@ func (pid *grainPID) registerRequestState(state *requestState) error {
 			}
 
 			if reentrant.inFlightCount.CompareAndSwap(current, current+1) {
+				first = current == 0
 				break
 			}
 		}
 	} else {
-		reentrant.inFlightCount.Inc()
+		first = reentrant.inFlightCount.Inc() == 1
 	}
 
 	if state.mode == reentrancy.StashNonReentrant {
@@ -570,6 +580,13 @@ func (pid *grainPID) registerRequestState(state *requestState) error {
 	}
 
 	reentrant.requestStates.Set(state.id, state)
+
+	// The manager must not deactivate a grain awaiting a response: pause it
+	// while requests are in flight. Registration happens on-turn, so this
+	// cannot race the resume of the last completion.
+	if first && pid.passivationManager != nil {
+		pid.passivationManager.Pause(pid)
+	}
 	return nil
 }
 
@@ -617,13 +634,31 @@ func (pid *grainPID) deregisterRequestState(state *requestState) {
 	}
 
 	reentrant.requestStates.Delete(state.id)
-	reentrant.inFlightCount.Dec()
+	remaining := reentrant.inFlightCount.Dec()
 
 	if state.mode == reentrancy.StashNonReentrant {
 		reentrant.blockingCount.Dec()
 	}
 
 	state.stopTimeoutIfSet()
+
+	if remaining == 0 {
+		pid.resumePassivation()
+	}
+}
+
+// resumePassivation re-enters the passivation lifecycle after the last
+// in-flight request completes. Resume reports false when the manager entry no
+// longer exists, deleted when a passivation pill fired while requests were in
+// flight; registering fresh restores the idle clock.
+func (pid *grainPID) resumePassivation() {
+	if pid.passivationManager == nil {
+		return
+	}
+
+	if !pid.passivationManager.Resume(pid) {
+		pid.startPassivation()
+	}
 }
 
 // enqueueAsyncError satisfies asyncErrorSink. Timeouts and cancellations
@@ -764,6 +799,15 @@ func (pid *grainPID) finishOrReclaim() bool {
 func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 	pid.onPoisonPill.Store(true)
 	defer pid.recovery(grainContext)
+
+	// A passivation pill and a PoisonPill can both be queued (the manager
+	// fires, then shutdown poisons); deactivate has no activated-guard of its
+	// own and OnDeactivate must run exactly once.
+	if !pid.isActive() {
+		grainContext.NoErr()
+		return
+	}
+
 	pid.teardownInFlightRequests()
 
 	if err := pid.deactivate(grainContext.Context()); err != nil {
@@ -970,6 +1014,15 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return false
 	}
 
+	// A reentrancy-capable grain serializes the deactivation decision with its
+	// turn: deciding here, on the manager goroutine, is check-then-act against
+	// a concurrently running turn that can register a request after the check.
+	// The pill travels through the mailbox so the decision and request
+	// registration execute on the same serialized turn stream.
+	if pid.reentrancy.Load() != nil {
+		return pid.enqueuePassivationPill()
+	}
+
 	if pid.logger.Enabled(log.DebugLevel) {
 		pid.logger.Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
 	}
@@ -981,6 +1034,63 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return false
 	}
 	return true
+}
+
+// enqueuePassivationPill hands the deactivation decision to the grain's turn
+// stream. Returning true makes the manager delete its entry: ownership of any
+// re-registration transfers to the pill handler and the completion path.
+// On a full bounded mailbox it touches activity and returns false, so the
+// manager's refreshed deadline lands a full deactivateAfter in the future
+// instead of hot-looping; a full mailbox means pending traffic, so the touch
+// is approximately honest.
+func (pid *grainPID) enqueuePassivationPill() bool {
+	grainContext := getGrainContext()
+	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), grainPassivationPill{}, grainEnvelope)
+
+	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+		releaseGrainContext(grainContext)
+		pid.markActivity(time.Now())
+		return false
+	}
+
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+	return true
+}
+
+// handlePassivationPill decides deactivation on the grain's turn. The pill may
+// be stale by the time it processes (delayed behind a pause or buffered
+// traffic), so every condition is re-checked against current state:
+//   - inactive or poisoning: drop the pill without re-registering, because a
+//     manager entry for a deactivated grain would fire forever;
+//   - in-flight or paused: do nothing, the last-completion path owns re-entry
+//     into passivation (resumePassivation);
+//   - recently active: re-register with a fresh idle deadline;
+//   - otherwise deactivate, exactly like the direct passivation path.
+func (pid *grainPID) handlePassivationPill() {
+	if !pid.isActive() || pid.onPoisonPill.Load() {
+		return
+	}
+
+	reentrant := pid.reentrancy.Load()
+	if (reentrant != nil && reentrant.inFlightCount.Load() > 0) || pid.paused() {
+		return
+	}
+
+	deadline := pid.latestReceiveTimeNano.Load() + pid.deactivateAfter.Load().Nanoseconds()
+	if deadline > time.Now().UnixNano() {
+		pid.startPassivation()
+		return
+	}
+
+	if pid.logger.Enabled(log.DebugLevel) {
+		pid.logger.Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), passivation.NewTimeBasedStrategy(pid.deactivateAfter.Load()).Name())
+	}
+
+	if err := pid.deactivate(context.Background()); err != nil && pid.logger.Enabled(log.ErrorLevel) {
+		pid.logger.Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
+	}
 }
 
 func (pid *grainPID) markActivity(at time.Time) {
