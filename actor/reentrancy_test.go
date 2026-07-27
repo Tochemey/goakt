@@ -122,6 +122,80 @@ func TestReentrancyCycleAllowAll(t *testing.T) {
 	}
 }
 
+// TestRequestNameAcrossNodes exercises the full remote reentrancy round trip:
+// the request envelope travels from node1 to node2 and the response envelope
+// travels back. Both hops depend on the async envelope serializers, without
+// which the send fails with "no serializer found".
+func TestRequestNameAcrossNodes(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+
+	pause.For(time.Second)
+
+	_, err := node2.Spawn(ctx, "remote-responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		switch rctx.Message().(type) {
+		case *testpb.TestPing:
+			rctx.Response(&testpb.TestCount{Value: 42})
+		default:
+			rctx.Unhandled()
+		}
+	}})
+	require.NoError(t, err)
+
+	replyCh := make(chan *testpb.TestCount, 1)
+	errCh := make(chan error, 1)
+
+	requester, err := node1.Spawn(ctx, "remote-requester", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
+			return
+		}
+
+		call := rctx.RequestName("remote-responder", new(testpb.TestPing), WithRequestTimeout(5*time.Second))
+		if call == nil {
+			reportScenarioError(errCh, rctx.getError())
+			return
+		}
+
+		call.Then(func(resp any, err error) {
+			if err != nil {
+				reportScenarioError(errCh, err)
+				return
+			}
+
+			count, ok := resp.(*testpb.TestCount)
+			if !ok {
+				reportScenarioError(errCh, errors.New("unexpected reply type"))
+				return
+			}
+			replyCh <- count
+		})
+	}}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	pause.For(time.Second)
+	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("remote request failed: %v", err)
+	case msg := <-replyCh:
+		require.EqualValues(t, 42, msg.GetValue())
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected reply from remote request")
+	}
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd2.Close())
+	srv.Shutdown()
+}
+
 func TestRequestRequiresReentrancy(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "target", responderWithDelay(0, nil))
@@ -992,40 +1066,44 @@ func TestEnqueueAsyncError(t *testing.T) {
 }
 
 func TestSendAsyncResponsePaths(t *testing.T) {
+	replyTarget := func() *commands.AsyncReplyTo {
+		return &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: address.New("actor", "sys", "127.0.0.1", 9000)}
+	}
+
 	t.Run("invalid correlation", func(t *testing.T) {
 		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "", new(testpb.TestSend), nil)
+		err := pid.sendAsyncResponse(context.Background(), replyTarget(), "", new(testpb.TestSend), nil)
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
 
-	t.Run("invalid replyTo", func(t *testing.T) {
+	t.Run("nil reply target", func(t *testing.T) {
 		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "", "corr", new(testpb.TestSend), nil)
+		err := pid.sendAsyncResponse(context.Background(), nil, "corr", new(testpb.TestSend), nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("reply target without address", func(t *testing.T) {
+		pid := &PID{}
+		err := pid.sendAsyncResponse(context.Background(), &commands.AsyncReplyTo{Kind: commands.ReplyToActor}, "corr", new(testpb.TestSend), nil)
+		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("grain reply target rejected", func(t *testing.T) {
+		pid := &PID{}
+		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: "kind/name"}
+		err := pid.sendAsyncResponse(context.Background(), replyTo, "corr", new(testpb.TestSend), nil)
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
 
 	t.Run("nil message", func(t *testing.T) {
 		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", nil, nil)
+		err := pid.sendAsyncResponse(context.Background(), replyTarget(), "corr", nil, nil)
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
-	})
-
-	t.Run("marshal error", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", &testpb.Reply{Content: invalidUTF8String()}, nil)
-		require.Error(t, err)
-	})
-
-	t.Run("address parse error", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "not-an-addr", "corr", &testpb.Reply{Content: "ok"}, nil)
-		require.Error(t, err)
 	})
 
 	t.Run("actor system not started", func(t *testing.T) {
 		pid := &PID{logger: log.DiscardLogger}
-		replyTo := address.New("actor", "sys", "127.0.0.1", 9000).String()
-		err := pid.sendAsyncResponse(context.Background(), replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
+		err := pid.sendAsyncResponse(context.Background(), replyTarget(), "corr", &testpb.Reply{Content: "ok"}, nil)
 		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 	})
 
@@ -1045,7 +1123,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			}
 		})
 
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
+		require.NoError(t, sender.sendAsyncResponse(ctx, &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: pathToAddress(receiver.Path())}, "corr-ok", &testpb.Reply{Content: "ok"}, nil))
 		select {
 		case msg := <-okCh:
 			reply, ok := msg.(*testpb.Reply)
@@ -1066,7 +1144,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 			}
 		})
 
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-err", nil, errors.New("boom")))
+		require.NoError(t, sender.sendAsyncResponse(ctx, &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: pathToAddress(receiver.Path())}, "corr-err", nil, errors.New("boom")))
 		select {
 		case err := <-errCh:
 			require.EqualError(t, err, "boom")
@@ -1080,7 +1158,7 @@ func TestSendAsyncResponsePaths(t *testing.T) {
 	t.Run("remote error", func(t *testing.T) {
 		sys, ctx := newReentrancySystem(t)
 		sender := spawnReentrancyActor(t, sys, ctx, "remote-sender", func(*ReceiveContext) {})
-		replyTo := address.New("remote", "remote-system", "127.0.0.1", 9002).String()
+		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: address.New("remote", "remote-system", "127.0.0.1", 9002)}
 		err := sender.sendAsyncResponse(ctx, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
 		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 	})
@@ -1125,10 +1203,6 @@ func reportScenarioError(errCh chan<- error, err error) {
 	case errCh <- err:
 	default:
 	}
-}
-
-func invalidUTF8String() string {
-	return string([]byte{0xff})
 }
 
 func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight int) *PID {

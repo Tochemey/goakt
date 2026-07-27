@@ -2764,6 +2764,8 @@ func (x *actorSystem) setupRemoting() error {
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
 		remoteclient.WithClientSerializers(new(Terminated), &terminatedSerializer{}),
+		remoteclient.WithClientSerializers(new(commands.AsyncRequest), &commands.AsyncRequestSerializer{}),
+		remoteclient.WithClientSerializers(new(commands.AsyncResponse), &commands.AsyncResponseSerializer{}),
 		// set the dependency registry for the remoting client
 		remoteclient.WithDependencyRegistry(x.registry),
 	}

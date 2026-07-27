@@ -25,14 +25,27 @@ message ReentrancyConfig {
   uint32 max_in_flight = 2;
 }
 
+// ReplyKind identifies the type of process awaiting the response.
+enum ReplyKind {
+  // REPLY_KIND_ACTOR routes the response to an actor address.
+  REPLY_KIND_ACTOR = 0;
+  // REPLY_KIND_GRAIN routes the response to a grain identity.
+  REPLY_KIND_GRAIN = 1;
+  // REPLY_KIND_CLIENT completes the pending ask registered on the receiving
+  // node. reply_to is empty for this kind.
+  REPLY_KIND_CLIENT = 2;
+}
+
 // AsyncRequest wraps a user message with correlation and reply metadata.
 message AsyncRequest {
   // correlation_id links requests to responses.
   string correlation_id = 1;
-  // reply_to is the address of the actor that should receive the response.
+  // reply_to identifies the requester, interpreted according to reply_kind.
   string reply_to = 2;
   // message is the original user payload.
   google.protobuf.Any message = 3;
+  // reply_kind selects how reply_to is interpreted.
+  ReplyKind reply_kind = 4;
 }
 
 // AsyncResponse delivers a response or error for an AsyncRequest.

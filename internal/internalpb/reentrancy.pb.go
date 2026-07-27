@@ -76,6 +76,60 @@ func (ReentrancyMode) EnumDescriptor() ([]byte, []int) {
 	return file_internal_reentrancy_proto_rawDescGZIP(), []int{0}
 }
 
+// ReplyKind identifies the type of process awaiting the response.
+type ReplyKind int32
+
+const (
+	// REPLY_KIND_ACTOR routes the response to an actor address.
+	ReplyKind_REPLY_KIND_ACTOR ReplyKind = 0
+	// REPLY_KIND_GRAIN routes the response to a grain identity.
+	ReplyKind_REPLY_KIND_GRAIN ReplyKind = 1
+	// REPLY_KIND_CLIENT completes the pending ask registered on the receiving
+	// node. reply_to is empty for this kind.
+	ReplyKind_REPLY_KIND_CLIENT ReplyKind = 2
+)
+
+// Enum value maps for ReplyKind.
+var (
+	ReplyKind_name = map[int32]string{
+		0: "REPLY_KIND_ACTOR",
+		1: "REPLY_KIND_GRAIN",
+		2: "REPLY_KIND_CLIENT",
+	}
+	ReplyKind_value = map[string]int32{
+		"REPLY_KIND_ACTOR":  0,
+		"REPLY_KIND_GRAIN":  1,
+		"REPLY_KIND_CLIENT": 2,
+	}
+)
+
+func (x ReplyKind) Enum() *ReplyKind {
+	p := new(ReplyKind)
+	*p = x
+	return p
+}
+
+func (x ReplyKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReplyKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_reentrancy_proto_enumTypes[1].Descriptor()
+}
+
+func (ReplyKind) Type() protoreflect.EnumType {
+	return &file_internal_reentrancy_proto_enumTypes[1]
+}
+
+func (x ReplyKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReplyKind.Descriptor instead.
+func (ReplyKind) EnumDescriptor() ([]byte, []int) {
+	return file_internal_reentrancy_proto_rawDescGZIP(), []int{1}
+}
+
 // ReentrancyConfig captures the reentrancy settings for an actor.
 type ReentrancyConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -136,10 +190,12 @@ type AsyncRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// correlation_id links requests to responses.
 	CorrelationId string `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	// reply_to is the address of the actor that should receive the response.
+	// reply_to identifies the requester, interpreted according to reply_kind.
 	ReplyTo string `protobuf:"bytes,2,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
 	// message is the original user payload.
-	Message       *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Message *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	// reply_kind selects how reply_to is interpreted.
+	ReplyKind     ReplyKind `protobuf:"varint,4,opt,name=reply_kind,json=replyKind,proto3,enum=internalpb.ReplyKind" json:"reply_kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,6 +249,13 @@ func (x *AsyncRequest) GetMessage() *anypb.Any {
 		return x.Message
 	}
 	return nil
+}
+
+func (x *AsyncRequest) GetReplyKind() ReplyKind {
+	if x != nil {
+		return x.ReplyKind
+	}
+	return ReplyKind_REPLY_KIND_ACTOR
 }
 
 // AsyncResponse delivers a response or error for an AsyncRequest.
@@ -267,11 +330,13 @@ const file_internal_reentrancy_proto_rawDesc = "" +
 	"internalpb\x1a\x19google/protobuf/any.proto\"f\n" +
 	"\x10ReentrancyConfig\x12.\n" +
 	"\x04mode\x18\x01 \x01(\x0e2\x1a.internalpb.ReentrancyModeR\x04mode\x12\"\n" +
-	"\rmax_in_flight\x18\x02 \x01(\rR\vmaxInFlight\"\x80\x01\n" +
+	"\rmax_in_flight\x18\x02 \x01(\rR\vmaxInFlight\"\xb6\x01\n" +
 	"\fAsyncRequest\x12%\n" +
 	"\x0ecorrelation_id\x18\x01 \x01(\tR\rcorrelationId\x12\x19\n" +
 	"\breply_to\x18\x02 \x01(\tR\areplyTo\x12.\n" +
-	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage\"|\n" +
+	"\amessage\x18\x03 \x01(\v2\x14.google.protobuf.AnyR\amessage\x124\n" +
+	"\n" +
+	"reply_kind\x18\x04 \x01(\x0e2\x15.internalpb.ReplyKindR\treplyKind\"|\n" +
 	"\rAsyncResponse\x12%\n" +
 	"\x0ecorrelation_id\x18\x01 \x01(\tR\rcorrelationId\x12.\n" +
 	"\amessage\x18\x02 \x01(\v2\x14.google.protobuf.AnyR\amessage\x12\x14\n" +
@@ -279,7 +344,11 @@ const file_internal_reentrancy_proto_rawDesc = "" +
 	"\x0eReentrancyMode\x12\x17\n" +
 	"\x13REENTRANCY_MODE_OFF\x10\x00\x12\x1d\n" +
 	"\x19REENTRANCY_MODE_ALLOW_ALL\x10\x01\x12'\n" +
-	"#REENTRANCY_MODE_STASH_NON_REENTRANT\x10\x02B\xa8\x01\n" +
+	"#REENTRANCY_MODE_STASH_NON_REENTRANT\x10\x02*N\n" +
+	"\tReplyKind\x12\x14\n" +
+	"\x10REPLY_KIND_ACTOR\x10\x00\x12\x14\n" +
+	"\x10REPLY_KIND_GRAIN\x10\x01\x12\x15\n" +
+	"\x11REPLY_KIND_CLIENT\x10\x02B\xa8\x01\n" +
 	"\x0ecom.internalpbB\x0fReentrancyProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
@@ -297,24 +366,26 @@ func file_internal_reentrancy_proto_rawDescGZIP() []byte {
 	return file_internal_reentrancy_proto_rawDescData
 }
 
-var file_internal_reentrancy_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_reentrancy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_reentrancy_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_internal_reentrancy_proto_goTypes = []any{
 	(ReentrancyMode)(0),      // 0: internalpb.ReentrancyMode
-	(*ReentrancyConfig)(nil), // 1: internalpb.ReentrancyConfig
-	(*AsyncRequest)(nil),     // 2: internalpb.AsyncRequest
-	(*AsyncResponse)(nil),    // 3: internalpb.AsyncResponse
-	(*anypb.Any)(nil),        // 4: google.protobuf.Any
+	(ReplyKind)(0),           // 1: internalpb.ReplyKind
+	(*ReentrancyConfig)(nil), // 2: internalpb.ReentrancyConfig
+	(*AsyncRequest)(nil),     // 3: internalpb.AsyncRequest
+	(*AsyncResponse)(nil),    // 4: internalpb.AsyncResponse
+	(*anypb.Any)(nil),        // 5: google.protobuf.Any
 }
 var file_internal_reentrancy_proto_depIdxs = []int32{
 	0, // 0: internalpb.ReentrancyConfig.mode:type_name -> internalpb.ReentrancyMode
-	4, // 1: internalpb.AsyncRequest.message:type_name -> google.protobuf.Any
-	4, // 2: internalpb.AsyncResponse.message:type_name -> google.protobuf.Any
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	5, // 1: internalpb.AsyncRequest.message:type_name -> google.protobuf.Any
+	1, // 2: internalpb.AsyncRequest.reply_kind:type_name -> internalpb.ReplyKind
+	5, // 3: internalpb.AsyncResponse.message:type_name -> google.protobuf.Any
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_reentrancy_proto_init() }
@@ -327,7 +398,7 @@ func file_internal_reentrancy_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_reentrancy_proto_rawDesc), len(file_internal_reentrancy_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,

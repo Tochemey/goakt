@@ -1768,8 +1768,9 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 
 // buildAsyncRequest wraps the payload with correlation and reply metadata.
 //
-// Design decision: AsyncRequest uses Any to preserve the protobuf-only message
-// contract while keeping the async envelope stable across message types.
+// Design decision: the reply target is carried typed so that replying never
+// re-parses an address; it is rendered to a string only when the envelope is
+// serialized for another node.
 func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.AsyncRequest, error) {
 	if message == nil {
 		return nil, gerrors.ErrInvalidMessage
@@ -1777,7 +1778,7 @@ func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.
 
 	return &commands.AsyncRequest{
 		CorrelationID: correlationID,
-		ReplyTo:       pathString(pid.Path()),
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: pathToAddress(pid.Path())},
 		Message:       message,
 	}, nil
 }
@@ -1934,7 +1935,7 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.Async
 		return
 	}
 
-	if req.CorrelationID == "" || req.ReplyTo == "" || req.Message == nil {
+	if req.CorrelationID == "" || !req.ReplyTo.Valid() || req.Message == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
@@ -2096,12 +2097,13 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 	return nil
 }
 
-// sendAsyncResponse delivers an AsyncResponse to the original requester.
+// sendAsyncResponse delivers an asyncResponse to the original requester.
 //
-// Design decision: reply routing uses the string address embedded in AsyncRequest
-// to support local and remote responders with the same flow.
-func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message any, err error) error {
-	if correlationID == "" || replyTo == "" {
+// Design decision: the reply target arrives typed on the envelope, so routing
+// dispatches on it directly and supports local and remote responders with the
+// same flow.
+func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo *commands.AsyncReplyTo, correlationID string, message any, err error) error {
+	if correlationID == "" || !replyTo.Valid() || replyTo.Kind != commands.ReplyToActor {
 		return gerrors.ErrInvalidMessage
 	}
 
@@ -2118,11 +2120,7 @@ func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID st
 		response.Message = message
 	}
 
-	addr, err := address.Parse(replyTo)
-	if err != nil {
-		return err
-	}
-
+	addr := replyTo.Actor
 	system := pid.ActorSystem()
 	if system == nil {
 		return gerrors.ErrActorSystemNotStarted
@@ -3604,8 +3602,8 @@ func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 // supervision, lifecycle and observability signals must not queue
 // behind a user-message burst.
 //
-// Narrower than isSystemMessage by design: AsyncRequest and
-// AsyncResponse participate in the reentrancy stash protocol and must
+// Narrower than isSystemMessage by design: asyncRequest and
+// asyncResponse participate in the reentrancy stash protocol and must
 // keep FIFO ordering with user messages, so they are not control plane.
 func isControlMessage(message any) bool {
 	switch message.(type) {
