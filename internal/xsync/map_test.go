@@ -24,6 +24,7 @@ package xsync
 
 import (
 	"slices"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,63 @@ func TestDelete(t *testing.T) {
 	_, ok := sm.Get(1)
 	require.False(t, ok)
 	sm.Delete(2) // just make sure this doesn't panic
+}
+
+func TestLoadAndDelete(t *testing.T) {
+	t.Run("returns the stored value and removes it", func(t *testing.T) {
+		sm := NewMap[int, string]()
+		sm.Set(1, "one")
+
+		value, ok := sm.LoadAndDelete(1)
+		require.True(t, ok)
+		require.Equal(t, "one", value)
+
+		_, ok = sm.Get(1)
+		require.False(t, ok)
+	})
+
+	t.Run("reports a missing key", func(t *testing.T) {
+		sm := NewMap[int, string]()
+
+		value, ok := sm.LoadAndDelete(1)
+		require.False(t, ok)
+		require.Empty(t, value)
+	})
+
+	t.Run("exactly one racing caller observes the value", func(t *testing.T) {
+		const racers = 8
+
+		for range 200 {
+			sm := NewMap[int, string]()
+			sm.Set(1, "one")
+
+			var wg sync.WaitGroup
+			winners := make(chan string, racers)
+
+			wg.Add(racers)
+			for range racers {
+				go func() {
+					defer wg.Done()
+					if value, ok := sm.LoadAndDelete(1); ok {
+						winners <- value
+					}
+				}()
+			}
+
+			wg.Wait()
+			close(winners)
+			require.Len(t, collect(winners), 1)
+		}
+	})
+}
+
+// collect drains a closed channel into a slice.
+func collect(ch <-chan string) []string {
+	var out []string
+	for v := range ch {
+		out = append(out, v)
+	}
+	return out
 }
 
 func TestLen(t *testing.T) {

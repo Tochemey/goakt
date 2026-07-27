@@ -1753,12 +1753,8 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 		return nil, err
 	}
 
-	if cid.IsLocal() {
-		if err := pid.Tell(ctx, cid, req); err != nil {
-			pid.deregisterRequestState(state)
-			return nil, err
-		}
-	} else if err := pid.remoteTell(ctx, cid.getAddress(), req); err != nil {
+	// Tell routes to the network itself when ActorOf resolved a remote handle.
+	if err := pid.Tell(ctx, cid, req); err != nil {
 		pid.deregisterRequestState(state)
 		return nil, err
 	}
@@ -1768,8 +1764,9 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 
 // buildAsyncRequest wraps the payload with correlation and reply metadata.
 //
-// Design decision: AsyncRequest uses Any to preserve the protobuf-only message
-// contract while keeping the async envelope stable across message types.
+// Design decision: the reply target is carried typed so that replying never
+// re-parses an address; it is rendered to a string only when the envelope is
+// serialized for another node.
 func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.AsyncRequest, error) {
 	if message == nil {
 		return nil, gerrors.ErrInvalidMessage
@@ -1777,7 +1774,7 @@ func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.
 
 	return &commands.AsyncRequest{
 		CorrelationID: correlationID,
-		ReplyTo:       pathString(pid.Path()),
+		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: pathToAddress(pid.Path())},
 		Message:       message,
 	}, nil
 }
@@ -1934,7 +1931,7 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.Async
 		return
 	}
 
-	if req.CorrelationID == "" || req.ReplyTo == "" || req.Message == nil {
+	if req.CorrelationID == "" || !req.ReplyTo.Valid() || req.Message == nil {
 		pid.handleReceivedError(received, gerrors.ErrInvalidMessage)
 		return
 	}
@@ -2094,50 +2091,6 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 	receiveContext.build(ctx, pid, pid, response, true)
 	pid.doReceive(receiveContext)
 	return nil
-}
-
-// sendAsyncResponse delivers an AsyncResponse to the original requester.
-//
-// Design decision: reply routing uses the string address embedded in AsyncRequest
-// to support local and remote responders with the same flow.
-func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo, correlationID string, message any, err error) error {
-	if correlationID == "" || replyTo == "" {
-		return gerrors.ErrInvalidMessage
-	}
-
-	response := &commands.AsyncResponse{
-		CorrelationID: correlationID,
-	}
-
-	if err != nil {
-		response.Error = err.Error()
-	} else {
-		if message == nil {
-			return gerrors.ErrInvalidMessage
-		}
-		response.Message = message
-	}
-
-	addr, err := address.Parse(replyTo)
-	if err != nil {
-		return err
-	}
-
-	system := pid.ActorSystem()
-	if system == nil {
-		return gerrors.ErrActorSystemNotStarted
-	}
-
-	isLocal := addr.System() == system.Name() && addr.Host() == system.Host() && addr.Port() == system.Port()
-	if isLocal {
-		target, err := system.ActorOf(ctx, addr.Name())
-		if err != nil {
-			return err
-		}
-		return pid.Tell(ctx, target, response)
-	}
-
-	return pid.remoteTell(ctx, addr, response)
 }
 
 // cancelInFlightRequests completes all in-flight async calls with the given reason.
@@ -3604,8 +3557,8 @@ func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 // supervision, lifecycle and observability signals must not queue
 // behind a user-message burst.
 //
-// Narrower than isSystemMessage by design: AsyncRequest and
-// AsyncResponse participate in the reentrancy stash protocol and must
+// Narrower than isSystemMessage by design: asyncRequest and
+// asyncResponse participate in the reentrancy stash protocol and must
 // keep FIFO ordering with user messages, so they are not control plane.
 func isControlMessage(message any) bool {
 	switch message.(type) {

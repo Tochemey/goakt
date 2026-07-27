@@ -147,12 +147,17 @@ func (g *GrainIdentity) Validate() error {
 }
 
 // toIdentity reconstructs a given GrainIdentity from its string representation
+//
+// The split uses strings.Cut, which allocates nothing, and the source string is
+// kept as the cached string form so that a following String() call (the grain
+// registry is keyed by it) costs nothing rather than rebuilding the same value.
 func toIdentity(s string) (*GrainIdentity, error) {
-	parts := strings.SplitN(s, id.GrainIdentitySeparator, 2)
-	if len(parts) != 2 {
+	kind, name, ok := strings.Cut(s, id.GrainIdentitySeparator)
+	if !ok {
 		return nil, gerrors.ErrInvalidGrainIdentity
 	}
-	identity := &GrainIdentity{kind: parts[0], name: parts[1]}
+
+	identity := &GrainIdentity{kind: kind, name: name, cachedStr: s}
 	if err := identity.Validate(); err != nil {
 		return nil, err
 	}

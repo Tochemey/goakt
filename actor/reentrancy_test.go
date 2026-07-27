@@ -122,6 +122,80 @@ func TestReentrancyCycleAllowAll(t *testing.T) {
 	}
 }
 
+// TestRequestNameAcrossNodes exercises the full remote reentrancy round trip:
+// the request envelope travels from node1 to node2 and the response envelope
+// travels back. Both hops depend on the async envelope serializers, without
+// which the send fails with "no serializer found".
+func TestRequestNameAcrossNodes(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node1)
+	node2, sd2 := testNATs(t, srv.Addr().String())
+	require.NotNil(t, node2)
+
+	pause.For(time.Second)
+
+	_, err := node2.Spawn(ctx, "remote-responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		switch rctx.Message().(type) {
+		case *testpb.TestPing:
+			rctx.Response(&testpb.TestCount{Value: 42})
+		default:
+			rctx.Unhandled()
+		}
+	}})
+	require.NoError(t, err)
+
+	replyCh := make(chan *testpb.TestCount, 1)
+	errCh := make(chan error, 1)
+
+	requester, err := node1.Spawn(ctx, "remote-requester", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
+			return
+		}
+
+		call := rctx.RequestName("remote-responder", new(testpb.TestPing), WithRequestTimeout(5*time.Second))
+		if call == nil {
+			reportScenarioError(errCh, rctx.getError())
+			return
+		}
+
+		call.Then(func(resp any, err error) {
+			if err != nil {
+				reportScenarioError(errCh, err)
+				return
+			}
+
+			count, ok := resp.(*testpb.TestCount)
+			if !ok {
+				reportScenarioError(errCh, errors.New("unexpected reply type"))
+				return
+			}
+			replyCh <- count
+		})
+	}}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	pause.For(time.Second)
+	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
+
+	select {
+	case err := <-errCh:
+		t.Fatalf("remote request failed: %v", err)
+	case msg := <-replyCh:
+		require.EqualValues(t, 42, msg.GetValue())
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected reply from remote request")
+	}
+
+	require.NoError(t, node1.Stop(ctx))
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd1.Close())
+	require.NoError(t, sd2.Close())
+	srv.Shutdown()
+}
+
 func TestRequestRequiresReentrancy(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	target := spawnReentrancyActor(t, sys, ctx, "target", responderWithDelay(0, nil))
@@ -831,6 +905,77 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 }
 
+// recordingErrorSink is a minimal asyncErrorSink that is not a process. It
+// proves the request machinery depends only on the sink contract, which is what
+// lets grains own in-flight requests without duplicating any of this state.
+type recordingErrorSink struct {
+	errs chan error
+	ret  error
+}
+
+func newRecordingErrorSink(ret error) *recordingErrorSink {
+	return &recordingErrorSink{errs: make(chan error, 1), ret: ret}
+}
+
+func (s *recordingErrorSink) enqueueAsyncError(_ context.Context, _ string, err error) error {
+	select {
+	case s.errs <- err:
+	default:
+	}
+	return s.ret
+}
+
+func TestRequestStateRequesterContract(t *testing.T) {
+	t.Run("cancel routes through the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		require.NoError(t, state.cancel())
+
+		select {
+		case err := <-sink.errs:
+			require.ErrorIs(t, err, gerrors.ErrRequestCanceled)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected cancellation to reach the requester")
+		}
+	})
+
+	t.Run("cancel surfaces the requester error", func(t *testing.T) {
+		sink := newRecordingErrorSink(gerrors.ErrDead)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		require.ErrorIs(t, state.cancel(), gerrors.ErrDead)
+	})
+
+	t.Run("timeout routes through the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		state.startTimeout(10 * time.Millisecond)
+
+		select {
+		case err := <-sink.errs:
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected timeout to reach the requester")
+		}
+	})
+
+	t.Run("stopped timeout never reaches the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		state.startTimeout(time.Hour)
+		state.stopTimeoutIfSet()
+
+		select {
+		case err := <-sink.errs:
+			t.Fatalf("unexpected error after the timeout was stopped: %v", err)
+		case <-time.After(reentrancyShortWait):
+		}
+	})
+}
+
 func TestAsyncErrorFromString(t *testing.T) {
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestTimeout.Error()), gerrors.ErrRequestTimeout)
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestCanceled.Error()), gerrors.ErrRequestCanceled)
@@ -991,101 +1136,6 @@ func TestEnqueueAsyncError(t *testing.T) {
 	}
 }
 
-func TestSendAsyncResponsePaths(t *testing.T) {
-	t.Run("invalid correlation", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "", new(testpb.TestSend), nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
-	})
-
-	t.Run("invalid replyTo", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "", "corr", new(testpb.TestSend), nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
-	})
-
-	t.Run("nil message", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", nil, nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
-	})
-
-	t.Run("marshal error", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "reply", "corr", &testpb.Reply{Content: invalidUTF8String()}, nil)
-		require.Error(t, err)
-	})
-
-	t.Run("address parse error", func(t *testing.T) {
-		pid := &PID{}
-		err := pid.sendAsyncResponse(context.Background(), "not-an-addr", "corr", &testpb.Reply{Content: "ok"}, nil)
-		require.Error(t, err)
-	})
-
-	t.Run("actor system not started", func(t *testing.T) {
-		pid := &PID{logger: log.DiscardLogger}
-		replyTo := address.New("actor", "sys", "127.0.0.1", 9000).String()
-		err := pid.sendAsyncResponse(context.Background(), replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
-		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
-	})
-
-	t.Run("local success and error", func(t *testing.T) {
-		sys, ctx := newReentrancySystem(t)
-		receiver := spawnReentrancyActor(t, sys, ctx, "reply-receiver", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
-		sender := spawnReentrancyActor(t, sys, ctx, "reply-sender", func(*ReceiveContext) {})
-
-		okState := newRequestState("corr-ok", reentrancy.AllowAll, receiver)
-		require.NoError(t, receiver.registerRequestState(okState))
-		t.Cleanup(func() { receiver.deregisterRequestState(okState) })
-
-		okCh := make(chan any, 1)
-		okState.setCallback(func(msg any, err error) {
-			if err == nil {
-				okCh <- msg
-			}
-		})
-
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-ok", &testpb.Reply{Content: "ok"}, nil))
-		select {
-		case msg := <-okCh:
-			reply, ok := msg.(*testpb.Reply)
-			require.True(t, ok)
-			require.Equal(t, "ok", reply.GetContent())
-		case <-time.After(reentrancyReplyTimeout):
-			t.Fatal("expected async response")
-		}
-
-		errState := newRequestState("corr-err", reentrancy.AllowAll, receiver)
-		require.NoError(t, receiver.registerRequestState(errState))
-		t.Cleanup(func() { receiver.deregisterRequestState(errState) })
-
-		errCh := make(chan error, 1)
-		errState.setCallback(func(_ any, err error) {
-			if err != nil {
-				errCh <- err
-			}
-		})
-
-		require.NoError(t, sender.sendAsyncResponse(ctx, receiver.Path().String(), "corr-err", nil, errors.New("boom")))
-		select {
-		case err := <-errCh:
-			require.EqualError(t, err, "boom")
-		case <-time.After(reentrancyReplyTimeout):
-			t.Fatal("expected error response")
-		}
-
-		require.Zero(t, receiver.reentrancy.requestStates.Len())
-	})
-
-	t.Run("remote error", func(t *testing.T) {
-		sys, ctx := newReentrancySystem(t)
-		sender := spawnReentrancyActor(t, sys, ctx, "remote-sender", func(*ReceiveContext) {})
-		replyTo := address.New("remote", "remote-system", "127.0.0.1", 9002).String()
-		err := sender.sendAsyncResponse(ctx, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
-		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
-	})
-}
-
 func TestCancelInFlightRequestsBranches(t *testing.T) {
 	t.Run("nil reentrancy", func(t *testing.T) {
 		pid := &PID{}
@@ -1125,10 +1175,6 @@ func reportScenarioError(errCh chan<- error, err error) {
 	case errCh <- err:
 	default:
 	}
-}
-
-func invalidUTF8String() string {
-	return string([]byte{0xff})
 }
 
 func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight int) *PID {

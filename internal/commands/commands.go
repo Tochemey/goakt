@@ -71,26 +71,6 @@ type DeadlettersCountResponse struct {
 	TotalCount int64
 }
 
-// AsyncRequest wraps a user message with correlation and reply metadata.
-type AsyncRequest struct {
-	// CorrelationID links requests to responses.
-	CorrelationID string
-	// ReplyTo is the address of the actor that should receive the response.
-	ReplyTo string
-	// Message is the original user payload.
-	Message any
-}
-
-// AsyncResponse delivers a response or error for an AsyncRequest.
-type AsyncResponse struct {
-	// CorrelationID matches the original AsyncRequest.
-	CorrelationID string
-	// Message is the successful response payload.
-	Message any
-	// Error is set when the request fails or times out.
-	Error string
-}
-
 // HealthCheckRequest is sent internally to an actor (or actor system component) to verify that:
 //  1. The mailbox is responsive.
 //  2. The actor has completed its initialization.

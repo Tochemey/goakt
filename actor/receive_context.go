@@ -30,6 +30,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -90,7 +91,7 @@ type ReceiveContext struct {
 	response       chan any
 	responseClosed atomic.Bool
 	requestID      string
-	requestReplyTo string
+	requestReplyTo *commands.AsyncReplyTo
 	self           *PID
 	err            error
 }
@@ -136,7 +137,13 @@ func (rctx *ReceiveContext) Response(resp any) {
 			return
 		}
 
-		if err := rctx.self.sendAsyncResponse(rctx.withoutCancel(), rctx.requestReplyTo, rctx.requestID, resp, nil); err != nil {
+		system := rctx.self.ActorSystem()
+		if system == nil {
+			rctx.Err(gerrors.ErrActorSystemNotStarted)
+			return
+		}
+
+		if err := system.routeAsyncReply(rctx.withoutCancel(), rctx.self, rctx.requestReplyTo, rctx.requestID, resp, nil); err != nil {
 			rctx.Err(err)
 		}
 		return
@@ -744,7 +751,7 @@ func (rctx *ReceiveContext) reset() {
 	rctx.response = nil
 	rctx.err = nil
 	rctx.requestID = ""
-	rctx.requestReplyTo = ""
+	rctx.requestReplyTo = nil
 
 	// responseClosed is not reset: build() overwrites it in the sync
 	// path, and async (Tell) never reads it. Skipping the atomic store
@@ -771,7 +778,7 @@ func (rctx *ReceiveContext) withoutCancel() context.Context {
 //
 // Design decision: metadata stays off the user message type to keep protobuf
 // payloads stable and backward compatible.
-func (rctx *ReceiveContext) withRequestMeta(correlationID, replyTo string) *ReceiveContext {
+func (rctx *ReceiveContext) withRequestMeta(correlationID string, replyTo *commands.AsyncReplyTo) *ReceiveContext {
 	rctx.requestID = correlationID
 	rctx.requestReplyTo = replyTo
 	return rctx

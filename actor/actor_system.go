@@ -63,6 +63,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pendingasks"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
@@ -862,6 +863,9 @@ type ActorSystem interface {
 	isStopping() bool
 	getRemoting() remoteclient.Client
 	getGrains() *xsync.Map[string, *grainPID]
+	// routeAsyncReply delivers a response to whoever awaits the given correlation
+	// ID, using the reply target carried on the originating request.
+	routeAsyncReply(ctx context.Context, from *PID, replyTo *commands.AsyncReplyTo, correlationID string, message any, failure error) error
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	grainOf(ctx context.Context, grainType Grain, name string, opts ...GrainOption) (*GrainIdentity, error)
 	decreaseActorsCounter()
@@ -1034,6 +1038,11 @@ type actorSystem struct {
 	remoteSenderAddresses *xsync.Map[string, *address.Address]
 	grainBarrier          *grainActivationBarrier
 	grainActivation       singleflight.Group
+	// pendingAsks holds the callers blocked inside an ask against a reentrant
+	// grain. Such a grain can reply from a later turn than the one that received
+	// the request, so the reply is routed back by correlation ID instead of
+	// through a channel bound to the delivered message.
+	pendingAsks *pendingasks.Table
 	// spawnActivation serializes concurrent local spawns of the same actor
 	// identity so that only one PID is ever created and inserted into the tree,
 	// keeping name-based spawns (including singletons) idempotent under
@@ -1125,6 +1134,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		extensions:            xsync.NewMap[string, extension.Extension](),
 		grains:                xsync.NewMap[string, *grainPID](),
 		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
+		pendingAsks:           pendingasks.New(),
 		askTimeout:            DefaultAskTimeout,
 		messageRetention:      DefaultMessageRetention,
 		evictionStopSig:       make(chan types.Unit, 1),
@@ -2005,6 +2015,24 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 	return nil, gerrors.NewErrActorNotFound(actorName)
 }
 
+// pidOf resolves a known address to a PID that can be told a message.
+//
+// It is the address-based counterpart to ActorOf: where ActorOf takes a name and
+// needs the cluster registry to place it, pidOf is given the location up front.
+// That makes it usable wherever remoting works, including a system with remoting
+// enabled and no cluster, where a name cannot be resolved at all.
+//
+// An address on this node resolves to the live actor, so the message is
+// delivered in process. Any other address yields a remote handle, and Tell sends
+// it over the network.
+func (x *actorSystem) pidOf(ctx context.Context, addr *address.Address) (*PID, error) {
+	if addr.System() == x.Name() && addr.Host() == x.Host() && addr.Port() == x.Port() {
+		return x.ActorOf(ctx, addr.Name())
+	}
+
+	return newRemotePID(addr, x.getRemoting()), nil
+}
+
 // ActorExists checks whether an actor with the given name exists in the system,
 // either locally, or on another node in the cluster if clustering is enabled.
 func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
@@ -2764,6 +2792,8 @@ func (x *actorSystem) setupRemoting() error {
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
 		remoteclient.WithClientSerializers(new(Terminated), &terminatedSerializer{}),
+		remoteclient.WithClientSerializers(new(commands.AsyncRequest), &commands.AsyncRequestSerializer{}),
+		remoteclient.WithClientSerializers(new(commands.AsyncResponse), &commands.AsyncResponseSerializer{}),
 		// set the dependency registry for the remoting client
 		remoteclient.WithDependencyRegistry(x.registry),
 	}

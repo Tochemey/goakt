@@ -205,10 +205,21 @@ func newRequestConfig(opts ...RequestOption) *requestConfig {
 	return config
 }
 
+// asyncErrorSink injects a synthetic error response into the requester's mailbox.
+//
+// Timeouts and cancellations originate off the requester's processing thread, so
+// they are delivered as ordinary messages rather than completed inline: that is
+// what keeps every continuation running single-threaded. Both actors and grains
+// issue requests, so the request machinery depends on this behavior rather than
+// on either process type.
+type asyncErrorSink interface {
+	enqueueAsyncError(ctx context.Context, correlationID string, err error) error
+}
+
 type requestState struct {
-	id   string
-	mode reentrancy.Mode
-	pid  *PID
+	id        string
+	mode      reentrancy.Mode
+	requester asyncErrorSink
 
 	mu              sync.Mutex
 	completed       bool
@@ -222,11 +233,11 @@ type requestState struct {
 // newRequestState initializes tracking for a single in-flight request.
 //
 // Design decision: state is keyed by correlation ID to support concurrent calls.
-func newRequestState(id string, mode reentrancy.Mode, pid *PID) *requestState {
+func newRequestState(id string, mode reentrancy.Mode, requester asyncErrorSink) *requestState {
 	return &requestState{
-		id:   id,
-		mode: mode,
-		pid:  pid,
+		id:        id,
+		mode:      mode,
+		requester: requester,
 	}
 }
 
@@ -281,7 +292,7 @@ func (s *requestState) cancel() error {
 	}
 	s.cancelRequested = true
 	s.mu.Unlock()
-	return s.pid.enqueueAsyncError(context.Background(), s.id, gerrors.ErrRequestCanceled)
+	return s.requester.enqueueAsyncError(context.Background(), s.id, gerrors.ErrRequestCanceled)
 }
 
 // startTimeout triggers a timeout error via the shared timer pool.
@@ -309,7 +320,7 @@ func (s *requestState) startTimeout(timeout time.Duration) {
 		defer timers.Put(timer)
 		select {
 		case <-timer.C:
-			_ = s.pid.enqueueAsyncError(context.Background(), s.id, gerrors.ErrRequestTimeout)
+			_ = s.requester.enqueueAsyncError(context.Background(), s.id, gerrors.ErrRequestTimeout)
 		case <-stopCh:
 			return
 		}
