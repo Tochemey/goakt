@@ -186,17 +186,19 @@ func (x *AsyncResponseSerializer) Deserialize(data []byte) (any, error) {
 	return response, nil
 }
 
-// frameAsyncEnvelope marshals the wire form and prefixes it with the sentinel.
+// frameAsyncEnvelope marshals the wire form directly behind the sentinel.
+//
+// Appending onto the sentinel builds the frame in a single allocation and never
+// derives a buffer size from the marshaled length, so no size arithmetic can
+// overflow on a large payload. The sentinel slice is full, so the append always
+// moves to a fresh buffer and the caller's array is never written through.
 func frameAsyncEnvelope(magic [8]byte, wire proto.Message) ([]byte, error) {
-	body, err := proto.Marshal(wire)
+	frame, err := proto.MarshalOptions{}.MarshalAppend(magic[:], wire)
 	if err != nil {
 		return nil, err
 	}
 
-	out := make([]byte, 0, len(magic)+len(body))
-	out = append(out, magic[:]...)
-	out = append(out, body...)
-	return out, nil
+	return frame, nil
 }
 
 // unframeAsyncEnvelope strips the sentinel, reporting whether the frame matches.
