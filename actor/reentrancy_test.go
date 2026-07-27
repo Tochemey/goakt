@@ -905,6 +905,77 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 }
 
+// recordingErrorSink is a minimal asyncErrorSink that is not a process. It
+// proves the request machinery depends only on the sink contract, which is what
+// lets grains own in-flight requests without duplicating any of this state.
+type recordingErrorSink struct {
+	errs chan error
+	ret  error
+}
+
+func newRecordingErrorSink(ret error) *recordingErrorSink {
+	return &recordingErrorSink{errs: make(chan error, 1), ret: ret}
+}
+
+func (s *recordingErrorSink) enqueueAsyncError(_ context.Context, _ string, err error) error {
+	select {
+	case s.errs <- err:
+	default:
+	}
+	return s.ret
+}
+
+func TestRequestStateRequesterContract(t *testing.T) {
+	t.Run("cancel routes through the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		require.NoError(t, state.cancel())
+
+		select {
+		case err := <-sink.errs:
+			require.ErrorIs(t, err, gerrors.ErrRequestCanceled)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected cancellation to reach the requester")
+		}
+	})
+
+	t.Run("cancel surfaces the requester error", func(t *testing.T) {
+		sink := newRecordingErrorSink(gerrors.ErrDead)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		require.ErrorIs(t, state.cancel(), gerrors.ErrDead)
+	})
+
+	t.Run("timeout routes through the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		state.startTimeout(10 * time.Millisecond)
+
+		select {
+		case err := <-sink.errs:
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		case <-time.After(reentrancyReplyTimeout):
+			t.Fatal("expected timeout to reach the requester")
+		}
+	})
+
+	t.Run("stopped timeout never reaches the requester", func(t *testing.T) {
+		sink := newRecordingErrorSink(nil)
+		state := newRequestState("corr", reentrancy.AllowAll, sink)
+
+		state.startTimeout(time.Hour)
+		state.stopTimeoutIfSet()
+
+		select {
+		case err := <-sink.errs:
+			t.Fatalf("unexpected error after the timeout was stopped: %v", err)
+		case <-time.After(reentrancyShortWait):
+		}
+	})
+}
+
 func TestAsyncErrorFromString(t *testing.T) {
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestTimeout.Error()), gerrors.ErrRequestTimeout)
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestCanceled.Error()), gerrors.ErrRequestCanceled)

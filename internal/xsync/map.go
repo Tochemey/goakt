@@ -84,6 +84,24 @@ func (s *Map[K, V]) Delete(k K) {
 	s.mu.Unlock()
 }
 
+// LoadAndDelete removes the key-value pair associated with the given key and
+// returns the value it held. The second return value reports whether the key
+// was present; when it is false the zero value is returned.
+//
+// The lookup and the removal happen under a single write lock, so when several
+// goroutines race for the same key exactly one of them observes the value.
+// Callers rely on that to hand ownership of a stored value to a single winner,
+// which Get followed by Delete cannot guarantee.
+func (s *Map[K, V]) LoadAndDelete(k K) (V, bool) {
+	s.mu.Lock()
+	val, ok := s.data[k]
+	if ok {
+		delete(s.data, k)
+	}
+	s.mu.Unlock()
+	return val, ok
+}
+
 // Len returns the number of key-value pairs currently stored in the Map.
 //
 // This method acquires a read lock to ensure safe concurrent access.

@@ -2107,25 +2107,24 @@ func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo *commands.AsyncRe
 		return gerrors.ErrInvalidMessage
 	}
 
-	response := &commands.AsyncResponse{
-		CorrelationID: correlationID,
+	// A response carries either a payload or a failure reason; neither is not a response.
+	if err == nil && message == nil {
+		return gerrors.ErrInvalidMessage
 	}
 
-	if err != nil {
-		response.Error = err.Error()
-	} else {
-		if message == nil {
-			return gerrors.ErrInvalidMessage
-		}
-		response.Message = message
-	}
-
-	addr := replyTo.Actor
 	system := pid.ActorSystem()
 	if system == nil {
 		return gerrors.ErrActorSystemNotStarted
 	}
 
+	response := &commands.AsyncResponse{CorrelationID: correlationID}
+	if err != nil {
+		response.Error = err.Error()
+	} else {
+		response.Message = message
+	}
+
+	addr := replyTo.Actor
 	isLocal := addr.System() == system.Name() && addr.Host() == system.Host() && addr.Port() == system.Port()
 	if isLocal {
 		target, err := system.ActorOf(ctx, addr.Name())

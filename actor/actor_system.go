@@ -63,6 +63,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/pendingasks"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
@@ -1034,6 +1035,11 @@ type actorSystem struct {
 	remoteSenderAddresses *xsync.Map[string, *address.Address]
 	grainBarrier          *grainActivationBarrier
 	grainActivation       singleflight.Group
+	// pendingAsks holds the callers blocked inside an ask against a reentrant
+	// grain. Such a grain can reply from a later turn than the one that received
+	// the request, so the reply is routed back by correlation ID instead of
+	// through a channel bound to the delivered message.
+	pendingAsks *pendingasks.Table
 	// spawnActivation serializes concurrent local spawns of the same actor
 	// identity so that only one PID is ever created and inserted into the tree,
 	// keeping name-based spawns (including singletons) idempotent under
@@ -1125,6 +1131,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		extensions:            xsync.NewMap[string, extension.Extension](),
 		grains:                xsync.NewMap[string, *grainPID](),
 		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
+		pendingAsks:           pendingasks.New(),
 		askTimeout:            DefaultAskTimeout,
 		messageRetention:      DefaultMessageRetention,
 		evictionStopSig:       make(chan types.Unit, 1),
