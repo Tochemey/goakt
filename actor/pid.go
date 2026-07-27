@@ -1753,12 +1753,8 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 		return nil, err
 	}
 
-	if cid.IsLocal() {
-		if err := pid.Tell(ctx, cid, req); err != nil {
-			pid.deregisterRequestState(state)
-			return nil, err
-		}
-	} else if err := pid.remoteTell(ctx, cid.getAddress(), req); err != nil {
+	// Tell routes to the network itself when ActorOf resolved a remote handle.
+	if err := pid.Tell(ctx, cid, req); err != nil {
 		pid.deregisterRequestState(state)
 		return nil, err
 	}
@@ -2095,46 +2091,6 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 	receiveContext.build(ctx, pid, pid, response, true)
 	pid.doReceive(receiveContext)
 	return nil
-}
-
-// sendAsyncResponse delivers an asyncResponse to the original requester.
-//
-// Design decision: the reply target arrives typed on the envelope, so routing
-// dispatches on it directly and supports local and remote responders with the
-// same flow.
-func (pid *PID) sendAsyncResponse(ctx context.Context, replyTo *commands.AsyncReplyTo, correlationID string, message any, err error) error {
-	if correlationID == "" || !replyTo.Valid() || replyTo.Kind != commands.ReplyToActor {
-		return gerrors.ErrInvalidMessage
-	}
-
-	// A response carries either a payload or a failure reason; neither is not a response.
-	if err == nil && message == nil {
-		return gerrors.ErrInvalidMessage
-	}
-
-	system := pid.ActorSystem()
-	if system == nil {
-		return gerrors.ErrActorSystemNotStarted
-	}
-
-	response := &commands.AsyncResponse{CorrelationID: correlationID}
-	if err != nil {
-		response.Error = err.Error()
-	} else {
-		response.Message = message
-	}
-
-	addr := replyTo.Actor
-	isLocal := addr.System() == system.Name() && addr.Host() == system.Host() && addr.Port() == system.Port()
-	if isLocal {
-		target, err := system.ActorOf(ctx, addr.Name())
-		if err != nil {
-			return err
-		}
-		return pid.Tell(ctx, target, response)
-	}
-
-	return pid.remoteTell(ctx, addr, response)
 }
 
 // cancelInFlightRequests completes all in-flight async calls with the given reason.

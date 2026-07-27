@@ -137,7 +137,13 @@ func (rctx *ReceiveContext) Response(resp any) {
 			return
 		}
 
-		if err := rctx.self.sendAsyncResponse(rctx.withoutCancel(), rctx.requestReplyTo, rctx.requestID, resp, nil); err != nil {
+		system := rctx.self.ActorSystem()
+		if system == nil {
+			rctx.Err(gerrors.ErrActorSystemNotStarted)
+			return
+		}
+
+		if err := system.routeAsyncReply(rctx.withoutCancel(), rctx.self, rctx.requestReplyTo, rctx.requestID, resp, nil); err != nil {
 			rctx.Err(err)
 		}
 		return

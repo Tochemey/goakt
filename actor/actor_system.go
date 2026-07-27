@@ -863,6 +863,9 @@ type ActorSystem interface {
 	isStopping() bool
 	getRemoting() remoteclient.Client
 	getGrains() *xsync.Map[string, *grainPID]
+	// routeAsyncReply delivers a response to whoever awaits the given correlation
+	// ID, using the reply target carried on the originating request.
+	routeAsyncReply(ctx context.Context, from *PID, replyTo *commands.AsyncReplyTo, correlationID string, message any, failure error) error
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	grainOf(ctx context.Context, grainType Grain, name string, opts ...GrainOption) (*GrainIdentity, error)
 	decreaseActorsCounter()
@@ -2010,6 +2013,24 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 	x.logger.Warnf("actor=%s not found", actorName)
 	x.locker.RUnlock()
 	return nil, gerrors.NewErrActorNotFound(actorName)
+}
+
+// pidOf resolves a known address to a PID that can be told a message.
+//
+// It is the address-based counterpart to ActorOf: where ActorOf takes a name and
+// needs the cluster registry to place it, pidOf is given the location up front.
+// That makes it usable wherever remoting works, including a system with remoting
+// enabled and no cluster, where a name cannot be resolved at all.
+//
+// An address on this node resolves to the live actor, so the message is
+// delivered in process. Any other address yields a remote handle, and Tell sends
+// it over the network.
+func (x *actorSystem) pidOf(ctx context.Context, addr *address.Address) (*PID, error) {
+	if addr.System() == x.Name() && addr.Host() == x.Host() && addr.Port() == x.Port() {
+		return x.ActorOf(ctx, addr.Name())
+	}
+
+	return newRemotePID(addr, x.getRemoting()), nil
 }
 
 // ActorExists checks whether an actor with the given name exists in the system,
