@@ -383,6 +383,92 @@ func (gctx *GrainContext) PipeToSelf(task func() (any, error), opts ...PipeOptio
 	return gctx.PipeToGrain(gctx.Self(), task, opts...)
 }
 
+// ScheduleOnce registers a volatile timer that delivers message to this Grain
+// exactly once after delay. A non-positive delay fires immediately.
+//
+// The tick is delivered through the Grain's mailbox and processed like any other
+// message: it is serialized with the Grain's other messages and OnReceive sees
+// the scheduled message via Message(). Tick handlers run with a background
+// context (no deadline, no cancellation), and an error reported via Err is
+// logged, since no caller is waiting for a reply.
+//
+// Grain timers are activation-scoped: they are all cancelled when the Grain
+// deactivates, they are never persisted, and they never reactivate a passivated
+// Grain. A tick does not reset the Grain's passivation clock unless the timer is
+// registered with WithTimerKeepAlive.
+//
+// It returns the timer's reference, auto-generated unless WithTimerReference is
+// used. References are scoped to this Grain; registering a timer under a
+// reference already in use cancels and replaces the existing timer. Use
+// CancelSchedule to stop the timer before it fires.
+//
+// Returns ErrGrainTimersStopped when the Grain is deactivating.
+func (gctx *GrainContext) ScheduleOnce(message any, delay time.Duration, opts ...GrainTimerOption) (string, error) {
+	registry, err := gctx.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleOnce(message, delay, opts...)
+}
+
+// Schedule registers a volatile timer that delivers message to this Grain
+// repeatedly at the given fixed interval, with the first tick after one
+// interval.
+//
+// The cadence is fixed, matching ActorSystem.Schedule: ticks of a handler
+// slower than the interval queue up in the mailbox, while execution itself
+// never overlaps because the Grain is single-threaded. The timer fires until
+// cancelled or the Grain deactivates.
+//
+// See ScheduleOnce for the timer semantics shared by all Grain timers.
+//
+// Returns ErrInvalidTimerInterval when interval is not strictly positive, and
+// ErrGrainTimersStopped when the Grain is deactivating.
+func (gctx *GrainContext) Schedule(message any, interval time.Duration, opts ...GrainTimerOption) (string, error) {
+	registry, err := gctx.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleInterval(message, interval, opts...)
+}
+
+// ScheduleWithCron registers a volatile timer that delivers message to this
+// Grain at the instants described by cronExpression.
+//
+// The expression is evaluated in the process's local timezone. Unlike
+// ActorSystem.ScheduleWithCron, no cluster-wide arbitration or explicit
+// reference is required: a Grain has exactly one activation cluster-wide, so
+// each tick fires exactly once by construction.
+//
+// See ScheduleOnce for the timer semantics shared by all Grain timers.
+//
+// Returns the cron parsing error for an invalid expression, and
+// ErrGrainTimersStopped when the Grain is deactivating.
+func (gctx *GrainContext) ScheduleWithCron(message any, cronExpression string, opts ...GrainTimerOption) (string, error) {
+	registry, err := gctx.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleCron(message, cronExpression, opts...)
+}
+
+// CancelSchedule cancels the Grain timer registered under reference.
+//
+// A tick of the cancelled timer already sitting in the mailbox is dropped
+// instead of being delivered. A one-shot timer that already fired has left the
+// registry, so cancelling it returns ErrScheduledReferenceNotFound, matching
+// ActorSystem.CancelSchedule.
+//
+// Returns ErrScheduledReferenceNotFound for an unknown reference, and
+// ErrGrainTimersStopped when the Grain is deactivating.
+func (gctx *GrainContext) CancelSchedule(reference string) error {
+	registry, err := gctx.pid.timerRegistry()
+	if err != nil {
+		return err
+	}
+	return registry.cancel(reference)
+}
+
 // GrainIdentity creates or retrieves a unique identity for a Grain instance.
 //
 // This method is used to generate a GrainIdentity for a given grain name and factory,

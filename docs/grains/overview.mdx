@@ -45,6 +45,7 @@ Inside `OnReceive`, `GrainContext` provides:
 | `TellActor(name, msg)`         | Send to an actor by name              |
 | `AskActor(name, msg, timeout)` | Ask an actor by name                  |
 | `AskGrain(to, msg, timeout)`   | Ask another grain                     |
+| `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule` | Manage [grain timers](/grains/timers) |
 
 ## Identity and messaging
 
@@ -108,5 +109,6 @@ quorum (or until the barrier timeout elapses).
 
 ## See also
 
+- [Grain Timers](/grains/timers) — Volatile, activation-scoped timers for periodic grain behavior
 - [Passivation](/actor/passivation) — Grains use passivation for idle-based deactivation
 - [Actor Model](/actor/actor-model) — When to use actors vs grains

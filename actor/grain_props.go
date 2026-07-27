@@ -22,7 +22,11 @@
 
 package actor
 
-import "github.com/tochemey/goakt/v4/extension"
+import (
+	"time"
+
+	"github.com/tochemey/goakt/v4/extension"
+)
 
 // GrainProps encapsulates configuration and metadata for a Grain (virtual actor) in the goakt actor system.
 //
@@ -37,6 +41,7 @@ type GrainProps struct {
 	identity     *GrainIdentity
 	actorSystem  ActorSystem
 	dependencies []extension.Dependency
+	pid          *grainPID
 }
 
 // newGrainProps creates and returns a new GrainProps instance for the specified identity and actor system.
@@ -46,14 +51,17 @@ type GrainProps struct {
 // Parameters:
 //   - identity:    The unique identity of the Grain.
 //   - actorSystem: The ActorSystem that will manage the Grain.
+//   - dependencies: The dependencies injected into the Grain.
+//   - pid:         The grain process backing the Grain; carries the timer registry.
 //
 // Returns:
 //   - *GrainProps: A new instance containing the provided identity and actor system.
-func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem, dependencies []extension.Dependency) *GrainProps {
+func newGrainProps(identity *GrainIdentity, actorSystem ActorSystem, dependencies []extension.Dependency, pid *grainPID) *GrainProps {
 	return &GrainProps{
 		identity:     identity,
 		actorSystem:  actorSystem,
 		dependencies: dependencies,
+		pid:          pid,
 	}
 }
 
@@ -95,4 +103,66 @@ func (props *GrainProps) ActorSystem() ActorSystem {
 //	}
 func (props *GrainProps) Dependencies() []extension.Dependency {
 	return props.dependencies
+}
+
+// ScheduleOnce registers a volatile timer that delivers message to this Grain
+// exactly once after delay.
+//
+// Registering timers from OnActivate is the canonical way to start a Grain's
+// periodic behavior: timers registered there stay dormant until activation
+// completes and are discarded when activation fails. From OnDeactivate the
+// registry is already stopped and registration returns ErrGrainTimersStopped.
+//
+// See GrainContext.ScheduleOnce for the full timer semantics.
+func (props *GrainProps) ScheduleOnce(message any, delay time.Duration, opts ...GrainTimerOption) (string, error) {
+	registry, err := props.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleOnce(message, delay, opts...)
+}
+
+// Schedule registers a volatile timer that delivers message to this Grain
+// repeatedly at the given fixed interval.
+//
+// Registering timers from OnActivate is the canonical way to start a Grain's
+// periodic behavior: timers registered there stay dormant until activation
+// completes and are discarded when activation fails. From OnDeactivate the
+// registry is already stopped and registration returns ErrGrainTimersStopped.
+//
+// See GrainContext.Schedule for the full timer semantics.
+func (props *GrainProps) Schedule(message any, interval time.Duration, opts ...GrainTimerOption) (string, error) {
+	registry, err := props.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleInterval(message, interval, opts...)
+}
+
+// ScheduleWithCron registers a volatile timer that delivers message to this
+// Grain at the instants described by cronExpression.
+//
+// Registering timers from OnActivate is the canonical way to start a Grain's
+// periodic behavior: timers registered there stay dormant until activation
+// completes and are discarded when activation fails. From OnDeactivate the
+// registry is already stopped and registration returns ErrGrainTimersStopped.
+//
+// See GrainContext.ScheduleWithCron for the full timer semantics.
+func (props *GrainProps) ScheduleWithCron(message any, cronExpression string, opts ...GrainTimerOption) (string, error) {
+	registry, err := props.pid.timerRegistry()
+	if err != nil {
+		return "", err
+	}
+	return registry.scheduleCron(message, cronExpression, opts...)
+}
+
+// CancelSchedule cancels the Grain timer registered under reference.
+//
+// See GrainContext.CancelSchedule for the full cancellation semantics.
+func (props *GrainProps) CancelSchedule(reference string) error {
+	registry, err := props.pid.timerRegistry()
+	if err != nil {
+		return err
+	}
+	return registry.cancel(reference)
 }
