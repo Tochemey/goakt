@@ -1,0 +1,253 @@
+---
+title: Placement
+description: Control where actors and grains run, on the local node, a chosen node, a role, or the least loaded member.
+sidebarTitle: "Placement"
+---
+
+## Overview
+
+Placement answers one question: which node runs an actor or grain. Actors are placed once, at spawn time. Grains are
+placed at activation time, every time they go from inactive to active. When cluster mode is disabled, all placement
+options are ignored and everything runs on the local node.
+
+| Workload        | API                            | Placement decided                                        | Default strategy  |
+|-----------------|--------------------------------|----------------------------------------------------------|-------------------|
+| Actor           | `Spawn`                        | At spawn: the calling node, or an explicit node via `WithHostAndPort` | Local             |
+| Actor           | `SpawnOn`                      | At spawn: node selected by strategy and role             | `RoundRobin`      |
+| Singleton actor | `SpawnSingleton`               | At spawn: coordinator, or oldest node with the role      | Leader            |
+| Grain           | `GrainOf` / first message      | At activation: node selected by strategy and role        | `LocalActivation` |
+
+## Actor placement
+
+### Local spawns
+
+`Spawn` always creates the actor on the calling node. Cluster mode does not change that; it only writes the actor's
+record to the cluster registry synchronously, so a successful `Spawn` means the actor is immediately resolvable by name
+via `ActorOf` and reachable from any node.
+
+```go
+pid, err := system.Spawn(ctx, "user-service", NewUserActor())
+if err != nil {
+    return err
+}
+```
+
+### Spawning on an explicit node
+
+`WithHostAndPort` targets a specific remote node by its remoting address. The spawn request is sent to that node and a
+remote PID is returned.
+
+```go
+pid, err := system.Spawn(ctx, "reporting", NewReportingActor(),
+    actor.WithHostAndPort("10.0.0.12", 4041),
+)
+if err != nil {
+    return err
+}
+```
+
+Requirements:
+
+- Remoting must be enabled on the calling system; otherwise `Spawn` returns `ErrRemotingDisabled`.
+- The actor kind must be registered on the target node, through `ClusterConfig.WithKinds` in cluster mode or
+  `ActorSystem.Register` in remoting-only setups; otherwise the target rejects the request with
+  `ErrTypeNotRegistered`.
+
+### Strategy-based placement with SpawnOn
+
+In cluster mode, `SpawnOn` selects a target node with a placement strategy and creates the actor there. The candidate
+set is the current cluster membership, including the calling node. Outside cluster mode, `SpawnOn` behaves exactly like
+`Spawn`.
+
+| Strategy               | Selection                                              | Notes                                                                                                       |
+|------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `RoundRobin` (default) | Cycles through candidate nodes                         | Uses a cluster-wide shared counter, so the rotation is even across callers. Actors and grains keep separate counters. |
+| `Random`               | Uniform random candidate                               | Stateless and cheap; distribution can be uneven over small samples.                                          |
+| `Local`                | Always the calling node                                | Use when locality matters (node-local caches, files, devices).                                               |
+| `LeastLoad`            | Candidate reporting the smallest load                  | Queries every candidate's load metric over remoting before spawning; placement cost grows with cluster size. |
+
+```go
+pid, err := system.SpawnOn(ctx, "analytics-worker", NewWorkerActor(),
+    actor.WithPlacement(actor.LeastLoad),
+)
+if err != nil {
+    return err
+}
+```
+
+The returned PID is a live local PID when the actor landed on the calling node and a lightweight remote PID otherwise.
+Both are transparent for messaging; use `pid.IsLocal()` / `pid.IsRemote()` when the physical location matters.
+
+<Note>
+Strategies see the topology at spawn time. `RoundRobin` gives an even spread over a stable membership, but actors do
+not move when nodes join later; redistribution only happens through [relocation](/actor/relocation) when a node leaves.
+</Note>
+
+### What travels with a remote spawn
+
+When `SpawnOn` or `WithHostAndPort` places an actor on another node, the spawn request carries the supervisor,
+passivation strategy, serializable dependencies, stashing flag, reentrancy policy, and init timeout; they are restored
+on the target node. The mailbox does not travel: a remotely placed actor uses the target system's default mailbox, so
+`WithMailbox` only takes effect for local placements.
+
+### Role-constrained placement
+
+Nodes advertise roles through `ClusterConfig.WithRoles`. Roles let you dedicate node pools to workload classes
+("api", "entity", "projection") and scale them independently.
+
+```go
+clusterConfig := actor.NewClusterConfig().
+    WithKinds(new(ProjectionActor)).
+    WithRoles("projection")
+```
+
+`WithRole` on the spawn side restricts the candidate set to nodes advertising that role. The placement strategy then
+applies among the matching nodes only.
+
+```go
+pid, err := system.SpawnOn(ctx, "orders-projection", NewProjectionActor(),
+    actor.WithRole("projection"),
+    actor.WithPlacement(actor.LeastLoad),
+)
+if err != nil {
+    return err
+}
+```
+
+- If no node in the cluster advertises the role, `SpawnOn` fails with an error instead of falling back to an
+  unsuitable node.
+- Omit `WithRole` to allow placement on any node.
+- Without clustering, the role option is ignored and the actor spawns locally.
+
+<Warning>
+`WithPlacement(actor.Local)` always resolves to the calling node, even when combined with `WithRole` and the calling
+node does not advertise the role. Use `RoundRobin`, `Random`, or `LeastLoad` with role-constrained spawns.
+</Warning>
+
+### Singletons
+
+Singleton placement is not strategy-based. A singleton runs on the cluster coordinator, or on the oldest node
+advertising the role given with `WithSingletonRole`. See [Singletons](/actor/singletons).
+
+### Cross data center placement
+
+`WithDataCenter` places the actor in another data center. The target is a random endpoint among the remoting addresses
+that data center advertised at registration; the actor kind must be registered on the target data center's systems.
+
+```go
+dc := &datacenter.DataCenter{Name: "dc-west", Region: "us-west-2"}
+
+pid, err := system.SpawnOn(ctx, "cart-72", NewCartActor(),
+    actor.WithDataCenter(dc),
+)
+if err != nil {
+    return err
+}
+```
+
+See [Multi Datacenter](/clustering/multi-datacenter) for control plane setup and failure modes.
+
+### Placement is not permanent
+
+When a node leaves the cluster, its relocatable actors are recreated on surviving nodes; role constraints are honored
+during that redistribution. Use `WithRelocationDisabled` to pin an actor to the node it was placed on, accepting that
+it is lost if that node goes down. See [Relocation](/actor/relocation).
+
+## Grain placement
+
+Grains are virtual actors: you never spawn them explicitly, so placement happens when an identity is activated. The
+activation strategy and role are passed as options to `GrainOf`.
+
+### The current owner always wins
+
+If the grain is already active anywhere in the cluster, every call routes to that node and the activation strategy is
+never consulted. Strategies only decide where an inactive grain comes to life. Ownership is claimed in the cluster
+registry with an atomic put-if-absent, so two nodes racing to activate the same identity converge on a single owner;
+the loser routes to the winner. See the [activation guarantee](/grains/overview#activation-guarantee).
+
+### Activation strategies
+
+| Strategy                       | Selection                             | Notes                                                                              |
+|--------------------------------|---------------------------------------|------------------------------------------------------------------------------------|
+| `LocalActivation` (default)    | The calling node                      | The grain lives where it is first used.                                            |
+| `RoundRobinActivation`         | Cycles through candidate nodes        | Cluster-wide shared counter, independent from the actor counter.                   |
+| `RandomActivation`             | Uniform random candidate              | Stateless spreading.                                                               |
+| `LeastLoadActivation`          | Candidate reporting the smallest load | Queries every candidate's load metric over remoting; activation cost grows with cluster size. |
+
+```go
+identity, err := actor.GrainOf[*UserGrain](ctx, system, "user-123",
+    actor.WithActivationStrategy(actor.LeastLoadActivation),
+)
+if err != nil {
+    return err
+}
+```
+
+In a single-node cluster every strategy resolves to the local node.
+
+<Note>
+The defaults differ between the two models: `SpawnOn` spreads actors with `RoundRobin`, while grains default to
+`LocalActivation`. Unless you set a strategy, a grain activates on whichever node first touches its identity.
+</Note>
+
+### Role-constrained activation
+
+`WithActivationRole` restricts activation to nodes advertising the role, with the same semantics as actors: the
+strategy applies among matching nodes, activation fails with an error when no node advertises the role, and the option
+is ignored without clustering.
+
+```go
+identity, err := actor.GrainOf[*OrderGrain](ctx, system, "order-991",
+    actor.WithActivationRole("entity"),
+    actor.WithActivationStrategy(actor.RoundRobinActivation),
+)
+if err != nil {
+    return err
+}
+```
+
+### Activation options are call-site properties
+
+Grain options, including the activation strategy and role, take effect on the activation performed by the `GrainOf`
+call that carries them. A grain that passivated and is later reactivated by a bare `TellGrain` or `AskGrain` on a
+stored identity comes back with the default configuration. When placement must be enforced on every activation,
+resolve the identity through `GrainOf` with your options before messaging.
+
+### Kind registration on host nodes
+
+Remote activation, recreation, and relocation construct the grain as a zero value from its registered kind. Every node
+that can host the grain must know the kind: `GrainOf` auto-registers it on the calling node, and other nodes register
+it at startup with `RegisterGrainKind` or `ClusterConfig.WithGrains`. Activation on a node that does not know the kind
+fails.
+
+### Relocation
+
+Grain placement after a node departure follows the virtual actor model:
+
+- **Lazy relocation (default)**: the departed node's grain directory entries are cleaned and each grain reactivates on
+  a surviving node the next time it is addressed. The next activation runs the placement flow again.
+- **`WithGrainEagerRelocation`**: the grain is reactivated immediately on a surviving node when its host departs. Use
+  it for grains that must stay warm, such as those driving timers or background work.
+- **`WithGrainDisableRelocation`**: the grain is pinned to its host. If the node is lost, the in-memory instance is
+  gone; addressing the identity again creates a fresh instance elsewhere, so persist state externally when it matters.
+
+`WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive; configuring both fails with
+`ErrGrainRelocationConflict`. See [Relocation](/actor/relocation) for the full flow.
+
+## Choosing a strategy
+
+- Keep `RoundRobin` for fleets of long-lived worker actors; it gives an even spread with negligible placement cost.
+- Use `Local` / `LocalActivation` when the workload needs node-local resources or the caller should own it.
+- Use `LeastLoad` / `LeastLoadActivation` for heavyweight, long-lived workloads where one extra round of metric
+  queries at placement time is cheap compared to running on a busy node.
+- Use `Random` when you want spreading without the shared counter round-trip and can tolerate short-term imbalance.
+- Use roles to fence workload classes onto dedicated node pools; combine them with any non-local strategy.
+
+## See also
+
+- [Clustering](/clustering/overview): membership, configuration, and leadership
+- [Relocation](/actor/relocation): what happens to placed actors and grains when a node leaves
+- [Singletons](/actor/singletons): coordinator- and role-based singleton placement
+- [Multi Datacenter](/clustering/multi-datacenter): cross data center topology
+- [Grains](/grains/overview): grain lifecycle and activation guarantee
+- [Location Transparency](/actor/location-transparency): messaging after placement

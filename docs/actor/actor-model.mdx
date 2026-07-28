@@ -41,6 +41,24 @@ Every actor lives inside a tree. GoAkt creates guardian actors at startup:
 - **System** — Parent of internal actors (dead letter, scheduler, etc.)
 - **User** — Parent of all user-spawned actors
 
+```mermaid
+graph TD
+    root["/ (root guardian)"]
+    system["/system<br/>dead letter, scheduler, topic actors"]
+    user["/user<br/>user-defined actors"]
+    order["/user/orderService"]
+    report["/user/reportService"]
+    inventory["/user/orderService/inventory"]
+    payment["/user/orderService/payment"]
+
+    root --> system
+    root --> user
+    user --> order
+    user --> report
+    order --> inventory
+    order --> payment
+```
+
 When a parent stops, all children stop first (depth-first). A parent supervises its children: on failure, the configured
 strategy decides whether to resume, restart, stop, or escalate.
 
@@ -48,6 +66,27 @@ strategy decides whether to resume, restart, stop, or escalate.
 
 GoAkt guarantees that **only one goroutine processes messages for a given actor at any time**. You never need internal
 locks to protect actor state. Messages are processed sequentially from the actor's mailbox (FIFO).
+
+## Message flow
+
+```mermaid
+sequenceDiagram
+    participant S as Sender<br/>(actor or client)
+    participant M as Mailbox
+    participant R as Receiver
+
+    Note over S,M: in-process, or TCP<br/>when remoting is enabled
+
+    S->>M: Tell (fire-and-forget)
+    M->>R: dequeue, Receive(ctx)
+
+    S->>M: Ask (request)
+    M->>R: dequeue, Receive(ctx)
+    R-->>S: response
+```
+
+For remote messages, the remoting layer serializes the payload over a custom TCP frame protocol with optional
+compression.
 
 ## The Actor interface
 

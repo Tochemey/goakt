@@ -6,6 +6,11 @@
   "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
   "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
   "favicon": "/assets/goakt-icon.png",
+  "logo": {
+    "light": "/assets/goakt-logo-light.svg",
+    "dark": "/assets/goakt-logo-dark.svg",
+    "href": "https://docs.goakt.dev"
+  },
   "background": { "decoration": "gradient" },
   "fonts": {
     "heading": { "family": "Geist" },
@@ -25,6 +30,16 @@
   "styling": {
     "codeblocks": { "theme": { "light": "github-light", "dark": "dracula" } }
   },
+  "redirects": [
+    {
+      "source": "/clustering/standalone",
+      "destination": "/clustering/overview"
+    },
+    {
+      "source": "/clustering/clustered",
+      "destination": "/clustering/overview"
+    }
+  ],
   "navigation": {
     "groups": [
       {
@@ -64,7 +79,12 @@
       },
       {
         "group": "Grains",
-        "pages": ["/grains/overview", "/grains/reentrancy", "/grains/timers"],
+        "pages": [
+          "/grains/overview",
+          "/grains/reentrancy",
+          "/grains/pipeto",
+          "/grains/timers"
+        ],
         "icon": "box"
       },
       {
@@ -75,8 +95,8 @@
       {
         "group": "Cluster",
         "pages": [
-          "/clustering/standalone",
-          "/clustering/clustered",
+          "/clustering/overview",
+          "/clustering/placement",
           "/clustering/multi-datacenter",
           "/clustering/service-discovery",
           "/clustering/partition-hashing"

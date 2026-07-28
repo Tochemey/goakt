@@ -33,6 +33,10 @@ PipeTo runs a task asynchronously and delivers its result (or failure) to a targ
 | `gctx.PipeToActor(actorName, task, opts...)` | Deliver result to a named actor. |
 | `gctx.PipeToSelf(task, opts...)`             | Deliver result to this grain.    |
 
+Failure semantics differ for grain targets: a failed task delivers a `*StatusFailure` message to the target grain
+instead of going to the dead-letter queue. `PipeToActor` follows the actor semantics below. See
+[Grain PipeTo](/grains/pipeto) for the grain-side API and example.
+
 ## Task signature
 
 ```go

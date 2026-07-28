@@ -13,34 +13,33 @@ The [Actor System](/actor/actor-system) is the top-level runtime that hosts acto
 ## Three deployment modes
 
 | Mode                 | Description                                                                                                 |
-|----------------------|-------------------------------------------------------------------------------------------------------------|
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **Standalone**       | Single process. Actors communicate in-process.                                                              |
 | **Clustered**        | Multiple nodes. Discovery via Consul, etcd, Kubernetes, NATS, mDNS, or static. Location-transparent actors. |
 | **Multi-Datacenter** | Multiple clusters across DCs. Pluggable control plane (NATS JetStream or etcd). DC-aware placement.         |
 
 ## Core building blocks
 
-| Concept | Role |
-|---------|------|
-| **Reactive stream** | Composable `stream.Source` → `Flow` stages → `Sink` pipelines, materialized with `RunnableGraph.Run` on an `ActorSystem`. Stages run as actors with demand-driven backpressure. See [Streams](/advanced/streams). |
+| Concept               | Role                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Reactive stream**   | Composable `stream.Source` → `Flow` stages → `Sink` pipelines, materialized with `RunnableGraph.Run` on an `ActorSystem`. Stages run as actors with demand-driven backpressure. See [Streams](/advanced/streams).                                                  |
 | **CRDT / Replicator** | Conflict-free replicated data types (`crdt` package), merged by a per-node **Replicator** system actor. Replication is **eventually consistent**—separate from the Olric actor/grain registry (quorum-strong). See [Distributed data](/advanced/distributed-data). |
-
-## Message flow
-
-![Message flow - Sender sends Tell (fire-and-forget) or Ask (request-response) to Receiver via local or TCP transport, messages enqueue to mailbox then dequeue to Receive](/assets/architecture-message-flow.png)
-
-For remote messages, the remoting layer serializes the payload over a custom TCP frame protocol with optional
-compression.
-
-## Actor hierarchy
-
-![Actor hierarchy - root guardian at top, /system branch for internal actors, /user branch for user-defined actors with nested children](/assets/architecture-actor-hierarchy.png)
-
-When a parent stops, all children stop first (depth-first). A parent supervises its children.
 
 ## Cluster architecture
 
-![Cluster architecture - GoAkt Cluster Node with ActorSystem connecting to Cluster (Olric DMap), Discovery, Remoting (TCP/TLS), and TCP Server](/assets/architecture-cluster-node.png)
+```mermaid
+graph LR
+    subgraph node["GoAkt node"]
+        AS["ActorSystem"]
+        CE["Cluster engine<br/>Olric registry, Memberlist"]
+        RM["Remoting<br/>TCP server, TLS"]
+    end
+
+    AS --> CE
+    AS --> RM
+    CE --> DP["Discovery provider<br/>Kubernetes, Consul, etcd,<br/>NATS, mDNS, static"]
+    RM <--> PN["Peer nodes"]
+```
 
 **Placement and membership** state (which actors and grains live where) is stored in Olric (distributed hash map) with configurable quorum. Node membership uses Hashicorp Memberlist. **CRDT application state** (when enabled via `ClusterConfig.WithCRDT`) is replicated separately by the **Replicator** actor using delta broadcast over the topic bus—not through Olric DMap writes.
 
@@ -48,11 +47,12 @@ When a parent stops, all children stop first (depth-first). A parent supervises 
 
 The following pages describe the internal architecture of each major subsystem:
 
-| Subsystem | Page | What it covers |
-|-----------|------|----------------|
+| Subsystem     | Page                                             | What it covers                                                                                                  |
+| ------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
 | **Scheduler** | [Dispatcher Pool](/architecture/dispatcher-pool) | Fixed worker pool, actor state machine, ready queue, work stealing, system-message priority, throughput tuning. |
 
 ## See also
 
+- [Actor Model](/actor/actor-model): actor hierarchy and message flow
 - [Code Map](/architecture/code-map) — package layout and file-level responsibilities
 - [Design Decisions](/architecture/design-decisions) — rationale behind architectural choices

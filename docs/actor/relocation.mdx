@@ -21,7 +21,34 @@ Relocation does **not** run in standalone mode; it requires cluster mode and rem
 
 ## Relocation flow
 
-![Relocation flow - Node A departs, persists PeerState to oldest peers, Cluster Leader receives NodeLeft, Relocator redistributes actors and grains across remaining nodes](/assets/relocation-flow.png)
+```mermaid
+sequenceDiagram
+    participant D as Departing node
+    participant P as Oldest peers (up to 3)
+    participant L as Leader
+    participant S as Surviving nodes
+
+    opt graceful shutdown only
+        D->>D: build PeerState snapshot
+        D->>P: replicate snapshot (2-of-3 quorum)
+        D->>D: remove own registry entries
+    end
+
+    Note over D,L: membership emits NodeLeft
+
+    alt snapshot found (graceful)
+        L->>L: load PeerState from local store
+    else no snapshot (crash)
+        L->>L: derive relocation set from registry
+    end
+
+    L->>L: publish RelocationStarted
+    L->>L: allocate: singletons to leader,<br/>others least-loaded, role-aware
+    L->>S: RelocateBatch (up to 500 items per request)
+    S->>S: respawn actors and eager grains,<br/>release lazy grain entries
+    S-->>L: per-item failures
+    L->>L: publish RelocationFailed (failed items only)
+```
 
 ### Key steps
 
@@ -284,7 +311,7 @@ The duration, relocated, and failed instruments are tagged with `actor.system` a
 
 ## See also
 
-- [Clustered Mode](/clustering/clustered): Cluster setup and discovery
+- [Clustering](/clustering/overview): Cluster setup and discovery
 - [Event Streams](/advanced/event-streams): Subscriber API and the full list of system events
 - [Singletons](/actor/singletons): Cluster singletons and placement
 - [Grains](/grains/overview): Virtual actors and `WithGrainDisableRelocation`

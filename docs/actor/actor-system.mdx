@@ -40,13 +40,13 @@ Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [First Actor](/
 | Method                                                   | Use case                                                                                                                       |
 |----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
 | `Spawn(ctx, name, actor, opts...)`                       | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                   |
-| `SpawnOn(ctx, name, actor, opts...)`                     | Create actor on a cluster node (placement: RoundRobin, Random, Local, LeastLoad) or in another data center (`WithDataCenter`). |
+| `SpawnOn(ctx, name, actor, opts...)`                     | Create actor on a cluster node (see [Placement](/clustering/placement)) or in another data center (`WithDataCenter`).          |
 | `SpawnFromFunc(ctx, receiveFunc, opts...)`               | Functional actor; no `Actor` implementation.                                                                                   |
 | `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | Named functional actor.                                                                                                        |
 | `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | Router with a pool of routees. Not cluster-relocatable.                                                                        |
 | `SpawnSingleton(ctx, name, actor, opts...)`              | Cluster singleton; one instance per name across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).   |
 
-See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons), [Clustering](/clustering/clustered).
+See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons), [Clustering](/clustering/overview).
 
 ### Resolution and inspection
 
@@ -124,7 +124,7 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 | `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                           |
 | **Remoting & cluster**                     |                                                                                                   |
 | `WithRemote(config)`                       | Enable remoting. See [Remoting](/advanced/remoting).                                              |
-| `WithCluster(config)`                      | Enable clustering. See [Clustered](/clustering/clustered).                                        |
+| `WithCluster(config)`                      | Enable clustering. See [Clustering](/clustering/overview).                                        |
 | `WithTLS(info)`                            | Deprecated: use `remote.WithTLS` on the remote config. See [TLS](/advanced/remoting#tls).         |
 | `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                       |
 | **Extensions & capabilities**              |                                                                                                   |
@@ -135,6 +135,7 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 | `WithCoordinatedShutdown(hooks...)`        | Shutdown hooks. See [Coordinated Shutdown](/advanced/coordinated-shutdown).                       |
 | `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                       |
 | **Advanced**                               |                                                                                                   |
+| `WithThroughputBudget(n)`                  | Messages an actor may process per scheduler turn (default: 32). See [Dispatcher Pool](/architecture/dispatcher-pool#tuning-the-throughput-budget) for tuning profiles. |
 | `WithPartitionHasher(hasher)`              | Deprecated: use `ClusterConfig.WithPartitionHasher`. See [Partition Hashing](/clustering/partition-hashing). |
 
 ## Component relationships
@@ -153,5 +154,5 @@ Actors obtain the system via `ctx.ActorSystem()` (or `ReceiveContext`, `GrainCon
 
 - [First Actor](/actor/first-actor) — Minimal flow
 - [Actor Model](/actor/actor-model) — Actor interface and hierarchy
-- [Clustering](/clustering/standalone) — Standalone vs clustered vs multi-DC
+- [Clustering](/clustering/overview) — Standalone vs clustered vs multi-DC
 - [Reference: Interfaces](/reference/interfaces) — Interface definitions

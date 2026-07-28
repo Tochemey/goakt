@@ -47,6 +47,7 @@ Inside `OnReceive`, `GrainContext` provides:
 | `AskGrain(to, msg, timeout)`                                          | Ask another grain                                                             |
 | `RequestGrain(to, msg, opts...)` / `RequestActor(name, msg, opts...)` | Non-blocking async request; needs [reentrancy](/grains/reentrancy)            |
 | `DeferResponse()`                                                     | Hand off this Ask's reply to a `GrainReply` for a later turn                  |
+| `PipeToSelf`, `PipeToGrain`, `PipeToActor`                            | Run a task off the message loop, deliver its result as a message; see [Grain PipeTo](/grains/pipeto) |
 | `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule`      | Manage [grain timers](/grains/timers)                                         |
 
 ## Identity and messaging
@@ -93,6 +94,14 @@ Enable it at activation with `WithGrainReentrancy` or at runtime with `ctx.Enabl
 Modes, per-call options, deferred replies, the passivation interaction, and a complete
 request-cycle example are on the [Grain Reentrancy](/grains/reentrancy) page.
 
+## PipeTo
+
+A grain processes one message at a time, so blocking on slow I/O inside `OnReceive` stalls every queued message.
+`PipeToSelf`, `PipeToGrain`, and `PipeToActor` offload that work: the task runs in a goroutine outside the message
+loop, the grain keeps processing, and the outcome comes back as an ordinary message (`*StatusFailure` on failure for
+grain targets). Methods, failure semantics, options, and a complete example are on the
+[Grain PipeTo](/grains/pipeto) page.
+
 ## When to use grains
 
 - Entity-per-identity patterns (users, sessions, devices)
@@ -123,6 +132,7 @@ quorum (or until the barrier timeout elapses).
 
 ## See also
 
+- [Placement](/clustering/placement): Where grains activate in a cluster: strategies, roles, and ownership
 - [Grain Timers](/grains/timers) — Volatile, activation-scoped timers for periodic grain behavior
 - [Passivation](/actor/passivation) — Grains use passivation for idle-based deactivation
 - [Actor Model](/actor/actor-model) — When to use actors vs grains

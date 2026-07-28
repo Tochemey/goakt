@@ -1,0 +1,86 @@
+---
+title: Grain PipeTo
+description: Run async tasks from a grain and deliver results as messages.
+sidebarTitle: "PipeTo"
+---
+
+A grain processes one message at a time, so blocking on slow I/O inside `OnReceive` stalls every queued message. The
+pipe methods offload that work: the task runs in a goroutine outside the message loop, the grain keeps processing, and
+the outcome comes back as an ordinary message.
+
+## API
+
+| Method                              | Result delivered to |
+|-------------------------------------|---------------------|
+| `PipeToSelf(task, opts...)`         | This grain          |
+| `PipeToGrain(to, task, opts...)`    | Another grain       |
+| `PipeToActor(name, task, opts...)`  | A named actor       |
+
+All three are methods on `GrainContext`, so they are called from inside `OnReceive`.
+
+## Task signature and outcome
+
+```go
+task func() (any, error)
+```
+
+- **Success**: the `any` result is delivered to the target as a normal message.
+- **Failure with a grain target** (`PipeToSelf`, `PipeToGrain`): the target receives a `*StatusFailure` message
+  carrying the error; handle it in `OnReceive` via `msg.Error()`. A `WithTimeout` expiry counts as a failure.
+- **Failure with an actor target** (`PipeToActor`): the error follows the actor [PipeTo](/actor/pipeto) semantics and
+  goes to the dead-letter queue.
+
+Delivery to a grain target uses the regular grain addressing path: if the target has passivated by the time the task
+completes, delivery reactivates it. The task itself is detached from the current message's context, so it keeps
+running after the originating call completes.
+
+<Warning>
+The task runs outside the grain's single-threaded message loop. Never read or mutate grain state inside it; hand
+results back through the piped message and update state when it arrives in `OnReceive`.
+</Warning>
+
+## Options
+
+| Option                   | Purpose                                                           |
+|--------------------------|-------------------------------------------------------------------|
+| `WithTimeout(d)`         | Abort delivery if the task does not complete within `d`.          |
+| `WithCircuitBreaker(cb)` | If the circuit breaker is open, do not deliver; drop the outcome. |
+
+Only one of the two may be used per call; using both returns `ErrOnlyOneOptionAllowed`.
+
+## Example
+
+```go
+func (g *ReportGrain) OnReceive(ctx *actor.GrainContext) {
+    switch msg := ctx.Message().(type) {
+    case *BuildReport:
+        err := ctx.PipeToSelf(func() (any, error) {
+            return fetchReportData(msg.GetReportId())
+        }, actor.WithTimeout(5*time.Second))
+
+        if err != nil {
+            ctx.Err(err)
+            return
+        }
+
+        ctx.NoErr()
+    case *ReportData:
+        g.latest = msg
+        ctx.NoErr()
+    case *actor.StatusFailure:
+        g.lastError = msg.Error()
+        ctx.NoErr()
+    default:
+        ctx.Unhandled()
+    }
+}
+```
+
+The grain stays responsive while `fetchReportData` runs; the report data (or a `*StatusFailure` on error or timeout)
+arrives as a later message and is serialized with the grain's other traffic.
+
+## See also
+
+- [Grains](/grains/overview): lifecycle, identity, and messaging
+- [PipeTo](/actor/pipeto): the actor-side API and shared option details
+- [Grain Reentrancy](/grains/reentrancy): non-blocking requests to other grains and actors

@@ -12,7 +12,27 @@ This enables use cases like distributed counters, cluster-wide session registrie
 
 Each node in the cluster runs its own **Replicator** system actor (`GoAktReplicator`). There is no central coordinator — each Replicator owns its node's local CRDT store and communicates with peer Replicators via GoAkt's existing [TopicActor](/advanced/pubsub) pub/sub system.
 
-![Distributed Data architecture - each node runs a Replicator actor with a local CRDT store; all Replicators subscribe to a shared topic and exchange deltas via TopicActor fan-out](/assets/crdt-architecture.png)
+```mermaid
+graph TB
+    subgraph A["Node A"]
+        UA["User actor"] -->|Update / Get| RA["Replicator<br/>local CRDT store"]
+        RA -->|publish delta| TA["TopicActor"]
+    end
+
+    subgraph B["Node B"]
+        UB["User actor"] -->|Update / Get| RB["Replicator<br/>local CRDT store"]
+        RB -->|publish delta| TB["TopicActor"]
+    end
+
+    subgraph C["Node C"]
+        UC["User actor"] -->|Update / Get| RC["Replicator<br/>local CRDT store"]
+        RC -->|publish delta| TC["TopicActor"]
+    end
+
+    TA <-->|goakt.crdt.deltas| TB
+    TB <-->|goakt.crdt.deltas| TC
+    TA <-->|goakt.crdt.deltas| TC
+```
 
 ### Data Flow
 
