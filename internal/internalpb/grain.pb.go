@@ -97,8 +97,12 @@ type Grain struct {
 	// when its host departs the cluster. When false (default) the grain relocates
 	// lazily: its directory entry is cleaned and it re-activates on next use.
 	EagerRelocation bool `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3" json:"eager_relocation,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// reentrancy carries the grain's async request policy so that eager
+	// relocation and remote activation reconstruct it. Absent when the grain has
+	// no policy.
+	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Grain) Reset() {
@@ -194,16 +198,23 @@ func (x *Grain) GetEagerRelocation() bool {
 	return false
 }
 
+func (x *Grain) GetReentrancy() *ReentrancyConfig {
+	if x != nil {
+		return x.Reentrancy
+	}
+	return nil
+}
+
 var File_internal_grain_proto protoreflect.FileDescriptor
 
 const file_internal_grain_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/grain.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\"G\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x19internal/reentrancy.proto\"G\n" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\xb3\x03\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xf1\x03\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -213,7 +224,11 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\x12activation_retries\x18\x06 \x01(\x05R\x11activationRetries\x12.\n" +
 	"\x10mailbox_capacity\x18\a \x01(\x03H\x00R\x0fmailboxCapacity\x88\x01\x01\x12-\n" +
 	"\x12disable_relocation\x18\b \x01(\bR\x11disableRelocation\x12)\n" +
-	"\x10eager_relocation\x18\t \x01(\bR\x0feagerRelocationB\x13\n" +
+	"\x10eager_relocation\x18\t \x01(\bR\x0feagerRelocation\x12<\n" +
+	"\n" +
+	"reentrancy\x18\n" +
+	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
+	"reentrancyB\x13\n" +
 	"\x11_mailbox_capacityB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
@@ -239,16 +254,18 @@ var file_internal_grain_proto_goTypes = []any{
 	(*Grain)(nil),               // 1: internalpb.Grain
 	(*Dependency)(nil),          // 2: internalpb.Dependency
 	(*durationpb.Duration)(nil), // 3: google.protobuf.Duration
+	(*ReentrancyConfig)(nil),    // 4: internalpb.ReentrancyConfig
 }
 var file_internal_grain_proto_depIdxs = []int32{
 	0, // 0: internalpb.Grain.grain_id:type_name -> internalpb.GrainId
 	2, // 1: internalpb.Grain.dependencies:type_name -> internalpb.Dependency
 	3, // 2: internalpb.Grain.activation_timeout:type_name -> google.protobuf.Duration
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 3: internalpb.Grain.reentrancy:type_name -> internalpb.ReentrancyConfig
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_grain_proto_init() }
@@ -257,6 +274,7 @@ func file_internal_grain_proto_init() {
 		return
 	}
 	file_internal_dependency_proto_init()
+	file_internal_reentrancy_proto_init()
 	file_internal_grain_proto_msgTypes[1].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

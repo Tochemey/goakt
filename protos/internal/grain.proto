@@ -4,6 +4,7 @@ package internalpb;
 
 import "google/protobuf/duration.proto";
 import "internal/dependency.proto";
+import "internal/reentrancy.proto";
 
 option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
@@ -27,4 +28,8 @@ message Grain {
   // when its host departs the cluster. When false (default) the grain relocates
   // lazily: its directory entry is cleaned and it re-activates on next use.
   bool eager_relocation = 9;
+  // reentrancy carries the grain's async request policy so that eager
+  // relocation and remote activation reconstruct it. Absent when the grain has
+  // no policy.
+  internalpb.ReentrancyConfig reentrancy = 10;
 }

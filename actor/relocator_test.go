@@ -502,26 +502,26 @@ func TestRelocation(t *testing.T) {
 	reentrantPID, err := node1.ActorOf(ctx, reentrantName)
 	require.NoError(t, err)
 	if reentrantPID.IsLocal() {
-		require.NotNil(t, reentrantPID.reentrancy)
-		require.Equal(t, reentrancy.StashNonReentrant, reentrantPID.reentrancy.mode)
-		require.Equal(t, 3, reentrantPID.reentrancy.maxInFlight)
+		require.NotNil(t, reentrantPID.reentrancy.Load())
+		require.Equal(t, reentrancy.StashNonReentrant, reentrantPID.reentrancy.Load().getMode())
+		require.EqualValues(t, 3, reentrantPID.reentrancy.Load().maxInFlight.Load())
 	}
 
 	reentrantAddr := reentrantPID.Path()
 	if reentrantAddr.HostPort() == net.JoinHostPort(node1.Host(), strconv.Itoa(node1.Port())) {
 		localPID, err := node1.ActorOf(ctx, reentrantName)
 		require.NoError(t, err)
-		require.NotNil(t, localPID.reentrancy)
-		require.Equal(t, reentrancy.StashNonReentrant, localPID.reentrancy.mode)
-		require.Equal(t, 3, localPID.reentrancy.maxInFlight)
+		require.NotNil(t, localPID.reentrancy.Load())
+		require.Equal(t, reentrancy.StashNonReentrant, localPID.reentrancy.Load().getMode())
+		require.EqualValues(t, 3, localPID.reentrancy.Load().maxInFlight.Load())
 	}
 
 	if reentrantAddr.HostPort() == net.JoinHostPort(node3.Host(), strconv.Itoa(node3.Port())) {
 		localPID, err := node3.ActorOf(ctx, reentrantName)
 		require.NoError(t, err)
-		require.NotNil(t, localPID.reentrancy)
-		require.Equal(t, reentrancy.StashNonReentrant, localPID.reentrancy.mode)
-		require.Equal(t, 3, localPID.reentrancy.maxInFlight)
+		require.NotNil(t, localPID.reentrancy.Load())
+		require.Equal(t, reentrancy.StashNonReentrant, localPID.reentrancy.Load().getMode())
+		require.EqualValues(t, 3, localPID.reentrancy.Load().maxInFlight.Load())
 	}
 
 	assert.NoError(t, node1.Stop(ctx))

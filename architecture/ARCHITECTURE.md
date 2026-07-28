@@ -292,13 +292,15 @@ Strategy types for actor passivation (automatic idle shutdown).
 
 ### `reentrancy/`
 
-Configuration for async `Request` reentrancy inside an actor's `Receive` method.
+Configuration for async request reentrancy inside an actor's `Receive` method or a grain's `OnReceive` handler.
 
 | Mode                | Behaviour                                                                          |
 |---------------------|------------------------------------------------------------------------------------|
 | `Off`               | No reentrancy. Sequential processing only.                                         |
 | `AllowAll`          | All incoming messages can interrupt the current handler while awaiting a response. |
 | `StashNonReentrant` | Non-reentrant messages are stashed; reentrant ones proceed.                        |
+
+The request machinery itself (envelopes, correlation, the pause-based grain stash, reply routing, passivation interaction) is documented in [REENTRANCY.md](./REENTRANCY.md).
 
 ---
 

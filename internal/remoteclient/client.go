@@ -2631,6 +2631,7 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		MailboxCapacity:   new(grainRequest.MailboxCapacity),
 		DisableRelocation: grainRequest.DisableRelocation,
 		EagerRelocation:   grainRequest.EagerRelocation,
+		Reentrancy:        codec.EncodeReentrancy(grainRequest.Reentrancy),
 	}
 
 	return grain, nil

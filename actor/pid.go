@@ -164,8 +164,12 @@ type PID struct {
 
 	// stash settings
 	stashState *stashState
-	// reentrancy settings
-	reentrancy *reentrancyState
+	// reentrancy holds the async request state. An atomic pointer because
+	// EnableReentrancy installs it at runtime from the processing turn while
+	// off-turn readers (shutdown cancellation, wire snapshots) observe it. It
+	// transitions nil to non-nil at most once and is never removed; disabling
+	// flips the state's default mode to Off instead.
+	reentrancy atomic.Pointer[reentrancyState]
 
 	// define an events stream
 	eventsStream eventstream.Stream
@@ -1658,12 +1662,13 @@ func (pid *PID) request(ctx context.Context, to *PID, message any, opts ...Reque
 		return nil, gerrors.ErrInvalidMessage
 	}
 
-	if pid.reentrancy == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
 		return nil, gerrors.ErrReentrancyDisabled
 	}
 
 	config := newRequestConfig(opts...)
-	mode := pid.reentrancy.mode
+	mode := reentrant.getMode()
 	if config.modeSet {
 		mode = config.mode
 	}
@@ -1714,12 +1719,13 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 		return nil, gerrors.ErrInvalidMessage
 	}
 
-	if pid.reentrancy == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
 		return nil, gerrors.ErrReentrancyDisabled
 	}
 
 	config := newRequestConfig(opts...)
-	mode := pid.reentrancy.mode
+	mode := reentrant.getMode()
 	if config.modeSet {
 		mode = config.mode
 	}
@@ -1755,6 +1761,73 @@ func (pid *PID) requestName(ctx context.Context, actorName string, message any, 
 
 	// Tell routes to the network itself when ActorOf resolved a remote handle.
 	if err := pid.Tell(ctx, cid, req); err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	return &requestHandle{state: state}, nil
+}
+
+// requestGrain sends an asynchronous request to a Grain.
+//
+// It follows the same admission flow as request/requestName; only the
+// delivery differs: the envelope goes through the grain runtime, which
+// activates the target or forwards to its owning node. The reply comes back
+// addressed to this actor and completes through the mailbox like any other
+// async response.
+func (pid *PID) requestGrain(ctx context.Context, to *GrainIdentity, message any, opts ...RequestOption) (RequestCall, error) {
+	if !pid.IsRunning() {
+		return nil, gerrors.ErrDead
+	}
+
+	if message == nil {
+		return nil, gerrors.ErrInvalidMessage
+	}
+
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	if to == nil {
+		return nil, gerrors.ErrInvalidGrainIdentity
+	}
+
+	if err := to.Validate(); err != nil {
+		return nil, gerrors.NewErrInvalidGrainIdentity(err)
+	}
+
+	config := newRequestConfig(opts...)
+	mode := reentrant.getMode()
+	if config.modeSet {
+		mode = config.mode
+	}
+
+	if mode == reentrancy.Off {
+		return nil, gerrors.ErrReentrancyDisabled
+	}
+
+	if !reentrancy.IsValidReentrancyMode(mode) {
+		return nil, gerrors.ErrInvalidReentrancyMode
+	}
+
+	correlationID := uuid.NewString()
+	state := newRequestState(correlationID, mode, pid)
+	if err := pid.registerRequestState(state); err != nil {
+		return nil, err
+	}
+
+	if config.timeout != nil {
+		state.startTimeout(*config.timeout)
+	}
+
+	req, err := pid.buildAsyncRequest(message, correlationID)
+	if err != nil {
+		pid.deregisterRequestState(state)
+		return nil, err
+	}
+
+	if err := pid.ActorSystem().deliverAsyncEnvelope(ctx, to, req); err != nil {
 		pid.deregisterRequestState(state)
 		return nil, err
 	}
@@ -1905,7 +1978,8 @@ func (pid *PID) handleReceived(received *ReceiveContext, now time.Time) {
 // Design decision: async responses and critical system/control messages bypass
 // stashing to avoid deadlocks and preserve liveness.
 func (pid *PID) enableReentrancyStash(received *ReceiveContext) bool {
-	if pid.reentrancy == nil || pid.reentrancy.blockingCount.Load() <= 0 {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil || reentrant.blockingCount.Load() <= 0 {
 		return false
 	}
 
@@ -1965,15 +2039,25 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 		return
 	}
 
-	if resp.Message == nil {
-		if !pid.completeRequest(correlationID, nil, gerrors.ErrInvalidMessage) {
-			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
-		}
-		return
-	}
-
+	// A response without a payload and without an error is a successful reply
+	// with nothing to return: a grain answered the request with NoErr.
 	if !pid.completeRequest(correlationID, resp.Message, nil) {
 		pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
+	}
+}
+
+// enableReentrancy installs or retunes the actor's async request policy at
+// runtime. In-flight requests keep the mode they were admitted with.
+func (pid *PID) enableReentrancy(config *reentrancy.Reentrancy) error {
+	return installReentrancy(&pid.reentrancy, config)
+}
+
+// disableReentrancy turns off async requests without disturbing in-flight
+// ones: they complete normally while new Request calls are rejected until a
+// later enableReentrancy. A no-op when reentrancy was never enabled.
+func (pid *PID) disableReentrancy() {
+	if reentrant := pid.reentrancy.Load(); reentrant != nil {
+		reentrant.disable()
 	}
 }
 
@@ -1982,7 +2066,8 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 // Design decision: blockingCount reflects stash-mode requests so stashing can
 // release only when the last blocking call completes.
 func (pid *PID) registerRequestState(state *requestState) error {
-	if pid.reentrancy == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
 		return gerrors.ErrReentrancyDisabled
 	}
 
@@ -1990,30 +2075,29 @@ func (pid *PID) registerRequestState(state *requestState) error {
 		return gerrors.ErrInvalidMessage
 	}
 
-	if pid.reentrancy.maxInFlight > 0 {
-		maxInFlight := int64(pid.reentrancy.maxInFlight)
+	if maxInFlight := reentrant.maxInFlight.Load(); maxInFlight > 0 {
 		for {
-			current := pid.reentrancy.inFlightCount.Load()
+			current := reentrant.inFlightCount.Load()
 			if current >= maxInFlight {
 				return gerrors.ErrReentrancyInFlightLimit
 			}
 
-			if pid.reentrancy.inFlightCount.CompareAndSwap(current, current+1) {
+			if reentrant.inFlightCount.CompareAndSwap(current, current+1) {
 				break
 			}
 		}
 	} else {
-		pid.reentrancy.inFlightCount.Inc()
+		reentrant.inFlightCount.Inc()
 	}
 
 	if state.mode == reentrancy.StashNonReentrant {
 		if pid.stashState == nil {
 			pid.stashState = &stashState{box: NewUnboundedMailbox()}
 		}
-		pid.reentrancy.blockingCount.Inc()
+		reentrant.blockingCount.Inc()
 	}
 
-	pid.reentrancy.requestStates.Set(state.id, state)
+	reentrant.requestStates.Set(state.id, state)
 	return nil
 }
 
@@ -2022,18 +2106,19 @@ func (pid *PID) registerRequestState(state *requestState) error {
 // Design decision: when the last blocking request completes, unstash all messages
 // to preserve original mailbox order.
 func (pid *PID) deregisterRequestState(state *requestState) {
-	if pid.reentrancy == nil || state == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil || state == nil {
 		return
 	}
 
-	if _, ok := pid.reentrancy.requestStates.Get(state.id); !ok {
+	if _, ok := reentrant.requestStates.Get(state.id); !ok {
 		return
 	}
 
-	pid.reentrancy.requestStates.Delete(state.id)
-	pid.reentrancy.inFlightCount.Dec()
+	reentrant.requestStates.Delete(state.id)
+	reentrant.inFlightCount.Dec()
 	if state.mode == reentrancy.StashNonReentrant {
-		remaining := pid.reentrancy.blockingCount.Dec()
+		remaining := reentrant.blockingCount.Dec()
 		if remaining == 0 {
 			if err := pid.unstashAll(); err != nil {
 				pid.logger.Warn(err)
@@ -2048,11 +2133,12 @@ func (pid *PID) deregisterRequestState(state *requestState) {
 //
 // Design decision: completion is idempotent; only the first result wins.
 func (pid *PID) completeRequest(correlationID string, result any, err error) bool {
-	if pid.reentrancy == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
 		return false
 	}
 
-	state, ok := pid.reentrancy.requestStates.Get(correlationID)
+	state, ok := reentrant.requestStates.Get(correlationID)
 	if !ok {
 		return false
 	}
@@ -2098,29 +2184,30 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 // Design decision: cancellations are local-only to keep shutdown fast and avoid
 // cross-node coordination.
 func (pid *PID) cancelInFlightRequests(reason error) {
-	if pid.reentrancy == nil {
+	reentrant := pid.reentrancy.Load()
+	if reentrant == nil {
 		return
 	}
 
-	keys := pid.reentrancy.requestStates.Keys()
+	keys := reentrant.requestStates.Keys()
 	for _, key := range keys {
-		state, ok := pid.reentrancy.requestStates.Get(key)
+		state, ok := reentrant.requestStates.Get(key)
 		if !ok || state == nil {
 			continue
 		}
 		if _, completed := state.complete(nil, reason); !completed {
 			continue
 		}
-		pid.reentrancy.requestStates.Delete(key)
-		pid.reentrancy.inFlightCount.Dec()
+		reentrant.requestStates.Delete(key)
+		reentrant.inFlightCount.Dec()
 		if state.mode == reentrancy.StashNonReentrant {
-			pid.reentrancy.blockingCount.Dec()
+			reentrant.blockingCount.Dec()
 		}
 		state.stopTimeoutIfSet()
 	}
 
-	pid.reentrancy.inFlightCount.Store(0)
-	pid.reentrancy.blockingCount.Store(0)
+	reentrant.inFlightCount.Store(0)
+	reentrant.blockingCount.Store(0)
 }
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
@@ -2308,9 +2395,7 @@ func (pid *PID) reset() {
 	pid.setState(passivationPausedState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(passivationSkipNextState, false)
-	if pid.reentrancy != nil {
-		pid.reentrancy.reset()
-	}
+	pid.reentrancy.Load().reset()
 }
 
 // freeWatchers releases all the actors watching this actor.
@@ -3155,8 +3240,8 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
-	if pid.reentrancy != nil {
-		reentrancy = pid.reentrancy.toProto()
+	if reentrant := pid.reentrancy.Load(); reentrant != nil {
+		reentrancy = reentrant.toProto()
 	}
 
 	// carry the init timeout through relocation only when it was an explicit
@@ -3602,7 +3687,15 @@ func asyncErrorFromString(err string) error {
 		return gerrors.ErrRequestTimeout
 	case gerrors.ErrRequestCanceled.Error():
 		return gerrors.ErrRequestCanceled
+	case gerrors.ErrUnhanledMessage.Error():
+		return gerrors.ErrUnhanledMessage
 	default:
+		// Unhandled replies carry the offending message type behind the
+		// sentinel; restore the identity so errors.Is keeps working across the
+		// envelope path exactly as it does on the channel path.
+		if detail, ok := strings.CutPrefix(err, gerrors.ErrUnhanledMessage.Error()+"\n"); ok {
+			return gerrors.NewErrUnhandledMessage(errors.New(detail))
+		}
 		return errors.New(err)
 	}
 }

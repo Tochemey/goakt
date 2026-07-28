@@ -54,9 +54,15 @@ func TestRouteAsyncReplyValidation(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
 
-	t.Run("neither payload nor failure", func(t *testing.T) {
-		err := system.routeAsyncReply(ctx, sender, actorReplyTarget(), "corr", nil, nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	// A reply carrying neither payload nor failure is the wire form of a
+	// grain's NoErr: it completes the awaiting caller with a nil result.
+	t.Run("empty reply routes as success", func(t *testing.T) {
+		slot := system.pendingAsks.Register("noerr")
+		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "noerr", nil, nil))
+
+		response := <-slot
+		require.Empty(t, response.Error)
+		require.Nil(t, response.Message)
 	})
 
 	t.Run("actor target without an address", func(t *testing.T) {
@@ -65,18 +71,50 @@ func TestRouteAsyncReplyValidation(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
 
-	t.Run("actor target without a sender", func(t *testing.T) {
-		err := system.routeAsyncReply(ctx, nil, actorReplyTarget(), "corr", new(testpb.TestSend), nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	// Grain repliers and deferred handles have no PID; the router substitutes
+	// NoSender so their responses still reach an actor requester.
+	t.Run("actor target without a sender delivers via NoSender", func(t *testing.T) {
+		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: pathToAddress(sender.Path())}
+		require.NoError(t, system.routeAsyncReply(ctx, nil, replyTo, "corr", new(testpb.TestSend), nil))
 	})
 
-	// Grain targets become routable once grains own in-flight requests; until
-	// then nothing produces one and the router refuses to guess.
-	t.Run("grain target is not routable yet", func(t *testing.T) {
-		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: "TestGrain/one"}
+	// The serializer validates grain targets at the node boundary and local
+	// targets are produced from live identities, so a malformed string here
+	// means a bug; the router surfaces it instead of guessing.
+	t.Run("grain target with a malformed identity", func(t *testing.T) {
+		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: "no-separator"}
 		err := system.routeAsyncReply(ctx, sender, replyTo, "corr", new(testpb.TestSend), nil)
-		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 	})
+}
+
+// TestRouteAsyncReplyToGrain pins the grain arm of the router: a response
+// addressed to a grain travels through deliverAsyncEnvelope into the grain's
+// response queue and completes the in-flight request on the grain's turn.
+func TestRouteAsyncReplyToGrain(t *testing.T) {
+	sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+	ctx := context.Background()
+
+	var result any
+	done := make(chan struct{})
+
+	registerGrainRequestState(pid, "corr-grain", reentrancy.AllowAll, func(res any, _ error) {
+		result = res
+		close(done)
+	})
+
+	replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: identity.String()}
+	require.NoError(t, sys.routeAsyncReply(ctx, nil, replyTo, "corr-grain", &testpb.Reply{Content: "grain-reply"}, nil))
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("grain request was not completed")
+	}
+
+	reply, ok := result.(*testpb.Reply)
+	require.True(t, ok)
+	require.Equal(t, "grain-reply", reply.GetContent())
 }
 
 func TestRouteAsyncReplyToPendingAsk(t *testing.T) {
@@ -166,7 +204,7 @@ func TestRouteAsyncReplyToActor(t *testing.T) {
 			t.Fatal("expected error response")
 		}
 
-		require.Zero(t, receiver.reentrancy.requestStates.Len())
+		require.Zero(t, receiver.reentrancy.Load().requestStates.Len())
 	})
 
 	t.Run("reports remoting disabled for an off-node target", func(t *testing.T) {

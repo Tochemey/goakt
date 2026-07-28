@@ -1365,6 +1365,18 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrReservedName(identity.String())), nil
 	}
 
+	// Async envelopes go straight to the grain's queues: the blocking localSend
+	// below waits on context channels an envelope never signals, and a response
+	// addressed to a grain paused in stash mode must reach it regardless.
+	switch message.(type) {
+	case *commands.AsyncRequest, *commands.AsyncResponse:
+		if err := x.deliverAsyncEnvelope(ctx, identity, message); err != nil {
+			logger.Errorf("failed to deliver async envelope to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
+			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+		}
+		return new(internalpb.RemoteTellGrainResponse), nil
+	}
+
 	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
 	if err != nil {
 		logger.Errorf("failed to send message to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
