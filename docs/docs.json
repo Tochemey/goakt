@@ -64,7 +64,7 @@
       },
       {
         "group": "Grains",
-        "pages": ["/grains/overview", "/grains/timers"],
+        "pages": ["/grains/overview", "/grains/reentrancy", "/grains/timers"],
         "icon": "box"
       },
       {

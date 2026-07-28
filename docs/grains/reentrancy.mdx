@@ -1,0 +1,276 @@
+---
+title: Grain Reentrancy
+description: Non-blocking requests from grains, deferred replies, and request cycles.
+sidebarTitle: "Reentrancy"
+---
+
+## Concept
+
+A grain processes one message at a time. **Reentrancy** lets a grain issue non-blocking requests with `RequestGrain` and `RequestActor` and keep processing while the replies are in flight. Replies are delivered back through the grain's own turn stream and continuations run on its turn, so grain state stays single-threaded throughout. This is what lets request cycles (A requests B while B requests A back) complete instead of deadlocking until a timeout.
+
+Reentrancy also changes how the grain is asked: an `AskGrain` against a reentrant grain is delivered as a correlated request instead of a channel-backed call. That unlocks `DeferResponse`, which answers an incoming Ask only after an outbound request completes, without ever blocking a turn.
+
+Modes, the `RequestCall` handle (`Then`, `Cancel`), and per-call options are shared with [actor reentrancy](/actor/reentrancy). This page covers the grain-side API and semantics.
+
+## Modes
+
+| Mode                  | Behavior                                                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Off**               | The default. `RequestGrain`/`RequestActor` fail with `ErrReentrancyDisabled`; asks take the legacy blocking path.                                                       |
+| **AllowAll**          | The grain keeps processing every incoming message while requests are in flight. Required for request cycles.                                                            |
+| **StashNonReentrant** | The grain stops consuming its mailbox while any stash-mode request is in flight. Buffered messages, including timer ticks, wait in place; only responses are processed. |
+
+<Note>
+Unlike actors, a grain in `StashNonReentrant` mode does not move messages to a stash buffer. Consumption of the mailbox pauses, nothing is relocated, and processing resumes in exact arrival order when the last blocking request completes.
+</Note>
+
+## Enabling reentrancy
+
+At activation, pass `WithGrainReentrancy`:
+
+```go
+import "github.com/tochemey/goakt/v4/reentrancy"
+
+cfg := reentrancy.New(
+    reentrancy.WithMode(reentrancy.AllowAll),
+    reentrancy.WithMaxInFlight(10), // optional cap on concurrent requests
+)
+
+identity, err := actor.GrainOf[*OrderGrain](ctx, system, "order-42",
+    actor.WithGrainReentrancy(cfg))
+```
+
+At runtime, from inside a handler:
+
+```go
+func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
+    switch ctx.Message().(type) {
+    case *StartBatch:
+        if err := ctx.EnableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))); err != nil {
+            ctx.Err(err)
+            return
+        }
+        ctx.NoErr() // RequestGrain/RequestActor now work, from this message on
+    case *BatchDone:
+        ctx.DisableReentrancy()
+        ctx.NoErr()
+    }
+}
+```
+
+`EnableReentrancy` installs the policy or retunes an existing one (mode, `MaxInFlight`) and takes effect for requests issued from that point on. `DisableReentrancy` flips the default mode back to `Off`: requests already in flight complete with the mode they were admitted with, a paused grain still unpauses, asks revert to the legacy path, and new requests fail with `ErrReentrancyDisabled`. After a runtime disable, a per-call `WithReentrancyMode` override still admits an individual request.
+
+<Warning>
+Reentrancy is an activation-time property like every grain option. A grain reactivated by a bare send on a stored identity comes back with the default configuration (no reentrancy) until it is activated with `WithGrainReentrancy` again or calls `EnableReentrancy` from a handler. The policy does survive eager relocation and remote activation through the grain's wire record.
+</Warning>
+
+## RequestGrain and RequestActor
+
+| Method                                         | Purpose                                                                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.RequestGrain(identity, message, opts...)` | Async request to another grain, including the grain itself. The target activates on demand, locally or on its owning node.     |
+| `ctx.RequestActor(name, message, opts...)`     | Async request to a named actor, local or remote. The actor replies with `ctx.Response` as it does for actor-to-actor requests. |
+
+Both return the same `RequestCall` handle actors use: register a continuation with `Then(func(any, error))`, cancel with `Cancel()`. Continuations run on the grain's turn when the response arrives.
+
+Failures never abort the current message and never complete the grain's own caller: a request that cannot be issued (reentrancy disabled, invalid target, in-flight limit, delivery error) returns an already-completed handle whose `Then` fires immediately with the error. This differs from the actor-side `Request`, which records the failure on the `ReceiveContext`.
+
+In the opposite direction, an actor requests a grain with `ReceiveContext.RequestGrain`; see [actor reentrancy](/actor/reentrancy).
+
+### Per-call options and timeout
+
+Grain requests default to `DefaultGrainRequestTimeout` (5 seconds), unlike actor requests, which have no default.
+
+| Option                     | Purpose                                                                                                                       |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `WithRequestTimeout(d)`    | Change the timeout for this request. On expiry the continuation runs with `ErrRequestTimeout`. `d <= 0` disables the timeout. |
+| `WithReentrancyMode(mode)` | Override the grain's mode for this request only.                                                                              |
+
+## Deferring a reply
+
+A grain has no `Sender()` to capture. To answer an incoming Ask only after an outbound request completes, the handler transfers reply ownership with `DeferResponse` and completes the returned `GrainReply` from the continuation:
+
+```go
+func (g *FrontGrain) OnReceive(ctx *actor.GrainContext) {
+    switch ctx.Message().(type) {
+    case *Request:
+        reply := ctx.DeferResponse() // take ownership of this Ask's reply
+
+        ctx.RequestGrain(backendID, &Query{}).Then(func(result any, err error) {
+            if err != nil {
+                reply.Err(err)
+                return
+            }
+
+            reply.Response(result) // completes the original Ask, on this grain's turn
+        })
+        // OnReceive returns here; the turn is never blocked
+    }
+}
+```
+
+Reply ownership rules:
+
+- `DeferResponse` is one-shot. After the call, the turn's own `Response`, `Err`, `NoErr`, and `Unhandled` become no-ops for this message; exactly one reply owner exists at any time.
+- The handle is one-shot too: the first of `GrainReply.Response`, `Err`, or `NoErr` wins, later calls do nothing.
+- The handle holds only reply metadata, never the context, so it stays valid indefinitely and can complete the request on any later turn.
+- For a message that did not arrive as a correlated request (a Tell, an Ask against a non-reentrant grain, or a timer tick) there is nothing to defer: `DeferResponse` returns nil, and the nil handle is safe to complete.
+
+`ctx.CorrelationID()` returns the correlation ID of the request being processed, or an empty string for ordinary messages; useful for tracing a request across grains.
+
+## Errors
+
+All request failures surface through the returned call's `Then` continuation.
+
+| Error                        | When                                                                                                      |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `ErrReentrancyDisabled`      | The grain has no reentrancy policy, or the effective mode is `Off` with no per-call override.             |
+| `ErrReentrancyInFlightLimit` | The `MaxInFlight` cap is reached; no new requests until some complete.                                    |
+| `ErrRequestTimeout`          | The request timed out (default `DefaultGrainRequestTimeout`, or the per-call `WithRequestTimeout` value). |
+| `ErrRequestCanceled`         | The request was canceled with `Cancel()`, or the system shut down while it was in flight.                 |
+
+## Passivation interaction
+
+- While requests are in flight the passivation clock is suspended: the grain cannot be deactivated mid-request. When the last request completes, passivation re-arms with a fresh idle deadline.
+- Issuing a request and receiving its response both count as activity for idle tracking.
+- A deferred reply obligation alone does not keep the grain alive; only in-flight requests do. Complete deferred replies from the request continuation, not from a detached goroutine.
+- On system shutdown, in-flight requests are canceled first: continuations run with `ErrRequestCanceled`, deferred callers receive the error, and the grain then deactivates normally.
+
+## Example: a request cycle
+
+`OrderGrain` answers an external `AskGrain` by requesting a price from `PricingGrain`. Before answering, `PricingGrain` requests the customer discount back from `OrderGrain`. Both grains run `AllowAll`, so every hop processes without pausing and the cycle completes without a timeout.
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/reentrancy"
+)
+
+// Message types for the request cycle.
+type ComputeTotal struct{}                                // client -> OrderGrain
+type PriceRequest struct{ Customer *actor.GrainIdentity } // OrderGrain -> PricingGrain
+type DiscountRequest struct{}                             // PricingGrain -> OrderGrain (the cycle)
+type Discount struct{ Amount int }
+type Price struct{ Amount int }
+
+// OrderGrain computes an order total. It answers ComputeTotal by requesting a
+// price from PricingGrain; while that request is in flight, PricingGrain
+// requests the customer discount back from it.
+type OrderGrain struct {
+	pricing *actor.GrainIdentity
+}
+
+func (g *OrderGrain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
+	pricing, err := actor.GrainOf[*PricingGrain](ctx, props.ActorSystem(), "pricing",
+		actor.WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	g.pricing = pricing
+	return err
+}
+
+func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
+	switch ctx.Message().(type) {
+	case *ComputeTotal:
+		// 1. Own this Ask's reply beyond the current turn.
+		reply := ctx.DeferResponse()
+
+		ctx.RequestGrain(g.pricing, &PriceRequest{Customer: ctx.Self()}).Then(func(result any, err error) {
+			if err != nil {
+				reply.Err(err)
+				return
+			}
+
+			// 5. Complete the original AskGrain from the continuation.
+			reply.Response(result.(*Price))
+		})
+	case *DiscountRequest:
+		// 3. Arrives from PricingGrain while our own request to it is still in
+		// flight. AllowAll lets this turn run instead of deadlocking the cycle.
+		ctx.Response(&Discount{Amount: 10})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (g *OrderGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps) error {
+	return nil
+}
+
+// PricingGrain prices an order, but needs the customer discount from the
+// requesting OrderGrain before it can answer.
+type PricingGrain struct{}
+
+func (g *PricingGrain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
+	return nil
+}
+
+func (g *PricingGrain) OnReceive(ctx *actor.GrainContext) {
+	switch msg := ctx.Message().(type) {
+	case *PriceRequest:
+		// 2. Still owing the reply to OrderGrain, request it back.
+		reply := ctx.DeferResponse()
+
+		ctx.RequestGrain(msg.Customer, &DiscountRequest{}).Then(func(result any, err error) {
+			if err != nil {
+				reply.Err(err)
+				return
+			}
+
+			// 4. Answer OrderGrain's request with the discounted price.
+			reply.Response(&Price{Amount: 100 - result.(*Discount).Amount})
+		})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (g *PricingGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps) error {
+	return nil
+}
+
+func main() {
+	ctx := context.Background()
+
+	system, err := actor.NewActorSystem("grain-reentrancy-demo", actor.WithLoggingDisabled())
+	if err != nil {
+		panic(err)
+	}
+
+	if err := system.Start(ctx); err != nil {
+		panic(err)
+	}
+	defer system.Stop(ctx)
+
+	order, err := actor.GrainOf[*OrderGrain](ctx, system, "order-42",
+		actor.WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	if err != nil {
+		panic(err)
+	}
+
+	total, err := system.AskGrain(ctx, order, &ComputeTotal{}, 3*time.Second)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println("total:", total.(*Price).Amount) // total: 90
+}
+```
+
+## Limitations
+
+- In-flight requests do not survive requester relocation or a node crash; late replies arriving at a fresh activation are logged and dropped.
+- Requests that cross nodes carry their payload as protobuf: the message must be a `proto.Message`, like every other remote send. Local requests accept any Go value.
+- `TellGrain` keeps its existing acknowledgement semantics; deferred replies apply to Ask and Request flows. Consequently a `TellGrain` against a grain paused in `StashNonReentrant` mode can return `ErrRequestTimeout` even though the message is delivered and processes after resume. Prefer `RequestGrain` toward reentrant grains.
+- `StashNonReentrant` with `WithRequestTimeout(d)` where `d <= 0` pauses the grain until the reply arrives; if the reply is lost (target node crash), only shutdown unblocks it. Keep the default timeout in stash mode.
+- Interval and cron timer ticks accumulate in the mailbox during a long pause and replay on resume; with a bounded mailbox, a pause-filled mailbox can also reject the shutdown `PoisonPill`. Use an unbounded mailbox (the default) with `StashNonReentrant`.
+
+## See also
+
+- [Reentrancy](/actor/reentrancy) for actors: modes in depth, `RequestCall`, and the actor-side `RequestGrain`.
+- [Grains](/grains/overview) for grain lifecycle, identity, and messaging.
+- [Grain Timers](/grains/timers) for how timer ticks interact with a paused grain.

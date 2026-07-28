@@ -37,14 +37,41 @@ pid, err := system.Spawn(ctx, "my-actor", actor, actor.WithReentrancy(cfg))
 | `WithMode(mode)`     | Set reentrancy mode: `Off`, `AllowAll`, or `StashNonReentrant`.                                                                                     |
 | `WithMaxInFlight(n)` | Cap the number of outstanding async requests. When reached, `Request`/`RequestName` return `ErrReentrancyInFlightLimit`. Use `n <= 0` for no limit. |
 
-Without `WithReentrancy`, calls to `Request` or `RequestName` fail with `ErrReentrancyDisabled`.
+Without a reentrancy policy, calls to `Request`, `RequestName`, or `RequestGrain` fail with `ErrReentrancyDisabled`.
 
-## Request and RequestName
+## Runtime toggle
 
-| Method                                    | Purpose                                                                                        |
-|-------------------------------------------|------------------------------------------------------------------------------------------------|
-| `ctx.Request(to, message, opts...)`       | Send an async request to a PID. Returns a `RequestCall` or `nil` on failure.                   |
-| `ctx.RequestName(name, message, opts...)` | Send an async request to an actor by name (local or remote). Returns a `RequestCall` or `nil`. |
+An actor spawned without reentrancy can enable it from inside a handler when the capability is only needed for a particular case, and turn it off again afterward:
+
+```go
+func (a *Migrator) Receive(ctx *actor.ReceiveContext) {
+    switch ctx.Message().(type) {
+    case *StartMigration:
+        cfg := reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))
+        if err := ctx.EnableReentrancy(cfg); err != nil {
+            ctx.Err(err)
+            return
+        }
+        // Request/RequestName/RequestGrain now work, from this message on
+    case *MigrationDone:
+        ctx.DisableReentrancy()
+    }
+}
+```
+
+`EnableReentrancy` installs the policy or retunes an existing one (mode, `MaxInFlight`) and takes effect for requests issued from that point on. `DisableReentrancy` flips the default mode back to `Off`: requests already in flight complete with the mode they were admitted with, stashed messages are released once the last blocking request finishes, and new requests fail with `ErrReentrancyDisabled`. After a runtime disable, a per-call `WithReentrancyMode` override still admits an individual request.
+
+Both methods also exist on `GrainContext`; see [Grain Reentrancy](/grains/reentrancy).
+
+## Request, RequestName, and RequestGrain
+
+| Method                                     | Purpose                                                                                        |
+|--------------------------------------------|------------------------------------------------------------------------------------------------|
+| `ctx.Request(to, message, opts...)`        | Send an async request to a PID. Returns a `RequestCall` or `nil` on failure.                   |
+| `ctx.RequestName(name, message, opts...)`  | Send an async request to an actor by name (local or remote). Returns a `RequestCall` or `nil`. |
+| `ctx.RequestGrain(identity, message, opts...)` | Send an async request to a grain, which activates on demand like any other grain send. Returns a `RequestCall` or `nil`. |
+
+Requests are location transparent: when the requester and the target sit on different nodes, the request and its reply travel over remoting, so cross-node payloads must be protobuf messages, like every other remote send.
 
 On failure to initiate the request, `Err` is set on the context and the returned call is `nil`. Check `ctx.Err()` or use `ctx.getError()` in tests.
 
@@ -86,7 +113,7 @@ if call != nil {
 
 | Error                        | When                                                                    |
 |------------------------------|-------------------------------------------------------------------------|
-| `ErrReentrancyDisabled`      | Actor was not spawned with `WithReentrancy`, or per-call mode is `Off`. |
+| `ErrReentrancyDisabled`      | The actor has no reentrancy policy (neither `WithReentrancy` at spawn nor a later `EnableReentrancy`), or the effective mode is `Off`. |
 | `ErrReentrancyInFlightLimit` | `MaxInFlight` cap reached; no new async requests until some complete.   |
 | `ErrRequestTimeout`          | Request timed out (via `WithRequestTimeout`).                           |
 | `ErrRequestCanceled`         | Request was canceled via `Cancel()`.                                    |
@@ -226,6 +253,7 @@ func main() {
 
 ## See also
 
+- [Grain Reentrancy](/grains/reentrancy) for the grain-side API: `RequestGrain`/`RequestActor` from grains, `DeferResponse`, and paused-consumption stash semantics.
 - [Stashing](/actor/stashing) — Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
 - [Messaging](/actor/messaging) — `Ask`, `Tell`, `PipeTo`.
 - [Behaviors](/actor/behaviors) — `Become`, `UnBecome` for state transitions.

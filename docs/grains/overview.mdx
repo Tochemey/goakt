@@ -45,7 +45,7 @@ Inside `OnReceive`, `GrainContext` provides:
 | `TellActor(name, msg)`                                                | Send to an actor by name                                                      |
 | `AskActor(name, msg, timeout)`                                        | Ask an actor by name                                                          |
 | `AskGrain(to, msg, timeout)`                                          | Ask another grain                                                             |
-| `RequestGrain(to, msg, opts...)` / `RequestActor(name, msg, opts...)` | Non-blocking async request (needs reentrancy) — see [Reentrancy](#reentrancy) |
+| `RequestGrain(to, msg, opts...)` / `RequestActor(name, msg, opts...)` | Non-blocking async request; needs [reentrancy](/grains/reentrancy)            |
 | `DeferResponse()`                                                     | Hand off this Ask's reply to a `GrainReply` for a later turn                  |
 | `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule`      | Manage [grain timers](/grains/timers)                                         |
 
@@ -83,56 +83,15 @@ always built as a zero value. Migrate to `GrainOf` with `OnActivate`-based initi
 
 ## Reentrancy
 
-By default a grain processes one message at a time. **Reentrancy** lets a grain issue a
-non-blocking request to another grain or actor and keep processing while it awaits the reply,
-which is what lets request cycles (A asks B while B asks A back) complete instead of
-deadlocking. Modes, in-flight limits, timeouts, cancellation, and cycle-deadlock guidance are
-the same as for actors and are documented once on the [Reentrancy](/actor/reentrancy) page —
-this section covers only what differs for grains.
+By default a grain processes one message at a time. **Reentrancy** lets a grain issue
+non-blocking requests to other grains or actors (`RequestGrain`, `RequestActor`) and keep
+processing while the replies are in flight, which is what lets request cycles (A asks B while B
+asks A back) complete instead of deadlocking. It also unlocks `DeferResponse`, which answers an
+incoming Ask only after an outbound request completes.
 
-| Concept                   | Actor API                        | Grain API                                                                |
-|---------------------------|----------------------------------|--------------------------------------------------------------------------|
-| Enable reentrancy         | `WithReentrancy` (spawn option)  | `WithGrainReentrancy` (activation), or `ctx.EnableReentrancy` at runtime |
-| Async request to a grain  | `ctx.Request(pid, msg)`          | `ctx.RequestGrain(identity, msg)`                                        |
-| Async request to an actor | `ctx.RequestName(name, msg)`     | `ctx.RequestActor(name, msg)`                                            |
-| Completion handle         | `RequestCall` (`Then`, `Cancel`) | `RequestCall` (`Then`, `Cancel`) — same type                             |
-
-Per-call options (`WithReentrancyMode`, `WithRequestTimeout`), the `MaxInFlight` cap, and the
-`ErrReentrancyDisabled` / `ErrReentrancyInFlightLimit` / `ErrRequestTimeout` errors behave
-exactly as described on the actor page.
-
-### Deferring a reply
-
-A grain has no `Sender()` to capture, so to answer an incoming Ask only *after* an outbound
-request completes, it hands off reply ownership with `DeferResponse`. The returned `GrainReply`
-outlives the current turn and is completed from the continuation:
-
-```go
-func (g *FrontGrain) OnReceive(ctx *actor.GrainContext) {
-    switch ctx.Message().(type) {
-    case *Request:
-        reply := ctx.DeferResponse() // take ownership of this Ask's reply
-        ctx.RequestGrain(backendID, &Query{}).Then(func(result any, err error) {
-            if err != nil {
-                reply.Err(err)
-                return
-            }
-            reply.Response(result) // completes the original Ask, on this grain's turn
-        })
-        // OnReceive returns here — the turn is never blocked
-    }
-}
-```
-
-`DeferResponse` is one-shot: afterward the turn's own `Response`/`Err`/`NoErr` become no-ops, and
-the first of `GrainReply.Response`/`Err`/`NoErr` wins. For a message that did not arrive as an
-Ask, it returns a nil handle that is safe to complete.
-
-<Warning>
-Prefer `AllowAll` for grains in request cycles. Under `StashNonReentrant` a grain pauses its
-mailbox while a request is in flight, so a re-entrant call back into it stalls until the request
-times out. See [Reentrancy](/actor/reentrancy).
-</Warning>
+Enable it at activation with `WithGrainReentrancy` or at runtime with `ctx.EnableReentrancy`.
+Modes, per-call options, deferred replies, the passivation interaction, and a complete
+request-cycle example are on the [Grain Reentrancy](/grains/reentrancy) page.
 
 ## When to use grains
 
