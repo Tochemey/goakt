@@ -12,20 +12,22 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect changes
+    name: Detect code changes
     runs-on: ubuntu-latest
     outputs:
-      build: ${{ steps.filter.outputs.build }}
+      code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out repository
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: dorny/paths-filter@v4
+      - name: Filter changed paths
+        uses: dorny/paths-filter@v4
         id: filter
         with:
-          # "build" is true if any of these paths changed
+          # "code" is true if any of these paths changed
           filters: |
-            build:
+            code:
               - '**/*.go'
               - 'go.mod'
               - 'go.sum'
@@ -34,9 +36,9 @@ jobs:
               - '.github/workflows/pr.yml'
 
   lint:
-    name: Lint
+    name: Lint (golangci-lint)
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     env:
       TZ: UTC
@@ -45,16 +47,19 @@ jobs:
       GOFLAGS: -mod=readonly -tags=hashicorpmetrics
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out repository
+        uses: actions/checkout@v7
         with:
           submodules: false
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26.5"
           check-latest: false
           cache-dependency-path: "**/*.sum"
-      - uses: actions/cache@v6
+      - name: Restore Go build and module caches
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build
@@ -62,18 +67,116 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - name: Vendoring and Tidy
+      - name: Tidy and vendor modules
         run: go mod tidy && go mod vendor
-      - name: Run Linter
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
           args: --timeout 10m --config .golangci.yml
 
-  build:
-    name: Tests (${{ matrix.shard }})
+  cross-compile:
+    # Every lint and test job runs on ubuntu, so the platform-specific files
+    # (notably memory/memory_darwin.go, memory/memory_bsd.go and
+    # memory/memory_windows.go) are otherwise never compiled and rot silently.
+    name: Cross-compile (${{ matrix.target }})
     needs: changes
-    if: needs.changes.outputs.build == 'true'
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - darwin/arm64
+          - darwin/amd64
+          - windows/amd64
+          - freebsd/amd64
+          - openbsd/amd64
+          - netbsd/amd64
+          - dragonfly/amd64
+    env:
+      TZ: UTC
+      CGO_ENABLED: "0" # no cross C toolchain on the runner
+      GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
+      GOFLAGS: -mod=readonly -tags=hashicorpmetrics
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          check-latest: false
+          cache-dependency-path: "**/*.sum"
+      - name: Restore Go build and module caches
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-cross-${{ matrix.target }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-cross-${{ matrix.target }}-go-
+      - name: Tidy and vendor modules
+        run: go mod tidy && go mod vendor
+      - name: Compile module and type-check memory tests for ${{ matrix.target }}
+        shell: bash
+        run: |
+          TARGET="${{ matrix.target }}"
+          export GOOS="${TARGET%/*}" GOARCH="${TARGET#*/}"
+          go build -mod=vendor ./...
+          # Also type-check the platform-specific package's _test.go files,
+          # which go build skips. This is scoped to ./memory/... rather than
+          # ./... because the vendored testcontainers -> moby/term chain does
+          # not type-check on dragonfly (it references unix.TCGETS/TCSETS).
+          go vet -mod=vendor ./memory/...
+
+  memory-tests:
+    # A cross-compile cannot execute the per-GOOS memory implementations: a
+    # wrong sysctl name or integer width compiles cleanly and only fails at
+    # runtime, which is exactly the bug class these files are prone to. macOS
+    # and Windows runners are free for public repositories, so run the package
+    # for real there. The BSD files stay compile-only, as GitHub hosts no BSD
+    # runners.
+    name: Memory tests (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    env:
+      TZ: UTC
+      CGO_ENABLED: "1"
+      GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
+      GOFLAGS: -mod=readonly
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          submodules: false
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26.5"
+          check-latest: false
+          cache-dependency-path: "**/*.sum"
+      - name: Run memory package tests
+        run: go test -count=1 -timeout 5m -v ./memory/...
+
+  unit-tests:
+    name: Unit tests (${{ matrix.shard }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -114,17 +217,21 @@ jobs:
       GOFLAGS: -mod=readonly -tags=hashicorpmetrics
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out repository
+        uses: actions/checkout@v7
         with:
           submodules: false
           fetch-depth: 0
-      - uses: actions/setup-go@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26.5"
           check-latest: false
           cache-dependency-path: "**/*.sum"
-      - run: go version
-      - uses: actions/cache@v6
+      - name: Print Go version
+        run: go version
+      - name: Restore Go build and module caches
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cache/go-build
@@ -132,9 +239,9 @@ jobs:
           key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
           restore-keys: |
             ${{ runner.os }}-go-
-      - name: Vendoring and Tidy
+      - name: Tidy and vendor modules
         run: go mod tidy && go mod vendor
-      - name: Run tests
+      - name: Run unit tests (${{ matrix.shard }})
         shell: bash
         run: |
           SHARD="${{ matrix.shard }}"

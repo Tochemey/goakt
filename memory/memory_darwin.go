@@ -24,63 +24,38 @@
 
 package memory
 
-import (
-	"os/exec"
-	"regexp"
-	"strconv"
-)
-
-// pageSizeRegex and freePagesRegex are compiled once at package level to avoid
-// repeated compilation on every Free() call.
-// They parse the output of the macOS vm_stat command.
-// Reference: man vm_stat(1) on macOS.
-var (
-	pageSizeRegex  = regexp.MustCompile(`page size of ([0-9]*) bytes`)
-	freePagesRegex = regexp.MustCompile(`Pages free: *([0-9]*)\.`)
-)
+import "golang.org/x/sys/unix"
 
 // Size returns the total physical memory of the system in bytes.
 //
-// It reads the "hw.memsize" sysctl, which reports total RAM on macOS.
+// It reads the "hw.memsize" sysctl, which reports total RAM on macOS as a
+// 64-bit value.
 // Reference: https://developer.apple.com/documentation/kernel/1387446-sysctlbyname
 func Size() (uint64, error) {
-	s, err := sysctl("hw.memsize")
-	if err != nil {
-		return 0, err
-	}
-	return s, nil
+	return unix.SysctlUint64("hw.memsize")
 }
 
 // Free returns the free physical memory of the system in bytes.
 //
-// It invokes the vm_stat command and parses its output to extract the page size
-// and the number of free pages. Free memory is computed as: freePages * pageSize.
-// If the page size is not found in the output, it defaults to 4096 bytes.
+// It multiplies the "vm.page_free_count" sysctl by the "hw.pagesize" sysctl.
+// The kernel types both nodes as 32-bit integers, so they are read with
+// SysctlUint32; requesting an 8-byte read of vm.page_free_count fails with EIO.
 //
-// Reference: man vm_stat(1) on macOS.
+// The result counts only pages on the free list. macOS keeps a large
+// reclaimable pool of inactive, purgeable and speculative pages that this
+// figure excludes, so it understates the memory an allocation could actually
+// obtain.
+// Reference: https://developer.apple.com/documentation/kernel/1387446-sysctlbyname
 func Free() (uint64, error) {
-	cmd := exec.Command("vm_stat")
-	outBytes, err := cmd.Output()
+	freePages, err := unix.SysctlUint32("vm.page_free_count")
 	if err != nil {
 		return 0, err
 	}
 
-	matches := pageSizeRegex.FindSubmatchIndex(outBytes)
-	pageSize := uint64(4096)
-	if len(matches) == 4 {
-		pageSize, err = strconv.ParseUint(string(outBytes[matches[2]:matches[3]]), 10, 64)
-		if err != nil {
-			return 0, err
-		}
+	pageSize, err := unix.SysctlUint32("hw.pagesize")
+	if err != nil {
+		return 0, err
 	}
 
-	matches = freePagesRegex.FindSubmatchIndex(outBytes)
-	freePages := uint64(0)
-	if len(matches) == 4 {
-		freePages, err = strconv.ParseUint(string(outBytes[matches[2]:matches[3]]), 10, 64)
-		if err != nil {
-			return 0, err
-		}
-	}
-	return freePages * pageSize, nil
+	return uint64(freePages) * uint64(pageSize), nil
 }
