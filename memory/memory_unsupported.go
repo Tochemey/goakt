@@ -20,43 +20,26 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build darwin || dragonfly || freebsd || linux || netbsd || openbsd || windows
+//go:build !darwin && !dragonfly && !freebsd && !linux && !netbsd && !openbsd && !windows
 
 package memory
 
-import (
-	"testing"
+import "errors"
 
-	"github.com/stretchr/testify/require"
-)
-
-func TestSize(t *testing.T) {
-	total, err := Size()
-	require.NoError(t, err)
-	require.NotZero(t, total)
-
-	// Guard against a truncated read. Every platform GoAkt supports needs more
-	// than 64 MiB to run a Go runtime at all, so anything smaller means the
-	// sysctl or syscall was decoded at the wrong width.
-	require.Greater(t, total, uint64(64<<20), "total memory is implausibly small, suspect a truncated read")
+// Size reports that the total physical memory of the system cannot be
+// determined on this platform.
+//
+// Size is implemented for Linux, macOS, Windows and the BSDs. On any other
+// GOOS, such as wasip1, js, solaris, aix or plan9, it returns
+// errors.ErrUnsupported. Keeping this stub means importing the package stays a
+// compile-time success everywhere and the limitation surfaces as a runtime
+// error instead of a build failure in a consumer's toolchain.
+func Size() (uint64, error) {
+	return 0, errors.ErrUnsupported
 }
 
-func TestFree(t *testing.T) {
-	free, err := Free()
-	require.NoError(t, err)
-	require.NotZero(t, free)
-}
-
-func TestFreeDoesNotExceedSize(t *testing.T) {
-	total, err := Size()
-	require.NoError(t, err)
-
-	free, err := Free()
-	require.NoError(t, err)
-
-	require.LessOrEqual(t, free, total, "free memory cannot exceed total memory")
-}
-
-func TestUsed(t *testing.T) {
-	require.NotZero(t, Used())
+// Free reports that the free physical memory of the system cannot be determined
+// on this platform. See Size for the list of supported platforms.
+func Free() (uint64, error) {
+	return 0, errors.ErrUnsupported
 }
