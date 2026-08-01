@@ -1942,9 +1942,14 @@ func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID
 func (x *actorSystem) PeersAddress() string {
 	if x.clusterEnabled.Load() {
 		x.locker.RLock()
-		address := x.clusterNode.PeersAddress()
+		node := x.clusterNode
 		x.locker.RUnlock()
-		return address
+
+		// clusterEnabled is set at construction time while clusterNode is only
+		// assigned during Start, so the node can still be nil here.
+		if node != nil {
+			return node.PeersAddress()
+		}
 	}
 	return ""
 }
@@ -2367,7 +2372,7 @@ func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
 		x.locker.RUnlock()
 		return pid, true
 	}
-	x.locker.RLock()
+	x.locker.RUnlock()
 	return nil, false
 }
 
@@ -2884,9 +2889,19 @@ func (x *actorSystem) reset() {
 	x.grains.Reset()
 	x.remoteSenderAddresses.Reset()
 	x.shuttingDown.Store(false)
+
+	// Shutdown does not wait for in-flight actor turns to drain, so a turn may
+	// still read these fields through their guarded getters while reset runs;
+	// clearing them must hold the same locks the getters use.
+	x.locker.Lock()
 	x.clusterStore = nil
 	x.dataCenterController = nil
+	x.locker.Unlock()
+
+	x.dataCenterLeaderMutex.Lock()
 	x.dataCenterLeaderTicker = nil
+	x.dataCenterLeaderMutex.Unlock()
+
 	x.dataCenterReconcileInFlight.Store(false)
 }
 

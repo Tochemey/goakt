@@ -1735,6 +1735,19 @@ func TestActorSystem(t *testing.T) {
 
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("With PeerAddress empty when cluster enabled but node not initialized", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		// clusterEnabled is set at construction time while clusterNode is only
+		// assigned during Start; PeersAddress must not panic in between.
+		system := sys.(*actorSystem)
+		system.clusterEnabled.Store(true)
+
+		require.NotPanics(t, func() {
+			require.Empty(t, sys.PeersAddress())
+		})
+	})
 
 	t.Run("With happy path Register", func(t *testing.T) {
 		ctx := context.TODO()
@@ -7824,4 +7837,32 @@ func TestPeerRemotingPortsCache(t *testing.T) {
 	system.forgetPeerRemotingPort("127.0.0.9:9000")
 	_, ok = system.peerRemotingPort("127.0.0.9:9000")
 	assert.False(t, ok)
+}
+
+// TestResetSynchronizesWithGuardedGetters verifies reset does not race with
+// the locker-guarded field getters: shutdown does not wait for in-flight actor
+// turns to drain, so a turn may still read these fields while reset clears
+// them.
+func TestResetSynchronizesWithGuardedGetters(t *testing.T) {
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	sys.clusterStore = &recordingPeerStateStore{}
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		for i := 0; i < 200; i++ {
+			sys.getClusterStore()
+			sys.getDataCenterController()
+		}
+	}()
+
+	sys.reset()
+	<-done
+
+	assert.Nil(t, sys.getClusterStore())
 }

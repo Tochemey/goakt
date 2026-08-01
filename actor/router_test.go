@@ -1101,6 +1101,20 @@ func TestRouter(t *testing.T) {
 	})
 }
 
+func TestFindRouteeMissReleasesLock(t *testing.T) {
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	_, ok := system.findRoutee("does-not-exist")
+	require.False(t, ok)
+
+	// The not-found path used to leak read locks, deadlocking the next
+	// write-lock acquisition during shutdown.
+	require.True(t, system.locker.TryLock(), "findRoutee leaked a read lock")
+	system.locker.Unlock()
+}
+
 func TestConsistentHashRing(t *testing.T) {
 	t.Run("empty ring returns empty string", func(t *testing.T) {
 		ring := newConsistentHashRing(nil, 0)

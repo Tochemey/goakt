@@ -334,8 +334,12 @@ func (w *relocationWorker) targetLoads(ctx context.Context, system ActorSystem, 
 func (w *relocationWorker) finish(ctx context.Context, address string) {
 	system := w.pid.ActorSystem()
 
-	if err := system.getClusterStore().DeletePeerState(ctx, address); err != nil {
-		w.logger.Errorf("failed to remove peer=%s state after relocation: %v (hint: check cluster store)", address, err)
+	// The store is nil once shutdown has reset the system; there is no peer
+	// state left to clean up at that point.
+	if store := system.getClusterStore(); store != nil {
+		if err := store.DeletePeerState(ctx, address); err != nil {
+			w.logger.Errorf("failed to remove peer=%s state after relocation: %v (hint: check cluster store)", address, err)
+		}
 	}
 
 	system.endRelocation(address)

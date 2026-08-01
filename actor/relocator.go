@@ -195,8 +195,12 @@ func (r *relocator) abortRelocation(ctx *ReceiveContext, address string, peerSta
 	// instead of a healthy-looking rebalance.
 	system.reportAbortedRelocation(rctx, r.pid, address, peerState, 0, err)
 
-	if derr := system.getClusterStore().DeletePeerState(rctx, address); derr != nil {
-		r.logger.Errorf("failed to remove peer=%s state after failed relocation: %v (hint: check cluster store)", address, derr)
+	// The store is nil once shutdown has reset the system; there is no peer
+	// state left to clean up at that point.
+	if store := system.getClusterStore(); store != nil {
+		if derr := store.DeletePeerState(rctx, address); derr != nil {
+			r.logger.Errorf("failed to remove peer=%s state after failed relocation: %v (hint: check cluster store)", address, derr)
+		}
 	}
 
 	system.endRelocation(address)

@@ -86,7 +86,12 @@ func (x *actorSystem) stopControllerLocked(ctx context.Context) error {
 		return err
 	}
 
+	// getDataCenterController reads this field under x.locker, so the write
+	// must hold it too; dataCenterControllerMutex alone does not synchronize
+	// with those readers.
+	x.locker.Lock()
 	x.dataCenterController = nil
+	x.locker.Unlock()
 	return nil
 }
 
@@ -149,7 +154,13 @@ func (x *actorSystem) startDataCenterController(ctx context.Context) error {
 		return err
 	}
 
+	// getDataCenterController reads this field under x.locker, so the write
+	// must hold it too; dataCenterControllerMutex alone does not synchronize
+	// with those readers.
+	x.locker.Lock()
 	x.dataCenterController = controller
+	x.locker.Unlock()
+
 	return nil
 }
 

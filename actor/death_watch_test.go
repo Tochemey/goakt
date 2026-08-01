@@ -91,6 +91,9 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
+		// The RemoveActor failure escalates to the system guardian which stops
+		// the whole system, so the shutdown path stops the cluster engine.
+		clmock.EXPECT().Stop(mock.Anything).Return(nil).Maybe()
 
 		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
 		// asynchronously during Start) picks it up via getCluster() without racing.

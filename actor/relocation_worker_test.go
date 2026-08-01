@@ -1538,3 +1538,26 @@ func TestRetryRelocationItem(t *testing.T) {
 		require.Equal(t, 1, attempts)
 	})
 }
+
+// TestRelocationWorkerFinishToleratesResetStore verifies finish neither panics
+// nor leaks the relocation job when the cluster store has already been cleared
+// by a concurrent system shutdown.
+func TestRelocationWorkerFinishToleratesResetStore(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", new(internalpb.PeerState)))
+
+	worker := &relocationWorker{
+		pid:    &PID{actorSystem: system, logger: log.DiscardLogger},
+		logger: log.DiscardLogger,
+	}
+
+	worker.finish(ctx, "127.0.0.1:9000")
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+}
