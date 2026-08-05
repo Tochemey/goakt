@@ -216,6 +216,9 @@ func (x *MockCluster) Stop(context.Context) error  { panic("unexpected call") }
 func (x *MockCluster) PutActor(context.Context, *internalpb.Actor) error {
 	panic("unexpected call")
 }
+func (x *MockCluster) PutActorIfAbsent(context.Context, *internalpb.Actor) error {
+	panic("unexpected call")
+}
 func (x *MockCluster) GetActor(context.Context, string) (*internalpb.Actor, error) {
 	panic("unexpected call")
 }

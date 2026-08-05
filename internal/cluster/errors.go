@@ -41,6 +41,8 @@ var (
 	ErrGrainNotFound = errors.New("grain not found")
 	// ErrGrainAlreadyExists is returned when a grain entry already exists.
 	ErrGrainAlreadyExists = errors.New("grain already exists")
+	// ErrActorAlreadyExists is returned when an actor entry already exists.
+	ErrActorAlreadyExists = errors.New("actor already exists")
 	// ErrScheduleFireClaimed is returned by ClaimScheduleFire when another node has already
 	// won the race for the given key.
 	ErrScheduleFireClaimed = errors.New("schedule fire already claimed")

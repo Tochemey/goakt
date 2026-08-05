@@ -7866,3 +7866,61 @@ func TestResetSynchronizesWithGuardedGetters(t *testing.T) {
 
 	assert.Nil(t, sys.getClusterStore())
 }
+
+func TestRemoveActorIfIncarnation(t *testing.T) {
+	newSystem := func(t *testing.T, clusterMock *mockscluster.Cluster) *actorSystem {
+		t.Helper()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		sysImpl := sys.(*actorSystem)
+		sysImpl.cluster = clusterMock
+		return sysImpl
+	}
+
+	t.Run("With a matching incarnation", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		record := &internalpb.Actor{IncarnationId: "incarnation-1"}
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(nil)
+
+		system := newSystem(t, clusterMock)
+		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
+	})
+
+	t.Run("With a newer incarnation", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		record := &internalpb.Actor{IncarnationId: "incarnation-2"}
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
+
+		system := newSystem(t, clusterMock)
+		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
+	})
+
+	t.Run("With a missing record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, cluster.ErrActorNotFound)
+
+		system := newSystem(t, clusterMock)
+		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
+	})
+
+	t.Run("With a load failure", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, assert.AnError)
+
+		system := newSystem(t, clusterMock)
+		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
+	})
+
+	t.Run("With a removal failure", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		record := &internalpb.Actor{IncarnationId: "incarnation-1"}
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(assert.AnError)
+
+		system := newSystem(t, clusterMock)
+		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
+	})
+}

@@ -96,6 +96,11 @@ const (
 	// DefaultQueueRetryBackoff is the delay before a durable queue operation
 	// retry when WithQueueRetry is not used.
 	DefaultQueueRetryBackoff = 100 * time.Millisecond
+	// DefaultRegistrationLookupTimeout bounds a reliable-delivery controller's
+	// endpoint and companion ownership lookup so a slow cluster registry can
+	// never stall the controller mailbox; a timeout is a dropped registration
+	// recovered by the controller's recurring tick.
+	DefaultRegistrationLookupTimeout = 500 * time.Millisecond
 )
 
 var (

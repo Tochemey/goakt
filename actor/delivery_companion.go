@@ -30,6 +30,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -53,6 +55,31 @@ type reliableCompanionSpec struct {
 	// endpointIncarnationID pins the companion to one endpoint incarnation so
 	// a stale companion can never be adopted by a newer endpoint.
 	endpointIncarnationID string
+}
+
+// toProto converts the runtime-companion metadata to its wire form. A nil
+// spec serializes as absent so ordinary actor records stay unchanged.
+func (x *reliableCompanionSpec) toProto() *internalpb.ReliableCompanionSpec {
+	if x == nil {
+		return nil
+	}
+
+	return &internalpb.ReliableCompanionSpec{
+		Role:                  x.role.toProto(),
+		EndpointName:          x.endpointName,
+		EndpointIncarnationId: x.endpointIncarnationID,
+	}
+}
+
+// reliableCompanionSpecFromProto validates and restores runtime-companion
+// metadata from its wire form through the same constructor local spawns use,
+// so a malformed record can never produce a spec that resolution would trust.
+func reliableCompanionSpecFromProto(proto *internalpb.ReliableCompanionSpec) (*reliableCompanionSpec, error) {
+	if proto == nil {
+		return nil, errors.New("reliable companion specification is required")
+	}
+
+	return newReliableCompanionSpec(reliableControllerRoleFromProto(proto.GetRole()), proto.GetEndpointName(), proto.GetEndpointIncarnationId())
 }
 
 // newReliableCompanionSpec validates and builds runtime-companion metadata.
@@ -95,18 +122,20 @@ func reliableCompanionName(role ReliableControllerRole, endpointIncarnationID st
 // endpoint is looked up in the local actor tree, its incarnation selects the
 // role-specific companion identity, and the companion is returned only when
 // its runtime kind, role, owning endpoint name, and endpoint incarnation all
-// validate. A missing endpoint, a missing companion, or a mixed pair is
-// reported as errReliableCompanionUnavailable and never falls back to an
-// older record; callers retry. Cluster-backed resolution of remote endpoints
-// arrives with companion publication.
-func (x *actorSystem) resolveReliableCompanion(endpointName string, role ReliableControllerRole) (*PID, error) {
+// validate. Only when no local endpoint record exists at all does resolution
+// fall to the cluster registry; a present-but-invalid local pair never does,
+// because a mixed local activation means a spawn or restart is in flight and
+// an older registry record must not win over it. A missing endpoint, a
+// missing companion, or a mixed pair is reported as
+// errReliableCompanionUnavailable; callers retry on their next tick.
+func (x *actorSystem) resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error) {
 	if !role.valid() {
 		return nil, errors.New("reliable controller role is not supported")
 	}
 
 	node, ok := x.actors.nodeByName(endpointName)
 	if !ok {
-		return nil, fmt.Errorf("%w: endpoint=%s has no local record", errReliableCompanionUnavailable, endpointName)
+		return x.resolveRemoteReliableCompanion(ctx, endpointName, role)
 	}
 
 	endpoint := node.value()
@@ -125,6 +154,58 @@ func (x *actorSystem) resolveReliableCompanion(endpointName string, role Reliabl
 	}
 
 	return companion, nil
+}
+
+// resolveRemoteReliableCompanion resolves the controller companion of an
+// endpoint that has no local record through the cluster registry: the
+// endpoint record's incarnation selects the companion identity, the companion
+// record must carry a runtime-companion spec whose role, owning endpoint, and
+// incarnation match, and the pair must live together on one remote node. Any
+// missing or mismatching record is the transient mixed-pair condition, which
+// covers both the publication window where the endpoint is visible before its
+// companion and a stale record left by an older activation. A record pointing
+// back at this node is also transient: the local tree is authoritative here,
+// so a registry self-reference only exists while local cleanup is in flight.
+func (x *actorSystem) resolveRemoteReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error) {
+	if !x.clusterEnabled.Load() {
+		return nil, fmt.Errorf("%w: endpoint=%s has no local record", errReliableCompanionUnavailable, endpointName)
+	}
+
+	registry := x.getCluster()
+
+	endpoint, err := registry.GetActor(ctx, endpointName)
+	if err != nil {
+		return nil, fmt.Errorf("%w: endpoint=%s has no registry record: %v", errReliableCompanionUnavailable, endpointName, err)
+	}
+
+	name := reliableCompanionName(role, endpoint.GetIncarnationId())
+	record, err := registry.GetActor(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("%w: endpoint=%s has no published %s controller for incarnation=%s: %v", errReliableCompanionUnavailable, endpointName, role, endpoint.GetIncarnationId(), err)
+	}
+
+	spec, specErr := reliableCompanionSpecFromProto(record.GetReliableCompanion())
+	endpointAddress, endpointErr := address.Parse(endpoint.GetAddress())
+	companionAddress, companionErr := address.Parse(record.GetAddress())
+
+	switch {
+	case specErr != nil:
+		return nil, fmt.Errorf("%w: record=%s is not a runtime companion: %v", errReliableCompanionUnavailable, name, specErr)
+	case spec.role != role:
+		return nil, fmt.Errorf("%w: companion=%s runs role=%s, want role=%s", errReliableCompanionUnavailable, name, spec.role, role)
+	case spec.endpointName != endpointName:
+		return nil, fmt.Errorf("%w: companion=%s is owned by endpoint=%s, want endpoint=%s", errReliableCompanionUnavailable, name, spec.endpointName, endpointName)
+	case spec.endpointIncarnationID != endpoint.GetIncarnationId():
+		return nil, fmt.Errorf("%w: companion=%s is bound to incarnation=%s, want incarnation=%s", errReliableCompanionUnavailable, name, spec.endpointIncarnationID, endpoint.GetIncarnationId())
+	case endpointErr != nil || companionErr != nil:
+		return nil, fmt.Errorf("%w: registry records for endpoint=%s carry an invalid address", errReliableCompanionUnavailable, endpointName)
+	case endpointAddress.HostPort() != companionAddress.HostPort():
+		return nil, fmt.Errorf("%w: endpoint=%s and companion=%s records live on different nodes", errReliableCompanionUnavailable, endpointName, name)
+	case companionAddress.HostPort() == x.actorReference(name).HostPort():
+		return nil, fmt.Errorf("%w: registry records for endpoint=%s point at this node but no local pair exists", errReliableCompanionUnavailable, endpointName)
+	default:
+		return newRemotePID(companionAddress, x.getRemoting()), nil
+	}
 }
 
 // reliableTickReference derives the scheduler reference of one controller
@@ -181,8 +262,33 @@ func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID
 		return err
 	}
 
-	_, err = x.completeSpawn(ctx, endpoint, pid)
+	_, err = x.attachAndPublish(ctx, endpoint, pid)
 	return err
+}
+
+// rollbackReliableSpawn undoes a failed reliable endpoint spawn transaction:
+// it stops the endpoint subtree, which takes any attached companion with it,
+// then removes both published registry records so a failed spawn leaves
+// nothing behind cluster-wide. The companion record is removed by its
+// incarnation-scoped name, which no other activation can own; the endpoint
+// record only when it still carries this activation's incarnation. Runs
+// detached from the caller's ctx because rollback must proceed even when the
+// failure was a cancellation.
+func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) {
+	x.rollbackSpawn(ctx, endpoint, "failed reliable controller creation")
+
+	if !x.clusterEnabled.Load() {
+		return
+	}
+
+	ctx = context.WithoutCancel(ctx)
+	name := reliableCompanionName(endpoint.reliableDelivery.role(), endpoint.IncarnationID())
+
+	if err := x.getCluster().RemoveActor(ctx, name); err != nil {
+		x.logger.Errorf("failed to remove registry record for reliable controller of endpoint=%s during rollback: %v", endpoint.Name(), err)
+	}
+
+	x.removeActorIfIncarnation(ctx, endpoint.Name(), endpoint.IncarnationID())
 }
 
 // newReliableController builds the role-specific controller of a reliable

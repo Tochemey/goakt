@@ -271,6 +271,14 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	config := newSpawnConfig(opts...)
+
+	// a remote spawn request cannot carry reliable-delivery settings yet, and
+	// placement is nondeterministic here: reject instead of silently spawning
+	// an unreliable endpoint on another node; use Spawn for local placement
+	if config.reliableDelivery != nil {
+		return nil, errors.New("reliable delivery endpoints cannot be placed with SpawnOn yet")
+	}
+
 	// here we are sending the message to a datacenter
 	if config.dataCenter != nil {
 		return x.spawnOnDatacenter(ctx, name, actor, config)

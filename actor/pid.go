@@ -3290,6 +3290,7 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		InitTimeout:         initTimeout,
 		IncarnationId:       pid.IncarnationID(),
 		ReliableDelivery:    pid.reliableDelivery.toProto(),
+		ReliableCompanion:   pid.reliableCompanion.toProto(),
 	}, nil
 }
 

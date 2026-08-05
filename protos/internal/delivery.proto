@@ -6,6 +6,29 @@ import "google/protobuf/duration.proto";
 
 option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
 
+// ReliableControllerRole identifies which reliable-delivery controller a
+// companion actor runs for its endpoint.
+enum ReliableControllerRole {
+  // The role is not set; records carrying it never validate.
+  RELIABLE_CONTROLLER_ROLE_UNSPECIFIED = 0;
+  // The companion is a producer controller.
+  RELIABLE_CONTROLLER_ROLE_PRODUCER = 1;
+  // The companion is a consumer controller.
+  RELIABLE_CONTROLLER_ROLE_CONSUMER = 2;
+}
+
+// ReliableCompanionSpec marks an actor record as the endpoint-owned
+// reliable-delivery controller of one endpoint incarnation and carries the
+// ownership fields that cluster resolution validates.
+message ReliableCompanionSpec {
+  // Identifies which controller role the companion runs.
+  ReliableControllerRole role = 1;
+  // Names the user-visible endpoint that owns the companion.
+  string endpoint_name = 2;
+  // Pins the companion to one endpoint incarnation.
+  string endpoint_incarnation_id = 3;
+}
+
 // ReliableDeliveryConfig defines one endpoint's reliable-delivery settings.
 message ReliableDeliveryConfig {
   oneof endpoint {

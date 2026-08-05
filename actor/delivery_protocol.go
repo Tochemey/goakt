@@ -29,6 +29,7 @@ import (
 	"time"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
@@ -806,6 +807,32 @@ func (x ReliableControllerRole) String() string {
 // valid reports whether x identifies a supported controller role.
 func (x ReliableControllerRole) valid() bool {
 	return x == ReliableControllerRoleProducer || x == ReliableControllerRoleConsumer
+}
+
+// toProto converts the role to its wire enum.
+func (x ReliableControllerRole) toProto() internalpb.ReliableControllerRole {
+	switch x {
+	case ReliableControllerRoleProducer:
+		return internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER
+	case ReliableControllerRoleConsumer:
+		return internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER
+	default:
+		return internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED
+	}
+}
+
+// reliableControllerRoleFromProto restores the role from its wire enum. An
+// unspecified or unknown value maps to the invalid zero role, which every
+// validation path rejects.
+func reliableControllerRoleFromProto(role internalpb.ReliableControllerRole) ReliableControllerRole {
+	switch role {
+	case internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER:
+		return ReliableControllerRoleProducer
+	case internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER:
+		return ReliableControllerRoleConsumer
+	default:
+		return reliableControllerRoleUnknown
+	}
 }
 
 // valid reports whether x identifies a supported delivery stage.

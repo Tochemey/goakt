@@ -294,7 +294,10 @@ func (x *producerController) handlePostStart(ctx *ReceiveContext) {
 // owed to the consumer. The ack always carries confirmedSeq+1 so a fresh
 // consumer resumes exactly after the last confirmed sequence.
 func (x *producerController) handleRegisterConsumer(ctx *ReceiveContext, register *commands.RegisterConsumer) {
-	expected, err := ctx.ActorSystem().resolveReliableCompanion(x.consumerName, ReliableControllerRoleConsumer)
+	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
+	defer cancel()
+
+	expected, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.consumerName, ReliableControllerRoleConsumer)
 	if err != nil || !expected.Equals(ctx.Sender()) {
 		ctx.Logger().Debugf("producer controller for endpoint=%s dropped registration from unverified sender: %v", x.producer.Name(), err)
 		return

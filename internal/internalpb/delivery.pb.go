@@ -22,6 +22,126 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ReliableControllerRole identifies which reliable-delivery controller a
+// companion actor runs for its endpoint.
+type ReliableControllerRole int32
+
+const (
+	// The role is not set; records carrying it never validate.
+	ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED ReliableControllerRole = 0
+	// The companion is a producer controller.
+	ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER ReliableControllerRole = 1
+	// The companion is a consumer controller.
+	ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER ReliableControllerRole = 2
+)
+
+// Enum value maps for ReliableControllerRole.
+var (
+	ReliableControllerRole_name = map[int32]string{
+		0: "RELIABLE_CONTROLLER_ROLE_UNSPECIFIED",
+		1: "RELIABLE_CONTROLLER_ROLE_PRODUCER",
+		2: "RELIABLE_CONTROLLER_ROLE_CONSUMER",
+	}
+	ReliableControllerRole_value = map[string]int32{
+		"RELIABLE_CONTROLLER_ROLE_UNSPECIFIED": 0,
+		"RELIABLE_CONTROLLER_ROLE_PRODUCER":    1,
+		"RELIABLE_CONTROLLER_ROLE_CONSUMER":    2,
+	}
+)
+
+func (x ReliableControllerRole) Enum() *ReliableControllerRole {
+	p := new(ReliableControllerRole)
+	*p = x
+	return p
+}
+
+func (x ReliableControllerRole) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReliableControllerRole) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_delivery_proto_enumTypes[0].Descriptor()
+}
+
+func (ReliableControllerRole) Type() protoreflect.EnumType {
+	return &file_internal_delivery_proto_enumTypes[0]
+}
+
+func (x ReliableControllerRole) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReliableControllerRole.Descriptor instead.
+func (ReliableControllerRole) EnumDescriptor() ([]byte, []int) {
+	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
+}
+
+// ReliableCompanionSpec marks an actor record as the endpoint-owned
+// reliable-delivery controller of one endpoint incarnation and carries the
+// ownership fields that cluster resolution validates.
+type ReliableCompanionSpec struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Identifies which controller role the companion runs.
+	Role ReliableControllerRole `protobuf:"varint,1,opt,name=role,proto3,enum=internalpb.ReliableControllerRole" json:"role,omitempty"`
+	// Names the user-visible endpoint that owns the companion.
+	EndpointName string `protobuf:"bytes,2,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
+	// Pins the companion to one endpoint incarnation.
+	EndpointIncarnationId string `protobuf:"bytes,3,opt,name=endpoint_incarnation_id,json=endpointIncarnationId,proto3" json:"endpoint_incarnation_id,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
+}
+
+func (x *ReliableCompanionSpec) Reset() {
+	*x = ReliableCompanionSpec{}
+	mi := &file_internal_delivery_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReliableCompanionSpec) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReliableCompanionSpec) ProtoMessage() {}
+
+func (x *ReliableCompanionSpec) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_delivery_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReliableCompanionSpec.ProtoReflect.Descriptor instead.
+func (*ReliableCompanionSpec) Descriptor() ([]byte, []int) {
+	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ReliableCompanionSpec) GetRole() ReliableControllerRole {
+	if x != nil {
+		return x.Role
+	}
+	return ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED
+}
+
+func (x *ReliableCompanionSpec) GetEndpointName() string {
+	if x != nil {
+		return x.EndpointName
+	}
+	return ""
+}
+
+func (x *ReliableCompanionSpec) GetEndpointIncarnationId() string {
+	if x != nil {
+		return x.EndpointIncarnationId
+	}
+	return ""
+}
+
 // ReliableDeliveryConfig defines one endpoint's reliable-delivery settings.
 type ReliableDeliveryConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -36,7 +156,7 @@ type ReliableDeliveryConfig struct {
 
 func (x *ReliableDeliveryConfig) Reset() {
 	*x = ReliableDeliveryConfig{}
-	mi := &file_internal_delivery_proto_msgTypes[0]
+	mi := &file_internal_delivery_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +168,7 @@ func (x *ReliableDeliveryConfig) String() string {
 func (*ReliableDeliveryConfig) ProtoMessage() {}
 
 func (x *ReliableDeliveryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[0]
+	mi := &file_internal_delivery_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,7 +181,7 @@ func (x *ReliableDeliveryConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReliableDeliveryConfig.ProtoReflect.Descriptor instead.
 func (*ReliableDeliveryConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ReliableDeliveryConfig) GetEndpoint() isReliableDeliveryConfig_Endpoint {
@@ -124,7 +244,7 @@ type ReliableProducerConfig struct {
 
 func (x *ReliableProducerConfig) Reset() {
 	*x = ReliableProducerConfig{}
-	mi := &file_internal_delivery_proto_msgTypes[1]
+	mi := &file_internal_delivery_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -136,7 +256,7 @@ func (x *ReliableProducerConfig) String() string {
 func (*ReliableProducerConfig) ProtoMessage() {}
 
 func (x *ReliableProducerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[1]
+	mi := &file_internal_delivery_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -149,7 +269,7 @@ func (x *ReliableProducerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReliableProducerConfig.ProtoReflect.Descriptor instead.
 func (*ReliableProducerConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{1}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ReliableProducerConfig) GetConsumerName() string {
@@ -195,7 +315,7 @@ type ReliableConsumerConfig struct {
 
 func (x *ReliableConsumerConfig) Reset() {
 	*x = ReliableConsumerConfig{}
-	mi := &file_internal_delivery_proto_msgTypes[2]
+	mi := &file_internal_delivery_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -207,7 +327,7 @@ func (x *ReliableConsumerConfig) String() string {
 func (*ReliableConsumerConfig) ProtoMessage() {}
 
 func (x *ReliableConsumerConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[2]
+	mi := &file_internal_delivery_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -220,7 +340,7 @@ func (x *ReliableConsumerConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReliableConsumerConfig.ProtoReflect.Descriptor instead.
 func (*ReliableConsumerConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{2}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ReliableConsumerConfig) GetProducerName() string {
@@ -257,7 +377,7 @@ type QueueRetryConfig struct {
 
 func (x *QueueRetryConfig) Reset() {
 	*x = QueueRetryConfig{}
-	mi := &file_internal_delivery_proto_msgTypes[3]
+	mi := &file_internal_delivery_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -269,7 +389,7 @@ func (x *QueueRetryConfig) String() string {
 func (*QueueRetryConfig) ProtoMessage() {}
 
 func (x *QueueRetryConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[3]
+	mi := &file_internal_delivery_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -282,7 +402,7 @@ func (x *QueueRetryConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QueueRetryConfig.ProtoReflect.Descriptor instead.
 func (*QueueRetryConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{3}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *QueueRetryConfig) GetMaxAttempts() uint32 {
@@ -310,7 +430,7 @@ type ReliablePayload struct {
 
 func (x *ReliablePayload) Reset() {
 	*x = ReliablePayload{}
-	mi := &file_internal_delivery_proto_msgTypes[4]
+	mi := &file_internal_delivery_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +442,7 @@ func (x *ReliablePayload) String() string {
 func (*ReliablePayload) ProtoMessage() {}
 
 func (x *ReliablePayload) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[4]
+	mi := &file_internal_delivery_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +455,7 @@ func (x *ReliablePayload) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReliablePayload.ProtoReflect.Descriptor instead.
 func (*ReliablePayload) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{4}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ReliablePayload) GetData() []byte {
@@ -356,7 +476,7 @@ type RegisterConsumer struct {
 
 func (x *RegisterConsumer) Reset() {
 	*x = RegisterConsumer{}
-	mi := &file_internal_delivery_proto_msgTypes[5]
+	mi := &file_internal_delivery_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +488,7 @@ func (x *RegisterConsumer) String() string {
 func (*RegisterConsumer) ProtoMessage() {}
 
 func (x *RegisterConsumer) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[5]
+	mi := &file_internal_delivery_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +501,7 @@ func (x *RegisterConsumer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterConsumer.ProtoReflect.Descriptor instead.
 func (*RegisterConsumer) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{5}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RegisterConsumer) GetNonce() string {
@@ -406,7 +526,7 @@ type RegistrationAck struct {
 
 func (x *RegistrationAck) Reset() {
 	*x = RegistrationAck{}
-	mi := &file_internal_delivery_proto_msgTypes[6]
+	mi := &file_internal_delivery_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +538,7 @@ func (x *RegistrationAck) String() string {
 func (*RegistrationAck) ProtoMessage() {}
 
 func (x *RegistrationAck) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[6]
+	mi := &file_internal_delivery_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +551,7 @@ func (x *RegistrationAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegistrationAck.ProtoReflect.Descriptor instead.
 func (*RegistrationAck) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{6}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RegistrationAck) GetSessionId() string {
@@ -474,7 +594,7 @@ type Request struct {
 
 func (x *Request) Reset() {
 	*x = Request{}
-	mi := &file_internal_delivery_proto_msgTypes[7]
+	mi := &file_internal_delivery_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -486,7 +606,7 @@ func (x *Request) String() string {
 func (*Request) ProtoMessage() {}
 
 func (x *Request) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[7]
+	mi := &file_internal_delivery_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -499,7 +619,7 @@ func (x *Request) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Request.ProtoReflect.Descriptor instead.
 func (*Request) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{7}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Request) GetSessionId() string {
@@ -552,7 +672,7 @@ type Ack struct {
 
 func (x *Ack) Reset() {
 	*x = Ack{}
-	mi := &file_internal_delivery_proto_msgTypes[8]
+	mi := &file_internal_delivery_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -564,7 +684,7 @@ func (x *Ack) String() string {
 func (*Ack) ProtoMessage() {}
 
 func (x *Ack) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[8]
+	mi := &file_internal_delivery_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -577,7 +697,7 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Ack.ProtoReflect.Descriptor instead.
 func (*Ack) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{8}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *Ack) GetSessionId() string {
@@ -618,7 +738,7 @@ type SequencedMessage struct {
 
 func (x *SequencedMessage) Reset() {
 	*x = SequencedMessage{}
-	mi := &file_internal_delivery_proto_msgTypes[9]
+	mi := &file_internal_delivery_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -630,7 +750,7 @@ func (x *SequencedMessage) String() string {
 func (*SequencedMessage) ProtoMessage() {}
 
 func (x *SequencedMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[9]
+	mi := &file_internal_delivery_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -643,7 +763,7 @@ func (x *SequencedMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SequencedMessage.ProtoReflect.Descriptor instead.
 func (*SequencedMessage) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{9}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SequencedMessage) GetSessionId() string {
@@ -692,7 +812,7 @@ type DeliveryEnvelope struct {
 
 func (x *DeliveryEnvelope) Reset() {
 	*x = DeliveryEnvelope{}
-	mi := &file_internal_delivery_proto_msgTypes[10]
+	mi := &file_internal_delivery_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -704,7 +824,7 @@ func (x *DeliveryEnvelope) String() string {
 func (*DeliveryEnvelope) ProtoMessage() {}
 
 func (x *DeliveryEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[10]
+	mi := &file_internal_delivery_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -717,7 +837,7 @@ func (x *DeliveryEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliveryEnvelope.ProtoReflect.Descriptor instead.
 func (*DeliveryEnvelope) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{10}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *DeliveryEnvelope) GetCommand() isDeliveryEnvelope_Command {
@@ -816,7 +936,11 @@ var File_internal_delivery_proto protoreflect.FileDescriptor
 const file_internal_delivery_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/delivery.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\"\xa8\x01\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\"\xac\x01\n" +
+	"\x15ReliableCompanionSpec\x126\n" +
+	"\x04role\x18\x01 \x01(\x0e2\".internalpb.ReliableControllerRoleR\x04role\x12#\n" +
+	"\rendpoint_name\x18\x02 \x01(\tR\fendpointName\x126\n" +
+	"\x17endpoint_incarnation_id\x18\x03 \x01(\tR\x15endpointIncarnationId\"\xa8\x01\n" +
 	"\x16ReliableDeliveryConfig\x12@\n" +
 	"\bproducer\x18\x01 \x01(\v2\".internalpb.ReliableProducerConfigH\x00R\bproducer\x12@\n" +
 	"\bconsumer\x18\x02 \x01(\v2\".internalpb.ReliableConsumerConfigH\x00R\bconsumerB\n" +
@@ -871,7 +995,11 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\arequest\x18\x03 \x01(\v2\x13.internalpb.RequestH\x00R\arequest\x12#\n" +
 	"\x03ack\x18\x04 \x01(\v2\x0f.internalpb.AckH\x00R\x03ack\x12K\n" +
 	"\x11sequenced_message\x18\x05 \x01(\v2\x1c.internalpb.SequencedMessageH\x00R\x10sequencedMessageB\t\n" +
-	"\acommandB\xa6\x01\n" +
+	"\acommand*\x90\x01\n" +
+	"\x16ReliableControllerRole\x12(\n" +
+	"$RELIABLE_CONTROLLER_ROLE_UNSPECIFIED\x10\x00\x12%\n" +
+	"!RELIABLE_CONTROLLER_ROLE_PRODUCER\x10\x01\x12%\n" +
+	"!RELIABLE_CONTROLLER_ROLE_CONSUMER\x10\x02B\xa6\x01\n" +
 	"\x0ecom.internalpbB\rDeliveryProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
@@ -889,39 +1017,43 @@ func file_internal_delivery_proto_rawDescGZIP() []byte {
 	return file_internal_delivery_proto_rawDescData
 }
 
-var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_internal_delivery_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_internal_delivery_proto_goTypes = []any{
-	(*ReliableDeliveryConfig)(nil), // 0: internalpb.ReliableDeliveryConfig
-	(*ReliableProducerConfig)(nil), // 1: internalpb.ReliableProducerConfig
-	(*ReliableConsumerConfig)(nil), // 2: internalpb.ReliableConsumerConfig
-	(*QueueRetryConfig)(nil),       // 3: internalpb.QueueRetryConfig
-	(*ReliablePayload)(nil),        // 4: internalpb.ReliablePayload
-	(*RegisterConsumer)(nil),       // 5: internalpb.RegisterConsumer
-	(*RegistrationAck)(nil),        // 6: internalpb.RegistrationAck
-	(*Request)(nil),                // 7: internalpb.Request
-	(*Ack)(nil),                    // 8: internalpb.Ack
-	(*SequencedMessage)(nil),       // 9: internalpb.SequencedMessage
-	(*DeliveryEnvelope)(nil),       // 10: internalpb.DeliveryEnvelope
-	(*durationpb.Duration)(nil),    // 11: google.protobuf.Duration
+	(ReliableControllerRole)(0),    // 0: internalpb.ReliableControllerRole
+	(*ReliableCompanionSpec)(nil),  // 1: internalpb.ReliableCompanionSpec
+	(*ReliableDeliveryConfig)(nil), // 2: internalpb.ReliableDeliveryConfig
+	(*ReliableProducerConfig)(nil), // 3: internalpb.ReliableProducerConfig
+	(*ReliableConsumerConfig)(nil), // 4: internalpb.ReliableConsumerConfig
+	(*QueueRetryConfig)(nil),       // 5: internalpb.QueueRetryConfig
+	(*ReliablePayload)(nil),        // 6: internalpb.ReliablePayload
+	(*RegisterConsumer)(nil),       // 7: internalpb.RegisterConsumer
+	(*RegistrationAck)(nil),        // 8: internalpb.RegistrationAck
+	(*Request)(nil),                // 9: internalpb.Request
+	(*Ack)(nil),                    // 10: internalpb.Ack
+	(*SequencedMessage)(nil),       // 11: internalpb.SequencedMessage
+	(*DeliveryEnvelope)(nil),       // 12: internalpb.DeliveryEnvelope
+	(*durationpb.Duration)(nil),    // 13: google.protobuf.Duration
 }
 var file_internal_delivery_proto_depIdxs = []int32{
-	1,  // 0: internalpb.ReliableDeliveryConfig.producer:type_name -> internalpb.ReliableProducerConfig
-	2,  // 1: internalpb.ReliableDeliveryConfig.consumer:type_name -> internalpb.ReliableConsumerConfig
-	3,  // 2: internalpb.ReliableProducerConfig.queue_retry:type_name -> internalpb.QueueRetryConfig
-	11, // 3: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
-	11, // 4: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
-	11, // 5: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
-	4,  // 6: internalpb.SequencedMessage.payload:type_name -> internalpb.ReliablePayload
-	5,  // 7: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
-	6,  // 8: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
-	7,  // 9: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
-	8,  // 10: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
-	9,  // 11: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	0,  // 0: internalpb.ReliableCompanionSpec.role:type_name -> internalpb.ReliableControllerRole
+	3,  // 1: internalpb.ReliableDeliveryConfig.producer:type_name -> internalpb.ReliableProducerConfig
+	4,  // 2: internalpb.ReliableDeliveryConfig.consumer:type_name -> internalpb.ReliableConsumerConfig
+	5,  // 3: internalpb.ReliableProducerConfig.queue_retry:type_name -> internalpb.QueueRetryConfig
+	13, // 4: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
+	13, // 5: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
+	13, // 6: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
+	6,  // 7: internalpb.SequencedMessage.payload:type_name -> internalpb.ReliablePayload
+	7,  // 8: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
+	8,  // 9: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
+	9,  // 10: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
+	10, // 11: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
+	11, // 12: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_internal_delivery_proto_init() }
@@ -929,12 +1061,12 @@ func file_internal_delivery_proto_init() {
 	if File_internal_delivery_proto != nil {
 		return
 	}
-	file_internal_delivery_proto_msgTypes[0].OneofWrappers = []any{
+	file_internal_delivery_proto_msgTypes[1].OneofWrappers = []any{
 		(*ReliableDeliveryConfig_Producer)(nil),
 		(*ReliableDeliveryConfig_Consumer)(nil),
 	}
-	file_internal_delivery_proto_msgTypes[1].OneofWrappers = []any{}
-	file_internal_delivery_proto_msgTypes[10].OneofWrappers = []any{
+	file_internal_delivery_proto_msgTypes[2].OneofWrappers = []any{}
+	file_internal_delivery_proto_msgTypes[11].OneofWrappers = []any{
 		(*DeliveryEnvelope_RegisterConsumer)(nil),
 		(*DeliveryEnvelope_RegistrationAck)(nil),
 		(*DeliveryEnvelope_Request)(nil),
@@ -946,13 +1078,14 @@ func file_internal_delivery_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_delivery_proto_rawDesc), len(file_internal_delivery_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   11,
+			NumEnums:      1,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_internal_delivery_proto_goTypes,
 		DependencyIndexes: file_internal_delivery_proto_depIdxs,
+		EnumInfos:         file_internal_delivery_proto_enumTypes,
 		MessageInfos:      file_internal_delivery_proto_msgTypes,
 	}.Build()
 	File_internal_delivery_proto = out.File

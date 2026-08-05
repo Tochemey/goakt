@@ -864,8 +864,8 @@ type ActorSystem interface {
 	getRemoting() remoteclient.Client
 	// resolveReliableCompanion returns the live reliable-delivery controller
 	// bound to the named endpoint's current incarnation using local-first
-	// resolution.
-	resolveReliableCompanion(endpointName string, role ReliableControllerRole) (*PID, error)
+	// resolution, falling back to the cluster registry for remote endpoints.
+	resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error)
 	getGrains() *xsync.Map[string, *grainPID]
 	// routeAsyncReply delivers a response to whoever awaits the given correlation
 	// ID, using the reply target carried on the originating request.
@@ -1942,6 +1942,13 @@ func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID
 			if err != nil {
 				continue
 			}
+
+			// the registry also holds reliable-delivery controller records,
+			// which stay invisible like every reserved identity
+			if isSystemName(addr.Name()) {
+				continue
+			}
+
 			if _, ok := seen[addr.String()]; !ok {
 				pids = append(pids, newRemotePID(addr, x.remoting))
 				seen[addr.String()] = types.Unit{}
@@ -2533,13 +2540,42 @@ func (x *actorSystem) forgetPeerRemotingPort(peerAddress string) {
 	x.peerRemotingPorts.Delete(peerAddress)
 }
 
-// completeSpawn finishes a local spawn: it counts the actor, attaches pid to
-// the tree under parent, registers death-watch supervision, and synchronously
-// publishes the registry record to the cluster. On publication failure the
-// actor is stopped, so a failed spawn leaves nothing behind: the death watch
-// removes the tree node, decrements the counter and, for singletons, removes
-// the kind.
+// completeSpawn finishes a local spawn: it attaches and publishes the actor
+// through attachAndPublish and then, for a reliable endpoint, runs the second
+// half of the spawn transaction. AsReliableProducer/AsReliableConsumer only
+// record intent on the spawn configuration; the controller companion comes to
+// exist here, in the one funnel every local spawn path shares. An endpoint
+// without its controller would look alive while no message could ever flow,
+// so a companion that cannot start aborts the whole spawn:
+// rollbackReliableSpawn stops the endpoint subtree and withdraws the
+// published registry records, keeping the error the only trace a failed
+// Spawn leaves behind.
 func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID, error) {
+	spawned, err := x.attachAndPublish(ctx, parent, pid)
+	if err != nil || spawned != pid {
+		// a canonical duplicate already carries its own companion
+		return spawned, err
+	}
+
+	if pid.reliableDelivery != nil {
+		if err := x.ensureReliableCompanion(ctx, pid); err != nil {
+			x.rollbackReliableSpawn(ctx, pid)
+			return nil, err
+		}
+	}
+
+	return pid, nil
+}
+
+// attachAndPublish counts the actor, attaches pid to the tree under parent,
+// registers death-watch supervision, and synchronously publishes the registry
+// record to the cluster. On publication failure the actor is stopped, so a
+// failed spawn leaves nothing behind: the death watch removes the tree node,
+// decrements the counter and, for singletons, removes the kind. It is the
+// spawn-completion core shared by completeSpawn and the reliable companion
+// transaction, which must attach its controller without re-entering the
+// endpoint logic above.
+func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*PID, error) {
 	if !pid.isStateSet(systemState) {
 		x.increaseActorsCounter()
 	}
@@ -2570,22 +2606,60 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 	}
 	x.actors.addWatcher(pid, x.deathWatch)
 
-	if err := x.putActorOnCluster(ctx, pid); err != nil {
+	if err := x.publishSpawnedActor(ctx, pid); err != nil {
 		x.rollbackSpawn(ctx, pid, "failed cluster publication")
 		return nil, err
 	}
 
-	// a reliable endpoint is only functional with its controller companion:
-	// create it under the endpoint, and roll the endpoint back when the
-	// controller cannot start so a failed spawn leaves nothing behind
-	if pid.reliableDelivery != nil {
-		if err := x.ensureReliableCompanion(ctx, pid); err != nil {
-			x.rollbackSpawn(ctx, pid, "failed reliable controller creation")
-			return nil, err
-		}
+	return pid, nil
+}
+
+// publishSpawnedActor writes the initial registry record of a completed
+// spawn. A reliable endpoint publishes atomically with PutActorIfAbsent so a
+// concurrent spawn of the same name on another node can never be overwritten,
+// turning the non-atomic precondition read into a real uniqueness guarantee;
+// every other actor keeps the plain publication path, whose overwrite
+// semantics restarts and relocation rely on.
+func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
+	if pid.reliableDelivery == nil || !x.clusterEnabled.Load() {
+		return x.putActorOnCluster(ctx, pid)
 	}
 
-	return pid, nil
+	actor, err := pid.toSerialize()
+	if err != nil {
+		return err
+	}
+
+	if err := x.getCluster().PutActorIfAbsent(ctx, actor); err != nil {
+		if errors.Is(err, cluster.ErrActorAlreadyExists) {
+			return gerrors.NewErrActorAlreadyExists(pid.Name())
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// removeActorIfIncarnation removes the registry record for name only when it
+// still carries incarnationID, following the releaseDepartedEntry ownership
+// rule: cleanup owned by one activation must never delete a record already
+// overwritten by a newer one. Best-effort by design, since every caller is
+// itself a rollback path whose primary error is already on its way to the
+// user; failures are logged for diagnosability.
+func (x *actorSystem) removeActorIfIncarnation(ctx context.Context, name, incarnationID string) {
+	registry := x.getCluster()
+	record, err := registry.GetActor(ctx, name)
+
+	switch {
+	case errors.Is(err, cluster.ErrActorNotFound):
+	case err != nil:
+		x.logger.Errorf("failed to load registry record for actor=%s during rollback: %v", name, err)
+	case record.GetIncarnationId() == incarnationID:
+		if err := registry.RemoveActor(ctx, name); err != nil {
+			x.logger.Errorf("failed to remove registry record for actor=%s during rollback: %v", name, err)
+		}
+	}
 }
 
 // rollbackSpawn stops a partially spawned actor so a failed spawn leaves
@@ -2601,9 +2675,13 @@ func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string
 // putActorOnCluster synchronously writes the actor's registry record to the
 // cluster store. It only returns nil once the record is durably written, so a
 // successful spawn implies the actor is resolvable by name from any node.
-// No-op when clustering is disabled or for system actors.
+// No-op when clustering is disabled or for system actors, with one exception:
+// reliable-delivery controller companions publish despite their reserved
+// names, because cluster resolution must find an endpoint's controller from
+// any node. Their records carry the ownership spec and leave the registry
+// through the same metadata gate in the death watch.
 func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
-	if !x.clusterEnabled.Load() || isSystemName(pid.Name()) {
+	if !x.clusterEnabled.Load() || (isSystemName(pid.Name()) && pid.reliableCompanion == nil) {
 		return nil
 	}
 
@@ -3759,11 +3837,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		return nil, err
 	}
 
-	// reliable delivery is single-node until companion publication and
-	// relocation reconstruction land: fail fast instead of spawning an
-	// endpoint whose controller could not be resolved or moved across nodes
-	if spawnConfig.reliableDelivery != nil && x.clusterEnabled.Load() {
-		return nil, errors.New("reliable delivery endpoints are not supported in cluster mode yet")
+	// reliable endpoints and their controllers stay on their spawn node until
+	// relocation reconstruction lands: a relocated record would silently lose
+	// its delivery machinery today, so relocation is disabled instead
+	if spawnConfig.reliableDelivery != nil || spawnConfig.reliableCompanion != nil {
+		spawnConfig.relocatable = false
 	}
 
 	if !spawnConfig.isSystem {

@@ -2352,6 +2352,60 @@ func TestNextRoundRobinValueReturnsErrorForInvalidKey(t *testing.T) {
 	require.EqualError(t, err, "invalid round-robin key: invalid-key")
 }
 
+func TestPutActorIfAbsent(t *testing.T) {
+	record := &internalpb.Actor{Address: address.New("endpoint", "testSystem", "127.0.0.1", 9000).String()}
+
+	t.Run("With an absent record", func(t *testing.T) {
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap: &MockDMap{
+				putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error { // nolint
+					require.Equal(t, composeKey(namespaceActors, "endpoint"), key)
+					// the write must carry the NX option that makes it conditional
+					require.Len(t, options, 1)
+					return nil
+				},
+			},
+		}
+
+		require.NoError(t, cl.PutActorIfAbsent(context.Background(), record))
+	})
+
+	t.Run("With an existing record", func(t *testing.T) {
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap:         &MockDMap{putErr: olric.ErrKeyFound},
+		}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
+	})
+
+	t.Run("With a backend failure", func(t *testing.T) {
+		putErr := errors.New("put failure")
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap:         &MockDMap{putErr: putErr},
+		}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("With the engine not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+	})
+}
+
 func TestGetActorReturnsDMapError(t *testing.T) {
 	expectedErr := errors.New("get failure")
 	cl := &cluster{

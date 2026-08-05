@@ -328,10 +328,14 @@ func (x *consumerController) handleTerminated(ctx *ReceiveContext, msg *Terminat
 }
 
 // register resolves the producer endpoint's current controller and sends a
-// RegisterConsumer with a fresh nonce. Failures are tolerated; the next tick
-// retries.
+// RegisterConsumer with a fresh nonce. The lookup is bounded by
+// DefaultRegistrationLookupTimeout so a slow cluster registry cannot stall
+// this mailbox. Failures are tolerated; the next tick retries.
 func (x *consumerController) register(ctx *ReceiveContext) {
-	pc, err := ctx.ActorSystem().resolveReliableCompanion(x.producerName, ReliableControllerRoleProducer)
+	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
+	defer cancel()
+
+	pc, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.producerName, ReliableControllerRoleProducer)
 	if err != nil {
 		ctx.Logger().Debugf("consumer controller for endpoint=%s cannot resolve producer=%s: %v", x.consumer.Name(), x.producerName, err)
 		return

@@ -75,6 +75,8 @@ message Actor {
   string incarnation_id = 12;
   // Specifies the reliable-delivery configuration when explicitly set
   ReliableDeliveryConfig reliable_delivery = 13;
+  // Marks an endpoint-owned reliable-delivery controller record
+  ReliableCompanionSpec reliable_companion = 14;
 }
 
 message SingletonSpec {

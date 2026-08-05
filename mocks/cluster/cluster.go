@@ -1343,6 +1343,63 @@ func (_c *Cluster_PutActor_Call) RunAndReturn(run func(ctx context.Context, acto
 	return _c
 }
 
+// PutActorIfAbsent provides a mock function for the type Cluster
+func (_mock *Cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error {
+	ret := _mock.Called(ctx, actor)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PutActorIfAbsent")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *internalpb.Actor) error); ok {
+		r0 = returnFunc(ctx, actor)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Cluster_PutActorIfAbsent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutActorIfAbsent'
+type Cluster_PutActorIfAbsent_Call struct {
+	*mock.Call
+}
+
+// PutActorIfAbsent is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actor *internalpb.Actor
+func (_e *Cluster_Expecter) PutActorIfAbsent(ctx any, actor any) *Cluster_PutActorIfAbsent_Call {
+	return &Cluster_PutActorIfAbsent_Call{Call: _e.mock.On("PutActorIfAbsent", ctx, actor)}
+}
+
+func (_c *Cluster_PutActorIfAbsent_Call) Run(run func(ctx context.Context, actor *internalpb.Actor)) *Cluster_PutActorIfAbsent_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *internalpb.Actor
+		if args[1] != nil {
+			arg1 = args[1].(*internalpb.Actor)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_PutActorIfAbsent_Call) Return(err error) *Cluster_PutActorIfAbsent_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Cluster_PutActorIfAbsent_Call) RunAndReturn(run func(ctx context.Context, actor *internalpb.Actor) error) *Cluster_PutActorIfAbsent_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PutGrain provides a mock function for the type Cluster
 func (_mock *Cluster) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	ret := _mock.Called(ctx, grain)

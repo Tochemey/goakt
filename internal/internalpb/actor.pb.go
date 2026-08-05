@@ -347,8 +347,10 @@ type Actor struct {
 	IncarnationId string `protobuf:"bytes,12,opt,name=incarnation_id,json=incarnationId,proto3" json:"incarnation_id,omitempty"`
 	// Specifies the reliable-delivery configuration when explicitly set
 	ReliableDelivery *ReliableDeliveryConfig `protobuf:"bytes,13,opt,name=reliable_delivery,json=reliableDelivery,proto3" json:"reliable_delivery,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Marks an endpoint-owned reliable-delivery controller record
+	ReliableCompanion *ReliableCompanionSpec `protobuf:"bytes,14,opt,name=reliable_companion,json=reliableCompanion,proto3" json:"reliable_companion,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -472,6 +474,13 @@ func (x *Actor) GetReliableDelivery() *ReliableDeliveryConfig {
 	return nil
 }
 
+func (x *Actor) GetReliableCompanion() *ReliableCompanionSpec {
+	if x != nil {
+		return x.ReliableCompanion
+	}
+	return nil
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -554,7 +563,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\x95\x05\n" +
+	"\x14_any_error_directive\"\xe7\x05\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -573,7 +582,8 @@ const file_internal_actor_proto_rawDesc = "" +
 	"reentrancy\x12<\n" +
 	"\finit_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12%\n" +
 	"\x0eincarnation_id\x18\f \x01(\tR\rincarnationId\x12O\n" +
-	"\x11reliable_delivery\x18\r \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDeliveryB\a\n" +
+	"\x11reliable_delivery\x18\r \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDelivery\x12P\n" +
+	"\x12reliable_companion\x18\x0e \x01(\v2!.internalpb.ReliableCompanionSpecR\x11reliableCompanionB\a\n" +
 	"\x05_role\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
@@ -628,6 +638,7 @@ var file_internal_actor_proto_goTypes = []any{
 	(*Dependency)(nil),              // 9: internalpb.Dependency
 	(*ReentrancyConfig)(nil),        // 10: internalpb.ReentrancyConfig
 	(*ReliableDeliveryConfig)(nil),  // 11: internalpb.ReliableDeliveryConfig
+	(*ReliableCompanionSpec)(nil),   // 12: internalpb.ReliableCompanionSpec
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
@@ -642,13 +653,14 @@ var file_internal_actor_proto_depIdxs = []int32{
 	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
 	7,  // 10: internalpb.Actor.init_timeout:type_name -> google.protobuf.Duration
 	11, // 11: internalpb.Actor.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
-	7,  // 12: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	7,  // 13: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	12, // 12: internalpb.Actor.reliable_companion:type_name -> internalpb.ReliableCompanionSpec
+	7,  // 13: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	7,  // 14: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
