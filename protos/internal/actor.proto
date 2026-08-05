@@ -3,6 +3,7 @@ syntax = "proto3";
 package internalpb;
 
 import "google/protobuf/duration.proto";
+import "internal/delivery.proto";
 import "internal/dependency.proto";
 import "internal/passivation.proto";
 import "internal/reentrancy.proto";
@@ -70,6 +71,10 @@ message Actor {
   // Specifies the init timeout override when explicitly set.
   // When unset, the hosting node's system-wide init timeout is used.
   google.protobuf.Duration init_timeout = 11;
+  // Identifies this actor incarnation
+  string incarnation_id = 12;
+  // Specifies the reliable-delivery configuration when explicitly set
+  ReliableDeliveryConfig reliable_delivery = 13;
 }
 
 message SingletonSpec {

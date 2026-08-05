@@ -23,34 +23,36 @@
 package types
 
 import (
-	"reflect"
-	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-// Unit type
-type Unit struct{}
-
-// EmptyString is a constant representing an empty string.
-const EmptyString = ""
-
-// IsBlank reports whether value contains no non-whitespace characters.
-func IsBlank(value string) bool {
-	return strings.TrimSpace(value) == ""
+// TestIsBlank verifies whitespace-only string detection.
+func TestIsBlank(t *testing.T) {
+	assert.True(t, IsBlank(""))
+	assert.True(t, IsBlank(" \t\n"))
+	assert.False(t, IsBlank(" value "))
 }
 
-// IsNil reports whether value is nil, including a typed nil held in an
-// interface.
-func IsNil(value any) bool {
-	if value == nil {
-		return true
-	}
+// TestIsNil verifies nil interfaces and typed nil values.
+func TestIsNil(t *testing.T) {
+	var pointer *int
+	var channel chan int
+	var function func()
+	var mapping map[string]int
+	var slice []int
 
-	reflected := reflect.ValueOf(value)
-
-	switch reflected.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return reflected.IsNil()
-	default:
-		return false
-	}
+	assert.True(t, IsNil(nil))
+	assert.True(t, IsNil(pointer))
+	assert.True(t, IsNil(channel))
+	assert.True(t, IsNil(function))
+	assert.True(t, IsNil(mapping))
+	assert.True(t, IsNil(slice))
+	assert.False(t, IsNil(0))
+	assert.False(t, IsNil(new(int)))
+	assert.False(t, IsNil(make(chan int)))
+	assert.False(t, IsNil(func() {}))
+	assert.False(t, IsNil(map[string]int{}))
+	assert.False(t, IsNil([]int{}))
 }

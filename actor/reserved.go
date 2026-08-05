@@ -47,8 +47,10 @@ const (
 	// eventsTopic defines the events topic
 	eventsTopic = "topic.events"
 
-	reservedNamesPrefix = "GoAkt"
-	routeeNamePrefix    = "Routee"
+	reservedNamesPrefix                  = "GoAkt"
+	routeeNamePrefix                     = "Routee"
+	reliableProducerControllerNamePrefix = "GoAktReliableProducerController-"
+	reliableConsumerControllerNamePrefix = "GoAktReliableConsumerController-"
 )
 
 var (
@@ -70,4 +72,11 @@ var (
 
 func isSystemName(name string) bool {
 	return strings.HasPrefix(name, reservedNamesPrefix)
+}
+
+// isReliableDeliveryControllerName reports whether name belongs to one of the
+// reserved reliable-delivery controller namespaces.
+func isReliableDeliveryControllerName(name string) bool {
+	return strings.HasPrefix(name, reliableProducerControllerNamePrefix) ||
+		strings.HasPrefix(name, reliableConsumerControllerNamePrefix)
 }

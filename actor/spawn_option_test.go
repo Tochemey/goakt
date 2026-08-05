@@ -295,3 +295,47 @@ func TestSpawnConfigClone(t *testing.T) {
 		require.Equal(t, original, cloned)
 	})
 }
+
+func TestSpawnConfigReliableDeliveryValidation(t *testing.T) {
+	t.Run("With long-lived passivation", func(t *testing.T) {
+		config := newSpawnConfig(
+			asReliableEndpoint(producerDeliveryConfig("consumer")),
+			WithPassivationStrategy(passivation.NewLongLivedStrategy()),
+		)
+		require.NoError(t, config.Validate())
+	})
+
+	t.Run("With unset passivation", func(t *testing.T) {
+		config := newSpawnConfig(asReliableEndpoint(consumerDeliveryConfig("producer")))
+		require.NoError(t, config.Validate())
+	})
+
+	t.Run("With time-based passivation", func(t *testing.T) {
+		config := newSpawnConfig(
+			asReliableEndpoint(producerDeliveryConfig("consumer")),
+			WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Minute)),
+		)
+		require.ErrorIs(t, config.Validate(), errors.ErrInvalidPassivationStrategy)
+	})
+
+	t.Run("With messages-count passivation", func(t *testing.T) {
+		config := newSpawnConfig(
+			asReliableEndpoint(producerDeliveryConfig("consumer")),
+			WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(10)),
+		)
+		require.ErrorIs(t, config.Validate(), errors.ErrInvalidPassivationStrategy)
+	})
+
+	t.Run("With invalid delivery configuration", func(t *testing.T) {
+		config := newSpawnConfig(asReliableEndpoint(producerDeliveryConfig("")))
+		require.Error(t, config.Validate())
+	})
+
+	t.Run("With invalid delivery configuration at spawn", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		pid, err := system.Spawn(ctx, "endpoint", NewMockActor(), asReliableEndpoint(producerDeliveryConfig("")))
+		require.Error(t, err)
+		require.Nil(t, pid)
+	})
+}

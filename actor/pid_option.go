@@ -39,6 +39,21 @@ import (
 // pidOption represents the pid
 type pidOption func(pid *PID)
 
+// withReliableDelivery records immutable reliable-delivery settings.
+func withReliableDelivery(config *reliableDeliveryConfig) pidOption {
+	return func(pid *PID) {
+		pid.reliableDelivery = config.clone()
+	}
+}
+
+// withReliableCompanion marks the PID as the endpoint-owned reliable-delivery
+// controller described by spec.
+func withReliableCompanion(spec *reliableCompanionSpec) pidOption {
+	return func(pid *PID) {
+		pid.reliableCompanion = spec
+	}
+}
+
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(value int) pidOption {
 	return func(pid *PID) {

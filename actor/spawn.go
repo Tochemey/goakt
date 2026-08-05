@@ -127,7 +127,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return newRemotePID(address, x.remoting), nil
 	}
 
-	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
 		// check some preconditions
 		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 			return nil, err
@@ -175,7 +175,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 	config := newFuncConfig(opts...)
 	actor := newFuncActor(name, receiveFunc, config)
 
-	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
 		// check some preconditions
 		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 			return nil, err
@@ -814,7 +814,7 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		singletonSupervisor = defaultSingletonSupervisor()
 	}
 
-	return x.runSpawnActivation(ctx, x.actorAddress(name).String(), func() (*PID, error) {
+	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
 		// check some preconditions
 		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
 			return nil, err

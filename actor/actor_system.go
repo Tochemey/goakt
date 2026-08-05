@@ -862,6 +862,10 @@ type ActorSystem interface {
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
 	getRemoting() remoteclient.Client
+	// resolveReliableCompanion returns the live reliable-delivery controller
+	// bound to the named endpoint's current incarnation using local-first
+	// resolution.
+	resolveReliableCompanion(endpointName string, role ReliableControllerRole) (*PID, error)
 	getGrains() *xsync.Map[string, *grainPID]
 	// routeAsyncReply delivers a response to whoever awaits the given correlation
 	// ID, using the reply target carried on the originating request.
@@ -1923,7 +1927,7 @@ func (x *actorSystem) Actors(ctx context.Context, timeout time.Duration) ([]*PID
 		}
 
 		for _, actor := range actors {
-			addr, err := address.Parse(actor.GetAddress())
+			addr, err := addressFromActor(actor)
 			if err != nil {
 				continue
 			}
@@ -2006,7 +2010,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 		remoting := x.remoting
 		x.locker.RUnlock()
 
-		addr, err := address.Parse(actor.GetAddress())
+		addr, err := addressFromActor(actor)
 		if err != nil {
 			return nil, err
 		}
@@ -2783,8 +2787,10 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 	return nil
 }
 
-// setupRemoting sets the remoting service
+// setupRemoting creates the remoting client with transport settings, built-in
+// protocol serializers, and user-defined serializers.
 func (x *actorSystem) setupRemoting() error {
+	deliverySerializer := new(commands.DeliverySerializer)
 	opts := []remoteclient.ClientOption{
 		// set the compression algorithm to use by the remoting client
 		remoteclient.WithClientCompression(x.remoteConfig.Compression()),
@@ -2802,6 +2808,11 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientSerializers(new(Terminated), &terminatedSerializer{}),
 		remoteclient.WithClientSerializers(new(commands.AsyncRequest), &commands.AsyncRequestSerializer{}),
 		remoteclient.WithClientSerializers(new(commands.AsyncResponse), &commands.AsyncResponseSerializer{}),
+		remoteclient.WithClientSerializers(new(commands.RegisterConsumer), deliverySerializer),
+		remoteclient.WithClientSerializers(new(commands.RegistrationAck), deliverySerializer),
+		remoteclient.WithClientSerializers(new(commands.Request), deliverySerializer),
+		remoteclient.WithClientSerializers(new(commands.Ack), deliverySerializer),
+		remoteclient.WithClientSerializers(new(commands.SequencedMessage), deliverySerializer),
 		// set the dependency registry for the remoting client
 		remoteclient.WithDependencyRegistry(x.registry),
 	}
@@ -3802,9 +3813,25 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDependencies(spawnConfig.dependencies...))
 	}
 
+	// set the reliable-delivery endpoint settings when defined
+	if spawnConfig.reliableDelivery != nil {
+		pidOpts = append(pidOpts, withReliableDelivery(spawnConfig.reliableDelivery))
+	}
+
+	// mark the actor as an endpoint-owned reliable-delivery controller when defined
+	if spawnConfig.reliableCompanion != nil {
+		pidOpts = append(pidOpts, withReliableCompanion(spawnConfig.reliableCompanion))
+	}
+
 	strategy := spawnConfig.passivationStrategy
 	if strategy == nil {
-		strategy = x.defaultPassivationStrategy
+		// reliable endpoints and their controllers must not passivate: the
+		// delivery session dies with the actor
+		if spawnConfig.reliableDelivery != nil || spawnConfig.reliableCompanion != nil {
+			strategy = passivation.NewLongLivedStrategy()
+		} else {
+			strategy = x.defaultPassivationStrategy
+		}
 	}
 	pidOpts = append(pidOpts, withPassivationStrategy(strategy))
 
@@ -3871,9 +3898,17 @@ func (x *actorSystem) clusterReadTimeout(fallback time.Duration) time.Duration {
 	return fallback
 }
 
-// actorAddress returns the actor path provided the actor name
+// actorAddress returns the actor address provided the actor name. It mints a
+// fresh incarnation identity: use it only when creating the actor, and
+// actorReference everywhere else.
 func (x *actorSystem) actorAddress(name string) *address.Address {
 	return address.New(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
+}
+
+// actorReference returns the address of the named actor without minting an
+// incarnation identity, for lookup keys and references.
+func (x *actorSystem) actorReference(name string) *address.Address {
+	return address.NewReference(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 }
 
 // spawnRootGuardian creates the rootGuardian guardian

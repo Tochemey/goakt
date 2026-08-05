@@ -210,6 +210,13 @@ type PID struct {
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
 
+	// reliableDelivery contains the endpoint's reliable-delivery settings.
+	reliableDelivery *reliableDeliveryConfig
+
+	// reliableCompanion marks an endpoint-owned reliable-delivery controller
+	// and pins it to its endpoint incarnation. It is nil for ordinary actors.
+	reliableCompanion *reliableCompanionSpec
+
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
 	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
@@ -457,6 +464,14 @@ func (pid *PID) Uptime() int64 {
 func (pid *PID) ID() string {
 	if path := pid.Path(); path != nil {
 		return path.String()
+	}
+	return ""
+}
+
+// IncarnationID returns the identifier of this actor incarnation.
+func (pid *PID) IncarnationID() string {
+	if path := pid.Path(); path != nil {
+		return path.IncarnationID()
 	}
 	return ""
 }
@@ -3264,6 +3279,8 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		Supervisor:          supervisorSpec,
 		Reentrancy:          reentrancy,
 		InitTimeout:         initTimeout,
+		IncarnationId:       pid.IncarnationID(),
+		ReliableDelivery:    pid.reliableDelivery.toProto(),
 	}, nil
 }
 

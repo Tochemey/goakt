@@ -138,6 +138,21 @@ var (
 	// ErrInvalidMessage indicates that a message is structurally or semantically invalid.
 	ErrInvalidMessage = errors.New("invalid message")
 
+	// ErrQueueFenced indicates that a durable producer queue rejected a stale writer.
+	ErrQueueFenced = errors.New("durable producer queue writer is fenced")
+
+	// ErrQueueConflict indicates that a durable producer queue operation conflicts with its current state.
+	ErrQueueConflict = errors.New("durable producer queue state conflict")
+
+	// ErrReliableStore indicates that reliable delivery could not store a message.
+	ErrReliableStore = errors.New("reliable delivery store failed")
+
+	// ErrReliableAccept indicates that reliable delivery could not record producer acceptance.
+	ErrReliableAccept = errors.New("reliable delivery acceptance failed")
+
+	// ErrReliableConfirm indicates that reliable delivery could not persist a confirmation.
+	ErrReliableConfirm = errors.New("reliable delivery confirmation failed")
+
 	// ErrInvalidTimeout is returned when a timeout value is less than or equal to zero.
 	ErrInvalidTimeout = errors.New("invalid timeout")
 

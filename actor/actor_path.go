@@ -31,6 +31,8 @@ type Path interface {
 	Host() string
 	// HostPort returns the host:port combination as a string.
 	HostPort() string
+	// IncarnationID returns the identifier of this actor incarnation.
+	IncarnationID() string
 	// Port returns the port number of the actor system node where the actor resides.
 	Port() int
 	// Name returns the name of the actor.
@@ -50,6 +52,7 @@ type path struct {
 	port           int
 	name           string
 	system         string
+	incarnationID  string
 	parent         Path
 	cachedStr      string
 	cachedHostPort string
@@ -74,6 +77,13 @@ func (x *path) HostPort() string {
 		return ""
 	}
 	return x.cachedHostPort
+}
+
+func (x *path) IncarnationID() string {
+	if x == nil {
+		return ""
+	}
+	return x.incarnationID
 }
 
 func (x *path) Name() string {
@@ -124,6 +134,7 @@ func newPath(addr *address.Address) Path {
 		port:           addr.Port(),
 		name:           addr.Name(),
 		system:         addr.System(),
+		incarnationID:  addr.IncarnationID(),
 		parent:         parent,
 		cachedStr:      addr.String(),
 		cachedHostPort: addr.HostPort(),
@@ -140,12 +151,20 @@ func pathString(path Path) string {
 }
 
 // pathToAddress converts a Path to *address.Address for use with APIs that require it
-// (e.g., RemoteTell, RemoteAsk). Returns address.NoSender() when p is nil or when
+// (e.g., RemoteTell, RemoteAsk). The path's incarnation identifier is restored on
+// the address when present. Returns address.NoSender() when p is nil or when
 // parsing the path string fails.
 func pathToAddress(path Path) *address.Address {
 	if path == nil {
 		return address.NoSender()
 	}
+
+	if incarnationID := path.IncarnationID(); incarnationID != "" {
+		if addr, err := address.ParseWithIncarnationID(path.String(), incarnationID); err == nil {
+			return addr
+		}
+	}
+
 	addr, err := address.Parse(path.String())
 	if err != nil {
 		return address.NoSender()

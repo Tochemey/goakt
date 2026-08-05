@@ -47,6 +47,7 @@ func TestNewPath(t *testing.T) {
 		assert.Equal(t, 9000, p.Port())
 		assert.Equal(t, "actor1", p.Name())
 		assert.Equal(t, "system1", p.System())
+		assert.Equal(t, addr.IncarnationID(), p.IncarnationID())
 		assert.Nil(t, p.Parent())
 		assert.Equal(t, addr.String(), p.String())
 	})
@@ -170,6 +171,7 @@ func TestPathToAddress(t *testing.T) {
 		addr := pathToAddress(p)
 		require.NotNil(t, addr)
 		assert.True(t, addr.Equals(orig))
+		assert.True(t, addr.SameIncarnation(orig))
 	})
 
 	t.Run("invalid path string returns NoSender", func(t *testing.T) {
@@ -186,6 +188,7 @@ type mockPathForTest struct{ s string }
 
 func (m *mockPathForTest) Host() string           { return "" }
 func (m *mockPathForTest) HostPort() string       { return "" }
+func (m *mockPathForTest) IncarnationID() string  { return "" }
 func (m *mockPathForTest) Port() int              { return 0 }
 func (m *mockPathForTest) Name() string           { return "" }
 func (m *mockPathForTest) Parent() Path           { return nil }

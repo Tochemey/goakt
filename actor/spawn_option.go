@@ -119,6 +119,12 @@ type spawnConfig struct {
 	// initTimeout overrides the actor system's init timeout for this actor.
 	// A nil value means the system-wide init timeout is used.
 	initTimeout *time.Duration
+	// reliableDelivery holds the endpoint's reliable-delivery settings when
+	// the actor is spawned as a reliable producer or consumer endpoint.
+	reliableDelivery *reliableDeliveryConfig
+	// reliableCompanion marks the actor as the endpoint-owned
+	// reliable-delivery controller described by the spec.
+	reliableCompanion *reliableCompanionSpec
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -138,6 +144,21 @@ func (s *spawnConfig) Validate() error {
 
 	if s.reentrancy != nil && s.reentrancy.Validate() != nil {
 		return errors.ErrInvalidReentrancyMode
+	}
+
+	if s.reliableDelivery != nil {
+		if err := s.reliableDelivery.Validate(); err != nil {
+			return err
+		}
+
+		// a reliable endpoint must stay alive to keep its controller session;
+		// only the never-passivate strategy (or the long-lived default applied
+		// at spawn) is allowed
+		switch s.passivationStrategy.(type) {
+		case nil, *passivation.LongLivedStrategy:
+		default:
+			return errors.NewErrInvalidPassivationStrategy(s.passivationStrategy)
+		}
 	}
 
 	for _, dependency := range s.dependencies {
@@ -209,6 +230,8 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		passivationStrategy: s.passivationStrategy,
 		reentrancy:          s.reentrancy,
 		dataCenter:          s.dataCenter,
+		reliableDelivery:    s.reliableDelivery,
+		reliableCompanion:   s.reliableCompanion,
 	}
 
 	if len(s.dependencies) > 0 {
@@ -546,5 +569,28 @@ func withSingleton(spec *singletonSpec) SpawnOption {
 func asSystem() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.isSystem = true
+	})
+}
+
+// asReliableEndpoint records the endpoint's reliable-delivery settings. The
+// public AsReliableProducer and AsReliableConsumer options build on it.
+//
+// Returns:
+//   - SpawnOption that stores the reliable-delivery configuration.
+func asReliableEndpoint(config *reliableDeliveryConfig) SpawnOption {
+	return spawnOption(func(cfg *spawnConfig) {
+		cfg.reliableDelivery = config
+	})
+}
+
+// asReliableCompanion marks the spawned actor as the endpoint-owned
+// reliable-delivery controller described by spec. Only the companion spawn
+// machinery uses it.
+//
+// Returns:
+//   - SpawnOption that stores the runtime-companion metadata.
+func asReliableCompanion(spec *reliableCompanionSpec) SpawnOption {
+	return spawnOption(func(cfg *spawnConfig) {
+		cfg.reliableCompanion = spec
 	})
 }
