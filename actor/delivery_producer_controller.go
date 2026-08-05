@@ -155,8 +155,6 @@ type producerController struct {
 	failed bool
 	// generation fences the recurring timer across restarts.
 	generation uint64
-	// scheduleRef cancels the recurring timer in PostStop.
-	scheduleRef string
 }
 
 // enforce the Actor contract
@@ -232,14 +230,11 @@ func (x *producerController) PreStart(ctx *Context) error {
 	return nil
 }
 
-// PostStop cancels the recurring timer of this incarnation.
+// PostStop cancels the recurring timer of this incarnation through its
+// derived reference, so no state shared with PostStart is read here.
 func (x *producerController) PostStop(ctx *Context) error {
-	if x.scheduleRef != types.EmptyString {
-		if err := ctx.ActorSystem().CancelSchedule(x.scheduleRef); err != nil {
-			ctx.ActorSystem().Logger().Debugf("producer controller for endpoint=%s failed to cancel tick: %v", x.producer.Name(), err)
-		}
-
-		x.scheduleRef = types.EmptyString
+	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation)); err != nil {
+		ctx.ActorSystem().Logger().Debugf("producer controller for endpoint=%s failed to cancel tick: %v", x.producer.Name(), err)
 	}
 
 	return nil
@@ -277,7 +272,7 @@ func (x *producerController) Receive(ctx *ReceiveContext) {
 func (x *producerController) handlePostStart(ctx *ReceiveContext) {
 	ctx.Watch(x.producer)
 
-	reference := uuid.NewString()
+	reference := reliableTickReference(ctx.Self().Name(), x.generation)
 	tick := &producerControllerTick{generation: x.generation}
 
 	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.localRetryInterval, WithReference(reference)); err != nil {
@@ -286,8 +281,6 @@ func (x *producerController) handlePostStart(ctx *ReceiveContext) {
 		ctx.Err(err)
 		return
 	}
-
-	x.scheduleRef = reference
 }
 
 // handleRegisterConsumer fences registration to the consumer endpoint's
@@ -414,11 +407,18 @@ func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produ
 		return
 	}
 
-	frame, err := ctx.ActorSystem().getRemoting().Serializer(produced.Payload()).Serialize(produced.Payload())
+	// encoding is deterministic, so a missing serializer or an encode error
+	// is an unregistered payload type: a producer contract violation that
+	// neither retry nor restart can fix, and letting the retry loop spin
+	// would stall the flow silently
+	serializer := ctx.ActorSystem().getRemoting().Serializer(produced.Payload())
+	if serializer == nil {
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("no serializer is registered for message=%s payload type %T", produced.MessageID(), produced.Payload()))
+		return
+	}
+
+	frame, err := serializer.Serialize(produced.Payload())
 	if err != nil {
-		// encoding is deterministic, so this is an unregistered payload type:
-		// a producer contract violation that neither retry nor restart can
-		// fix, and letting the retry loop spin would stall the flow silently
 		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to encode message=%s: %w", produced.MessageID(), err))
 		return
 	}

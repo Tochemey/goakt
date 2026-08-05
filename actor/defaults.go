@@ -79,6 +79,23 @@ const (
 	// trivial memory cost (at most 256 pointers plus their payloads queued
 	// per destination during a burst).
 	remoteSendCoalescingMaxBatch = 256
+
+	// DefaultFlowControlWindow is the demand granted per consumer request and
+	// the consumer controller's receive buffer capacity when
+	// WithFlowControlWindow is not used.
+	DefaultFlowControlWindow = 50
+	// DefaultResendInterval is the consumer controller's registration, demand,
+	// and delivery retry cadence when WithResendInterval is not used.
+	DefaultResendInterval = 2 * time.Second
+	// DefaultLocalRetryInterval is the producer controller's RequestNext and
+	// Stored retry cadence when WithLocalRetryInterval is not used.
+	DefaultLocalRetryInterval = 500 * time.Millisecond
+	// DefaultQueueRetryAttempts bounds each durable queue operation's attempts
+	// when WithQueueRetry is not used.
+	DefaultQueueRetryAttempts = 3
+	// DefaultQueueRetryBackoff is the delay before a durable queue operation
+	// retry when WithQueueRetry is not used.
+	DefaultQueueRetryBackoff = 100 * time.Millisecond
 )
 
 var (

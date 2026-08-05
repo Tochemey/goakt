@@ -217,6 +217,11 @@ type PID struct {
 	// and pins it to its endpoint incarnation. It is nil for ordinary actors.
 	reliableCompanion *reliableCompanionSpec
 
+	// durableQueue is the producer endpoint's durable queue instance, retained
+	// so ReSpawn can recreate a terminally stopped producer controller with its
+	// storage. It is nil for consumers and volatile producers.
+	durableQueue DurableProducerQueue
+
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
 	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
@@ -1522,9 +1527,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		return pid.remoting.RemoteStop(ctx, pid.Path().Host(), pid.Path().Port(), pid.Name())
 	}
 
-	// we should never shutdown system actors unless the whole system is terminating
+	// we should never shutdown system actors unless the whole system is
+	// terminating. Endpoint-owned reliable-delivery controllers are the one
+	// exception: their reserved identity hides them from every public API, yet
+	// spawn rollback, endpoint subtree shutdown, and their own terminal
+	// self-stop must all be able to stop them while the system keeps running.
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
-		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
+		if !actoryStem.isStopping() && isSystemName(pid.Name()) && pid.reliableCompanion == nil {
 			pid.logger.Warnf("attempt to shutdown system actor=%s", pid.Name())
 			return gerrors.ErrShutdownForbidden
 		}

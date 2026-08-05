@@ -1853,6 +1853,17 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", pid.ID(), err)
 		}
+
+		// a reliable endpoint needs its controller companion back: a live one
+		// was restarted with the subtree and is left untouched, while one that
+		// stopped terminally is recreated here, which is the supported
+		// recovery path after correcting a terminal delivery failure
+		if pid.reliableDelivery != nil {
+			if err := x.ensureReliableCompanion(ctx, pid); err != nil {
+				return nil, err
+			}
+		}
+
 		return pid, nil
 	}
 
@@ -2560,16 +2571,31 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 	x.actors.addWatcher(pid, x.deathWatch)
 
 	if err := x.putActorOnCluster(ctx, pid); err != nil {
-		// the rollback must run even when the publication failed because ctx
-		// was canceled or timed out
-		if serr := pid.Shutdown(context.WithoutCancel(ctx)); serr != nil {
-			x.logger.Errorf("failed to stop actor=%s after failed cluster publication: %v (hint: check actor PostStop)", pid.Name(), serr)
-		}
-
+		x.rollbackSpawn(ctx, pid, "failed cluster publication")
 		return nil, err
 	}
 
+	// a reliable endpoint is only functional with its controller companion:
+	// create it under the endpoint, and roll the endpoint back when the
+	// controller cannot start so a failed spawn leaves nothing behind
+	if pid.reliableDelivery != nil {
+		if err := x.ensureReliableCompanion(ctx, pid); err != nil {
+			x.rollbackSpawn(ctx, pid, "failed reliable controller creation")
+			return nil, err
+		}
+	}
+
 	return pid, nil
+}
+
+// rollbackSpawn stops a partially spawned actor so a failed spawn leaves
+// nothing behind. It runs even when the failure was a canceled or timed-out
+// ctx, and a stop failure is only logged because the spawn error being rolled
+// back is the one the caller must see.
+func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string) {
+	if err := pid.Shutdown(context.WithoutCancel(ctx)); err != nil {
+		x.logger.Errorf("failed to stop actor=%s after %s: %v (hint: check actor PostStop)", pid.Name(), reason, err)
+	}
 }
 
 // putActorOnCluster synchronously writes the actor's registry record to the
@@ -3733,6 +3759,13 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		return nil, err
 	}
 
+	// reliable delivery is single-node until companion publication and
+	// relocation reconstruction land: fail fast instead of spawning an
+	// endpoint whose controller could not be resolved or moved across nodes
+	if spawnConfig.reliableDelivery != nil && x.clusterEnabled.Load() {
+		return nil, errors.New("reliable delivery endpoints are not supported in cluster mode yet")
+	}
+
 	if !spawnConfig.isSystem {
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
@@ -3816,6 +3849,11 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// set the reliable-delivery endpoint settings when defined
 	if spawnConfig.reliableDelivery != nil {
 		pidOpts = append(pidOpts, withReliableDelivery(spawnConfig.reliableDelivery))
+	}
+
+	// retain the durable queue instance for controller creation and recovery
+	if spawnConfig.durableQueue != nil {
+		pidOpts = append(pidOpts, withDurableQueue(spawnConfig.durableQueue))
 	}
 
 	// mark the actor as an endpoint-owned reliable-delivery controller when defined

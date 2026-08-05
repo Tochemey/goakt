@@ -125,6 +125,10 @@ type spawnConfig struct {
 	// reliableCompanion marks the actor as the endpoint-owned
 	// reliable-delivery controller described by the spec.
 	reliableCompanion *reliableCompanionSpec
+	// durableQueue is the producer endpoint's durable queue instance; it
+	// travels by reference to the controller companion and is referenced by
+	// ID in the wire configuration.
+	durableQueue DurableProducerQueue
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -232,6 +236,7 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		dataCenter:          s.dataCenter,
 		reliableDelivery:    s.reliableDelivery,
 		reliableCompanion:   s.reliableCompanion,
+		durableQueue:        s.durableQueue,
 	}
 
 	if len(s.dependencies) > 0 {

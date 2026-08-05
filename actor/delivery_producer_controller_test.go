@@ -51,6 +51,7 @@ type mockDurableQueue struct {
 	loads        int
 	operations   []string
 	storeErr     error
+	loadErr      error
 }
 
 func (x *mockDurableQueue) ID() string                     { return "mockDurableQueue" }
@@ -62,6 +63,11 @@ func (x *mockDurableQueue) Load(context.Context) (DurableQueueState, QueueEpoch,
 	defer x.mu.Unlock()
 
 	x.loads++
+
+	if x.loadErr != nil {
+		return DurableQueueState{}, 0, x.loadErr
+	}
+
 	x.epoch++
 
 	state, err := NewDurableQueueState(x.currentSeq, x.confirmedSeq, x.stored)
@@ -582,6 +588,36 @@ func TestProducerControllerTerminalFailures(t *testing.T) {
 
 		failure := waitFailure(t, subscriber)
 		assert.Equal(t, ReliableDeliveryStageProtocol, failure.Stage())
+
+		require.Eventually(t, func() bool {
+			return !harness.pc.IsRunning()
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("With unregistered payload type", func(t *testing.T) {
+		harness := newProducerControllerHarness(t, nil)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromCC(t, request)
+
+		// a payload type without a registered serializer cannot be encoded:
+		// encoding is deterministic, so the controller must fail terminally
+		// instead of panicking or spinning the retry loop
+		credit := harness.latestRequestNext(t)
+		produced, err := NewProduced(credit, "m-1", struct{ ID string }{ID: "m-1"})
+		require.NoError(t, err)
+		harness.fromProducer(t, produced)
+
+		failure := waitFailure(t, subscriber)
+		assert.Equal(t, ReliableControllerRoleProducer, failure.ControllerRole())
+		assert.Equal(t, ReliableDeliveryStageProtocol, failure.Stage())
+		assert.ErrorContains(t, failure.Err(), "no serializer is registered")
 
 		require.Eventually(t, func() bool {
 			return !harness.pc.IsRunning()

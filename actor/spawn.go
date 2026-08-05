@@ -102,6 +102,12 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nil, gerrors.ErrRemotingDisabled
 		}
 
+		// the remote spawn request cannot carry reliable-delivery settings
+		// yet: reject instead of silently spawning an unreliable endpoint
+		if config.reliableDelivery != nil {
+			return nil, errors.New("reliable delivery endpoints cannot be spawned on a remote node yet")
+		}
+
 		// we are spawning the actor on a remote node
 		addr, err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
 			Name:                name,

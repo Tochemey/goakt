@@ -92,8 +92,6 @@ type consumerController struct {
 	failed bool
 	// generation fences the recurring timer across restarts.
 	generation uint64
-	// scheduleRef cancels the recurring timer in PostStop.
-	scheduleRef string
 }
 
 // enforce the Actor contract
@@ -144,14 +142,11 @@ func (x *consumerController) PreStart(*Context) error {
 	return nil
 }
 
-// PostStop cancels the recurring timer of this incarnation.
+// PostStop cancels the recurring timer of this incarnation through its
+// derived reference, so no state shared with PostStart is read here.
 func (x *consumerController) PostStop(ctx *Context) error {
-	if x.scheduleRef != types.EmptyString {
-		if err := ctx.ActorSystem().CancelSchedule(x.scheduleRef); err != nil {
-			ctx.ActorSystem().Logger().Debugf("consumer controller for endpoint=%s failed to cancel tick: %v", x.consumer.Name(), err)
-		}
-
-		x.scheduleRef = types.EmptyString
+	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation)); err != nil {
+		ctx.ActorSystem().Logger().Debugf("consumer controller for endpoint=%s failed to cancel tick: %v", x.consumer.Name(), err)
 	}
 
 	return nil
@@ -184,7 +179,7 @@ func (x *consumerController) handlePostStart(ctx *ReceiveContext) {
 	ctx.Watch(x.consumer)
 	x.register(ctx)
 
-	reference := uuid.NewString()
+	reference := reliableTickReference(ctx.Self().Name(), x.generation)
 	tick := &consumerControllerTick{generation: x.generation}
 
 	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.resendInterval, WithReference(reference)); err != nil {
@@ -194,8 +189,6 @@ func (x *consumerController) handlePostStart(ctx *ReceiveContext) {
 		ctx.Err(err)
 		return
 	}
-
-	x.scheduleRef = reference
 }
 
 // handleRegistrationAck applies the nonce and session-adoption rules: only

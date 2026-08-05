@@ -33,21 +33,27 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
-// producerDeliveryConfig builds a minimal producer endpoint configuration.
+// producerDeliveryConfig builds a complete producer endpoint configuration.
 func producerDeliveryConfig(consumerName string) *reliableDeliveryConfig {
 	return &reliableDeliveryConfig{
 		producer: &reliableProducerConfig{
-			consumerName: consumerName,
+			consumerName:       consumerName,
+			localRetryInterval: DefaultLocalRetryInterval,
+			queueRetry: &reliableQueueRetryConfig{
+				maxAttempts:    DefaultQueueRetryAttempts,
+				initialBackoff: DefaultQueueRetryBackoff,
+			},
 		},
 	}
 }
 
-// consumerDeliveryConfig builds a minimal consumer endpoint configuration.
+// consumerDeliveryConfig builds a complete consumer endpoint configuration.
 func consumerDeliveryConfig(producerName string) *reliableDeliveryConfig {
 	return &reliableDeliveryConfig{
 		consumer: &reliableConsumerConfig{
 			producerName:      producerName,
 			flowControlWindow: 50,
+			resendInterval:    DefaultResendInterval,
 		},
 	}
 }
@@ -96,42 +102,43 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 			invalid: true,
 		},
 		"producer with negative local retry interval": {
-			config: &reliableDeliveryConfig{
-				producer: &reliableProducerConfig{
-					consumerName:       "consumer",
-					localRetryInterval: -time.Second,
-				},
-			},
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.localRetryInterval = -time.Second
+				return config
+			}(),
+			invalid: true,
+		},
+		"producer with missing queue retry policy": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.queueRetry = nil
+				return config
+			}(),
 			invalid: true,
 		},
 		"producer with zero queue retry attempts": {
-			config: &reliableDeliveryConfig{
-				producer: &reliableProducerConfig{
-					consumerName: "consumer",
-					queueRetry:   &reliableQueueRetryConfig{},
-				},
-			},
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.queueRetry.maxAttempts = 0
+				return config
+			}(),
 			invalid: true,
 		},
 		"producer with negative queue retry backoff": {
-			config: &reliableDeliveryConfig{
-				producer: &reliableProducerConfig{
-					consumerName: "consumer",
-					queueRetry: &reliableQueueRetryConfig{
-						maxAttempts:    3,
-						initialBackoff: -time.Millisecond,
-					},
-				},
-			},
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.queueRetry.initialBackoff = -time.Millisecond
+				return config
+			}(),
 			invalid: true,
 		},
 		"producer with invalid durable queue ID": {
-			config: &reliableDeliveryConfig{
-				producer: &reliableProducerConfig{
-					consumerName:   "consumer",
-					durableQueueID: "bad id!",
-				},
-			},
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.durableQueueID = "bad id!"
+				return config
+			}(),
 			invalid: true,
 		},
 		"consumer with blank producer name": {
@@ -161,6 +168,15 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 					producerName:      "producer",
 					flowControlWindow: 50,
 					resendInterval:    -time.Second,
+				},
+			},
+			invalid: true,
+		},
+		"consumer with zero resend interval": {
+			config: &reliableDeliveryConfig{
+				consumer: &reliableConsumerConfig{
+					producerName:      "producer",
+					flowControlWindow: 50,
 				},
 			},
 			invalid: true,

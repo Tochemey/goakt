@@ -24,6 +24,8 @@ package actor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -34,6 +36,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // newCompanionTestSystem starts a cluster-disabled actor system for
@@ -266,14 +269,311 @@ func TestReliableEndpointDefaults(t *testing.T) {
 	assert.Equal(t, config, endpoint.reliableDelivery)
 	assert.NotSame(t, config, endpoint.reliableDelivery)
 
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.IncarnationID())
-	require.NoError(t, err)
-
-	companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
-	companion, err := system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
+	// the spawn transaction created the controller companion automatically
+	companion, err := system.resolveReliableCompanion("endpoint", ReliableControllerRoleProducer)
 	require.NoError(t, err)
 
 	assert.IsType(t, new(passivation.LongLivedStrategy), companion.passivationStrategy)
+}
+
+// produceSubmission commands the reliable producer mock to submit one
+// application message through its controller.
+type produceSubmission struct {
+	messageID string
+	payload   any
+}
+
+// reliableProducerMock is a producer endpoint that answers the controller
+// handshake the way a real application producer would: it queues submissions,
+// spends one RequestNext grant per submission, idempotently resends the same
+// Produced when a grant is retried, and acknowledges Stored. All state lives
+// in the actor and is only touched inside its own mailbox turns.
+type reliableProducerMock struct {
+	controller   *PID
+	request      *RequestNext
+	pending      []*produceSubmission
+	lastToken    string
+	lastProduced *Produced
+}
+
+func (x *reliableProducerMock) PreStart(*Context) error { return nil }
+func (x *reliableProducerMock) PostStop(*Context) error { return nil }
+
+func (x *reliableProducerMock) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *PostStart:
+	case *RequestNext:
+		if !msg.IsAuthorizedFor(ctx.Self(), ctx.Sender()) {
+			return
+		}
+
+		x.controller = ctx.Sender()
+
+		if msg.Token() == x.lastToken && x.lastProduced != nil {
+			ctx.Tell(x.controller, x.lastProduced)
+			return
+		}
+
+		x.request = msg
+		x.flush(ctx)
+	case *Stored:
+		ack, err := NewStoredAck(msg)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		ctx.Tell(ctx.Sender(), ack)
+	case *produceSubmission:
+		x.pending = append(x.pending, msg)
+		x.flush(ctx)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// flush spends the held grant on the oldest queued submission.
+func (x *reliableProducerMock) flush(ctx *ReceiveContext) {
+	if x.request == nil || len(x.pending) == 0 {
+		return
+	}
+
+	submission := x.pending[0]
+	produced, err := NewProduced(x.request, submission.messageID, submission.payload)
+	if err != nil {
+		ctx.Err(err)
+		return
+	}
+
+	x.pending = x.pending[1:]
+	x.lastToken = x.request.Token()
+	x.lastProduced = produced
+	x.request = nil
+	ctx.Tell(x.controller, produced)
+}
+
+// awaitDeliveries polls the consumer mock until it has recorded at least
+// count deliveries and returns them collapsed to their first occurrence per
+// sequence, since a slow confirmation legitimately allows a redelivery.
+func awaitDeliveries(t *testing.T, ctx context.Context, consumer *PID, count int) []*Delivery {
+	t.Helper()
+
+	var distinct []*Delivery
+
+	require.Eventually(t, func() bool {
+		response, err := Ask(ctx, consumer, &getDeliveries{}, time.Second)
+		if err != nil {
+			return false
+		}
+
+		recorded, _ := response.([]*Delivery)
+		seen := make(map[int64]bool, len(recorded))
+		distinct = distinct[:0]
+
+		for _, delivery := range recorded {
+			if seen[delivery.Seq()] {
+				continue
+			}
+
+			seen[delivery.Seq()] = true
+			distinct = append(distinct, delivery)
+		}
+
+		return len(distinct) >= count
+	}, 20*time.Second, 20*time.Millisecond)
+
+	return distinct
+}
+
+func TestReliableDeliveryEndToEnd(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+
+	consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	// both controller companions were created by the spawn transaction
+	_, err = system.resolveReliableCompanion("orders-producer", ReliableControllerRoleProducer)
+	require.NoError(t, err)
+	_, err = system.resolveReliableCompanion("orders-consumer", ReliableControllerRoleConsumer)
+	require.NoError(t, err)
+
+	// ingress stays plain Tell: a message that never becomes Produced is not
+	// part of the reliable flow and must not reach the consumer
+	require.NoError(t, Tell(ctx, producer, new(testpb.TestSend)))
+
+	for i := 1; i <= 3; i++ {
+		id := fmt.Sprintf("m-%d", i)
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+	}
+
+	deliveries := awaitDeliveries(t, ctx, consumer, 3)
+	require.Len(t, deliveries, 3)
+
+	for i, delivery := range deliveries {
+		id := fmt.Sprintf("m-%d", i+1)
+		assert.Equal(t, id, delivery.MessageID())
+		assert.Equal(t, int64(i+1), delivery.Seq())
+
+		reply, ok := delivery.Payload().(*testpb.Reply)
+		require.True(t, ok)
+		assert.Equal(t, id, reply.GetContent())
+	}
+}
+
+func TestReliableDeliveryEndToEndDurable(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	queue := &mockDurableQueue{}
+	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer", WithDurableQueue(queue)))
+	require.NoError(t, err)
+
+	consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	for i := 1; i <= 2; i++ {
+		id := fmt.Sprintf("m-%d", i)
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+	}
+
+	deliveries := awaitDeliveries(t, ctx, consumer, 2)
+	require.Len(t, deliveries, 2)
+
+	// every message went through the durable store-accept handshake
+	require.Eventually(t, func() bool {
+		_, operations, _ := queue.snapshot()
+		return len(operations) >= 4
+	}, 10*time.Second, 20*time.Millisecond)
+
+	_, operations, _ := queue.snapshot()
+	assert.Equal(t, []string{"store:m-1", "accept:m-1", "store:m-2", "accept:m-2"}, operations)
+}
+
+func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
+	t.Run("With producer endpoint", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+		require.NoError(t, err)
+
+		companion, err := system.resolveReliableCompanion("orders-producer", ReliableControllerRoleProducer)
+		require.NoError(t, err)
+
+		require.NoError(t, producer.Shutdown(ctx))
+		assert.False(t, companion.IsRunning())
+
+		require.Eventually(t, func() bool {
+			_, ok := system.actors.nodeByName(companion.Name())
+			return !ok
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("With consumer endpoint", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer"))
+		require.NoError(t, err)
+
+		companion, err := system.resolveReliableCompanion("orders-consumer", ReliableControllerRoleConsumer)
+		require.NoError(t, err)
+
+		require.NoError(t, consumer.Shutdown(ctx))
+		assert.False(t, companion.IsRunning())
+
+		require.Eventually(t, func() bool {
+			_, ok := system.actors.nodeByName(companion.Name())
+			return !ok
+		}, 3*time.Second, 10*time.Millisecond)
+	})
+}
+
+func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+
+	companion, err := system.resolveReliableCompanion("orders-producer", ReliableControllerRoleProducer)
+	require.NoError(t, err)
+
+	// simulate the controller's terminal self-stop, which the private stop
+	// path permits while the system keeps running
+	require.NoError(t, companion.Shutdown(ctx))
+
+	require.Eventually(t, func() bool {
+		_, ok := system.actors.nodeByName(companion.Name())
+		return !ok
+	}, 3*time.Second, 10*time.Millisecond)
+
+	respawned, err := system.ReSpawn(ctx, "orders-producer")
+	require.NoError(t, err)
+	require.True(t, respawned.Equals(producer))
+
+	recreated, err := system.resolveReliableCompanion("orders-producer", ReliableControllerRoleProducer)
+	require.NoError(t, err)
+	assert.True(t, recreated.IsRunning())
+	assert.Equal(t, companion.Name(), recreated.Name())
+	assert.NotSame(t, companion, recreated)
+
+	// a live companion is restarted with the endpoint subtree, never duplicated
+	respawned, err = system.ReSpawn(ctx, "orders-producer")
+	require.NoError(t, err)
+
+	companions := 0
+
+	for _, child := range system.tree().children(respawned) {
+		if child.reliableCompanion != nil {
+			companions++
+		}
+	}
+
+	assert.Equal(t, 1, companions)
+}
+
+func TestReliableEndpointSpawnRollback(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	queue := &mockDurableQueue{loadErr: errors.New("backing store is unreachable")}
+	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		AsReliableProducer("orders-consumer", WithDurableQueue(queue), WithQueueRetry(1, time.Millisecond)))
+	require.Error(t, err)
+	require.Nil(t, pid)
+
+	// a failed spawn leaves nothing behind: the endpoint record disappears
+	// and the same name spawns cleanly afterwards
+	require.Eventually(t, func() bool {
+		_, ok := system.actors.nodeByName("orders-producer")
+		return !ok
+	}, 3*time.Second, 10*time.Millisecond)
+
+	fresh, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+	assert.True(t, fresh.IsRunning())
+}
+
+func TestReliableEndpointClusterModeRejected(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	system.clusterEnabled.Store(true)
+	t.Cleanup(func() { system.clusterEnabled.Store(false) })
+
+	pid, err := system.configPID(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.ErrorContains(t, err, "cluster mode")
+	assert.Nil(t, pid)
+}
+
+func TestReliableEndpointRemoteSpawnRejected(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	system.remotingEnabled.Store(true)
+	t.Cleanup(func() { system.remotingEnabled.Store(false) })
+
+	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		AsReliableProducer("orders-consumer"), WithHostAndPort("127.0.0.1", 8080))
+	require.ErrorContains(t, err, "remote node")
+	assert.Nil(t, pid)
 }
 
 func TestToSerializeCarriesReliableDelivery(t *testing.T) {

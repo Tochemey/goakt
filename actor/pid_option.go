@@ -54,6 +54,15 @@ func withReliableCompanion(spec *reliableCompanionSpec) pidOption {
 	}
 }
 
+// withDurableQueue retains the producer endpoint's durable queue instance so
+// controller creation and ReSpawn recovery can hand it to a fresh producer
+// controller.
+func withDurableQueue(queue DurableProducerQueue) pidOption {
+	return func(pid *PID) {
+		pid.durableQueue = queue
+	}
+}
+
 // withInitMaxRetries sets the number of times to retry an actor init process
 func withInitMaxRetries(value int) pidOption {
 	return func(pid *PID) {

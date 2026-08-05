@@ -23,12 +23,15 @@
 package actor
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/google/uuid"
 
 	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/supervisor"
 )
 
 // errReliableCompanionUnavailable reports that an endpoint's reliable-delivery
@@ -122,6 +125,78 @@ func (x *actorSystem) resolveReliableCompanion(endpointName string, role Reliabl
 	}
 
 	return companion, nil
+}
+
+// reliableTickReference derives the scheduler reference of one controller
+// incarnation's recurring tick from its name and generation. Deriving the
+// reference instead of storing it on the controller removes the shared field
+// that an external shutdown's PostStop could otherwise read while PostStart
+// is still writing it, and the generation keeps every restart's reference
+// unique so a schedule leaked by that same overlap can never collide with the
+// next incarnation's.
+func reliableTickReference(name string, generation uint64) string {
+	return name + "-tick-" + strconv.FormatUint(generation, 10)
+}
+
+// reliableCompanionSupervisor returns the supervisor attached to every
+// reliable-delivery controller. Any processing error restarts the controller,
+// because the failure classification only lets transient conditions surface
+// as errors: durable queue retry exhaustion reaches the supervisor through
+// ctx.Err so a restart reloads durable state and resumes, while deterministic
+// failures never get here because the controller publishes
+// ReliableDeliveryFailed and stops itself.
+func reliableCompanionSupervisor() *supervisor.Supervisor {
+	return supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+}
+
+// ensureReliableCompanion creates the endpoint-owned controller companion of a
+// reliable endpoint when its current incarnation does not already have a live
+// one. It is the second half of the endpoint spawn transaction and the
+// recovery step of ActorSystem.ReSpawn: a live companion is left untouched so
+// recovery can never duplicate a controller, a companion still tearing down is
+// reported as an error the caller may retry, and otherwise the role-specific
+// controller is constructed from the endpoint's retained settings and attached
+// to the tree as a child of the endpoint, so endpoint shutdown and restart
+// carry the controller with them. The caller owns endpoint rollback when
+// creation fails.
+func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID) error {
+	role := endpoint.reliableDelivery.role()
+
+	name := reliableCompanionName(role, endpoint.IncarnationID())
+	if node, ok := x.actors.nodeByName(name); ok {
+		if companion := node.value(); companion != nil && companion.IsRunning() {
+			return nil
+		}
+
+		return fmt.Errorf("%s controller for endpoint=%s is still terminating", role, endpoint.Name())
+	}
+
+	spec, err := newReliableCompanionSpec(role, endpoint.Name(), endpoint.IncarnationID())
+	if err != nil {
+		return err
+	}
+
+	pid, err := x.configPID(ctx, name, newReliableController(endpoint), asSystem(), asReliableCompanion(spec), WithSupervisor(reliableCompanionSupervisor()))
+	if err != nil {
+		return err
+	}
+
+	_, err = x.completeSpawn(ctx, endpoint, pid)
+	return err
+}
+
+// newReliableController builds the role-specific controller of a reliable
+// endpoint from its retained settings: the producer side carries the durable
+// queue instance and retry policy, the consumer side carries flow control.
+func newReliableController(endpoint *PID) Actor {
+	config := endpoint.reliableDelivery
+
+	if producer := config.producer; producer != nil {
+		return newProducerController(endpoint, producer.consumerName, endpoint.durableQueue, producer.queueRetry.maxAttempts, producer.queueRetry.initialBackoff, producer.localRetryInterval)
+	}
+
+	consumer := config.consumer
+	return newConsumerController(endpoint, consumer.producerName, consumer.flowControlWindow, consumer.resendInterval)
 }
 
 // validateReliableCompanion enforces local-tree ownership of a companion:

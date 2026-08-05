@@ -53,11 +53,11 @@ type reliableProducerConfig struct {
 	// durableQueueID references the durable queue in the endpoint's user
 	// dependencies; empty means the flow runs without a durable queue.
 	durableQueueID string
-	// queueRetry defines retries for durable queue operations; nil applies
-	// the defaults at spawn.
+	// queueRetry defines retries for durable queue operations; it is
+	// required because the producer controller cannot run without one.
 	queueRetry *reliableQueueRetryConfig
-	// localRetryInterval is the RequestNext/Stored retry cadence; zero
-	// applies the default at spawn.
+	// localRetryInterval is the RequestNext/Stored retry cadence; it must
+	// be positive.
 	localRetryInterval time.Duration
 }
 
@@ -65,8 +65,7 @@ type reliableProducerConfig struct {
 type reliableQueueRetryConfig struct {
 	// maxAttempts is the maximum number of attempts for one queue operation.
 	maxAttempts int
-	// initialBackoff is the delay before the first retry; zero applies the
-	// default at spawn.
+	// initialBackoff is the delay before the first retry; it must be positive.
 	initialBackoff time.Duration
 }
 
@@ -77,7 +76,7 @@ type reliableConsumerConfig struct {
 	// flowControlWindow is the maximum demand granted in one request.
 	flowControlWindow int
 	// resendInterval is the registration, demand, and delivery retry cadence;
-	// zero applies the default at spawn.
+	// it must be positive.
 	resendInterval time.Duration
 }
 
@@ -99,24 +98,38 @@ func (x *reliableDeliveryConfig) Validate() error {
 	}
 }
 
-// Validate checks producer-side delivery settings.
+// role returns the controller role required by the configured endpoint side.
+// Validate guarantees exactly one side is set.
+func (x *reliableDeliveryConfig) role() ReliableControllerRole {
+	if x.producer != nil {
+		return ReliableControllerRoleProducer
+	}
+
+	return ReliableControllerRoleConsumer
+}
+
+// Validate checks producer-side delivery settings. It mirrors the producer
+// controller's constructor guards, so a configuration that passes validation
+// always builds a controller during the endpoint spawn transaction.
 func (x *reliableProducerConfig) Validate() error {
 	if err := validateReliablePeerName(x.consumerName); err != nil {
 		return err
 	}
 
-	if x.localRetryInterval < 0 {
-		return errors.New("local retry interval must not be negative")
+	if x.localRetryInterval <= 0 {
+		return errors.New("local retry interval must be positive")
 	}
 
-	if x.queueRetry != nil {
-		if x.queueRetry.maxAttempts < 1 {
-			return errors.New("queue retry max attempts must be at least 1")
-		}
+	if x.queueRetry == nil {
+		return errors.New("queue retry policy is required")
+	}
 
-		if x.queueRetry.initialBackoff < 0 {
-			return errors.New("queue retry initial backoff must not be negative")
-		}
+	if x.queueRetry.maxAttempts < 1 {
+		return errors.New("queue retry max attempts must be at least 1")
+	}
+
+	if x.queueRetry.initialBackoff <= 0 {
+		return errors.New("queue retry initial backoff must be positive")
 	}
 
 	if x.durableQueueID != "" {
@@ -128,7 +141,9 @@ func (x *reliableProducerConfig) Validate() error {
 	return nil
 }
 
-// Validate checks consumer-side delivery settings.
+// Validate checks consumer-side delivery settings. It mirrors the consumer
+// controller's constructor guards, so a configuration that passes validation
+// always builds a controller during the endpoint spawn transaction.
 func (x *reliableConsumerConfig) Validate() error {
 	if err := validateReliablePeerName(x.producerName); err != nil {
 		return err
@@ -138,8 +153,8 @@ func (x *reliableConsumerConfig) Validate() error {
 		return fmt.Errorf("flow control window must be in [1, %d]", MaxFlowControlWindow)
 	}
 
-	if x.resendInterval < 0 {
-		return errors.New("resend interval must not be negative")
+	if x.resendInterval <= 0 {
+		return errors.New("resend interval must be positive")
 	}
 
 	return nil
