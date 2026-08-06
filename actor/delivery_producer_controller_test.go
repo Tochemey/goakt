@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +61,10 @@ type mockDurableQueue struct {
 	loadErr      error
 	storeDelay   time.Duration
 	confirmDelay time.Duration
+	// retainConfirmed keeps confirmed entries in the MessageID index, which
+	// the contract permits until Accept and Confirm both cover a message, so
+	// first-write-wins still answers a resubmission of a confirmed MessageID.
+	retainConfirmed bool
 }
 
 func (x *mockDurableQueue) ID() string                     { return "mockDurableQueue" }
@@ -78,7 +83,15 @@ func (x *mockDurableQueue) Load(context.Context) (DurableQueueState, QueueEpoch,
 
 	x.epoch++
 
-	state, err := NewDurableQueueState(x.currentSeq, x.confirmedSeq, x.stored)
+	unconfirmed := make([]UnconfirmedMessage, 0, len(x.stored))
+
+	for _, message := range x.stored {
+		if message.Seq() > x.confirmedSeq {
+			unconfirmed = append(unconfirmed, message)
+		}
+	}
+
+	state, err := NewDurableQueueState(x.currentSeq, x.confirmedSeq, unconfirmed)
 	if err != nil {
 		return DurableQueueState{}, 0, err
 	}
@@ -127,6 +140,102 @@ func (x *mockDurableQueue) Store(_ context.Context, epoch QueueEpoch, request St
 	return NewStoreResult(request.ProposedSeq(), false, request.Payload())
 }
 
+func (x *mockDurableQueue) StoreChunked(_ context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error) {
+	x.mu.Lock()
+	delay, storeErr := x.storeDelay, x.storeErr
+	x.mu.Unlock()
+
+	if delay > 0 {
+		pause.For(delay)
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if storeErr != nil {
+		return nil, storeErr
+	}
+
+	if epoch != x.epoch {
+		return nil, gerrors.ErrQueueFenced
+	}
+
+	if len(requests) == 0 {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requires at least one chunk"))
+	}
+
+	businessID, index, count, ok := parseDurableChunkMessageID(requests[0].MessageID())
+	if !ok || index != 1 || count != len(requests) {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requests must be a complete derived-ID batch"))
+	}
+
+	for position, request := range requests {
+		requestBusiness, requestIndex, requestCount, requestOK := parseDurableChunkMessageID(request.MessageID())
+		if !requestOK || requestBusiness != businessID || requestIndex != position+1 || requestCount != count {
+			return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requests must share one business MessageID and contiguous positions"))
+		}
+	}
+
+	existing := make([]UnconfirmedMessage, 0, count)
+
+	for _, message := range x.stored {
+		if idFrom(message.MessageID()) == businessID {
+			existing = append(existing, message)
+		}
+	}
+
+	if len(existing) > 0 {
+		// first-write-wins for the business MessageID: return the original
+		// batch even when the retry proposes a different chunk count or bytes
+		results := make([]StoreResult, 0, len(existing))
+
+		for _, message := range existing {
+			result, err := NewStoreResult(message.Seq(), true, message.Payload())
+			if err != nil {
+				return nil, err
+			}
+
+			results = append(results, result)
+		}
+
+		x.operations = append(x.operations, "storechunked:"+businessID)
+		return results, nil
+	}
+
+	if requests[0].ProposedSeq() != x.currentSeq+1 {
+		return nil, gerrors.ErrQueueConflict
+	}
+
+	for position, request := range requests {
+		if request.ProposedSeq() != x.currentSeq+int64(position)+1 {
+			return nil, gerrors.ErrQueueConflict
+		}
+	}
+
+	results := make([]StoreResult, 0, count)
+	appended := make([]UnconfirmedMessage, 0, count)
+
+	for position, request := range requests {
+		entry, err := newChunkUnconfirmedMessage(request.MessageID(), request.ProposedSeq(), request.Payload(), position == 0, position == count-1)
+		if err != nil {
+			return nil, err
+		}
+
+		result, err := NewStoreResult(request.ProposedSeq(), false, request.Payload())
+		if err != nil {
+			return nil, err
+		}
+
+		appended = append(appended, entry)
+		results = append(results, result)
+	}
+
+	x.stored = append(x.stored, appended...)
+	x.currentSeq = requests[len(requests)-1].ProposedSeq()
+	x.operations = append(x.operations, "storechunked:"+businessID)
+	return results, nil
+}
+
 func (x *mockDurableQueue) Accept(_ context.Context, epoch QueueEpoch, messageID string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -164,11 +273,15 @@ func (x *mockDurableQueue) Confirm(_ context.Context, epoch QueueEpoch, upToSeq 
 	x.confirmedSeq = max(x.confirmedSeq, upToSeq)
 	x.operations = append(x.operations, "confirm")
 
-	cut := 0
-	for cut < len(x.stored) && x.stored[cut].Seq() <= x.confirmedSeq {
-		cut++
+	if !x.retainConfirmed {
+		cut := 0
+
+		for cut < len(x.stored) && x.stored[cut].Seq() <= x.confirmedSeq {
+			cut++
+		}
+
+		x.stored = x.stored[cut:]
 	}
-	x.stored = x.stored[cut:]
 
 	return nil
 }
@@ -414,6 +527,46 @@ func (x *producerControllerHarness) produceOneWith(t *testing.T, messageID strin
 	ack, err := NewStoredAck(stored)
 	require.NoError(t, err)
 	x.fromProducer(t, ack)
+}
+
+// produceAgainWith drives a full resubmission handshake for a messageID the
+// producer already completed once, waiting for a Stored beyond the ones
+// already recorded, and returns that fresh acknowledgement.
+func (x *producerControllerHarness) produceAgainWith(t *testing.T, messageID string, payload *testpb.Reply) *Stored {
+	t.Helper()
+
+	before := 0
+
+	for _, message := range x.recordedOf(x.producer) {
+		if stored, ok := message.(*Stored); ok && stored.MessageID() == messageID {
+			before++
+		}
+	}
+
+	request := x.freshRequestNext(t)
+	produced, err := NewProduced(request, messageID, payload)
+	require.NoError(t, err)
+	x.fromProducer(t, produced)
+
+	var stored *Stored
+
+	require.Eventually(t, func() bool {
+		count := 0
+
+		for _, message := range x.recordedOf(x.producer) {
+			if candidate, ok := message.(*Stored); ok && candidate.MessageID() == messageID {
+				count++
+				stored = candidate
+			}
+		}
+
+		return count > before
+	}, 3*time.Second, 10*time.Millisecond)
+
+	ack, err := NewStoredAck(stored)
+	require.NoError(t, err)
+	x.fromProducer(t, ack)
+	return stored
 }
 
 // freshRequestNext waits for a credit the test has not answered yet and marks
@@ -973,6 +1126,433 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 			}
 			return false
 		}, 3*time.Second, 10*time.Millisecond)
+	})
+}
+
+func TestProducerControllerDurableChunkedFlow(t *testing.T) {
+	t.Run("With StoreChunked then Accept under one business MessageID", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-chunked", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		_, operations, _ := queue.snapshot()
+		require.Equal(t, []string{"storechunked:m-chunked", "accept:m-chunked"}, operations)
+
+		for index, emission := range harness.sequencedEmissions() {
+			assert.Equal(t, "m-chunked", emission.MessageID())
+			assert.Equal(t, int64(index+1), emission.Seq())
+			assert.True(t, emission.Chunked())
+			assert.Equal(t, index == 0, emission.FirstChunk())
+			assert.Equal(t, index == chunks-1, emission.LastChunk())
+		}
+
+		storedCount := 0
+
+		for _, message := range harness.recordedOf(harness.producer) {
+			if stored, ok := message.(*Stored); ok && stored.MessageID() == "m-chunked" {
+				storedCount++
+				assert.Equal(t, int64(chunks), stored.Seq())
+			}
+		}
+
+		assert.Equal(t, 1, storedCount)
+	})
+
+	t.Run("With a restart while unconfirmed chunks reload and resend", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-reload", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		firstEmissions := append([]*commands.SequencedMessage(nil), harness.sequencedEmissions()...)
+
+		// restart before confirmation: Load rehydrates chunk marks and a
+		// timeout request resends the stored batch without re-chunking
+		require.NoError(t, harness.producerController.Restart(harness.ctx))
+
+		require.Eventually(t, func() bool {
+			loads, _, _ := queue.snapshot()
+			return loads >= 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		newSessionID := harness.register(t)
+		newNonce := harness.nonceOf(t)
+
+		resend, err := commands.NewRequest(newSessionID, newNonce, 0, int64(chunks)+5, true)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, resend)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) >= 2*chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		reloaded := harness.sequencedEmissions()[chunks : 2*chunks]
+
+		for index, emission := range reloaded {
+			assert.Equal(t, firstEmissions[index].MessageID(), emission.MessageID())
+			assert.Equal(t, firstEmissions[index].Seq(), emission.Seq())
+			assert.Equal(t, firstEmissions[index].Payload(), emission.Payload())
+			assert.Equal(t, firstEmissions[index].FirstChunk(), emission.FirstChunk())
+			assert.Equal(t, firstEmissions[index].LastChunk(), emission.LastChunk())
+		}
+	})
+
+	t.Run("With resubmit under a tight window reuses the stored batch", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-tight", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		require.NoError(t, harness.producerController.Restart(harness.ctx))
+
+		require.Eventually(t, func() bool {
+			loads, _, _ := queue.snapshot()
+			return loads >= 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		newSessionID := harness.register(t)
+		newNonce := harness.nonceOf(t)
+
+		// demand opens one credit (upTo = currentSeq+1) while the window span
+		// equals chunks+1; a much larger re-encode would fail the first-store
+		// window check, so surviving proves the already-stored short-circuit
+		tight, err := commands.NewRequest(newSessionID, newNonce, 0, int64(chunks)+1, true)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, tight)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) >= 2*chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		oversized := &testpb.Reply{Content: strings.Repeat("y", 20*MinChunkSize)}
+		overFrame, err := harness.system.getRemoting().Serializer(oversized).Serialize(oversized)
+		require.NoError(t, err)
+		require.Greater(t, (len(overFrame)+MinChunkSize-1)/MinChunkSize, chunks+1)
+
+		harness.produceOneWith(t, "m-tight", oversized)
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+
+			for _, operation := range operations {
+				if operation == "accept:m-tight" {
+					return true
+				}
+			}
+
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
+
+		assert.True(t, harness.producerController.IsRunning())
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, chunks, currentSeq)
+	})
+
+	t.Run("With resubmission after StoreChunked reuses the first-write batch", func(t *testing.T) {
+		_, system := newCompanionTestSystem(t)
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		stored := make([]UnconfirmedMessage, 0, chunks)
+
+		for index := 0; index < chunks; index++ {
+			start := index * MinChunkSize
+			end := min(start+MinChunkSize, len(frame))
+			part, err := NewReliablePayload(frame[start:end])
+			require.NoError(t, err)
+
+			entry, err := newChunkUnconfirmedMessage(durableChunkMessageID("m-retry", index+1, chunks), int64(index+1), part, index == 0, index == chunks-1)
+			require.NoError(t, err)
+			stored = append(stored, entry)
+		}
+
+		queue := &mockDurableQueue{currentSeq: int64(chunks), stored: stored}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, true)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// different bytes, same business MessageID: StoreChunked returns the
+		// original batch and Accept completes the interrupted handshake
+		harness.produceOneWith(t, "m-retry", &testpb.Reply{Content: strings.Repeat("y", 3*MinChunkSize)})
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+
+			for _, operation := range operations {
+				if operation == "accept:m-retry" {
+					return true
+				}
+			}
+
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, chunks, currentSeq)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) >= 2*chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		reemitted := harness.sequencedEmissions()[chunks : 2*chunks]
+
+		for index, emission := range reemitted {
+			assert.Equal(t, "m-retry", emission.MessageID())
+			assert.Equal(t, int64(index+1), emission.Seq())
+			assert.Equal(t, stored[index].Payload().Bytes(), emission.Payload())
+		}
+	})
+
+	t.Run("With delivery confirmation reports one notice at the last chunk seq", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, true, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-confirm", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		confirm, err := commands.NewAck(sessionID, nonce, int64(chunks))
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirm)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		pause.For(200 * time.Millisecond)
+		assert.Len(t, harness.deliveryConfirmations(), 1)
+
+		notice := harness.deliveryConfirmations()[0]
+		assert.Equal(t, "m-confirm", notice.MessageID())
+		assert.Equal(t, int64(chunks), notice.Seq())
+	})
+
+	t.Run("With a whole-stored resubmission re-encoded above the chunk size reuses the stored message", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 50, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-mixed", &testpb.Reply{Content: "small"})
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// same MessageID re-encoded above the chunk threshold: the stored
+		// whole message stays authoritative, so no chunk batch is appended
+		// and the emission repeats the original shape
+		stored := harness.produceAgainWith(t, "m-mixed", &testpb.Reply{Content: strings.Repeat("y", 3*MinChunkSize)})
+		assert.EqualValues(t, 1, stored.Seq())
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		for _, emission := range harness.sequencedEmissions() {
+			assert.Equal(t, "m-mixed", emission.MessageID())
+			assert.EqualValues(t, 1, emission.Seq())
+			assert.False(t, emission.Chunked())
+		}
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, 1, currentSeq)
+		assert.True(t, harness.producerController.IsRunning())
+	})
+
+	t.Run("With a chunk-stored resubmission re-encoded below the chunk size reuses the stored batch", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-shrunk", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// same MessageID re-encoded below the chunk threshold: the stored
+		// batch stays authoritative and replays through StoreChunked, so the
+		// queue never holds a second whole-message encoding
+		stored := harness.produceAgainWith(t, "m-shrunk", &testpb.Reply{Content: "tiny"})
+		assert.EqualValues(t, chunks, stored.Seq())
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) >= 2*chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		reemitted := harness.sequencedEmissions()[chunks : 2*chunks]
+
+		for index, emission := range reemitted {
+			assert.Equal(t, "m-shrunk", emission.MessageID())
+			assert.EqualValues(t, index+1, emission.Seq())
+			assert.True(t, emission.Chunked())
+		}
+
+		_, operations, _ := queue.snapshot()
+
+		for _, operation := range operations {
+			assert.NotEqual(t, "store:m-shrunk", operation)
+		}
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, chunks, currentSeq)
+		assert.True(t, harness.producerController.IsRunning())
+	})
+
+	t.Run("With a confirmed retained business MessageID resubmission completes benignly", func(t *testing.T) {
+		queue := &mockDurableQueue{retainConfirmed: true}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-keep", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		confirm, err := commands.NewAck(sessionID, nonce, int64(chunks))
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirm)
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+			return slices.Contains(operations, "confirm")
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// the confirmed entries left the unconfirmed buffer but the queue
+		// still owns the MessageID: StoreChunked answers with the original
+		// batch and the handshake completes without appending or terminating
+		stored := harness.produceAgainWith(t, "m-keep", payload)
+		assert.EqualValues(t, chunks, stored.Seq())
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+
+			accepts := 0
+			for _, operation := range operations {
+				if operation == "accept:m-keep" {
+					accepts++
+				}
+			}
+
+			return accepts == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, chunks, currentSeq)
+		assert.True(t, harness.producerController.IsRunning())
 	})
 }
 

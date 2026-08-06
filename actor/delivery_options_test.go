@@ -85,7 +85,9 @@ func TestAsReliableProducer(t *testing.T) {
 
 	t.Run("With chunking and a durable queue", func(t *testing.T) {
 		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MinChunkSize), WithDurableQueue(&mockDurableQueue{})))
-		assert.ErrorContains(t, config.Validate(), "chunking cannot be combined with a durable queue")
+		require.NoError(t, config.Validate())
+		assert.EqualValues(t, MinChunkSize, config.reliableDelivery.producer.maxChunkBytes)
+		assert.NotNil(t, config.durableQueue)
 	})
 
 	t.Run("With nil durable queue", func(t *testing.T) {

@@ -249,6 +249,11 @@ func TestReliableProtocolValidation(t *testing.T) {
 			return err
 		},
 
+		"produced reserved chunk prefix": func() error {
+			_, err := NewProduced(request, durableChunkIDPrefix+"1/1:message-1", "payload")
+			return err
+		},
+
 		"produced payload": func() error {
 			_, err := NewProduced(request, "message-1", nil)
 			return err
@@ -613,6 +618,54 @@ func BenchmarkReliablePayloadLifecycle(b *testing.B) {
 				}
 
 				_ = request.Payload().Bytes()
+			}
+		})
+	}
+}
+
+// BenchmarkReliableChunkSplit measures allocations while splitting a large
+// encoded frame into chunk unconfirmed entries the way the producer controller
+// does before StoreChunked or volatile append.
+func BenchmarkReliableChunkSplit(b *testing.B) {
+	const chunkSize = 256 << 10
+
+	for _, size := range []int{1 << 20, 15 << 20} {
+		b.Run(fmt.Sprintf("%dMiB", size>>20), func(b *testing.B) {
+			frame := make([]byte, size)
+			count := (len(frame) + chunkSize - 1) / chunkSize
+
+			b.ReportAllocs()
+			b.SetBytes(int64(size))
+			b.ResetTimer()
+
+			for b.Loop() {
+				seq := int64(0)
+				entries := make([]UnconfirmedMessage, 0, count)
+
+				for index, start := 0, 0; start < len(frame); start += chunkSize {
+					index++
+					end := start + chunkSize
+					if end > len(frame) {
+						end = len(frame)
+					}
+
+					payload, err := newReliablePayload(frame[start:end])
+					if err != nil {
+						b.Fatal(err)
+					}
+
+					seq++
+					entry, err := newChunkUnconfirmedMessage(durableChunkMessageID("message-1", index, count), seq, payload, index == 1, index == count)
+					if err != nil {
+						b.Fatal(err)
+					}
+
+					entries = append(entries, entry)
+				}
+
+				if len(entries) != count {
+					b.Fatalf("got %d chunks want %d", len(entries), count)
+				}
 			}
 		})
 	}

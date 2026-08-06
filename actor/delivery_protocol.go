@@ -25,7 +25,9 @@ package actor
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -164,7 +166,9 @@ func NewUnconfirmedMessage(messageID string, seq int64, payload ReliablePayload)
 	}, nil
 }
 
-// MessageID returns the producer's idempotency key.
+// MessageID returns the entry's stored identity: the producer's idempotency
+// key for a whole message, or the derived chunk identity for a durable chunk
+// entry. deliveryID recovers the producer-facing MessageID in both cases.
 func (x UnconfirmedMessage) MessageID() string {
 	return x.messageID
 }
@@ -185,6 +189,19 @@ func (x UnconfirmedMessage) Payload() ReliablePayload {
 // whole messages and last chunks notify.
 func (x UnconfirmedMessage) notifiesConfirmation() bool {
 	return !x.chunk.chunked || x.chunk.last
+}
+
+// id returns the MessageID carried on Delivery, Confirmed, and
+// DeliveryConfirmed. Durable chunk entries store a derived identity; the wire
+// and producer-facing notices always use the business MessageID. Whole-message
+// entries keep their MessageID verbatim so an application ID that happens to
+// look like a chunk suffix is never rewritten.
+func (x UnconfirmedMessage) id() string {
+	if !x.chunk.chunked {
+		return x.messageID
+	}
+
+	return idFrom(x.messageID)
 }
 
 // StoreRequest describes one message the producer wants to append.
@@ -427,6 +444,13 @@ func NewProduced(request *RequestNext, messageID string, payload any) (*Produced
 
 	if types.IsBlank(messageID) {
 		return nil, gerrors.NewErrInvalidMessage(errors.New("message ID is required"))
+	}
+
+	if strings.HasPrefix(messageID, durableChunkIDPrefix) {
+		// the prefix namespaces derived chunk identities inside durable
+		// queues; admitting it here would let an application ID collide with
+		// a stored chunk or be rehydrated as one after a reload
+		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("message ID must not start with the reserved prefix %q", durableChunkIDPrefix))
 	}
 
 	if types.IsNil(payload) {

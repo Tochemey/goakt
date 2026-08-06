@@ -96,6 +96,10 @@ func (x *sharedDurableQueue) Store(ctx context.Context, epoch QueueEpoch, reques
 	return x.backing().Store(ctx, epoch, request)
 }
 
+func (x *sharedDurableQueue) StoreChunked(ctx context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error) {
+	return x.backing().StoreChunked(ctx, epoch, requests)
+}
+
 func (x *sharedDurableQueue) Accept(ctx context.Context, epoch QueueEpoch, messageID string) error {
 	return x.backing().Accept(ctx, epoch, messageID)
 }

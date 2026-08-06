@@ -158,10 +158,6 @@ func (x *reliableProducerConfig) Validate() error {
 		if x.maxChunkBytes < MinChunkSize || x.maxChunkBytes > MaxChunkSize {
 			return fmt.Errorf("chunk size must be in [%d, %d]", MinChunkSize, MaxChunkSize)
 		}
-
-		if x.durableQueueID != "" {
-			return errors.New("chunking cannot be combined with a durable queue")
-		}
 	}
 
 	return nil

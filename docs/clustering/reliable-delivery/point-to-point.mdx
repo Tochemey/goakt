@@ -319,6 +319,20 @@ Protobuf payloads need no setup. Non-protobuf payloads currently require `WithRe
 
 An unregistered payload type is a terminal flow failure, not a retried one: encoding is deterministic, so the producer controller stops and publishes a failure event instead of retrying forever. See [Failure handling](#failure-handling-and-recovery).
 
+## Large messages
+
+One reliable payload rides one remoting transport frame. The remoting `maxFrameSize` cap is 16 MiB, and an oversized frame closes the connection without an error frame, so a large reliable payload can wedge the flow in a resend loop that kills the connection on every attempt. Enable chunking when payloads may approach that bound or monopolize a shared connection:
+
+```go
+publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
+    actor.AsReliableProducer("order-processor",
+        actor.WithChunking(256*1024)))
+```
+
+The size must be in [`MinChunkSize`, `MaxChunkSize`] (1 KiB through 16 MiB minus envelope headroom). Each chunk consumes one sequence number; the consumer controller reassembles before `Delivery`, so your consumer still sees one business message. A message must fit in the consumer's flow-control window worth of chunks: the consumer confirms nothing mid-message, so a message needing more chunks than the window can never drain. A violation fails the flow terminally and names the remedy (raise `WithFlowControlWindow` or the chunk size).
+
+With a durable queue, the producer controller stores the whole chunked message through `StoreChunked` so a crash mid-message cannot mix two encodings of the same payload. A resubmission after a producer crash recovers the stored shape even when the re-encoded payload crosses the chunk threshold in either direction: the first write stays authoritative. Queue implementors must treat the batch as atomic; see [Durable delivery](#durable-delivery). The derived chunk identities live in a reserved namespace: an application `MessageID` must not start with `GoAktChunk:`, and `NewProduced` rejects one that does.
+
 ## Durable delivery
 
 Without a durable queue, a producer-side restart loses the messages already handed to the controller but not yet confirmed. To survive producer crashes, attach a `DurableProducerQueue`:
@@ -344,8 +358,15 @@ type DurableProducerQueue interface {
     // The first write for a MessageID is authoritative; retries return it.
     Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error)
 
+    // StoreChunked durably records every chunk of one business message in one
+    // atomic unit. First-write-wins applies to the whole batch keyed by the
+    // business MessageID; chunk entries use reserved derived MessageIDs
+    // (GoAktChunk:<index>/<count>:<businessMessageID>).
+    StoreChunked(ctx context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error)
+
     // Accept records that the producer durably removed the submission from
-    // its own recoverable source.
+    // its own recoverable source. For a chunked batch, messageID is the
+    // business MessageID and covers every derived chunk identity.
     Accept(ctx context.Context, epoch QueueEpoch, messageID string) error
 
     // Confirm durably advances the highest consumer-confirmed sequence.
@@ -353,7 +374,7 @@ type DurableProducerQueue interface {
 }
 ```
 
-The contract in brief: all four operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` for a `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithQueueRetry`. The full contract is documented on the interface.
+The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithQueueRetry`. The full contract is documented on the interface.
 
 A producer backed by its own recoverable source completes the loop: it durably marks or removes the submission before replying `StoredAck`, and after a crash it resubmits every unmarked item with its original `MessageID`. The queue's first-write ownership then guarantees one durable sequence per message.
 
@@ -397,13 +418,15 @@ An in-memory `seen` map, as in the example above, deduplicates within one consum
 
 ## Configuration
 
-| Option                   | Side     | Default           | Meaning                                                                          |
-| ------------------------ | -------- | ----------------- | -------------------------------------------------------------------------------- |
-| `WithFlowControlWindow`  | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000 |
-| `WithResendInterval`     | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                     |
-| `WithDurableQueue`       | Producer | none              | Durable queue for producer-crash survival                                        |
-| `WithQueueRetry`         | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error       |
-| `WithLocalRetryInterval` | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor               |
+| Option                     | Side     | Default           | Meaning                                                                                          |
+| -------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------ |
+| `WithFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                 |
+| `WithResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                     |
+| `WithDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                        |
+| `WithQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                       |
+| `WithLocalRetryInterval`   | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                               |
+| `WithChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinChunkSize`, `MaxChunkSize`]             |
+| `WithDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                     |
 
 The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
 

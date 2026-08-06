@@ -54,6 +54,8 @@ const (
 const (
 	// queueOpStore identifies an asynchronous durable Store.
 	queueOpStore = iota + 1
+	// queueOpStoreChunked identifies an asynchronous durable StoreChunked.
+	queueOpStoreChunked
 	// queueOpAccept identifies an asynchronous durable Accept.
 	queueOpAccept
 	// queueOpConfirm identifies an asynchronous durable Confirm.
@@ -79,6 +81,8 @@ type queueOpResult struct {
 	kind int
 	// store holds the result of a queueOpStore.
 	store StoreResult
+	// stores holds the results of a queueOpStoreChunked.
+	stores []StoreResult
 	// confirmSeq holds the watermark of a queueOpConfirm.
 	confirmSeq int64
 	// err is the terminal outcome after the retry policy ran.
@@ -217,10 +221,6 @@ func (x *producerController) PreStart(ctx *Context) error {
 		return errors.New("producer controller requires positive retry settings")
 	}
 
-	if x.maxChunkBytes != 0 && x.queue != nil {
-		return errors.New("producer controller cannot combine chunking with a durable queue")
-	}
-
 	x.sessionID = uuid.NewString()
 	x.epoch = 0
 	x.currentSeq = 0
@@ -258,8 +258,21 @@ func (x *producerController) PreStart(ctx *Context) error {
 	x.currentSeq = state.CurrentSeq()
 	x.confirmedSeq = state.ConfirmedSeq()
 	x.persistedConfirmedSeq = state.ConfirmedSeq()
-	x.unconfirmed = state.Unconfirmed()
+	x.unconfirmed = hydrateLoadedUnconfirmed(state.Unconfirmed())
 	return nil
+}
+
+// hydrateLoadedUnconfirmed restores chunk marks on durable chunk entries so a
+// reloaded incarnation emits them with the same first/last flags the producer
+// stored. Whole-message entries pass through unchanged. It hydrates in place:
+// the input is the private clone DurableQueueState.Unconfirmed returns, so no
+// caller observes the mutation and reload allocates no second copy.
+func hydrateLoadedUnconfirmed(messages []UnconfirmedMessage) []UnconfirmedMessage {
+	for index, message := range messages {
+		messages[index] = hydrateUnconfirmedChunk(message)
+	}
+
+	return messages
 }
 
 // PostStop cancels the recurring timer of this incarnation through its
@@ -415,7 +428,11 @@ func (x *producerController) handleAck(ctx *ReceiveContext, ack *commands.Ack) {
 // genuine contract violation from the bound producer, which is terminal.
 // Encoding happens exactly once per message; afterwards only the immutable
 // snapshot is retained so the application object becomes collectable before
-// the durable round trip.
+// the durable round trip. On a durable flow, a MessageID whose entries are
+// already in the unconfirmed buffer is a resubmission: it is routed by the
+// stored shape (whole or chunked), never by the re-encoded frame's size,
+// because first-write-wins makes the stored encoding authoritative and the
+// two shapes recover through different queue operations.
 func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produced) {
 	if !ctx.Sender().Equals(x.producer) {
 		ctx.Logger().Debugf("producer controller for endpoint=%s dropped Produced from unexpected sender", x.producer.Name())
@@ -459,6 +476,15 @@ func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produ
 		return
 	}
 
+	if x.queue != nil {
+		if existing := chunksForBusinessMessage(x.unconfirmed, produced.MessageID()); len(existing) > 0 {
+			x.handshake = producerHandshakeStore
+			x.pendingMessageID = produced.MessageID()
+			x.resubmitStored(ctx, existing)
+			return
+		}
+	}
+
 	if x.maxChunkBytes > 0 && len(frame) > x.maxChunkBytes {
 		x.handshake = producerHandshakeStore
 		x.pendingMessageID = produced.MessageID()
@@ -480,18 +506,19 @@ func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produ
 	x.startStore(ctx)
 }
 
-// storeChunks splits the encoded frame at maxChunkBytes, appends one
-// unconfirmed entry per chunk under contiguous sequences, and replies Stored
-// for the last chunk so the producer-visible handshake stays one
-// Produced/Stored/StoredAck per business message. Chunk payloads alias the
-// frame without copying: the entries jointly retain it until the message is
-// confirmed and the whole prefix is released at once. Chunking runs only on
-// volatile flows, so storage completes synchronously here; the demand-capped
-// emission happens after acceptance.
+// storeChunks splits the encoded frame at maxChunkBytes into one unconfirmed
+// entry per chunk under contiguous sequences. The producer-visible handshake
+// stays one Produced/Stored/StoredAck per business message: Stored carries the
+// last chunk's sequence. Chunk payloads alias the frame without copying on the
+// volatile path; the durable path stores the same split through StoreChunked
+// under derived chunk MessageIDs so Load's unique-ID invariant stays honest.
 //
 // The window bound is terminal rather than retried because it is
 // deterministic: the consumer confirms nothing mid-message, so a message
-// needing more chunks than its buffer holds could never drain.
+// needing more chunks than its buffer holds could never drain. Resubmissions
+// never reach this function on a durable flow: handleProduced routes them
+// through resubmitStored, which is what keeps the window check scoped to
+// genuinely new appends.
 func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
 	count := (len(frame) + x.maxChunkBytes - 1) / x.maxChunkBytes
 
@@ -507,9 +534,11 @@ func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
 
 	seq := x.currentSeq
 	x.pendingChunks = make([]UnconfirmedMessage, 0, count)
+	index := 0
 
 	for start := 0; start < len(frame); start += x.maxChunkBytes {
 		end := min(start+x.maxChunkBytes, len(frame))
+		index++
 
 		payload, err := newReliablePayload(frame[start:end])
 		if err != nil {
@@ -519,8 +548,13 @@ func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
 			return
 		}
 
+		messageID := x.pendingMessageID
+		if x.queue != nil {
+			messageID = durableChunkMessageID(x.pendingMessageID, index, count)
+		}
+
 		seq++
-		entry, err := newChunkUnconfirmedMessage(x.pendingMessageID, seq, payload, start == 0, end == len(frame))
+		entry, err := newChunkUnconfirmedMessage(messageID, seq, payload, index == 1, index == count)
 		if err != nil {
 			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to record chunk of message=%s: %w", x.pendingMessageID, err))
 			return
@@ -529,10 +563,120 @@ func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
 		x.pendingChunks = append(x.pendingChunks, entry)
 	}
 
+	x.pendingSeq = seq
+
+	if x.queue != nil {
+		x.launchOp(ctx, queueOpStoreChunked)
+		return
+	}
+
 	x.unconfirmed = append(x.unconfirmed, x.pendingChunks...)
 	x.currentSeq = seq
-	x.pendingSeq = seq
 	x.replyStored(ctx)
+}
+
+// resubmitStored replays the store phase for a business MessageID whose
+// entries already sit in the unconfirmed buffer, routing by the stored shape
+// rather than the resubmitted frame's size: first-write-wins makes the stored
+// encoding authoritative, so a re-encode that crosses the chunk threshold in
+// either direction must still recover what the queue holds. The chunked shape
+// replays through StoreChunked and the whole shape through Store, and both
+// skip the first-store window check because the recovered batch was admitted
+// when it was first stored.
+func (x *producerController) resubmitStored(ctx *ReceiveContext, existing []UnconfirmedMessage) {
+	if existing[0].chunk.chunked {
+		x.pendingChunks = existing
+		x.pendingSeq = existing[len(existing)-1].Seq()
+		x.launchOp(ctx, queueOpStoreChunked)
+		return
+	}
+
+	x.pendingPayload = existing[0].Payload()
+	x.startStore(ctx)
+}
+
+// completeStoreChunked commits volatile state for a chunked append from the
+// authoritative StoreChunked results, replies Stored for the last chunk, and
+// awaits the producer acknowledgement. An already-stored business MessageID
+// reuses the original batch without appending again, even when the producer
+// re-encoded the payload into a different chunk count; its entries are
+// rebuilt positionally from the results because the unconfirmed buffer may
+// no longer hold them (a confirmed message whose MessageID index the queue
+// retains resubmits against an empty buffer). A new batch keeps the prepared
+// pending entries after verifying the queue assigned exactly the proposed
+// contiguous sequences, so no per-chunk rebuild runs on the common path.
+func (x *producerController) completeStoreChunked(ctx *ReceiveContext, results []StoreResult) {
+	if len(results) == 0 {
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("store chunked for message=%s returned no results", x.pendingMessageID))
+		return
+	}
+
+	alreadyStored := results[0].AlreadyStored()
+
+	for _, result := range results {
+		if result.AlreadyStored() != alreadyStored {
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("store chunked for message=%s returned mixed already-stored results", x.pendingMessageID))
+			return
+		}
+	}
+
+	if alreadyStored {
+		existing := chunksForBusinessMessage(x.unconfirmed, x.pendingMessageID)
+		if len(existing) > 0 && len(existing) != len(results) {
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("store chunked for message=%s returned %d results but unconfirmed holds %d chunks", x.pendingMessageID, len(results), len(existing)))
+			return
+		}
+
+		count := len(results)
+		chunks := make([]UnconfirmedMessage, 0, count)
+
+		for index, result := range results {
+			entry, err := newChunkUnconfirmedMessage(durableChunkMessageID(x.pendingMessageID, index+1, count), result.Seq(), result.Payload(), index == 0, index == count-1)
+			if err != nil {
+				x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to record chunk of message=%s: %w", x.pendingMessageID, err))
+				return
+			}
+
+			chunks = append(chunks, entry)
+		}
+
+		x.pendingChunks = chunks
+		x.pendingSeq = results[count-1].Seq()
+		x.replyStored(ctx)
+		return
+	}
+
+	if len(results) != len(x.pendingChunks) {
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("store chunked for message=%s returned %d results for %d chunks", x.pendingMessageID, len(results), len(x.pendingChunks)))
+		return
+	}
+
+	for index, result := range results {
+		if result.Seq() != x.currentSeq+int64(index)+1 {
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("store chunked for message=%s assigned seq=%d at position %d, want %d", x.pendingMessageID, result.Seq(), index, x.currentSeq+int64(index)+1))
+			return
+		}
+	}
+
+	x.pendingSeq = results[len(results)-1].Seq()
+	x.unconfirmed = append(x.unconfirmed, x.pendingChunks...)
+	x.currentSeq = x.pendingSeq
+	x.replyStored(ctx)
+}
+
+// chunksForBusinessMessage returns the unconfirmed chunk entries that belong
+// to businessMessageID, in sequence order. Whole-message entries with that ID
+// are included as a single-element run.
+func chunksForBusinessMessage(messages []UnconfirmedMessage, businessMessageID string) []UnconfirmedMessage {
+	chunks := make([]UnconfirmedMessage, 0)
+
+	for _, message := range messages {
+		if message.id() == businessMessageID {
+			chunks = append(chunks, message)
+		}
+	}
+
+	return chunks
 }
 
 // replyStored acknowledges the pending message's storage toward the producer
@@ -609,6 +753,8 @@ func (x *producerController) handleQueueOpResult(ctx *ReceiveContext, result *qu
 	switch result.kind {
 	case queueOpStore:
 		x.completeStore(ctx, result.store)
+	case queueOpStoreChunked:
+		x.completeStoreChunked(ctx, result.stores)
 	case queueOpAccept:
 		x.completeAccept(ctx)
 	case queueOpConfirm:
@@ -805,7 +951,7 @@ func (x *producerController) startAccept(ctx *ReceiveContext) {
 func (x *producerController) completeAccept(ctx *ReceiveContext) {
 	if len(x.pendingChunks) > 0 {
 		for _, chunk := range x.pendingChunks {
-			x.emitSequenced(ctx, chunk.MessageID(), chunk.Seq(), chunk.Payload(), chunk.chunk)
+			x.emitSequenced(ctx, chunk.id(), chunk.Seq(), chunk.Payload(), chunk.chunk)
 		}
 	} else {
 		x.emitSequenced(ctx, x.pendingMessageID, x.pendingSeq, x.pendingPayload, chunkMark{})
@@ -914,7 +1060,7 @@ func (x *producerController) sendConfirmation(ctx *ReceiveContext, confirmed []U
 			continue
 		}
 
-		notice, err := newDeliveryConfirmed(x.sessionID, message.MessageID(), message.Seq(), x.producer, ctx.Self())
+		notice, err := newDeliveryConfirmed(x.sessionID, message.id(), message.Seq(), x.producer, ctx.Self())
 		if err != nil {
 			ctx.Logger().Debugf("producer controller for endpoint=%s skipped a delivery confirmation: %v", x.producer.Name(), err)
 			continue
@@ -938,7 +1084,7 @@ func (x *producerController) resendUnconfirmed(ctx *ReceiveContext) {
 			return
 		}
 
-		x.emitSequenced(ctx, message.MessageID(), message.Seq(), message.Payload(), message.chunk)
+		x.emitSequenced(ctx, message.id(), message.Seq(), message.Payload(), message.chunk)
 	}
 }
 
@@ -975,6 +1121,18 @@ func (x *producerController) launchOp(ctx *ReceiveContext, kind int) {
 		return
 	}
 
+	var chunkRequests []StoreRequest
+
+	if kind == queueOpStoreChunked {
+		requests, err := storeRequestsFromChunks(x.pendingChunks)
+		if err != nil {
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build chunked store requests for message=%s: %w", x.pendingMessageID, err))
+			return
+		}
+
+		chunkRequests = requests
+	}
+
 	x.opInFlight = true
 	x.nextOperationID++
 
@@ -999,6 +1157,8 @@ func (x *producerController) launchOp(ctx *ReceiveContext, kind int) {
 				if request, err = NewStoreRequest(messageID, proposedSeq, payload); err == nil {
 					result.store, err = queue.Store(taskCtx, epoch, request)
 				}
+			case queueOpStoreChunked:
+				result.stores, err = queue.StoreChunked(taskCtx, epoch, chunkRequests)
 			case queueOpAccept:
 				err = queue.Accept(taskCtx, epoch, messageID)
 			case queueOpConfirm:
@@ -1010,6 +1170,27 @@ func (x *producerController) launchOp(ctx *ReceiveContext, kind int) {
 
 		return result, nil
 	})
+}
+
+// storeRequestsFromChunks builds the StoreChunked request batch from the
+// pending chunk entries prepared for the current handshake.
+func storeRequestsFromChunks(chunks []UnconfirmedMessage) ([]StoreRequest, error) {
+	if len(chunks) == 0 {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requires at least one chunk"))
+	}
+
+	requests := make([]StoreRequest, 0, len(chunks))
+
+	for _, chunk := range chunks {
+		request, err := NewStoreRequest(chunk.MessageID(), chunk.Seq(), chunk.Payload())
+		if err != nil {
+			return nil, err
+		}
+
+		requests = append(requests, request)
+	}
+
+	return requests, nil
 }
 
 // retryQueueOp runs a durable operation under the queue retry policy using

@@ -100,7 +100,8 @@ func WithDeliveryConfirmation() ReliableProducerOption {
 // consumer controller before Delivery, so one large message can never exceed
 // the remoting frame cap. The size must be in [MinChunkSize, MaxChunkSize],
 // and a message must fit in the consumer's flow-control window worth of
-// chunks. Chunking cannot be combined with a durable queue.
+// chunks. Combined with a durable queue, the producer controller stores the
+// chunks through StoreChunked so a crash mid-message cannot mix encodings.
 func WithChunking(maxChunkBytes uint32) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {

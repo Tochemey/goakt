@@ -410,8 +410,16 @@ type DurableProducerQueue interface {
     // and authoritative first-write payload; the proposed bytes are ignored.
     Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error)
 
+    // StoreChunked atomically indexes every chunk of one business message.
+    // First-write-wins applies to the whole batch keyed by the business
+    // MessageID; chunk entries use derived MessageIDs
+    // (`GoAktChunk:<index>/<count>:<businessID>`). The prefix is reserved:
+    // NewProduced rejects an application MessageID that starts with it.
+    StoreChunked(ctx context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error)
+
     // Accept records that the producer received Stored and durably removed
-    // the offer from any recoverable source. Monotonic and idempotent.
+    // the offer from any recoverable source. For a chunked batch, messageID
+    // is the business MessageID. Monotonic and idempotent.
     Accept(ctx context.Context, epoch QueueEpoch, messageID string) error
 
     // Confirm records the highest confirmed sequence under the writer's
