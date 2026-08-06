@@ -4,7 +4,7 @@ description: Confirmed, ordered, flow-controlled message delivery between a prod
 sidebarTitle: "Point-to-Point"
 ---
 
-Ordinary GoAkt messaging is `at-most-once`: a `Tell` that races a crash, a full bounded mailbox, or a network fault is lost. The **point-to-point** reliable delivery pattern adds a confirmed, ordered, flow-controlled flow between exactly two of your actors, a producer and a consumer. Default `Tell` semantics are unchanged; reliability applies only to flows you explicitly configure.
+Ordinary GoAkt messaging is at-most-once: a **Tell** that races a crash, a full bounded mailbox, or a network fault is lost. The **point-to-point** reliable delivery pattern adds a confirmed, ordered, flow-controlled flow between exactly two of your actors, a producer and a consumer. Default **Tell** semantics are unchanged; reliability applies only to flows you explicitly configure.
 
 You enable a flow with one spawn option per side. The actor system then creates and manages an internal controller next to each endpoint. The controllers sequence messages, grant send credit, resend after loss, deduplicate after restarts, and optionally persist producer state in a durable queue. Your actors stay ordinary actors: anyone can message them, and only a small handshake connects them to the flow.
 
@@ -12,7 +12,7 @@ You enable a flow with one spawn option per side. The actor system then creates 
 
 Reach for point-to-point reliable delivery when one actor must hand work to another and the default at-most-once semantics are not enough:
 
-- **Message loss is unacceptable.** Two specific actors need at-least-once or effectively-once processing instead of best-effort `Tell`. A checkout actor handing accepted orders to a fulfillment processor is the running example on this page: every order must arrive, in order, exactly once in effect, across restarts, redeploys, and node loss.
+- **Message loss is unacceptable.** Two specific actors need at-least-once or effectively-once processing instead of best-effort **Tell**. A checkout actor handing accepted orders to a fulfillment processor is the running example on this page: every order must arrive, in order, exactly once in effect, across restarts, redeploys, and node loss.
 - **Flow-controlled producer-consumer pipelines.** A fast producer risks overwhelming a slower consumer or saturating the network. The producer sends only when its controller grants demand through `RequestNext`, so the consumer-side buffer stays bounded no matter how fast the producer runs and mailboxes never grow without limit.
 - **Ordered, sequential processing.** Deliveries arrive in sequence order, and the next message reaches the consumer only after the current one is confirmed; the consumer controller buffers anything that arrives in the meantime. A coordinator streaming jobs to a worker knows each job was processed, not merely enqueued, before the next one lands.
 - **Cross-node event forwarding.** An actor on one cluster node feeds an actor on another, and the receiver must see every event in order even though the network hop is lossy.
