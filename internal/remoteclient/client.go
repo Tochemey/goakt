@@ -2187,7 +2187,7 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 			Pattern:              pattern,
 		}
 
-		if spec.Producer.DurableQueueID != "" {
+		if spec.Producer.DurableQueueID != types.EmptyString {
 			producer.DurableQueueId = new(spec.Producer.DurableQueueID)
 		}
 

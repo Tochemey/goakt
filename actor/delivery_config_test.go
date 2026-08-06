@@ -416,6 +416,22 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		assert.Nil(t, config.durableQueue)
 	})
 
+	t.Run("With a work-pulling producer and its durable work queue", func(t *testing.T) {
+		queue := &mockDurableWorkQueue{}
+		wire := workPullingProducerConfig()
+		wire.producer.durableQueueID = queue.ID()
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{queue})
+		require.NoError(t, err)
+
+		config := newSpawnConfig(option)
+		require.NotNil(t, config.reliableDelivery)
+		assert.True(t, config.reliableDelivery.producer.workPulling)
+		assert.Same(t, queue, config.durableWorkQueue)
+		assert.Nil(t, config.durableQueue)
+		require.NoError(t, config.Validate())
+	})
+
 	t.Run("With a consumer", func(t *testing.T) {
 		option, err := reliableSpawnOptionFromWire(consumerDeliveryConfig("producer").toProto(), nil)
 		require.NoError(t, err)

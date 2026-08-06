@@ -75,6 +75,31 @@ func newReliableClusterFixture(t *testing.T) (context.Context, []*actorSystem) {
 	return ctx, systems
 }
 
+func TestWorkPullingDurableClusterFlow(t *testing.T) {
+	ctx, systems := newReliableClusterFixture(t)
+	node1, node2 := systems[0], systems[1]
+	queue := &mockDurableWorkQueue{}
+
+	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+		AsWorkPullingProducer(WithDurableWorkQueue(queue), WithLocalRetryInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
+		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
+
+	deliveries := awaitDeliveries(t, ctx, worker, 1)
+	require.Len(t, deliveries, 1)
+	assert.Equal(t, "job-1", deliveries[0].MessageID())
+
+	require.Eventually(t, func() bool {
+		_, ops := queue.snapshot()
+		return containsAllOperations(ops, "store:job-1", "accept:job-1", "confirm:job-1")
+	}, 20*time.Second, 50*time.Millisecond)
+}
+
 func TestWorkPullingDeliveryClusterFlow(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]

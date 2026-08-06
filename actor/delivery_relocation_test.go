@@ -108,6 +108,66 @@ func (x *sharedDurableQueue) Confirm(ctx context.Context, epoch QueueEpoch, upTo
 	return x.backing().Confirm(ctx, epoch, upToSeq)
 }
 
+// sharedWorkQueueStates backs sharedDurableWorkQueue instances across the
+// in-process cluster nodes, modeling an external durable work store.
+var (
+	sharedWorkQueueStatesMu sync.Mutex
+	sharedWorkQueueStates   = map[string]*mockDurableWorkQueue{}
+)
+
+// sharedDurableWorkQueue is a relocatable DurableWorkQueue: only its ID
+// crosses the wire, and every instance delegates to the process-global state
+// registered under that ID.
+type sharedDurableWorkQueue struct {
+	id string
+}
+
+// newSharedDurableWorkQueue creates a work-queue handle and its backing state.
+func newSharedDurableWorkQueue(id string) *sharedDurableWorkQueue {
+	queue := &sharedDurableWorkQueue{id: id}
+	queue.backing()
+	return queue
+}
+
+// backing resolves the process-global state of this work queue, creating it on
+// first use so a reconstructed instance attaches to the same store.
+func (x *sharedDurableWorkQueue) backing() *mockDurableWorkQueue {
+	sharedWorkQueueStatesMu.Lock()
+	defer sharedWorkQueueStatesMu.Unlock()
+
+	state, ok := sharedWorkQueueStates[x.id]
+	if !ok {
+		state = &mockDurableWorkQueue{}
+		sharedWorkQueueStates[x.id] = state
+	}
+
+	return state
+}
+
+func (x *sharedDurableWorkQueue) ID() string                     { return x.id }
+func (x *sharedDurableWorkQueue) MarshalBinary() ([]byte, error) { return []byte(x.id), nil }
+
+func (x *sharedDurableWorkQueue) UnmarshalBinary(data []byte) error {
+	x.id = string(data)
+	return nil
+}
+
+func (x *sharedDurableWorkQueue) Load(ctx context.Context) (WorkQueueState, QueueEpoch, error) {
+	return x.backing().Load(ctx)
+}
+
+func (x *sharedDurableWorkQueue) Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error) {
+	return x.backing().Store(ctx, epoch, request)
+}
+
+func (x *sharedDurableWorkQueue) Accept(ctx context.Context, epoch QueueEpoch, messageID string) error {
+	return x.backing().Accept(ctx, epoch, messageID)
+}
+
+func (x *sharedDurableWorkQueue) ConfirmMessage(ctx context.Context, epoch QueueEpoch, messageID string) error {
+	return x.backing().ConfirmMessage(ctx, epoch, messageID)
+}
+
 // reliableRelocationConsumerMock is a reliableConsumerMock whose zero value
 // confirms deliveries, so the fresh instance a relocation creates behaves
 // like the original spawn.
@@ -187,6 +247,91 @@ func awaitLocalEndpoint(t *testing.T, nodes []*actorSystem, name string) *PID {
 	}, 30*time.Second, 100*time.Millisecond, "endpoint %s must be respawned on a survivor", name)
 
 	return relocated
+}
+
+func TestWorkPullingProducerRelocation(t *testing.T) {
+	ctx, systems, stopNode := newReliableRelocationFixture(t)
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+
+	queue := newSharedDurableWorkQueue("jobs-queue-" + uuid.NewString())
+
+	for _, node := range systems {
+		require.NoError(t, node.Inject(queue))
+	}
+
+	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+		AsWorkPullingProducer(
+			WithDurableWorkQueue(queue),
+			WithLocalRetryInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableRelocationConsumerMock{},
+		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	oldIncarnation := producer.IncarnationID()
+	oldCompanion := reliableCompanionName(ReliableControllerRoleProducer, oldIncarnation)
+
+	for i := 1; i <= 2; i++ {
+		id := fmt.Sprintf("job-%d", i)
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+	}
+
+	deliveries := awaitDeliveries(t, ctx, worker, 2)
+	require.Len(t, deliveries, 2)
+
+	// wait for per-message confirmations to persist so the relocated
+	// controller resumes from a clean durable state
+	backing := queue.backing()
+	require.Eventually(t, func() bool {
+		return backing.confirmedCount() == 2
+	}, 10*time.Second, 50*time.Millisecond)
+
+	oldEpoch := backing.epoch
+
+	stopNode(0)
+
+	relocated := awaitLocalEndpoint(t, []*actorSystem{node2, node3}, "jobs-producer")
+	require.NotNil(t, relocated.reliableDelivery)
+	require.True(t, relocated.reliableDelivery.producer.workPulling)
+	require.NotNil(t, relocated.durableWorkQueue)
+	assert.NotEqual(t, oldIncarnation, relocated.IncarnationID())
+
+	// the relocated controller reloaded the durable work queue under a new
+	// epoch, fencing any writer of the departed activation
+	require.Eventually(t, func() bool {
+		backing.mu.Lock()
+		defer backing.mu.Unlock()
+		return backing.epoch > oldEpoch
+	}, 20*time.Second, 100*time.Millisecond)
+
+	_, err = backing.Store(ctx, oldEpoch, mustStoreRequest(t, "stale-write", 3))
+	require.ErrorIs(t, err, gerrors.ErrQueueFenced)
+
+	require.Eventually(t, func() bool {
+		companion, cerr := node3.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer)
+		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.IncarnationID())
+	}, 20*time.Second, 100*time.Millisecond)
+
+	require.Eventually(t, func() bool {
+		_, gerr := node3.getCluster().GetActor(ctx, oldCompanion)
+		return gerr != nil
+	}, 20*time.Second, 100*time.Millisecond, "the departed controller record must be withdrawn")
+
+	// delivery resumes across the relocation to the surviving worker. Per-worker
+	// sequences restart with the new producer session, so assert by MessageID
+	// rather than distinct sequence count.
+	require.NoError(t, Tell(ctx, relocated, &produceSubmission{messageID: "job-3", payload: &testpb.Reply{Content: "job-3"}}))
+
+	require.Eventually(t, func() bool {
+		for _, delivery := range distinctDeliveries(awaitDeliveriesSnapshot(t, ctx, worker)) {
+			if delivery.MessageID() == "job-3" {
+				return true
+			}
+		}
+
+		return false
+	}, 20*time.Second, 50*time.Millisecond)
 }
 
 func TestReliableProducerRelocation(t *testing.T) {

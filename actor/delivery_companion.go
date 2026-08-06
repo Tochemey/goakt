@@ -324,7 +324,7 @@ func newReliableController(endpoint *PID) Actor {
 
 	if producerConfig := config.producer; producerConfig != nil {
 		if producerConfig.workPulling {
-			return newWorkPullingProducerController(endpoint, producerConfig)
+			return newWorkPullingProducerController(endpoint, producerConfig, endpoint.durableWorkQueue)
 		}
 
 		return newProducerController(endpoint, producerConfig, endpoint.durableQueue)

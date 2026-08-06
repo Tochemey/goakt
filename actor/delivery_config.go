@@ -72,13 +72,18 @@ type reliableProducerConfig struct {
 	// sequenced chunks; zero disables chunking. It mirrors the wire field's
 	// type so the configuration crosses the boundary without conversion.
 	maxChunkBytes uint32
-	// queue is the live durable queue instance collected by WithDurableQueue;
-	// nil runs volatile. It is not serialized from this struct: the queue
-	// crosses the wire as an ordinary dependency descriptor on the actor
-	// record and is rebuilt by dependency reconstruction on the hosting node.
-	// durableQueueID then selects that rebuilt instance among the endpoint's
-	// dependencies, which may also contain unrelated business dependencies.
+	// queue is the live durable producer queue collected by WithDurableQueue;
+	// nil runs volatile on a point-to-point producer. It is not serialized
+	// from this struct: the queue crosses the wire as an ordinary dependency
+	// descriptor on the actor record and is rebuilt by dependency
+	// reconstruction on the hosting node. durableQueueID then selects that
+	// rebuilt instance among the endpoint's dependencies.
 	queue DurableProducerQueue
+	// workQueue is the live durable work queue collected by
+	// WithDurableWorkQueue; nil runs volatile on a work-pulling producer. It
+	// shares durableQueueID with queue for wire reconstruction and is
+	// mutually exclusive with queue by pattern.
+	workQueue DurableWorkQueue
 }
 
 // reliableQueueRetryConfig defines retries for durable queue operations.
@@ -132,19 +137,7 @@ func (x *reliableDeliveryConfig) role() ReliableControllerRole {
 // controller's constructor guards, so a configuration that passes validation
 // always builds a controller during the endpoint spawn transaction.
 func (x *reliableProducerConfig) Validate() error {
-	if x.workPulling {
-		if !types.IsBlank(x.consumerName) {
-			return errors.New("work-pulling producer rejects a consumer endpoint name")
-		}
-
-		if x.maxChunkBytes != 0 {
-			return errors.New("work-pulling producer rejects chunking")
-		}
-
-		if x.durableQueueID != "" || x.queue != nil {
-			return errors.New("work-pulling producer rejects a durable producer queue")
-		}
-	} else if err := validateReliablePeerName(x.consumerName); err != nil {
+	if err := x.validatePattern(); err != nil {
 		return err
 	}
 
@@ -164,7 +157,7 @@ func (x *reliableProducerConfig) Validate() error {
 		return errors.New("queue retry initial backoff must be positive")
 	}
 
-	if x.durableQueueID != "" {
+	if x.durableQueueID != types.EmptyString {
 		if err := validation.NewIDValidator(x.durableQueueID).Validate(); err != nil {
 			return fmt.Errorf("durable queue ID is invalid: %w", err)
 		}
@@ -174,6 +167,50 @@ func (x *reliableProducerConfig) Validate() error {
 		if x.maxChunkBytes < MinChunkSize || x.maxChunkBytes > MaxChunkSize {
 			return fmt.Errorf("chunk size must be in [%d, %d]", MinChunkSize, MaxChunkSize)
 		}
+	}
+
+	return nil
+}
+
+// validatePattern applies the checks owned by the selected producer pattern,
+// dispatching to exactly one of the pattern validators.
+func (x *reliableProducerConfig) validatePattern() error {
+	if x.workPulling {
+		return x.validateWorkPulling()
+	}
+
+	return x.validatePointToPoint()
+}
+
+// validateWorkPulling rejects the settings that only apply to point-to-point:
+// workers are discovered through registration fencing rather than a peer
+// name, chunking is unsupported, and durability uses the work queue contract.
+func (x *reliableProducerConfig) validateWorkPulling() error {
+	if !types.IsBlank(x.consumerName) {
+		return errors.New("work-pulling producer rejects a consumer endpoint name")
+	}
+
+	if x.maxChunkBytes != 0 {
+		return errors.New("work-pulling producer rejects chunking")
+	}
+
+	if x.queue != nil {
+		return errors.New("work-pulling producer rejects a durable producer queue")
+	}
+
+	return nil
+}
+
+// validatePointToPoint requires the consumer peer name and rejects the
+// work-pulling durable queue, whose per-message confirmation model does not
+// apply to a cumulative-watermark flow.
+func (x *reliableProducerConfig) validatePointToPoint() error {
+	if err := validateReliablePeerName(x.consumerName); err != nil {
+		return err
+	}
+
+	if x.workQueue != nil {
+		return errors.New("point-to-point producer rejects a durable work queue")
 	}
 
 	return nil
@@ -252,7 +289,7 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 			Pattern:              reliableDeliveryPatternToProto(x.producer.workPulling),
 		}
 
-		if x.producer.durableQueueID != "" {
+		if x.producer.durableQueueID != types.EmptyString {
 			producer.DurableQueueId = new(x.producer.durableQueueID)
 		}
 
@@ -403,17 +440,26 @@ func reliableSpawnOptionFromWire(config *internalpb.ReliableDeliveryConfig, depe
 	}
 
 	var queue DurableProducerQueue
+	var workQueue DurableWorkQueue
 
-	if producer := decoded.producer; producer != nil && producer.durableQueueID != "" {
-		queue, err = durableQueueByID(dependencies, producer.durableQueueID)
-		if err != nil {
-			return nil, err
+	if producer := decoded.producer; producer != nil && producer.durableQueueID != types.EmptyString {
+		if producer.workPulling {
+			workQueue, err = durableWorkQueueByID(dependencies, producer.durableQueueID)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			queue, err = durableQueueByID(dependencies, producer.durableQueueID)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
 	return spawnOption(func(config *spawnConfig) {
 		config.reliableDelivery = decoded
 		config.durableQueue = queue
+		config.durableWorkQueue = workQueue
 	}), nil
 }
 
@@ -437,6 +483,26 @@ func durableQueueByID(dependencies []extension.Dependency, id string) (DurablePr
 	}
 
 	return nil, fmt.Errorf("durable producer queue dependency=%s is missing from the endpoint dependencies", id)
+}
+
+// durableWorkQueueByID resolves the durable work queue a reconstructed
+// work-pulling producer configuration references among the endpoint's
+// reconstructed dependencies.
+func durableWorkQueueByID(dependencies []extension.Dependency, id string) (DurableWorkQueue, error) {
+	for _, dependency := range dependencies {
+		if dependency == nil || dependency.ID() != id {
+			continue
+		}
+
+		queue, ok := dependency.(DurableWorkQueue)
+		if !ok {
+			return nil, fmt.Errorf("dependency=%s is not a durable work queue", id)
+		}
+
+		return queue, nil
+	}
+
+	return nil, fmt.Errorf("durable work queue dependency=%s is missing from the endpoint dependencies", id)
 }
 
 // reliableDeliveryPatternToProto maps the in-memory work-pulling flag to its

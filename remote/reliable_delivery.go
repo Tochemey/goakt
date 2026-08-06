@@ -26,6 +26,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // ReliableDeliverySpec marks a remotely spawned actor as one endpoint of a
@@ -121,18 +123,14 @@ func (x *ReliableDeliverySpec) Validate() error {
 // Validate checks the producer-side delivery settings.
 func (x *ReliableProducerSpec) Validate() error {
 	if x.WorkPulling {
-		if strings.TrimSpace(x.ConsumerName) != "" {
+		if strings.TrimSpace(x.ConsumerName) != types.EmptyString {
 			return errors.New("work-pulling producer rejects a consumer endpoint name")
 		}
 
 		if x.MaxChunkBytes != 0 {
 			return errors.New("work-pulling producer rejects chunking")
 		}
-
-		if strings.TrimSpace(x.DurableQueueID) != "" {
-			return errors.New("work-pulling producer rejects a durable producer queue")
-		}
-	} else if strings.TrimSpace(x.ConsumerName) == "" {
+	} else if strings.TrimSpace(x.ConsumerName) == types.EmptyString {
 		return errors.New("consumer endpoint name is required")
 	}
 
@@ -153,7 +151,7 @@ func (x *ReliableProducerSpec) Validate() error {
 
 // Validate checks the consumer-side delivery settings.
 func (x *ReliableConsumerSpec) Validate() error {
-	if strings.TrimSpace(x.ProducerName) == "" {
+	if strings.TrimSpace(x.ProducerName) == types.EmptyString {
 		return errors.New("producer endpoint name is required")
 	}
 

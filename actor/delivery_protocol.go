@@ -322,7 +322,7 @@ func NewDurableQueueState(currentSeq, confirmedSeq int64, unconfirmed []Unconfir
 		return DurableQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed messages must cover every sequence after confirmation"))
 	}
 
-	messageIDs := make(map[string]struct{}, len(unconfirmed))
+	messageIDs := make(map[string]types.Unit, len(unconfirmed))
 
 	for index, message := range unconfirmed {
 		expectedSeq := confirmedSeq + int64(index) + 1
@@ -342,7 +342,7 @@ func NewDurableQueueState(currentSeq, confirmedSeq int64, unconfirmed []Unconfir
 			return DurableQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed message IDs must be unique"))
 		}
 
-		messageIDs[message.messageID] = struct{}{}
+		messageIDs[message.messageID] = types.Unit{}
 	}
 
 	return DurableQueueState{
@@ -365,6 +365,69 @@ func (x DurableQueueState) ConfirmedSeq() int64 {
 // Unconfirmed returns a copy of messages awaiting confirmation. Their payloads
 // remain immutable and copy bytes only when Bytes is called.
 func (x DurableQueueState) Unconfirmed() []UnconfirmedMessage {
+	return cloneUnconfirmedMessages(x.unconfirmed)
+}
+
+// WorkQueueState contains the append cursor and accepted, not-yet-confirmed
+// messages of a work-pulling durable queue. Unlike DurableQueueState there is
+// no cumulative confirmation watermark: holes in the unconfirmed set are
+// normal because workers complete out of order.
+type WorkQueueState struct {
+	// currentSeq is the highest sequence assigned by Store.
+	currentSeq int64
+	// unconfirmed contains every accepted message that is not yet confirmed,
+	// in ascending store-sequence order. Sequences need not be contiguous.
+	unconfirmed []UnconfirmedMessage
+}
+
+// NewWorkQueueState creates and validates an immutable work-queue snapshot.
+func NewWorkQueueState(currentSeq int64, unconfirmed []UnconfirmedMessage) (WorkQueueState, error) {
+	if currentSeq < 0 {
+		return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("current sequence must not be negative"))
+	}
+
+	messageIDs := make(map[string]types.Unit, len(unconfirmed))
+	previousSeq := int64(0)
+
+	for _, message := range unconfirmed {
+		if message.seq <= 0 || message.seq > currentSeq {
+			return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed store sequence must be in (0, currentSeq]"))
+		}
+
+		if message.seq <= previousSeq {
+			return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed messages must be ordered by ascending store sequence"))
+		}
+
+		if types.IsBlank(message.messageID) {
+			return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed message ID is required"))
+		}
+
+		if len(message.payload.rawBytes()) == 0 {
+			return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed payload is required"))
+		}
+
+		if _, exists := messageIDs[message.messageID]; exists {
+			return WorkQueueState{}, gerrors.NewErrInvalidMessage(errors.New("unconfirmed message IDs must be unique"))
+		}
+
+		messageIDs[message.messageID] = types.Unit{}
+		previousSeq = message.seq
+	}
+
+	return WorkQueueState{
+		currentSeq:  currentSeq,
+		unconfirmed: cloneUnconfirmedMessages(unconfirmed),
+	}, nil
+}
+
+// CurrentSeq returns the highest sequence assigned by Store.
+func (x WorkQueueState) CurrentSeq() int64 {
+	return x.currentSeq
+}
+
+// Unconfirmed returns a copy of accepted messages awaiting confirmation. Their
+// payloads remain immutable and copy bytes only when Bytes is called.
+func (x WorkQueueState) Unconfirmed() []UnconfirmedMessage {
 	return cloneUnconfirmedMessages(x.unconfirmed)
 }
 

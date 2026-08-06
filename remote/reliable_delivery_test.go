@@ -113,13 +113,12 @@ func TestReliableDeliverySpecValidate(t *testing.T) {
 			wantErr: "rejects chunking",
 		},
 		{
-			name: "work-pulling producer with durable queue",
+			name: "work-pulling producer with durable work queue ID",
 			spec: func() *ReliableDeliverySpec {
 				producer := validWorkPullingProducerSpec()
 				producer.DurableQueueID = "queue"
 				return &ReliableDeliverySpec{Producer: producer}
 			}(),
-			wantErr: "rejects a durable producer queue",
 		},
 		{
 			name: "producer without retry attempts",

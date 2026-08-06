@@ -125,10 +125,13 @@ type spawnConfig struct {
 	// reliableCompanion marks the actor as the endpoint-owned
 	// reliable-delivery controller described by the spec.
 	reliableCompanion *reliableCompanionSpec
-	// durableQueue is the producer endpoint's durable queue instance; it
-	// travels by reference to the controller companion and is referenced by
-	// ID in the wire configuration.
+	// durableQueue is the point-to-point producer endpoint's durable queue
+	// instance; it travels by reference to the controller companion and is
+	// referenced by ID in the wire configuration.
 	durableQueue DurableProducerQueue
+	// durableWorkQueue is the work-pulling producer endpoint's durable work
+	// queue instance; it travels by reference like durableQueue.
+	durableWorkQueue DurableWorkQueue
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -217,17 +220,24 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 // idempotent. Running after all options are applied keeps the result
 // independent of option order.
 func (s *spawnConfig) normalizeDurableQueue() {
-	if s.durableQueue == nil {
+	s.appendDurableDependency(s.durableQueue)
+	s.appendDurableDependency(s.durableWorkQueue)
+}
+
+// appendDurableDependency adds queue to the dependency list when it is set
+// and not already present by ID.
+func (s *spawnConfig) appendDurableDependency(queue extension.Dependency) {
+	if queue == nil {
 		return
 	}
 
 	for _, dependency := range s.dependencies {
-		if dependency != nil && dependency.ID() == s.durableQueue.ID() {
+		if dependency != nil && dependency.ID() == queue.ID() {
 			return
 		}
 	}
 
-	s.dependencies = append(s.dependencies, s.durableQueue)
+	s.dependencies = append(s.dependencies, queue)
 }
 
 // clone returns a deep copy of the spawnConfig and applies the given SpawnOption(s)
@@ -260,6 +270,7 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		reliableDelivery:    s.reliableDelivery,
 		reliableCompanion:   s.reliableCompanion,
 		durableQueue:        s.durableQueue,
+		durableWorkQueue:    s.durableWorkQueue,
 	}
 
 	if len(s.dependencies) > 0 {

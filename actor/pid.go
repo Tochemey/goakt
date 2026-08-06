@@ -217,10 +217,15 @@ type PID struct {
 	// and pins it to its endpoint incarnation. It is nil for ordinary actors.
 	reliableCompanion *reliableCompanionSpec
 
-	// durableQueue is the producer endpoint's durable queue instance, retained
-	// so ReSpawn can recreate a terminally stopped producer controller with its
-	// storage. It is nil for consumers and volatile producers.
+	// durableQueue is the point-to-point producer endpoint's durable queue
+	// instance, retained so ReSpawn can recreate a terminally stopped producer
+	// controller with its storage. It is nil for consumers, work-pulling
+	// producers, and volatile point-to-point producers.
 	durableQueue DurableProducerQueue
+
+	// durableWorkQueue is the work-pulling producer endpoint's durable work
+	// queue instance, retained for the same recovery path as durableQueue.
+	durableWorkQueue DurableWorkQueue
 
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager

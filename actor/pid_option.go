@@ -54,12 +54,21 @@ func withReliableCompanion(spec *reliableCompanionSpec) pidOption {
 	}
 }
 
-// withDurableQueue retains the producer endpoint's durable queue instance so
-// controller creation and ReSpawn recovery can hand it to a fresh producer
-// controller.
+// withDurableQueue retains the point-to-point producer endpoint's durable
+// queue instance so controller creation and ReSpawn recovery can hand it to a
+// fresh producer controller.
 func withDurableQueue(queue DurableProducerQueue) pidOption {
 	return func(pid *PID) {
 		pid.durableQueue = queue
+	}
+}
+
+// withDurableWorkQueue retains the work-pulling producer endpoint's durable
+// work queue instance so controller creation and ReSpawn recovery can hand it
+// to a fresh work-pulling producer controller.
+func withDurableWorkQueue(queue DurableWorkQueue) pidOption {
+	return func(pid *PID) {
+		pid.durableWorkQueue = queue
 	}
 }
 

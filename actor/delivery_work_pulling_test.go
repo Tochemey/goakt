@@ -68,10 +68,17 @@ func TestWorkPullingProducerConfigValidate(t *testing.T) {
 		require.ErrorContains(t, config.Validate(), "rejects chunking")
 	})
 
-	t.Run("With a durable queue", func(t *testing.T) {
+	t.Run("With a durable producer queue", func(t *testing.T) {
 		config := workPullingProducerConfig()
-		config.producer.durableQueueID = "queue"
+		config.producer.queue = &mockDurableQueue{}
 		require.ErrorContains(t, config.Validate(), "rejects a durable producer queue")
+	})
+
+	t.Run("With a durable work queue", func(t *testing.T) {
+		config := workPullingProducerConfig()
+		config.producer.workQueue = &mockDurableWorkQueue{}
+		config.producer.durableQueueID = "mockDurableWorkQueue"
+		require.NoError(t, config.Validate())
 	})
 }
 

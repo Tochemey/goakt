@@ -3949,6 +3949,10 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		pidOpts = append(pidOpts, withDurableQueue(spawnConfig.durableQueue))
 	}
 
+	if spawnConfig.durableWorkQueue != nil {
+		pidOpts = append(pidOpts, withDurableWorkQueue(spawnConfig.durableWorkQueue))
+	}
+
 	// mark the actor as an endpoint-owned reliable-delivery controller when defined
 	if spawnConfig.reliableCompanion != nil {
 		pidOpts = append(pidOpts, withReliableCompanion(spawnConfig.reliableCompanion))

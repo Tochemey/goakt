@@ -58,8 +58,10 @@ const (
 	queueOpStoreChunked
 	// queueOpAccept identifies an asynchronous durable Accept.
 	queueOpAccept
-	// queueOpConfirm identifies an asynchronous durable Confirm.
+	// queueOpConfirm identifies an asynchronous durable Confirm watermark.
 	queueOpConfirm
+	// queueOpConfirmMessage identifies an asynchronous durable ConfirmMessage.
+	queueOpConfirmMessage
 )
 
 // producerControllerTick is the generation-fenced recurring timer message

@@ -37,7 +37,8 @@ type ReliableConsumerOption func(config *reliableConsumerConfig)
 // WithDurableQueue stores every produced message durably so a producer crash
 // or relocation redelivers unconfirmed messages. The queue is also registered
 // as a user dependency so relocation can reconstruct it by ID on any eligible
-// node.
+// node. It applies only to point-to-point producers; work-pulling uses
+// WithDurableWorkQueue.
 func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
@@ -45,6 +46,25 @@ func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
 		}
 
 		config.queue = queue
+
+		if queue != nil {
+			config.durableQueueID = queue.ID()
+		}
+	}
+}
+
+// WithDurableWorkQueue stores every accepted work-pulling message durably so a
+// producer crash or relocation reloads unconfirmed jobs into the pending pool
+// and re-dispatches them to current workers. Confirmation is per MessageID
+// because workers complete out of order. The queue is also registered as a
+// user dependency so relocation can reconstruct it by ID on any eligible node.
+func WithDurableWorkQueue(queue DurableWorkQueue) ReliableProducerOption {
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.workQueue = queue
 
 		if queue != nil {
 			config.durableQueueID = queue.ID()
@@ -191,9 +211,9 @@ func AsReliableConsumer(producerName string, opts ...ReliableConsumerOption) Spa
 // through registration fencing rather than a peer name. The actor system
 // creates and owns a work-pulling producer controller next to the endpoint;
 // the producer answers the same RequestNext/Produced/Stored/StoredAck
-// contract as point-to-point. WithChunking and WithDurableQueue are rejected
-// in this iteration. Reliable endpoints must be long-lived: finite
-// passivation is rejected at spawn.
+// contract as point-to-point. WithChunking and WithDurableQueue are
+// rejected; durability uses WithDurableWorkQueue. Reliable endpoints must be
+// long-lived: finite passivation is rejected at spawn.
 func AsWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
 	producer := &reliableProducerConfig{
 		workPulling:        true,
@@ -210,7 +230,7 @@ func AsWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
 
 	return spawnOption(func(config *spawnConfig) {
 		config.reliableDelivery = &reliableDeliveryConfig{producer: producer}
-		config.durableQueue = producer.queue
+		config.durableWorkQueue = producer.workQueue
 	})
 }
 
