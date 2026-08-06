@@ -104,14 +104,14 @@ func (x *sharedDurableQueue) Confirm(ctx context.Context, epoch QueueEpoch, upTo
 	return x.backing().Confirm(ctx, epoch, upToSeq)
 }
 
-// reliableRelocConsumerMock is a reliableConsumerMock whose zero value
+// reliableRelocationConsumerMock is a reliableConsumerMock whose zero value
 // confirms deliveries, so the fresh instance a relocation creates behaves
 // like the original spawn.
-type reliableRelocConsumerMock struct {
+type reliableRelocationConsumerMock struct {
 	reliableConsumerMock
 }
 
-func (x *reliableRelocConsumerMock) PreStart(*Context) error {
+func (x *reliableRelocationConsumerMock) PreStart(*Context) error {
 	x.autoConfirm = true
 	return nil
 }
@@ -128,7 +128,7 @@ func newReliableRelocationFixture(t *testing.T) (context.Context, []*actorSystem
 	ctx := context.TODO()
 	server := startNatsServer(t)
 	built, providers := testNATsConcurrent(t, server.Addr().String(), 3,
-		withTestExtraKinds(&reliableProducerMock{}, &reliableRelocConsumerMock{}),
+		withTestExtraKinds(&reliableProducerMock{}, &reliableRelocationConsumerMock{}),
 		withTestReplication(2, 1, 1),
 		withTestBootstrapTimeout(20*time.Second))
 
@@ -201,7 +201,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 			WithLocalRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocConsumerMock{},
+	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
 		AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -273,7 +273,7 @@ func TestReliableConsumerRelocation(t *testing.T) {
 		AsReliableProducer("orders-consumer", WithLocalRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocConsumerMock{},
+	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
 		AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -335,7 +335,7 @@ func TestReliableNonRelocatableEndpointRecordsWithdrawnOnShutdown(t *testing.T) 
 	ctx, systems, stopNode := newReliableRelocationFixture(t)
 	node1, node2 := systems[0], systems[1]
 
-	consumer, err := node1.Spawn(ctx, "orders-consumer", &reliableRelocConsumerMock{},
+	consumer, err := node1.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
 		AsReliableConsumer("orders-producer"), WithRelocationDisabled())
 	require.NoError(t, err)
 
@@ -360,7 +360,7 @@ func TestReliableNonRelocatableEndpointRecordsWithdrawnOnShutdown(t *testing.T) 
 	}, 20*time.Second, 100*time.Millisecond, "the endpoint and controller records must be withdrawn")
 
 	// the name is immediately reusable on a survivor
-	fresh, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocConsumerMock{},
+	fresh, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
 		AsReliableConsumer("orders-producer"))
 	require.NoError(t, err)
 	assert.True(t, fresh.IsRunning())
