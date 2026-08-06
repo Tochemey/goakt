@@ -955,18 +955,41 @@ func TestConsumerControllerChunkedDelivery(t *testing.T) {
 
 		// the assembled message is in flight, so its two chunks still occupy
 		// the buffer; the next message's first chunk fills it and the second
-		// one is dropped
+		// one is dropped. While the first message is in flight that incomplete
+		// run is not yet the head the controller can deliver, so no gap
+		// request fires here.
 		frameB := harness.encodeReply(t, "message-b")
 		halfB := len(frameB) / 2
 		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 3, frameB[:halfB], true, false))
 		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 4, frameB[halfB:], false, true))
 
+		beforeConfirm := len(harness.requests())
+
 		confirmed, err := NewConfirmed(harness.deliveries()[0])
 		require.NoError(t, err)
 		require.NoError(t, Tell(harness.ctx, harness.consumer, &deliveryForward{to: harness.consumerController, message: confirmed}))
 
-		// after confirmation purges the first run, the producer's timeout
-		// resend delivers the dropped chunk and the second message assembles
+		// confirmation purges the first run and uncovers the incomplete head;
+		// the controller must solicit a timeout resend itself. A non-timeout
+		// top-up from batching is not enough: ordinary Requests never resend.
+		var gapRequest *commands.Request
+
+		require.Eventually(t, func() bool {
+			for _, request := range harness.requests()[beforeConfirm:] {
+				if request.ViaTimeout() && request.ConfirmedSeq() == 2 {
+					gapRequest = request
+					return true
+				}
+			}
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
+
+		require.NotNil(t, gapRequest)
+		assert.EqualValues(t, 5, gapRequest.RequestUpToSeq())
+		require.Empty(t, harness.deliveries()[1:])
+
+		// the producer's timeout resend delivers the dropped chunk and the
+		// second message assembles
 		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 3, frameB[:halfB], true, false))
 		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 4, frameB[halfB:], false, true))
 

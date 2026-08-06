@@ -285,10 +285,13 @@ func (x *consumerController) handleSequencedMessage(ctx *ReceiveContext, msg *co
 // must match the in-flight MessageID, session, and sequence exactly: a
 // mismatch is a stale application reply (for example from a previous
 // session), dropped rather than treated as a violation because consumers
-// legitimately confirm late. The fixed order (advance, purge, batch, drain)
-// matters: batching runs before drain so the drained-stream rule observes
-// the truth, and drain hands over the next contiguous message only after
-// the watermark moved.
+// legitimately confirm late. The fixed order (advance, purge, batch, drain,
+// gap solicit) matters: batching runs before drain so the drained-stream
+// rule observes the truth, drain hands over the next contiguous message
+// only after the watermark moved, and a gap uncovered by the purge (for
+// example an incomplete chunk run that was buffered behind the confirmed
+// message) solicits a timeout resend immediately rather than waiting for
+// the next tick. A non-timeout top-up from batchConfirmation never resends.
 func (x *consumerController) handleConfirmed(ctx *ReceiveContext, confirmed *Confirmed) {
 	if !ctx.Sender().Equals(x.consumer) {
 		ctx.Logger().Debugf("consumer controller for endpoint=%s dropped Confirmed from unexpected sender", x.consumer.Name())
@@ -310,6 +313,17 @@ func (x *consumerController) handleConfirmed(ctx *ReceiveContext, confirmed *Con
 	x.refreshRunLast()
 	x.batchConfirmation(ctx)
 	x.drain(ctx)
+
+	if x.gapOpen() {
+		// Confirmation can uncover a gap that was invisible while the
+		// confirmed message was in flight, typically an incomplete chunk run
+		// buffered behind it. Solicit immediately and outside the
+		// bufferMessage rate limit: that limiter coalesces storms of
+		// reordered arrivals, and a confirmation that exposes a previously
+		// unreachable head is a single state transition. A non-timeout
+		// top-up from batchConfirmation never resends.
+		x.solicitGapRequest(ctx)
+	}
 }
 
 // handleTick applies exactly one recovery rule per generation-valid tick,
@@ -646,7 +660,15 @@ func (x *consumerController) sendGapRequest(ctx *ReceiveContext) {
 		return
 	}
 
-	x.lastGapRequest = now
+	x.solicitGapRequest(ctx)
+}
+
+// solicitGapRequest sends a timeout Request for an open gap and records the
+// solicit time so a following bufferMessage storm stays rate-limited. It is
+// the unthrottled path used when a discrete state transition (confirmation)
+// uncovers a gap that arrivals could not see.
+func (x *consumerController) solicitGapRequest(ctx *ReceiveContext) {
+	x.lastGapRequest = time.Now()
 	x.sendRequest(ctx, true)
 }
 

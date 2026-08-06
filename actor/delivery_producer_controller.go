@@ -893,8 +893,11 @@ func (x *producerController) advanceConfirmed(ctx *ReceiveContext, confirmed int
 }
 
 // sendConfirmation tells the producer that the consumer confirmed each
-// message leaving the unconfirmed buffer, in ascending sequence order. It runs
-// only for an endpoint spawned with WithDeliveryConfirmation.
+// business message leaving the unconfirmed buffer, in ascending sequence
+// order. It runs only for an endpoint spawned with WithDeliveryConfirmation.
+// Interior chunks are skipped: they share the business MessageID and are
+// covered by the notice for the last chunk (or a whole message), whose Seq
+// matches Stored and Delivery.
 //
 // The notice is best effort and deliberately not retried: it carries no
 // protocol obligation, so a bounded producer mailbox or a controller restart
@@ -907,6 +910,10 @@ func (x *producerController) sendConfirmation(ctx *ReceiveContext, confirmed []U
 	}
 
 	for _, message := range confirmed {
+		if !message.notifiesConfirmation() {
+			continue
+		}
+
 		notice, err := newDeliveryConfirmed(x.sessionID, message.MessageID(), message.Seq(), x.producer, ctx.Self())
 		if err != nil {
 			ctx.Logger().Debugf("producer controller for endpoint=%s skipped a delivery confirmation: %v", x.producer.Name(), err)

@@ -300,8 +300,8 @@ Confirm only after processing. Confirming early converts every later fault into 
 
 Every hop inside the machinery is a `Tell`; the flow carries one-way, ordered, confirmed transfers. `Ask` still works at the edges with bounded meaning:
 
-- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my buffer". It cannot answer "delivered": `Stored` acknowledges controller storage, and the confirmation loop terminates at the consumer's controller.
-- The consumer cannot reply to the original submitter through the flow, because `Delivery`'s sender is the controller. Carry correlation in the payload and reply through ordinary messaging, or run a second flow in the opposite direction when the reply itself must be reliable.
+- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my buffer". `Stored` acknowledges controller storage; it is not consumer confirmation. When the producer needs to know the consumer confirmed, enable `WithDeliveryConfirmation` and handle `DeliveryConfirmed` (see [Knowing when the consumer confirmed](#knowing-when-the-consumer-confirmed)). Relaying that signal to an original submitter remains application code: `Ask` at the edge still cannot mean "delivered".
+- The consumer cannot reply to the original submitter through the flow, because `Delivery`'s sender is the controller. Carry correlation in the payload and reply through ordinary messaging, use `DeliveryConfirmed` at the producer when a completion signal is enough, or run a second flow in the opposite direction when the reply itself must be reliable.
 
 ## Payload serialization
 

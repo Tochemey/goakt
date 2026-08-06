@@ -179,6 +179,14 @@ func (x UnconfirmedMessage) Payload() ReliablePayload {
 	return x.payload
 }
 
+// notifiesConfirmation reports whether popping this entry should emit a
+// DeliveryConfirmed. Confirmation is business-level: interior chunks share
+// the MessageID with the last chunk and are covered by that notice, so only
+// whole messages and last chunks notify.
+func (x UnconfirmedMessage) notifiesConfirmation() bool {
+	return !x.chunk.chunked || x.chunk.last
+}
+
 // StoreRequest describes one message the producer wants to append.
 type StoreRequest struct {
 	// messageID is the idempotency key supplied by the producer.

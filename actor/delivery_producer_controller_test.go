@@ -731,6 +731,60 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 		assert.Equal(t, "m-1", notice.MessageID())
 		assert.Equal(t, newSessionID, notice.SessionID())
 	})
+
+	t.Run("With chunking reports one notice per business message at the last chunk seq", func(t *testing.T) {
+		harness := newProducerControllerHarnessFor(t, nil, true, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-chunked", payload)
+		harness.produceOne(t, "m-whole")
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks+1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		require.Empty(t, harness.deliveryConfirmations())
+
+		// confirming the whole chunked message pops every chunk entry, but
+		// the producer sees one business-level notice at the last chunk seq
+		confirmChunked, err := commands.NewAck(sessionID, nonce, int64(chunks))
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirmChunked)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		pause.For(200 * time.Millisecond)
+		assert.Len(t, harness.deliveryConfirmations(), 1)
+
+		notice := harness.deliveryConfirmations()[0]
+		assert.Equal(t, "m-chunked", notice.MessageID())
+		assert.Equal(t, int64(chunks), notice.Seq())
+		assert.Equal(t, sessionID, notice.SessionID())
+
+		confirmWhole, err := commands.NewAck(sessionID, nonce, int64(chunks)+1)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirmWhole)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		assert.Equal(t, "m-whole", harness.deliveryConfirmations()[1].MessageID())
+		assert.Equal(t, int64(chunks)+1, harness.deliveryConfirmations()[1].Seq())
+	})
 }
 
 func TestProducerControllerChunkedFlow(t *testing.T) {
