@@ -176,12 +176,12 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 
 	// an uninvolved node resolves both companions as remote PIDs
 	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
-	resolved, err := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	resolved, err := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 	assert.True(t, resolved.IsRemote())
 	assert.Equal(t, companionName, resolved.Name())
 
-	resolved, err = node3.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer)
+	resolved, err = node3.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer, nil)
 	require.NoError(t, err)
 	assert.True(t, resolved.IsRemote())
 
@@ -229,7 +229,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 	}, 5*time.Second, 100*time.Millisecond)
 
 	t.Run("With a published pair", func(t *testing.T) {
-		resolved, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		resolved, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.NoError(t, err)
 		assert.True(t, resolved.IsRemote())
 		assert.Equal(t, companionName, resolved.Name())
@@ -240,7 +240,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 		tampered.GetReliableCompanion().EndpointIncarnationId = uuid.NewString()
 		require.NoError(t, registry.PutActor(ctx, tampered))
 
-		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 
 		require.NoError(t, registry.PutActor(ctx, companionRecord))
@@ -249,7 +249,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 	t.Run("With the companion record missing", func(t *testing.T) {
 		require.NoError(t, registry.RemoveActor(ctx, companionName))
 
-		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 
 		require.NoError(t, registry.PutActor(ctx, companionRecord))
@@ -260,7 +260,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 		tampered.Address = address.New(companionName, node1.Name(), node3.Host(), node3.Port()).String()
 		require.NoError(t, registry.PutActor(ctx, tampered))
 
-		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 
 		require.NoError(t, registry.PutActor(ctx, companionRecord))
@@ -274,7 +274,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 		require.NoError(t, registry.PutActor(ctx, tamperedEndpoint))
 		require.NoError(t, registry.PutActor(ctx, tamperedCompanion))
 
-		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 
 		require.NoError(t, registry.PutActor(ctx, endpointRecord))

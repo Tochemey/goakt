@@ -165,7 +165,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		companion, err := system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.NoError(t, err)
 		assert.True(t, companion.Equals(resolved))
 	})
@@ -173,7 +173,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 	t.Run("With unsupported role", func(t *testing.T) {
 		ctx, system := newCompanionTestSystem(t)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", reliableControllerRoleUnknown)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", reliableControllerRoleUnknown, nil)
 		require.Error(t, err)
 		assert.Nil(t, resolved)
 		assert.NotErrorIs(t, err, errReliableCompanionUnavailable)
@@ -182,7 +182,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 	t.Run("With missing endpoint", func(t *testing.T) {
 		ctx, system := newCompanionTestSystem(t)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -193,7 +193,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		_, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleConsumer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleConsumer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -208,7 +208,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem())
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -226,7 +226,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -244,7 +244,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -262,7 +262,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.Nil(t, resolved)
 	})
@@ -299,7 +299,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 
 		endpoint.setState(runningState, false)
 
-		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "is not running")
 		assert.Nil(t, resolved)
@@ -335,7 +335,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, cluster.ErrActorNotFound)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "no registry record")
 		assert.Nil(t, resolved)
@@ -347,7 +347,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "no published")
 		assert.Nil(t, resolved)
@@ -359,7 +359,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, nil), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "is not a runtime companion")
 		assert.Nil(t, resolved)
@@ -374,7 +374,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, wrongSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "runs role=")
 		assert.Nil(t, resolved)
@@ -389,7 +389,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, wrongOwner.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "is owned by endpoint=")
 		assert.Nil(t, resolved)
@@ -404,7 +404,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, staleSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "is bound to incarnation=")
 		assert.Nil(t, resolved)
@@ -419,7 +419,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		}, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "invalid address")
 		assert.Nil(t, resolved)
@@ -431,7 +431,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord("10.0.0.1:9000"), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "live on different nodes")
 		assert.Nil(t, resolved)
@@ -443,7 +443,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(localHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(localHostPort, validSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "point at this node")
 		assert.Nil(t, resolved)
@@ -455,7 +455,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
-		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
 		require.NoError(t, err)
 		require.NotNil(t, resolved)
 		assert.True(t, resolved.IsRemote())
@@ -470,7 +470,7 @@ func TestEnsureReliableCompanionEdges(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "orders", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
 		require.NoError(t, err)
 
-		companion, err := system.resolveReliableCompanion(ctx, "orders", ReliableControllerRoleProducer)
+		companion, err := system.resolveReliableCompanion(ctx, "orders", ReliableControllerRoleProducer, nil)
 		require.NoError(t, err)
 		companion.setState(runningState, false)
 
@@ -622,7 +622,7 @@ func TestReliableEndpointDefaults(t *testing.T) {
 	assert.NotSame(t, config, endpoint.reliableDelivery)
 
 	// the spawn transaction created the controller companion automatically
-	companion, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+	companion, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	assert.IsType(t, new(passivation.LongLivedStrategy), companion.passivationStrategy)
@@ -770,9 +770,9 @@ func TestReliableDeliveryEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 
 	// both controller companions were created by the spawn transaction
-	_, err = system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	_, err = system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
-	_, err = system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer)
+	_, err = system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer, nil)
 	require.NoError(t, err)
 
 	// ingress stays plain Tell: a message that never becomes Produced is not
@@ -842,7 +842,7 @@ func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
 		producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
 		require.NoError(t, err)
 
-		companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, producer.Shutdown(ctx))
@@ -860,7 +860,7 @@ func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
 		consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer"))
 		require.NoError(t, err)
 
-		companion, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer)
+		companion, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer, nil)
 		require.NoError(t, err)
 
 		require.NoError(t, consumer.Shutdown(ctx))
@@ -879,7 +879,7 @@ func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
 	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
-	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	// simulate the controller's terminal self-stop, which the private stop
@@ -895,7 +895,7 @@ func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, respawned.Equals(producer))
 
-	recreated, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	recreated, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 	assert.True(t, recreated.IsRunning())
 	assert.Equal(t, companion.Name(), recreated.Name())
@@ -958,6 +958,57 @@ func TestReliableEndpointRemoteChildSpawnRejected(t *testing.T) {
 	assert.Nil(t, pid)
 }
 
+func TestReliableEndpointRemotingOnlyRemotePlacementRejected(t *testing.T) {
+	// remoting without clustering cannot resolve peer controllers, so remote
+	// placement of a reliable endpoint must fail fast instead of spawning a
+	// flow that never connects
+	ctx := context.TODO()
+	ports := dynaport.Get(1)
+	host := "127.0.0.1"
+
+	system, err := NewActorSystem("remoting-only",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() {
+		assert.NoError(t, system.Stop(ctx))
+	})
+
+	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		AsReliableProducer("orders-consumer"),
+		WithHostAndPort(host, ports[0]))
+	require.ErrorIs(t, err, gerrors.ErrReliableClusterRequired)
+	assert.Nil(t, pid)
+
+	// single-node local placement remains valid without a cluster
+	local, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+	assert.NotNil(t, local)
+}
+
+func TestSpawnConfigRejectReliableRemotePlacement(t *testing.T) {
+	// placement requires cluster resolution: without it the endpoint would
+	// never connect, and clustering wins the precedence when both rules fail
+	config := newSpawnConfig(AsReliableProducer("orders-consumer"), WithHostAndPort("127.0.0.1", 8080))
+	require.ErrorIs(t, config.rejectReliableRemotePlacement(false), gerrors.ErrReliableClusterRequired)
+	require.NoError(t, config.rejectReliableRemotePlacement(true))
+
+	// the placement wire never carries a peer address, so a placement route
+	// must reject it instead of silently dropping the setting
+	producer := newSpawnConfig(AsReliableProducer("orders-consumer", WithRemoteConsumer("127.0.0.1", 2280)))
+	require.ErrorIs(t, producer.rejectReliableRemotePlacement(true), gerrors.ErrReliablePeerClusterConflict)
+	require.ErrorIs(t, producer.rejectReliableRemotePlacement(false), gerrors.ErrReliableClusterRequired)
+
+	consumer := newSpawnConfig(AsReliableConsumer("orders-producer", WithRemoteProducer("127.0.0.1", 2280)))
+	require.ErrorIs(t, consumer.rejectReliableRemotePlacement(true), gerrors.ErrReliablePeerClusterConflict)
+
+	// a spawn without reliable settings is never the guard's business
+	require.NoError(t, newSpawnConfig(WithHostAndPort("127.0.0.1", 8080)).rejectReliableRemotePlacement(false))
+	require.NoError(t, newSpawnConfig(WithHostAndPort("127.0.0.1", 8080)).rejectReliableRemotePlacement(true))
+}
+
 func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
@@ -977,7 +1028,7 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 
 	// the companion record carries the ownership spec cluster resolution
 	// validates and is pinned to its node
-	companion, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+	companion, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	companionSerialized, err := companion.toSerialize()
@@ -1055,7 +1106,7 @@ func TestReliableEndpointRemoteSpawn(t *testing.T) {
 	assert.Equal(t, "orders-consumer", endpoint.reliableDelivery.producer.consumerName)
 	require.NotNil(t, endpoint.durableQueue)
 
-	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 	assert.True(t, companion.IsRunning())
 }
@@ -1220,7 +1271,7 @@ func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
 	require.Len(t, deliveries, 1)
 	assert.Equal(t, "m-1", deliveries[0].MessageID())
 
-	consumerController, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer)
+	consumerController, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer, nil)
 	require.NoError(t, err)
 
 	response, err = Ask(ctx, consumer, &getDeliverySenders{}, time.Second)

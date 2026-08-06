@@ -112,7 +112,8 @@ The reliability guarantee begins at the producer's handoff to its controller, no
 | [`protos/internal/delivery.proto`](../protos/internal/delivery.proto)                      | Stable wire form for the delivery control fields and nested serialized payload bytes.                              |
 | [`protos/internal/actor.proto`](../protos/internal/actor.proto)                            | `Actor.reliable_delivery` (endpoint configuration) and `Actor.reliable_companion` (controller ownership record).   |
 | [`remote/reliable_delivery.go`](../remote/reliable_delivery.go)                            | `remote.ReliableDeliverySpec` carried by `remote.SpawnRequest` for remote endpoint placement.                      |
-| [`errors/errors.go`](../errors/errors.go)                                                  | `ErrQueueFenced`, `ErrQueueConflict`, `ErrReliableStore`, `ErrReliableAccept`, `ErrReliableConfirm`, `ErrReliableSpawnUnsupported`. |
+| [`errors/errors.go`](../errors/errors.go)                                                  | `ErrQueueFenced`, `ErrQueueConflict`, `ErrReliableStore`, `ErrReliableAccept`, `ErrReliableConfirm`, `ErrReliableSpawnUnsupported`, `ErrReliableClusterRequired`, `ErrReliablePeerRemotingRequired`, `ErrReliablePeerClusterConflict`. |
+| [`protos/internal/remoting.proto`](../protos/internal/remoting.proto)                      | `GetReliableCompanion` request/response: peer-node companion resolution for remoting-only flows.                   |
 
 ---
 
@@ -491,14 +492,17 @@ With clustering disabled, local attachment is the complete publication step; no 
 
 ### 15.2 Local-first resolution
 
-`resolveReliableCompanion(ctx, endpointName, role)` is fully defined for both deployment modes:
+`resolveReliableCompanion(ctx, endpointName, role, peer)` is fully defined for every deployment mode:
 
-1. Look up the endpoint in the local actor tree. If a live endpoint exists, read its incarnation ID, derive the role-specific companion identity, look up that local PID, and validate runtime kind, owning endpoint name, role, incarnation, and liveness. Return only a validated pair.
-2. If no local endpoint exists and clustering is disabled, report not-found; the controller timer retries. A single-node flow resolves entirely through the local tree.
-3. If no local endpoint exists and clustering is enabled, load the endpoint record from the registry, derive the companion identity from that record's incarnation, load the companion record, validate the same ownership fields plus same-node pair placement, and construct the remote PID. Records pointing at the resolving node itself are rejected.
-4. Never fall back from a present-but-invalid local pair to an older cluster record: a mixed local activation means a spawn or restart is in flight, and an older registry record must not win over it.
+1. Look up the endpoint in the local actor tree. If a live endpoint exists, read its incarnation ID, derive the role-specific companion identity, look up that local PID, and validate runtime kind, owning endpoint name, role, incarnation, and liveness. Return only a validated pair (`resolveLocalReliableCompanion`).
+2. If no local endpoint exists and an explicit peer address is configured, call the `GetReliableCompanion` remoting RPC at that address. The serving node runs the same `resolveLocalReliableCompanion` ladder against its own tree and answers only with a validated live pair, so the caller always sees the peer's current incarnation. Any RPC failure or not-found is the transient unavailable condition; the controller timer retries.
+3. If no local endpoint exists, no peer address is configured, and clustering is disabled, report not-found; the controller timer retries. A single-node flow resolves entirely through the local tree.
+4. If no local endpoint exists, no peer address is configured, and clustering is enabled, load the endpoint record from the registry, derive the companion identity from that record's incarnation, load the companion record, validate the same ownership fields plus same-node pair placement, and construct the remote PID. Records pointing at the resolving node itself are rejected.
+5. Never fall back from a present-but-invalid local pair to an older remote record: a mixed local activation means a spawn or restart is in flight, and an older record must not win over it.
 
-`DefaultRegistrationLookupTimeout` (500ms) bounds the producer controller's ownership lookup so a slow registry cannot stall its mailbox; a timeout is treated as a dropped registration and recovered by the consumer's retry loop. After resolution, remote controller traffic uses the ordinary `RemoteTell` path addressed at the companion PID directly.
+The peer address comes from `WithRemoteConsumer` on the producer options and `WithRemoteProducer` on the consumer options. It exists only for remoting-only flows: `rejectReliablePeerTopology` (called from `configPID`, the choke point of every local spawn) rejects a peer address without remoting (`ErrReliablePeerRemotingRequired`) or combined with clustering (`ErrReliablePeerClusterConflict`), so one flow follows exactly one resolution authority. Peer addresses never serialize: remoting-only endpoints are always locally spawned and never relocate.
+
+`DefaultRegistrationLookupTimeout` (500ms) bounds the producer controller's ownership lookup so a slow registry or unreachable peer cannot stall its mailbox; a timeout is treated as a dropped registration and recovered by the consumer's retry loop. After resolution, remote controller traffic uses the ordinary `RemoteTell` path addressed at the companion PID directly.
 
 ---
 
@@ -514,7 +518,7 @@ No second relocation subsystem exists. Reliable endpoints ride the existing relo
 6. Non-relocatable reliable endpoints get their registry records withdrawn on node loss instead of leaking. This is required, not hygiene: reliable endpoints publish with if-absent semantics, so a leaked record would block the endpoint name cluster-wide.
 7. Graceful shutdown removes the companion record next to each reliable endpoint's record in `cleanupCluster`, because companions are absent from the user-actor list and per-actor death-watch removal is disabled while the system stops. `cleanupStaleLocalActors` removes orphaned companion records from a previous node incarnation while keeping a live controller's record; companions are never recovered, endpoint recovery spawns a fresh one under a new incarnation.
 
-Placement restrictions: `SpawnOn` rejects reliable options combined with `WithDataCenter`, because a cross-datacenter endpoint could never resolve its pair in the local cluster registry. The standalone cluster client rejects reliable spawn requests with `gerrors.ErrReliableSpawnUnsupported`, since its caller does not participate in the delivery protocol. Remote `SpawnChild` rejects reliable options because its request cannot carry the settings. Remote endpoint placement itself travels as `remote.ReliableDeliverySpec` on `remote.SpawnRequest`, validated with the request and mutually exclusive with `Singleton`.
+Placement restrictions: `SpawnOn` rejects reliable options combined with `WithDataCenter`, because a cross-datacenter endpoint could never resolve its pair in the local cluster registry. The standalone cluster client rejects reliable spawn requests with `gerrors.ErrReliableSpawnUnsupported`, since its caller does not participate in the delivery protocol. Remote `SpawnChild` rejects reliable options because its request cannot carry the settings. Remoting-only remote placement (`Spawn` with `WithHostAndPort`, and `remoteSpawnHandler`) rejects a reliable endpoint with `gerrors.ErrReliableClusterRequired`, because peer controllers resolve through the cluster registry and a remoting-only host would otherwise spawn an endpoint that never connects. Remote endpoint placement itself travels as `remote.ReliableDeliverySpec` on `remote.SpawnRequest`, validated with the request and mutually exclusive with `Singleton`.
 
 Operational requirement: relocation of reliable endpoints needs a registry replica count of at least 2. With a single copy, registry partitions primaried on the departed node are lost with it, and a lost peer-endpoint record wedges companion resolution permanently.
 

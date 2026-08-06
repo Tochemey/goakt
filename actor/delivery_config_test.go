@@ -201,6 +201,68 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 			},
 			invalid: true,
 		},
+		"producer with remote consumer address": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.consumerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 2280}
+				return config
+			}(),
+		},
+		"producer with blank remote consumer host": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.consumerAddress = &reliablePeerAddress{host: "  ", port: 2280}
+				return config
+			}(),
+			invalid: true,
+		},
+		"producer with invalid remote consumer port": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.consumerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 0}
+				return config
+			}(),
+			invalid: true,
+		},
+		"producer with out-of-range remote consumer port": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.consumerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 70000}
+				return config
+			}(),
+			invalid: true,
+		},
+		"work-pulling producer with remote consumer address": {
+			config: func() *reliableDeliveryConfig {
+				config := workPullingProducerConfig()
+				config.producer.consumerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 2280}
+				return config
+			}(),
+			invalid: true,
+		},
+		"consumer with remote producer address": {
+			config: func() *reliableDeliveryConfig {
+				config := consumerDeliveryConfig("producer")
+				config.consumer.producerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 2280}
+				return config
+			}(),
+		},
+		"consumer with blank remote producer host": {
+			config: func() *reliableDeliveryConfig {
+				config := consumerDeliveryConfig("producer")
+				config.consumer.producerAddress = &reliablePeerAddress{host: "", port: 2280}
+				return config
+			}(),
+			invalid: true,
+		},
+		"consumer with invalid remote producer port": {
+			config: func() *reliableDeliveryConfig {
+				config := consumerDeliveryConfig("producer")
+				config.consumer.producerAddress = &reliablePeerAddress{host: "127.0.0.1", port: -1}
+				return config
+			}(),
+			invalid: true,
+		},
 	}
 
 	for name, test := range tests {
@@ -320,6 +382,7 @@ func TestReliableDeliveryConfigClone(t *testing.T) {
 					maxAttempts:    3,
 					initialBackoff: 100 * time.Millisecond,
 				},
+				consumerAddress: &reliablePeerAddress{host: "127.0.0.1", port: 2280},
 			},
 		}
 
@@ -328,18 +391,23 @@ func TestReliableDeliveryConfigClone(t *testing.T) {
 
 		config.producer.consumerName = "changed"
 		config.producer.queueRetry.maxAttempts = 9
+		config.producer.consumerAddress.port = 9999
 		assert.Equal(t, "consumer", cloned.producer.consumerName)
 		assert.Equal(t, 3, cloned.producer.queueRetry.maxAttempts)
+		assert.Equal(t, 2280, cloned.producer.consumerAddress.port)
 	})
 
 	t.Run("With consumer settings", func(t *testing.T) {
 		config := consumerDeliveryConfig("producer")
+		config.consumer.producerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 2280}
 
 		cloned := config.clone()
 		require.Equal(t, config, cloned)
 
 		config.consumer.producerName = "changed"
+		config.consumer.producerAddress.host = "changed"
 		assert.Equal(t, "producer", cloned.consumer.producerName)
+		assert.Equal(t, "127.0.0.1", cloned.consumer.producerAddress.host)
 	})
 
 	t.Run("With no configuration", func(t *testing.T) {

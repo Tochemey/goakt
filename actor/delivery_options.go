@@ -132,6 +132,42 @@ func WithChunking(maxChunkBytes uint32) ReliableProducerOption {
 	}
 }
 
+// WithRemoteConsumer names the remoting address of the node hosting the
+// consumer endpoint, forming a remoting-only flow: the producer's controller
+// resolves the consumer's controller by asking that node directly instead of
+// the cluster registry. The producer endpoint must be spawned locally on a
+// system with remoting enabled and clustering disabled, and the consumer
+// endpoint must carry the mirror WithRemoteProducer option. Peer loss is
+// recovered by restarting the peer process at this address; the ordinary
+// registration resync then reconnects the flow.
+func WithRemoteConsumer(host string, port int) ReliableProducerOption {
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.consumerAddress = &reliablePeerAddress{host: host, port: port}
+	}
+}
+
+// WithRemoteProducer names the remoting address of the node hosting the
+// producer endpoint, forming a remoting-only flow: the consumer's controller
+// resolves the producer's controller by asking that node directly instead of
+// the cluster registry. The consumer endpoint must be spawned locally on a
+// system with remoting enabled and clustering disabled, and the producer
+// endpoint must carry the mirror WithRemoteConsumer option. Peer loss is
+// recovered by restarting the peer process at this address; the ordinary
+// registration resync then reconnects the flow.
+func WithRemoteProducer(host string, port int) ReliableConsumerOption {
+	return func(config *reliableConsumerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.producerAddress = &reliablePeerAddress{host: host, port: port}
+	}
+}
+
 // WithFlowControlWindow sets the demand granted per consumer request and the
 // consumer controller's receive buffer capacity. It must be in
 // [1, MaxFlowControlWindow].

@@ -427,12 +427,14 @@ An in-memory `seen` map, as in the example above, deduplicates within one consum
 | `WithLocalRetryInterval`   | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                               |
 | `WithChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinChunkSize`, `MaxChunkSize`]             |
 | `WithDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                     |
+| `WithRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow               |
+| `WithRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow               |
 
 The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
 
 ## Clustered flows
 
-Across nodes, both actor systems must join the same GoAkt cluster. Controller discovery and endpoint relocation use the cluster registry, so remoting without clustering is not sufficient:
+A flow can cross nodes in one of two modes: both systems join the same GoAkt cluster and resolve each other through its registry, or both run remoting-only and name each other's address explicitly (see [Remoting-only flows](#remoting-only-flows)). This section covers cluster mode, where controller discovery and endpoint relocation use the cluster registry. Remote placement of a reliable endpoint on a remoting-only system fails fast with `ErrReliableClusterRequired` instead of spawning a flow that never connects:
 
 ```mermaid
 flowchart LR
@@ -471,6 +473,52 @@ Requirements:
 - Run the cluster with a replica count of at least 2 when reliable endpoints are relocatable. With a single copy, registry state owned by a lost node disappears with it and the peer lookup cannot recover.
 
 Relocation uses the existing replicated actor record and dependency reconstruction: when a node is lost, the surviving node rebuilds the endpoint from its record, and the fresh endpoint gets a fresh controller. Controllers are never relocated on their own. A relocated durable producer reloads its queue under a new epoch, which fences any writes from the departed node, and redelivers unconfirmed messages. A relocated consumer re-registers and resumes. Without a durable queue, relocation has the same loss boundary as a producer crash.
+
+## Remoting-only flows
+
+Two nodes with remoting enabled and no cluster form a flow by naming each other's address explicitly: the producer side carries `WithRemoteConsumer(host, port)` with the consumer node's remoting address, and the consumer side carries `WithRemoteProducer(host, port)` with the producer node's. Each endpoint is spawned locally on its own node; there is no remote placement in this mode.
+
+```mermaid
+flowchart LR
+    subgraph nodeA["Node A (remoting only)"]
+        P["producer actor"]
+        PC["producer controller"]
+    end
+
+    subgraph nodeB["Node B (remoting only)"]
+        CC["consumer controller"]
+        C["consumer actor"]
+    end
+
+    PC <-->|"sequenced messages,<br/>demand, confirmations<br/>(remoting)"| CC
+    PC -.->|"resolve peer at<br/>configured address"| nodeB
+    CC -.->|"resolve peer at<br/>configured address"| nodeA
+```
+
+```go
+// node A (remoting on 192.168.1.10:2280)
+publisher, err := producerSystem.Spawn(ctx, "order-publisher", &OrderPublisher{},
+    actor.AsReliableProducer("order-processor",
+        actor.WithRemoteConsumer("192.168.1.11", 2280)))
+
+// node B (remoting on 192.168.1.11:2280)
+_, err = consumerSystem.Spawn(ctx, "order-processor", &OrderProcessor{},
+    actor.AsReliableConsumer("order-publisher",
+        actor.WithRemoteProducer("192.168.1.10", 2280)))
+```
+
+Resolution asks the addressed node directly: an internal lookup served by the peer's remoting server resolves the endpoint's current controller from that node's local actor tree and validates its ownership before answering, so the caller always gets the peer's live incarnation, never a stale record. Registration fencing runs the same lookup in the other direction. An unreachable or not-yet-started peer is a transient condition: controllers retry on their timers and the flow forms once both sides are up, in either start order.
+
+<Note>
+A flow follows exactly one resolution authority. A peer address requires remoting (`ErrReliablePeerRemotingRequired` otherwise) and cannot be combined with clustering (`ErrReliablePeerClusterConflict`), both rejected at spawn.
+</Note>
+
+The recovery model differs from cluster mode:
+
+- There is no relocation: nothing exists to relocate through. Node loss is recovered by restarting the peer process at its configured address; the restarted endpoint has a new incarnation and the ordinary registration resync reconnects the flow.
+- The loss boundary equals a process crash: with a durable queue the producer reloads stored state and redelivers, without one controller-unconfirmed messages are lost.
+- Work-pulling does not support peer addresses; a worker set spanning nodes requires cluster mode.
+- Payload types must be registered on both nodes, exactly as in cluster mode.
 
 ## Failure handling and recovery
 

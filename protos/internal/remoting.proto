@@ -52,6 +52,28 @@ message RemoteLookupResponse {
   string address = 1;
 }
 
+// GetReliableCompanionRequest resolves the live reliable-delivery controller
+// companion of an endpoint hosted on the serving node. The serving node runs
+// the same local-tree resolution and ownership validation it applies to its
+// own flows, so only a validated live endpoint-companion pair is returned.
+// Remoting-only flows use this request to find their explicitly addressed
+// peer without a cluster registry.
+message GetReliableCompanionRequest {
+  // Specifies the remote host address of the serving node
+  string host = 1;
+  // Specifies the remote port of the serving node
+  int32 port = 2;
+  // Specifies the user-visible name of the endpoint owning the companion
+  string endpoint_name = 3;
+  // Specifies the controller role to resolve for the endpoint
+  ReliableControllerRole role = 4;
+}
+
+message GetReliableCompanionResponse {
+  // Specifies the validated companion address
+  string address = 1;
+}
+
 // RemoteMessage will be used by Actors to communicate remotely
 message RemoteMessage {
   // Specifies the sender' address

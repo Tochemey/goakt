@@ -315,6 +315,129 @@ func (x *RemoteLookupResponse) GetAddress() string {
 	return ""
 }
 
+// GetReliableCompanionRequest resolves the live reliable-delivery controller
+// companion of an endpoint hosted on the serving node. The serving node runs
+// the same local-tree resolution and ownership validation it applies to its
+// own flows, so only a validated live endpoint-companion pair is returned.
+// Remoting-only flows use this request to find their explicitly addressed
+// peer without a cluster registry.
+type GetReliableCompanionRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the remote host address of the serving node
+	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// Specifies the remote port of the serving node
+	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
+	// Specifies the user-visible name of the endpoint owning the companion
+	EndpointName string `protobuf:"bytes,3,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
+	// Specifies the controller role to resolve for the endpoint
+	Role          ReliableControllerRole `protobuf:"varint,4,opt,name=role,proto3,enum=internalpb.ReliableControllerRole" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReliableCompanionRequest) Reset() {
+	*x = GetReliableCompanionRequest{}
+	mi := &file_internal_remoting_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReliableCompanionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReliableCompanionRequest) ProtoMessage() {}
+
+func (x *GetReliableCompanionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReliableCompanionRequest.ProtoReflect.Descriptor instead.
+func (*GetReliableCompanionRequest) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetReliableCompanionRequest) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *GetReliableCompanionRequest) GetPort() int32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
+func (x *GetReliableCompanionRequest) GetEndpointName() string {
+	if x != nil {
+		return x.EndpointName
+	}
+	return ""
+}
+
+func (x *GetReliableCompanionRequest) GetRole() ReliableControllerRole {
+	if x != nil {
+		return x.Role
+	}
+	return ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED
+}
+
+type GetReliableCompanionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Specifies the validated companion address
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetReliableCompanionResponse) Reset() {
+	*x = GetReliableCompanionResponse{}
+	mi := &file_internal_remoting_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetReliableCompanionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetReliableCompanionResponse) ProtoMessage() {}
+
+func (x *GetReliableCompanionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_remoting_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetReliableCompanionResponse.ProtoReflect.Descriptor instead.
+func (*GetReliableCompanionResponse) Descriptor() ([]byte, []int) {
+	return file_internal_remoting_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *GetReliableCompanionResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
 // RemoteMessage will be used by Actors to communicate remotely
 type RemoteMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -337,7 +460,7 @@ type RemoteMessage struct {
 
 func (x *RemoteMessage) Reset() {
 	*x = RemoteMessage{}
-	mi := &file_internal_remoting_proto_msgTypes[6]
+	mi := &file_internal_remoting_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +472,7 @@ func (x *RemoteMessage) String() string {
 func (*RemoteMessage) ProtoMessage() {}
 
 func (x *RemoteMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[6]
+	mi := &file_internal_remoting_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,7 +485,7 @@ func (x *RemoteMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteMessage.ProtoReflect.Descriptor instead.
 func (*RemoteMessage) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{6}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RemoteMessage) GetSender() string {
@@ -407,7 +530,7 @@ type RemoteReSpawnRequest struct {
 
 func (x *RemoteReSpawnRequest) Reset() {
 	*x = RemoteReSpawnRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[7]
+	mi := &file_internal_remoting_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -419,7 +542,7 @@ func (x *RemoteReSpawnRequest) String() string {
 func (*RemoteReSpawnRequest) ProtoMessage() {}
 
 func (x *RemoteReSpawnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[7]
+	mi := &file_internal_remoting_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -432,7 +555,7 @@ func (x *RemoteReSpawnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteReSpawnRequest.ProtoReflect.Descriptor instead.
 func (*RemoteReSpawnRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{7}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *RemoteReSpawnRequest) GetHost() string {
@@ -466,7 +589,7 @@ type RemoteReSpawnResponse struct {
 
 func (x *RemoteReSpawnResponse) Reset() {
 	*x = RemoteReSpawnResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[8]
+	mi := &file_internal_remoting_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -478,7 +601,7 @@ func (x *RemoteReSpawnResponse) String() string {
 func (*RemoteReSpawnResponse) ProtoMessage() {}
 
 func (x *RemoteReSpawnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[8]
+	mi := &file_internal_remoting_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -491,7 +614,7 @@ func (x *RemoteReSpawnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteReSpawnResponse.ProtoReflect.Descriptor instead.
 func (*RemoteReSpawnResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{8}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RemoteReSpawnResponse) GetAddress() string {
@@ -515,7 +638,7 @@ type RemoteStopRequest struct {
 
 func (x *RemoteStopRequest) Reset() {
 	*x = RemoteStopRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[9]
+	mi := &file_internal_remoting_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +650,7 @@ func (x *RemoteStopRequest) String() string {
 func (*RemoteStopRequest) ProtoMessage() {}
 
 func (x *RemoteStopRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[9]
+	mi := &file_internal_remoting_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +663,7 @@ func (x *RemoteStopRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStopRequest.ProtoReflect.Descriptor instead.
 func (*RemoteStopRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{9}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *RemoteStopRequest) GetHost() string {
@@ -572,7 +695,7 @@ type RemoteStopResponse struct {
 
 func (x *RemoteStopResponse) Reset() {
 	*x = RemoteStopResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[10]
+	mi := &file_internal_remoting_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -584,7 +707,7 @@ func (x *RemoteStopResponse) String() string {
 func (*RemoteStopResponse) ProtoMessage() {}
 
 func (x *RemoteStopResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[10]
+	mi := &file_internal_remoting_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -597,7 +720,7 @@ func (x *RemoteStopResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStopResponse.ProtoReflect.Descriptor instead.
 func (*RemoteStopResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{10}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{12}
 }
 
 // RemoteWatchRequest registers a remote watcher for an actor on this node.
@@ -617,7 +740,7 @@ type RemoteWatchRequest struct {
 
 func (x *RemoteWatchRequest) Reset() {
 	*x = RemoteWatchRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[11]
+	mi := &file_internal_remoting_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +752,7 @@ func (x *RemoteWatchRequest) String() string {
 func (*RemoteWatchRequest) ProtoMessage() {}
 
 func (x *RemoteWatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[11]
+	mi := &file_internal_remoting_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +765,7 @@ func (x *RemoteWatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteWatchRequest.ProtoReflect.Descriptor instead.
 func (*RemoteWatchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{11}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RemoteWatchRequest) GetHost() string {
@@ -681,7 +804,7 @@ type RemoteWatchResponse struct {
 
 func (x *RemoteWatchResponse) Reset() {
 	*x = RemoteWatchResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[12]
+	mi := &file_internal_remoting_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +816,7 @@ func (x *RemoteWatchResponse) String() string {
 func (*RemoteWatchResponse) ProtoMessage() {}
 
 func (x *RemoteWatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[12]
+	mi := &file_internal_remoting_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +829,7 @@ func (x *RemoteWatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteWatchResponse.ProtoReflect.Descriptor instead.
 func (*RemoteWatchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{12}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{14}
 }
 
 // RemoteUnWatchRequest cancels a previously registered remote watch.
@@ -726,7 +849,7 @@ type RemoteUnWatchRequest struct {
 
 func (x *RemoteUnWatchRequest) Reset() {
 	*x = RemoteUnWatchRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[13]
+	mi := &file_internal_remoting_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -738,7 +861,7 @@ func (x *RemoteUnWatchRequest) String() string {
 func (*RemoteUnWatchRequest) ProtoMessage() {}
 
 func (x *RemoteUnWatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[13]
+	mi := &file_internal_remoting_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -751,7 +874,7 @@ func (x *RemoteUnWatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteUnWatchRequest.ProtoReflect.Descriptor instead.
 func (*RemoteUnWatchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{13}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RemoteUnWatchRequest) GetHost() string {
@@ -790,7 +913,7 @@ type RemoteUnWatchResponse struct {
 
 func (x *RemoteUnWatchResponse) Reset() {
 	*x = RemoteUnWatchResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[14]
+	mi := &file_internal_remoting_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -802,7 +925,7 @@ func (x *RemoteUnWatchResponse) String() string {
 func (*RemoteUnWatchResponse) ProtoMessage() {}
 
 func (x *RemoteUnWatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[14]
+	mi := &file_internal_remoting_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -815,7 +938,7 @@ func (x *RemoteUnWatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteUnWatchResponse.ProtoReflect.Descriptor instead.
 func (*RemoteUnWatchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{14}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{16}
 }
 
 type RemoteSpawnRequest struct {
@@ -858,7 +981,7 @@ type RemoteSpawnRequest struct {
 
 func (x *RemoteSpawnRequest) Reset() {
 	*x = RemoteSpawnRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[15]
+	mi := &file_internal_remoting_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -870,7 +993,7 @@ func (x *RemoteSpawnRequest) String() string {
 func (*RemoteSpawnRequest) ProtoMessage() {}
 
 func (x *RemoteSpawnRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[15]
+	mi := &file_internal_remoting_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -883,7 +1006,7 @@ func (x *RemoteSpawnRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteSpawnRequest.ProtoReflect.Descriptor instead.
 func (*RemoteSpawnRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{15}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *RemoteSpawnRequest) GetHost() string {
@@ -994,7 +1117,7 @@ type RemoteSpawnResponse struct {
 
 func (x *RemoteSpawnResponse) Reset() {
 	*x = RemoteSpawnResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[16]
+	mi := &file_internal_remoting_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1006,7 +1129,7 @@ func (x *RemoteSpawnResponse) String() string {
 func (*RemoteSpawnResponse) ProtoMessage() {}
 
 func (x *RemoteSpawnResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[16]
+	mi := &file_internal_remoting_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1019,7 +1142,7 @@ func (x *RemoteSpawnResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteSpawnResponse.ProtoReflect.Descriptor instead.
 func (*RemoteSpawnResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{16}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *RemoteSpawnResponse) GetAddress() string {
@@ -1043,7 +1166,7 @@ type RemoteReinstateRequest struct {
 
 func (x *RemoteReinstateRequest) Reset() {
 	*x = RemoteReinstateRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[17]
+	mi := &file_internal_remoting_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1055,7 +1178,7 @@ func (x *RemoteReinstateRequest) String() string {
 func (*RemoteReinstateRequest) ProtoMessage() {}
 
 func (x *RemoteReinstateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[17]
+	mi := &file_internal_remoting_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1068,7 +1191,7 @@ func (x *RemoteReinstateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteReinstateRequest.ProtoReflect.Descriptor instead.
 func (*RemoteReinstateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{17}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RemoteReinstateRequest) GetHost() string {
@@ -1100,7 +1223,7 @@ type RemoteReinstateResponse struct {
 
 func (x *RemoteReinstateResponse) Reset() {
 	*x = RemoteReinstateResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[18]
+	mi := &file_internal_remoting_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1112,7 +1235,7 @@ func (x *RemoteReinstateResponse) String() string {
 func (*RemoteReinstateResponse) ProtoMessage() {}
 
 func (x *RemoteReinstateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[18]
+	mi := &file_internal_remoting_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1125,7 +1248,7 @@ func (x *RemoteReinstateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteReinstateResponse.ProtoReflect.Descriptor instead.
 func (*RemoteReinstateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{18}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{20}
 }
 
 type RemoteAskGrainRequest struct {
@@ -1139,7 +1262,7 @@ type RemoteAskGrainRequest struct {
 
 func (x *RemoteAskGrainRequest) Reset() {
 	*x = RemoteAskGrainRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[19]
+	mi := &file_internal_remoting_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1151,7 +1274,7 @@ func (x *RemoteAskGrainRequest) String() string {
 func (*RemoteAskGrainRequest) ProtoMessage() {}
 
 func (x *RemoteAskGrainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[19]
+	mi := &file_internal_remoting_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1164,7 +1287,7 @@ func (x *RemoteAskGrainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteAskGrainRequest.ProtoReflect.Descriptor instead.
 func (*RemoteAskGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{19}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *RemoteAskGrainRequest) GetGrain() *Grain {
@@ -1197,7 +1320,7 @@ type RemoteAskGrainResponse struct {
 
 func (x *RemoteAskGrainResponse) Reset() {
 	*x = RemoteAskGrainResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[20]
+	mi := &file_internal_remoting_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1209,7 +1332,7 @@ func (x *RemoteAskGrainResponse) String() string {
 func (*RemoteAskGrainResponse) ProtoMessage() {}
 
 func (x *RemoteAskGrainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[20]
+	mi := &file_internal_remoting_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1222,7 +1345,7 @@ func (x *RemoteAskGrainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteAskGrainResponse.ProtoReflect.Descriptor instead.
 func (*RemoteAskGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{20}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RemoteAskGrainResponse) GetMessage() []byte {
@@ -1242,7 +1365,7 @@ type RemoteTellGrainRequest struct {
 
 func (x *RemoteTellGrainRequest) Reset() {
 	*x = RemoteTellGrainRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[21]
+	mi := &file_internal_remoting_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1254,7 +1377,7 @@ func (x *RemoteTellGrainRequest) String() string {
 func (*RemoteTellGrainRequest) ProtoMessage() {}
 
 func (x *RemoteTellGrainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[21]
+	mi := &file_internal_remoting_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1267,7 +1390,7 @@ func (x *RemoteTellGrainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteTellGrainRequest.ProtoReflect.Descriptor instead.
 func (*RemoteTellGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{21}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RemoteTellGrainRequest) GetGrain() *Grain {
@@ -1292,7 +1415,7 @@ type RemoteTellGrainResponse struct {
 
 func (x *RemoteTellGrainResponse) Reset() {
 	*x = RemoteTellGrainResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[22]
+	mi := &file_internal_remoting_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1304,7 +1427,7 @@ func (x *RemoteTellGrainResponse) String() string {
 func (*RemoteTellGrainResponse) ProtoMessage() {}
 
 func (x *RemoteTellGrainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[22]
+	mi := &file_internal_remoting_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1317,7 +1440,7 @@ func (x *RemoteTellGrainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteTellGrainResponse.ProtoReflect.Descriptor instead.
 func (*RemoteTellGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{22}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{24}
 }
 
 type RemoteActivateGrainRequest struct {
@@ -1329,7 +1452,7 @@ type RemoteActivateGrainRequest struct {
 
 func (x *RemoteActivateGrainRequest) Reset() {
 	*x = RemoteActivateGrainRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[23]
+	mi := &file_internal_remoting_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1341,7 +1464,7 @@ func (x *RemoteActivateGrainRequest) String() string {
 func (*RemoteActivateGrainRequest) ProtoMessage() {}
 
 func (x *RemoteActivateGrainRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[23]
+	mi := &file_internal_remoting_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1354,7 +1477,7 @@ func (x *RemoteActivateGrainRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteActivateGrainRequest.ProtoReflect.Descriptor instead.
 func (*RemoteActivateGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{23}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *RemoteActivateGrainRequest) GetGrain() *Grain {
@@ -1372,7 +1495,7 @@ type RemoteActivateGrainResponse struct {
 
 func (x *RemoteActivateGrainResponse) Reset() {
 	*x = RemoteActivateGrainResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[24]
+	mi := &file_internal_remoting_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1384,7 +1507,7 @@ func (x *RemoteActivateGrainResponse) String() string {
 func (*RemoteActivateGrainResponse) ProtoMessage() {}
 
 func (x *RemoteActivateGrainResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[24]
+	mi := &file_internal_remoting_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1397,7 +1520,7 @@ func (x *RemoteActivateGrainResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteActivateGrainResponse.ProtoReflect.Descriptor instead.
 func (*RemoteActivateGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{24}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{26}
 }
 
 type PersistPeerStateRequest struct {
@@ -1410,7 +1533,7 @@ type PersistPeerStateRequest struct {
 
 func (x *PersistPeerStateRequest) Reset() {
 	*x = PersistPeerStateRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[25]
+	mi := &file_internal_remoting_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1422,7 +1545,7 @@ func (x *PersistPeerStateRequest) String() string {
 func (*PersistPeerStateRequest) ProtoMessage() {}
 
 func (x *PersistPeerStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[25]
+	mi := &file_internal_remoting_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1435,7 +1558,7 @@ func (x *PersistPeerStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistPeerStateRequest.ProtoReflect.Descriptor instead.
 func (*PersistPeerStateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{25}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PersistPeerStateRequest) GetPeerState() *PeerState {
@@ -1453,7 +1576,7 @@ type PersistPeerStateResponse struct {
 
 func (x *PersistPeerStateResponse) Reset() {
 	*x = PersistPeerStateResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[26]
+	mi := &file_internal_remoting_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1465,7 +1588,7 @@ func (x *PersistPeerStateResponse) String() string {
 func (*PersistPeerStateResponse) ProtoMessage() {}
 
 func (x *PersistPeerStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[26]
+	mi := &file_internal_remoting_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1478,7 +1601,7 @@ func (x *PersistPeerStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PersistPeerStateResponse.ProtoReflect.Descriptor instead.
 func (*PersistPeerStateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{26}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{28}
 }
 
 type TopicMessage struct {
@@ -1495,7 +1618,7 @@ type TopicMessage struct {
 
 func (x *TopicMessage) Reset() {
 	*x = TopicMessage{}
-	mi := &file_internal_remoting_proto_msgTypes[27]
+	mi := &file_internal_remoting_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1507,7 +1630,7 @@ func (x *TopicMessage) String() string {
 func (*TopicMessage) ProtoMessage() {}
 
 func (x *TopicMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[27]
+	mi := &file_internal_remoting_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1520,7 +1643,7 @@ func (x *TopicMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicMessage.ProtoReflect.Descriptor instead.
 func (*TopicMessage) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{27}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *TopicMessage) GetId() string {
@@ -1557,7 +1680,7 @@ type TopicStatsRequest struct {
 
 func (x *TopicStatsRequest) Reset() {
 	*x = TopicStatsRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[28]
+	mi := &file_internal_remoting_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1569,7 +1692,7 @@ func (x *TopicStatsRequest) String() string {
 func (*TopicStatsRequest) ProtoMessage() {}
 
 func (x *TopicStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[28]
+	mi := &file_internal_remoting_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1582,7 +1705,7 @@ func (x *TopicStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicStatsRequest.ProtoReflect.Descriptor instead.
 func (*TopicStatsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{28}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *TopicStatsRequest) GetTopic() string {
@@ -1604,7 +1727,7 @@ type TopicStatsResponse struct {
 
 func (x *TopicStatsResponse) Reset() {
 	*x = TopicStatsResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[29]
+	mi := &file_internal_remoting_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1616,7 +1739,7 @@ func (x *TopicStatsResponse) String() string {
 func (*TopicStatsResponse) ProtoMessage() {}
 
 func (x *TopicStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[29]
+	mi := &file_internal_remoting_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1629,7 +1752,7 @@ func (x *TopicStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TopicStatsResponse.ProtoReflect.Descriptor instead.
 func (*TopicStatsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{29}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *TopicStatsResponse) GetLocalSubscriberCount() int32 {
@@ -1653,7 +1776,7 @@ type RemoteStashSizeRequest struct {
 
 func (x *RemoteStashSizeRequest) Reset() {
 	*x = RemoteStashSizeRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[30]
+	mi := &file_internal_remoting_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1665,7 +1788,7 @@ func (x *RemoteStashSizeRequest) String() string {
 func (*RemoteStashSizeRequest) ProtoMessage() {}
 
 func (x *RemoteStashSizeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[30]
+	mi := &file_internal_remoting_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1678,7 +1801,7 @@ func (x *RemoteStashSizeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStashSizeRequest.ProtoReflect.Descriptor instead.
 func (*RemoteStashSizeRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{30}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *RemoteStashSizeRequest) GetHost() string {
@@ -1712,7 +1835,7 @@ type RemoteStashSizeResponse struct {
 
 func (x *RemoteStashSizeResponse) Reset() {
 	*x = RemoteStashSizeResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[31]
+	mi := &file_internal_remoting_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1724,7 +1847,7 @@ func (x *RemoteStashSizeResponse) String() string {
 func (*RemoteStashSizeResponse) ProtoMessage() {}
 
 func (x *RemoteStashSizeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[31]
+	mi := &file_internal_remoting_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1737,7 +1860,7 @@ func (x *RemoteStashSizeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStashSizeResponse.ProtoReflect.Descriptor instead.
 func (*RemoteStashSizeResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{31}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *RemoteStashSizeResponse) GetSize() uint64 {
@@ -1761,7 +1884,7 @@ type RemoteRoleRequest struct {
 
 func (x *RemoteRoleRequest) Reset() {
 	*x = RemoteRoleRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[32]
+	mi := &file_internal_remoting_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1773,7 +1896,7 @@ func (x *RemoteRoleRequest) String() string {
 func (*RemoteRoleRequest) ProtoMessage() {}
 
 func (x *RemoteRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[32]
+	mi := &file_internal_remoting_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1786,7 +1909,7 @@ func (x *RemoteRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteRoleRequest.ProtoReflect.Descriptor instead.
 func (*RemoteRoleRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{32}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *RemoteRoleRequest) GetHost() string {
@@ -1820,7 +1943,7 @@ type RemoteRoleResponse struct {
 
 func (x *RemoteRoleResponse) Reset() {
 	*x = RemoteRoleResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[33]
+	mi := &file_internal_remoting_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1832,7 +1955,7 @@ func (x *RemoteRoleResponse) String() string {
 func (*RemoteRoleResponse) ProtoMessage() {}
 
 func (x *RemoteRoleResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[33]
+	mi := &file_internal_remoting_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1845,7 +1968,7 @@ func (x *RemoteRoleResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteRoleResponse.ProtoReflect.Descriptor instead.
 func (*RemoteRoleResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{33}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *RemoteRoleResponse) GetRole() string {
@@ -1869,7 +1992,7 @@ type RemoteDependenciesRequest struct {
 
 func (x *RemoteDependenciesRequest) Reset() {
 	*x = RemoteDependenciesRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[34]
+	mi := &file_internal_remoting_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1881,7 +2004,7 @@ func (x *RemoteDependenciesRequest) String() string {
 func (*RemoteDependenciesRequest) ProtoMessage() {}
 
 func (x *RemoteDependenciesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[34]
+	mi := &file_internal_remoting_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1894,7 +2017,7 @@ func (x *RemoteDependenciesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteDependenciesRequest.ProtoReflect.Descriptor instead.
 func (*RemoteDependenciesRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{34}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *RemoteDependenciesRequest) GetHost() string {
@@ -1928,7 +2051,7 @@ type RemoteDependenciesResponse struct {
 
 func (x *RemoteDependenciesResponse) Reset() {
 	*x = RemoteDependenciesResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[35]
+	mi := &file_internal_remoting_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1940,7 +2063,7 @@ func (x *RemoteDependenciesResponse) String() string {
 func (*RemoteDependenciesResponse) ProtoMessage() {}
 
 func (x *RemoteDependenciesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[35]
+	mi := &file_internal_remoting_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1953,7 +2076,7 @@ func (x *RemoteDependenciesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteDependenciesResponse.ProtoReflect.Descriptor instead.
 func (*RemoteDependenciesResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{35}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *RemoteDependenciesResponse) GetDependencies() []*Dependency {
@@ -1977,7 +2100,7 @@ type RemoteMetricRequest struct {
 
 func (x *RemoteMetricRequest) Reset() {
 	*x = RemoteMetricRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[36]
+	mi := &file_internal_remoting_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1989,7 +2112,7 @@ func (x *RemoteMetricRequest) String() string {
 func (*RemoteMetricRequest) ProtoMessage() {}
 
 func (x *RemoteMetricRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[36]
+	mi := &file_internal_remoting_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2002,7 +2125,7 @@ func (x *RemoteMetricRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteMetricRequest.ProtoReflect.Descriptor instead.
 func (*RemoteMetricRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{36}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *RemoteMetricRequest) GetHost() string {
@@ -2036,7 +2159,7 @@ type RemoteMetricResponse struct {
 
 func (x *RemoteMetricResponse) Reset() {
 	*x = RemoteMetricResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[37]
+	mi := &file_internal_remoting_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2048,7 +2171,7 @@ func (x *RemoteMetricResponse) String() string {
 func (*RemoteMetricResponse) ProtoMessage() {}
 
 func (x *RemoteMetricResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[37]
+	mi := &file_internal_remoting_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2061,7 +2184,7 @@ func (x *RemoteMetricResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteMetricResponse.ProtoReflect.Descriptor instead.
 func (*RemoteMetricResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{37}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *RemoteMetricResponse) GetMetric() *Metric {
@@ -2085,7 +2208,7 @@ type RemoteKindRequest struct {
 
 func (x *RemoteKindRequest) Reset() {
 	*x = RemoteKindRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[38]
+	mi := &file_internal_remoting_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2097,7 +2220,7 @@ func (x *RemoteKindRequest) String() string {
 func (*RemoteKindRequest) ProtoMessage() {}
 
 func (x *RemoteKindRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[38]
+	mi := &file_internal_remoting_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2110,7 +2233,7 @@ func (x *RemoteKindRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteKindRequest.ProtoReflect.Descriptor instead.
 func (*RemoteKindRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{38}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *RemoteKindRequest) GetHost() string {
@@ -2144,7 +2267,7 @@ type RemoteKindResponse struct {
 
 func (x *RemoteKindResponse) Reset() {
 	*x = RemoteKindResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[39]
+	mi := &file_internal_remoting_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2156,7 +2279,7 @@ func (x *RemoteKindResponse) String() string {
 func (*RemoteKindResponse) ProtoMessage() {}
 
 func (x *RemoteKindResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[39]
+	mi := &file_internal_remoting_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2169,7 +2292,7 @@ func (x *RemoteKindResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteKindResponse.ProtoReflect.Descriptor instead.
 func (*RemoteKindResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{39}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *RemoteKindResponse) GetKind() string {
@@ -2193,7 +2316,7 @@ type RemoteParentRequest struct {
 
 func (x *RemoteParentRequest) Reset() {
 	*x = RemoteParentRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[40]
+	mi := &file_internal_remoting_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2205,7 +2328,7 @@ func (x *RemoteParentRequest) String() string {
 func (*RemoteParentRequest) ProtoMessage() {}
 
 func (x *RemoteParentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[40]
+	mi := &file_internal_remoting_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2218,7 +2341,7 @@ func (x *RemoteParentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteParentRequest.ProtoReflect.Descriptor instead.
 func (*RemoteParentRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{40}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *RemoteParentRequest) GetHost() string {
@@ -2252,7 +2375,7 @@ type RemoteParentResponse struct {
 
 func (x *RemoteParentResponse) Reset() {
 	*x = RemoteParentResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[41]
+	mi := &file_internal_remoting_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2264,7 +2387,7 @@ func (x *RemoteParentResponse) String() string {
 func (*RemoteParentResponse) ProtoMessage() {}
 
 func (x *RemoteParentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[41]
+	mi := &file_internal_remoting_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2277,7 +2400,7 @@ func (x *RemoteParentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteParentResponse.ProtoReflect.Descriptor instead.
 func (*RemoteParentResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{41}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *RemoteParentResponse) GetAddress() string {
@@ -2301,7 +2424,7 @@ type RemoteChildrenRequest struct {
 
 func (x *RemoteChildrenRequest) Reset() {
 	*x = RemoteChildrenRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[42]
+	mi := &file_internal_remoting_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2313,7 +2436,7 @@ func (x *RemoteChildrenRequest) String() string {
 func (*RemoteChildrenRequest) ProtoMessage() {}
 
 func (x *RemoteChildrenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[42]
+	mi := &file_internal_remoting_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2326,7 +2449,7 @@ func (x *RemoteChildrenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteChildrenRequest.ProtoReflect.Descriptor instead.
 func (*RemoteChildrenRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{42}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *RemoteChildrenRequest) GetHost() string {
@@ -2360,7 +2483,7 @@ type RemoteChildrenResponse struct {
 
 func (x *RemoteChildrenResponse) Reset() {
 	*x = RemoteChildrenResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[43]
+	mi := &file_internal_remoting_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2372,7 +2495,7 @@ func (x *RemoteChildrenResponse) String() string {
 func (*RemoteChildrenResponse) ProtoMessage() {}
 
 func (x *RemoteChildrenResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[43]
+	mi := &file_internal_remoting_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2385,7 +2508,7 @@ func (x *RemoteChildrenResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteChildrenResponse.ProtoReflect.Descriptor instead.
 func (*RemoteChildrenResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{43}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *RemoteChildrenResponse) GetAddresses() []string {
@@ -2411,7 +2534,7 @@ type RemoteStateRequest struct {
 
 func (x *RemoteStateRequest) Reset() {
 	*x = RemoteStateRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[44]
+	mi := &file_internal_remoting_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2423,7 +2546,7 @@ func (x *RemoteStateRequest) String() string {
 func (*RemoteStateRequest) ProtoMessage() {}
 
 func (x *RemoteStateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[44]
+	mi := &file_internal_remoting_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2436,7 +2559,7 @@ func (x *RemoteStateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStateRequest.ProtoReflect.Descriptor instead.
 func (*RemoteStateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{44}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *RemoteStateRequest) GetHost() string {
@@ -2477,7 +2600,7 @@ type RemoteStateResponse struct {
 
 func (x *RemoteStateResponse) Reset() {
 	*x = RemoteStateResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[45]
+	mi := &file_internal_remoting_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2489,7 +2612,7 @@ func (x *RemoteStateResponse) String() string {
 func (*RemoteStateResponse) ProtoMessage() {}
 
 func (x *RemoteStateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[45]
+	mi := &file_internal_remoting_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2502,7 +2625,7 @@ func (x *RemoteStateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteStateResponse.ProtoReflect.Descriptor instead.
 func (*RemoteStateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{45}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *RemoteStateResponse) GetState() bool {
@@ -2526,7 +2649,7 @@ type RemotePassivationStrategyRequest struct {
 
 func (x *RemotePassivationStrategyRequest) Reset() {
 	*x = RemotePassivationStrategyRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[46]
+	mi := &file_internal_remoting_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2538,7 +2661,7 @@ func (x *RemotePassivationStrategyRequest) String() string {
 func (*RemotePassivationStrategyRequest) ProtoMessage() {}
 
 func (x *RemotePassivationStrategyRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[46]
+	mi := &file_internal_remoting_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2551,7 +2674,7 @@ func (x *RemotePassivationStrategyRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemotePassivationStrategyRequest.ProtoReflect.Descriptor instead.
 func (*RemotePassivationStrategyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{46}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *RemotePassivationStrategyRequest) GetHost() string {
@@ -2585,7 +2708,7 @@ type RemotePassivationStrategyResponse struct {
 
 func (x *RemotePassivationStrategyResponse) Reset() {
 	*x = RemotePassivationStrategyResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[47]
+	mi := &file_internal_remoting_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2597,7 +2720,7 @@ func (x *RemotePassivationStrategyResponse) String() string {
 func (*RemotePassivationStrategyResponse) ProtoMessage() {}
 
 func (x *RemotePassivationStrategyResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[47]
+	mi := &file_internal_remoting_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2610,7 +2733,7 @@ func (x *RemotePassivationStrategyResponse) ProtoReflect() protoreflect.Message 
 
 // Deprecated: Use RemotePassivationStrategyResponse.ProtoReflect.Descriptor instead.
 func (*RemotePassivationStrategyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{47}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *RemotePassivationStrategyResponse) GetPassivationStrategy() *PassivationStrategy {
@@ -2653,7 +2776,7 @@ type RemoteSpawnChildRequest struct {
 
 func (x *RemoteSpawnChildRequest) Reset() {
 	*x = RemoteSpawnChildRequest{}
-	mi := &file_internal_remoting_proto_msgTypes[48]
+	mi := &file_internal_remoting_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2665,7 +2788,7 @@ func (x *RemoteSpawnChildRequest) String() string {
 func (*RemoteSpawnChildRequest) ProtoMessage() {}
 
 func (x *RemoteSpawnChildRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[48]
+	mi := &file_internal_remoting_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2678,7 +2801,7 @@ func (x *RemoteSpawnChildRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteSpawnChildRequest.ProtoReflect.Descriptor instead.
 func (*RemoteSpawnChildRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{48}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *RemoteSpawnChildRequest) GetHost() string {
@@ -2775,7 +2898,7 @@ type RemoteSpawnChildResponse struct {
 
 func (x *RemoteSpawnChildResponse) Reset() {
 	*x = RemoteSpawnChildResponse{}
-	mi := &file_internal_remoting_proto_msgTypes[49]
+	mi := &file_internal_remoting_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2787,7 +2910,7 @@ func (x *RemoteSpawnChildResponse) String() string {
 func (*RemoteSpawnChildResponse) ProtoMessage() {}
 
 func (x *RemoteSpawnChildResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_remoting_proto_msgTypes[49]
+	mi := &file_internal_remoting_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2800,7 +2923,7 @@ func (x *RemoteSpawnChildResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteSpawnChildResponse.ProtoReflect.Descriptor instead.
 func (*RemoteSpawnChildResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{49}
+	return file_internal_remoting_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *RemoteSpawnChildResponse) GetAddress() string {
@@ -2829,6 +2952,13 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"0\n" +
 	"\x14RemoteLookupResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xa2\x01\n" +
+	"\x1bGetReliableCompanionRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x02 \x01(\x05R\x04port\x12#\n" +
+	"\rendpoint_name\x18\x03 \x01(\tR\fendpointName\x126\n" +
+	"\x04role\x18\x04 \x01(\x0e2\".internalpb.ReliableControllerRoleR\x04role\"8\n" +
+	"\x1cGetReliableCompanionResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xdf\x01\n" +
 	"\rRemoteMessage\x12\x16\n" +
 	"\x06sender\x18\x01 \x01(\tR\x06sender\x12\x1a\n" +
@@ -3010,7 +3140,7 @@ func file_internal_remoting_proto_rawDescGZIP() []byte {
 	return file_internal_remoting_proto_rawDescData
 }
 
-var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 51)
+var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_internal_remoting_proto_goTypes = []any{
 	(*RemoteAskRequest)(nil),                  // 0: internalpb.RemoteAskRequest
 	(*RemoteAskResponse)(nil),                 // 1: internalpb.RemoteAskResponse
@@ -3018,94 +3148,98 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*RemoteTellResponse)(nil),                // 3: internalpb.RemoteTellResponse
 	(*RemoteLookupRequest)(nil),               // 4: internalpb.RemoteLookupRequest
 	(*RemoteLookupResponse)(nil),              // 5: internalpb.RemoteLookupResponse
-	(*RemoteMessage)(nil),                     // 6: internalpb.RemoteMessage
-	(*RemoteReSpawnRequest)(nil),              // 7: internalpb.RemoteReSpawnRequest
-	(*RemoteReSpawnResponse)(nil),             // 8: internalpb.RemoteReSpawnResponse
-	(*RemoteStopRequest)(nil),                 // 9: internalpb.RemoteStopRequest
-	(*RemoteStopResponse)(nil),                // 10: internalpb.RemoteStopResponse
-	(*RemoteWatchRequest)(nil),                // 11: internalpb.RemoteWatchRequest
-	(*RemoteWatchResponse)(nil),               // 12: internalpb.RemoteWatchResponse
-	(*RemoteUnWatchRequest)(nil),              // 13: internalpb.RemoteUnWatchRequest
-	(*RemoteUnWatchResponse)(nil),             // 14: internalpb.RemoteUnWatchResponse
-	(*RemoteSpawnRequest)(nil),                // 15: internalpb.RemoteSpawnRequest
-	(*RemoteSpawnResponse)(nil),               // 16: internalpb.RemoteSpawnResponse
-	(*RemoteReinstateRequest)(nil),            // 17: internalpb.RemoteReinstateRequest
-	(*RemoteReinstateResponse)(nil),           // 18: internalpb.RemoteReinstateResponse
-	(*RemoteAskGrainRequest)(nil),             // 19: internalpb.RemoteAskGrainRequest
-	(*RemoteAskGrainResponse)(nil),            // 20: internalpb.RemoteAskGrainResponse
-	(*RemoteTellGrainRequest)(nil),            // 21: internalpb.RemoteTellGrainRequest
-	(*RemoteTellGrainResponse)(nil),           // 22: internalpb.RemoteTellGrainResponse
-	(*RemoteActivateGrainRequest)(nil),        // 23: internalpb.RemoteActivateGrainRequest
-	(*RemoteActivateGrainResponse)(nil),       // 24: internalpb.RemoteActivateGrainResponse
-	(*PersistPeerStateRequest)(nil),           // 25: internalpb.PersistPeerStateRequest
-	(*PersistPeerStateResponse)(nil),          // 26: internalpb.PersistPeerStateResponse
-	(*TopicMessage)(nil),                      // 27: internalpb.TopicMessage
-	(*TopicStatsRequest)(nil),                 // 28: internalpb.TopicStatsRequest
-	(*TopicStatsResponse)(nil),                // 29: internalpb.TopicStatsResponse
-	(*RemoteStashSizeRequest)(nil),            // 30: internalpb.RemoteStashSizeRequest
-	(*RemoteStashSizeResponse)(nil),           // 31: internalpb.RemoteStashSizeResponse
-	(*RemoteRoleRequest)(nil),                 // 32: internalpb.RemoteRoleRequest
-	(*RemoteRoleResponse)(nil),                // 33: internalpb.RemoteRoleResponse
-	(*RemoteDependenciesRequest)(nil),         // 34: internalpb.RemoteDependenciesRequest
-	(*RemoteDependenciesResponse)(nil),        // 35: internalpb.RemoteDependenciesResponse
-	(*RemoteMetricRequest)(nil),               // 36: internalpb.RemoteMetricRequest
-	(*RemoteMetricResponse)(nil),              // 37: internalpb.RemoteMetricResponse
-	(*RemoteKindRequest)(nil),                 // 38: internalpb.RemoteKindRequest
-	(*RemoteKindResponse)(nil),                // 39: internalpb.RemoteKindResponse
-	(*RemoteParentRequest)(nil),               // 40: internalpb.RemoteParentRequest
-	(*RemoteParentResponse)(nil),              // 41: internalpb.RemoteParentResponse
-	(*RemoteChildrenRequest)(nil),             // 42: internalpb.RemoteChildrenRequest
-	(*RemoteChildrenResponse)(nil),            // 43: internalpb.RemoteChildrenResponse
-	(*RemoteStateRequest)(nil),                // 44: internalpb.RemoteStateRequest
-	(*RemoteStateResponse)(nil),               // 45: internalpb.RemoteStateResponse
-	(*RemotePassivationStrategyRequest)(nil),  // 46: internalpb.RemotePassivationStrategyRequest
-	(*RemotePassivationStrategyResponse)(nil), // 47: internalpb.RemotePassivationStrategyResponse
-	(*RemoteSpawnChildRequest)(nil),           // 48: internalpb.RemoteSpawnChildRequest
-	(*RemoteSpawnChildResponse)(nil),          // 49: internalpb.RemoteSpawnChildResponse
-	nil,                                       // 50: internalpb.RemoteMessage.MetadataEntry
-	(*durationpb.Duration)(nil),               // 51: google.protobuf.Duration
-	(*SingletonSpec)(nil),                     // 52: internalpb.SingletonSpec
-	(*PassivationStrategy)(nil),               // 53: internalpb.PassivationStrategy
-	(*Dependency)(nil),                        // 54: internalpb.Dependency
-	(*SupervisorSpec)(nil),                    // 55: internalpb.SupervisorSpec
-	(*ReentrancyConfig)(nil),                  // 56: internalpb.ReentrancyConfig
-	(*ReliableDeliveryConfig)(nil),            // 57: internalpb.ReliableDeliveryConfig
-	(*Grain)(nil),                             // 58: internalpb.Grain
-	(*PeerState)(nil),                         // 59: internalpb.PeerState
-	(*Metric)(nil),                            // 60: internalpb.Metric
-	(State)(0),                                // 61: internalpb.State
+	(*GetReliableCompanionRequest)(nil),       // 6: internalpb.GetReliableCompanionRequest
+	(*GetReliableCompanionResponse)(nil),      // 7: internalpb.GetReliableCompanionResponse
+	(*RemoteMessage)(nil),                     // 8: internalpb.RemoteMessage
+	(*RemoteReSpawnRequest)(nil),              // 9: internalpb.RemoteReSpawnRequest
+	(*RemoteReSpawnResponse)(nil),             // 10: internalpb.RemoteReSpawnResponse
+	(*RemoteStopRequest)(nil),                 // 11: internalpb.RemoteStopRequest
+	(*RemoteStopResponse)(nil),                // 12: internalpb.RemoteStopResponse
+	(*RemoteWatchRequest)(nil),                // 13: internalpb.RemoteWatchRequest
+	(*RemoteWatchResponse)(nil),               // 14: internalpb.RemoteWatchResponse
+	(*RemoteUnWatchRequest)(nil),              // 15: internalpb.RemoteUnWatchRequest
+	(*RemoteUnWatchResponse)(nil),             // 16: internalpb.RemoteUnWatchResponse
+	(*RemoteSpawnRequest)(nil),                // 17: internalpb.RemoteSpawnRequest
+	(*RemoteSpawnResponse)(nil),               // 18: internalpb.RemoteSpawnResponse
+	(*RemoteReinstateRequest)(nil),            // 19: internalpb.RemoteReinstateRequest
+	(*RemoteReinstateResponse)(nil),           // 20: internalpb.RemoteReinstateResponse
+	(*RemoteAskGrainRequest)(nil),             // 21: internalpb.RemoteAskGrainRequest
+	(*RemoteAskGrainResponse)(nil),            // 22: internalpb.RemoteAskGrainResponse
+	(*RemoteTellGrainRequest)(nil),            // 23: internalpb.RemoteTellGrainRequest
+	(*RemoteTellGrainResponse)(nil),           // 24: internalpb.RemoteTellGrainResponse
+	(*RemoteActivateGrainRequest)(nil),        // 25: internalpb.RemoteActivateGrainRequest
+	(*RemoteActivateGrainResponse)(nil),       // 26: internalpb.RemoteActivateGrainResponse
+	(*PersistPeerStateRequest)(nil),           // 27: internalpb.PersistPeerStateRequest
+	(*PersistPeerStateResponse)(nil),          // 28: internalpb.PersistPeerStateResponse
+	(*TopicMessage)(nil),                      // 29: internalpb.TopicMessage
+	(*TopicStatsRequest)(nil),                 // 30: internalpb.TopicStatsRequest
+	(*TopicStatsResponse)(nil),                // 31: internalpb.TopicStatsResponse
+	(*RemoteStashSizeRequest)(nil),            // 32: internalpb.RemoteStashSizeRequest
+	(*RemoteStashSizeResponse)(nil),           // 33: internalpb.RemoteStashSizeResponse
+	(*RemoteRoleRequest)(nil),                 // 34: internalpb.RemoteRoleRequest
+	(*RemoteRoleResponse)(nil),                // 35: internalpb.RemoteRoleResponse
+	(*RemoteDependenciesRequest)(nil),         // 36: internalpb.RemoteDependenciesRequest
+	(*RemoteDependenciesResponse)(nil),        // 37: internalpb.RemoteDependenciesResponse
+	(*RemoteMetricRequest)(nil),               // 38: internalpb.RemoteMetricRequest
+	(*RemoteMetricResponse)(nil),              // 39: internalpb.RemoteMetricResponse
+	(*RemoteKindRequest)(nil),                 // 40: internalpb.RemoteKindRequest
+	(*RemoteKindResponse)(nil),                // 41: internalpb.RemoteKindResponse
+	(*RemoteParentRequest)(nil),               // 42: internalpb.RemoteParentRequest
+	(*RemoteParentResponse)(nil),              // 43: internalpb.RemoteParentResponse
+	(*RemoteChildrenRequest)(nil),             // 44: internalpb.RemoteChildrenRequest
+	(*RemoteChildrenResponse)(nil),            // 45: internalpb.RemoteChildrenResponse
+	(*RemoteStateRequest)(nil),                // 46: internalpb.RemoteStateRequest
+	(*RemoteStateResponse)(nil),               // 47: internalpb.RemoteStateResponse
+	(*RemotePassivationStrategyRequest)(nil),  // 48: internalpb.RemotePassivationStrategyRequest
+	(*RemotePassivationStrategyResponse)(nil), // 49: internalpb.RemotePassivationStrategyResponse
+	(*RemoteSpawnChildRequest)(nil),           // 50: internalpb.RemoteSpawnChildRequest
+	(*RemoteSpawnChildResponse)(nil),          // 51: internalpb.RemoteSpawnChildResponse
+	nil,                                       // 52: internalpb.RemoteMessage.MetadataEntry
+	(*durationpb.Duration)(nil),               // 53: google.protobuf.Duration
+	(ReliableControllerRole)(0),               // 54: internalpb.ReliableControllerRole
+	(*SingletonSpec)(nil),                     // 55: internalpb.SingletonSpec
+	(*PassivationStrategy)(nil),               // 56: internalpb.PassivationStrategy
+	(*Dependency)(nil),                        // 57: internalpb.Dependency
+	(*SupervisorSpec)(nil),                    // 58: internalpb.SupervisorSpec
+	(*ReentrancyConfig)(nil),                  // 59: internalpb.ReentrancyConfig
+	(*ReliableDeliveryConfig)(nil),            // 60: internalpb.ReliableDeliveryConfig
+	(*Grain)(nil),                             // 61: internalpb.Grain
+	(*PeerState)(nil),                         // 62: internalpb.PeerState
+	(*Metric)(nil),                            // 63: internalpb.Metric
+	(State)(0),                                // 64: internalpb.State
 }
 var file_internal_remoting_proto_depIdxs = []int32{
-	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	51, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
-	6,  // 2: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
-	50, // 3: internalpb.RemoteMessage.metadata:type_name -> internalpb.RemoteMessage.MetadataEntry
-	52, // 4: internalpb.RemoteSpawnRequest.singleton:type_name -> internalpb.SingletonSpec
-	53, // 5: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	54, // 6: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
-	55, // 7: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	56, // 8: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	51, // 9: internalpb.RemoteSpawnRequest.init_timeout:type_name -> google.protobuf.Duration
-	57, // 10: internalpb.RemoteSpawnRequest.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
-	58, // 11: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
-	51, // 12: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
-	58, // 13: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
-	58, // 14: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
-	59, // 15: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
-	54, // 16: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
-	60, // 17: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
-	61, // 18: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
-	53, // 19: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	53, // 20: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	54, // 21: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
-	56, // 22: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	55, // 23: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	51, // 24: internalpb.RemoteSpawnChildRequest.init_timeout:type_name -> google.protobuf.Duration
-	25, // [25:25] is the sub-list for method output_type
-	25, // [25:25] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	8,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
+	53, // 1: internalpb.RemoteAskRequest.timeout:type_name -> google.protobuf.Duration
+	8,  // 2: internalpb.RemoteTellRequest.remote_messages:type_name -> internalpb.RemoteMessage
+	54, // 3: internalpb.GetReliableCompanionRequest.role:type_name -> internalpb.ReliableControllerRole
+	52, // 4: internalpb.RemoteMessage.metadata:type_name -> internalpb.RemoteMessage.MetadataEntry
+	55, // 5: internalpb.RemoteSpawnRequest.singleton:type_name -> internalpb.SingletonSpec
+	56, // 6: internalpb.RemoteSpawnRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	57, // 7: internalpb.RemoteSpawnRequest.dependencies:type_name -> internalpb.Dependency
+	58, // 8: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	59, // 9: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	53, // 10: internalpb.RemoteSpawnRequest.init_timeout:type_name -> google.protobuf.Duration
+	60, // 11: internalpb.RemoteSpawnRequest.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
+	61, // 12: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
+	53, // 13: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	61, // 14: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
+	61, // 15: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
+	62, // 16: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
+	57, // 17: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
+	63, // 18: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
+	64, // 19: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
+	56, // 20: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	56, // 21: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	57, // 22: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
+	59, // 23: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	58, // 24: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	53, // 25: internalpb.RemoteSpawnChildRequest.init_timeout:type_name -> google.protobuf.Duration
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }
@@ -3121,14 +3255,14 @@ func file_internal_remoting_proto_init() {
 	file_internal_passivation_proto_init()
 	file_internal_peers_proto_init()
 	file_internal_reentrancy_proto_init()
-	file_internal_remoting_proto_msgTypes[15].OneofWrappers = []any{}
+	file_internal_remoting_proto_msgTypes[17].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_remoting_proto_rawDesc), len(file_internal_remoting_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   51,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

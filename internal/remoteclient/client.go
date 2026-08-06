@@ -147,6 +147,28 @@ type Client interface {
 	//   - Other server-side failures surfaced as proto errors.
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error)
 
+	// GetReliableCompanion resolves the live reliable-delivery controller
+	// companion of a named endpoint hosted on a remote node. The serving node
+	// validates the endpoint-companion pair against its local actor tree, so
+	// the returned address always names the peer's current controller
+	// incarnation. Remoting-only reliable flows use this to resolve their
+	// explicitly addressed peer without a cluster registry.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines.
+	//   - host, port: Location of the remote actor system hosting the endpoint.
+	//   - endpointName: The endpoint's registered name on that node.
+	//   - role: The controller role to resolve for the endpoint.
+	//
+	// Returns:
+	//   - addr: The validated companion address. If the endpoint or its
+	//     companion is not available, address.NoSender() is returned without error.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - Other server-side failures surfaced as proto errors.
+	GetReliableCompanion(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (addr *address.Address, err error)
+
 	// RemoteBatchTell sends multiple fire-and-forget messages to the same remote
 	// actor in a single RPC for efficiency.
 	//
@@ -1939,6 +1961,54 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	}
 
 	return address.Parse(lookupResp.GetAddress())
+}
+
+// GetReliableCompanion resolves the live reliable-delivery controller
+// companion of a named endpoint hosted on a remote node. A NoSender address is
+// returned when the endpoint or its companion is not available on that node.
+//
+// Errors are returned for transport problems or other server-side failures.
+func (r *client) GetReliableCompanion(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (*address.Address, error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.GetReliableCompanionRequest{
+		Host:         host,
+		Port:         port32,
+		EndpointName: endpointName,
+		Role:         role,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	// Handle NOT_FOUND specially - return NoSender without error
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return address.NoSender(), nil
+		}
+		return nil, checkProtoError(errResp)
+	}
+
+	companionResp, ok := resp.(*internalpb.GetReliableCompanionResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return address.Parse(companionResp.GetAddress())
 }
 
 // RemoteBatchTell sends multiple asynchronous messages to the same remote actor

@@ -864,8 +864,9 @@ type ActorSystem interface {
 	getRemoting() remoteclient.Client
 	// resolveReliableCompanion returns the live reliable-delivery controller
 	// bound to the named endpoint's current incarnation using local-first
-	// resolution, falling back to the cluster registry for remote endpoints.
-	resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error)
+	// resolution, falling back to the explicitly addressed peer node when peer
+	// is set and to the cluster registry otherwise.
+	resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole, peer *reliablePeerAddress) (*PID, error)
 	// authenticateWorkPullingWorker verifies that sender is the live consumer
 	// companion of an endpoint whose consumer configuration names producerName.
 	authenticateWorkPullingWorker(ctx context.Context, sender *PID, producerName string) (*PID, string, error)
@@ -3941,6 +3942,10 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 
 	// set the reliable-delivery endpoint settings when defined
 	if spawnConfig.reliableDelivery != nil {
+		if err := x.rejectReliablePeerTopology(spawnConfig.reliableDelivery); err != nil {
+			return nil, err
+		}
+
 		pidOpts = append(pidOpts, withReliableDelivery(spawnConfig.reliableDelivery))
 	}
 

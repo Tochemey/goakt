@@ -187,6 +187,32 @@ func (s *spawnConfig) Validate() error {
 	return nil
 }
 
+// rejectReliableRemotePlacement applies the placement rules of a reliable
+// endpoint spawned away from the calling node. Placement resolves peer
+// controllers through the cluster registry, so clustering is required:
+// without it the endpoint would spawn and never connect, and the rule is
+// permanent because remoting-only flows spawn each endpoint locally on its
+// own node with explicit peer addressing. An explicit peer address is
+// rejected on every placement route, because it excludes cluster resolution
+// and the placement wire never carries it, so accepting the spawn would
+// silently drop the setting instead of surfacing the authority conflict the
+// local spawn path reports.
+func (s *spawnConfig) rejectReliableRemotePlacement(clusterEnabled bool) error {
+	if s == nil || s.reliableDelivery == nil {
+		return nil
+	}
+
+	if !clusterEnabled {
+		return errors.ErrReliableClusterRequired
+	}
+
+	if s.reliableDelivery.peerAddress() != nil {
+		return errors.ErrReliablePeerClusterConflict
+	}
+
+	return nil
+}
+
 // newSpawnConfig creates and returns a new spawnConfig instance,
 // applying any provided SpawnOption functions to customize the configuration.
 //

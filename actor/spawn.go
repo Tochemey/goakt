@@ -103,6 +103,13 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nil, gerrors.ErrRemotingDisabled
 		}
 
+		// remote placement of a reliable endpoint requires cluster resolution
+		// and excludes an explicit peer address: reject instead of spawning
+		// an endpoint that never connects or silently dropping the setting
+		if err := config.rejectReliableRemotePlacement(x.clusterEnabled.Load()); err != nil {
+			return nil, err
+		}
+
 		// we are spawning the actor on a remote node
 		addr, err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
 			Name:                name,
@@ -287,6 +294,13 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	if !x.InCluster() {
 		return x.Spawn(ctx, name, actor, opts...)
+	}
+
+	// cluster placement resolves through the registry, which an explicit peer
+	// address excludes; the placement wire never carries the address, so
+	// reject instead of silently dropping it on a remote node
+	if err := config.rejectReliableRemotePlacement(x.clusterEnabled.Load()); err != nil {
+		return nil, err
 	}
 
 	peers, err := x.cluster.Members(ctx)

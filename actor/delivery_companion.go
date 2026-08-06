@@ -30,6 +30,7 @@ import (
 
 	"github.com/google/uuid"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -123,19 +124,33 @@ func reliableCompanionName(role ReliableControllerRole, endpointIncarnationID st
 // role-specific companion identity, and the companion is returned only when
 // its runtime kind, role, owning endpoint name, and endpoint incarnation all
 // validate. Only when no local endpoint record exists at all does resolution
-// fall to the cluster registry; a present-but-invalid local pair never does,
-// because a mixed local activation means a spawn or restart is in flight and
-// an older registry record must not win over it. A missing endpoint, a
-// missing companion, or a mixed pair is reported as
+// fall to the remote path (the explicitly addressed peer node when peer is
+// set, the cluster registry otherwise); a present-but-invalid local pair
+// never does, because a mixed local activation means a spawn or restart is in
+// flight and an older remote record must not win over it. A missing endpoint,
+// a missing companion, or a mixed pair is reported as
 // errReliableCompanionUnavailable; callers retry on their next tick.
-func (x *actorSystem) resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error) {
+func (x *actorSystem) resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole, peer *reliablePeerAddress) (*PID, error) {
 	if !role.valid() {
 		return nil, errors.New("reliable controller role is not supported")
 	}
 
+	if _, ok := x.actors.nodeByName(endpointName); !ok {
+		return x.resolveRemoteReliableCompanion(ctx, endpointName, role, peer)
+	}
+
+	return x.resolveLocalReliableCompanion(endpointName, role)
+}
+
+// resolveLocalReliableCompanion resolves the controller companion of a
+// locally hosted endpoint from the local actor tree only: the endpoint must
+// exist and run, its incarnation selects the companion identity, and the pair
+// must pass ownership validation. It is the resolution the GetReliableCompanion
+// handler serves to remoting-only peers, so it never consults the registry.
+func (x *actorSystem) resolveLocalReliableCompanion(endpointName string, role ReliableControllerRole) (*PID, error) {
 	node, ok := x.actors.nodeByName(endpointName)
 	if !ok {
-		return x.resolveRemoteReliableCompanion(ctx, endpointName, role)
+		return nil, fmt.Errorf("%w: endpoint=%s has no local record", errReliableCompanionUnavailable, endpointName)
 	}
 
 	endpoint := node.value()
@@ -156,17 +171,45 @@ func (x *actorSystem) resolveReliableCompanion(ctx context.Context, endpointName
 	return companion, nil
 }
 
+// resolvePeerReliableCompanion resolves the controller companion of an
+// endpoint hosted on an explicitly addressed peer node by asking that node
+// directly through the GetReliableCompanion RPC. The serving node runs the
+// same local-tree resolution and ownership validation this system applies to
+// its own endpoints, so only a validated live endpoint-companion pair ever
+// returns, always under the peer's current incarnation. Every failure is the
+// transient unavailable condition: the peer may be down, restarting, or not
+// yet hosting the endpoint, and the caller retries on its next tick.
+func (x *actorSystem) resolvePeerReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole, peer *reliablePeerAddress) (*PID, error) {
+	companionAddress, err := x.getRemoting().GetReliableCompanion(ctx, peer.host, peer.port, endpointName, role.toProto())
+	if err != nil {
+		return nil, fmt.Errorf("%w: endpoint=%s did not resolve on peer node=%s:%d: %v", errReliableCompanionUnavailable, endpointName, peer.host, peer.port, err)
+	}
+
+	if companionAddress.Equals(address.NoSender()) {
+		return nil, fmt.Errorf("%w: endpoint=%s has no live %s controller on peer node=%s:%d", errReliableCompanionUnavailable, endpointName, role, peer.host, peer.port)
+	}
+
+	return newRemotePID(companionAddress, x.getRemoting()), nil
+}
+
 // resolveRemoteReliableCompanion resolves the controller companion of an
-// endpoint that has no local record through the cluster registry: the
-// endpoint record's incarnation selects the companion identity, the companion
-// record must carry a runtime-companion spec whose role, owning endpoint, and
-// incarnation match, and the pair must live together on one remote node. Any
-// missing or mismatching record is the transient mixed-pair condition, which
-// covers both the publication window where the endpoint is visible before its
-// companion and a stale record left by an older activation. A record pointing
-// back at this node is also transient: the local tree is authoritative here,
-// so a registry self-reference only exists while local cleanup is in flight.
-func (x *actorSystem) resolveRemoteReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error) {
+// endpoint that has no local record. An explicitly addressed peer bypasses
+// the registry entirely: the peer node answers for its own endpoints, which
+// is how remoting-only flows resolve. Otherwise the cluster registry is
+// consulted: the endpoint record's incarnation selects the companion
+// identity, the companion record must carry a runtime-companion spec whose
+// role, owning endpoint, and incarnation match, and the pair must live
+// together on one remote node. Any missing or mismatching record is the
+// transient mixed-pair condition, which covers both the publication window
+// where the endpoint is visible before its companion and a stale record left
+// by an older activation. A record pointing back at this node is also
+// transient: the local tree is authoritative here, so a registry
+// self-reference only exists while local cleanup is in flight.
+func (x *actorSystem) resolveRemoteReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole, peer *reliablePeerAddress) (*PID, error) {
+	if peer != nil {
+		return x.resolvePeerReliableCompanion(ctx, endpointName, role, peer)
+	}
+
 	if !x.clusterEnabled.Load() {
 		return nil, fmt.Errorf("%w: endpoint=%s has no local record", errReliableCompanionUnavailable, endpointName)
 	}
@@ -206,6 +249,27 @@ func (x *actorSystem) resolveRemoteReliableCompanion(ctx context.Context, endpoi
 	default:
 		return newRemotePID(companionAddress, x.getRemoting()), nil
 	}
+}
+
+// rejectReliablePeerTopology enforces the deployment rules of an explicitly
+// addressed reliable-delivery peer. The address only exists for remoting-only
+// flows, so it requires remoting, and it excludes clustering because a flow
+// follows exactly one resolution authority: the cluster registry, or the
+// explicitly addressed peer node.
+func (x *actorSystem) rejectReliablePeerTopology(config *reliableDeliveryConfig) error {
+	if config.peerAddress() == nil {
+		return nil
+	}
+
+	if !x.remotingEnabled.Load() {
+		return gerrors.ErrReliablePeerRemotingRequired
+	}
+
+	if x.clusterEnabled.Load() {
+		return gerrors.ErrReliablePeerClusterConflict
+	}
+
+	return nil
 }
 
 // reliableTickReference derives the scheduler reference of one controller
@@ -330,8 +394,7 @@ func newReliableController(endpoint *PID) Actor {
 		return newProducerController(endpoint, producerConfig, endpoint.durableQueue)
 	}
 
-	consumerConfig := config.consumer
-	return newConsumerController(endpoint, consumerConfig.producerName, consumerConfig.flowControlWindow, consumerConfig.resendInterval)
+	return newConsumerController(endpoint, config.consumer)
 }
 
 // authenticateWorkPullingWorker verifies that sender is the live consumer

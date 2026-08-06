@@ -774,10 +774,33 @@ func TestRemoteSpawnHandler(t *testing.T) {
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
 	})
 
+	t.Run("reliable delivery without clustering returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		// remoting-only hosts cannot resolve peer controllers; reject before
+		// spawning an endpoint that never connects
+		sys := newRemoteServerTestSystem(host, port)
+		registry := types.NewRegistry()
+		registry.Register(new(MockActor))
+		sys.reflection = newReflection(registry)
+		sys.registry = registry
+
+		req := &internalpb.RemoteSpawnRequest{
+			Host: host, Port: int32(port),
+			ActorName:        "orders-producer",
+			ActorType:        types.Name(new(MockActor)),
+			ReliableDelivery: producerDeliveryConfig("orders-consumer").toProto(),
+		}
+		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+		protoErr := resp.(*internalpb.Error)
+		assert.Equal(t, gerrors.ErrReliableClusterRequired.Error(), protoErr.GetMessage())
+	})
+
 	t.Run("reliable producer with an unresolvable queue returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		// the durable queue must be resolvable among the request dependencies;
 		// failing fast beats silently spawning a volatile endpoint
 		sys := newRemoteServerTestSystem(host, port)
+		sys.clusterEnabled.Store(true)
 		registry := types.NewRegistry()
 		registry.Register(new(MockActor))
 		sys.reflection = newReflection(registry)

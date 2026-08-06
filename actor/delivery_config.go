@@ -25,6 +25,8 @@ package actor
 import (
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"time"
 
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -84,6 +86,36 @@ type reliableProducerConfig struct {
 	// shares durableQueueID with queue for wire reconstruction and is
 	// mutually exclusive with queue by pattern.
 	workQueue DurableWorkQueue
+	// consumerAddress is the remoting address of the node hosting the consumer
+	// endpoint of a remoting-only flow; nil resolves cross-node peers through
+	// the cluster registry. It never serializes: remoting-only endpoints are
+	// spawned locally on their own node and never relocate.
+	consumerAddress *reliablePeerAddress
+}
+
+// reliablePeerAddress is the remoting address of the node hosting a flow's
+// peer endpoint. When set, cross-node companion resolution asks that node
+// directly through the GetReliableCompanion remoting RPC instead of the
+// cluster registry, which is how a remoting-only flow finds its peer.
+type reliablePeerAddress struct {
+	// host is the remoting host the peer node advertises.
+	host string
+	// port is the remoting port the peer node listens on.
+	port int
+}
+
+// Validate checks that the peer node address is dialable: a usable host and a
+// positive port in the TCP range.
+func (x *reliablePeerAddress) Validate() error {
+	if x.port < 1 {
+		return fmt.Errorf("peer node port is invalid: %d", x.port)
+	}
+
+	if err := validation.NewTCPAddressValidator(net.JoinHostPort(x.host, strconv.Itoa(x.port))).Validate(); err != nil {
+		return fmt.Errorf("peer node address is invalid: %w", err)
+	}
+
+	return nil
 }
 
 // reliableQueueRetryConfig defines retries for durable queue operations.
@@ -103,6 +135,11 @@ type reliableConsumerConfig struct {
 	// resendInterval is the registration, demand, and delivery retry cadence;
 	// it must be positive.
 	resendInterval time.Duration
+	// producerAddress is the remoting address of the node hosting the producer
+	// endpoint of a remoting-only flow; nil resolves cross-node peers through
+	// the cluster registry. It never serializes: remoting-only endpoints are
+	// spawned locally on their own node and never relocate.
+	producerAddress *reliablePeerAddress
 }
 
 var _ validation.Validator = (*reliableDeliveryConfig)(nil)
@@ -184,7 +221,9 @@ func (x *reliableProducerConfig) validatePattern() error {
 
 // validateWorkPulling rejects the settings that only apply to point-to-point:
 // workers are discovered through registration fencing rather than a peer
-// name, chunking is unsupported, and durability uses the work queue contract.
+// name, chunking is unsupported, durability uses the work queue contract, and
+// a worker set spanning nodes requires cluster mode rather than an explicit
+// peer address.
 func (x *reliableProducerConfig) validateWorkPulling() error {
 	if !types.IsBlank(x.consumerName) {
 		return errors.New("work-pulling producer rejects a consumer endpoint name")
@@ -196,6 +235,10 @@ func (x *reliableProducerConfig) validateWorkPulling() error {
 
 	if x.queue != nil {
 		return errors.New("work-pulling producer rejects a durable producer queue")
+	}
+
+	if x.consumerAddress != nil {
+		return errors.New("work-pulling producer rejects a remote consumer address")
 	}
 
 	return nil
@@ -211,6 +254,12 @@ func (x *reliableProducerConfig) validatePointToPoint() error {
 
 	if x.workQueue != nil {
 		return errors.New("point-to-point producer rejects a durable work queue")
+	}
+
+	if x.consumerAddress != nil {
+		if err := x.consumerAddress.Validate(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -230,6 +279,12 @@ func (x *reliableConsumerConfig) Validate() error {
 
 	if x.resendInterval <= 0 {
 		return errors.New("resend interval must be positive")
+	}
+
+	if x.producerAddress != nil {
+		if err := x.producerAddress.Validate(); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -265,15 +320,42 @@ func (x *reliableDeliveryConfig) clone() *reliableDeliveryConfig {
 			producer.queueRetry = &retry
 		}
 
+		if x.producer.consumerAddress != nil {
+			peer := *x.producer.consumerAddress
+			producer.consumerAddress = &peer
+		}
+
 		cloned.producer = &producer
 	}
 
 	if x.consumer != nil {
 		consumer := *x.consumer
+
+		if x.consumer.producerAddress != nil {
+			peer := *x.consumer.producerAddress
+			consumer.producerAddress = &peer
+		}
+
 		cloned.consumer = &consumer
 	}
 
 	return cloned
+}
+
+// peerAddress returns the explicitly configured remote peer node address of
+// whichever endpoint side is set, or nil when the flow resolves through the
+// local tree or the cluster registry.
+func (x *reliableDeliveryConfig) peerAddress() *reliablePeerAddress {
+	switch {
+	case x == nil:
+		return nil
+	case x.producer != nil:
+		return x.producer.consumerAddress
+	case x.consumer != nil:
+		return x.consumer.producerAddress
+	default:
+		return nil
+	}
 }
 
 // toProto converts the configuration to its wire form for the actor record.

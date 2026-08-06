@@ -134,7 +134,7 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 	_, err = system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true}, AsWorkPullingWorker("jobs-producer"))
 	require.NoError(t, err)
 
-	companion, err := system.resolveReliableCompanion(ctx, "jobs-worker", ReliableControllerRoleConsumer)
+	companion, err := system.resolveReliableCompanion(ctx, "jobs-worker", ReliableControllerRoleConsumer, nil)
 	require.NoError(t, err)
 
 	verified, endpointName, err := system.authenticateWorkPullingWorker(ctx, companion, producer.Name())
@@ -146,7 +146,7 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 		other, err := system.Spawn(ctx, "other-worker", &reliableConsumerMock{autoConfirm: true}, AsWorkPullingWorker("other-producer"))
 		require.NoError(t, err)
 
-		otherCompanion, err := system.resolveReliableCompanion(ctx, other.Name(), ReliableControllerRoleConsumer)
+		otherCompanion, err := system.resolveReliableCompanion(ctx, other.Name(), ReliableControllerRoleConsumer, nil)
 		require.NoError(t, err)
 
 		_, _, err = system.authenticateWorkPullingWorker(ctx, otherCompanion, producer.Name())
@@ -168,7 +168,7 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 		consumer, err := system.Spawn(ctx, "p2p-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer(producer.Name()))
 		require.NoError(t, err)
 
-		consumerCompanion, err := system.resolveReliableCompanion(ctx, consumer.Name(), ReliableControllerRoleConsumer)
+		consumerCompanion, err := system.resolveReliableCompanion(ctx, consumer.Name(), ReliableControllerRoleConsumer, nil)
 		require.NoError(t, err)
 
 		verified, endpointName, err := system.authenticateWorkPullingWorker(ctx, consumerCompanion, producer.Name())
@@ -192,7 +192,7 @@ func TestWorkPullingDeliveryEndToEnd(t *testing.T) {
 		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond), WithFlowControlWindow(2)))
 	require.NoError(t, err)
 
-	_, err = system.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer)
+	_, err = system.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	// give both workers time to register and grant demand before submitting
@@ -307,7 +307,7 @@ func TestWorkPullingRegistrationFencingDropsUntrusted(t *testing.T) {
 	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsWorkPullingProducer())
 	require.NoError(t, err)
 
-	companion, err := system.resolveReliableCompanion(ctx, producer.Name(), ReliableControllerRoleProducer)
+	companion, err := system.resolveReliableCompanion(ctx, producer.Name(), ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	// a plain actor spoofing RegisterConsumer never receives an ack

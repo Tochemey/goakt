@@ -54,6 +54,10 @@ type consumerController struct {
 	consumer *PID
 	// producerName is the user-visible name of the peer producer endpoint.
 	producerName string
+	// producerAddress is the remoting address of the node hosting the
+	// producer endpoint of a remoting-only flow; nil resolves cross-node
+	// peers through the cluster registry.
+	producerAddress *reliablePeerAddress
 	// window is the flow-control window: demand granted per request and the
 	// receive buffer capacity.
 	window int
@@ -105,13 +109,18 @@ type consumerController struct {
 var _ Actor = (*consumerController)(nil)
 
 // newConsumerController creates the consumer-side controller bound to the
-// local consumer endpoint and its peer producer endpoint name.
-func newConsumerController(consumer *PID, producerName string, window int, resendInterval time.Duration) *consumerController {
+// local consumer endpoint from its retained consumer settings, mirroring the
+// producer-side constructor. Settings that arrive incomplete are carried
+// through as they are: PreStart rejects them, so an invalid configuration
+// fails at controller start rather than silently running with substituted
+// values.
+func newConsumerController(consumer *PID, config *reliableConsumerConfig) *consumerController {
 	return &consumerController{
-		consumer:       consumer,
-		producerName:   producerName,
-		window:         window,
-		resendInterval: resendInterval,
+		consumer:        consumer,
+		producerName:    config.producerName,
+		window:          config.flowControlWindow,
+		resendInterval:  config.resendInterval,
+		producerAddress: config.producerAddress,
 	}
 }
 
@@ -375,7 +384,7 @@ func (x *consumerController) register(ctx *ReceiveContext) {
 	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
 	defer cancel()
 
-	pc, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.producerName, ReliableControllerRoleProducer)
+	pc, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.producerName, ReliableControllerRoleProducer, x.producerAddress)
 	if err != nil {
 		ctx.Logger().Debugf("consumer controller for endpoint=%s cannot resolve producer=%s: %v", x.consumer.Name(), x.producerName, err)
 		return

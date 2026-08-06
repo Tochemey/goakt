@@ -108,6 +108,16 @@ func (x *reliableConsumerMock) Receive(ctx *ReceiveContext) {
 	}
 }
 
+// consumerSettings builds the consumer-side configuration the controller
+// constructor consumes, keeping test call sites compact.
+func consumerSettings(producerName string, window int, resendInterval time.Duration) *reliableConsumerConfig {
+	return &reliableConsumerConfig{
+		producerName:      producerName,
+		flowControlWindow: window,
+		resendInterval:    resendInterval,
+	}
+}
+
 // consumerControllerHarness wires a consumer controller under test to a recording producer
 // controller stand-in and a mock consumer endpoint.
 type consumerControllerHarness struct {
@@ -139,7 +149,7 @@ func newConsumerControllerHarness(t *testing.T, window int, resendInterval time.
 	consumer, err := system.Spawn(ctx, "consumer", &reliableConsumerMock{autoConfirm: autoConfirm})
 	require.NoError(t, err)
 
-	controller := newConsumerController(consumer, "producer", window, resendInterval)
+	controller := newConsumerController(consumer, consumerSettings("producer", window, resendInterval))
 	consumerController, err := system.Spawn(ctx, "consumer-controller", controller)
 	require.NoError(t, err)
 
@@ -624,17 +634,17 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	}
 
 	t.Run("With PreStart validation", func(t *testing.T) {
-		assert.ErrorContains(t, newConsumerController(nil, "producer", 1, time.Millisecond).PreStart(nil), "bound local consumer")
-		assert.ErrorContains(t, newConsumerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), "producer", 1, time.Millisecond).PreStart(nil), "bound local consumer")
-		assert.ErrorContains(t, newConsumerController(consumer, "", 1, time.Millisecond).PreStart(nil), "producer endpoint name")
-		assert.ErrorContains(t, newConsumerController(consumer, "producer", 0, time.Millisecond).PreStart(nil), "valid flow control window")
-		assert.ErrorContains(t, newConsumerController(consumer, "producer", MaxFlowControlWindow+1, time.Millisecond).PreStart(nil), "valid flow control window")
-		assert.ErrorContains(t, newConsumerController(consumer, "producer", 1, 0).PreStart(nil), "positive resend interval")
+		assert.ErrorContains(t, newConsumerController(nil, consumerSettings("producer", 1, time.Millisecond)).PreStart(nil), "bound local consumer")
+		assert.ErrorContains(t, newConsumerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), consumerSettings("producer", 1, time.Millisecond)).PreStart(nil), "bound local consumer")
+		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("", 1, time.Millisecond)).PreStart(nil), "producer endpoint name")
+		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", 0, time.Millisecond)).PreStart(nil), "valid flow control window")
+		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", MaxFlowControlWindow+1, time.Millisecond)).PreStart(nil), "valid flow control window")
+		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", 1, 0)).PreStart(nil), "positive resend interval")
 	})
 
 	t.Run("With stale tick generation", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-stale-tick")
-		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 2, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.sawValidTraffic = true
 
@@ -646,7 +656,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With gap recovery on tick", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-gap-tick")
-		controller := newConsumerController(consumer, "producer", 6, time.Millisecond)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Millisecond))
 		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = producerControllerStandIn
 		controller.sessionID = "s1"
@@ -670,7 +680,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With full receive buffer", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-full-buffer")
-		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 2, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = producerControllerStandIn
 		controller.sessionID = "s1"
@@ -706,7 +716,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With producer controller terminated", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-producer-controller-terminated")
-		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 2, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = producerControllerStandIn
 		controller.sessionID = "s1"
@@ -723,7 +733,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With register resolve failure", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-register-miss")
-		controller := newConsumerController(consumer, "missing-producer", 2, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("missing-producer", 2, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})
@@ -732,7 +742,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	})
 
 	t.Run("With purgeBuffer removing stale entries", func(t *testing.T) {
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.expectedSeq = 3
 
@@ -751,7 +761,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With sendRequest and sendAck guards", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-request-ack-guards")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})
@@ -768,7 +778,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible Request construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-bad-request")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = producerControllerStandIn
 		controller.sessionID = "s1"
@@ -786,7 +796,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible Ack construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-bad-ack")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = producerControllerStandIn
 		controller.sessionID = "s1"
@@ -804,7 +814,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With Delivery ownership failure", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-delivery-ownership")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		// PreStart requires a local consumer; swap afterwards so newDelivery rejects ownership
 		controller.consumer = newRemotePID(address.New("remote-consumer", "sys", "127.0.0.1", 1), nil)
@@ -822,7 +832,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With fail already published", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-fail-once")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 		controller.failed = true
 
@@ -839,7 +849,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		consumerAddr := address.New("no-stream-consumer", system.Name(), "127.0.0.1", 1)
 		consumerWithoutStream := &PID{address: consumerAddr, path: newPath(consumerAddr)}
 
-		controller := newConsumerController(consumerWithoutStream, "producer", 6, time.Hour)
+		controller := newConsumerController(consumerWithoutStream, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})
@@ -849,7 +859,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With tell to dead peer", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-tell-dead")
-		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 
 		dead, err := system.Spawn(ctx, "dead-peer", &deliveryRecorder{})

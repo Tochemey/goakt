@@ -230,6 +230,41 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 	return &internalpb.RemoteLookupResponse{Address: pid.ID()}, nil
 }
 
+// getReliableCompanionHandler handles GetReliableCompanion requests over the
+// proto TCP transport. It resolves the live controller companion of a locally
+// hosted reliable endpoint for a remoting-only peer, running the same
+// local-tree resolution and ownership validation local callers use, and never
+// consults the cluster registry: this node only answers for endpoints it
+// owns. Any resolution failure maps to NOT_FOUND, which the calling side
+// treats as the transient unavailable condition and retries on its next tick.
+func (x *actorSystem) getReliableCompanionHandler(_ context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.GetReliableCompanionRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	role := reliableControllerRoleFromProto(request.GetRole())
+	if !role.valid() {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("reliable controller role is not supported")), nil
+	}
+
+	companion, err := x.resolveLocalReliableCompanion(request.GetEndpointName(), role)
+	if err != nil {
+		x.logger.Debugf("get reliable companion: endpoint=%s role=%s did not resolve: %v", request.GetEndpointName(), role, err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.GetReliableCompanionResponse{Address: companion.ID()}, nil
+}
+
 // remoteAskHandler handles RemoteAsk requests over the proto TCP transport.
 // It sends messages to remote actors and expects immediate responses.
 func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
@@ -696,8 +731,14 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	// Restore the reliable-delivery settings so remote placement spawns the
-	// endpoint exactly like a local spawn, controller companion included
+	// endpoint exactly like a local spawn, controller companion included.
+	// Remoting-only hosts cannot resolve peer controllers through the
+	// registry, so reject before spawning an endpoint that never connects.
 	if request.GetReliableDelivery() != nil {
+		if !x.clusterEnabled.Load() {
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrReliableClusterRequired), nil
+		}
+
 		reliableOption, err := reliableSpawnOptionFromWire(request.GetReliableDelivery(), dependencies)
 		if err != nil {
 			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: register the durable queue type on the hosting node)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
@@ -1594,6 +1635,7 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 	return []inet.ProtoServerOption{
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", x.remoteLookupHandler),
+		inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", x.getReliableCompanionHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", x.remoteAskHandler),
 		inet.WithProtoHandler("internalpb.RemoteTellRequest", x.remoteTellHandler),
 		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", x.remoteReSpawnHandler),

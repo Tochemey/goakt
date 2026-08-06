@@ -309,7 +309,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 	require.ErrorIs(t, err, gerrors.ErrQueueFenced)
 
 	require.Eventually(t, func() bool {
-		companion, cerr := node3.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer)
+		companion, cerr := node3.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer, nil)
 		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.IncarnationID())
 	}, 20*time.Second, 100*time.Millisecond)
 
@@ -398,7 +398,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 	// exactly one fresh companion exists under the new incarnation and the
 	// departed activation's records are gone cluster-wide
 	require.Eventually(t, func() bool {
-		companion, cerr := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+		companion, cerr := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.IncarnationID())
 	}, 20*time.Second, 100*time.Millisecond)
 

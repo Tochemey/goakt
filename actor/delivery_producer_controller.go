@@ -101,6 +101,10 @@ type producerController struct {
 	// consumerName is the user-visible name of the only consumer endpoint
 	// whose controller may register.
 	consumerName string
+	// consumerAddress is the remoting address of the node hosting the
+	// consumer endpoint of a remoting-only flow; nil resolves cross-node
+	// peers through the cluster registry.
+	consumerAddress *reliablePeerAddress
 	// queue is the optional durable producer queue; nil runs volatile.
 	queue DurableProducerQueue
 	// queueRetryAttempts bounds each durable operation's attempts.
@@ -191,6 +195,7 @@ func newProducerController(producer *PID, config *reliableProducerConfig, queue 
 	controller := &producerController{
 		producer:             producer,
 		consumerName:         config.consumerName,
+		consumerAddress:      config.consumerAddress,
 		queue:                queue,
 		localRetryInterval:   config.localRetryInterval,
 		deliveryConfirmation: config.deliveryConfirmation,
@@ -344,7 +349,7 @@ func (x *producerController) handleRegisterConsumer(ctx *ReceiveContext, registe
 	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
 	defer cancel()
 
-	expected, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.consumerName, ReliableControllerRoleConsumer)
+	expected, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.consumerName, ReliableControllerRoleConsumer, x.consumerAddress)
 	if err != nil || !expected.Equals(ctx.Sender()) {
 		ctx.Logger().Debugf("producer controller for endpoint=%s dropped registration from unverified sender: %v", x.producer.Name(), err)
 		return
