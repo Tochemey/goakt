@@ -177,11 +177,25 @@ func TestAddress(t *testing.T) {
 }
 
 func TestParseWithIncarnationID(t *testing.T) {
-	incarnationID := uuid.NewString()
-	addr, err := ParseWithIncarnationID("goakt://system@host:1234/name", incarnationID)
+	t.Run("With valid inputs", func(t *testing.T) {
+		incarnationID := uuid.NewString()
+		addr, err := ParseWithIncarnationID("goakt://system@host:1234/name", incarnationID)
 
-	assert.NoError(t, err)
-	assert.Equal(t, incarnationID, addr.IncarnationID())
+		assert.NoError(t, err)
+		assert.Equal(t, incarnationID, addr.IncarnationID())
+	})
+
+	t.Run("With invalid address", func(t *testing.T) {
+		addr, err := ParseWithIncarnationID("", uuid.NewString())
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+
+	t.Run("With invalid incarnation", func(t *testing.T) {
+		addr, err := ParseWithIncarnationID("goakt://system@host:1234/name", "not-a-uuid")
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
 }
 
 func TestAddressNilReceiver(t *testing.T) {

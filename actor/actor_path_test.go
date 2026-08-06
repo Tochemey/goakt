@@ -138,6 +138,7 @@ func TestPath_NilReceiver(t *testing.T) {
 	assert.Equal(t, "", p.HostPort())
 	assert.Equal(t, 0, p.Port())
 	assert.Equal(t, "", p.Name())
+	assert.Equal(t, "", p.IncarnationID())
 	assert.Nil(t, p.Parent())
 	assert.Equal(t, "", p.String())
 	assert.Equal(t, "", p.System())
@@ -181,14 +182,36 @@ func TestPathToAddress(t *testing.T) {
 		require.NotNil(t, addr)
 		assert.True(t, addr.Equals(address.NoSender()))
 	})
+
+	t.Run("empty incarnation falls back to Parse", func(t *testing.T) {
+		pathWithoutIncarnation := &mockPathForTest{s: "goakt://system1@127.0.0.1:9000/actor1"}
+		addr := pathToAddress(pathWithoutIncarnation)
+		require.NotNil(t, addr)
+		assert.Equal(t, "actor1", addr.Name())
+		assert.Equal(t, "system1", addr.System())
+	})
+
+	t.Run("invalid incarnation falls back to Parse", func(t *testing.T) {
+		pathWithBadIncarnation := &mockPathForTest{
+			s:             "goakt://system1@127.0.0.1:9000/actor1",
+			incarnationID: "not-a-uuid",
+		}
+		addr := pathToAddress(pathWithBadIncarnation)
+		require.NotNil(t, addr)
+		assert.Equal(t, "actor1", addr.Name())
+		assert.Equal(t, "system1", addr.System())
+	})
 }
 
 // mockPathForTest implements Path for testing pathToAddress parse-failure path.
-type mockPathForTest struct{ s string }
+type mockPathForTest struct {
+	s             string
+	incarnationID string
+}
 
 func (m *mockPathForTest) Host() string           { return "" }
 func (m *mockPathForTest) HostPort() string       { return "" }
-func (m *mockPathForTest) IncarnationID() string  { return "" }
+func (m *mockPathForTest) IncarnationID() string  { return m.incarnationID }
 func (m *mockPathForTest) Port() int              { return 0 }
 func (m *mockPathForTest) Name() string           { return "" }
 func (m *mockPathForTest) Parent() Path           { return nil }

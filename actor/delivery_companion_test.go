@@ -31,18 +31,21 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
+	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -280,6 +283,302 @@ func TestResolveReliableCompanion(t *testing.T) {
 		err = validateReliableCompanion(endpoint, companion, ReliableControllerRoleProducer)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 	})
+
+	t.Run("With stopped endpoint", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
+		require.NoError(t, err)
+
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.IncarnationID())
+		require.NoError(t, err)
+
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
+		require.NoError(t, err)
+
+		endpoint.setState(runningState, false)
+
+		resolved, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "is not running")
+		assert.Nil(t, resolved)
+	})
+}
+
+func TestResolveRemoteReliableCompanion(t *testing.T) {
+	incarnationID := uuid.NewString()
+	companionName := reliableCompanionName(ReliableControllerRoleProducer, incarnationID)
+	remoteHostPort := "10.0.0.2:9000"
+	localHostPort := "127.0.0.1:8080"
+
+	validSpec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", incarnationID)
+	require.NoError(t, err)
+
+	endpointRecord := func(hostPort string) *internalpb.Actor {
+		return &internalpb.Actor{
+			Address:       "goakt://test-replication@" + hostPort + "/endpoint",
+			IncarnationId: incarnationID,
+		}
+	}
+
+	companionRecord := func(hostPort string, spec *internalpb.ReliableCompanionSpec) *internalpb.Actor {
+		return &internalpb.Actor{
+			Address:           "goakt://test-replication@" + hostPort + "/" + companionName,
+			IncarnationId:     incarnationID,
+			ReliableCompanion: spec,
+		}
+	}
+
+	t.Run("With no registry endpoint", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, cluster.ErrActorNotFound)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "no registry record")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With no published companion", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "no published")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With missing companion spec", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, nil), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "is not a runtime companion")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With wrong companion role", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		wrongSpec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", incarnationID)
+		require.NoError(t, err)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, wrongSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "runs role=")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With wrong owner endpoint", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		wrongOwner, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "other", incarnationID)
+		require.NoError(t, err)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, wrongOwner.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "is owned by endpoint=")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With incarnation mismatch", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		staleSpec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", uuid.NewString())
+		require.NoError(t, err)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, staleSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "is bound to incarnation=")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With invalid registry address", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(&internalpb.Actor{
+			Address:       "not-an-address",
+			IncarnationId: incarnationID,
+		}, nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "invalid address")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With split nodes", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord("10.0.0.1:9000"), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "live on different nodes")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With self-reference", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(localHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(localHostPort, validSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "point at this node")
+		assert.Nil(t, resolved)
+	})
+
+	t.Run("With happy remote path", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
+
+		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer)
+		require.NoError(t, err)
+		require.NotNil(t, resolved)
+		assert.True(t, resolved.IsRemote())
+		assert.Equal(t, companionName, resolved.Name())
+	})
+}
+
+func TestEnsureReliableCompanionEdges(t *testing.T) {
+	t.Run("With terminating companion", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		endpoint, err := system.Spawn(ctx, "orders", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+		require.NoError(t, err)
+
+		companion, err := system.resolveReliableCompanion(ctx, "orders", ReliableControllerRoleProducer)
+		require.NoError(t, err)
+		companion.setState(runningState, false)
+
+		err = system.ensureReliableCompanion(ctx, endpoint)
+		require.ErrorContains(t, err, "is still terminating")
+	})
+
+	t.Run("With invalid endpoint incarnation", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		addr := address.NewReference("orders", system.Name(), "127.0.0.1", 0)
+		endpoint := &PID{
+			address:          addr,
+			path:             newPath(addr),
+			actorSystem:      system,
+			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+		}
+
+		err := system.ensureReliableCompanion(ctx, endpoint)
+		require.Error(t, err)
+	})
+}
+
+func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
+	newStoppedEndpoint := func(system *actorSystem) *PID {
+		addr := address.New("orders", system.name, "127.0.0.1", 8080)
+		endpoint := &PID{
+			address:          addr,
+			path:             newPath(addr),
+			actorSystem:      system,
+			logger:           log.DiscardLogger,
+			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+		}
+		endpoint.setState(runningState, false)
+		return endpoint
+	}
+
+	t.Run("With cluster disabled", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+		endpoint := newStoppedEndpoint(system)
+		system.rollbackReliableSpawn(ctx, endpoint)
+	})
+
+	t.Run("With cluster remove failure", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		endpoint := newStoppedEndpoint(system)
+
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+
+		system.rollbackReliableSpawn(context.Background(), endpoint)
+	})
+
+	t.Run("With cluster remove success", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		endpoint := newStoppedEndpoint(system)
+
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+
+		system.rollbackReliableSpawn(context.Background(), endpoint)
+	})
+}
+
+func TestReleaseDepartedReliableCompanion(t *testing.T) {
+	t.Run("With producer role and release error", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		incarnationID := uuid.NewString()
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, incarnationID)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, assert.AnError).Once()
+
+		props := &internalpb.Actor{
+			IncarnationId: incarnationID,
+			ReliableDelivery: &internalpb.ReliableDeliveryConfig{
+				Endpoint: &internalpb.ReliableDeliveryConfig_Producer{
+					Producer: &internalpb.ReliableProducerConfig{ConsumerName: "consumer"},
+				},
+			},
+		}
+
+		system.releaseDepartedReliableCompanion(context.Background(), props, "10.0.0.1:9000")
+	})
+
+	t.Run("With consumer role", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		incarnationID := uuid.NewString()
+		companionName := reliableCompanionName(ReliableControllerRoleConsumer, incarnationID)
+		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound).Once()
+
+		props := &internalpb.Actor{
+			IncarnationId: incarnationID,
+			ReliableDelivery: &internalpb.ReliableDeliveryConfig{
+				Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
+					Consumer: &internalpb.ReliableConsumerConfig{ProducerName: "producer"},
+				},
+			},
+		}
+
+		system.releaseDepartedReliableCompanion(context.Background(), props, "10.0.0.1:9000")
+	})
 }
 
 func TestReliableCompanionHiddenFromPublicAPIs(t *testing.T) {
@@ -499,14 +798,23 @@ func TestReliableDeliveryEndToEndDurable(t *testing.T) {
 	deliveries := awaitDeliveries(t, ctx, consumer, 2)
 	require.Len(t, deliveries, 2)
 
-	// every message went through the durable store-accept handshake
+	// every message went through the durable store-accept handshake; confirm
+	// writes may also appear as confirmation watermarks catch up
 	require.Eventually(t, func() bool {
 		_, operations, _ := queue.snapshot()
-		return len(operations) >= 4
+		return containsAllOperations(operations, "store:m-1", "accept:m-1", "store:m-2", "accept:m-2")
 	}, 10*time.Second, 20*time.Millisecond)
+}
 
-	_, operations, _ := queue.snapshot()
-	assert.Equal(t, []string{"store:m-1", "accept:m-1", "store:m-2", "accept:m-2"}, operations)
+// containsAllOperations reports whether every wanted operation appears in order.
+func containsAllOperations(operations []string, wanted ...string) bool {
+	index := 0
+	for _, operation := range operations {
+		if index < len(wanted) && operation == wanted[index] {
+			index++
+		}
+	}
+	return index == len(wanted)
 }
 
 func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {

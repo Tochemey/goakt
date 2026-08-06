@@ -34,6 +34,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -611,6 +612,46 @@ func BenchmarkDurableQueueStateLoad(b *testing.B) {
 
 		_ = state.Unconfirmed()
 	}
+}
+
+func TestNewStoredFromState(t *testing.T) {
+	endpoint, controller, _ := reliableProtocolPIDs()
+	remoteEndpoint := reliableProtocolPID("remote-endpoint", 9010)
+	remoteEndpoint.setState(remoteState, true)
+
+	t.Run("With valid inputs", func(t *testing.T) {
+		stored, err := newStoredFromState("session-1", "token-1", "message-1", 1, endpoint, controller)
+		require.NoError(t, err)
+		assert.Equal(t, "session-1", stored.SessionID())
+		assert.Equal(t, "token-1", stored.Token())
+		assert.Equal(t, "message-1", stored.MessageID())
+		assert.EqualValues(t, 1, stored.Seq())
+	})
+
+	t.Run("With blank message ID", func(t *testing.T) {
+		_, err := newStoredFromState("session-1", "token-1", " ", 1, endpoint, controller)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("With non-positive sequence", func(t *testing.T) {
+		_, err := newStoredFromState("session-1", "token-1", "message-1", 0, endpoint, controller)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+
+	t.Run("With remote ownership", func(t *testing.T) {
+		_, err := newStoredFromState("session-1", "token-1", "message-1", 1, remoteEndpoint, controller)
+		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+	})
+}
+
+func TestReliableControllerRoleHelpers(t *testing.T) {
+	assert.Equal(t, "producer", ReliableControllerRoleProducer.String())
+	assert.Equal(t, "consumer", ReliableControllerRoleConsumer.String())
+	assert.Equal(t, "unknown", reliableControllerRoleUnknown.String())
+
+	assert.Equal(t, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER, ReliableControllerRoleProducer.toProto())
+	assert.Equal(t, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER, ReliableControllerRoleConsumer.toProto())
+	assert.Equal(t, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED, reliableControllerRoleUnknown.toProto())
 }
 
 type reliableProtocolMessage struct {

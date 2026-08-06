@@ -355,6 +355,10 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 	t.Run("With no configuration", func(t *testing.T) {
 		assert.Nil(t, (*reliableDeliveryConfig)(nil).toRemoteSpec())
 	})
+
+	t.Run("With empty configuration", func(t *testing.T) {
+		assert.Nil(t, (&reliableDeliveryConfig{}).toRemoteSpec())
+	})
 }
 
 func TestReliableSpawnOptionFromWire(t *testing.T) {
@@ -421,5 +425,17 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{dependency})
 		require.ErrorContains(t, err, "is not a durable producer queue")
 		assert.Nil(t, option)
+	})
+
+	t.Run("With a nil dependency entry skipped", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		wire := producerDeliveryConfig("consumer")
+		wire.producer.durableQueueID = queue.ID()
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{nil, queue})
+		require.NoError(t, err)
+
+		config := newSpawnConfig(option)
+		assert.Same(t, queue, config.durableQueue)
 	})
 }

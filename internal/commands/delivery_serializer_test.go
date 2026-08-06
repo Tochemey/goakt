@@ -24,6 +24,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -143,8 +144,16 @@ func TestReliableDeliverySerializerErrors(t *testing.T) {
 	})
 
 	t.Run("invalid command fields", func(t *testing.T) {
-		_, err := serializer.Serialize(new(RegisterConsumer))
-		assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+		for _, command := range []any{
+			new(RegisterConsumer),
+			new(RegistrationAck),
+			new(Request),
+			new(Ack),
+			new(SequencedMessage),
+		} {
+			_, err := serializer.Serialize(command)
+			assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+		}
 	})
 }
 
@@ -195,6 +204,12 @@ func TestReliablePayloadCodecValidation(t *testing.T) {
 
 	_, err = EncodeReliablePayload(new(deliveryCodecPayload), deliveryEmptySerializer{})
 	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+
+	_, err = EncodeReliablePayload(new(deliveryCodecPayload), deliveryFailingSerializer{})
+	assert.ErrorContains(t, err, "encode boom")
+
+	_, err = DecodeReliablePayload([]byte("payload"), deliveryFailingSerializer{})
+	assert.ErrorContains(t, err, "decode boom")
 
 	data, err := EncodeReliablePayload(new(deliveryCodecPayload), deliveryNilSerializer{})
 	require.NoError(t, err)
@@ -324,6 +339,19 @@ func (x deliveryEmptySerializer) Deserialize([]byte) (any, error) {
 
 // deliveryEmptySerializer implements remote.Serializer.
 var _ remote.Serializer = deliveryEmptySerializer{}
+
+// deliveryFailingSerializer propagates encode/decode errors through the codec helpers.
+type deliveryFailingSerializer struct{}
+
+func (x deliveryFailingSerializer) Serialize(any) ([]byte, error) {
+	return nil, errors.New("encode boom")
+}
+
+func (x deliveryFailingSerializer) Deserialize([]byte) (any, error) {
+	return nil, errors.New("decode boom")
+}
+
+var _ remote.Serializer = deliveryFailingSerializer{}
 
 // deliveryCodecSerializer implements remote.Serializer.
 var _ remote.Serializer = (*deliveryCodecSerializer)(nil)

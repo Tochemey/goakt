@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -491,6 +493,91 @@ func TestConsumerControllerConsumerTerminated(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 }
 
+func TestConsumerControllerProtocolDrops(t *testing.T) {
+	harness := newConsumerControllerHarness(t, 6, 200*time.Millisecond, true)
+	nonce := harness.adopt(t, "s1", 1)
+
+	t.Run("With RegistrationAck from unexpected sender", func(t *testing.T) {
+		ack, err := commands.NewRegistrationAck("s1", 1, nonce)
+		require.NoError(t, err)
+		require.NoError(t, Tell(harness.ctx, harness.consumer, &deliveryForward{to: harness.cc, message: ack}))
+		pause.For(150 * time.Millisecond)
+		assert.True(t, harness.cc.IsRunning())
+	})
+
+	t.Run("With RegistrationAck stale nonce", func(t *testing.T) {
+		ack, err := commands.NewRegistrationAck("s1", 1, uuid.NewString())
+		require.NoError(t, err)
+		harness.fromPC(t, ack)
+		pause.For(150 * time.Millisecond)
+		assert.True(t, harness.cc.IsRunning())
+	})
+
+	t.Run("With SequencedMessage from unexpected sender", func(t *testing.T) {
+		require.NoError(t, Tell(harness.ctx, harness.consumer, &deliveryForward{
+			to:      harness.cc,
+			message: harness.sequenced(t, "s1", 1),
+		}))
+		pause.For(150 * time.Millisecond)
+		assert.Empty(t, harness.deliveries())
+	})
+
+	t.Run("With Confirmed from unexpected sender", func(t *testing.T) {
+		harness.fromPC(t, &Confirmed{
+			sessionID: "s1",
+			messageID: "id-1",
+			seq:       1,
+		})
+		pause.For(150 * time.Millisecond)
+		assert.True(t, harness.cc.IsRunning())
+	})
+
+	t.Run("With unhandled message", func(t *testing.T) {
+		require.NoError(t, Tell(harness.ctx, harness.cc, &testpb.Reply{Content: "noise"}))
+		pause.For(150 * time.Millisecond)
+		assert.True(t, harness.cc.IsRunning())
+	})
+}
+
+func TestConsumerControllerDecodeFailure(t *testing.T) {
+	harness := newConsumerControllerHarness(t, 6, 200*time.Millisecond, true)
+	harness.adopt(t, "s1", 1)
+
+	subscriber, err := harness.system.Subscribe()
+	require.NoError(t, err)
+
+	// a frame the remoting layer cannot decode is a terminal serializer asymmetry
+	bad, err := commands.NewSequencedMessage("s1", "id-1", 1, []byte("not-a-serialized-frame"))
+	require.NoError(t, err)
+	harness.fromPC(t, bad)
+
+	failure := waitFailure(t, subscriber)
+	assert.Equal(t, "consumer", failure.EndpointName())
+	assert.Equal(t, ReliableControllerRoleConsumer, failure.ControllerRole())
+	assert.Equal(t, ReliableDeliveryStageProtocol, failure.Stage())
+	assert.ErrorContains(t, failure.Err(), "failed to decode")
+
+	require.Eventually(t, func() bool {
+		return !harness.cc.IsRunning()
+	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestConsumerControllerProducerControllerTerminated(t *testing.T) {
+	harness := newConsumerControllerHarness(t, 6, 150*time.Millisecond, true)
+	harness.adopt(t, "s1", 1)
+
+	require.NoError(t, harness.pc.Shutdown(harness.ctx))
+
+	// silence after the peer dies triggers re-registration attempts against the
+	// missing companion until a replacement appears
+	require.Eventually(t, func() bool {
+		return !harness.pc.IsRunning()
+	}, 3*time.Second, 10*time.Millisecond)
+
+	pause.For(400 * time.Millisecond)
+	assert.True(t, harness.cc.IsRunning())
+}
+
 func TestConsumerControllerEdgeBranches(t *testing.T) {
 	// the controller under test is never spawned: its handlers run on the
 	// test goroutine with stand-in PIDs, so no actor turn touches its state
@@ -499,24 +586,72 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	consumer, err := system.Spawn(ctx, "consumer", &reliableConsumerMock{})
 	require.NoError(t, err)
 
-	pc, err := system.Spawn(ctx, "pc-shell", &deliveryRecorder{})
+	producer, err := system.Spawn(ctx, "producer", NewMockActor())
 	require.NoError(t, err)
 
-	shell, err := system.Spawn(ctx, "cc-shell", &deliveryRecorder{})
+	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.IncarnationID())
 	require.NoError(t, err)
 
-	controller := newConsumerController(consumer, "producer", 2, time.Hour)
-	require.NoError(t, controller.PreStart(nil))
+	pcName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+	pc, err := system.Spawn(ctx, pcName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+	require.NoError(t, err)
+
+	newShell := func(t *testing.T, name string) *PID {
+		t.Helper()
+		shell, err := system.Spawn(ctx, name, &deliveryRecorder{})
+		require.NoError(t, err)
+		return shell
+	}
+
+	t.Run("With PreStart validation", func(t *testing.T) {
+		assert.ErrorContains(t, newConsumerController(nil, "producer", 1, time.Millisecond).PreStart(nil), "bound local consumer")
+		assert.ErrorContains(t, newConsumerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), "producer", 1, time.Millisecond).PreStart(nil), "bound local consumer")
+		assert.ErrorContains(t, newConsumerController(consumer, "", 1, time.Millisecond).PreStart(nil), "producer endpoint name")
+		assert.ErrorContains(t, newConsumerController(consumer, "producer", 0, time.Millisecond).PreStart(nil), "valid flow control window")
+		assert.ErrorContains(t, newConsumerController(consumer, "producer", MaxFlowControlWindow+1, time.Millisecond).PreStart(nil), "valid flow control window")
+		assert.ErrorContains(t, newConsumerController(consumer, "producer", 1, 0).PreStart(nil), "positive resend interval")
+	})
 
 	t.Run("With stale tick generation", func(t *testing.T) {
+		shell := newShell(t, "shell-stale-tick")
+		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
 		controller.sawValidTraffic = true
+
 		stale := &consumerControllerTick{generation: controller.generation + 1}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, stale)
 		controller.handleTick(rctx, stale)
 		assert.True(t, controller.sawValidTraffic)
 	})
 
+	t.Run("With gap recovery on tick", func(t *testing.T) {
+		shell := newShell(t, "shell-gap-tick")
+		controller := newConsumerController(consumer, "producer", 6, time.Millisecond)
+		require.NoError(t, controller.PreStart(nil))
+		controller.producerController = pc
+		controller.sessionID = "s1"
+		controller.registrationNonce = uuid.NewString()
+		controller.expectedSeq = 1
+		controller.confirmedSeq = 0
+		controller.requestUpToSeq = 6
+		controller.sawValidTraffic = true
+
+		three, err := commands.NewSequencedMessage("s1", "id-3", 3, []byte("frame"))
+		require.NoError(t, err)
+		controller.buffer = []*commands.SequencedMessage{three}
+
+		tick := &consumerControllerTick{generation: controller.generation}
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, tick)
+		controller.handleTick(rctx, tick)
+
+		assert.False(t, controller.sawValidTraffic)
+		assert.False(t, controller.lastGapRequest.IsZero())
+	})
+
 	t.Run("With full receive buffer", func(t *testing.T) {
+		shell := newShell(t, "shell-full-buffer")
+		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = pc
 		controller.sessionID = "s1"
 		controller.registrationNonce = uuid.NewString()
@@ -550,6 +685,9 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	})
 
 	t.Run("With producer controller terminated", func(t *testing.T) {
+		shell := newShell(t, "shell-pc-terminated")
+		controller := newConsumerController(consumer, "producer", 2, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
 		controller.producerController = pc
 		controller.sessionID = "s1"
 		controller.registrationNonce = uuid.NewString()
@@ -561,5 +699,146 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		assert.Nil(t, controller.producerController)
 		assert.Empty(t, controller.sessionID)
 		assert.Empty(t, controller.registrationNonce)
+	})
+
+	t.Run("With register resolve failure", func(t *testing.T) {
+		shell := newShell(t, "shell-register-miss")
+		controller := newConsumerController(consumer, "missing-producer", 2, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.register(rctx)
+		assert.Nil(t, controller.producerController)
+	})
+
+	t.Run("With purgeBuffer removing stale entries", func(t *testing.T) {
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+		controller.expectedSeq = 3
+
+		one, err := commands.NewSequencedMessage("s1", "id-1", 1, []byte("frame"))
+		require.NoError(t, err)
+		two, err := commands.NewSequencedMessage("s1", "id-2", 2, []byte("frame"))
+		require.NoError(t, err)
+		four, err := commands.NewSequencedMessage("s1", "id-4", 4, []byte("frame"))
+		require.NoError(t, err)
+		controller.buffer = []*commands.SequencedMessage{one, two, four}
+
+		controller.purgeBuffer()
+		require.Len(t, controller.buffer, 1)
+		assert.Equal(t, int64(4), controller.buffer[0].Seq())
+	})
+
+	t.Run("With sendRequest and sendAck guards", func(t *testing.T) {
+		shell := newShell(t, "shell-request-ack-guards")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.sendRequest(rctx, false)
+		controller.sendAck(rctx)
+		assert.Zero(t, controller.requestUpToSeq)
+
+		controller.producerController = pc
+		controller.sessionID = ""
+		controller.sendRequest(rctx, false)
+		controller.sendAck(rctx)
+		assert.Zero(t, controller.requestUpToSeq)
+	})
+
+	t.Run("With impossible Request construction", func(t *testing.T) {
+		shell := newShell(t, "shell-bad-request")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+		controller.producerController = pc
+		controller.sessionID = "s1"
+		controller.registrationNonce = ""
+
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.sendRequest(rctx, false)
+
+		failure := waitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "failed to build Request")
+	})
+
+	t.Run("With impossible Ack construction", func(t *testing.T) {
+		shell := newShell(t, "shell-bad-ack")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+		controller.producerController = pc
+		controller.sessionID = "s1"
+		controller.registrationNonce = ""
+
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.sendAck(rctx)
+
+		failure := waitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "failed to build Ack")
+	})
+
+	t.Run("With Delivery ownership failure", func(t *testing.T) {
+		shell := newShell(t, "shell-delivery-ownership")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+		// PreStart requires a local consumer; swap afterwards so newDelivery rejects ownership
+		controller.consumer = newRemotePID(address.New("remote-consumer", "sys", "127.0.0.1", 1), nil)
+
+		payload := &testpb.Reply{Content: "x"}
+		frame, err := system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		msg, err := commands.NewSequencedMessage("s1", "id-1", 1, frame)
+		require.NoError(t, err)
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, msg)
+		controller.deliver(rctx, msg)
+		assert.True(t, controller.failed)
+	})
+
+	t.Run("With fail already published", func(t *testing.T) {
+		shell := newShell(t, "shell-fail-once")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+		controller.failed = true
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.fail(rctx, ReliableDeliveryStageProtocol, errors.New("ignored"))
+		assert.True(t, shell.IsRunning())
+	})
+
+	t.Run("With fail without event stream", func(t *testing.T) {
+		shell := newShell(t, "shell-fail-silent")
+		lonely, err := system.Spawn(ctx, "lonely-consumer", &reliableConsumerMock{})
+		require.NoError(t, err)
+		lonely.eventsStream = nil
+
+		controller := newConsumerController(lonely, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.fail(rctx, ReliableDeliveryStageProtocol, errors.New("silent"))
+		assert.True(t, controller.failed)
+	})
+
+	t.Run("With tell to dead peer", func(t *testing.T) {
+		shell := newShell(t, "shell-tell-dead")
+		controller := newConsumerController(consumer, "producer", 6, time.Hour)
+		require.NoError(t, controller.PreStart(nil))
+
+		dead, err := system.Spawn(ctx, "dead-peer", &deliveryRecorder{})
+		require.NoError(t, err)
+		require.NoError(t, dead.Shutdown(ctx))
+		require.Eventually(t, func() bool { return !dead.IsRunning() }, 3*time.Second, 10*time.Millisecond)
+
+		register, err := commands.NewRegisterConsumer(uuid.NewString())
+		require.NoError(t, err)
+
+		rctx := newReceiveContext(context.Background(), system.NoSender(), shell, &PostStart{})
+		controller.tell(rctx, dead, register)
 	})
 }
