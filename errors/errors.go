@@ -153,6 +153,11 @@ var (
 	// ErrReliableConfirm indicates that reliable delivery could not persist a confirmation.
 	ErrReliableConfirm = errors.New("reliable delivery confirmation failed")
 
+	// ErrReliableSpawnUnsupported is returned when a spawn path cannot host a reliable
+	// delivery endpoint, such as the standalone cluster client, whose caller does not
+	// participate in the delivery protocol.
+	ErrReliableSpawnUnsupported = errors.New("reliable delivery endpoints cannot be spawned from this caller")
+
 	// ErrInvalidTimeout is returned when a timeout value is less than or equal to zero.
 	ErrInvalidTimeout = errors.New("invalid timeout")
 

@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
@@ -322,5 +323,103 @@ func TestReliableDeliveryConfigClone(t *testing.T) {
 
 	t.Run("With no configuration", func(t *testing.T) {
 		assert.Nil(t, (*reliableDeliveryConfig)(nil).clone())
+	})
+}
+
+func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
+	t.Run("With a producer configuration", func(t *testing.T) {
+		config := producerDeliveryConfig("consumer")
+		config.producer.durableQueueID = "ordersQueue"
+
+		spec := config.toRemoteSpec()
+		require.NotNil(t, spec)
+		require.NotNil(t, spec.Producer)
+		assert.Nil(t, spec.Consumer)
+		assert.Equal(t, "consumer", spec.Producer.ConsumerName)
+		assert.Equal(t, "ordersQueue", spec.Producer.DurableQueueID)
+		assert.Equal(t, DefaultQueueRetryAttempts, spec.Producer.QueueRetryMaxAttempts)
+		assert.Equal(t, DefaultQueueRetryBackoff, spec.Producer.QueueRetryInitialBackoff)
+		assert.Equal(t, DefaultLocalRetryInterval, spec.Producer.LocalRetryInterval)
+	})
+
+	t.Run("With a consumer configuration", func(t *testing.T) {
+		spec := consumerDeliveryConfig("producer").toRemoteSpec()
+		require.NotNil(t, spec)
+		require.NotNil(t, spec.Consumer)
+		assert.Nil(t, spec.Producer)
+		assert.Equal(t, "producer", spec.Consumer.ProducerName)
+		assert.Equal(t, 50, spec.Consumer.FlowControlWindow)
+		assert.Equal(t, DefaultResendInterval, spec.Consumer.ResendInterval)
+	})
+
+	t.Run("With no configuration", func(t *testing.T) {
+		assert.Nil(t, (*reliableDeliveryConfig)(nil).toRemoteSpec())
+	})
+}
+
+func TestReliableSpawnOptionFromWire(t *testing.T) {
+	t.Run("With a producer and its durable queue", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		wire := producerDeliveryConfig("consumer")
+		wire.producer.durableQueueID = queue.ID()
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{queue})
+		require.NoError(t, err)
+
+		config := newSpawnConfig(option)
+		require.NotNil(t, config.reliableDelivery)
+		assert.Equal(t, "consumer", config.reliableDelivery.producer.consumerName)
+		assert.Same(t, queue, config.durableQueue)
+		require.NoError(t, config.Validate())
+	})
+
+	t.Run("With a volatile producer", func(t *testing.T) {
+		option, err := reliableSpawnOptionFromWire(producerDeliveryConfig("consumer").toProto(), nil)
+		require.NoError(t, err)
+
+		config := newSpawnConfig(option)
+		require.NotNil(t, config.reliableDelivery)
+		assert.Nil(t, config.durableQueue)
+	})
+
+	t.Run("With a consumer", func(t *testing.T) {
+		option, err := reliableSpawnOptionFromWire(consumerDeliveryConfig("producer").toProto(), nil)
+		require.NoError(t, err)
+
+		config := newSpawnConfig(option)
+		require.NotNil(t, config.reliableDelivery)
+		assert.Equal(t, "producer", config.reliableDelivery.consumer.producerName)
+		assert.Nil(t, config.durableQueue)
+	})
+
+	t.Run("With a structurally invalid configuration", func(t *testing.T) {
+		option, err := reliableSpawnOptionFromWire(&internalpb.ReliableDeliveryConfig{}, nil)
+		require.Error(t, err)
+		assert.Nil(t, option)
+	})
+
+	t.Run("With no configuration", func(t *testing.T) {
+		option, err := reliableSpawnOptionFromWire(nil, nil)
+		require.ErrorContains(t, err, "endpoint configuration is required")
+		assert.Nil(t, option)
+	})
+
+	t.Run("With the queue dependency missing", func(t *testing.T) {
+		wire := producerDeliveryConfig("consumer")
+		wire.producer.durableQueueID = "ordersQueue"
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), nil)
+		require.ErrorContains(t, err, "missing from the endpoint dependencies")
+		assert.Nil(t, option)
+	})
+
+	t.Run("With a mistyped queue dependency", func(t *testing.T) {
+		dependency := NewMockDependency("ordersQueue", "user", "email")
+		wire := producerDeliveryConfig("consumer")
+		wire.producer.durableQueueID = dependency.ID()
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{dependency})
+		require.ErrorContains(t, err, "is not a durable producer queue")
+		assert.Nil(t, option)
 	})
 }

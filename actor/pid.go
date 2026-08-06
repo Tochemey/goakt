@@ -905,6 +905,13 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	if pid.IsRemote() {
+		// the remote child spawn request cannot carry reliable-delivery
+		// settings: reject instead of silently spawning an endpoint without
+		// its controller
+		if config.reliableDelivery != nil {
+			return nil, errors.New("reliable delivery endpoints cannot be spawned as remote children")
+		}
+
 		return pid.spawnChildRemote(ctx, name, actor, config)
 	}
 

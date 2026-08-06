@@ -33,10 +33,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -320,8 +328,9 @@ func TestReliableEndpointDefaults(t *testing.T) {
 
 	assert.IsType(t, new(passivation.LongLivedStrategy), companion.passivationStrategy)
 
-	// both stay on their spawn node until relocation reconstruction lands
-	assert.False(t, endpoint.IsRelocatable())
+	// the endpoint keeps the normal relocation default; the controller never
+	// relocates on its own because the relocated endpoint rebuilds a fresh one
+	assert.True(t, endpoint.IsRelocatable())
 	assert.False(t, companion.IsRelocatable())
 }
 
@@ -602,23 +611,24 @@ func TestReliableEndpointSpawnRollback(t *testing.T) {
 	assert.True(t, fresh.IsRunning())
 }
 
-func TestReliableEndpointSpawnOnRejected(t *testing.T) {
+func TestReliableEndpointDataCenterRejected(t *testing.T) {
+	// a cross-datacenter endpoint could never resolve its controller pair in
+	// the local cluster registry, so the placement is rejected up front
 	ctx, system := newCompanionTestSystem(t)
 
-	pid, err := system.SpawnOn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
-	require.ErrorContains(t, err, "SpawnOn")
+	pid, err := system.SpawnOn(ctx, "orders-producer", &reliableProducerMock{},
+		AsReliableProducer("orders-consumer"), WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "us", Zone: "a"}))
+	require.ErrorContains(t, err, "data center")
 	assert.Nil(t, pid)
 }
 
-func TestReliableEndpointRemoteSpawnRejected(t *testing.T) {
-	ctx, system := newCompanionTestSystem(t)
+func TestReliableEndpointRemoteChildSpawnRejected(t *testing.T) {
+	// the remote child spawn request cannot carry reliable-delivery settings,
+	// so the options are rejected instead of silently dropped
+	remoteParent := newRemotePID(address.New("parent", "remote-system", "127.0.0.1", 8080), nil)
 
-	system.remotingEnabled.Store(true)
-	t.Cleanup(func() { system.remotingEnabled.Store(false) })
-
-	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
-		AsReliableProducer("orders-consumer"), WithHostAndPort("127.0.0.1", 8080))
-	require.ErrorContains(t, err, "remote node")
+	pid, err := remoteParent.SpawnChild(context.TODO(), "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.ErrorContains(t, err, "remote children")
 	assert.Nil(t, pid)
 }
 
@@ -637,6 +647,7 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 
 	assert.Equal(t, endpoint.IncarnationID(), serialized.GetIncarnationId())
 	assert.Equal(t, "consumer", serialized.GetReliableDelivery().GetProducer().GetConsumerName())
+	assert.True(t, serialized.GetRelocatable())
 
 	// the companion record carries the ownership spec cluster resolution
 	// validates and is pinned to its node
@@ -661,4 +672,64 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 	assert.Nil(t, plainSerialized.GetReliableDelivery())
 	assert.Nil(t, plainSerialized.GetReliableCompanion())
 	assert.Equal(t, plain.IncarnationID(), plainSerialized.GetIncarnationId())
+}
+
+func TestReliableEndpointRemoteSpawn(t *testing.T) {
+	// initial remote placement behaves exactly like a local spawn: the public
+	// spec travels with the spawn request, the hosting node restores the
+	// settings, resolves the durable queue among the dependencies, and creates
+	// the controller companion
+	ctx := context.TODO()
+	host := "127.0.0.1"
+	ports := dynaport.Get(1)
+
+	sys, err := NewActorSystem("remote-reliable",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, ports[0])))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	t.Cleanup(func() {
+		assert.NoError(t, sys.Stop(context.WithoutCancel(ctx)))
+	})
+
+	pause.For(time.Second)
+
+	require.NoError(t, sys.Register(ctx, &reliableProducerMock{}))
+	require.NoError(t, sys.Inject(&mockDurableQueue{}))
+
+	queue := &mockDurableQueue{}
+	remoting := remoteclient.NewClient()
+
+	t.Cleanup(remoting.Close)
+
+	_, err = remoting.RemoteSpawn(ctx, host, ports[0], &remote.SpawnRequest{
+		Name:         "orders-producer",
+		Kind:         types.Name(&reliableProducerMock{}),
+		Relocatable:  true,
+		Dependencies: []extension.Dependency{queue},
+		ReliableDelivery: &remote.ReliableDeliverySpec{
+			Producer: &remote.ReliableProducerSpec{
+				ConsumerName:             "orders-consumer",
+				DurableQueueID:           queue.ID(),
+				QueueRetryMaxAttempts:    DefaultQueueRetryAttempts,
+				QueueRetryInitialBackoff: DefaultQueueRetryBackoff,
+				LocalRetryInterval:       DefaultLocalRetryInterval,
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	node, ok := system.actors.nodeByName("orders-producer")
+	require.True(t, ok)
+
+	endpoint := node.value()
+	require.NotNil(t, endpoint.reliableDelivery)
+	assert.Equal(t, "orders-consumer", endpoint.reliableDelivery.producer.consumerName)
+	require.NotNil(t, endpoint.durableQueue)
+
+	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
+	require.NoError(t, err)
+	assert.True(t, companion.IsRunning())
 }

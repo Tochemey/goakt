@@ -23,6 +23,7 @@
 package remote
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -180,6 +181,17 @@ type SpawnRequest struct {
 	//
 	// A zero value means the hosting node's system-wide init timeout is used.
 	InitTimeout time.Duration
+
+	// ReliableDelivery marks the actor as one endpoint of a reliable delivery
+	// flow. The hosting node restores the settings as spawn options and creates
+	// the system-owned controller companion next to the endpoint, so remote
+	// placement behaves exactly like a local AsReliableProducer or
+	// AsReliableConsumer spawn.
+	//
+	// It is set by the actor system when a reliable endpoint targets a remote
+	// node; the standalone cluster client rejects spawn requests carrying it.
+	// It cannot be combined with Singleton.
+	ReliableDelivery *ReliableDeliverySpec
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
@@ -207,6 +219,16 @@ func (s *SpawnRequest) Validate() error {
 		return gerrors.ErrInvalidReentrancyMode
 	}
 
+	if s.ReliableDelivery != nil {
+		if s.Singleton != nil {
+			return errors.New("reliable delivery endpoints cannot be singletons")
+		}
+
+		if err := s.ReliableDelivery.Validate(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -216,6 +238,10 @@ func (s *SpawnRequest) Sanitize() {
 	s.Kind = strings.TrimSpace(s.Kind)
 	if s.Singleton != nil {
 		s.Relocatable = true
+	}
+
+	if s.ReliableDelivery != nil {
+		s.ReliableDelivery.sanitize()
 	}
 }
 

@@ -773,6 +773,29 @@ func TestRemoteSpawnHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
 	})
+
+	t.Run("reliable producer with an unresolvable queue returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		// the durable queue must be resolvable among the request dependencies;
+		// failing fast beats silently spawning a volatile endpoint
+		sys := newRemoteServerTestSystem(host, port)
+		registry := types.NewRegistry()
+		registry.Register(new(MockActor))
+		sys.reflection = newReflection(registry)
+		sys.registry = registry
+
+		wire := producerDeliveryConfig("orders-consumer")
+		wire.producer.durableQueueID = "orders-queue"
+
+		req := &internalpb.RemoteSpawnRequest{
+			Host: host, Port: int32(port),
+			ActorName:        "orders-producer",
+			ActorType:        types.Name(new(MockActor)),
+			ReliableDelivery: wire.toProto(),
+		}
+		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+	})
 }
 
 func TestRemoteSpawnChildHandler(t *testing.T) {

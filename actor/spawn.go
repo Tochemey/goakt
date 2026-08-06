@@ -40,6 +40,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
@@ -102,12 +103,6 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nil, gerrors.ErrRemotingDisabled
 		}
 
-		// the remote spawn request cannot carry reliable-delivery settings
-		// yet: reject instead of silently spawning an unreliable endpoint
-		if config.reliableDelivery != nil {
-			return nil, errors.New("reliable delivery endpoints cannot be spawned on a remote node yet")
-		}
-
 		// we are spawning the actor on a remote node
 		addr, err := x.remoting.RemoteSpawn(ctx, *config.host, *config.port, &remote.SpawnRequest{
 			Name:                name,
@@ -120,6 +115,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			Supervisor:          config.supervisor,
 			Role:                config.role,
 			InitTimeout:         pointer.Deref(config.initTimeout, 0),
+			ReliableDelivery:    config.reliableDelivery.toRemoteSpec(),
 		})
 		if err != nil {
 			return nil, err
@@ -272,11 +268,11 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 
 	config := newSpawnConfig(opts...)
 
-	// a remote spawn request cannot carry reliable-delivery settings yet, and
-	// placement is nondeterministic here: reject instead of silently spawning
-	// an unreliable endpoint on another node; use Spawn for local placement
-	if config.reliableDelivery != nil {
-		return nil, errors.New("reliable delivery endpoints cannot be placed with SpawnOn yet")
+	// a cross-datacenter reliable endpoint could never resolve its controller
+	// pair: the peer endpoint and the cluster registry live in the local
+	// cluster, so reject instead of spawning an endpoint that can never flow
+	if config.reliableDelivery != nil && config.dataCenter != nil {
+		return nil, errors.New("reliable delivery endpoints cannot be placed on another data center")
 	}
 
 	// here we are sending the message to a datacenter
@@ -328,6 +324,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		Reentrancy:          config.reentrancy,
 		Supervisor:          config.supervisor,
 		InitTimeout:         pointer.Deref(config.initTimeout, 0),
+		ReliableDelivery:    config.reliableDelivery.toRemoteSpec(),
 	}
 
 	addr, err := x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
@@ -1010,20 +1007,50 @@ func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers [
 // skipped. System actors, singleton actors and non-relocatable actors are always
 // skipped before any registry mutation: singletons are recreated on the leader
 // through recreateSingletonFromWire, and non-relocatable actors are lost with
-// their node by design, so their registry entry must not be touched here.
+// their node by design, so their registry entry must not be touched here. The
+// one exception is a non-relocatable reliable endpoint, whose endpoint and
+// controller records are withdrawn (never respawned) because their if-absent
+// publication would otherwise block the endpoint name cluster-wide.
+//
+// A relocated reliable endpoint additionally releases the departed
+// activation's controller record before the respawn: the companion identity
+// is derived from the departed record's role and incarnation, so the release
+// can never touch the fresh controller the respawn creates.
 func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
 		return gerrors.NewInternalError(err)
 	}
 
-	if isSystemName(addr.Name()) || props.GetSingleton() != nil || !props.GetRelocatable() {
+	if isSystemName(addr.Name()) || props.GetSingleton() != nil {
+		return nil
+	}
+
+	if !props.GetRelocatable() {
+		// A non-relocatable reliable endpoint is lost with its node by design,
+		// but its registry records must not outlive it: reliable endpoints
+		// publish with if-absent semantics, so a leaked record would block the
+		// name cluster-wide instead of merely going stale. Withdraw the
+		// endpoint and controller records; ordinary non-relocatable actors
+		// keep their historical registry semantics.
+		if props.GetReliableDelivery() != nil {
+			if _, rerr := x.releaseDepartedEntry(ctx, addr.Name(), departedNode); rerr != nil {
+				x.logger.Errorf("failed to release registry record of the departed non-relocatable reliable endpoint=%s: %v", addr.Name(), rerr)
+			}
+
+			x.releaseDepartedReliableCompanion(ctx, props, departedNode)
+		}
+
 		return nil
 	}
 
 	proceed, err := x.releaseDepartedEntry(ctx, addr.Name(), departedNode)
 	if err != nil || !proceed {
 		return err
+	}
+
+	if props.GetReliableDelivery() != nil {
+		x.releaseDepartedReliableCompanion(ctx, props, departedNode)
 	}
 
 	actor, err := x.reflection.instantiateActor(props.GetType())
@@ -1094,7 +1121,10 @@ func (x *actorSystem) releaseDepartedEntry(ctx context.Context, name, departedNo
 
 // wireSpawnOptions rebuilds the spawn options carried by a serialized actor
 // record so a relocated actor keeps its passivation, stashing, role,
-// reentrancy, supervision and dependencies.
+// reentrancy, supervision, dependencies and reliable-delivery settings. A
+// reliable producer record resolves its durable queue instance by ID among
+// the reconstructed dependencies; a missing queue type fails reconstruction
+// so the caller restores the departed record for a later relocation retry.
 func (x *actorSystem) wireSpawnOptions(props *internalpb.Actor) ([]SpawnOption, error) {
 	spawnOpts := []SpawnOption{
 		WithPassivationStrategy(codec.DecodePassivationStrategy(props.GetPassivationStrategy())),
@@ -1122,13 +1152,26 @@ func (x *actorSystem) wireSpawnOptions(props *internalpb.Actor) ([]SpawnOption, 
 		}
 	}
 
+	var dependencies []extension.Dependency
+
 	if len(props.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.dependenciesFromProto(props.GetDependencies()...)
+		var err error
+
+		dependencies, err = x.reflection.dependenciesFromProto(props.GetDependencies()...)
 		if err != nil {
 			return nil, err
 		}
 
 		spawnOpts = append(spawnOpts, WithDependencies(dependencies...))
+	}
+
+	if props.GetReliableDelivery() != nil {
+		reliableOption, err := reliableSpawnOptionFromWire(props.GetReliableDelivery(), dependencies)
+		if err != nil {
+			return nil, err
+		}
+
+		spawnOpts = append(spawnOpts, reliableOption)
 	}
 
 	return spawnOpts, nil

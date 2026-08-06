@@ -204,7 +204,30 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	for _, opt := range opts {
 		opt.Apply(config)
 	}
+
+	config.normalizeDurableQueue()
 	return config
+}
+
+// normalizeDurableQueue registers the durable queue instance among the user
+// dependencies so it serializes into the actor record and can be
+// reconstructed by ID on any eligible node after remote placement or
+// relocation. The ID guard keeps exactly one entry when the caller also
+// passed the queue through WithDependencies and makes repeated normalization
+// idempotent. Running after all options are applied keeps the result
+// independent of option order.
+func (s *spawnConfig) normalizeDurableQueue() {
+	if s.durableQueue == nil {
+		return
+	}
+
+	for _, dependency := range s.dependencies {
+		if dependency != nil && dependency.ID() == s.durableQueue.ID() {
+			return
+		}
+	}
+
+	s.dependencies = append(s.dependencies, s.durableQueue)
 }
 
 // clone returns a deep copy of the spawnConfig and applies the given SpawnOption(s)

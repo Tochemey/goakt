@@ -193,11 +193,13 @@ type Client interface {
 	//   - ctx: Cancellation and deadlines.
 	//   - host, port: Location of the remote actor system.
 	//   - spawnRequest: Desired actor name, type (kind), singleton/relocatable
-	//     flags, passivation strategy, dependencies, and stash behavior.
+	//     flags, passivation strategy, dependencies, stash behavior, and
+	//     reliable-delivery settings.
 	//
 	// Behavior:
 	//   - Validates and sanitizes spawnRequest before sending.
-	//   - Dependencies and passivation strategy are encoded for transport.
+	//   - Dependencies, passivation strategy, and reliable-delivery settings
+	//     are encoded for transport.
 	//
 	// Errors:
 	//   - ErrTypeNotRegistered when the remote system does not recognize the
@@ -2139,6 +2141,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
 		Reentrancy:          reentrancy,
 		InitTimeout:         initTimeout,
+		ReliableDelivery:    encodeReliableDelivery(spawnRequest.ReliableDelivery),
 	}
 
 	// Send request
@@ -2157,6 +2160,45 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	}
 
 	return nil, gerrors.ErrInvalidResponse
+}
+
+// encodeReliableDelivery converts the public reliable-delivery spec of a
+// spawn request to its wire form. A nil spec encodes as absent so ordinary
+// spawn requests stay unchanged.
+func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.ReliableDeliveryConfig {
+	switch {
+	case spec == nil:
+		return nil
+	case spec.Producer != nil:
+		producer := &internalpb.ReliableProducerConfig{
+			ConsumerName: spec.Producer.ConsumerName,
+			QueueRetry: &internalpb.QueueRetryConfig{
+				MaxAttempts:    uint32(spec.Producer.QueueRetryMaxAttempts), // nolint
+				InitialBackoff: durationpb.New(spec.Producer.QueueRetryInitialBackoff),
+			},
+			LocalRetryInterval: durationpb.New(spec.Producer.LocalRetryInterval),
+		}
+
+		if spec.Producer.DurableQueueID != "" {
+			producer.DurableQueueId = new(spec.Producer.DurableQueueID)
+		}
+
+		return &internalpb.ReliableDeliveryConfig{
+			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
+		}
+	case spec.Consumer != nil:
+		return &internalpb.ReliableDeliveryConfig{
+			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
+				Consumer: &internalpb.ReliableConsumerConfig{
+					ProducerName:      spec.Consumer.ProducerName,
+					FlowControlWindow: uint32(spec.Consumer.FlowControlWindow), // nolint
+					ResendInterval:    durationpb.New(spec.Consumer.ResendInterval),
+				},
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.

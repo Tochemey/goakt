@@ -846,9 +846,14 @@ type RemoteSpawnRequest struct {
 	Reentrancy *ReentrancyConfig `protobuf:"bytes,12,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
 	// Specifies the init timeout override when explicitly set.
 	// When unset, the hosting node's system-wide init timeout is used.
-	InitTimeout   *durationpb.Duration `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	InitTimeout *durationpb.Duration `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
+	// Specifies the reliable-delivery endpoint settings when the actor is
+	// spawned as a reliable producer or consumer endpoint. The hosting node
+	// restores them as spawn options so remote placement behaves exactly like
+	// a local spawn, including controller companion creation.
+	ReliableDelivery *ReliableDeliveryConfig `protobuf:"bytes,14,opt,name=reliable_delivery,json=reliableDelivery,proto3" json:"reliable_delivery,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnRequest) Reset() {
@@ -968,6 +973,13 @@ func (x *RemoteSpawnRequest) GetReentrancy() *ReentrancyConfig {
 func (x *RemoteSpawnRequest) GetInitTimeout() *durationpb.Duration {
 	if x != nil {
 		return x.InitTimeout
+	}
+	return nil
+}
+
+func (x *RemoteSpawnRequest) GetReliableDelivery() *ReliableDeliveryConfig {
+	if x != nil {
+		return x.ReliableDelivery
 	}
 	return nil
 }
@@ -2803,7 +2815,7 @@ var File_internal_remoting_proto protoreflect.FileDescriptor
 const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"\x17internal/remoting.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x14internal/actor.proto\x1a\x19internal/dependency.proto\x1a\x14internal/grain.proto\x1a\x15internal/metric.proto\x1a\x1ainternal/passivation.proto\x1a\x14internal/peers.proto\x1a\x19internal/reentrancy.proto\"\x8b\x01\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x14internal/actor.proto\x1a\x17internal/delivery.proto\x1a\x19internal/dependency.proto\x1a\x14internal/grain.proto\x1a\x15internal/metric.proto\x1a\x1ainternal/passivation.proto\x1a\x14internal/peers.proto\x1a\x19internal/reentrancy.proto\"\x8b\x01\n" +
 	"\x10RemoteAskRequest\x12B\n" +
 	"\x0fremote_messages\x18\x01 \x03(\v2\x19.internalpb.RemoteMessageR\x0eremoteMessages\x123\n" +
 	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"/\n" +
@@ -2848,7 +2860,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12'\n" +
 	"\x0fwatcher_address\x18\x04 \x01(\tR\x0ewatcherAddress\"\x17\n" +
-	"\x15RemoteUnWatchResponse\"\xe2\x04\n" +
+	"\x15RemoteUnWatchResponse\"\xb3\x05\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -2869,7 +2881,8 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\f \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
 	"reentrancy\x12<\n" +
-	"\finit_timeout\x18\r \x01(\v2\x19.google.protobuf.DurationR\vinitTimeoutB\a\n" +
+	"\finit_timeout\x18\r \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12O\n" +
+	"\x11reliable_delivery\x18\x0e \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDeliveryB\a\n" +
 	"\x05_role\"/\n" +
 	"\x13RemoteSpawnResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"T\n" +
@@ -3056,10 +3069,11 @@ var file_internal_remoting_proto_goTypes = []any{
 	(*Dependency)(nil),                        // 54: internalpb.Dependency
 	(*SupervisorSpec)(nil),                    // 55: internalpb.SupervisorSpec
 	(*ReentrancyConfig)(nil),                  // 56: internalpb.ReentrancyConfig
-	(*Grain)(nil),                             // 57: internalpb.Grain
-	(*PeerState)(nil),                         // 58: internalpb.PeerState
-	(*Metric)(nil),                            // 59: internalpb.Metric
-	(State)(0),                                // 60: internalpb.State
+	(*ReliableDeliveryConfig)(nil),            // 57: internalpb.ReliableDeliveryConfig
+	(*Grain)(nil),                             // 58: internalpb.Grain
+	(*PeerState)(nil),                         // 59: internalpb.PeerState
+	(*Metric)(nil),                            // 60: internalpb.Metric
+	(State)(0),                                // 61: internalpb.State
 }
 var file_internal_remoting_proto_depIdxs = []int32{
 	6,  // 0: internalpb.RemoteAskRequest.remote_messages:type_name -> internalpb.RemoteMessage
@@ -3072,25 +3086,26 @@ var file_internal_remoting_proto_depIdxs = []int32{
 	55, // 7: internalpb.RemoteSpawnRequest.supervisor:type_name -> internalpb.SupervisorSpec
 	56, // 8: internalpb.RemoteSpawnRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
 	51, // 9: internalpb.RemoteSpawnRequest.init_timeout:type_name -> google.protobuf.Duration
-	57, // 10: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
-	51, // 11: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
-	57, // 12: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
-	57, // 13: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
-	58, // 14: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
-	54, // 15: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
-	59, // 16: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
-	60, // 17: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
-	53, // 18: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	53, // 19: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	54, // 20: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
-	56, // 21: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
-	55, // 22: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
-	51, // 23: internalpb.RemoteSpawnChildRequest.init_timeout:type_name -> google.protobuf.Duration
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	57, // 10: internalpb.RemoteSpawnRequest.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
+	58, // 11: internalpb.RemoteAskGrainRequest.grain:type_name -> internalpb.Grain
+	51, // 12: internalpb.RemoteAskGrainRequest.request_timeout:type_name -> google.protobuf.Duration
+	58, // 13: internalpb.RemoteTellGrainRequest.grain:type_name -> internalpb.Grain
+	58, // 14: internalpb.RemoteActivateGrainRequest.grain:type_name -> internalpb.Grain
+	59, // 15: internalpb.PersistPeerStateRequest.peer_state:type_name -> internalpb.PeerState
+	54, // 16: internalpb.RemoteDependenciesResponse.dependencies:type_name -> internalpb.Dependency
+	60, // 17: internalpb.RemoteMetricResponse.metric:type_name -> internalpb.Metric
+	61, // 18: internalpb.RemoteStateRequest.state:type_name -> internalpb.State
+	53, // 19: internalpb.RemotePassivationStrategyResponse.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	53, // 20: internalpb.RemoteSpawnChildRequest.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	54, // 21: internalpb.RemoteSpawnChildRequest.dependencies:type_name -> internalpb.Dependency
+	56, // 22: internalpb.RemoteSpawnChildRequest.reentrancy:type_name -> internalpb.ReentrancyConfig
+	55, // 23: internalpb.RemoteSpawnChildRequest.supervisor:type_name -> internalpb.SupervisorSpec
+	51, // 24: internalpb.RemoteSpawnChildRequest.init_timeout:type_name -> google.protobuf.Duration
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_internal_remoting_proto_init() }
@@ -3099,6 +3114,7 @@ func file_internal_remoting_proto_init() {
 		return
 	}
 	file_internal_actor_proto_init()
+	file_internal_delivery_proto_init()
 	file_internal_dependency_proto_init()
 	file_internal_grain_proto_init()
 	file_internal_metric_proto_init()

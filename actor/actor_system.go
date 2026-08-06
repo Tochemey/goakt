@@ -2859,14 +2859,23 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 		if addr.Host() != host || addr.Port() != port {
 			continue
 		}
-		if isSystemName(addr.Name()) {
+		// Reserved names never have registry records, with one exception: the
+		// reliable-delivery controller companions. A companion record without
+		// a live local controller is an orphan of the previous incarnation
+		// (companions are never recovered; endpoint recovery spawns a fresh
+		// one under a new incarnation), so it falls through to the
+		// non-relocatable removal below.
+		if isSystemName(addr.Name()) && actor.GetReliableCompanion() == nil {
 			continue
 		}
 		if _, ok := x.actors.node(addr.String()); ok {
 			continue
 		}
 
-		if actor.GetSingleton() == nil && actor.GetRelocatable() {
+		// a companion record never enters the recovery branch, whatever its
+		// relocatable flag claims: companions are rebuilt by their endpoint's
+		// spawn transaction, never recovered from a record
+		if actor.GetSingleton() == nil && actor.GetRelocatable() && actor.GetReliableCompanion() == nil {
 			if err := x.recreateActorFromWire(ctx, actor, selfAddress); err != nil {
 				x.logger.Warnf("failed to recover actor %s from a previous incarnation of this node: %v", addr.String(), err)
 				continue
@@ -3615,9 +3624,12 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	var wireActors map[string]*internalpb.Actor
 
 	for _, actor := range registryActors {
-		// only relocatable actors are recovered; the rest are lost with the node
-		// by design
-		if !actor.GetRelocatable() {
+		// Only relocatable actors are recovered; the rest are lost with the
+		// node by design. A non-relocatable reliable endpoint still joins the
+		// set so the relocation worker withdraws its registry records: the
+		// endpoint publishes with if-absent semantics, so a leaked record
+		// would block the name cluster-wide instead of merely going stale.
+		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
 			continue
 		}
 
@@ -3837,10 +3849,10 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		return nil, err
 	}
 
-	// reliable endpoints and their controllers stay on their spawn node until
-	// relocation reconstruction lands: a relocated record would silently lose
-	// its delivery machinery today, so relocation is disabled instead
-	if spawnConfig.reliableDelivery != nil || spawnConfig.reliableCompanion != nil {
+	// controller companions never relocate on their own: they hold incarnation
+	// state and constructor-bound PIDs, so only the endpoint relocates and the
+	// spawn transaction rebuilds a fresh controller next to it
+	if spawnConfig.reliableCompanion != nil {
 		spawnConfig.relocatable = false
 	}
 
@@ -4167,6 +4179,19 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 				return err
 			}
 			x.logger.Debugf("actor=%s removed from cluster", actorName)
+
+			// A reliable endpoint's controller companion carries a reserved
+			// name, so it is absent from pids and the per-actor death watch
+			// removal is disabled while the system stops. Withdraw its record
+			// here or it outlives the node in the registry.
+			if pid.reliableDelivery != nil {
+				companionName := reliableCompanionName(pid.reliableDelivery.role(), pid.IncarnationID())
+				if err := x.cluster.RemoveActor(ctx, companionName); err != nil {
+					x.logger.Errorf("failed to remove reliable controller=%s of endpoint=%s from cluster: %v (hint: check cluster connectivity)", companionName, actorName, err)
+					return err
+				}
+				x.logger.Debugf("reliable controller=%s removed from cluster", companionName)
+			}
 			return nil
 		})
 	}

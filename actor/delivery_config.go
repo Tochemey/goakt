@@ -29,9 +29,11 @@ import (
 
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 // reliableDeliveryConfig describes one endpoint's reliable-delivery settings.
@@ -250,6 +252,40 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 	}
 }
 
+// toRemoteSpec converts the configuration to the public specification carried
+// by a remote spawn request, so a reliable endpoint placed on another node
+// through Spawn or SpawnOn travels with its full delivery settings. The
+// constructor defaults guarantee every field is populated.
+func (x *reliableDeliveryConfig) toRemoteSpec() *remote.ReliableDeliverySpec {
+	switch {
+	case x == nil:
+		return nil
+	case x.producer != nil:
+		producer := &remote.ReliableProducerSpec{
+			ConsumerName:       x.producer.consumerName,
+			DurableQueueID:     x.producer.durableQueueID,
+			LocalRetryInterval: x.producer.localRetryInterval,
+		}
+
+		if x.producer.queueRetry != nil {
+			producer.QueueRetryMaxAttempts = x.producer.queueRetry.maxAttempts
+			producer.QueueRetryInitialBackoff = x.producer.queueRetry.initialBackoff
+		}
+
+		return &remote.ReliableDeliverySpec{Producer: producer}
+	case x.consumer != nil:
+		return &remote.ReliableDeliverySpec{
+			Consumer: &remote.ReliableConsumerSpec{
+				ProducerName:      x.consumer.producerName,
+				FlowControlWindow: x.consumer.flowControlWindow,
+				ResendInterval:    x.consumer.resendInterval,
+			},
+		}
+	default:
+		return nil
+	}
+}
+
 // reliableDeliveryConfigFromProto restores the in-memory configuration from
 // its wire form. It rejects a structurally invalid record; semantic checks
 // remain with Validate.
@@ -301,6 +337,61 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 	default:
 		return nil, errors.New("reliable delivery endpoint configuration is required")
 	}
+}
+
+// reliableSpawnOptionFromWire rebuilds the reliable-delivery spawn option
+// carried by a serialized actor record or a remote spawn request, so initial
+// remote placement and relocation reconstruct an endpoint exactly like a
+// local AsReliableProducer/AsReliableConsumer spawn. A producer configuration
+// that references a durable queue resolves the instance by ID among the
+// already reconstructed dependencies; a missing or mistyped queue dependency
+// fails reconstruction so the caller can restore the departed record or
+// reject the spawn instead of silently degrading to a volatile flow.
+func reliableSpawnOptionFromWire(config *internalpb.ReliableDeliveryConfig, dependencies []extension.Dependency) (SpawnOption, error) {
+	decoded, err := reliableDeliveryConfigFromProto(config)
+	if err != nil {
+		return nil, err
+	}
+
+	if decoded == nil {
+		return nil, errors.New("reliable delivery endpoint configuration is required")
+	}
+
+	var queue DurableProducerQueue
+
+	if producer := decoded.producer; producer != nil && producer.durableQueueID != "" {
+		queue, err = durableQueueByID(dependencies, producer.durableQueueID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return spawnOption(func(config *spawnConfig) {
+		config.reliableDelivery = decoded
+		config.durableQueue = queue
+	}), nil
+}
+
+// durableQueueByID resolves the durable producer queue a reconstructed
+// producer configuration references among the endpoint's reconstructed
+// dependencies. The queue travels in the dependency list (see
+// normalizeDurableQueue), so a missing entry means the queue type is not
+// registered on this node or the record is malformed.
+func durableQueueByID(dependencies []extension.Dependency, id string) (DurableProducerQueue, error) {
+	for _, dependency := range dependencies {
+		if dependency == nil || dependency.ID() != id {
+			continue
+		}
+
+		queue, ok := dependency.(DurableProducerQueue)
+		if !ok {
+			return nil, fmt.Errorf("dependency=%s is not a durable producer queue", id)
+		}
+
+		return queue, nil
+	}
+
+	return nil, fmt.Errorf("durable producer queue dependency=%s is missing from the endpoint dependencies", id)
 }
 
 // durationFromProto converts an optional wire duration, rejecting malformed

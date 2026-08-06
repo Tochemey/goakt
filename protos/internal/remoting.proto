@@ -4,6 +4,7 @@ package internalpb;
 
 import "google/protobuf/duration.proto";
 import "internal/actor.proto";
+import "internal/delivery.proto";
 import "internal/dependency.proto";
 import "internal/grain.proto";
 import "internal/metric.proto";
@@ -149,6 +150,11 @@ message RemoteSpawnRequest {
   // Specifies the init timeout override when explicitly set.
   // When unset, the hosting node's system-wide init timeout is used.
   google.protobuf.Duration init_timeout = 13;
+  // Specifies the reliable-delivery endpoint settings when the actor is
+  // spawned as a reliable producer or consumer endpoint. The hosting node
+  // restores them as spawn options so remote placement behaves exactly like
+  // a local spawn, including controller companion creation.
+  ReliableDeliveryConfig reliable_delivery = 14;
 }
 
 message RemoteSpawnResponse {

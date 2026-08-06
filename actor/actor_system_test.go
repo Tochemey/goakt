@@ -7924,3 +7924,184 @@ func TestRemoveActorIfIncarnation(t *testing.T) {
 		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
 	})
 }
+
+func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
+	newEndpointPID := func(system *actorSystem, name string) *PID {
+		addr := address.New(name, system.name, "127.0.0.1", 8080)
+		return &PID{
+			address:          addr,
+			path:             newPath(addr),
+			actorSystem:      system,
+			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+		}
+	}
+
+	t.Run("removes the endpoint and its controller record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		endpoint := newEndpointPID(system, "orders-producer")
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+
+		require.NoError(t, system.cleanupCluster(context.Background(), []*PID{endpoint}))
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("controller record removal failure surfaces", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		endpoint := newEndpointPID(system, "orders-producer")
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
+
+		require.Error(t, system.cleanupCluster(context.Background(), []*PID{endpoint}))
+	})
+
+	t.Run("ordinary actors remove only their own record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		addr := address.New("worker", system.name, "127.0.0.1", 8080)
+		plain := &PID{address: addr, path: newPath(addr), actorSystem: system}
+
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker").Return(nil).Once()
+
+		require.NoError(t, system.cleanupCluster(context.Background(), []*PID{plain}))
+		clusterMock.AssertExpectations(t)
+	})
+}
+
+func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
+	t.Run("removes an orphaned controller record", func(t *testing.T) {
+		// a companion record of a previous incarnation has no live local
+		// controller: companions are never recovered, so the record is removed
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString())
+		record := &internalpb.Actor{
+			Address: address.New(companionName, system.name, "127.0.0.1", 8080).String(),
+			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
+				EndpointName:          "orders-producer",
+				EndpointIncarnationId: uuid.NewString(),
+			},
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("keeps the record of a live controller", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString())
+		companionAddr := address.New(companionName, system.name, "127.0.0.1", 8080)
+		companion := &PID{address: companionAddr, path: newPath(companionAddr), actorSystem: system}
+
+		node := newPidNode(companion)
+		system.actors.pids[node.id] = node
+		system.actors.names[node.name] = node
+
+		record := &internalpb.Actor{
+			Address: companionAddr.String(),
+			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
+				EndpointName:          "orders-producer",
+				EndpointIncarnationId: uuid.NewString(),
+			},
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("removes an orphaned controller record whatever its relocatable flag claims", func(t *testing.T) {
+		// companions are rebuilt by their endpoint's spawn transaction, never
+		// recovered from a record: a tampered relocatable flag must not route
+		// the record into the recovery branch where it would silently leak
+		clusterMock := mockscluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.actors = newTree()
+
+		companionName := reliableCompanionName(ReliableControllerRoleConsumer, uuid.NewString())
+		record := &internalpb.Actor{
+			Address:     address.New(companionName, system.name, "127.0.0.1", 8080).String(),
+			Relocatable: true,
+			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER,
+				EndpointName:          "orders-consumer",
+				EndpointIncarnationId: uuid.NewString(),
+			},
+		}
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+		clusterMock.AssertExpectations(t)
+	})
+}
+
+func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
+	// a non-relocatable reliable endpoint joins the crash-derived set so the
+	// relocation worker can withdraw its registry records; ordinary
+	// non-relocatable actors and companion records stay excluded
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+
+	peerAddress := "127.0.0.1:9100"
+	system.peerRemotingPorts.Set(peerAddress, 7777)
+
+	relocatable := &internalpb.Actor{
+		Address:     address.New("worker", system.name, "127.0.0.1", 7777).String(),
+		Relocatable: true,
+	}
+	pinned := &internalpb.Actor{
+		Address: address.New("pinned", system.name, "127.0.0.1", 7777).String(),
+	}
+	reliable := &internalpb.Actor{
+		Address:          address.New("orders-producer", system.name, "127.0.0.1", 7777).String(),
+		ReliableDelivery: producerDeliveryConfig("orders-consumer").toProto(),
+	}
+	companion := &internalpb.Actor{
+		Address: address.New(reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString()), system.name, "127.0.0.1", 7777).String(),
+		ReliableCompanion: &internalpb.ReliableCompanionSpec{
+			Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
+			EndpointName:          "orders-producer",
+			EndpointIncarnationId: uuid.NewString(),
+		},
+	}
+
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 7777, mock.Anything).
+		Return([]*internalpb.Actor{relocatable, pinned, reliable, companion}, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 7777, mock.Anything).
+		Return(nil, nil).Once()
+
+	peerState, ok := system.deriveRelocationSetFromRegistry(context.Background(), peerAddress)
+	require.True(t, ok)
+	require.NotNil(t, peerState)
+
+	names := make([]string, 0, len(peerState.GetActors()))
+	for _, actor := range peerState.GetActors() {
+		addr, err := address.Parse(actor.GetAddress())
+		require.NoError(t, err)
+		names = append(names, addr.Name())
+	}
+
+	assert.ElementsMatch(t, []string{"worker", "orders-producer"}, names)
+}

@@ -291,6 +291,30 @@ func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) 
 	x.removeActorIfIncarnation(ctx, endpoint.Name(), endpoint.IncarnationID())
 }
 
+// releaseDepartedReliableCompanion removes the registry record of the
+// controller companion owned by a departed reliable endpoint activation. The
+// companion identity is derived from the departed record's role and
+// incarnation, and the removal reuses the releaseDepartedEntry ownership
+// comparison, so it can only ever delete a record still pointing at the
+// departed node and can never touch the fresh controller a relocation
+// respawn creates under a new incarnation. Best effort: the stale record is
+// incarnation-scoped and can never be adopted, so a failed release is logged
+// rather than failing the relocation that triggered it.
+func (x *actorSystem) releaseDepartedReliableCompanion(ctx context.Context, props *internalpb.Actor, departedNode string) {
+	// the role only depends on which endpoint side the wire configuration
+	// sets, mirroring reliableDeliveryConfig.role, so the release never
+	// decodes settings it does not use
+	role := ReliableControllerRoleConsumer
+	if props.GetReliableDelivery().GetProducer() != nil {
+		role = ReliableControllerRoleProducer
+	}
+
+	name := reliableCompanionName(role, props.GetIncarnationId())
+	if _, err := x.releaseDepartedEntry(ctx, name, departedNode); err != nil {
+		x.logger.Errorf("failed to release registry record of the departed reliable controller=%s: %v", name, err)
+	}
+}
+
 // newReliableController builds the role-specific controller of a reliable
 // endpoint from its retained settings: the producer side carries the durable
 // queue instance and retry policy, the consumer side carries flow control.

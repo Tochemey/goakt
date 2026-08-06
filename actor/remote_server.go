@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
@@ -683,13 +684,27 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	// Set the dependencies if any
+	var dependencies []extension.Dependency
+
 	if len(request.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.dependenciesFromProto(request.GetDependencies()...)
+		dependencies, err = x.reflection.dependenciesFromProto(request.GetDependencies()...)
 		if err != nil {
 			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 		opts = append(opts, WithDependencies(dependencies...))
+	}
+
+	// Restore the reliable-delivery settings so remote placement spawns the
+	// endpoint exactly like a local spawn, controller companion included
+	if request.GetReliableDelivery() != nil {
+		reliableOption, err := reliableSpawnOptionFromWire(request.GetReliableDelivery(), dependencies)
+		if err != nil {
+			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: register the durable queue type on the hosting node)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
+		}
+
+		opts = append(opts, reliableOption)
 	}
 
 	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
