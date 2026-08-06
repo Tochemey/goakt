@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- **Point-to-point reliable delivery** ([#1296](https://github.com/Tochemey/goakt/issues/1296)). One producer actor hands messages to one consumer actor with confirmed, ordered, flow-controlled delivery, locally or across a cluster. Default `Tell` is unchanged. A flow is enabled with one spawn option per side, `AsReliableProducer(consumerName)` and `AsReliableConsumer(producerName)`; the actor system creates and manages an internal controller next to each endpoint, which handles sequencing, demand, resends, sessions, and restart deduplication. Controllers are invisible to every actor-management API and impose no naming convention on user actors.
+  - The endpoints stay ordinary actors. The producer answers `RequestNext` with one `Produced` and acknowledges `Stored` with `StoredAck`; the consumer processes each `Delivery` idempotently and replies `Confirmed` after processing, never before. `RequestNext`, `Stored`, and `Delivery` expose `IsAuthorizedFor` to reject spoofed controller traffic.
+  - Guarantees: effectively-once, in order on the fault-free path; any loss, restart, or relocation redelivers, so processing must be idempotent. `MessageID` is the stable deduplication key; exactly-once effects require committing it with the business mutation in one transaction. Reliability starts at the producer's handoff to its controller; ingress stays at-most-once.
+  - Flow control is consumer-driven: the producer never sends beyond granted demand. Tuning: `WithFlowControlWindow` (default 50, maximum 10,000) and `WithResendInterval` (2s) on the consumer; `WithLocalRetryInterval` (500ms), `WithDurableQueue`, and `WithQueueRetry` (3 attempts, 100ms) on the producer. Finite passivation is rejected.
+  - The `DurableProducerQueue` contract adds producer-crash survival: `Load` acquires epoch-fenced writership, `Store` is first-write-wins per `MessageID`, `Accept` and `Confirm` advance the durable state. New sentinels: `ErrQueueFenced`, `ErrQueueConflict`, `ErrReliableStore`, `ErrReliableAccept`, `ErrReliableConfirm`. A durable flow costs roughly two backend round trips per message before the next credit, so backend latency caps per-flow throughput.
+  - Payloads are encoded through the remoting serializer dispatch even on one node: protobuf needs no setup; other types must be registered with `remote.WithSerializables`, which currently also binds the remoting listener. An unregistered payload fails the flow terminally instead of retrying.
+  - Cross-node flows require both systems in the same GoAkt cluster. Endpoint relocation rides the existing replicated actor record; a relocated durable producer reloads its queue under a new epoch that fences the departed writer. Register queue types on every eligible node and run the registry with a replica count of at least 2.
+  - Terminal failures publish one `ReliableDeliveryFailed` event carrying the endpoint name, controller role, and failing stage while the endpoint stays alive; `ReSpawn` recreates the controller after remediation. Transient loss self-heals through the protocol's timers.
+  - Docs: [architecture/RELIABLE_DELIVERY.md](architecture/RELIABLE_DELIVERY.md) for contributors, and runnable single-node and cluster samples in `playground/issue-1296`.
+
 ## v4.4.3 - 2026-08-02
 
 ### ✨ Features

@@ -640,6 +640,20 @@ type produceSubmission struct {
 	payload   any
 }
 
+// askSubmission is a produce submission sent with Ask. The producer answers
+// it from local knowledge only, before any storage or delivery work happens.
+type askSubmission struct {
+	messageID string
+	payload   any
+}
+
+// submissionAccepted is the producer's reply to askSubmission: the message
+// was accepted into its buffer. It deliberately cannot say anything about
+// storage or delivery.
+type submissionAccepted struct {
+	queued int
+}
+
 // reliableProducerMock is a producer endpoint that answers the controller
 // handshake the way a real application producer would: it queues submissions,
 // spends one RequestNext grant per submission, idempotently resends the same
@@ -683,6 +697,10 @@ func (x *reliableProducerMock) Receive(ctx *ReceiveContext) {
 		ctx.Tell(ctx.Sender(), ack)
 	case *produceSubmission:
 		x.pending = append(x.pending, msg)
+		x.flush(ctx)
+	case *askSubmission:
+		x.pending = append(x.pending, &produceSubmission{messageID: msg.messageID, payload: msg.payload})
+		ctx.Response(&submissionAccepted{queued: len(x.pending)})
 		x.flush(ctx)
 	default:
 		ctx.Unhandled()
@@ -1040,4 +1058,209 @@ func TestReliableEndpointRemoteSpawn(t *testing.T) {
 	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer)
 	require.NoError(t, err)
 	assert.True(t, companion.IsRunning())
+}
+
+// getDeliverySenders asks senderRecordingConsumerMock for the sender of each
+// recorded delivery.
+type getDeliverySenders struct{}
+
+// senderRecordingConsumerMock confirms every delivery and records which PID
+// delivered it, so tests can assert that deliveries come only from the
+// consumer's own controller.
+type senderRecordingConsumerMock struct {
+	deliveries []*Delivery
+	senders    []*PID
+}
+
+func (x *senderRecordingConsumerMock) PreStart(*Context) error { return nil }
+func (x *senderRecordingConsumerMock) PostStop(*Context) error { return nil }
+
+func (x *senderRecordingConsumerMock) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *PostStart:
+	case *Delivery:
+		x.deliveries = append(x.deliveries, msg)
+		x.senders = append(x.senders, ctx.Sender())
+
+		confirmed, err := NewConfirmed(msg)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		ctx.Tell(ctx.Sender(), confirmed)
+	case *getDeliveries:
+		ctx.Response(append([]*Delivery(nil), x.deliveries...))
+	case *getDeliverySenders:
+		ctx.Response(append([]*PID(nil), x.senders...))
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// startCheckout commands the checkout actor to hand one finished order to the
+// reliable flow.
+type startCheckout struct {
+	orderID string
+}
+
+// processedNotice is the consumer's business-level notification to the
+// checkout actor, sent through ordinary messaging.
+type processedNotice struct {
+	orderID string
+}
+
+// getNotices asks the checkout actor which orders were confirmed processed.
+type getNotices struct{}
+
+// checkoutMock is an ordinary actor that feeds the reliable flow the same way
+// it would message any other actor: the producer PID is plain constructor
+// state and the handoff is a plain Tell from its own Receive.
+type checkoutMock struct {
+	producer *PID
+	notices  []string
+}
+
+func (x *checkoutMock) PreStart(*Context) error { return nil }
+func (x *checkoutMock) PostStop(*Context) error { return nil }
+
+func (x *checkoutMock) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *PostStart:
+	case *startCheckout:
+		// the payload carries the reply-to actor name because Delivery's
+		// sender is the controller, never the business origin
+		ctx.Tell(x.producer, &produceSubmission{
+			messageID: msg.orderID,
+			payload:   &testpb.Reply{Content: ctx.Self().Name()},
+		})
+	case *processedNotice:
+		x.notices = append(x.notices, msg.orderID)
+	case *getNotices:
+		ctx.Response(append([]string(nil), x.notices...))
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// replyingConsumerMock processes deliveries idempotently and notifies the
+// origin actor named in the payload through ordinary messaging before
+// confirming.
+type replyingConsumerMock struct {
+	seen map[string]bool
+}
+
+func (x *replyingConsumerMock) PreStart(*Context) error {
+	x.seen = make(map[string]bool)
+	return nil
+}
+
+func (x *replyingConsumerMock) PostStop(*Context) error { return nil }
+
+func (x *replyingConsumerMock) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *PostStart:
+	case *Delivery:
+		if !x.seen[msg.MessageID()] {
+			reply, ok := msg.Payload().(*testpb.Reply)
+			if !ok {
+				ctx.Err(fmt.Errorf("unexpected payload type %T", msg.Payload()))
+				return
+			}
+
+			origin, err := ctx.ActorSystem().ActorOf(ctx.Context(), reply.GetContent())
+			if err != nil {
+				ctx.Err(err)
+				return
+			}
+
+			x.seen[msg.MessageID()] = true
+			ctx.Tell(origin, &processedNotice{orderID: msg.MessageID()})
+		}
+
+		confirmed, err := NewConfirmed(msg)
+		if err != nil {
+			ctx.Err(err)
+			return
+		}
+
+		ctx.Tell(ctx.Sender(), confirmed)
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// TestReliableDeliveryAskAnswersFromLocalKnowledge verifies the documented
+// Ask boundary: a caller may Ask the producer, but the answer reflects only
+// acceptance into the producer's buffer, never delivery, and every Delivery
+// reaches the consumer from its own controller rather than from the
+// submitter, so the flow offers no reply path to the business origin.
+func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+
+	// the consumer endpoint does not exist yet, so delivery is impossible;
+	// the Ask still answers immediately because the producer reports local
+	// acceptance only
+	response, err := Ask(ctx, producer, &askSubmission{messageID: "m-1", payload: &testpb.Reply{Content: "m-1"}}, time.Second)
+	require.NoError(t, err)
+
+	accepted, ok := response.(*submissionAccepted)
+	require.True(t, ok)
+	assert.Equal(t, 1, accepted.queued)
+
+	// once the consumer exists, the flow completes the delivery the Ask
+	// could not speak for
+	consumer, err := system.Spawn(ctx, "orders-consumer", &senderRecordingConsumerMock{}, AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	deliveries := awaitDeliveries(t, ctx, consumer, 1)
+	require.Len(t, deliveries, 1)
+	assert.Equal(t, "m-1", deliveries[0].MessageID())
+
+	consumerController, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer)
+	require.NoError(t, err)
+
+	response, err = Ask(ctx, consumer, &getDeliverySenders{}, time.Second)
+	require.NoError(t, err)
+
+	senders, ok := response.([]*PID)
+	require.True(t, ok)
+	require.NotEmpty(t, senders)
+
+	for _, sender := range senders {
+		assert.True(t, sender.Equals(consumerController))
+		assert.False(t, sender.Equals(producer))
+	}
+}
+
+// TestReliableDeliveryFedByOrdinaryActor verifies that the producer is an
+// ordinary actor other actors can message from their own Receive, and that
+// the consumer answers the business origin through ordinary messaging using
+// correlation carried in the payload.
+func TestReliableDeliveryFedByOrdinaryActor(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	require.NoError(t, err)
+
+	_, err = system.Spawn(ctx, "orders-consumer", &replyingConsumerMock{}, AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	checkout, err := system.Spawn(ctx, "checkout", &checkoutMock{producer: producer})
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, checkout, &startCheckout{orderID: "ord-1"}))
+
+	require.Eventually(t, func() bool {
+		response, err := Ask(ctx, checkout, &getNotices{}, time.Second)
+		if err != nil {
+			return false
+		}
+
+		notices, _ := response.([]string)
+		return len(notices) == 1 && notices[0] == "ord-1"
+	}, 20*time.Second, 20*time.Millisecond)
 }

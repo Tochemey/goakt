@@ -1,6 +1,6 @@
-# Issue 1296: Point-to-Point Reliable Delivery (Single Node)
+# Issue 1296: Point-to-Point Reliable Delivery
 
-Living sample for [#1296](https://github.com/Tochemey/goakt/issues/1296), Akka-style reliable delivery between two actors on one node.
+Living samples for [#1296](https://github.com/Tochemey/goakt/issues/1296): point-to-point reliable delivery between two actors, on one node (`main.go`) and across a two-node cluster (`cluster/main.go`).
 
 ## Scenario
 
@@ -89,6 +89,14 @@ case *actor.Delivery:
 - Reliable endpoints are long-lived: finite passivation is rejected at spawn.
 - Without `WithDurableQueue` the flow is in-memory, exactly like Akka's default: no loss while the producer's process lives, no survival of a process crash. Pass a `DurableProducerQueue` to add crash durability.
 
+## Cluster sample
+
+`cluster/main.go` runs the same flow across a two-node GoAkt cluster: the publisher on one node, the processor on another. The endpoint actors and the handshake are identical to the single-node sample; the sample demonstrates what changes with the topology:
+
+- Both nodes join the same cluster (embedded NATS discovery). The controllers resolve each other through the cluster registry, so the spawn calls stay exactly the same as on one node.
+- Every `SequencedMessage` and confirmation crosses the network through remoting. The payload is a protobuf message, so no serializer registration is needed.
+- Both endpoint kinds are registered with the cluster so a surviving node could reconstruct a relocated endpoint, and the registry runs with `WithReplicaCount(2)`: with a single copy, registry state owned by a lost node disappears with it and peer resolution cannot recover.
+
 ## Run
 
 ```bash
@@ -96,3 +104,9 @@ go run ./playground/issue-1296
 ```
 
 Expected: act one stores and processes ord-1 through ord-5 in order, act two logs the `ReliableDeliveryFailed` event naming the publisher, the producer role, and the unknown payload type, act three stores ord-7 and ord-8 under a fresh session (sequence numbers restart at 1) and processes them exactly once, then `OK`. The sample exits non-zero on any deviation.
+
+```bash
+go run ./playground/issue-1296/cluster
+```
+
+Expected: the node addresses are printed, ord-1 through ord-5 are stored on the producer node and processed in order on the consumer node, then `OK`. The sample exits non-zero on any deviation.
