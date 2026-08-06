@@ -654,6 +654,19 @@ func TestReliableControllerRoleHelpers(t *testing.T) {
 	assert.Equal(t, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED, reliableControllerRoleUnknown.toProto())
 }
 
+func TestReliableDeliveryStageString(t *testing.T) {
+	assert.Equal(t, "load", ReliableDeliveryStageLoad.String())
+	assert.Equal(t, "store", ReliableDeliveryStageStore.String())
+	assert.Equal(t, "accept", ReliableDeliveryStageAccept.String())
+	assert.Equal(t, "confirm", ReliableDeliveryStageConfirm.String())
+	assert.Equal(t, "protocol", ReliableDeliveryStageProtocol.String())
+	assert.Equal(t, "unknown", reliableDeliveryStageUnknown.String())
+	assert.Equal(t, "unknown", ReliableDeliveryStage(200).String())
+
+	// the stage renders by name wherever a failure event is formatted
+	assert.Equal(t, "stage=protocol", fmt.Sprintf("stage=%s", ReliableDeliveryStageProtocol))
+}
+
 type reliableProtocolMessage struct {
 	value string
 }

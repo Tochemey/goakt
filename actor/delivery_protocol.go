@@ -725,6 +725,24 @@ type ReliableControllerRole uint8
 // ReliableDeliveryStage identifies the operation that failed.
 type ReliableDeliveryStage uint8
 
+// String returns the stage name.
+func (x ReliableDeliveryStage) String() string {
+	switch x {
+	case ReliableDeliveryStageLoad:
+		return "load"
+	case ReliableDeliveryStageStore:
+		return "store"
+	case ReliableDeliveryStageAccept:
+		return "accept"
+	case ReliableDeliveryStageConfirm:
+		return "confirm"
+	case ReliableDeliveryStageProtocol:
+		return "protocol"
+	default:
+		return "unknown"
+	}
+}
+
 // ReliableDeliveryFailed reports why a reliable-delivery controller stopped.
 // The endpoint remains identified by its user-visible actor name.
 type ReliableDeliveryFailed struct {

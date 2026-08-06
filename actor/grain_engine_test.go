@@ -1895,9 +1895,8 @@ func BenchmarkTellGrainNodeLocal(b *testing.B) {
 	ctx := context.TODO()
 	msg := new(testpb.TestSend)
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		if err := system.TellGrain(ctx, identity, msg); err != nil {
 			b.Fatal(err)
 		}
@@ -1910,9 +1909,8 @@ func BenchmarkAskGrainNodeLocal(b *testing.B) {
 	ctx := context.TODO()
 	msg := new(testpb.TestReply)
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		if _, err := system.AskGrain(ctx, identity, msg, time.Second); err != nil {
 			b.Fatal(err)
 		}
