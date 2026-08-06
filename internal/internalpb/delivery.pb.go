@@ -238,8 +238,10 @@ type ReliableProducerConfig struct {
 	QueueRetry *QueueRetryConfig `protobuf:"bytes,3,opt,name=queue_retry,json=queueRetry,proto3" json:"queue_retry,omitempty"`
 	// Defines how often unacknowledged local protocol messages are retried.
 	LocalRetryInterval *durationpb.Duration `protobuf:"bytes,4,opt,name=local_retry_interval,json=localRetryInterval,proto3" json:"local_retry_interval,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Enables DeliveryConfirmed notifications toward the producer endpoint.
+	DeliveryConfirmation bool `protobuf:"varint,5,opt,name=delivery_confirmation,json=deliveryConfirmation,proto3" json:"delivery_confirmation,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ReliableProducerConfig) Reset() {
@@ -298,6 +300,13 @@ func (x *ReliableProducerConfig) GetLocalRetryInterval() *durationpb.Duration {
 		return x.LocalRetryInterval
 	}
 	return nil
+}
+
+func (x *ReliableProducerConfig) GetDeliveryConfirmation() bool {
+	if x != nil {
+		return x.DeliveryConfirmation
+	}
+	return false
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.
@@ -945,13 +954,14 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\bproducer\x18\x01 \x01(\v2\".internalpb.ReliableProducerConfigH\x00R\bproducer\x12@\n" +
 	"\bconsumer\x18\x02 \x01(\v2\".internalpb.ReliableConsumerConfigH\x00R\bconsumerB\n" +
 	"\n" +
-	"\bendpoint\"\x8d\x02\n" +
+	"\bendpoint\"\xc2\x02\n" +
 	"\x16ReliableProducerConfig\x12#\n" +
 	"\rconsumer_name\x18\x01 \x01(\tR\fconsumerName\x12-\n" +
 	"\x10durable_queue_id\x18\x02 \x01(\tH\x00R\x0edurableQueueId\x88\x01\x01\x12=\n" +
 	"\vqueue_retry\x18\x03 \x01(\v2\x1c.internalpb.QueueRetryConfigR\n" +
 	"queueRetry\x12K\n" +
-	"\x14local_retry_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x12localRetryIntervalB\x13\n" +
+	"\x14local_retry_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x12localRetryInterval\x123\n" +
+	"\x15delivery_confirmation\x18\x05 \x01(\bR\x14deliveryConfirmationB\x13\n" +
 	"\x11_durable_queue_id\"\xb1\x01\n" +
 	"\x16ReliableConsumerConfig\x12#\n" +
 	"\rproducer_name\x18\x01 \x01(\tR\fproducerName\x12.\n" +

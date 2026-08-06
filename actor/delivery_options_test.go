@@ -45,6 +45,7 @@ func TestAsReliableProducer(t *testing.T) {
 		assert.Equal(t, DefaultQueueRetryBackoff, producer.queueRetry.initialBackoff)
 		assert.Empty(t, producer.durableQueueID)
 		assert.Nil(t, config.durableQueue)
+		assert.False(t, producer.deliveryConfirmation)
 	})
 
 	t.Run("With all options", func(t *testing.T) {
@@ -53,6 +54,7 @@ func TestAsReliableProducer(t *testing.T) {
 			WithDurableQueue(queue),
 			WithQueueRetry(5, 250*time.Millisecond),
 			WithLocalRetryInterval(time.Second),
+			WithDeliveryConfirmation(),
 		))
 		require.NoError(t, config.Validate())
 
@@ -62,6 +64,7 @@ func TestAsReliableProducer(t *testing.T) {
 		assert.Equal(t, 250*time.Millisecond, producer.queueRetry.initialBackoff)
 		assert.Equal(t, time.Second, producer.localRetryInterval)
 		assert.Same(t, queue, config.durableQueue)
+		assert.True(t, producer.deliveryConfirmation)
 	})
 
 	t.Run("With nil durable queue", func(t *testing.T) {

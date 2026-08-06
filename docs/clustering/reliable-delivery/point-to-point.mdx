@@ -202,6 +202,36 @@ The `IsAuthorizedFor` check matters: `RequestNext` grants the right to hand over
 
 Backpressure surfaces in the `pending` buffer. A slow consumer means the buffer grows; bounding or shedding it is an application policy decision.
 
+## Knowing when the consumer confirmed
+
+By default the producer learns that a message was stored, never that it was processed. Enable `WithDeliveryConfirmation` and the controller tells the producer a `DeliveryConfirmed` for every message the consumer confirms:
+
+```go
+publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
+    actor.AsReliableProducer("order-processor",
+        actor.WithDeliveryConfirmation()))
+```
+
+The producer records who should hear back when the work arrives, for example a `submitters map[string]*actor.PID` field keyed by `MessageID` and filled in the `*OrderCreated` case. The handler then relays with any message your submitter understands:
+
+```go
+case *actor.DeliveryConfirmed:
+    if !msg.IsAuthorizedFor(ctx.Self(), ctx.Sender()) {
+        return
+    }
+
+    if submitter, ok := x.submitters[msg.MessageID()]; ok {
+        delete(x.submitters, msg.MessageID())
+        ctx.Tell(submitter, &OrderProcessed{OrderId: msg.MessageID()})
+    }
+```
+
+The notification stops at the producer. The flow never learns who submitted the work, because work enters the producer through an ordinary `Tell` that carries no reply address, so relaying the outcome to the original submitter is your code, using correlation the producer recorded at ingress.
+
+<Warning>
+Treat `DeliveryConfirmed` idempotently, keyed by `MessageID`, exactly as the consumer treats `Delivery`. It carries no protocol obligation and is not retried: a full producer mailbox or a controller restart can drop it, and a message that is redelivered and confirmed again is reported again. When you need a durable record of what completed, use a durable queue rather than counting notifications.
+</Warning>
+
 ## Feeding the flow
 
 The producer is a normal actor, so work reaches it like any other message: from application code with `actor.Tell`, from another actor's `Receive`, or from a remote node. Nothing in the sender knows reliable delivery exists:

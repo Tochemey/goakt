@@ -71,6 +71,10 @@ type ReliableProducerSpec struct {
 	// retries an unanswered RequestNext or Stored toward the producer
 	// endpoint; it must be positive.
 	LocalRetryInterval time.Duration
+
+	// DeliveryConfirmation enables DeliveryConfirmed notifications toward the
+	// producer endpoint once the consumer confirms a message.
+	DeliveryConfirmation bool
 }
 
 // ReliableConsumerSpec carries the consumer-side delivery settings of a

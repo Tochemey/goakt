@@ -321,12 +321,12 @@ func (x *actorSystem) releaseDepartedReliableCompanion(ctx context.Context, prop
 func newReliableController(endpoint *PID) Actor {
 	config := endpoint.reliableDelivery
 
-	if producer := config.producer; producer != nil {
-		return newProducerController(endpoint, producer.consumerName, endpoint.durableQueue, producer.queueRetry.maxAttempts, producer.queueRetry.initialBackoff, producer.localRetryInterval)
+	if producerConfig := config.producer; producerConfig != nil {
+		return newProducerController(endpoint, producerConfig, endpoint.durableQueue)
 	}
 
-	consumer := config.consumer
-	return newConsumerController(endpoint, consumer.producerName, consumer.flowControlWindow, consumer.resendInterval)
+	consumerConfig := config.consumer
+	return newConsumerController(endpoint, consumerConfig.producerName, consumerConfig.flowControlWindow, consumerConfig.resendInterval)
 }
 
 // validateReliableCompanion enforces local-tree ownership of a companion:

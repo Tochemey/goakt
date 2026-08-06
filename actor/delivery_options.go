@@ -79,6 +79,18 @@ func WithLocalRetryInterval(interval time.Duration) ReliableProducerOption {
 	}
 }
 
+// WithDeliveryConfirmation tells the producer controller to send the producer
+// endpoint a DeliveryConfirmed for every message the consumer confirms, so a
+// producer can report completion to whoever submitted the work. The
+// notification carries no protocol obligation: it is best effort within one
+// controller incarnation, it repeats when a message is redelivered and
+// confirmed again, and the producer must handle it idempotently by MessageID.
+func WithDeliveryConfirmation() ReliableProducerOption {
+	return func(settings *reliableProducerSettings) {
+		settings.config.deliveryConfirmation = true
+	}
+}
+
 // WithFlowControlWindow sets the demand granted per consumer request and the
 // consumer controller's receive buffer capacity. It must be in
 // [1, MaxFlowControlWindow].

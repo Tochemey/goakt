@@ -61,6 +61,9 @@ type reliableProducerConfig struct {
 	// localRetryInterval is the RequestNext/Stored retry cadence; it must
 	// be positive.
 	localRetryInterval time.Duration
+	// deliveryConfirmation enables DeliveryConfirmed notifications toward
+	// the producer endpoint once the consumer confirms a message.
+	deliveryConfirmation bool
 }
 
 // reliableQueueRetryConfig defines retries for durable queue operations.
@@ -210,7 +213,8 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 		return nil
 	case x.producer != nil:
 		producer := &internalpb.ReliableProducerConfig{
-			ConsumerName: x.producer.consumerName,
+			ConsumerName:         x.producer.consumerName,
+			DeliveryConfirmation: x.producer.deliveryConfirmation,
 		}
 
 		if x.producer.durableQueueID != "" {
@@ -262,9 +266,10 @@ func (x *reliableDeliveryConfig) toRemoteSpec() *remote.ReliableDeliverySpec {
 		return nil
 	case x.producer != nil:
 		producer := &remote.ReliableProducerSpec{
-			ConsumerName:       x.producer.consumerName,
-			DurableQueueID:     x.producer.durableQueueID,
-			LocalRetryInterval: x.producer.localRetryInterval,
+			ConsumerName:         x.producer.consumerName,
+			DurableQueueID:       x.producer.durableQueueID,
+			LocalRetryInterval:   x.producer.localRetryInterval,
+			DeliveryConfirmation: x.producer.deliveryConfirmation,
 		}
 
 		if x.producer.queueRetry != nil {
@@ -297,8 +302,9 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 	switch endpoint := config.GetEndpoint().(type) {
 	case *internalpb.ReliableDeliveryConfig_Producer:
 		producer := &reliableProducerConfig{
-			consumerName:   endpoint.Producer.GetConsumerName(),
-			durableQueueID: endpoint.Producer.GetDurableQueueId(),
+			consumerName:         endpoint.Producer.GetConsumerName(),
+			durableQueueID:       endpoint.Producer.GetDurableQueueId(),
+			deliveryConfirmation: endpoint.Producer.GetDeliveryConfirmation(),
 		}
 
 		localRetryInterval, err := durationFromProto("local retry interval", endpoint.Producer.GetLocalRetryInterval())

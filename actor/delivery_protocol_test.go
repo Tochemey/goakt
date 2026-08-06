@@ -125,6 +125,15 @@ func TestReliableProtocol(t *testing.T) {
 	assert.Equal(t, delivery.SessionID(), confirmed.SessionID())
 	assert.Equal(t, delivery.MessageID(), confirmed.MessageID())
 	assert.Equal(t, delivery.Seq(), confirmed.Seq())
+
+	deliveryConfirmed, err := newDeliveryConfirmed("session-1", "message-1", 1, producer, producerController)
+	require.NoError(t, err)
+	assert.Equal(t, "session-1", deliveryConfirmed.SessionID())
+	assert.Equal(t, "message-1", deliveryConfirmed.MessageID())
+	assert.EqualValues(t, 1, deliveryConfirmed.Seq())
+	assert.True(t, deliveryConfirmed.IsAuthorizedFor(producer, producerController))
+	assert.False(t, deliveryConfirmed.IsAuthorizedFor(other, producerController))
+	assert.False(t, deliveryConfirmed.IsAuthorizedFor(producer, other))
 }
 
 // TestReliableProtocolRepliesCopyCorrelationFields verifies that replies do
@@ -420,6 +429,31 @@ func TestReliableProtocolValidation(t *testing.T) {
 					payload:   "payload",
 				},
 			)
+			return err
+		},
+
+		"delivery confirmed session": func() error {
+			_, err := newDeliveryConfirmed(" ", "message-1", 1, endpoint, controller)
+			return err
+		},
+
+		"delivery confirmed message": func() error {
+			_, err := newDeliveryConfirmed("session-1", " ", 1, endpoint, controller)
+			return err
+		},
+
+		"delivery confirmed sequence": func() error {
+			_, err := newDeliveryConfirmed("session-1", "message-1", 0, endpoint, controller)
+			return err
+		},
+
+		"delivery confirmed endpoint": func() error {
+			_, err := newDeliveryConfirmed("session-1", "message-1", 1, nil, controller)
+			return err
+		},
+
+		"delivery confirmed remote ownership": func() error {
+			_, err := newDeliveryConfirmed("session-1", "message-1", 1, remoteEndpoint, controller)
 			return err
 		},
 	}

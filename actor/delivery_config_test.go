@@ -206,7 +206,8 @@ func TestReliableDeliveryConfigWireRoundTrip(t *testing.T) {
 					maxAttempts:    3,
 					initialBackoff: 100 * time.Millisecond,
 				},
-				localRetryInterval: 500 * time.Millisecond,
+				localRetryInterval:   500 * time.Millisecond,
+				deliveryConfirmation: true,
 			},
 		}
 
@@ -330,6 +331,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 	t.Run("With a producer configuration", func(t *testing.T) {
 		config := producerDeliveryConfig("consumer")
 		config.producer.durableQueueID = "ordersQueue"
+		config.producer.deliveryConfirmation = true
 
 		spec := config.toRemoteSpec()
 		require.NotNil(t, spec)
@@ -340,6 +342,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 		assert.Equal(t, DefaultQueueRetryAttempts, spec.Producer.QueueRetryMaxAttempts)
 		assert.Equal(t, DefaultQueueRetryBackoff, spec.Producer.QueueRetryInitialBackoff)
 		assert.Equal(t, DefaultLocalRetryInterval, spec.Producer.LocalRetryInterval)
+		assert.True(t, spec.Producer.DeliveryConfirmation)
 	})
 
 	t.Run("With a consumer configuration", func(t *testing.T) {
@@ -366,6 +369,7 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		queue := &mockDurableQueue{}
 		wire := producerDeliveryConfig("consumer")
 		wire.producer.durableQueueID = queue.ID()
+		wire.producer.deliveryConfirmation = true
 
 		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{queue})
 		require.NoError(t, err)
@@ -375,6 +379,10 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		assert.Equal(t, "consumer", config.reliableDelivery.producer.consumerName)
 		assert.Same(t, queue, config.durableQueue)
 		require.NoError(t, config.Validate())
+
+		// relocation and remote placement rebuild the endpoint with the same
+		// notification setting
+		assert.True(t, config.reliableDelivery.producer.deliveryConfirmation)
 	})
 
 	t.Run("With a volatile producer", func(t *testing.T) {

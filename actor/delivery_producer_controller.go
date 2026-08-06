@@ -103,6 +103,9 @@ type producerController struct {
 	queueRetryBackoff time.Duration
 	// localRetryInterval is the RequestNext/Stored retry cadence.
 	localRetryInterval time.Duration
+	// deliveryConfirmation reports whether the endpoint asked to be told
+	// about each consumer confirmation.
+	deliveryConfirmation bool
 
 	// sessionID identifies this controller incarnation.
 	sessionID string
@@ -160,18 +163,27 @@ type producerController struct {
 // enforce the Actor contract
 var _ Actor = (*producerController)(nil)
 
-// newProducerController creates the producer-side controller bound to the
-// local producer endpoint and its peer consumer endpoint name. A nil queue
-// runs the flow without durability.
-func newProducerController(producer *PID, consumerName string, queue DurableProducerQueue, retryAttempts int, retryBackoff, localRetryInterval time.Duration) *producerController {
-	return &producerController{
-		producer:           producer,
-		consumerName:       consumerName,
-		queue:              queue,
-		queueRetryAttempts: retryAttempts,
-		queueRetryBackoff:  retryBackoff,
-		localRetryInterval: localRetryInterval,
+// newProducerController creates the producer-side controller bound to the local
+// producer endpoint, configured by the endpoint's producer settings. A nil
+// queue runs the flow without durability. Settings that arrive incomplete are
+// carried through as they are: PreStart rejects them, so an invalid
+// configuration fails at controller start rather than silently running with
+// substituted values.
+func newProducerController(producer *PID, config *reliableProducerConfig, queue DurableProducerQueue) *producerController {
+	controller := &producerController{
+		producer:             producer,
+		consumerName:         config.consumerName,
+		queue:                queue,
+		localRetryInterval:   config.localRetryInterval,
+		deliveryConfirmation: config.deliveryConfirmation,
 	}
+
+	if retry := config.queueRetry; retry != nil {
+		controller.queueRetryAttempts = retry.maxAttempts
+		controller.queueRetryBackoff = retry.initialBackoff
+	}
+
+	return controller
 }
 
 // PreStart resets incarnation state, generates the session, and, with a
@@ -757,6 +769,7 @@ func (x *producerController) advanceConfirmed(ctx *ReceiveContext, confirmed int
 	}
 
 	if cut > 0 {
+		x.sendConfirmation(ctx, x.unconfirmed[:cut])
 		x.unconfirmed = slices.Delete(x.unconfirmed, 0, cut)
 	}
 
@@ -768,6 +781,31 @@ func (x *producerController) advanceConfirmed(ctx *ReceiveContext, confirmed int
 	if confirmed > x.persistedConfirmedSeq {
 		x.dirtyConfirmSeq = max(x.dirtyConfirmSeq, confirmed)
 		x.pumpLane(ctx)
+	}
+}
+
+// sendConfirmation tells the producer that the consumer confirmed each
+// message leaving the unconfirmed buffer, in ascending sequence order. It runs
+// only for an endpoint spawned with WithDeliveryConfirmation.
+//
+// The notice is best effort and deliberately not retried: it carries no
+// protocol obligation, so a bounded producer mailbox or a controller restart
+// may drop it without affecting delivery. A message redelivered after a
+// restart is confirmed and reported again, which is why the producer must
+// deduplicate by MessageID.
+func (x *producerController) sendConfirmation(ctx *ReceiveContext, confirmed []UnconfirmedMessage) {
+	if !x.deliveryConfirmation {
+		return
+	}
+
+	for _, message := range confirmed {
+		notice, err := newDeliveryConfirmed(x.sessionID, message.MessageID(), message.Seq(), x.producer, ctx.Self())
+		if err != nil {
+			ctx.Logger().Debugf("producer controller for endpoint=%s skipped a delivery confirmation: %v", x.producer.Name(), err)
+			continue
+		}
+
+		x.tell(ctx, x.producer, notice)
 	}
 }
 

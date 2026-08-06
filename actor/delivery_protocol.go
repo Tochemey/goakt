@@ -719,6 +719,81 @@ func (x Confirmed) Seq() int64 {
 	return x.seq
 }
 
+// DeliveryConfirmed reports to the producer that the consumer confirmed one
+// message. It is sent only when the endpoint was spawned with
+// WithDeliveryConfirmation, and it exists so a producer can report completion
+// to whoever submitted the work: the protocol never learns the submitter,
+// because work enters the producer through an ordinary Tell.
+//
+// The notification carries no protocol obligation and requires no reply. It is
+// best effort within one producer-controller incarnation: a bounded producer
+// mailbox may drop it, a controller restart may lose it, and a message that is
+// redelivered and confirmed again is reported again. Producers must therefore
+// treat it idempotently, keyed by MessageID.
+type DeliveryConfirmed struct {
+	// The session ID identifies the ProducerController incarnation that observed the confirmation.
+	sessionID string
+	// The message ID identifies the application message the consumer confirmed.
+	messageID string
+	// The sequence number is the message's ordered position in the producer stream.
+	seq int64
+	// The endpoint is the producer the notification belongs to.
+	endpoint *PID
+	// The controller is the ProducerController that observed the confirmation.
+	controller *PID
+}
+
+// newDeliveryConfirmed creates a confirmation notice bound to one producer and
+// its controller.
+func newDeliveryConfirmed(sessionID, messageID string, seq int64, endpoint, controller *PID) (*DeliveryConfirmed, error) {
+	if types.IsBlank(sessionID) {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("session ID is required"))
+	}
+
+	if types.IsBlank(messageID) {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("message ID is required"))
+	}
+
+	if seq <= 0 {
+		return nil, gerrors.NewErrInvalidMessage(errors.New("sequence must be greater than zero"))
+	}
+
+	if err := validateLocalOwnership(endpoint, controller); err != nil {
+		return nil, err
+	}
+
+	return &DeliveryConfirmed{
+		sessionID:  sessionID,
+		messageID:  messageID,
+		seq:        seq,
+		endpoint:   endpoint,
+		controller: controller,
+	}, nil
+}
+
+// SessionID returns the producer-controller session.
+func (x DeliveryConfirmed) SessionID() string {
+	return x.sessionID
+}
+
+// MessageID returns the stable application message identifier. It is the key a
+// producer deduplicates on, because the same message can be reported again
+// after redelivery.
+func (x DeliveryConfirmed) MessageID() string {
+	return x.messageID
+}
+
+// Seq returns the confirmed sequence number.
+func (x DeliveryConfirmed) Seq() int64 {
+	return x.seq
+}
+
+// IsAuthorizedFor reports whether endpoint received the notification from its
+// controller.
+func (x DeliveryConfirmed) IsAuthorizedFor(endpoint, sender *PID) bool {
+	return isAuthorizedFor(x.endpoint, x.controller, endpoint, sender)
+}
+
 // ReliableControllerRole identifies a reliable-delivery controller.
 type ReliableControllerRole uint8
 

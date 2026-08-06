@@ -179,6 +179,19 @@ func (x *mockDurableQueue) snapshot() (int, []string, int64) {
 	return x.loads, append([]string(nil), x.operations...), x.confirmedSeq
 }
 
+// testProducerConfig builds the producer settings a directly constructed
+// controller needs, so a test states only the values it cares about.
+func testProducerConfig(consumerName string, retryAttempts int, retryBackoff, localRetryInterval time.Duration) *reliableProducerConfig {
+	return &reliableProducerConfig{
+		consumerName:       consumerName,
+		localRetryInterval: localRetryInterval,
+		queueRetry: &reliableQueueRetryConfig{
+			maxAttempts:    retryAttempts,
+			initialBackoff: retryBackoff,
+		},
+	}
+}
+
 // producerControllerHarness wires a producer controller under test to a recording producer
 // endpoint and a recording consumer controller stand-in.
 type producerControllerHarness struct {
@@ -197,6 +210,13 @@ type producerControllerHarness struct {
 // stand-in, and the producer controller under test.
 func newProducerControllerHarness(t *testing.T, queue DurableProducerQueue) *producerControllerHarness {
 	t.Helper()
+	return newProducerControllerHarnessWith(t, queue, false)
+}
+
+// newProducerControllerHarnessWith builds the harness with the endpoint's
+// delivery-confirmation setting, which the spawn options would otherwise carry.
+func newProducerControllerHarnessWith(t *testing.T, queue DurableProducerQueue, deliveryConfirmation bool) *producerControllerHarness {
+	t.Helper()
 
 	ctx, system := newCompanionTestSystem(t)
 
@@ -213,8 +233,10 @@ func newProducerControllerHarness(t *testing.T, queue DurableProducerQueue) *pro
 	consumerControllerStandIn, err := system.Spawn(ctx, consumerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 
-	controller := newProducerController(producer, "consumer", queue, 2, 20*time.Millisecond, 150*time.Millisecond)
-	producerController, err := system.Spawn(ctx, "producer-controller", controller)
+	config := testProducerConfig("consumer", 2, 20*time.Millisecond, 150*time.Millisecond)
+	config.deliveryConfirmation = deliveryConfirmation
+
+	producerController, err := system.Spawn(ctx, "producer-controller", newProducerController(producer, config, queue))
 	require.NoError(t, err)
 
 	return &producerControllerHarness{ctx: ctx, system: system, producer: producer, consumerControllerStandIn: consumerControllerStandIn, producerController: producerController, usedTokens: map[string]bool{}}
@@ -317,6 +339,19 @@ func (x *producerControllerHarness) latestStored(t *testing.T) *Stored {
 	}, 3*time.Second, 10*time.Millisecond)
 
 	return latest
+}
+
+// deliveryConfirmations returns the confirmation notices the producer received.
+func (x *producerControllerHarness) deliveryConfirmations() []*DeliveryConfirmed {
+	var notices []*DeliveryConfirmed
+
+	for _, message := range x.recordedOf(x.producer) {
+		if notice, ok := message.(*DeliveryConfirmed); ok {
+			notices = append(notices, notice)
+		}
+	}
+
+	return notices
 }
 
 // sequencedEmissions returns the sequenced messages the stand-in received.
@@ -527,6 +562,144 @@ func TestProducerControllerDurableFlow(t *testing.T) {
 		loads, _, _ := queue.snapshot()
 		return loads >= 2
 	}, 3*time.Second, 10*time.Millisecond)
+}
+
+func TestProducerControllerDeliveryConfirmation(t *testing.T) {
+	t.Run("With confirmations enabled reports each confirmed message once, in order", func(t *testing.T) {
+		harness := newProducerControllerHarnessWith(t, nil, true)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOne(t, "m-1")
+		harness.produceOne(t, "m-2")
+		harness.produceOne(t, "m-3")
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 3
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// nothing is confirmed yet, so the producer has been told nothing
+		require.Empty(t, harness.deliveryConfirmations())
+
+		// one cumulative confirmation pops two messages
+		confirmTwo, err := commands.NewAck(sessionID, nonce, 2)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirmTwo)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		notices := harness.deliveryConfirmations()
+		assert.Equal(t, "m-1", notices[0].MessageID())
+		assert.Equal(t, int64(1), notices[0].Seq())
+		assert.Equal(t, "m-2", notices[1].MessageID())
+		assert.Equal(t, int64(2), notices[1].Seq())
+		assert.Equal(t, sessionID, notices[0].SessionID())
+
+		// the notice authorizes only the producer and its own controller
+		assert.True(t, notices[0].IsAuthorizedFor(harness.producer, harness.producerController))
+		assert.False(t, notices[0].IsAuthorizedFor(harness.producer, harness.consumerControllerStandIn))
+
+		// repeated and lower confirmations pop nothing, so nothing repeats
+		harness.fromConsumerController(t, confirmTwo)
+
+		confirmOne, err := commands.NewAck(sessionID, nonce, 1)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirmOne)
+
+		pause.For(300 * time.Millisecond)
+		assert.Len(t, harness.deliveryConfirmations(), 2)
+
+		// the last message reports only once its own confirmation arrives
+		confirmThree, err := commands.NewAck(sessionID, nonce, 3)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirmThree)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 3
+		}, 3*time.Second, 10*time.Millisecond)
+
+		assert.Equal(t, "m-3", harness.deliveryConfirmations()[2].MessageID())
+	})
+
+	t.Run("With confirmations disabled reports nothing", func(t *testing.T) {
+		harness := newProducerControllerHarness(t, nil)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOne(t, "m-1")
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		confirm, err := commands.NewAck(sessionID, nonce, 1)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirm)
+
+		// the confirmation is processed: the message leaves the unconfirmed
+		// buffer, proven by a timeout request resending nothing
+		resend, err := commands.NewRequest(sessionID, nonce, 1, 11, true)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, resend)
+
+		pause.For(300 * time.Millisecond)
+		assert.Len(t, harness.sequencedEmissions(), 1)
+		assert.Empty(t, harness.deliveryConfirmations())
+	})
+
+	t.Run("With a durable restart reports the redelivered message again", func(t *testing.T) {
+		queue := &mockDurableQueue{}
+		harness := newProducerControllerHarnessWith(t, queue, true)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOne(t, "m-1")
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// the controller restarts before any confirmation arrives, so the
+		// stored message reloads and stays unconfirmed
+		require.NoError(t, harness.producerController.Restart(harness.ctx))
+
+		require.Eventually(t, func() bool {
+			loads, _, _ := queue.snapshot()
+			return loads >= 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		assert.Empty(t, harness.deliveryConfirmations())
+
+		// the new incarnation reports the reloaded message when it is confirmed
+		newSessionID := harness.register(t)
+		newNonce := harness.nonceOf(t)
+
+		confirm, err := commands.NewAck(newSessionID, newNonce, 1)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirm)
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveryConfirmations()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		notice := harness.deliveryConfirmations()[0]
+		assert.Equal(t, "m-1", notice.MessageID())
+		assert.Equal(t, newSessionID, notice.SessionID())
+	})
 }
 
 func TestProducerControllerFirstWriteWins(t *testing.T) {
@@ -1066,17 +1239,17 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	}
 
 	t.Run("With PreStart validation", func(t *testing.T) {
-		assert.ErrorContains(t, newProducerController(nil, "consumer", nil, 1, time.Millisecond, time.Millisecond).PreStart(nil), "bound local producer")
-		assert.ErrorContains(t, newProducerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), "consumer", nil, 1, time.Millisecond, time.Millisecond).PreStart(nil), "bound local producer")
-		assert.ErrorContains(t, newProducerController(producer, "", nil, 1, time.Millisecond, time.Millisecond).PreStart(nil), "consumer endpoint name")
-		assert.ErrorContains(t, newProducerController(producer, "consumer", nil, 0, time.Millisecond, time.Millisecond).PreStart(nil), "positive retry settings")
-		assert.ErrorContains(t, newProducerController(producer, "consumer", nil, 1, 0, time.Millisecond).PreStart(nil), "positive retry settings")
-		assert.ErrorContains(t, newProducerController(producer, "consumer", nil, 1, time.Millisecond, 0).PreStart(nil), "positive retry settings")
+		assert.ErrorContains(t, newProducerController(nil, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil).PreStart(nil), "bound local producer")
+		assert.ErrorContains(t, newProducerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil).PreStart(nil), "bound local producer")
+		assert.ErrorContains(t, newProducerController(producer, testProducerConfig("", 1, time.Millisecond, time.Millisecond), nil).PreStart(nil), "consumer endpoint name")
+		assert.ErrorContains(t, newProducerController(producer, testProducerConfig("consumer", 0, time.Millisecond, time.Millisecond), nil).PreStart(nil), "positive retry settings")
+		assert.ErrorContains(t, newProducerController(producer, testProducerConfig("consumer", 1, 0, time.Millisecond), nil).PreStart(nil), "positive retry settings")
+		assert.ErrorContains(t, newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, 0), nil).PreStart(nil), "positive retry settings")
 	})
 
 	t.Run("With load failure on first incarnation", func(t *testing.T) {
 		queue := &mockDurableQueue{loadErr: errors.New("unreachable")}
-		controller := newProducerController(producer, "consumer", queue, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), queue)
 		pctx := newContext(ctx, "producerController", system)
 		err := controller.PreStart(pctx)
 		require.ErrorContains(t, err, "failed to load durable state")
@@ -1085,7 +1258,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With stale tick generation", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-stale-tick")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.handshake = producerHandshakeCredit
 
@@ -1097,7 +1270,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With consumer controller terminated", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-consumer-controller-terminated")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.consumerController = consumerControllerStandIn
 		controller.registrationNonce = "nonce"
@@ -1115,7 +1288,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With sequence space exhausted", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-seq-exhausted")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.currentSeq = math.MaxInt64 - 1
 		controller.demandUpTo = math.MaxInt64
@@ -1133,7 +1306,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible RequestNext construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-request-next")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.sessionID = ""
 		controller.token = ""
@@ -1150,7 +1323,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible volatile store result", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-store-result")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.pendingMessageID = "m-1"
 
@@ -1166,7 +1339,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible unconfirmed record", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-unconfirmed")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.pendingMessageID = ""
 		controller.token = uuid.NewString()
@@ -1186,7 +1359,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible Stored construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-stored")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.sessionID = ""
 		controller.token = ""
@@ -1207,7 +1380,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible SequencedMessage construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-sequenced")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.sessionID = ""
 		controller.consumerController = consumerControllerStandIn
@@ -1225,7 +1398,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With impossible RegistrationAck construction", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-registration-ack")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.confirmedSeq = -1
 
@@ -1243,7 +1416,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With terminate already failed", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-terminate-once")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.failed = true
 
@@ -1260,14 +1433,14 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		producerAddr := address.New("no-stream-producer", system.Name(), "127.0.0.1", 1)
 		producerWithoutStream := &PID{address: producerAddr, path: newPath(producerAddr)}
 
-		controller := newProducerController(producerWithoutStream, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producerWithoutStream, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.publishFailure(ReliableDeliveryStageProtocol, errors.New("silent"))
 	})
 
 	t.Run("With tell to dead peer", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-tell-dead")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 
 		dead, err := system.Spawn(ctx, "dead-peer", &deliveryRecorder{})
@@ -1288,7 +1461,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	t.Run("With pumpLane deferred handshake op", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-pump-deferred")
 		queue := &mockDurableQueue{}
-		controller := newProducerController(producer, "consumer", queue, 1, time.Millisecond, time.Hour)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Hour), queue)
 		pctx := newContext(ctx, "producerController", system)
 		require.NoError(t, controller.PreStart(pctx))
 
@@ -1305,7 +1478,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	t.Run("With launchOp deferral while lane busy", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-launch-defer")
 		queue := &mockDurableQueue{}
-		controller := newProducerController(producer, "consumer", queue, 1, time.Millisecond, time.Hour)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Hour), queue)
 		pctx := newContext(ctx, "producerController", system)
 		require.NoError(t, controller.PreStart(pctx))
 
@@ -1317,7 +1490,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With pumpLane idle when queue absent", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-pump-nil")
-		controller := newProducerController(producer, "consumer", nil, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 		controller.dirtyConfirmSeq = 5
 
@@ -1328,7 +1501,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With handleQueueFailure non-fencing escalation", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-queue-failure")
-		controller := newProducerController(producer, "consumer", &mockDurableQueue{}, 1, time.Millisecond, time.Millisecond)
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), &mockDurableQueue{})
 		require.NoError(t, controller.PreStart(newContext(ctx, "producerController", system)))
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})

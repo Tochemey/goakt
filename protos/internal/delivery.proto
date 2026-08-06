@@ -49,6 +49,8 @@ message ReliableProducerConfig {
   QueueRetryConfig queue_retry = 3;
   // Defines how often unacknowledged local protocol messages are retried.
   google.protobuf.Duration local_retry_interval = 4;
+  // Enables DeliveryConfirmed notifications toward the producer endpoint.
+  bool delivery_confirmation = 5;
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.

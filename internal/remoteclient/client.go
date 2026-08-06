@@ -2176,7 +2176,8 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 				MaxAttempts:    uint32(spec.Producer.QueueRetryMaxAttempts), // nolint
 				InitialBackoff: durationpb.New(spec.Producer.QueueRetryInitialBackoff),
 			},
-			LocalRetryInterval: durationpb.New(spec.Producer.LocalRetryInterval),
+			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
+			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
 		}
 
 		if spec.Producer.DurableQueueID != "" {
