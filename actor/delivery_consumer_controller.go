@@ -82,6 +82,13 @@ type consumerController struct {
 	buffer []*commands.SequencedMessage
 	// inFlight is the single unconfirmed Delivery handed to the consumer.
 	inFlight *Delivery
+	// runLastSeq is the sequence of the head chunk run's last-flagged chunk,
+	// or zero while none is known. It is a verified hint: completeness checks
+	// re-validate it against the buffer, so a hint pointing at a dropped or
+	// stale entry can only delay assembly (recovered by the gap request),
+	// never corrupt it. It exists to keep per-arrival work constant instead
+	// of rescanning the run on every chunk.
+	runLastSeq int64
 	// sawValidTraffic records whether a validated producer-controller message
 	// arrived since the previous tick.
 	sawValidTraffic bool
@@ -135,6 +142,7 @@ func (x *consumerController) PreStart(*Context) error {
 	x.requestUpToSeq = 0
 	x.buffer = nil
 	x.inFlight = nil
+	x.runLastSeq = 0
 	x.sawValidTraffic = false
 	x.lastGapRequest = time.Time{}
 	x.failed = false
@@ -213,6 +221,7 @@ func (x *consumerController) handleRegistrationAck(ctx *ReceiveContext, ack *com
 		x.confirmedSeq = ack.NextSeq() - 1
 		x.buffer = nil
 		x.inFlight = nil
+		x.runLastSeq = 0
 	}
 
 	x.sendRequest(ctx, true)
@@ -247,12 +256,28 @@ func (x *consumerController) handleSequencedMessage(ctx *ReceiveContext, msg *co
 		ctx.Logger().Debugf("consumer controller for endpoint=%s dropped SequencedMessage seq=%d outside window", x.consumer.Name(), seq)
 	case seq < x.expectedSeq:
 		x.sendAck(ctx)
+	case msg.Chunked():
+		// a chunk is never deliverable alone: it buffers until the whole
+		// first-to-last run is contiguous at expectedSeq, then drain
+		// assembles it; a repeat of an in-flight message's chunk lands here
+		// too and is absorbed by the buffer's seq deduplication
+		x.bufferMessage(ctx, msg)
+
+		if msg.LastChunk() && (x.runLastSeq == 0 || seq < x.runLastSeq) {
+			x.runLastSeq = seq
+		}
+
+		x.drain(ctx)
 	case seq == x.expectedSeq && x.inFlight == nil:
 		x.deliver(ctx, msg)
 	case x.inFlight != nil && seq == x.inFlight.Seq():
 		// already handed to the consumer; the tick retries it
 	default:
+		// a whole message buffered behind the head can be the entry that
+		// completes a chunk run's sequence coverage, so drain runs here too
+		// and assembly classifies the interleaving terminally
 		x.bufferMessage(ctx, msg)
+		x.drain(ctx)
 	}
 }
 
@@ -282,6 +307,7 @@ func (x *consumerController) handleConfirmed(ctx *ReceiveContext, confirmed *Con
 	x.expectedSeq = x.confirmedSeq + 1
 	x.inFlight = nil
 	x.purgeBuffer()
+	x.refreshRunLast()
 	x.batchConfirmation(ctx)
 	x.drain(ctx)
 }
@@ -362,27 +388,33 @@ func (x *consumerController) register(ctx *ReceiveContext) {
 }
 
 // deliver decodes a fresh payload value and hands the single in-flight
-// Delivery to the consumer. Exactly one Delivery is ever unconfirmed at a
-// time, which is what gives the no-fault path its in-order,
+// Delivery to the consumer.
+func (x *consumerController) deliver(ctx *ReceiveContext, msg *commands.SequencedMessage) {
+	x.deliverFrame(ctx, msg.MessageID(), msg.Seq(), msg.Payload())
+}
+
+// deliverFrame decodes one complete serialized frame and hands the single
+// in-flight Delivery to the consumer. Exactly one Delivery is ever
+// unconfirmed at a time, which is what gives the no-fault path its in-order,
 // effectively-once presentation. Decoding is deterministic, so a decode
 // failure means a serializer registration asymmetry between the producer
 // and consumer nodes: no resend can repair it, and it is terminal rather
 // than a silent retry stall.
-func (x *consumerController) deliver(ctx *ReceiveContext, msg *commands.SequencedMessage) {
-	payload, err := ctx.ActorSystem().getRemoting().Serializer(nil).Deserialize(msg.Payload())
+func (x *consumerController) deliverFrame(ctx *ReceiveContext, messageID string, seq int64, frame []byte) {
+	payload, err := ctx.ActorSystem().getRemoting().Serializer(nil).Deserialize(frame)
 	if err != nil {
 		// decoding is deterministic, so this is a serializer registration
 		// asymmetry between producer and consumer: no resend can fix it, and
 		// letting the retry loop spin would stall the flow silently
-		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to decode message=%s seq=%d: %w", msg.MessageID(), msg.Seq(), err))
+		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to decode message=%s seq=%d: %w", messageID, seq, err))
 		return
 	}
 
-	delivery, err := newDelivery(msg.SessionID(), msg.MessageID(), msg.Seq(), payload, x.consumer, ctx.Self())
+	delivery, err := newDelivery(x.sessionID, messageID, seq, payload, x.consumer, ctx.Self())
 	if err != nil {
 		// deterministic impossible-value guard: every resend would rebuild
 		// and fail identically, so it is terminal
-		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build Delivery seq=%d: %w", msg.Seq(), err))
+		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build Delivery seq=%d: %w", seq, err))
 		return
 	}
 
@@ -413,14 +445,84 @@ func (x *consumerController) bufferMessage(ctx *ReceiveContext, msg *commands.Se
 }
 
 // drain hands the next contiguous buffered message to the consumer, if any.
+// A chunked head assembles instead: its entries stay buffered until the
+// message is confirmed, because expectedSeq only advances at message
+// boundaries and the confirmation purge releases the whole run at once.
 func (x *consumerController) drain(ctx *ReceiveContext) {
 	if x.inFlight != nil || len(x.buffer) == 0 || x.buffer[0].Seq() != x.expectedSeq {
+		return
+	}
+
+	if x.buffer[0].Chunked() {
+		// assembly runs only once the run's sequence coverage is complete,
+		// so each message is scanned once instead of once per arrival
+		if x.chunkRunComplete() {
+			x.assemble(ctx)
+		}
+
 		return
 	}
 
 	head := x.buffer[0]
 	x.buffer = slices.Delete(x.buffer, 0, 1)
 	x.deliver(ctx, head)
+}
+
+// assemble reassembles the chunk run starting at expectedSeq and delivers the
+// whole message under the last chunk's sequence. An incomplete run waits: a
+// missing interior chunk is ordinary loss, recovered by the gap request. A
+// structurally impossible run from the authenticated current session is a
+// terminal contract violation, because the producer emits the chunks of one
+// message contiguously, first to last, under one message ID: no resend can
+// reorder what the producer controller itself stored wrongly.
+func (x *consumerController) assemble(ctx *ReceiveContext) {
+	head := x.buffer[0]
+	if !head.FirstChunk() {
+		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("chunk run of message=%s at seq=%d does not start with a first chunk", head.MessageID(), head.Seq()))
+		return
+	}
+
+	next := x.expectedSeq
+	total := 0
+	count := 0
+
+	for index, entry := range x.buffer {
+		if entry.Seq() != next {
+			return // interior chunk missing: wait for the gap request
+		}
+
+		switch {
+		case !entry.Chunked():
+			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("whole message seq=%d interleaved into the chunk run of message=%s", entry.Seq(), head.MessageID()))
+			return
+		case entry.MessageID() != head.MessageID():
+			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("chunk run of message=%s changed message ID at seq=%d", head.MessageID(), entry.Seq()))
+			return
+		case index > 0 && entry.FirstChunk():
+			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("unexpected first chunk at seq=%d inside the chunk run of message=%s", entry.Seq(), head.MessageID()))
+			return
+		}
+
+		total += entry.PayloadSize()
+		next++
+
+		if entry.LastChunk() {
+			count = index + 1
+			break
+		}
+	}
+
+	if count == 0 {
+		return // the last chunk has not arrived: wait for the gap request
+	}
+
+	frame := make([]byte, 0, total)
+
+	for _, entry := range x.buffer[:count] {
+		frame = entry.AppendPayload(frame)
+	}
+
+	x.deliverFrame(ctx, head.MessageID(), x.buffer[count-1].Seq(), frame)
 }
 
 // purgeBuffer removes buffered entries below expectedSeq.
@@ -436,9 +538,10 @@ func (x *consumerController) purgeBuffer() {
 	}
 }
 
-// gapOpen reports whether a sequence before the buffered head is missing:
-// the buffer is non-empty and its head is not the next sequence the
-// controller can hand over.
+// gapOpen reports whether a sequence the controller needs is missing: either
+// the buffered head is not the next sequence the controller can hand over,
+// or the head starts a chunk run whose interior or last chunk has not
+// arrived, which blocks assembly the same way a missing head does.
 func (x *consumerController) gapOpen() bool {
 	if len(x.buffer) == 0 {
 		return false
@@ -449,7 +552,45 @@ func (x *consumerController) gapOpen() bool {
 		nextMissing = x.inFlight.Seq() + 1
 	}
 
-	return x.buffer[0].Seq() > nextMissing
+	if x.buffer[0].Seq() > nextMissing {
+		return true
+	}
+
+	if x.inFlight == nil && x.buffer[0].Seq() == x.expectedSeq && x.buffer[0].Chunked() {
+		return !x.chunkRunComplete()
+	}
+
+	return false
+}
+
+// chunkRunComplete reports whether every sequence from expectedSeq through
+// the hinted last chunk is buffered. The buffer is sorted and deduplicated
+// with no entry below expectedSeq, so buffer[k] carrying sequence
+// expectedSeq+k proves the whole prefix is present: one index probe instead
+// of a scan. It judges only sequence coverage; structural violations are
+// assembly's business.
+func (x *consumerController) chunkRunComplete() bool {
+	if x.runLastSeq < x.expectedSeq {
+		return false
+	}
+
+	k := x.runLastSeq - x.expectedSeq
+	return k < int64(len(x.buffer)) && x.buffer[k].Seq() == x.runLastSeq
+}
+
+// refreshRunLast rebuilds the last-chunk hint from the buffer after the
+// confirmation purge moved the run boundary: the next run's last chunk may
+// already be buffered from pipelined emission. One scan per confirmed
+// message, stopping at the first last-flagged entry.
+func (x *consumerController) refreshRunLast() {
+	x.runLastSeq = 0
+
+	for _, entry := range x.buffer {
+		if entry.LastChunk() {
+			x.runLastSeq = entry.Seq()
+			return
+		}
+	}
 }
 
 // batchConfirmation applies exactly one of the confirmation rules, in

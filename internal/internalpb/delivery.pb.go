@@ -240,8 +240,11 @@ type ReliableProducerConfig struct {
 	LocalRetryInterval *durationpb.Duration `protobuf:"bytes,4,opt,name=local_retry_interval,json=localRetryInterval,proto3" json:"local_retry_interval,omitempty"`
 	// Enables DeliveryConfirmed notifications toward the producer endpoint.
 	DeliveryConfirmation bool `protobuf:"varint,5,opt,name=delivery_confirmation,json=deliveryConfirmation,proto3" json:"delivery_confirmation,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Splits payloads larger than this many bytes into sequenced chunks; zero
+	// disables chunking.
+	MaxChunkBytes uint32 `protobuf:"varint,6,opt,name=max_chunk_bytes,json=maxChunkBytes,proto3" json:"max_chunk_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReliableProducerConfig) Reset() {
@@ -307,6 +310,13 @@ func (x *ReliableProducerConfig) GetDeliveryConfirmation() bool {
 		return x.DeliveryConfirmation
 	}
 	return false
+}
+
+func (x *ReliableProducerConfig) GetMaxChunkBytes() uint32 {
+	if x != nil {
+		return x.MaxChunkBytes
+	}
+	return 0
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.
@@ -730,6 +740,62 @@ func (x *Ack) GetConfirmedSeq() int64 {
 	return 0
 }
 
+// ChunkInfo marks one part of a chunked payload. Its absence on a
+// SequencedMessage means the payload is a complete serialized message.
+type ChunkInfo struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Marks the first chunk of a chunked message.
+	First bool `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
+	// Marks the last chunk of a chunked message.
+	Last          bool `protobuf:"varint,2,opt,name=last,proto3" json:"last,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChunkInfo) Reset() {
+	*x = ChunkInfo{}
+	mi := &file_internal_delivery_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChunkInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChunkInfo) ProtoMessage() {}
+
+func (x *ChunkInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_delivery_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChunkInfo.ProtoReflect.Descriptor instead.
+func (*ChunkInfo) Descriptor() ([]byte, []int) {
+	return file_internal_delivery_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *ChunkInfo) GetFirst() bool {
+	if x != nil {
+		return x.First
+	}
+	return false
+}
+
+func (x *ChunkInfo) GetLast() bool {
+	if x != nil {
+		return x.Last
+	}
+	return false
+}
+
 // SequencedMessage carries one serialized application message in stream order.
 type SequencedMessage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -739,15 +805,17 @@ type SequencedMessage struct {
 	MessageId string `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
 	// Specifies the message's ordered position in the stream.
 	Seq int64 `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
-	// Contains the immutable serialized application message.
-	Payload       *ReliablePayload `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	// Contains the immutable serialized application message, or one chunk of it.
+	Payload *ReliablePayload `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	// Marks the payload as one chunk of a chunked message when present.
+	ChunkInfo     *ChunkInfo `protobuf:"bytes,5,opt,name=chunk_info,json=chunkInfo,proto3" json:"chunk_info,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SequencedMessage) Reset() {
 	*x = SequencedMessage{}
-	mi := &file_internal_delivery_proto_msgTypes[10]
+	mi := &file_internal_delivery_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -759,7 +827,7 @@ func (x *SequencedMessage) String() string {
 func (*SequencedMessage) ProtoMessage() {}
 
 func (x *SequencedMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[10]
+	mi := &file_internal_delivery_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -772,7 +840,7 @@ func (x *SequencedMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SequencedMessage.ProtoReflect.Descriptor instead.
 func (*SequencedMessage) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{10}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SequencedMessage) GetSessionId() string {
@@ -803,6 +871,13 @@ func (x *SequencedMessage) GetPayload() *ReliablePayload {
 	return nil
 }
 
+func (x *SequencedMessage) GetChunkInfo() *ChunkInfo {
+	if x != nil {
+		return x.ChunkInfo
+	}
+	return nil
+}
+
 // DeliveryEnvelope identifies the reliable-delivery command in a custom
 // serializer frame.
 type DeliveryEnvelope struct {
@@ -821,7 +896,7 @@ type DeliveryEnvelope struct {
 
 func (x *DeliveryEnvelope) Reset() {
 	*x = DeliveryEnvelope{}
-	mi := &file_internal_delivery_proto_msgTypes[11]
+	mi := &file_internal_delivery_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -833,7 +908,7 @@ func (x *DeliveryEnvelope) String() string {
 func (*DeliveryEnvelope) ProtoMessage() {}
 
 func (x *DeliveryEnvelope) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_delivery_proto_msgTypes[11]
+	mi := &file_internal_delivery_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -846,7 +921,7 @@ func (x *DeliveryEnvelope) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeliveryEnvelope.ProtoReflect.Descriptor instead.
 func (*DeliveryEnvelope) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{11}
+	return file_internal_delivery_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeliveryEnvelope) GetCommand() isDeliveryEnvelope_Command {
@@ -954,14 +1029,15 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\bproducer\x18\x01 \x01(\v2\".internalpb.ReliableProducerConfigH\x00R\bproducer\x12@\n" +
 	"\bconsumer\x18\x02 \x01(\v2\".internalpb.ReliableConsumerConfigH\x00R\bconsumerB\n" +
 	"\n" +
-	"\bendpoint\"\xc2\x02\n" +
+	"\bendpoint\"\xea\x02\n" +
 	"\x16ReliableProducerConfig\x12#\n" +
 	"\rconsumer_name\x18\x01 \x01(\tR\fconsumerName\x12-\n" +
 	"\x10durable_queue_id\x18\x02 \x01(\tH\x00R\x0edurableQueueId\x88\x01\x01\x12=\n" +
 	"\vqueue_retry\x18\x03 \x01(\v2\x1c.internalpb.QueueRetryConfigR\n" +
 	"queueRetry\x12K\n" +
 	"\x14local_retry_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x12localRetryInterval\x123\n" +
-	"\x15delivery_confirmation\x18\x05 \x01(\bR\x14deliveryConfirmationB\x13\n" +
+	"\x15delivery_confirmation\x18\x05 \x01(\bR\x14deliveryConfirmation\x12&\n" +
+	"\x0fmax_chunk_bytes\x18\x06 \x01(\rR\rmaxChunkBytesB\x13\n" +
 	"\x11_durable_queue_id\"\xb1\x01\n" +
 	"\x16ReliableConsumerConfig\x12#\n" +
 	"\rproducer_name\x18\x01 \x01(\tR\fproducerName\x12.\n" +
@@ -991,14 +1067,19 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12-\n" +
 	"\x12registration_nonce\x18\x02 \x01(\tR\x11registrationNonce\x12#\n" +
-	"\rconfirmed_seq\x18\x03 \x01(\x03R\fconfirmedSeq\"\x99\x01\n" +
+	"\rconfirmed_seq\x18\x03 \x01(\x03R\fconfirmedSeq\"5\n" +
+	"\tChunkInfo\x12\x14\n" +
+	"\x05first\x18\x01 \x01(\bR\x05first\x12\x12\n" +
+	"\x04last\x18\x02 \x01(\bR\x04last\"\xcf\x01\n" +
 	"\x10SequencedMessage\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1d\n" +
 	"\n" +
 	"message_id\x18\x02 \x01(\tR\tmessageId\x12\x10\n" +
 	"\x03seq\x18\x03 \x01(\x03R\x03seq\x125\n" +
-	"\apayload\x18\x04 \x01(\v2\x1b.internalpb.ReliablePayloadR\apayload\"\xd7\x02\n" +
+	"\apayload\x18\x04 \x01(\v2\x1b.internalpb.ReliablePayloadR\apayload\x124\n" +
+	"\n" +
+	"chunk_info\x18\x05 \x01(\v2\x15.internalpb.ChunkInfoR\tchunkInfo\"\xd7\x02\n" +
 	"\x10DeliveryEnvelope\x12K\n" +
 	"\x11register_consumer\x18\x01 \x01(\v2\x1c.internalpb.RegisterConsumerH\x00R\x10registerConsumer\x12H\n" +
 	"\x10registration_ack\x18\x02 \x01(\v2\x1b.internalpb.RegistrationAckH\x00R\x0fregistrationAck\x12/\n" +
@@ -1028,7 +1109,7 @@ func file_internal_delivery_proto_rawDescGZIP() []byte {
 }
 
 var file_internal_delivery_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_internal_delivery_proto_goTypes = []any{
 	(ReliableControllerRole)(0),    // 0: internalpb.ReliableControllerRole
 	(*ReliableCompanionSpec)(nil),  // 1: internalpb.ReliableCompanionSpec
@@ -1041,29 +1122,31 @@ var file_internal_delivery_proto_goTypes = []any{
 	(*RegistrationAck)(nil),        // 8: internalpb.RegistrationAck
 	(*Request)(nil),                // 9: internalpb.Request
 	(*Ack)(nil),                    // 10: internalpb.Ack
-	(*SequencedMessage)(nil),       // 11: internalpb.SequencedMessage
-	(*DeliveryEnvelope)(nil),       // 12: internalpb.DeliveryEnvelope
-	(*durationpb.Duration)(nil),    // 13: google.protobuf.Duration
+	(*ChunkInfo)(nil),              // 11: internalpb.ChunkInfo
+	(*SequencedMessage)(nil),       // 12: internalpb.SequencedMessage
+	(*DeliveryEnvelope)(nil),       // 13: internalpb.DeliveryEnvelope
+	(*durationpb.Duration)(nil),    // 14: google.protobuf.Duration
 }
 var file_internal_delivery_proto_depIdxs = []int32{
 	0,  // 0: internalpb.ReliableCompanionSpec.role:type_name -> internalpb.ReliableControllerRole
 	3,  // 1: internalpb.ReliableDeliveryConfig.producer:type_name -> internalpb.ReliableProducerConfig
 	4,  // 2: internalpb.ReliableDeliveryConfig.consumer:type_name -> internalpb.ReliableConsumerConfig
 	5,  // 3: internalpb.ReliableProducerConfig.queue_retry:type_name -> internalpb.QueueRetryConfig
-	13, // 4: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
-	13, // 5: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
-	13, // 6: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
+	14, // 4: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
+	14, // 5: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
+	14, // 6: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
 	6,  // 7: internalpb.SequencedMessage.payload:type_name -> internalpb.ReliablePayload
-	7,  // 8: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
-	8,  // 9: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
-	9,  // 10: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
-	10, // 11: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
-	11, // 12: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 8: internalpb.SequencedMessage.chunk_info:type_name -> internalpb.ChunkInfo
+	7,  // 9: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
+	8,  // 10: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
+	9,  // 11: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
+	10, // 12: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
+	12, // 13: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_internal_delivery_proto_init() }
@@ -1076,7 +1159,7 @@ func file_internal_delivery_proto_init() {
 		(*ReliableDeliveryConfig_Consumer)(nil),
 	}
 	file_internal_delivery_proto_msgTypes[2].OneofWrappers = []any{}
-	file_internal_delivery_proto_msgTypes[11].OneofWrappers = []any{
+	file_internal_delivery_proto_msgTypes[12].OneofWrappers = []any{
 		(*DeliveryEnvelope_RegisterConsumer)(nil),
 		(*DeliveryEnvelope_RegistrationAck)(nil),
 		(*DeliveryEnvelope_Request)(nil),
@@ -1089,7 +1172,7 @@ func file_internal_delivery_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_delivery_proto_rawDesc), len(file_internal_delivery_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

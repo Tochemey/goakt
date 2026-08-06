@@ -51,6 +51,12 @@ func TestReliableDeliverySerializerRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	sequenced, err := NewSequencedMessage("session-1", "message-1", 2, []byte("payload"))
 	require.NoError(t, err)
+	firstChunk, err := NewChunkedSequencedMessage("session-1", "message-2", 3, []byte("chu"), true, false)
+	require.NoError(t, err)
+	middleChunk, err := NewChunkedSequencedMessage("session-1", "message-2", 4, []byte("nked"), false, false)
+	require.NoError(t, err)
+	lastChunk, err := NewChunkedSequencedMessage("session-1", "message-2", 5, []byte("!"), false, true)
+	require.NoError(t, err)
 
 	commands := []any{
 		register,
@@ -58,6 +64,9 @@ func TestReliableDeliverySerializerRoundTrip(t *testing.T) {
 		request,
 		ack,
 		sequenced,
+		firstChunk,
+		middleChunk,
+		lastChunk,
 	}
 
 	serializer := new(DeliverySerializer)

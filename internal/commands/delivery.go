@@ -257,19 +257,30 @@ func (x Ack) ConfirmedSeq() int64 {
 }
 
 // SequencedMessage carries one serialized application message at its assigned
-// position in the producer stream.
+// position in the producer stream, or one chunk of it when the producer split
+// the payload.
 type SequencedMessage struct {
 	// The session ID identifies the producer controller incarnation.
 	sessionID string
-	// The message ID identifies the application message across retries.
+	// The message ID identifies the application message across retries. Every
+	// chunk of one chunked message carries the same message ID.
 	messageID string
-	// The sequence number is the message's ordered position in the stream.
+	// The sequence number is the message's ordered position in the stream;
+	// each chunk consumes its own sequence.
 	seq int64
-	// The payload contains the serializer's self-describing message frame.
+	// The payload contains the serializer's self-describing message frame, or
+	// one chunk of it.
 	payload []byte
+	// The chunked flag marks the payload as one part of a split message.
+	chunked bool
+	// The firstChunk flag marks the first part of a split message.
+	firstChunk bool
+	// The lastChunk flag marks the last part of a split message.
+	lastChunk bool
 }
 
-// NewSequencedMessage creates an immutable sequenced-message snapshot.
+// NewSequencedMessage creates an immutable sequenced-message snapshot carrying
+// a complete payload.
 func NewSequencedMessage(sessionID, messageID string, seq int64, payload []byte) (*SequencedMessage, error) {
 	command := &SequencedMessage{
 		sessionID: sessionID,
@@ -283,6 +294,20 @@ func NewSequencedMessage(sessionID, messageID string, seq int64, payload []byte)
 	}
 
 	command.payload = bytes.Clone(payload)
+	return command, nil
+}
+
+// NewChunkedSequencedMessage creates an immutable sequenced-message snapshot
+// carrying one chunk of a split payload, marked with its position.
+func NewChunkedSequencedMessage(sessionID, messageID string, seq int64, payload []byte, first, last bool) (*SequencedMessage, error) {
+	command, err := NewSequencedMessage(sessionID, messageID, seq, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	command.chunked = true
+	command.firstChunk = first
+	command.lastChunk = last
 	return command, nil
 }
 
@@ -325,6 +350,32 @@ func (x SequencedMessage) Seq() int64 {
 // Payload returns a copy of the serialized application message.
 func (x SequencedMessage) Payload() []byte {
 	return bytes.Clone(x.payload)
+}
+
+// PayloadSize returns the serialized payload length without copying it.
+func (x SequencedMessage) PayloadSize() int {
+	return len(x.payload)
+}
+
+// AppendPayload appends the serialized payload to dst without an intermediate
+// copy, for reassembling a chunked message into one frame.
+func (x SequencedMessage) AppendPayload(dst []byte) []byte {
+	return append(dst, x.payload...)
+}
+
+// Chunked reports whether the payload is one part of a split message.
+func (x SequencedMessage) Chunked() bool {
+	return x.chunked
+}
+
+// FirstChunk reports whether the payload is the first part of a split message.
+func (x SequencedMessage) FirstChunk() bool {
+	return x.firstChunk
+}
+
+// LastChunk reports whether the payload is the last part of a split message.
+func (x SequencedMessage) LastChunk() bool {
+	return x.lastChunk
 }
 
 // rawPayload returns the serialized application message without copying it.

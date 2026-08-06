@@ -257,6 +257,26 @@ func (x *consumerControllerHarness) sequenced(t *testing.T, sessionID string, se
 	return message
 }
 
+// chunk builds a chunked SequencedMessage carrying one part of a frame.
+func (x *consumerControllerHarness) chunk(t *testing.T, sessionID, messageID string, seq int64, part []byte, first, last bool) *commands.SequencedMessage {
+	t.Helper()
+
+	message, err := commands.NewChunkedSequencedMessage(sessionID, messageID, seq, part, first, last)
+	require.NoError(t, err)
+	return message
+}
+
+// encodeReply serializes one test payload the way the producer controller
+// would before splitting it into chunks.
+func (x *consumerControllerHarness) encodeReply(t *testing.T, content string) []byte {
+	t.Helper()
+
+	payload := &testpb.Reply{Content: content}
+	frame, err := x.system.getRemoting().Serializer(payload).Serialize(payload)
+	require.NoError(t, err)
+	return frame
+}
+
 // requests returns the Requests recorded by the producer controller stand-in.
 func (x *consumerControllerHarness) requests() []*commands.Request {
 	var requests []*commands.Request
@@ -842,5 +862,210 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})
 		controller.tell(rctx, dead, register)
+	})
+}
+
+func TestConsumerControllerChunkedDelivery(t *testing.T) {
+	t.Run("With an in-order run assembled into one delivery", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		nonce := harness.adopt(t, "session-1", 1)
+
+		frame := harness.encodeReply(t, "chunked-hello")
+		third := len(frame) / 3
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, frame[:third], true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 2, frame[third:2*third], false, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 3, frame[2*third:], false, true))
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveries()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		delivery := harness.deliveries()[0]
+		assert.Equal(t, "m-1", delivery.MessageID())
+		assert.EqualValues(t, 3, delivery.Seq())
+
+		reply, ok := delivery.Payload().(*testpb.Reply)
+		require.True(t, ok)
+		assert.Equal(t, "chunked-hello", reply.GetContent())
+
+		// cumulative confirmation covers the interior chunk sequences
+		require.Eventually(t, func() bool {
+			for _, request := range harness.requests() {
+				if request.ConfirmedSeq() == 3 {
+					return true
+				}
+			}
+			for _, ack := range harness.acks() {
+				if ack.ConfirmedSeq() == 3 {
+					return true
+				}
+			}
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
+
+		_ = nonce
+	})
+
+	t.Run("With an interior chunk missing recovered by a gap request", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, 150*time.Millisecond, true)
+		harness.adopt(t, "session-1", 1)
+
+		frame := harness.encodeReply(t, "gap-recovery")
+		half := len(frame) / 2
+		before := len(harness.requests())
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, frame[:half], true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 3, []byte("tail"), false, true))
+
+		// the incomplete run opens a gap: a timeout request asks for resend
+		require.Eventually(t, func() bool {
+			for _, request := range harness.requests()[before:] {
+				if request.ViaTimeout() {
+					return true
+				}
+			}
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
+
+		require.Empty(t, harness.deliveries())
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 2, frame[half:], false, false))
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveries()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		reply, ok := harness.deliveries()[0].Payload().(*testpb.Reply)
+		require.True(t, ok)
+		assert.Equal(t, "gap-recovery", reply.GetContent())
+	})
+
+	t.Run("With a full buffer dropping a chunk recovered by resend", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 3, 150*time.Millisecond, false)
+		harness.adopt(t, "session-1", 1)
+
+		frameA := harness.encodeReply(t, "message-a")
+		halfA := len(frameA) / 2
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-a", 1, frameA[:halfA], true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-a", 2, frameA[halfA:], false, true))
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveries()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// the assembled message is in flight, so its two chunks still occupy
+		// the buffer; the next message's first chunk fills it and the second
+		// one is dropped
+		frameB := harness.encodeReply(t, "message-b")
+		halfB := len(frameB) / 2
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 3, frameB[:halfB], true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 4, frameB[halfB:], false, true))
+
+		confirmed, err := NewConfirmed(harness.deliveries()[0])
+		require.NoError(t, err)
+		require.NoError(t, Tell(harness.ctx, harness.consumer, &deliveryForward{to: harness.consumerController, message: confirmed}))
+
+		// after confirmation purges the first run, the producer's timeout
+		// resend delivers the dropped chunk and the second message assembles
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 3, frameB[:halfB], true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-b", 4, frameB[halfB:], false, true))
+
+		require.Eventually(t, func() bool {
+			return len(harness.deliveries()) == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		delivery := harness.deliveries()[1]
+		assert.Equal(t, "m-b", delivery.MessageID())
+		assert.EqualValues(t, 4, delivery.Seq())
+	})
+
+	t.Run("With a run not starting at a first chunk is terminal", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("part"), false, true))
+
+		failure := awaitFailure(t, subscriber)
+		assert.Equal(t, ReliableDeliveryStageProtocol, failure.Stage())
+		assert.Equal(t, ReliableControllerRoleConsumer, failure.ControllerRole())
+		assert.ErrorContains(t, failure.Err(), "does not start with a first chunk")
+	})
+
+	t.Run("With a first chunk inside a run is terminal", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 2, []byte("head-again"), true, true))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "unexpected first chunk")
+	})
+
+	t.Run("With a whole message interleaved into a run is terminal", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.sequenced(t, "session-1", 2))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 3, []byte("tail"), false, true))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "interleaved into the chunk run")
+	})
+
+	t.Run("With a whole message completing the run coverage is terminal without resend", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		// the last chunk arrives before the interleaved whole message, so the
+		// entry closing the sequence coverage is the whole message itself:
+		// assembly must run from that arrival, not wait for another chunk
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 3, []byte("tail"), false, true))
+		harness.fromProducerController(t, harness.sequenced(t, "session-1", 2))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "interleaved into the chunk run")
+	})
+
+	t.Run("With a message ID change inside a run is terminal", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-2", 2, []byte("tail"), false, true))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "changed message ID")
+	})
+
+	t.Run("With an undecodable reassembled frame is terminal", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, time.Second, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("gar"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 2, []byte("bage"), false, true))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "failed to decode")
 	})
 }

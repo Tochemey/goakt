@@ -106,6 +106,9 @@ type producerController struct {
 	// deliveryConfirmation reports whether the endpoint asked to be told
 	// about each consumer confirmation.
 	deliveryConfirmation bool
+	// maxChunkBytes splits payloads larger than this many bytes into
+	// sequenced chunks; zero disables chunking.
+	maxChunkBytes int
 
 	// sessionID identifies this controller incarnation.
 	sessionID string
@@ -126,6 +129,12 @@ type producerController struct {
 	registrationNonce string
 	// demandUpTo is the highest sequence the controller may emit.
 	demandUpTo int64
+	// windowSpan is the consumer's flow-control window as observed on the
+	// latest demand grant: every Request grants confirmedSeq+window, so the
+	// grant span is the window. It bounds how many chunks one message may
+	// need, because the consumer confirms nothing mid-message and a message
+	// larger than its buffer could never drain.
+	windowSpan int64
 
 	// handshake is the single local handshake phase.
 	handshake int
@@ -139,6 +148,9 @@ type producerController struct {
 	pendingPayload ReliablePayload
 	// storedMessage is resent on the tick until its StoredAck arrives.
 	storedMessage *Stored
+	// pendingChunks aliases the unconfirmed entries of the chunked message in
+	// the current handshake; empty for a whole-payload handshake.
+	pendingChunks []UnconfirmedMessage
 	// lastCompletedToken identifies the most recently accepted handshake so a
 	// late duplicate StoredAck stays idempotent.
 	lastCompletedToken string
@@ -176,6 +188,9 @@ func newProducerController(producer *PID, config *reliableProducerConfig, queue 
 		queue:                queue,
 		localRetryInterval:   config.localRetryInterval,
 		deliveryConfirmation: config.deliveryConfirmation,
+		// the controller arithmetic runs against len() results, so the
+		// validated uint32 setting becomes an int once, here
+		maxChunkBytes: int(config.maxChunkBytes),
 	}
 
 	if retry := config.queueRetry; retry != nil {
@@ -202,6 +217,10 @@ func (x *producerController) PreStart(ctx *Context) error {
 		return errors.New("producer controller requires positive retry settings")
 	}
 
+	if x.maxChunkBytes != 0 && x.queue != nil {
+		return errors.New("producer controller cannot combine chunking with a durable queue")
+	}
+
 	x.sessionID = uuid.NewString()
 	x.epoch = 0
 	x.currentSeq = 0
@@ -211,6 +230,7 @@ func (x *producerController) PreStart(ctx *Context) error {
 	x.consumerController = nil
 	x.registrationNonce = types.EmptyString
 	x.demandUpTo = 0
+	x.windowSpan = 0
 	x.resetHandshake()
 	x.lastCompletedToken = types.EmptyString
 	x.lastCompletedMessageID = types.EmptyString
@@ -357,6 +377,7 @@ func (x *producerController) handleRequest(ctx *ReceiveContext, request *command
 
 	x.advanceConfirmed(ctx, request.ConfirmedSeq())
 	x.demandUpTo = request.RequestUpToSeq()
+	x.windowSpan = request.RequestUpToSeq() - request.ConfirmedSeq()
 
 	if request.ViaTimeout() {
 		x.resendUnconfirmed(ctx)
@@ -438,6 +459,13 @@ func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produ
 		return
 	}
 
+	if x.maxChunkBytes > 0 && len(frame) > x.maxChunkBytes {
+		x.handshake = producerHandshakeStore
+		x.pendingMessageID = produced.MessageID()
+		x.storeChunks(ctx, frame)
+		return
+	}
+
 	payload, err := newReliablePayload(frame)
 	if err != nil {
 		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("rejected encoded message=%s: %w", produced.MessageID(), err))
@@ -450,6 +478,79 @@ func (x *producerController) handleProduced(ctx *ReceiveContext, produced *Produ
 	x.pendingMessageID = produced.MessageID()
 	x.pendingPayload = payload
 	x.startStore(ctx)
+}
+
+// storeChunks splits the encoded frame at maxChunkBytes, appends one
+// unconfirmed entry per chunk under contiguous sequences, and replies Stored
+// for the last chunk so the producer-visible handshake stays one
+// Produced/Stored/StoredAck per business message. Chunk payloads alias the
+// frame without copying: the entries jointly retain it until the message is
+// confirmed and the whole prefix is released at once. Chunking runs only on
+// volatile flows, so storage completes synchronously here; the demand-capped
+// emission happens after acceptance.
+//
+// The window bound is terminal rather than retried because it is
+// deterministic: the consumer confirms nothing mid-message, so a message
+// needing more chunks than its buffer holds could never drain.
+func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
+	count := (len(frame) + x.maxChunkBytes - 1) / x.maxChunkBytes
+
+	if int64(count) > x.windowSpan {
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("message=%s needs %d chunks but the consumer window is %d: raise WithFlowControlWindow or the WithChunking size", x.pendingMessageID, count, x.windowSpan))
+		return
+	}
+
+	if x.currentSeq > math.MaxInt64-int64(count) {
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("sequence space exhausted at seq=%d", x.currentSeq))
+		return
+	}
+
+	seq := x.currentSeq
+	x.pendingChunks = make([]UnconfirmedMessage, 0, count)
+
+	for start := 0; start < len(frame); start += x.maxChunkBytes {
+		end := min(start+x.maxChunkBytes, len(frame))
+
+		payload, err := newReliablePayload(frame[start:end])
+		if err != nil {
+			// dropping would wedge the handshake in the store phase with
+			// nothing left to retry it, so an impossible value is terminal
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("rejected chunk of message=%s: %w", x.pendingMessageID, err))
+			return
+		}
+
+		seq++
+		entry, err := newChunkUnconfirmedMessage(x.pendingMessageID, seq, payload, start == 0, end == len(frame))
+		if err != nil {
+			x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to record chunk of message=%s: %w", x.pendingMessageID, err))
+			return
+		}
+
+		x.pendingChunks = append(x.pendingChunks, entry)
+	}
+
+	x.unconfirmed = append(x.unconfirmed, x.pendingChunks...)
+	x.currentSeq = seq
+	x.pendingSeq = seq
+	x.replyStored(ctx)
+}
+
+// replyStored acknowledges the pending message's storage toward the producer
+// and opens the StoredAck phase. Whole and chunked storage share it: by the
+// time it runs, pendingSeq is the sequence Stored must carry, which for a
+// chunked message is the last chunk's.
+func (x *producerController) replyStored(ctx *ReceiveContext) {
+	stored, err := newStoredFromState(x.sessionID, x.token, x.pendingMessageID, x.pendingSeq, x.producer, ctx.Self())
+	if err != nil {
+		// no retry path covers a store phase without a Stored message, so an
+		// impossible value is terminal rather than a wedged handshake
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build Stored for message=%s: %w", x.pendingMessageID, err))
+		return
+	}
+
+	x.handshake = producerHandshakeStoredAck
+	x.storedMessage = stored
+	x.tell(ctx, x.producer, stored)
 }
 
 // handleStoredAck records that the producer saw its Stored reply and durably
@@ -678,17 +779,7 @@ func (x *producerController) completeStore(ctx *ReceiveContext, result StoreResu
 		x.unconfirmed = append(x.unconfirmed, message)
 	}
 
-	stored, err := newStoredFromState(x.sessionID, x.token, x.pendingMessageID, x.pendingSeq, x.producer, ctx.Self())
-	if err != nil {
-		// same wedge as above: no retry path covers a store phase without a
-		// Stored message, so an impossible value is terminal
-		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build Stored for message=%s: %w", x.pendingMessageID, err))
-		return
-	}
-
-	x.handshake = producerHandshakeStoredAck
-	x.storedMessage = stored
-	x.tell(ctx, x.producer, stored)
+	x.replyStored(ctx)
 }
 
 // startAccept begins acceptance of the acknowledged message: the durable
@@ -712,7 +803,14 @@ func (x *producerController) startAccept(ctx *ReceiveContext) {
 // unconfirmed entry still holds the message and the consumer's next timeout
 // request resends it.
 func (x *producerController) completeAccept(ctx *ReceiveContext) {
-	x.emitSequenced(ctx, x.pendingMessageID, x.pendingSeq, x.pendingPayload)
+	if len(x.pendingChunks) > 0 {
+		for _, chunk := range x.pendingChunks {
+			x.emitSequenced(ctx, chunk.MessageID(), chunk.Seq(), chunk.Payload(), chunk.chunk)
+		}
+	} else {
+		x.emitSequenced(ctx, x.pendingMessageID, x.pendingSeq, x.pendingPayload, chunkMark{})
+	}
+
 	x.lastCompletedToken = x.token
 	x.lastCompletedMessageID = x.pendingMessageID
 	x.resetHandshake()
@@ -727,18 +825,28 @@ func (x *producerController) resetHandshake() {
 	x.pendingSeq = 0
 	x.pendingPayload = ReliablePayload{}
 	x.storedMessage = nil
+	x.pendingChunks = nil
 }
 
-// emitSequenced sends one stored message to the registered consumer
+// emitSequenced sends one stored message or chunk to the registered consumer
 // controller, never above the granted demand; a skipped emission is
-// recovered by the consumer's timeout request.
-func (x *producerController) emitSequenced(ctx *ReceiveContext, messageID string, seq int64, payload ReliablePayload) {
+// recovered by the consumer's timeout request. A mid-message demand boundary
+// therefore simply pauses a chunked emission between chunks.
+func (x *producerController) emitSequenced(ctx *ReceiveContext, messageID string, seq int64, payload ReliablePayload, chunk chunkMark) {
 	if x.consumerController == nil || seq > x.demandUpTo {
 		ctx.Logger().Debugf("producer controller for endpoint=%s deferred emission seq=%d demand=%d", x.producer.Name(), seq, x.demandUpTo)
 		return
 	}
 
-	message, err := commands.NewSequencedMessage(x.sessionID, messageID, seq, payload.rawBytes())
+	var message *commands.SequencedMessage
+	var err error
+
+	if chunk.chunked {
+		message, err = commands.NewChunkedSequencedMessage(x.sessionID, messageID, seq, payload.rawBytes(), chunk.first, chunk.last)
+	} else {
+		message, err = commands.NewSequencedMessage(x.sessionID, messageID, seq, payload.rawBytes())
+	}
+
 	if err != nil {
 		// deterministic impossible-value guard: every timeout resend would
 		// rebuild and fail identically, so it is terminal
@@ -823,7 +931,7 @@ func (x *producerController) resendUnconfirmed(ctx *ReceiveContext) {
 			return
 		}
 
-		x.emitSequenced(ctx, message.MessageID(), message.Seq(), message.Payload())
+		x.emitSequenced(ctx, message.MessageID(), message.Seq(), message.Payload(), message.chunk)
 	}
 }
 

@@ -2178,6 +2178,7 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 			},
 			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
 			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
+			MaxChunkBytes:        spec.Producer.MaxChunkBytes,
 		}
 
 		if spec.Producer.DurableQueueID != "" {

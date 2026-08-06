@@ -51,6 +51,9 @@ message ReliableProducerConfig {
   google.protobuf.Duration local_retry_interval = 4;
   // Enables DeliveryConfirmed notifications toward the producer endpoint.
   bool delivery_confirmation = 5;
+  // Splits payloads larger than this many bytes into sequenced chunks; zero
+  // disables chunking.
+  uint32 max_chunk_bytes = 6;
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.
@@ -117,6 +120,15 @@ message Ack {
   int64 confirmed_seq = 3;
 }
 
+// ChunkInfo marks one part of a chunked payload. Its absence on a
+// SequencedMessage means the payload is a complete serialized message.
+message ChunkInfo {
+  // Marks the first chunk of a chunked message.
+  bool first = 1;
+  // Marks the last chunk of a chunked message.
+  bool last = 2;
+}
+
 // SequencedMessage carries one serialized application message in stream order.
 message SequencedMessage {
   // Identifies the producer controller incarnation.
@@ -125,8 +137,10 @@ message SequencedMessage {
   string message_id = 2;
   // Specifies the message's ordered position in the stream.
   int64 seq = 3;
-  // Contains the immutable serialized application message.
+  // Contains the immutable serialized application message, or one chunk of it.
   ReliablePayload payload = 4;
+  // Marks the payload as one chunk of a chunked message when present.
+  ChunkInfo chunk_info = 5;
 }
 
 // DeliveryEnvelope identifies the reliable-delivery command in a custom

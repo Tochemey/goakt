@@ -208,6 +208,7 @@ func TestReliableDeliveryConfigWireRoundTrip(t *testing.T) {
 				},
 				localRetryInterval:   500 * time.Millisecond,
 				deliveryConfirmation: true,
+				maxChunkBytes:        64 * 1024,
 			},
 		}
 
@@ -332,6 +333,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 		config := producerDeliveryConfig("consumer")
 		config.producer.durableQueueID = "ordersQueue"
 		config.producer.deliveryConfirmation = true
+		config.producer.maxChunkBytes = 64 * 1024
 
 		spec := config.toRemoteSpec()
 		require.NotNil(t, spec)
@@ -343,6 +345,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 		assert.Equal(t, DefaultQueueRetryBackoff, spec.Producer.QueueRetryInitialBackoff)
 		assert.Equal(t, DefaultLocalRetryInterval, spec.Producer.LocalRetryInterval)
 		assert.True(t, spec.Producer.DeliveryConfirmation)
+		assert.EqualValues(t, 64*1024, spec.Producer.MaxChunkBytes)
 	})
 
 	t.Run("With a consumer configuration", func(t *testing.T) {

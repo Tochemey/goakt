@@ -75,6 +75,11 @@ type ReliableProducerSpec struct {
 	// DeliveryConfirmation enables DeliveryConfirmed notifications toward the
 	// producer endpoint once the consumer confirms a message.
 	DeliveryConfirmation bool
+
+	// MaxChunkBytes splits payloads larger than this many bytes into
+	// sequenced chunks; zero disables chunking. The hosting node enforces the
+	// exact bounds.
+	MaxChunkBytes uint32
 }
 
 // ReliableConsumerSpec carries the consumer-side delivery settings of a

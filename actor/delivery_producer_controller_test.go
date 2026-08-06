@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -217,6 +218,20 @@ func newProducerControllerHarness(t *testing.T, queue DurableProducerQueue) *pro
 // delivery-confirmation setting, which the spawn options would otherwise carry.
 func newProducerControllerHarnessWith(t *testing.T, queue DurableProducerQueue, deliveryConfirmation bool) *producerControllerHarness {
 	t.Helper()
+	return newProducerControllerHarnessFor(t, queue, deliveryConfirmation, 0)
+}
+
+// newProducerControllerHarnessChunked builds the harness with chunking enabled
+// at the given size on a volatile flow.
+func newProducerControllerHarnessChunked(t *testing.T, maxChunkBytes uint32) *producerControllerHarness {
+	t.Helper()
+	return newProducerControllerHarnessFor(t, nil, false, maxChunkBytes)
+}
+
+// newProducerControllerHarnessFor builds the harness from the endpoint
+// settings the spawn options would otherwise carry.
+func newProducerControllerHarnessFor(t *testing.T, queue DurableProducerQueue, deliveryConfirmation bool, maxChunkBytes uint32) *producerControllerHarness {
+	t.Helper()
 
 	ctx, system := newCompanionTestSystem(t)
 
@@ -235,6 +250,7 @@ func newProducerControllerHarnessWith(t *testing.T, queue DurableProducerQueue, 
 
 	config := testProducerConfig("consumer", 2, 20*time.Millisecond, 150*time.Millisecond)
 	config.deliveryConfirmation = deliveryConfirmation
+	config.maxChunkBytes = maxChunkBytes
 
 	producerController, err := system.Spawn(ctx, "producer-controller", newProducerController(producer, config, queue))
 	require.NoError(t, err)
@@ -371,21 +387,15 @@ func (x *producerControllerHarness) sequencedEmissions() []*commands.SequencedMe
 // fresh credit and the storage acknowledgement of exactly this message.
 func (x *producerControllerHarness) produceOne(t *testing.T, messageID string) {
 	t.Helper()
+	x.produceOneWith(t, messageID, &testpb.Reply{Content: messageID})
+}
 
-	var request *RequestNext
+// produceOneWith drives one full producer handshake handing over payload.
+func (x *producerControllerHarness) produceOneWith(t *testing.T, messageID string, payload *testpb.Reply) {
+	t.Helper()
 
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.producer) {
-			if candidate, ok := message.(*RequestNext); ok && !x.usedTokens[candidate.Token()] {
-				request = candidate
-				return true
-			}
-		}
-		return false
-	}, 3*time.Second, 10*time.Millisecond)
-
-	x.usedTokens[request.Token()] = true
-	produced, err := NewProduced(request, messageID, &testpb.Reply{Content: messageID})
+	request := x.freshRequestNext(t)
+	produced, err := NewProduced(request, messageID, payload)
 	require.NoError(t, err)
 	x.fromProducer(t, produced)
 
@@ -404,6 +414,27 @@ func (x *producerControllerHarness) produceOne(t *testing.T, messageID string) {
 	ack, err := NewStoredAck(stored)
 	require.NoError(t, err)
 	x.fromProducer(t, ack)
+}
+
+// freshRequestNext waits for a credit the test has not answered yet and marks
+// it used.
+func (x *producerControllerHarness) freshRequestNext(t *testing.T) *RequestNext {
+	t.Helper()
+
+	var request *RequestNext
+
+	require.Eventually(t, func() bool {
+		for _, message := range x.recordedOf(x.producer) {
+			if candidate, ok := message.(*RequestNext); ok && !x.usedTokens[candidate.Token()] {
+				request = candidate
+				return true
+			}
+		}
+		return false
+	}, 3*time.Second, 10*time.Millisecond)
+
+	x.usedTokens[request.Token()] = true
+	return request
 }
 
 // awaitFailure polls the event stream until a terminal failure arrives; the
@@ -699,6 +730,195 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 		notice := harness.deliveryConfirmations()[0]
 		assert.Equal(t, "m-1", notice.MessageID())
 		assert.Equal(t, newSessionID, notice.SessionID())
+	})
+}
+
+func TestProducerControllerChunkedFlow(t *testing.T) {
+	t.Run("With a large payload split into flagged chunks under one Stored", func(t *testing.T) {
+		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		expected := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, expected, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(expected)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-big", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == expected
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// each chunk consumes one sequence, carries the business message ID,
+		// and is flagged by position; the parts concatenate to the frame
+		var assembled []byte
+
+		for index, emission := range harness.sequencedEmissions() {
+			assert.True(t, emission.Chunked())
+			assert.Equal(t, "m-big", emission.MessageID())
+			assert.Equal(t, int64(index+1), emission.Seq())
+			assert.Equal(t, index == 0, emission.FirstChunk())
+			assert.Equal(t, index == expected-1, emission.LastChunk())
+			assembled = emission.AppendPayload(assembled)
+		}
+
+		assert.Equal(t, frame, assembled)
+
+		// the producer-visible handshake stays one Stored per business
+		// message, carrying the last chunk's sequence
+		storedCount := 0
+
+		for _, message := range harness.recordedOf(harness.producer) {
+			if stored, ok := message.(*Stored); ok && stored.MessageID() == "m-big" {
+				storedCount++
+				assert.Equal(t, int64(expected), stored.Seq())
+			}
+		}
+
+		assert.Equal(t, 1, storedCount)
+	})
+
+	t.Run("With frames at an exact chunk multiple and one byte over", func(t *testing.T) {
+		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		// pin the frame length to exactly two chunks by measuring the
+		// serializer overhead for a probe of the target content size
+		probe := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize)}
+		probeFrame, err := harness.system.getRemoting().Serializer(probe).Serialize(probe)
+		require.NoError(t, err)
+		overhead := len(probeFrame) - 2*MinChunkSize
+
+		exact := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize-overhead)}
+		exactFrame, err := harness.system.getRemoting().Serializer(exact).Serialize(exact)
+		require.NoError(t, err)
+		require.Len(t, exactFrame, 2*MinChunkSize)
+
+		harness.produceOneWith(t, "m-exact", exact)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		for _, emission := range harness.sequencedEmissions() {
+			assert.Equal(t, MinChunkSize, emission.PayloadSize())
+		}
+
+		// one byte more of content splits into a third, one-byte chunk
+		over := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize-overhead+1)}
+		harness.produceOneWith(t, "m-over", over)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 5
+		}, 3*time.Second, 10*time.Millisecond)
+
+		tail := harness.sequencedEmissions()[2:]
+		assert.Equal(t, MinChunkSize, tail[0].PayloadSize())
+		assert.Equal(t, MinChunkSize, tail[1].PayloadSize())
+		assert.Equal(t, 1, tail[2].PayloadSize())
+		assert.True(t, tail[2].LastChunk())
+	})
+
+	t.Run("With a payload at or below the chunk size stays whole", func(t *testing.T) {
+		harness := newProducerControllerHarnessChunked(t, MaxChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, 10, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOne(t, "m-small")
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 1
+		}, 3*time.Second, 10*time.Millisecond)
+
+		emission := harness.sequencedEmissions()[0]
+		assert.False(t, emission.Chunked())
+		assert.Equal(t, int64(1), emission.Seq())
+	})
+
+	t.Run("With more chunks than the consumer window is terminal", func(t *testing.T) {
+		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		// the window span is 2, but the payload needs at least 3 chunks
+		request, err := commands.NewRequest(sessionID, nonce, 0, 2, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		credit := harness.freshRequestNext(t)
+		produced, err := NewProduced(credit, "m-oversized", &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)})
+		require.NoError(t, err)
+		harness.fromProducer(t, produced)
+
+		failure := awaitFailure(t, subscriber)
+		assert.Equal(t, ReliableDeliveryStageProtocol, failure.Stage())
+		assert.Equal(t, ReliableControllerRoleProducer, failure.ControllerRole())
+		assert.ErrorContains(t, failure.Err(), "chunks but the consumer window")
+	})
+
+	t.Run("With a mid-message demand pause resumed by a timeout request", func(t *testing.T) {
+		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.Equal(t, 3, chunks)
+
+		// demand covers one whole message plus only part of the chunked one:
+		// the window span (3) admits the chunk count, but demandUpTo stops
+		// emission after the second chunk
+		request, err := commands.NewRequest(sessionID, nonce, 0, 3, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOne(t, "m-first")
+		harness.produceOneWith(t, "m-chunked", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == 3
+		}, 3*time.Second, 10*time.Millisecond)
+
+		pause.For(200 * time.Millisecond)
+
+		for _, emission := range harness.sequencedEmissions() {
+			assert.LessOrEqual(t, emission.Seq(), int64(3))
+		}
+
+		// the timeout request grants the rest and resends the unconfirmed
+		// suffix, completing the paused message with its flags intact
+		resume, err := commands.NewRequest(sessionID, nonce, 1, 6, true)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, resume)
+
+		require.Eventually(t, func() bool {
+			for _, emission := range harness.sequencedEmissions() {
+				if emission.Seq() == 4 {
+					return emission.Chunked() && emission.LastChunk()
+				}
+			}
+			return false
+		}, 3*time.Second, 10*time.Millisecond)
 	})
 }
 
@@ -1390,7 +1610,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, err)
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})
-		controller.emitSequenced(rctx, "m-1", 1, payload)
+		controller.emitSequenced(rctx, "m-1", 1, payload, chunkMark{})
 
 		failure := awaitFailure(t, subscriber)
 		assert.ErrorContains(t, failure.Err(), "failed to build SequencedMessage")

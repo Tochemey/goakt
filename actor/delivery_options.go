@@ -28,34 +28,26 @@ import (
 
 // ReliableProducerOption configures the producer side of a reliable-delivery
 // flow when spawning the producer endpoint with AsReliableProducer.
-type ReliableProducerOption func(settings *reliableProducerSettings)
+type ReliableProducerOption func(config *reliableProducerConfig)
 
 // ReliableConsumerOption configures the consumer side of a reliable-delivery
 // flow when spawning the consumer endpoint with AsReliableConsumer.
 type ReliableConsumerOption func(config *reliableConsumerConfig)
-
-// reliableProducerSettings collects everything a producer endpoint spawn
-// needs to create its controller companion: the wire-serializable producer
-// configuration plus the in-process durable queue instance, which travels by
-// reference and is looked up by ID after relocation. Consumer options need
-// no equivalent because the consumer side is configuration only.
-type reliableProducerSettings struct {
-	// config is the producer endpoint's reliable-delivery configuration.
-	config *reliableProducerConfig
-	// queue is the durable producer queue instance; nil runs volatile.
-	queue DurableProducerQueue
-}
 
 // WithDurableQueue stores every produced message durably so a producer crash
 // or relocation redelivers unconfirmed messages. The queue is also registered
 // as a user dependency so relocation can reconstruct it by ID on any eligible
 // node.
 func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
-	return func(settings *reliableProducerSettings) {
-		settings.queue = queue
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.queue = queue
 
 		if queue != nil {
-			settings.config.durableQueueID = queue.ID()
+			config.durableQueueID = queue.ID()
 		}
 	}
 }
@@ -63,8 +55,12 @@ func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
 // WithQueueRetry bounds the retry policy applied to every durable queue
 // operation before the producer controller raises a reliability error.
 func WithQueueRetry(maxAttempts int, initialBackoff time.Duration) ReliableProducerOption {
-	return func(settings *reliableProducerSettings) {
-		settings.config.queueRetry = &reliableQueueRetryConfig{
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.queueRetry = &reliableQueueRetryConfig{
 			maxAttempts:    maxAttempts,
 			initialBackoff: initialBackoff,
 		}
@@ -74,8 +70,12 @@ func WithQueueRetry(maxAttempts int, initialBackoff time.Duration) ReliableProdu
 // WithLocalRetryInterval sets the cadence at which the producer controller
 // retries an unanswered RequestNext or Stored toward the producer endpoint.
 func WithLocalRetryInterval(interval time.Duration) ReliableProducerOption {
-	return func(settings *reliableProducerSettings) {
-		settings.config.localRetryInterval = interval
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.localRetryInterval = interval
 	}
 }
 
@@ -86,8 +86,28 @@ func WithLocalRetryInterval(interval time.Duration) ReliableProducerOption {
 // controller incarnation, it repeats when a message is redelivered and
 // confirmed again, and the producer must handle it idempotently by MessageID.
 func WithDeliveryConfirmation() ReliableProducerOption {
-	return func(settings *reliableProducerSettings) {
-		settings.config.deliveryConfirmation = true
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.deliveryConfirmation = true
+	}
+}
+
+// WithChunking splits every produced payload larger than maxChunkBytes into
+// parts that each consume one sequence number and are reassembled by the
+// consumer controller before Delivery, so one large message can never exceed
+// the remoting frame cap. The size must be in [MinChunkSize, MaxChunkSize],
+// and a message must fit in the consumer's flow-control window worth of
+// chunks. Chunking cannot be combined with a durable queue.
+func WithChunking(maxChunkBytes uint32) ReliableProducerOption {
+	return func(config *reliableProducerConfig) {
+		if config == nil {
+			return
+		}
+
+		config.maxChunkBytes = maxChunkBytes
 	}
 }
 
@@ -96,6 +116,10 @@ func WithDeliveryConfirmation() ReliableProducerOption {
 // [1, MaxFlowControlWindow].
 func WithFlowControlWindow(window int) ReliableConsumerOption {
 	return func(config *reliableConsumerConfig) {
+		if config == nil {
+			return
+		}
+
 		config.flowControlWindow = window
 	}
 }
@@ -104,6 +128,10 @@ func WithFlowControlWindow(window int) ReliableConsumerOption {
 // re-registers, retries the unconfirmed delivery, and requests gap resends.
 func WithResendInterval(interval time.Duration) ReliableConsumerOption {
 	return func(config *reliableConsumerConfig) {
+		if config == nil {
+			return
+		}
+
 		config.resendInterval = interval
 	}
 }
@@ -116,24 +144,22 @@ func WithResendInterval(interval time.Duration) ReliableConsumerOption {
 // controller, not at its inbox, and reliable endpoints must be long-lived:
 // finite passivation is rejected at spawn.
 func AsReliableProducer(consumerName string, opts ...ReliableProducerOption) SpawnOption {
-	settings := &reliableProducerSettings{
-		config: &reliableProducerConfig{
-			consumerName:       consumerName,
-			localRetryInterval: DefaultLocalRetryInterval,
-			queueRetry: &reliableQueueRetryConfig{
-				maxAttempts:    DefaultQueueRetryAttempts,
-				initialBackoff: DefaultQueueRetryBackoff,
-			},
+	producer := &reliableProducerConfig{
+		consumerName:       consumerName,
+		localRetryInterval: DefaultLocalRetryInterval,
+		queueRetry: &reliableQueueRetryConfig{
+			maxAttempts:    DefaultQueueRetryAttempts,
+			initialBackoff: DefaultQueueRetryBackoff,
 		},
 	}
 
 	for _, opt := range opts {
-		opt(settings)
+		opt(producer)
 	}
 
 	return spawnOption(func(config *spawnConfig) {
-		config.reliableDelivery = &reliableDeliveryConfig{producer: settings.config}
-		config.durableQueue = settings.queue
+		config.reliableDelivery = &reliableDeliveryConfig{producer: producer}
+		config.durableQueue = producer.queue
 	})
 }
 

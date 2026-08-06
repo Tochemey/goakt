@@ -67,6 +67,27 @@ func TestAsReliableProducer(t *testing.T) {
 		assert.True(t, producer.deliveryConfirmation)
 	})
 
+	t.Run("With chunking", func(t *testing.T) {
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(64*1024)))
+		require.NoError(t, config.Validate())
+		assert.EqualValues(t, 64*1024, config.reliableDelivery.producer.maxChunkBytes)
+	})
+
+	t.Run("With a chunk size below the minimum", func(t *testing.T) {
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MinChunkSize-1)))
+		assert.ErrorContains(t, config.Validate(), "chunk size must be in")
+	})
+
+	t.Run("With a chunk size above the maximum", func(t *testing.T) {
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MaxChunkSize+1)))
+		assert.ErrorContains(t, config.Validate(), "chunk size must be in")
+	})
+
+	t.Run("With chunking and a durable queue", func(t *testing.T) {
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MinChunkSize), WithDurableQueue(&mockDurableQueue{})))
+		assert.ErrorContains(t, config.Validate(), "chunking cannot be combined with a durable queue")
+	})
+
 	t.Run("With nil durable queue", func(t *testing.T) {
 		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithDurableQueue(nil)))
 		require.NoError(t, config.Validate())

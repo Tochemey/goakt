@@ -165,15 +165,24 @@ func (x *DeliverySerializer) Serialize(message any) ([]byte, error) {
 			return nil, err
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_SequencedMessage{
-			SequencedMessage: &internalpb.SequencedMessage{
-				SessionId: command.sessionID,
-				MessageId: command.messageID,
-				Seq:       command.seq,
-				Payload: &internalpb.ReliablePayload{
-					Data: command.rawPayload(),
-				},
+		sequenced := &internalpb.SequencedMessage{
+			SessionId: command.sessionID,
+			MessageId: command.messageID,
+			Seq:       command.seq,
+			Payload: &internalpb.ReliablePayload{
+				Data: command.rawPayload(),
 			},
+		}
+
+		if command.chunked {
+			sequenced.ChunkInfo = &internalpb.ChunkInfo{
+				First: command.firstChunk,
+				Last:  command.lastChunk,
+			}
+		}
+
+		envelope.Command = &internalpb.DeliveryEnvelope_SequencedMessage{
+			SequencedMessage: sequenced,
 		}
 
 	default:
@@ -218,6 +227,10 @@ func (x *DeliverySerializer) Deserialize(data []byte) (any, error) {
 
 		if payload == nil {
 			return nil, gerrors.NewErrInvalidMessage(errors.New("reliable payload is required"))
+		}
+
+		if chunk := message.GetChunkInfo(); chunk != nil {
+			return NewChunkedSequencedMessage(message.GetSessionId(), message.GetMessageId(), message.GetSeq(), payload.GetData(), chunk.GetFirst(), chunk.GetLast())
 		}
 
 		return NewSequencedMessage(message.GetSessionId(), message.GetMessageId(), message.GetSeq(), payload.GetData())

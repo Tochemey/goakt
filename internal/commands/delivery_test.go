@@ -71,6 +71,22 @@ func TestReliableDeliveryCommands(t *testing.T) {
 	payload[0] = 'P'
 	assert.Equal(t, []byte("payload"), sequenced.Payload())
 	assert.Equal(t, []byte("payload"), sequenced.rawPayload())
+
+	assert.False(t, sequenced.Chunked())
+	assert.False(t, sequenced.FirstChunk())
+	assert.False(t, sequenced.LastChunk())
+	assert.Equal(t, len("payload"), sequenced.PayloadSize())
+	assert.Equal(t, []byte("head-payload"), sequenced.AppendPayload([]byte("head-")))
+
+	chunk, err := NewChunkedSequencedMessage("session-1", "message-1", 3, []byte("part"), true, false)
+	require.NoError(t, err)
+	assert.True(t, chunk.Chunked())
+	assert.True(t, chunk.FirstChunk())
+	assert.False(t, chunk.LastChunk())
+	assert.Equal(t, []byte("part"), chunk.Payload())
+
+	_, err = NewChunkedSequencedMessage("session-1", " ", 3, []byte("part"), true, false)
+	require.Error(t, err)
 }
 
 // TestReliableDeliveryCommandValidation verifies every constructor invariant.

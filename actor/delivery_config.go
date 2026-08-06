@@ -64,6 +64,17 @@ type reliableProducerConfig struct {
 	// deliveryConfirmation enables DeliveryConfirmed notifications toward
 	// the producer endpoint once the consumer confirms a message.
 	deliveryConfirmation bool
+	// maxChunkBytes splits payloads larger than this many bytes into
+	// sequenced chunks; zero disables chunking. It mirrors the wire field's
+	// type so the configuration crosses the boundary without conversion.
+	maxChunkBytes uint32
+	// queue is the live durable queue instance collected by WithDurableQueue;
+	// nil runs volatile. It is not serialized from this struct: the queue
+	// crosses the wire as an ordinary dependency descriptor on the actor
+	// record and is rebuilt by dependency reconstruction on the hosting node.
+	// durableQueueID then selects that rebuilt instance among the endpoint's
+	// dependencies, which may also contain unrelated business dependencies.
+	queue DurableProducerQueue
 }
 
 // reliableQueueRetryConfig defines retries for durable queue operations.
@@ -143,6 +154,16 @@ func (x *reliableProducerConfig) Validate() error {
 		}
 	}
 
+	if x.maxChunkBytes != 0 {
+		if x.maxChunkBytes < MinChunkSize || x.maxChunkBytes > MaxChunkSize {
+			return fmt.Errorf("chunk size must be in [%d, %d]", MinChunkSize, MaxChunkSize)
+		}
+
+		if x.durableQueueID != "" {
+			return errors.New("chunking cannot be combined with a durable queue")
+		}
+	}
+
 	return nil
 }
 
@@ -215,6 +236,7 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 		producer := &internalpb.ReliableProducerConfig{
 			ConsumerName:         x.producer.consumerName,
 			DeliveryConfirmation: x.producer.deliveryConfirmation,
+			MaxChunkBytes:        x.producer.maxChunkBytes,
 		}
 
 		if x.producer.durableQueueID != "" {
@@ -270,6 +292,7 @@ func (x *reliableDeliveryConfig) toRemoteSpec() *remote.ReliableDeliverySpec {
 			DurableQueueID:       x.producer.durableQueueID,
 			LocalRetryInterval:   x.producer.localRetryInterval,
 			DeliveryConfirmation: x.producer.deliveryConfirmation,
+			MaxChunkBytes:        x.producer.maxChunkBytes,
 		}
 
 		if x.producer.queueRetry != nil {
@@ -305,6 +328,7 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 			consumerName:         endpoint.Producer.GetConsumerName(),
 			durableQueueID:       endpoint.Producer.GetDurableQueueId(),
 			deliveryConfirmation: endpoint.Producer.GetDeliveryConfirmation(),
+			maxChunkBytes:        endpoint.Producer.GetMaxChunkBytes(),
 		}
 
 		localRetryInterval, err := durationFromProto("local retry interval", endpoint.Producer.GetLocalRetryInterval())

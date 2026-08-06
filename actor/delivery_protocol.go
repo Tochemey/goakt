@@ -37,6 +37,13 @@ import (
 // request; it also bounds the consumer controller's receive buffer.
 const MaxFlowControlWindow = 10_000
 
+// MinChunkSize is the smallest chunk size WithChunking accepts.
+const MinChunkSize = 1_024
+
+// MaxChunkSize is the largest chunk size WithChunking accepts: the remoting
+// frame cap minus headroom for the delivery envelope and remoting framing.
+const MaxChunkSize = 16*1_024*1_024 - 64*1_024
+
 const (
 	// reliableControllerRoleUnknown is the zero value for an unspecified role.
 	reliableControllerRoleUnknown ReliableControllerRole = iota
@@ -100,6 +107,17 @@ func (x ReliablePayload) rawBytes() []byte {
 	return x.bytes
 }
 
+// chunkMark identifies a stored entry's position inside a chunked message;
+// its zero value marks a complete, unchunked payload.
+type chunkMark struct {
+	// chunked marks the entry as one part of a split message.
+	chunked bool
+	// first marks the first part of a split message.
+	first bool
+	// last marks the last part of a split message.
+	last bool
+}
+
 // UnconfirmedMessage is a stored message awaiting consumer confirmation.
 type UnconfirmedMessage struct {
 	// messageID is the idempotency key supplied by the producer.
@@ -108,6 +126,21 @@ type UnconfirmedMessage struct {
 	seq int64
 	// payload is the immutable serialized application message.
 	payload ReliablePayload
+	// chunk marks the entry's position when the producer split the message;
+	// its zero value marks a complete payload.
+	chunk chunkMark
+}
+
+// newChunkUnconfirmedMessage creates a stored entry carrying one chunk of a
+// split message and its position within it.
+func newChunkUnconfirmedMessage(messageID string, seq int64, payload ReliablePayload, first, last bool) (UnconfirmedMessage, error) {
+	message, err := NewUnconfirmedMessage(messageID, seq, payload)
+	if err != nil {
+		return UnconfirmedMessage{}, err
+	}
+
+	message.chunk = chunkMark{chunked: true, first: first, last: last}
+	return message, nil
 }
 
 // NewUnconfirmedMessage creates an immutable stored-message snapshot.
