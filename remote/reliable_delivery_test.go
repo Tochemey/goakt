@@ -40,6 +40,15 @@ func validReliableProducerSpec() *ReliableProducerSpec {
 	}
 }
 
+func validWorkPullingProducerSpec() *ReliableProducerSpec {
+	return &ReliableProducerSpec{
+		WorkPulling:              true,
+		QueueRetryMaxAttempts:    3,
+		QueueRetryInitialBackoff: 100 * time.Millisecond,
+		LocalRetryInterval:       time.Second,
+	}
+}
+
 func validReliableConsumerSpec() *ReliableConsumerSpec {
 	return &ReliableConsumerSpec{
 		ProducerName:      "orders-producer",
@@ -57,6 +66,10 @@ func TestReliableDeliverySpecValidate(t *testing.T) {
 		{
 			name: "valid producer side",
 			spec: &ReliableDeliverySpec{Producer: validReliableProducerSpec()},
+		},
+		{
+			name: "valid work-pulling producer side",
+			spec: &ReliableDeliverySpec{Producer: validWorkPullingProducerSpec()},
 		},
 		{
 			name: "valid consumer side",
@@ -80,6 +93,33 @@ func TestReliableDeliverySpecValidate(t *testing.T) {
 				return &ReliableDeliverySpec{Producer: producer}
 			}(),
 			wantErr: "consumer endpoint name is required",
+		},
+		{
+			name: "work-pulling producer with consumer name",
+			spec: func() *ReliableDeliverySpec {
+				producer := validWorkPullingProducerSpec()
+				producer.ConsumerName = "worker"
+				return &ReliableDeliverySpec{Producer: producer}
+			}(),
+			wantErr: "rejects a consumer endpoint name",
+		},
+		{
+			name: "work-pulling producer with chunking",
+			spec: func() *ReliableDeliverySpec {
+				producer := validWorkPullingProducerSpec()
+				producer.MaxChunkBytes = 1024
+				return &ReliableDeliverySpec{Producer: producer}
+			}(),
+			wantErr: "rejects chunking",
+		},
+		{
+			name: "work-pulling producer with durable queue",
+			spec: func() *ReliableDeliverySpec {
+				producer := validWorkPullingProducerSpec()
+				producer.DurableQueueID = "queue"
+				return &ReliableDeliverySpec{Producer: producer}
+			}(),
+			wantErr: "rejects a durable producer queue",
 		},
 		{
 			name: "producer without retry attempts",

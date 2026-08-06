@@ -185,3 +185,41 @@ func AsReliableConsumer(producerName string, opts ...ReliableConsumerOption) Spa
 		config.reliableDelivery = &reliableDeliveryConfig{consumer: consumer}
 	})
 }
+
+// AsWorkPullingProducer spawns the actor as the producer endpoint of a
+// work-pulling reliable delivery flow. Authorized workers are discovered
+// through registration fencing rather than a peer name. The actor system
+// creates and owns a work-pulling producer controller next to the endpoint;
+// the producer answers the same RequestNext/Produced/Stored/StoredAck
+// contract as point-to-point. WithChunking and WithDurableQueue are rejected
+// in this iteration. Reliable endpoints must be long-lived: finite
+// passivation is rejected at spawn.
+func AsWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
+	producer := &reliableProducerConfig{
+		workPulling:        true,
+		localRetryInterval: DefaultLocalRetryInterval,
+		queueRetry: &reliableQueueRetryConfig{
+			maxAttempts:    DefaultQueueRetryAttempts,
+			initialBackoff: DefaultQueueRetryBackoff,
+		},
+	}
+
+	for _, opt := range opts {
+		opt(producer)
+	}
+
+	return spawnOption(func(config *spawnConfig) {
+		config.reliableDelivery = &reliableDeliveryConfig{producer: producer}
+		config.durableQueue = producer.queue
+	})
+}
+
+// AsWorkPullingWorker spawns the actor as a work-pulling worker endpoint that
+// pulls jobs from the named producer. The worker runs the unchanged consumer
+// controller and answers Delivery with Confirmed; processing must be
+// idempotent because a lost worker requeues unconfirmed work under the same
+// MessageID. Reliable endpoints must be long-lived: finite passivation is
+// rejected at spawn.
+func AsWorkPullingWorker(producerName string, opts ...ReliableConsumerOption) SpawnOption {
+	return AsReliableConsumer(producerName, opts...)
+}

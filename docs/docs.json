@@ -106,7 +106,10 @@
           "/clustering/partition-hashing",
           {
             "group": "Reliable Delivery",
-            "pages": ["/clustering/reliable-delivery/point-to-point"]
+            "pages": [
+              "/clustering/reliable-delivery/point-to-point",
+              "/clustering/reliable-delivery/work-pulling"
+            ]
           }
         ],
         "icon": "network"

@@ -67,6 +67,9 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 		"valid producer": {
 			config: producerDeliveryConfig("consumer"),
 		},
+		"valid work-pulling producer": {
+			config: workPullingProducerConfig(),
+		},
 		"valid producer with options": {
 			config: &reliableDeliveryConfig{
 				producer: &reliableProducerConfig{
@@ -96,6 +99,22 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 		},
 		"producer with blank consumer name": {
 			config:  producerDeliveryConfig("  "),
+			invalid: true,
+		},
+		"work-pulling producer with consumer name": {
+			config: func() *reliableDeliveryConfig {
+				config := workPullingProducerConfig()
+				config.producer.consumerName = "worker"
+				return config
+			}(),
+			invalid: true,
+		},
+		"work-pulling producer with chunking": {
+			config: func() *reliableDeliveryConfig {
+				config := workPullingProducerConfig()
+				config.producer.maxChunkBytes = MinChunkSize
+				return config
+			}(),
 			invalid: true,
 		},
 		"producer with reserved consumer name": {

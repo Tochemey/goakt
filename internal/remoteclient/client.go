@@ -2170,6 +2170,11 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 	case spec == nil:
 		return nil
 	case spec.Producer != nil:
+		pattern := internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT
+		if spec.Producer.WorkPulling {
+			pattern = internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
+		}
+
 		producer := &internalpb.ReliableProducerConfig{
 			ConsumerName: spec.Producer.ConsumerName,
 			QueueRetry: &internalpb.QueueRetryConfig{
@@ -2179,6 +2184,7 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
 			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
 			MaxChunkBytes:        spec.Producer.MaxChunkBytes,
+			Pattern:              pattern,
 		}
 
 		if spec.Producer.DurableQueueID != "" {

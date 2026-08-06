@@ -52,8 +52,13 @@ type ReliableDeliverySpec struct {
 // remotely spawned reliable producer endpoint.
 type ReliableProducerSpec struct {
 	// ConsumerName names the one consumer endpoint authorized to receive the
-	// producer's messages.
+	// producer's messages. Empty when WorkPulling is set: workers are
+	// discovered through registration fencing.
 	ConsumerName string
+
+	// WorkPulling selects the work-pulling producer controller that
+	// multiplexes per-worker point-to-point sub-flows; false is point-to-point.
+	WorkPulling bool
 
 	// DurableQueueID references the durable producer queue among the spawn
 	// request dependencies; empty runs the flow without durable storage.
@@ -115,7 +120,19 @@ func (x *ReliableDeliverySpec) Validate() error {
 
 // Validate checks the producer-side delivery settings.
 func (x *ReliableProducerSpec) Validate() error {
-	if strings.TrimSpace(x.ConsumerName) == "" {
+	if x.WorkPulling {
+		if strings.TrimSpace(x.ConsumerName) != "" {
+			return errors.New("work-pulling producer rejects a consumer endpoint name")
+		}
+
+		if x.MaxChunkBytes != 0 {
+			return errors.New("work-pulling producer rejects chunking")
+		}
+
+		if strings.TrimSpace(x.DurableQueueID) != "" {
+			return errors.New("work-pulling producer rejects a durable producer queue")
+		}
+	} else if strings.TrimSpace(x.ConsumerName) == "" {
 		return errors.New("consumer endpoint name is required")
 	}
 

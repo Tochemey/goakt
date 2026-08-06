@@ -50,8 +50,12 @@ type reliableDeliveryConfig struct {
 // reliableProducerConfig holds producer-side delivery settings.
 type reliableProducerConfig struct {
 	// consumerName names the one consumer endpoint authorized to receive the
-	// producer's messages.
+	// producer's messages. Empty when workPulling is set: workers are
+	// discovered through registration fencing.
 	consumerName string
+	// workPulling selects the work-pulling producer controller that
+	// multiplexes per-worker point-to-point sub-flows; false is point-to-point.
+	workPulling bool
 	// durableQueueID references the durable queue in the endpoint's user
 	// dependencies; empty means the flow runs without a durable queue.
 	durableQueueID string
@@ -128,7 +132,19 @@ func (x *reliableDeliveryConfig) role() ReliableControllerRole {
 // controller's constructor guards, so a configuration that passes validation
 // always builds a controller during the endpoint spawn transaction.
 func (x *reliableProducerConfig) Validate() error {
-	if err := validateReliablePeerName(x.consumerName); err != nil {
+	if x.workPulling {
+		if !types.IsBlank(x.consumerName) {
+			return errors.New("work-pulling producer rejects a consumer endpoint name")
+		}
+
+		if x.maxChunkBytes != 0 {
+			return errors.New("work-pulling producer rejects chunking")
+		}
+
+		if x.durableQueueID != "" || x.queue != nil {
+			return errors.New("work-pulling producer rejects a durable producer queue")
+		}
+	} else if err := validateReliablePeerName(x.consumerName); err != nil {
 		return err
 	}
 
@@ -233,6 +249,7 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 			ConsumerName:         x.producer.consumerName,
 			DeliveryConfirmation: x.producer.deliveryConfirmation,
 			MaxChunkBytes:        x.producer.maxChunkBytes,
+			Pattern:              reliableDeliveryPatternToProto(x.producer.workPulling),
 		}
 
 		if x.producer.durableQueueID != "" {
@@ -285,6 +302,7 @@ func (x *reliableDeliveryConfig) toRemoteSpec() *remote.ReliableDeliverySpec {
 	case x.producer != nil:
 		producer := &remote.ReliableProducerSpec{
 			ConsumerName:         x.producer.consumerName,
+			WorkPulling:          x.producer.workPulling,
 			DurableQueueID:       x.producer.durableQueueID,
 			LocalRetryInterval:   x.producer.localRetryInterval,
 			DeliveryConfirmation: x.producer.deliveryConfirmation,
@@ -322,6 +340,7 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 	case *internalpb.ReliableDeliveryConfig_Producer:
 		producer := &reliableProducerConfig{
 			consumerName:         endpoint.Producer.GetConsumerName(),
+			workPulling:          reliableDeliveryPatternFromProto(endpoint.Producer.GetPattern()),
 			durableQueueID:       endpoint.Producer.GetDurableQueueId(),
 			deliveryConfirmation: endpoint.Producer.GetDeliveryConfirmation(),
 			maxChunkBytes:        endpoint.Producer.GetMaxChunkBytes(),
@@ -418,6 +437,24 @@ func durableQueueByID(dependencies []extension.Dependency, id string) (DurablePr
 	}
 
 	return nil, fmt.Errorf("durable producer queue dependency=%s is missing from the endpoint dependencies", id)
+}
+
+// reliableDeliveryPatternToProto maps the in-memory work-pulling flag to its
+// wire pattern. Point-to-point is written explicitly so relocation and remote
+// spawn rebuild the same controller without relying on the unspecified default.
+func reliableDeliveryPatternToProto(workPulling bool) internalpb.ReliableDeliveryPattern {
+	if workPulling {
+		return internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
+	}
+
+	return internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT
+}
+
+// reliableDeliveryPatternFromProto restores the work-pulling flag from its
+// wire pattern. Unspecified means point-to-point so records written before
+// the field existed keep their original meaning.
+func reliableDeliveryPatternFromProto(pattern internalpb.ReliableDeliveryPattern) bool {
+	return pattern == internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
 }
 
 // durationFromProto converts an optional wire duration, rejecting malformed

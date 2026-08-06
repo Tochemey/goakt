@@ -76,6 +76,61 @@ func (ReliableControllerRole) EnumDescriptor() ([]byte, []int) {
 	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
 }
 
+// ReliableDeliveryPattern selects the producer-side delivery pattern.
+type ReliableDeliveryPattern int32
+
+const (
+	// The pattern is not set; decoded as point-to-point for compatibility with
+	// records written before the field existed.
+	ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_UNSPECIFIED ReliableDeliveryPattern = 0
+	// One producer endpoint feeds exactly one named consumer endpoint.
+	ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT ReliableDeliveryPattern = 1
+	// One producer endpoint distributes work across dynamically registered
+	// workers that each run a consumer controller.
+	ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING ReliableDeliveryPattern = 2
+)
+
+// Enum value maps for ReliableDeliveryPattern.
+var (
+	ReliableDeliveryPattern_name = map[int32]string{
+		0: "RELIABLE_DELIVERY_PATTERN_UNSPECIFIED",
+		1: "RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT",
+		2: "RELIABLE_DELIVERY_PATTERN_WORK_PULLING",
+	}
+	ReliableDeliveryPattern_value = map[string]int32{
+		"RELIABLE_DELIVERY_PATTERN_UNSPECIFIED":    0,
+		"RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT": 1,
+		"RELIABLE_DELIVERY_PATTERN_WORK_PULLING":   2,
+	}
+)
+
+func (x ReliableDeliveryPattern) Enum() *ReliableDeliveryPattern {
+	p := new(ReliableDeliveryPattern)
+	*p = x
+	return p
+}
+
+func (x ReliableDeliveryPattern) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReliableDeliveryPattern) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_delivery_proto_enumTypes[1].Descriptor()
+}
+
+func (ReliableDeliveryPattern) Type() protoreflect.EnumType {
+	return &file_internal_delivery_proto_enumTypes[1]
+}
+
+func (x ReliableDeliveryPattern) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReliableDeliveryPattern.Descriptor instead.
+func (ReliableDeliveryPattern) EnumDescriptor() ([]byte, []int) {
+	return file_internal_delivery_proto_rawDescGZIP(), []int{1}
+}
+
 // ReliableCompanionSpec marks an actor record as the endpoint-owned
 // reliable-delivery controller of one endpoint incarnation and carries the
 // ownership fields that cluster resolution validates.
@@ -231,6 +286,7 @@ func (*ReliableDeliveryConfig_Consumer) isReliableDeliveryConfig_Endpoint() {}
 type ReliableProducerConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Names the consumer endpoint authorized to receive messages.
+	// Empty when pattern is work-pulling: workers are discovered by registration.
 	ConsumerName string `protobuf:"bytes,1,opt,name=consumer_name,json=consumerName,proto3" json:"consumer_name,omitempty"`
 	// Identifies the durable queue in the endpoint's user dependencies.
 	DurableQueueId *string `protobuf:"bytes,2,opt,name=durable_queue_id,json=durableQueueId,proto3,oneof" json:"durable_queue_id,omitempty"`
@@ -243,6 +299,9 @@ type ReliableProducerConfig struct {
 	// Splits payloads larger than this many bytes into sequenced chunks; zero
 	// disables chunking.
 	MaxChunkBytes uint32 `protobuf:"varint,6,opt,name=max_chunk_bytes,json=maxChunkBytes,proto3" json:"max_chunk_bytes,omitempty"`
+	// Selects point-to-point or work-pulling on the producer side. Unspecified
+	// is treated as point-to-point.
+	Pattern       ReliableDeliveryPattern `protobuf:"varint,7,opt,name=pattern,proto3,enum=internalpb.ReliableDeliveryPattern" json:"pattern,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -317,6 +376,13 @@ func (x *ReliableProducerConfig) GetMaxChunkBytes() uint32 {
 		return x.MaxChunkBytes
 	}
 	return 0
+}
+
+func (x *ReliableProducerConfig) GetPattern() ReliableDeliveryPattern {
+	if x != nil {
+		return x.Pattern
+	}
+	return ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_UNSPECIFIED
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.
@@ -1029,7 +1095,7 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\bproducer\x18\x01 \x01(\v2\".internalpb.ReliableProducerConfigH\x00R\bproducer\x12@\n" +
 	"\bconsumer\x18\x02 \x01(\v2\".internalpb.ReliableConsumerConfigH\x00R\bconsumerB\n" +
 	"\n" +
-	"\bendpoint\"\xea\x02\n" +
+	"\bendpoint\"\xa9\x03\n" +
 	"\x16ReliableProducerConfig\x12#\n" +
 	"\rconsumer_name\x18\x01 \x01(\tR\fconsumerName\x12-\n" +
 	"\x10durable_queue_id\x18\x02 \x01(\tH\x00R\x0edurableQueueId\x88\x01\x01\x12=\n" +
@@ -1037,7 +1103,8 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"queueRetry\x12K\n" +
 	"\x14local_retry_interval\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x12localRetryInterval\x123\n" +
 	"\x15delivery_confirmation\x18\x05 \x01(\bR\x14deliveryConfirmation\x12&\n" +
-	"\x0fmax_chunk_bytes\x18\x06 \x01(\rR\rmaxChunkBytesB\x13\n" +
+	"\x0fmax_chunk_bytes\x18\x06 \x01(\rR\rmaxChunkBytes\x12=\n" +
+	"\apattern\x18\a \x01(\x0e2#.internalpb.ReliableDeliveryPatternR\apatternB\x13\n" +
 	"\x11_durable_queue_id\"\xb1\x01\n" +
 	"\x16ReliableConsumerConfig\x12#\n" +
 	"\rproducer_name\x18\x01 \x01(\tR\fproducerName\x12.\n" +
@@ -1090,7 +1157,11 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"\x16ReliableControllerRole\x12(\n" +
 	"$RELIABLE_CONTROLLER_ROLE_UNSPECIFIED\x10\x00\x12%\n" +
 	"!RELIABLE_CONTROLLER_ROLE_PRODUCER\x10\x01\x12%\n" +
-	"!RELIABLE_CONTROLLER_ROLE_CONSUMER\x10\x02B\xa6\x01\n" +
+	"!RELIABLE_CONTROLLER_ROLE_CONSUMER\x10\x02*\x9e\x01\n" +
+	"\x17ReliableDeliveryPattern\x12)\n" +
+	"%RELIABLE_DELIVERY_PATTERN_UNSPECIFIED\x10\x00\x12,\n" +
+	"(RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT\x10\x01\x12*\n" +
+	"&RELIABLE_DELIVERY_PATTERN_WORK_PULLING\x10\x02B\xa6\x01\n" +
 	"\x0ecom.internalpbB\rDeliveryProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
@@ -1108,45 +1179,47 @@ func file_internal_delivery_proto_rawDescGZIP() []byte {
 	return file_internal_delivery_proto_rawDescData
 }
 
-var file_internal_delivery_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_delivery_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_internal_delivery_proto_goTypes = []any{
 	(ReliableControllerRole)(0),    // 0: internalpb.ReliableControllerRole
-	(*ReliableCompanionSpec)(nil),  // 1: internalpb.ReliableCompanionSpec
-	(*ReliableDeliveryConfig)(nil), // 2: internalpb.ReliableDeliveryConfig
-	(*ReliableProducerConfig)(nil), // 3: internalpb.ReliableProducerConfig
-	(*ReliableConsumerConfig)(nil), // 4: internalpb.ReliableConsumerConfig
-	(*QueueRetryConfig)(nil),       // 5: internalpb.QueueRetryConfig
-	(*ReliablePayload)(nil),        // 6: internalpb.ReliablePayload
-	(*RegisterConsumer)(nil),       // 7: internalpb.RegisterConsumer
-	(*RegistrationAck)(nil),        // 8: internalpb.RegistrationAck
-	(*Request)(nil),                // 9: internalpb.Request
-	(*Ack)(nil),                    // 10: internalpb.Ack
-	(*ChunkInfo)(nil),              // 11: internalpb.ChunkInfo
-	(*SequencedMessage)(nil),       // 12: internalpb.SequencedMessage
-	(*DeliveryEnvelope)(nil),       // 13: internalpb.DeliveryEnvelope
-	(*durationpb.Duration)(nil),    // 14: google.protobuf.Duration
+	(ReliableDeliveryPattern)(0),   // 1: internalpb.ReliableDeliveryPattern
+	(*ReliableCompanionSpec)(nil),  // 2: internalpb.ReliableCompanionSpec
+	(*ReliableDeliveryConfig)(nil), // 3: internalpb.ReliableDeliveryConfig
+	(*ReliableProducerConfig)(nil), // 4: internalpb.ReliableProducerConfig
+	(*ReliableConsumerConfig)(nil), // 5: internalpb.ReliableConsumerConfig
+	(*QueueRetryConfig)(nil),       // 6: internalpb.QueueRetryConfig
+	(*ReliablePayload)(nil),        // 7: internalpb.ReliablePayload
+	(*RegisterConsumer)(nil),       // 8: internalpb.RegisterConsumer
+	(*RegistrationAck)(nil),        // 9: internalpb.RegistrationAck
+	(*Request)(nil),                // 10: internalpb.Request
+	(*Ack)(nil),                    // 11: internalpb.Ack
+	(*ChunkInfo)(nil),              // 12: internalpb.ChunkInfo
+	(*SequencedMessage)(nil),       // 13: internalpb.SequencedMessage
+	(*DeliveryEnvelope)(nil),       // 14: internalpb.DeliveryEnvelope
+	(*durationpb.Duration)(nil),    // 15: google.protobuf.Duration
 }
 var file_internal_delivery_proto_depIdxs = []int32{
 	0,  // 0: internalpb.ReliableCompanionSpec.role:type_name -> internalpb.ReliableControllerRole
-	3,  // 1: internalpb.ReliableDeliveryConfig.producer:type_name -> internalpb.ReliableProducerConfig
-	4,  // 2: internalpb.ReliableDeliveryConfig.consumer:type_name -> internalpb.ReliableConsumerConfig
-	5,  // 3: internalpb.ReliableProducerConfig.queue_retry:type_name -> internalpb.QueueRetryConfig
-	14, // 4: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
-	14, // 5: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
-	14, // 6: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
-	6,  // 7: internalpb.SequencedMessage.payload:type_name -> internalpb.ReliablePayload
-	11, // 8: internalpb.SequencedMessage.chunk_info:type_name -> internalpb.ChunkInfo
-	7,  // 9: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
-	8,  // 10: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
-	9,  // 11: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
-	10, // 12: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
-	12, // 13: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	4,  // 1: internalpb.ReliableDeliveryConfig.producer:type_name -> internalpb.ReliableProducerConfig
+	5,  // 2: internalpb.ReliableDeliveryConfig.consumer:type_name -> internalpb.ReliableConsumerConfig
+	6,  // 3: internalpb.ReliableProducerConfig.queue_retry:type_name -> internalpb.QueueRetryConfig
+	15, // 4: internalpb.ReliableProducerConfig.local_retry_interval:type_name -> google.protobuf.Duration
+	1,  // 5: internalpb.ReliableProducerConfig.pattern:type_name -> internalpb.ReliableDeliveryPattern
+	15, // 6: internalpb.ReliableConsumerConfig.resend_interval:type_name -> google.protobuf.Duration
+	15, // 7: internalpb.QueueRetryConfig.initial_backoff:type_name -> google.protobuf.Duration
+	7,  // 8: internalpb.SequencedMessage.payload:type_name -> internalpb.ReliablePayload
+	12, // 9: internalpb.SequencedMessage.chunk_info:type_name -> internalpb.ChunkInfo
+	8,  // 10: internalpb.DeliveryEnvelope.register_consumer:type_name -> internalpb.RegisterConsumer
+	9,  // 11: internalpb.DeliveryEnvelope.registration_ack:type_name -> internalpb.RegistrationAck
+	10, // 12: internalpb.DeliveryEnvelope.request:type_name -> internalpb.Request
+	11, // 13: internalpb.DeliveryEnvelope.ack:type_name -> internalpb.Ack
+	13, // 14: internalpb.DeliveryEnvelope.sequenced_message:type_name -> internalpb.SequencedMessage
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_internal_delivery_proto_init() }
@@ -1171,7 +1244,7 @@ func file_internal_delivery_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_delivery_proto_rawDesc), len(file_internal_delivery_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,

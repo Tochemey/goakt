@@ -75,6 +75,45 @@ func newReliableClusterFixture(t *testing.T) (context.Context, []*actorSystem) {
 	return ctx, systems
 }
 
+func TestWorkPullingDeliveryClusterFlow(t *testing.T) {
+	ctx, systems := newReliableClusterFixture(t)
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+
+	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+		AsWorkPullingProducer(WithLocalRetryInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	worker1, err := node2.Spawn(ctx, "jobs-worker-1", &reliableConsumerMock{autoConfirm: true},
+		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	worker2, err := node3.Spawn(ctx, "jobs-worker-2", &reliableConsumerMock{autoConfirm: true},
+		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+	require.NoError(t, err)
+
+	for i := 1; i <= 4; i++ {
+		id := fmt.Sprintf("job-%d", i)
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+	}
+
+	require.Eventually(t, func() bool {
+		all := append(awaitDeliveriesSnapshot(t, ctx, worker1), awaitDeliveriesSnapshot(t, ctx, worker2)...)
+		return len(distinctDeliveries(all)) >= 4
+	}, 30*time.Second, 50*time.Millisecond)
+
+	all := distinctDeliveries(append(awaitDeliveriesSnapshot(t, ctx, worker1), awaitDeliveriesSnapshot(t, ctx, worker2)...))
+	require.Len(t, all, 4)
+
+	seen := make(map[string]bool, len(all))
+	for _, delivery := range all {
+		seen[delivery.MessageID()] = true
+	}
+
+	for i := 1; i <= 4; i++ {
+		assert.True(t, seen[fmt.Sprintf("job-%d", i)])
+	}
+}
+
 func TestReliableDeliveryClusterFlow(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]

@@ -866,6 +866,9 @@ type ActorSystem interface {
 	// bound to the named endpoint's current incarnation using local-first
 	// resolution, falling back to the cluster registry for remote endpoints.
 	resolveReliableCompanion(ctx context.Context, endpointName string, role ReliableControllerRole) (*PID, error)
+	// authenticateWorkPullingWorker verifies that sender is the live consumer
+	// companion of an endpoint whose consumer configuration names producerName.
+	authenticateWorkPullingWorker(ctx context.Context, sender *PID, producerName string) (*PID, string, error)
 	getGrains() *xsync.Map[string, *grainPID]
 	// routeAsyncReply delivers a response to whoever awaits the given correlation
 	// ID, using the reply target carried on the originating request.

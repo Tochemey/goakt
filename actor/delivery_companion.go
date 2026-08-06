@@ -317,16 +317,126 @@ func (x *actorSystem) releaseDepartedReliableCompanion(ctx context.Context, prop
 
 // newReliableController builds the role-specific controller of a reliable
 // endpoint from its retained settings: the producer side carries the durable
-// queue instance and retry policy, the consumer side carries flow control.
+// queue instance and retry policy (or the work-pulling multiplexer when that
+// pattern is selected), the consumer side carries flow control.
 func newReliableController(endpoint *PID) Actor {
 	config := endpoint.reliableDelivery
 
 	if producerConfig := config.producer; producerConfig != nil {
+		if producerConfig.workPulling {
+			return newWorkPullingProducerController(endpoint, producerConfig)
+		}
+
 		return newProducerController(endpoint, producerConfig, endpoint.durableQueue)
 	}
 
 	consumerConfig := config.consumer
 	return newConsumerController(endpoint, consumerConfig.producerName, consumerConfig.flowControlWindow, consumerConfig.resendInterval)
+}
+
+// authenticateWorkPullingWorker verifies that sender is the live consumer
+// companion of an endpoint whose reliable-consumer configuration names
+// producerName. Companion names are self-describing, so fencing starts from
+// the sender rather than a preconfigured peer list: local senders are checked
+// against the local tree, and remote senders against the cluster registry.
+// Success returns the verified companion and the worker endpoint name.
+func (x *actorSystem) authenticateWorkPullingWorker(ctx context.Context, sender *PID, producerName string) (*PID, string, error) {
+	if sender == nil {
+		return nil, "", errors.New("registration sender is required")
+	}
+
+	if types.IsBlank(producerName) {
+		return nil, "", errors.New("producer endpoint name is required")
+	}
+
+	if sender.IsLocal() {
+		return x.authenticateLocalWorkPullingWorker(sender, producerName)
+	}
+
+	return x.authenticateRemoteWorkPullingWorker(ctx, sender, producerName)
+}
+
+// authenticateLocalWorkPullingWorker fences a local registration sender against
+// the local actor tree and the owning endpoint's consumer configuration.
+func (x *actorSystem) authenticateLocalWorkPullingWorker(sender *PID, producerName string) (*PID, string, error) {
+	spec := sender.reliableCompanion
+	if spec == nil || spec.role != ReliableControllerRoleConsumer {
+		return nil, "", fmt.Errorf("%w: sender=%s is not a consumer companion", errReliableCompanionUnavailable, sender.Name())
+	}
+
+	node, ok := x.actors.nodeByName(spec.endpointName)
+	if !ok {
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s has no local record", errReliableCompanionUnavailable, spec.endpointName)
+	}
+
+	endpoint := node.value()
+	if !endpoint.IsRunning() {
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s is not running", errReliableCompanionUnavailable, spec.endpointName)
+	}
+
+	if err := validateReliableCompanion(endpoint, sender, ReliableControllerRoleConsumer); err != nil {
+		return nil, "", err
+	}
+
+	consumer := endpoint.reliableDelivery
+	if consumer == nil || consumer.consumer == nil || consumer.consumer.producerName != producerName {
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s does not name producer=%s", errReliableCompanionUnavailable, spec.endpointName, producerName)
+	}
+
+	return sender, spec.endpointName, nil
+}
+
+// authenticateRemoteWorkPullingWorker fences a remote registration sender
+// through the cluster registry: the sender's companion record must validate,
+// live with its owning endpoint on one node, and that endpoint's consumer
+// configuration must name producerName.
+func (x *actorSystem) authenticateRemoteWorkPullingWorker(ctx context.Context, sender *PID, producerName string) (*PID, string, error) {
+	if !x.clusterEnabled.Load() {
+		return nil, "", fmt.Errorf("%w: remote worker registration requires cluster mode", errReliableCompanionUnavailable)
+	}
+
+	registry := x.getCluster()
+	record, err := registry.GetActor(ctx, sender.Name())
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: companion=%s has no registry record: %v", errReliableCompanionUnavailable, sender.Name(), err)
+	}
+
+	spec, specErr := reliableCompanionSpecFromProto(record.GetReliableCompanion())
+	companionAddress, companionErr := address.Parse(record.GetAddress())
+
+	switch {
+	case specErr != nil:
+		return nil, "", fmt.Errorf("%w: record=%s is not a runtime companion: %v", errReliableCompanionUnavailable, sender.Name(), specErr)
+	case spec.role != ReliableControllerRoleConsumer:
+		return nil, "", fmt.Errorf("%w: companion=%s runs role=%s, want role=%s", errReliableCompanionUnavailable, sender.Name(), spec.role, ReliableControllerRoleConsumer)
+	case companionErr != nil:
+		return nil, "", fmt.Errorf("%w: companion=%s carries an invalid address", errReliableCompanionUnavailable, sender.Name())
+	case !companionAddress.Equals(pathToAddress(sender.Path())):
+		return nil, "", fmt.Errorf("%w: companion=%s address does not match the registration sender", errReliableCompanionUnavailable, sender.Name())
+	}
+
+	endpoint, err := registry.GetActor(ctx, spec.endpointName)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s has no registry record: %v", errReliableCompanionUnavailable, spec.endpointName, err)
+	}
+
+	endpointAddress, endpointErr := address.Parse(endpoint.GetAddress())
+	delivery, deliveryErr := reliableDeliveryConfigFromProto(endpoint.GetReliableDelivery())
+
+	switch {
+	case endpointErr != nil:
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s carries an invalid address", errReliableCompanionUnavailable, spec.endpointName)
+	case endpointAddress.HostPort() != companionAddress.HostPort():
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s and companion=%s records live on different nodes", errReliableCompanionUnavailable, spec.endpointName, sender.Name())
+	case spec.endpointIncarnationID != endpoint.GetIncarnationId():
+		return nil, "", fmt.Errorf("%w: companion=%s is bound to incarnation=%s, want incarnation=%s", errReliableCompanionUnavailable, sender.Name(), spec.endpointIncarnationID, endpoint.GetIncarnationId())
+	case deliveryErr != nil || delivery == nil || delivery.consumer == nil:
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s has no consumer configuration", errReliableCompanionUnavailable, spec.endpointName)
+	case delivery.consumer.producerName != producerName:
+		return nil, "", fmt.Errorf("%w: worker endpoint=%s does not name producer=%s", errReliableCompanionUnavailable, spec.endpointName, producerName)
+	default:
+		return sender, spec.endpointName, nil
+	}
 }
 
 // validateReliableCompanion enforces local-tree ownership of a companion:

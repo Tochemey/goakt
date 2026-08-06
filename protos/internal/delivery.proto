@@ -17,6 +17,18 @@ enum ReliableControllerRole {
   RELIABLE_CONTROLLER_ROLE_CONSUMER = 2;
 }
 
+// ReliableDeliveryPattern selects the producer-side delivery pattern.
+enum ReliableDeliveryPattern {
+  // The pattern is not set; decoded as point-to-point for compatibility with
+  // records written before the field existed.
+  RELIABLE_DELIVERY_PATTERN_UNSPECIFIED = 0;
+  // One producer endpoint feeds exactly one named consumer endpoint.
+  RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT = 1;
+  // One producer endpoint distributes work across dynamically registered
+  // workers that each run a consumer controller.
+  RELIABLE_DELIVERY_PATTERN_WORK_PULLING = 2;
+}
+
 // ReliableCompanionSpec marks an actor record as the endpoint-owned
 // reliable-delivery controller of one endpoint incarnation and carries the
 // ownership fields that cluster resolution validates.
@@ -42,6 +54,7 @@ message ReliableDeliveryConfig {
 // ReliableProducerConfig defines producer-side delivery settings.
 message ReliableProducerConfig {
   // Names the consumer endpoint authorized to receive messages.
+  // Empty when pattern is work-pulling: workers are discovered by registration.
   string consumer_name = 1;
   // Identifies the durable queue in the endpoint's user dependencies.
   optional string durable_queue_id = 2;
@@ -54,6 +67,9 @@ message ReliableProducerConfig {
   // Splits payloads larger than this many bytes into sequenced chunks; zero
   // disables chunking.
   uint32 max_chunk_bytes = 6;
+  // Selects point-to-point or work-pulling on the producer side. Unspecified
+  // is treated as point-to-point.
+  ReliableDeliveryPattern pattern = 7;
 }
 
 // ReliableConsumerConfig defines consumer-side delivery settings.
