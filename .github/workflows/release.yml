@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - CHANGELOG.md
+      - changelogs/**
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Parse CHANGELOG and print the release notes, but skip tag/release/discussion creation."
+        description: "Parse changelogs/ and print the release notes, but skip tag/release/discussion creation."
         type: boolean
         default: true
 
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   release:
-    name: Cut release from CHANGELOG
+    name: Cut release from changelogs
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,46 +31,93 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Parse top CHANGELOG section
+      - name: Select changelog and parse release notes
         id: parse
         run: |
           set -euo pipefail
 
-          header=$(awk '/^## / { print; exit }' CHANGELOG.md)
-          echo "Top header: ${header}"
+          version_file_re='^changelogs/v[0-9]+\.[0-9]+\.[0-9]+\.md$'
+          header_re='^# (v[0-9]+\.[0-9]+\.[0-9]+) - ([0-9]{4}-[0-9]{2}-[0-9]{2})$'
 
-          if [[ ! "$header" =~ ^"## "(v[0-9]+\.[0-9]+\.[0-9]+)" - "[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$ ]]; then
-            echo "Top section is not a versioned release; nothing to do."
+          candidates_file=$(mktemp)
+          trap 'rm -f "$candidates_file"' EXIT
+
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            before="${GITHUB_EVENT_BEFORE:-}"
+            if [[ -z "$before" || "$before" =~ ^0+$ ]]; then
+              before="$(git rev-parse "${GITHUB_SHA}^" 2>/dev/null || true)"
+            fi
+
+            if [[ -n "$before" ]] && git cat-file -e "${before}^{commit}" 2>/dev/null; then
+              git diff --name-only --diff-filter=AM "$before" "$GITHUB_SHA" -- changelogs/ \
+                | grep -E "$version_file_re" > "$candidates_file" || true
+            else
+              # First commit / shallow history fallback: consider version files present at HEAD.
+              git ls-files 'changelogs/v*.md' | grep -E "$version_file_re" > "$candidates_file" || true
+            fi
+          else
+            # workflow_dispatch: consider every versioned changelog.
+            git ls-files 'changelogs/v*.md' | grep -E "$version_file_re" > "$candidates_file" || true
+          fi
+
+          if [[ ! -s "$candidates_file" ]]; then
+            echo "No versioned changelog candidates; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          version="${BASH_REMATCH[1]}"
 
-          if git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
-            echo "Tag ${version} already exists; nothing to do."
+          selected=""
+          selected_version=""
+          while IFS= read -r file; do
+            [[ -z "$file" || ! -f "$file" ]] && continue
+            version="$(basename "$file" .md)"
+            if git rev-parse --verify --quiet "refs/tags/${version}" >/dev/null; then
+              echo "Skipping ${file}: tag ${version} already exists."
+              continue
+            fi
+
+            header="$(awk 'NF { print; exit }' "$file")"
+            if [[ ! "$header" =~ $header_re ]]; then
+              echo "::error::${file}: first non-empty line must be '# ${version} - YYYY-MM-DD' (got: ${header})"
+              exit 1
+            fi
+            header_version="${BASH_REMATCH[1]}"
+            if [[ "$header_version" != "$version" ]]; then
+              echo "::error::${file}: header version ${header_version} does not match filename ${version}"
+              exit 1
+            fi
+
+            if [[ -z "$selected_version" ]] || \
+               printf '%s\n' "$selected_version" "$version" | sort -V | tail -n1 | grep -qx "$version"; then
+              selected="$file"
+              selected_version="$version"
+            fi
+          done < "$candidates_file"
+
+          if [[ -z "$selected" ]]; then
+            echo "All candidate changelog versions are already tagged; nothing to do."
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          awk -v hdr="$header" '
-            $0 == hdr { capture = 1; next }
-            capture && /^## / { exit }
-            capture {
-              buf = buf $0 "\n"
-              if (NF) { final = buf; started = 1 }
-              if (!NF && !started) { buf = "" }
-            }
+          version="$selected_version"
+          echo "Selected ${selected} for release ${version}"
+
+          # Body after the H1 title; keep in-file ## / ### section headings as release notes.
+          awk '
+            /^# / && !started { next }
+            /^$/ && !started { next }
+            { started = 1; buf = buf $0 "\n"; if (NF) final = buf }
             END { printf "%s", final }
-          ' CHANGELOG.md > release-notes.md
+          ' "$selected" > release-notes.md
 
           if [[ ! -s release-notes.md ]]; then
-            echo "Extracted release notes are empty; refusing to publish."
+            echo "Extracted release notes from ${selected} are empty; refusing to publish."
             exit 1
           fi
 
           prev=$(git tag --list 'v*' --sort=-v:refname | head -n 1 || true)
           if [[ -n "${prev}" ]]; then
-            # Pull Requests:
             shas_file=$(mktemp)
             prs_file=$(mktemp)
             if ! gh api "repos/${GITHUB_REPOSITORY}/compare/${prev}...${GITHUB_SHA}" \
@@ -89,7 +136,7 @@ jobs:
             rm -f "$shas_file"
 
             if [[ -s "$prs_file" ]]; then
-              printf '\n### 🔀 Pull Requests\n\n' >> release-notes.md
+              printf '\n## 🔀 Pull Requests\n\n' >> release-notes.md
               awk -F'\t' '!seen[$1]++ { printf "- #%s %s by @%s\n", $1, $2, $3 }' \
                 "$prs_file" >> release-notes.md
             fi
@@ -100,12 +147,14 @@ jobs:
           fi
 
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "changelog=${selected}" >> "$GITHUB_OUTPUT"
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Dry-run preview
         if: steps.parse.outputs.skip != 'true' && github.event.inputs.dry_run == 'true'
         run: |
           echo "::group::Would publish ${{ steps.parse.outputs.version }}"
+          echo "Changelog file:     ${{ steps.parse.outputs.changelog }}"
           echo "Target SHA:         ${{ github.sha }}"
           echo "Tag / title:        ${{ steps.parse.outputs.version }}"
           echo "Discussion category: Announcements"

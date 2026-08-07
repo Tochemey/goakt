@@ -44,9 +44,47 @@ Run `make help` to list every target. The common ones are:
 
 1. Make your changes in your fork.
 2. Ensure your code adheres to the project's style and passes tests: `make test`.
-3. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
-4. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
-5. Follow the instructions in the `playground` package to leave a working sample in case it is a bug or a new feature. This will help reviewers understand your changes and verify that they work as expected.
+3. Document user-visible changes in [`changelogs/unreleased.md`](changelogs/unreleased.md) (see [Changelog entries](#changelog-entries) below).
+4. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
+5. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
+6. Follow the instructions in the `playground` package to leave a working sample in case it is a bug or a new feature. This will help reviewers understand your changes and verify that they work as expected.
+
+### Changelog entries
+
+Document user-facing changes by creating or updating [`changelogs/unreleased.md`](changelogs/unreleased.md). Maintainers can only create or update `changelogs/unreleased.md` for pending release notes.
+
+If `changelogs/unreleased.md` is missing, create it with this skeleton:
+
+```markdown
+# Unreleased
+
+## ✨ Features
+
+## 🔧 Fixes
+
+## ⚡ Performance
+
+## ⚠️ Behavior Changes
+
+## 🗑️ Deprecations
+
+## 📚 Documentation
+```
+
+Keep only the section headings that have entries. Add your note under the matching section using the same style as existing releases:
+
+```markdown
+## ✨ Features
+
+- **Short title** ([#1234](https://github.com/Tochemey/goakt/issues/1234)). One or two sentences on what changed and why it matters to callers. Call out new APIs, options, or migration impact when relevant.
+```
+
+Guidelines:
+
+* Update `changelogs/unreleased.md` in the same pull request as the code change.
+* Link the authorizing GitHub issue (or PR) in the entry.
+* Prefer clear, user-facing language over implementation detail.
+* Purely internal refactors with no observable behavior change do not need a changelog entry.
 
 ### Contributor License Agreement (CLA)
 
