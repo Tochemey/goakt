@@ -144,6 +144,11 @@ var (
 	// ErrQueueConflict indicates that a durable producer queue operation conflicts with its current state.
 	ErrQueueConflict = errors.New("durable producer queue state conflict")
 
+	// ErrQueueChunkedBatch indicates that a durable producer queue Store targeted
+	// a business MessageID whose authoritative first write is a chunked batch, so
+	// the caller must recover the batch through StoreChunked instead.
+	ErrQueueChunkedBatch = errors.New("durable producer queue message is stored as a chunked batch")
+
 	// ErrReliableStore indicates that reliable delivery could not store a message.
 	ErrReliableStore = errors.New("reliable delivery store failed")
 

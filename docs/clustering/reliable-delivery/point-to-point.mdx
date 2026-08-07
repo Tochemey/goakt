@@ -355,7 +355,10 @@ type DurableProducerQueue interface {
     Load(ctx context.Context) (DurableQueueState, QueueEpoch, error)
 
     // Store durably records one message, indexed by MessageID and sequence.
-    // The first write for a MessageID is authoritative; retries return it.
+    // The first write for a MessageID is authoritative; retries return it. A
+    // MessageID whose retained first write is a chunked batch returns
+    // ErrQueueChunkedBatch without appending: the controller recovers the
+    // batch through a StoreChunked retry.
     Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error)
 
     // StoreChunked durably records every chunk of one business message in one
@@ -374,7 +377,7 @@ type DurableProducerQueue interface {
 }
 ```
 
-The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithQueueRetry`. The full contract is documented on the interface.
+The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; a `Store` addressing a `MessageID` owned by a retained chunked batch returns `ErrQueueChunkedBatch` so the controller can recover the batch instead of appending a duplicate; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithQueueRetry`. The full contract is documented on the interface.
 
 A producer backed by its own recoverable source completes the loop: it durably marks or removes the submission before replying `StoredAck`, and after a crash it resubmits every unmarked item with its original `MessageID`. The queue's first-write ownership then guarantees one durable sequence per message.
 
