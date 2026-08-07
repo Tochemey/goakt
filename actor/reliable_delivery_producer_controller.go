@@ -771,10 +771,17 @@ func (x *producerController) handleQueueOpResult(ctx *ReceiveContext, result *qu
 	x.pumpLane(ctx)
 }
 
-// handleQueueFailure classifies a durable operation failure: fencing and
-// conflicts are terminal, anything else restarts the controller to reload
-// authoritative state.
+// handleQueueFailure classifies a durable operation failure: a whole-payload
+// store rejected because the MessageID owns a chunked batch reroutes to the
+// StoreChunked retry that recovers the batch, fencing and conflicts are
+// terminal, anything else restarts the controller to reload authoritative
+// state.
 func (x *producerController) handleQueueFailure(ctx *ReceiveContext, result *queueOpResult) {
+	if result.kind == queueOpStore && errors.Is(result.err, gerrors.ErrQueueChunkedBatch) {
+		x.recoverChunkedBatch(ctx)
+		return
+	}
+
 	stage, wrap := ReliableDeliveryStageStore, gerrors.ErrReliableStore
 
 	switch result.kind {
@@ -790,6 +797,28 @@ func (x *producerController) handleQueueFailure(ctx *ReceiveContext, result *que
 	}
 
 	ctx.Err(fmt.Errorf("%w: %w", wrap, result.err))
+}
+
+// recoverChunkedBatch re-drives the pending store through StoreChunked after
+// Store reported that the business MessageID owns a stored chunked batch. The
+// case is a resubmission whose re-encode fell below the chunk threshold while
+// the original batch left the unconfirmed buffer but stayed indexed by the
+// queue, so routing by the fresh encode size would append a second copy of a
+// message the first write already owns. The proposal is one derived chunk
+// carrying the fresh encode; the queue's batch-keyed first-write ownership
+// ignores it and answers with the original chunks, which completeStoreChunked
+// rebuilds positionally.
+func (x *producerController) recoverChunkedBatch(ctx *ReceiveContext) {
+	entry, err := newChunkUnconfirmedMessage(durableChunkMessageID(x.pendingMessageID, 1, 1), x.currentSeq+1, x.pendingPayload, true, true)
+	if err != nil {
+		// deterministic impossible-value guard: the same pending state would
+		// rebuild and fail identically on any retry, so it is terminal
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("failed to build batch recovery for message=%s: %w", x.pendingMessageID, err))
+		return
+	}
+
+	x.pendingChunks = []UnconfirmedMessage{entry}
+	x.launchOp(ctx, queueOpStoreChunked)
 }
 
 // handleTick retries the outstanding local handshake message on the
@@ -1215,7 +1244,7 @@ func retryQueueOp(attempts int, backoff time.Duration, op func(ctx context.Conte
 	err := retrier.RunContext(context.Background(), func(taskCtx context.Context) error {
 		err := op(taskCtx)
 
-		if errors.Is(err, gerrors.ErrQueueFenced) || errors.Is(err, gerrors.ErrQueueConflict) {
+		if errors.Is(err, gerrors.ErrQueueFenced) || errors.Is(err, gerrors.ErrQueueConflict) || errors.Is(err, gerrors.ErrQueueChunkedBatch) {
 			terminal = err
 			return retry.Stop(err)
 		}

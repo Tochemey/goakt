@@ -125,6 +125,15 @@ func (x *mockDurableQueue) Store(_ context.Context, epoch QueueEpoch, request St
 		}
 	}
 
+	for _, message := range x.stored {
+		if strings.HasPrefix(message.MessageID(), durableChunkIDPrefix) && idFrom(message.MessageID()) == request.MessageID() {
+			// the business MessageID is owned by a stored chunked batch that a
+			// single StoreResult cannot carry: the contract directs the caller
+			// to recover it through a StoreChunked retry
+			return StoreResult{}, gerrors.ErrQueueChunkedBatch
+		}
+	}
+
 	if request.ProposedSeq() != x.currentSeq+1 {
 		return StoreResult{}, gerrors.ErrQueueConflict
 	}
@@ -1547,6 +1556,70 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 			return accepts == 2
 		}, 3*time.Second, 10*time.Millisecond)
+
+		queue.mu.Lock()
+		currentSeq := queue.currentSeq
+		queue.mu.Unlock()
+		assert.EqualValues(t, chunks, currentSeq)
+		assert.True(t, harness.producerController.IsRunning())
+	})
+
+	t.Run("With a confirmed retained chunked MessageID resubmitted below the chunk threshold reuses the batch", func(t *testing.T) {
+		queue := &mockDurableQueue{retainConfirmed: true}
+		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		sessionID := harness.register(t)
+		nonce := harness.nonceOf(t)
+
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
+		require.NoError(t, err)
+		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		require.GreaterOrEqual(t, chunks, 3)
+
+		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
+		require.NoError(t, err)
+		harness.fromConsumerController(t, request)
+
+		harness.produceOneWith(t, "m-below", payload)
+
+		require.Eventually(t, func() bool {
+			return len(harness.sequencedEmissions()) == chunks
+		}, 3*time.Second, 10*time.Millisecond)
+
+		confirm, err := commands.NewAck(sessionID, nonce, int64(chunks))
+		require.NoError(t, err)
+		harness.fromConsumerController(t, confirm)
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+			return slices.Contains(operations, "confirm")
+		}, 3*time.Second, 10*time.Millisecond)
+
+		// the confirmed chunks left the unconfirmed buffer while the queue kept
+		// the MessageID index, and the resubmission re-encodes below the chunk
+		// threshold: Store reports the chunked-batch owner and the controller
+		// recovers the original batch through the StoreChunked retry instead of
+		// appending a second copy of the message under fresh sequences
+		stored := harness.produceAgainWith(t, "m-below", &testpb.Reply{Content: "small"})
+		assert.EqualValues(t, chunks, stored.Seq())
+
+		require.Eventually(t, func() bool {
+			_, operations, _ := queue.snapshot()
+
+			accepts := 0
+			for _, operation := range operations {
+				if operation == "accept:m-below" {
+					accepts++
+				}
+			}
+
+			return accepts == 2
+		}, 3*time.Second, 10*time.Millisecond)
+
+		_, operations, _ := queue.snapshot()
+		for _, operation := range operations {
+			assert.NotEqual(t, "store:m-below", operation)
+		}
 
 		queue.mu.Lock()
 		currentSeq := queue.currentSeq

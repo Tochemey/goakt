@@ -342,8 +342,10 @@ func (x *consumerController) handleConfirmed(ctx *ReceiveContext, confirmed *Con
 // registration, a controller restart, a relocation, or plain idleness; the
 // matching ack always reasserts demand. Otherwise the unconfirmed delivery
 // is re-told, deliberately permitting duplicate business processing, or an
-// open gap requests a resend. Exactly one rule per tick keeps recovery
-// traffic bounded by the tick cadence.
+// open gap requests a resend after checking that the head chunk run is not
+// already structurally violated, because a resend cannot repair a violation
+// and would loop forever. Exactly one rule per tick keeps recovery traffic
+// bounded by the tick cadence.
 func (x *consumerController) handleTick(ctx *ReceiveContext, tick *consumerControllerTick) {
 	if tick.generation != x.generation {
 		return
@@ -355,10 +357,38 @@ func (x *consumerController) handleTick(ctx *ReceiveContext, tick *consumerContr
 	case x.inFlight != nil:
 		x.tell(ctx, x.consumer, x.inFlight)
 	case x.gapOpen():
+		if x.failWedgedChunkRun(ctx) {
+			return
+		}
+
 		x.sendGapRequest(ctx)
 	}
 
 	x.sawValidTraffic = false
+}
+
+// failWedgedChunkRun reports whether the buffered head chunk run is already
+// structurally violated, failing the flow terminally when it is. Assembly
+// raises the same violations, but it runs only once the run's sequence
+// coverage completes, and completion needs a buffered last chunk: a stream
+// whose violation is precisely that the run never terminates, such as a whole
+// message occupying the sequence where the run should have continued, would
+// otherwise stall in an endless resend loop, because every resend replays the
+// same shapes into the seq-deduplicated buffer. Scanning only on the tick's
+// gap rule keeps the cost off the per-arrival path and bounded by the tick
+// cadence.
+func (x *consumerController) failWedgedChunkRun(ctx *ReceiveContext) bool {
+	if len(x.buffer) == 0 || x.buffer[0].Seq() != x.expectedSeq || !x.buffer[0].Chunked() {
+		return false
+	}
+
+	_, _, violation := x.scanChunkRun()
+	if violation == nil {
+		return false
+	}
+
+	x.fail(ctx, ReliableDeliveryStageProtocol, violation)
+	return true
 }
 
 // handleTerminated stops the controller with its consumer and clears the
@@ -499,44 +529,14 @@ func (x *consumerController) drain(ctx *ReceiveContext) {
 // message contiguously, first to last, under one message ID: no resend can
 // reorder what the producer controller itself stored wrongly.
 func (x *consumerController) assemble(ctx *ReceiveContext) {
-	head := x.buffer[0]
-	if !head.FirstChunk() {
-		x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("chunk run of message=%s at seq=%d does not start with a first chunk", head.MessageID(), head.Seq()))
+	count, total, violation := x.scanChunkRun()
+	if violation != nil {
+		x.fail(ctx, ReliableDeliveryStageProtocol, violation)
 		return
 	}
 
-	next := x.expectedSeq
-	total := 0
-	count := 0
-
-	for index, entry := range x.buffer {
-		if entry.Seq() != next {
-			return // interior chunk missing: wait for the gap request
-		}
-
-		switch {
-		case !entry.Chunked():
-			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("whole message seq=%d interleaved into the chunk run of message=%s", entry.Seq(), head.MessageID()))
-			return
-		case entry.MessageID() != head.MessageID():
-			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("chunk run of message=%s changed message ID at seq=%d", head.MessageID(), entry.Seq()))
-			return
-		case index > 0 && entry.FirstChunk():
-			x.fail(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("unexpected first chunk at seq=%d inside the chunk run of message=%s", entry.Seq(), head.MessageID()))
-			return
-		}
-
-		total += entry.PayloadSize()
-		next++
-
-		if entry.LastChunk() {
-			count = index + 1
-			break
-		}
-	}
-
 	if count == 0 {
-		return // the last chunk has not arrived: wait for the gap request
+		return // interior or last chunk missing: wait for the gap request
 	}
 
 	frame := make([]byte, 0, total)
@@ -545,7 +545,51 @@ func (x *consumerController) assemble(ctx *ReceiveContext) {
 		frame = entry.AppendPayload(frame)
 	}
 
-	x.deliverFrame(ctx, head.MessageID(), x.buffer[count-1].Seq(), frame)
+	x.deliverFrame(ctx, x.buffer[0].MessageID(), x.buffer[count-1].Seq(), frame)
+}
+
+// scanChunkRun walks the contiguous buffered prefix of the chunk run starting
+// at expectedSeq and classifies it. A structural violation returns a terminal
+// error: the contiguous successor of a non-last chunk can only be the next
+// chunk of the same message, so a whole message, a foreign message ID, or a
+// repeated first chunk inside the run is proof of a violated producer stream
+// even before the run's coverage completes. A well-formed run whose last chunk
+// is buffered returns its entry count and total payload size; a well-formed
+// run still missing chunks returns zero values so the caller waits for the
+// gap request. The caller guarantees the buffer head is a chunk at
+// expectedSeq.
+func (x *consumerController) scanChunkRun() (int, int, error) {
+	head := x.buffer[0]
+	if !head.FirstChunk() {
+		return 0, 0, fmt.Errorf("chunk run of message=%s at seq=%d does not start with a first chunk", head.MessageID(), head.Seq())
+	}
+
+	next := x.expectedSeq
+	total := 0
+
+	for index, entry := range x.buffer {
+		if entry.Seq() != next {
+			return 0, 0, nil // interior chunk missing: wait for the gap request
+		}
+
+		switch {
+		case !entry.Chunked():
+			return 0, 0, fmt.Errorf("whole message seq=%d interleaved into the chunk run of message=%s", entry.Seq(), head.MessageID())
+		case entry.MessageID() != head.MessageID():
+			return 0, 0, fmt.Errorf("chunk run of message=%s changed message ID at seq=%d", head.MessageID(), entry.Seq())
+		case index > 0 && entry.FirstChunk():
+			return 0, 0, fmt.Errorf("unexpected first chunk at seq=%d inside the chunk run of message=%s", entry.Seq(), head.MessageID())
+		}
+
+		total += entry.PayloadSize()
+		next++
+
+		if entry.LastChunk() {
+			return index + 1, total, nil
+		}
+	}
+
+	return 0, 0, nil // the last chunk has not arrived: wait for the gap request
 }
 
 // purgeBuffer removes buffered entries below expectedSeq.

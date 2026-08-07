@@ -113,6 +113,13 @@ type DurableProducerQueue interface {
 	// For an existing MessageID, Store ignores the proposed sequence and payload
 	// and returns the authoritative first-write sequence and payload with
 	// AlreadyStored true. This retry path must not append another message.
+	//
+	// A business MessageID whose retained first write is a chunked batch is
+	// owned by that batch, not free for a whole-message append: Store must
+	// return ErrQueueChunkedBatch without appending, because a StoreResult
+	// cannot carry the batch. The controller recovers the original chunks
+	// through a StoreChunked retry, which keeps the first write authoritative
+	// when a resubmitted payload re-encodes below the chunk threshold.
 	Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error)
 
 	// StoreChunked durably records every chunk of one business message under

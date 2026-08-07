@@ -1074,6 +1074,41 @@ func TestConsumerControllerChunkedDelivery(t *testing.T) {
 		assert.ErrorContains(t, failure.Err(), "interleaved into the chunk run")
 	})
 
+	t.Run("With a whole message occupying the run continuation and no last chunk is terminal on the tick", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, 200*time.Millisecond, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		// no last chunk ever arrives for the head run, so sequence coverage
+		// never completes and assembly never classifies the stream: only the
+		// tick's gap rule can raise the violation instead of resending forever
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 2, []byte("mid"), false, false))
+		harness.fromProducerController(t, harness.sequenced(t, "session-1", 3))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "interleaved into the chunk run")
+	})
+
+	t.Run("With a foreign chunk continuing the run and no last chunk is terminal on the tick", func(t *testing.T) {
+		harness := newConsumerControllerHarness(t, 10, 200*time.Millisecond, true)
+		harness.adopt(t, "session-1", 1)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		// the foreign interior chunk occupies the run's continuation and
+		// neither run ever presents a last chunk, so only the tick's gap rule
+		// can classify the violated stream
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-1", 1, []byte("head"), true, false))
+		harness.fromProducerController(t, harness.chunk(t, "session-1", "m-2", 2, []byte("mid"), false, false))
+
+		failure := awaitFailure(t, subscriber)
+		assert.ErrorContains(t, failure.Err(), "changed message ID")
+	})
+
 	t.Run("With a message ID change inside a run is terminal", func(t *testing.T) {
 		harness := newConsumerControllerHarness(t, 10, time.Second, true)
 		harness.adopt(t, "session-1", 1)

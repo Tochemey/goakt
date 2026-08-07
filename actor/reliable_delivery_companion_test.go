@@ -1052,10 +1052,11 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 }
 
 func TestReliableEndpointRemoteSpawn(t *testing.T) {
-	// initial remote placement behaves exactly like a local spawn: the public
-	// spec travels with the spawn request, the hosting node restores the
-	// settings, resolves the durable queue among the dependencies, and creates
-	// the controller companion
+	// remote placement of a reliable endpoint resolves peer controllers
+	// through the cluster registry, so a remoting-only host rejects the spawn
+	// before creating an endpoint that could never connect: remoting-only
+	// flows spawn each endpoint locally on its own node with explicit peer
+	// addressing instead
 	ctx := context.TODO()
 	host := "127.0.0.1"
 	ports := dynaport.Get(1)
@@ -1095,20 +1096,12 @@ func TestReliableEndpointRemoteSpawn(t *testing.T) {
 			},
 		},
 	})
-	require.NoError(t, err)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, gerrors.ErrReliableClusterRequired.Error())
 
 	system := sys.(*actorSystem)
-	node, ok := system.actors.nodeByName("orders-producer")
-	require.True(t, ok)
-
-	endpoint := node.value()
-	require.NotNil(t, endpoint.reliableDelivery)
-	assert.Equal(t, "orders-consumer", endpoint.reliableDelivery.producer.consumerName)
-	require.NotNil(t, endpoint.durableQueue)
-
-	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
-	require.NoError(t, err)
-	assert.True(t, companion.IsRunning())
+	_, ok := system.actors.nodeByName("orders-producer")
+	assert.False(t, ok)
 }
 
 // getDeliverySenders asks senderRecordingConsumerMock for the sender of each
