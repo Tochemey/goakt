@@ -285,11 +285,11 @@ func main() {
 	// identical to the single-node sample, and the controllers resolve each
 	// other through the cluster registry
 	publisher, err := producerNode.Spawn(ctx, publisherName, &OrderPublisher{},
-		actor.AsReliableProducer(processorName, actor.WithLocalRetryInterval(retryInterval)))
+		actor.AsReliableProducer(processorName, actor.WithReliableRetryInterval(retryInterval)))
 	must(err)
 
 	processor, err := consumerNode.Spawn(ctx, processorName, &OrderProcessor{},
-		actor.AsReliableConsumer(publisherName, actor.WithResendInterval(retryInterval)))
+		actor.AsReliableConsumer(publisherName, actor.WithReliableResendInterval(retryInterval)))
 	must(err)
 
 	fmt.Printf("publisher on %s:%d, processor on %s:%d\n",

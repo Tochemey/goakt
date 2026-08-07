@@ -45,7 +45,7 @@ sequenceDiagram
 | Feature                                                                   | Where                                                                        |
 |---------------------------------------------------------------------------|------------------------------------------------------------------------------|
 | `AsReliableProducer` / `AsReliableConsumer` spawn options                 | the two `system.Spawn` calls in `main`                                       |
-| Retry cadence tuning (`WithLocalRetryInterval`, `WithResendInterval`)     | the same spawn calls                                                         |
+| Retry cadence tuning (`WithLocalRetryInterval`, `WithReliableResendInterval`)     | the same spawn calls                                                         |
 | The producer handshake (`RequestNext`, `Produced`, `Stored`, `StoredAck`) | `OrderPublisher.Receive` and `flush`                                         |
 | Idempotent re-answer of a retried grant                                   | the `lastToken`/`lastProduced` branch in `OrderPublisher.Receive`            |
 | The consumer exchange (`Delivery`, `Confirmed`)                           | `OrderProcessor.Receive`                                                     |
@@ -87,7 +87,7 @@ case *actor.Delivery:
 - Reliable payloads must be protobuf messages or types with a registered serializer. An unknown payload type is a producer contract violation: the flow fails terminally instead of retrying forever.
 - Watch the event stream for `ReliableDeliveryFailed`. It carries the endpoint name, controller role, failing stage, and cause; the flow stays disabled until you remediate and `ReSpawn` the endpoint.
 - Reliable endpoints are long-lived: finite passivation is rejected at spawn.
-- Without `WithDurableQueue` the flow is in-memory, exactly like Akka's default: no loss while the producer's process lives, no survival of a process crash. Pass a `DurableProducerQueue` to add crash durability.
+- Without `WithReliableDurableQueue` the flow is in-memory, exactly like Akka's default: no loss while the producer's process lives, no survival of a process crash. Pass a `DurableProducerQueue` to add crash durability.
 
 ## Cluster sample
 

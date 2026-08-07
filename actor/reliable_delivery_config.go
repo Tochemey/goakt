@@ -64,9 +64,9 @@ type reliableProducerConfig struct {
 	// queueRetry defines retries for durable queue operations; it is
 	// required because the producer controller cannot run without one.
 	queueRetry *reliableQueueRetryConfig
-	// localRetryInterval is the RequestNext/Stored retry cadence; it must
+	// retryInterval is the RequestNext/Stored retry cadence; it must
 	// be positive.
-	localRetryInterval time.Duration
+	retryInterval time.Duration
 	// deliveryConfirmation enables DeliveryConfirmed notifications toward
 	// the producer endpoint once the consumer confirms a message.
 	deliveryConfirmation bool
@@ -74,7 +74,7 @@ type reliableProducerConfig struct {
 	// sequenced chunks; zero disables chunking. It mirrors the wire field's
 	// type so the configuration crosses the boundary without conversion.
 	maxChunkBytes uint32
-	// queue is the live durable producer queue collected by WithDurableQueue;
+	// queue is the live durable producer queue collected by WithReliableDurableQueue;
 	// nil runs volatile on a point-to-point producer. It is not serialized
 	// from this struct: the queue crosses the wire as an ordinary dependency
 	// descriptor on the actor record and is rebuilt by dependency
@@ -82,7 +82,7 @@ type reliableProducerConfig struct {
 	// rebuilt instance among the endpoint's dependencies.
 	queue DurableProducerQueue
 	// workQueue is the live durable work queue collected by
-	// WithDurableWorkQueue; nil runs volatile on a work-pulling producer. It
+	// WithReliableDurableWorkQueue; nil runs volatile on a work-pulling producer. It
 	// shares durableQueueID with queue for wire reconstruction and is
 	// mutually exclusive with queue by pattern.
 	workQueue DurableWorkQueue
@@ -178,7 +178,7 @@ func (x *reliableProducerConfig) Validate() error {
 		return err
 	}
 
-	if x.localRetryInterval <= 0 {
+	if x.retryInterval <= 0 {
 		return errors.New("local retry interval must be positive")
 	}
 
@@ -201,8 +201,8 @@ func (x *reliableProducerConfig) Validate() error {
 	}
 
 	if x.maxChunkBytes != 0 {
-		if x.maxChunkBytes < MinChunkSize || x.maxChunkBytes > MaxChunkSize {
-			return fmt.Errorf("chunk size must be in [%d, %d]", MinChunkSize, MaxChunkSize)
+		if x.maxChunkBytes < MinReliableChunkSize || x.maxChunkBytes > MaxReliableChunkSize {
+			return fmt.Errorf("chunk size must be in [%d, %d]", MinReliableChunkSize, MaxReliableChunkSize)
 		}
 	}
 
@@ -273,8 +273,8 @@ func (x *reliableConsumerConfig) Validate() error {
 		return err
 	}
 
-	if x.flowControlWindow < 1 || x.flowControlWindow > MaxFlowControlWindow {
-		return fmt.Errorf("flow control window must be in [1, %d]", MaxFlowControlWindow)
+	if x.flowControlWindow < 1 || x.flowControlWindow > MaxReliableFlowControlWindow {
+		return fmt.Errorf("flow control window must be in [1, %d]", MaxReliableFlowControlWindow)
 	}
 
 	if x.resendInterval <= 0 {
@@ -385,8 +385,8 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 			}
 		}
 
-		if x.producer.localRetryInterval > 0 {
-			producer.LocalRetryInterval = durationpb.New(x.producer.localRetryInterval)
+		if x.producer.retryInterval > 0 {
+			producer.LocalRetryInterval = durationpb.New(x.producer.retryInterval)
 		}
 
 		return &internalpb.ReliableDeliveryConfig{
@@ -423,7 +423,7 @@ func (x *reliableDeliveryConfig) toRemoteSpec() *remote.ReliableDeliverySpec {
 			ConsumerName:         x.producer.consumerName,
 			WorkPulling:          x.producer.workPulling,
 			DurableQueueID:       x.producer.durableQueueID,
-			LocalRetryInterval:   x.producer.localRetryInterval,
+			LocalRetryInterval:   x.producer.retryInterval,
 			DeliveryConfirmation: x.producer.deliveryConfirmation,
 			MaxChunkBytes:        x.producer.maxChunkBytes,
 		}
@@ -470,7 +470,7 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 			return nil, err
 		}
 
-		producer.localRetryInterval = localRetryInterval
+		producer.retryInterval = localRetryInterval
 
 		if retry := endpoint.Producer.GetQueueRetry(); retry != nil {
 			initialBackoff, err := durationFromProto("queue retry initial backoff", retry.GetInitialBackoff())

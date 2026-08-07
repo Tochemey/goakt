@@ -40,9 +40,9 @@ func TestAsReliableProducer(t *testing.T) {
 		producer := config.reliableDelivery.producer
 		require.NotNil(t, producer)
 		assert.Equal(t, "orders-consumer", producer.consumerName)
-		assert.Equal(t, DefaultLocalRetryInterval, producer.localRetryInterval)
-		assert.Equal(t, DefaultQueueRetryAttempts, producer.queueRetry.maxAttempts)
-		assert.Equal(t, DefaultQueueRetryBackoff, producer.queueRetry.initialBackoff)
+		assert.Equal(t, DefaultReliableProducerRetryInterval, producer.retryInterval)
+		assert.Equal(t, DefaultReliableQueueRetryAttempts, producer.queueRetry.maxAttempts)
+		assert.Equal(t, DefaultReliableQueueRetryBackoff, producer.queueRetry.initialBackoff)
 		assert.Empty(t, producer.durableQueueID)
 		assert.Nil(t, config.durableQueue)
 		assert.False(t, producer.deliveryConfirmation)
@@ -51,10 +51,10 @@ func TestAsReliableProducer(t *testing.T) {
 	t.Run("With all options", func(t *testing.T) {
 		queue := &mockDurableQueue{}
 		config := newSpawnConfig(AsReliableProducer("orders-consumer",
-			WithDurableQueue(queue),
-			WithQueueRetry(5, 250*time.Millisecond),
-			WithLocalRetryInterval(time.Second),
-			WithDeliveryConfirmation(),
+			WithReliableDurableQueue(queue),
+			WithReliableQueueRetry(5, 250*time.Millisecond),
+			WithReliableRetryInterval(time.Second),
+			WithReliableDeliveryConfirmation(),
 		))
 		require.NoError(t, config.Validate())
 
@@ -62,36 +62,36 @@ func TestAsReliableProducer(t *testing.T) {
 		assert.Equal(t, queue.ID(), producer.durableQueueID)
 		assert.Equal(t, 5, producer.queueRetry.maxAttempts)
 		assert.Equal(t, 250*time.Millisecond, producer.queueRetry.initialBackoff)
-		assert.Equal(t, time.Second, producer.localRetryInterval)
+		assert.Equal(t, time.Second, producer.retryInterval)
 		assert.Same(t, queue, config.durableQueue)
 		assert.True(t, producer.deliveryConfirmation)
 	})
 
 	t.Run("With chunking", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(64*1024)))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(64*1024)))
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 64*1024, config.reliableDelivery.producer.maxChunkBytes)
 	})
 
 	t.Run("With a chunk size below the minimum", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MinChunkSize-1)))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(MinReliableChunkSize-1)))
 		assert.ErrorContains(t, config.Validate(), "chunk size must be in")
 	})
 
 	t.Run("With a chunk size above the maximum", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MaxChunkSize+1)))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(MaxReliableChunkSize+1)))
 		assert.ErrorContains(t, config.Validate(), "chunk size must be in")
 	})
 
 	t.Run("With chunking and a durable queue", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithChunking(MinChunkSize), WithDurableQueue(&mockDurableQueue{})))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(MinReliableChunkSize), WithReliableDurableQueue(&mockDurableQueue{})))
 		require.NoError(t, config.Validate())
-		assert.EqualValues(t, MinChunkSize, config.reliableDelivery.producer.maxChunkBytes)
+		assert.EqualValues(t, MinReliableChunkSize, config.reliableDelivery.producer.maxChunkBytes)
 		assert.NotNil(t, config.durableQueue)
 	})
 
 	t.Run("With nil durable queue", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithDurableQueue(nil)))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableDurableQueue(nil)))
 		require.NoError(t, config.Validate())
 		assert.Empty(t, config.reliableDelivery.producer.durableQueueID)
 		assert.Nil(t, config.durableQueue)
@@ -101,7 +101,7 @@ func TestAsReliableProducer(t *testing.T) {
 		config := newSpawnConfig(AsReliableProducer(""))
 		require.Error(t, config.Validate())
 
-		config = newSpawnConfig(AsReliableProducer("orders-consumer", WithQueueRetry(0, time.Second)))
+		config = newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableQueueRetry(0, time.Second)))
 		require.Error(t, config.Validate())
 	})
 
@@ -122,15 +122,15 @@ func TestAsReliableConsumer(t *testing.T) {
 		consumer := config.reliableDelivery.consumer
 		require.NotNil(t, consumer)
 		assert.Equal(t, "orders-producer", consumer.producerName)
-		assert.Equal(t, DefaultFlowControlWindow, consumer.flowControlWindow)
-		assert.Equal(t, DefaultResendInterval, consumer.resendInterval)
+		assert.Equal(t, DefaultReliableFlowControlWindow, consumer.flowControlWindow)
+		assert.Equal(t, DefaultReliableResendInterval, consumer.resendInterval)
 		assert.Nil(t, config.durableQueue)
 	})
 
 	t.Run("With all options", func(t *testing.T) {
 		config := newSpawnConfig(AsReliableConsumer("orders-producer",
-			WithFlowControlWindow(100),
-			WithResendInterval(500*time.Millisecond),
+			WithReliableFlowControlWindow(100),
+			WithReliableResendInterval(500*time.Millisecond),
 		))
 		require.NoError(t, config.Validate())
 
@@ -143,10 +143,38 @@ func TestAsReliableConsumer(t *testing.T) {
 		config := newSpawnConfig(AsReliableConsumer(""))
 		require.Error(t, config.Validate())
 
-		config = newSpawnConfig(AsReliableConsumer("orders-producer", WithFlowControlWindow(0)))
+		config = newSpawnConfig(AsReliableConsumer("orders-producer", WithReliableFlowControlWindow(0)))
 		require.Error(t, config.Validate())
 
-		config = newSpawnConfig(AsReliableConsumer("orders-producer", WithFlowControlWindow(MaxFlowControlWindow+1)))
+		config = newSpawnConfig(AsReliableConsumer("orders-producer", WithReliableFlowControlWindow(MaxReliableFlowControlWindow+1)))
 		require.Error(t, config.Validate())
 	})
+}
+
+func TestReliableOptionsTolerateNilConfig(t *testing.T) {
+	// the option closures run against caller-provided state, so a nil
+	// configuration must be a no-op rather than a panic
+	producerOptions := []ReliableProducerOption{
+		WithReliableDurableQueue(&mockDurableQueue{}),
+		WithReliableDurableWorkQueue(&mockDurableWorkQueue{}),
+		WithReliableQueueRetry(3, 100*time.Millisecond),
+		WithReliableRetryInterval(time.Second),
+		WithReliableDeliveryConfirmation(),
+		WithReliableChunking(MinReliableChunkSize),
+		WithReliableRemoteConsumer("127.0.0.1", 9000),
+	}
+
+	for _, option := range producerOptions {
+		assert.NotPanics(t, func() { option(nil) })
+	}
+
+	consumerOptions := []ReliableConsumerOption{
+		WithReliableRemoteProducer("127.0.0.1", 9000),
+		WithReliableFlowControlWindow(10),
+		WithReliableResendInterval(time.Second),
+	}
+
+	for _, option := range consumerOptions {
+		assert.NotPanics(t, func() { option(nil) })
+	}
 }

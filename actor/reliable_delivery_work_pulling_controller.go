@@ -98,8 +98,8 @@ type workPullingProducerController struct {
 	queueRetryAttempts int
 	// queueRetryBackoff is the delay before a durable operation retry.
 	queueRetryBackoff time.Duration
-	// localRetryInterval is the RequestNext/Stored retry cadence.
-	localRetryInterval time.Duration
+	// retryInterval is the RequestNext/Stored retry cadence.
+	retryInterval time.Duration
 	// deliveryConfirmation reports whether the endpoint asked to be told
 	// about each worker confirmation.
 	deliveryConfirmation bool
@@ -164,7 +164,7 @@ func newWorkPullingProducerController(producer *PID, config *reliableProducerCon
 	controller := &workPullingProducerController{
 		producer:             producer,
 		queue:                queue,
-		localRetryInterval:   config.localRetryInterval,
+		retryInterval:        config.retryInterval,
 		deliveryConfirmation: config.deliveryConfirmation,
 		bindings:             make(map[string]*bindingWork),
 	}
@@ -186,7 +186,7 @@ func (x *workPullingProducerController) PreStart(ctx *Context) error {
 		return errors.New("work-pulling producer controller requires a bound local producer")
 	}
 
-	if x.localRetryInterval <= 0 {
+	if x.retryInterval <= 0 {
 		return errors.New("work-pulling producer controller requires a positive local retry interval")
 	}
 
@@ -292,7 +292,7 @@ func (x *workPullingProducerController) handlePostStart(ctx *ReceiveContext) {
 	reference := reliableTickReference(ctx.Self().Name(), x.generation)
 	tick := &producerControllerTick{generation: x.generation}
 
-	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.localRetryInterval, WithReference(reference)); err != nil {
+	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.retryInterval, WithReference(reference)); err != nil {
 		ctx.Err(err)
 		return
 	}
@@ -309,7 +309,7 @@ func (x *workPullingProducerController) handlePostStart(ctx *ReceiveContext) {
 // reset space would desynchronize its expected sequence from the binding and
 // every later demand grant would read as a bounds violation.
 func (x *workPullingProducerController) handleRegisterConsumer(ctx *ReceiveContext, register *commands.RegisterConsumer) {
-	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
+	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultReliableRegistrationLookupTimeout)
 	defer cancel()
 
 	companion, endpointName, err := ctx.ActorSystem().authenticateWorkPullingWorker(lookup, ctx.Sender(), x.producer.Name())
@@ -359,7 +359,7 @@ func (x *workPullingProducerController) handleRequest(ctx *ReceiveContext, reque
 
 	if request.ConfirmedSeq() < 0 || request.ConfirmedSeq() > binding.currentSeq ||
 		request.RequestUpToSeq() < request.ConfirmedSeq() ||
-		request.RequestUpToSeq() > request.ConfirmedSeq()+MaxFlowControlWindow {
+		request.RequestUpToSeq() > request.ConfirmedSeq()+MaxReliableFlowControlWindow {
 		ctx.Logger().Warnf("work-pulling producer controller for endpoint=%s ended worker=%s after illegal demand range [%d, %d] at seq=%d", x.producer.Name(), binding.endpointName, request.ConfirmedSeq(), request.RequestUpToSeq(), binding.currentSeq)
 		x.endBinding(ctx, binding.endpointName, "illegal demand range")
 		x.progress(ctx)

@@ -38,11 +38,11 @@ import (
 func producerDeliveryConfig(consumerName string) *reliableDeliveryConfig {
 	return &reliableDeliveryConfig{
 		producer: &reliableProducerConfig{
-			consumerName:       consumerName,
-			localRetryInterval: DefaultLocalRetryInterval,
+			consumerName:  consumerName,
+			retryInterval: DefaultReliableProducerRetryInterval,
 			queueRetry: &reliableQueueRetryConfig{
-				maxAttempts:    DefaultQueueRetryAttempts,
-				initialBackoff: DefaultQueueRetryBackoff,
+				maxAttempts:    DefaultReliableQueueRetryAttempts,
+				initialBackoff: DefaultReliableQueueRetryBackoff,
 			},
 		},
 	}
@@ -54,7 +54,7 @@ func consumerDeliveryConfig(producerName string) *reliableDeliveryConfig {
 		consumer: &reliableConsumerConfig{
 			producerName:      producerName,
 			flowControlWindow: 50,
-			resendInterval:    DefaultResendInterval,
+			resendInterval:    DefaultReliableResendInterval,
 		},
 	}
 }
@@ -79,7 +79,7 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 						maxAttempts:    3,
 						initialBackoff: 100 * time.Millisecond,
 					},
-					localRetryInterval: 500 * time.Millisecond,
+					retryInterval: 500 * time.Millisecond,
 				},
 			},
 		},
@@ -112,7 +112,15 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 		"work-pulling producer with chunking": {
 			config: func() *reliableDeliveryConfig {
 				config := workPullingProducerConfig()
-				config.producer.maxChunkBytes = MinChunkSize
+				config.producer.maxChunkBytes = MinReliableChunkSize
+				return config
+			}(),
+			invalid: true,
+		},
+		"point-to-point producer with durable work queue": {
+			config: func() *reliableDeliveryConfig {
+				config := producerDeliveryConfig("consumer")
+				config.producer.workQueue = &mockDurableWorkQueue{}
 				return config
 			}(),
 			invalid: true,
@@ -124,7 +132,7 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 		"producer with negative local retry interval": {
 			config: func() *reliableDeliveryConfig {
 				config := producerDeliveryConfig("consumer")
-				config.producer.localRetryInterval = -time.Second
+				config.producer.retryInterval = -time.Second
 				return config
 			}(),
 			invalid: true,
@@ -177,7 +185,7 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 			config: &reliableDeliveryConfig{
 				consumer: &reliableConsumerConfig{
 					producerName:      "producer",
-					flowControlWindow: MaxFlowControlWindow + 1,
+					flowControlWindow: MaxReliableFlowControlWindow + 1,
 				},
 			},
 			invalid: true,
@@ -287,7 +295,7 @@ func TestReliableDeliveryConfigWireRoundTrip(t *testing.T) {
 					maxAttempts:    3,
 					initialBackoff: 100 * time.Millisecond,
 				},
-				localRetryInterval:   500 * time.Millisecond,
+				retryInterval:        500 * time.Millisecond,
 				deliveryConfirmation: true,
 				maxChunkBytes:        64 * 1024,
 			},
@@ -428,9 +436,9 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 		assert.Nil(t, spec.Consumer)
 		assert.Equal(t, "consumer", spec.Producer.ConsumerName)
 		assert.Equal(t, "ordersQueue", spec.Producer.DurableQueueID)
-		assert.Equal(t, DefaultQueueRetryAttempts, spec.Producer.QueueRetryMaxAttempts)
-		assert.Equal(t, DefaultQueueRetryBackoff, spec.Producer.QueueRetryInitialBackoff)
-		assert.Equal(t, DefaultLocalRetryInterval, spec.Producer.LocalRetryInterval)
+		assert.Equal(t, DefaultReliableQueueRetryAttempts, spec.Producer.QueueRetryMaxAttempts)
+		assert.Equal(t, DefaultReliableQueueRetryBackoff, spec.Producer.QueueRetryInitialBackoff)
+		assert.Equal(t, DefaultReliableProducerRetryInterval, spec.Producer.LocalRetryInterval)
 		assert.True(t, spec.Producer.DeliveryConfirmation)
 		assert.EqualValues(t, 64*1024, spec.Producer.MaxChunkBytes)
 	})
@@ -442,7 +450,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 		assert.Nil(t, spec.Producer)
 		assert.Equal(t, "producer", spec.Consumer.ProducerName)
 		assert.Equal(t, 50, spec.Consumer.FlowControlWindow)
-		assert.Equal(t, DefaultResendInterval, spec.Consumer.ResendInterval)
+		assert.Equal(t, DefaultReliableResendInterval, spec.Consumer.ResendInterval)
 	})
 
 	t.Run("With no configuration", func(t *testing.T) {
@@ -552,4 +560,39 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		config := newSpawnConfig(option)
 		assert.Same(t, queue, config.durableQueue)
 	})
+
+	t.Run("With the work queue dependency missing", func(t *testing.T) {
+		wire := workPullingProducerConfig()
+		wire.producer.durableQueueID = "jobsQueue"
+
+		// the non-matching entry is skipped before the miss is reported
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{nil, &mockDurableWorkQueue{}})
+		require.ErrorContains(t, err, "durable work queue dependency=jobsQueue is missing")
+		assert.Nil(t, option)
+	})
+
+	t.Run("With a mistyped work queue dependency", func(t *testing.T) {
+		dependency := &mockDurableQueue{}
+		wire := workPullingProducerConfig()
+		wire.producer.durableQueueID = dependency.ID()
+
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{dependency})
+		require.ErrorContains(t, err, "is not a durable work queue")
+		assert.Nil(t, option)
+	})
+}
+
+func TestReliableDeliveryConfigPeerAddress(t *testing.T) {
+	// every switch arm resolves without dereferencing an absent side
+	var missing *reliableDeliveryConfig
+	assert.Nil(t, missing.peerAddress())
+	assert.Nil(t, (&reliableDeliveryConfig{}).peerAddress())
+
+	producer := producerDeliveryConfig("consumer")
+	producer.producer.consumerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 9000}
+	assert.Equal(t, producer.producer.consumerAddress, producer.peerAddress())
+
+	consumer := consumerDeliveryConfig("producer")
+	consumer.consumer.producerAddress = &reliablePeerAddress{host: "127.0.0.1", port: 9001}
+	assert.Equal(t, consumer.consumer.producerAddress, consumer.peerAddress())
 }

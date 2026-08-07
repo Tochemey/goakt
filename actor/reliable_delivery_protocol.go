@@ -35,16 +35,16 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
-// MaxFlowControlWindow is the highest demand window a consumer may grant per
+// MaxReliableFlowControlWindow is the highest demand window a consumer may grant per
 // request; it also bounds the consumer controller's receive buffer.
-const MaxFlowControlWindow = 10_000
+const MaxReliableFlowControlWindow = 10_000
 
-// MinChunkSize is the smallest chunk size WithChunking accepts.
-const MinChunkSize = 1_024
+// MinReliableChunkSize is the smallest chunk size WithReliableChunking accepts.
+const MinReliableChunkSize = 1_024
 
-// MaxChunkSize is the largest chunk size WithChunking accepts: the remoting
+// MaxReliableChunkSize is the largest chunk size WithReliableChunking accepts: the remoting
 // frame cap minus headroom for the delivery envelope and remoting framing.
-const MaxChunkSize = 16*1_024*1_024 - 64*1_024
+const MaxReliableChunkSize = 16*1_024*1_024 - 64*1_024
 
 const (
 	// reliableControllerRoleUnknown is the zero value for an unspecified role.
@@ -849,7 +849,7 @@ func (x Confirmed) Seq() int64 {
 
 // DeliveryConfirmed reports to the producer that the consumer confirmed one
 // message. It is sent only when the endpoint was spawned with
-// WithDeliveryConfirmation, and it exists so a producer can report completion
+// WithReliableDeliveryConfirmation, and it exists so a producer can report completion
 // to whoever submitted the work: the protocol never learns the submitter,
 // because work enters the producer through an ordinary Tell.
 //

@@ -260,13 +260,13 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 	}
 
 	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
-		AsWorkPullingProducer(
-			WithDurableWorkQueue(queue),
-			WithLocalRetryInterval(200*time.Millisecond)))
+		AsReliableWorkPullingProducer(
+			WithReliableDurableWorkQueue(queue),
+			WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableRelocationConsumerMock{},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	oldIncarnation := producer.IncarnationID()
@@ -346,12 +346,12 @@ func TestReliableProducerRelocation(t *testing.T) {
 
 	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
 		AsReliableProducer("orders-consumer",
-			WithDurableQueue(queue),
-			WithLocalRetryInterval(200*time.Millisecond)))
+			WithReliableDurableQueue(queue),
+			WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
-		AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	oldIncarnation := producer.IncarnationID()
@@ -419,11 +419,11 @@ func TestReliableConsumerRelocation(t *testing.T) {
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
 	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
-		AsReliableProducer("orders-consumer", WithLocalRetryInterval(200*time.Millisecond)))
+		AsReliableProducer("orders-consumer", WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
-		AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
@@ -455,7 +455,7 @@ func TestReliableRelocationMissingQueueTypeRestoresRecord(t *testing.T) {
 	queue := newSharedDurableQueue("orders-queue-" + uuid.NewString())
 
 	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
-		AsReliableProducer("orders-consumer", WithDurableQueue(queue)))
+		AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue)))
 	require.NoError(t, err)
 
 	departedNode := address.FormatHostPort(node1.Host(), node1.Port())

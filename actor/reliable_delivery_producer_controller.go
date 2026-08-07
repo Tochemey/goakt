@@ -111,8 +111,8 @@ type producerController struct {
 	queueRetryAttempts int
 	// queueRetryBackoff is the delay before a durable operation retry.
 	queueRetryBackoff time.Duration
-	// localRetryInterval is the RequestNext/Stored retry cadence.
-	localRetryInterval time.Duration
+	// retryInterval is the RequestNext/Stored retry cadence.
+	retryInterval time.Duration
 	// deliveryConfirmation reports whether the endpoint asked to be told
 	// about each consumer confirmation.
 	deliveryConfirmation bool
@@ -197,7 +197,7 @@ func newProducerController(producer *PID, config *reliableProducerConfig, queue 
 		consumerName:         config.consumerName,
 		consumerAddress:      config.consumerAddress,
 		queue:                queue,
-		localRetryInterval:   config.localRetryInterval,
+		retryInterval:        config.retryInterval,
 		deliveryConfirmation: config.deliveryConfirmation,
 		// the controller arithmetic runs against len() results, so the
 		// validated uint32 setting becomes an int once, here
@@ -224,7 +224,7 @@ func (x *producerController) PreStart(ctx *Context) error {
 		return errors.New("producer controller requires the consumer endpoint name")
 	}
 
-	if x.queueRetryAttempts < 1 || x.queueRetryBackoff <= 0 || x.localRetryInterval <= 0 {
+	if x.queueRetryAttempts < 1 || x.queueRetryBackoff <= 0 || x.retryInterval <= 0 {
 		return errors.New("producer controller requires positive retry settings")
 	}
 
@@ -327,7 +327,7 @@ func (x *producerController) handlePostStart(ctx *ReceiveContext) {
 	reference := reliableTickReference(ctx.Self().Name(), x.generation)
 	tick := &producerControllerTick{generation: x.generation}
 
-	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.localRetryInterval, WithReference(reference)); err != nil {
+	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.retryInterval, WithReference(reference)); err != nil {
 		// the tick is the controller's only local retry mechanism; escalate
 		// so the supervisor restarts this incarnation
 		ctx.Err(err)
@@ -346,7 +346,7 @@ func (x *producerController) handlePostStart(ctx *ReceiveContext) {
 // owed to the consumer. The ack always carries confirmedSeq+1 so a fresh
 // consumer resumes exactly after the last confirmed sequence.
 func (x *producerController) handleRegisterConsumer(ctx *ReceiveContext, register *commands.RegisterConsumer) {
-	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
+	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultReliableRegistrationLookupTimeout)
 	defer cancel()
 
 	expected, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.consumerName, ReliableControllerRoleConsumer, x.consumerAddress)
@@ -390,7 +390,7 @@ func (x *producerController) handleRequest(ctx *ReceiveContext, request *command
 
 	if request.ConfirmedSeq() < 0 || request.ConfirmedSeq() > x.currentSeq ||
 		request.RequestUpToSeq() < request.ConfirmedSeq() ||
-		request.RequestUpToSeq() > request.ConfirmedSeq()+MaxFlowControlWindow {
+		request.RequestUpToSeq() > request.ConfirmedSeq()+MaxReliableFlowControlWindow {
 		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("illegal demand range [%d, %d] at seq=%d", request.ConfirmedSeq(), request.RequestUpToSeq(), x.currentSeq))
 		return
 	}
@@ -530,7 +530,7 @@ func (x *producerController) storeChunks(ctx *ReceiveContext, frame []byte) {
 	count := (len(frame) + x.maxChunkBytes - 1) / x.maxChunkBytes
 
 	if int64(count) > x.windowSpan {
-		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("message=%s needs %d chunks but the consumer window is %d: raise WithFlowControlWindow or the WithChunking size", x.pendingMessageID, count, x.windowSpan))
+		x.terminate(ctx, ReliableDeliveryStageProtocol, fmt.Errorf("message=%s needs %d chunks but the consumer window is %d: raise WithReliableFlowControlWindow or the WithReliableChunking size", x.pendingMessageID, count, x.windowSpan))
 		return
 	}
 
@@ -1076,7 +1076,7 @@ func (x *producerController) advanceConfirmed(ctx *ReceiveContext, confirmed int
 
 // sendConfirmation tells the producer that the consumer confirmed each
 // business message leaving the unconfirmed buffer, in ascending sequence
-// order. It runs only for an endpoint spawned with WithDeliveryConfirmation.
+// order. It runs only for an endpoint spawned with WithReliableDeliveryConfirmation.
 // Interior chunks are skipped: they share the business MessageID and are
 // covered by the notice for the last chunk (or a whole message), whose Seq
 // matches Stored and Delivery.

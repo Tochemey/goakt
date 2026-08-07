@@ -46,7 +46,7 @@ The producer names no peer: authorized workers are discovered through registrati
 
 ```go
 dispatcher, err := system.Spawn(ctx, "job-dispatcher", &JobDispatcher{},
-    actor.AsWorkPullingProducer())
+    actor.AsReliableWorkPullingProducer())
 if err != nil {
     return err
 }
@@ -55,15 +55,15 @@ for i := 1; i <= 3; i++ {
     name := fmt.Sprintf("job-worker-%d", i)
 
     _, err = system.Spawn(ctx, name, &JobWorker{},
-        actor.AsWorkPullingWorker("job-dispatcher",
-            actor.WithFlowControlWindow(10)))
+        actor.AsReliableWorkPullingWorker("job-dispatcher",
+            actor.WithReliableFlowControlWindow(10)))
     if err != nil {
         return err
     }
 }
 ```
 
-Both options reject finite passivation: reliable endpoints are long-lived. `AsWorkPullingProducer` rejects `WithChunking` and the point-to-point `WithDurableQueue`; durability uses `WithDurableWorkQueue` because per-message completion across workers cannot be expressed by a cumulative watermark.
+Both options reject finite passivation: reliable endpoints are long-lived. `AsReliableWorkPullingProducer` rejects `WithReliableChunking` and the point-to-point `WithReliableDurableQueue`; durability uses `WithReliableDurableWorkQueue` because per-message completion across workers cannot be expressed by a cumulative watermark.
 
 ## The endpoint contracts
 
@@ -86,7 +86,7 @@ A worker pool spanning nodes requires both systems in the same GoAkt cluster, ex
 
 ## Knowing when a worker confirmed
 
-`WithDeliveryConfirmation` on the producer side works unchanged: the producer receives a `DeliveryConfirmed` when a worker confirms a job, carrying the same sequence its `Stored` acknowledgement carried. The notice is best effort and repeats when a requeued job is confirmed again, so handle it idempotently by `MessageID`, as described in [Knowing when the consumer confirmed](/clustering/reliable-delivery/point-to-point#knowing-when-the-consumer-confirmed).
+`WithReliableDeliveryConfirmation` on the producer side works unchanged: the producer receives a `DeliveryConfirmed` when a worker confirms a job, carrying the same sequence its `Stored` acknowledgement carried. The notice is best effort and repeats when a requeued job is confirmed again, so handle it idempotently by `MessageID`, as described in [Knowing when the consumer confirmed](/clustering/reliable-delivery/point-to-point#knowing-when-the-consumer-confirmed).
 
 ## Durable delivery
 
@@ -94,9 +94,9 @@ Without a durable work queue, a producer-side restart loses jobs already accepte
 
 ```go
 dispatcher, err := system.Spawn(ctx, "job-dispatcher", &JobDispatcher{},
-    actor.AsWorkPullingProducer(
-        actor.WithDurableWorkQueue(queue),
-        actor.WithQueueRetry(3, 100*time.Millisecond)))
+    actor.AsReliableWorkPullingProducer(
+        actor.WithReliableDurableWorkQueue(queue),
+        actor.WithReliableQueueRetry(3, 100*time.Millisecond)))
 ```
 
 The contract keeps Store and Accept on the same first-write-wins, epoch-fenced append model as point-to-point, but confirmation is per `MessageID`:
@@ -122,12 +122,12 @@ A durable work-pulling flow still performs `Store` plus `Accept` before the next
 
 | Option                     | Side     | Default | Meaning                                                                          |
 | -------------------------- | -------- | ------- | -------------------------------------------------------------------------------- |
-| `WithLocalRetryInterval`   | Producer | 500ms   | `RequestNext` and `Stored` retry cadence toward the producer actor               |
-| `WithDurableWorkQueue`     | Producer | off     | Persist accepted jobs; reload re-dispatches unconfirmed work after a crash       |
-| `WithQueueRetry`           | Producer | 3 / 100ms | Retry policy for durable work-queue operations                                |
-| `WithDeliveryConfirmation` | Producer | off     | Tell the producer a `DeliveryConfirmed` when a worker confirms a job             |
-| `WithFlowControlWindow`    | Worker   | 50      | Demand granted per request and the worker-side buffer capacity; maximum 10,000   |
-| `WithResendInterval`       | Worker   | 2s      | Worker controller tick: re-registration and resend cadence                       |
+| `WithReliableRetryInterval`   | Producer | 500ms   | `RequestNext` and `Stored` retry cadence toward the producer actor               |
+| `WithReliableDurableWorkQueue`     | Producer | off     | Persist accepted jobs; reload re-dispatches unconfirmed work after a crash       |
+| `WithReliableQueueRetry`           | Producer | 3 / 100ms | Retry policy for durable work-queue operations                                |
+| `WithReliableDeliveryConfirmation` | Producer | off     | Tell the producer a `DeliveryConfirmed` when a worker confirms a job             |
+| `WithReliableFlowControlWindow`    | Worker   | 50      | Demand granted per request and the worker-side buffer capacity; maximum 10,000   |
+| `WithReliableResendInterval`       | Worker   | 2s      | Worker controller tick: re-registration and resend cadence                       |
 
 ## Failure handling
 

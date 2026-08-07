@@ -135,7 +135,7 @@ func (x *consumerController) PreStart(*Context) error {
 		return errors.New("consumer controller requires the producer endpoint name")
 	}
 
-	if x.window < 1 || x.window > MaxFlowControlWindow {
+	if x.window < 1 || x.window > MaxReliableFlowControlWindow {
 		return errors.New("consumer controller requires a valid flow control window")
 	}
 
@@ -408,10 +408,10 @@ func (x *consumerController) handleTerminated(ctx *ReceiveContext, msg *Terminat
 
 // register resolves the producer endpoint's current controller and sends a
 // RegisterConsumer with a fresh nonce. The lookup is bounded by
-// DefaultRegistrationLookupTimeout so a slow cluster registry cannot stall
+// DefaultReliableRegistrationLookupTimeout so a slow cluster registry cannot stall
 // this mailbox. Failures are tolerated; the next tick retries.
 func (x *consumerController) register(ctx *ReceiveContext) {
-	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultRegistrationLookupTimeout)
+	lookup, cancel := context.WithTimeout(ctx.Context(), DefaultReliableRegistrationLookupTimeout)
 	defer cancel()
 
 	pc, err := ctx.ActorSystem().resolveReliableCompanion(lookup, x.producerName, ReliableControllerRoleProducer, x.producerAddress)

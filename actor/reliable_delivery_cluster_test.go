@@ -81,11 +81,11 @@ func TestWorkPullingDurableClusterFlow(t *testing.T) {
 	queue := &mockDurableWorkQueue{}
 
 	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
-		AsWorkPullingProducer(WithDurableWorkQueue(queue), WithLocalRetryInterval(200*time.Millisecond)))
+		AsReliableWorkPullingProducer(WithReliableDurableWorkQueue(queue), WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
@@ -105,15 +105,15 @@ func TestWorkPullingDeliveryClusterFlow(t *testing.T) {
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
 	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
-		AsWorkPullingProducer(WithLocalRetryInterval(200*time.Millisecond)))
+		AsReliableWorkPullingProducer(WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker1, err := node2.Spawn(ctx, "jobs-worker-1", &reliableConsumerMock{autoConfirm: true},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker2, err := node3.Spawn(ctx, "jobs-worker-2", &reliableConsumerMock{autoConfirm: true},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	for i := 1; i <= 4; i++ {
@@ -144,7 +144,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
 	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
-		AsReliableProducer("orders-consumer", WithLocalRetryInterval(200*time.Millisecond)))
+		AsReliableProducer("orders-consumer", WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	// an order submitted before the consumer exists stays queued: the
@@ -153,7 +153,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
 
 	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
-		AsReliableConsumer("orders-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	for i := 2; i <= 3; i++ {
@@ -288,7 +288,7 @@ func TestReliableClusterSpawnRollback(t *testing.T) {
 
 	queue := &mockDurableQueue{loadErr: errors.New("backing store is unreachable")}
 	pid, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
-		AsReliableProducer("orders-consumer", WithDurableQueue(queue), WithQueueRetry(1, time.Millisecond)))
+		AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue), WithReliableQueueRetry(1, time.Millisecond)))
 	require.Error(t, err)
 	require.Nil(t, pid)
 

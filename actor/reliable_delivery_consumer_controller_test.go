@@ -638,7 +638,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		assert.ErrorContains(t, newConsumerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), consumerSettings("producer", 1, time.Millisecond)).PreStart(nil), "bound local consumer")
 		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("", 1, time.Millisecond)).PreStart(nil), "producer endpoint name")
 		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", 0, time.Millisecond)).PreStart(nil), "valid flow control window")
-		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", MaxFlowControlWindow+1, time.Millisecond)).PreStart(nil), "valid flow control window")
+		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", MaxReliableFlowControlWindow+1, time.Millisecond)).PreStart(nil), "valid flow control window")
 		assert.ErrorContains(t, newConsumerController(consumer, consumerSettings("producer", 1, 0)).PreStart(nil), "positive resend interval")
 	})
 

@@ -343,7 +343,7 @@ func TestSpawnConfigReliableDeliveryValidation(t *testing.T) {
 func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 	t.Run("With durable queue absent from dependencies", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		config := newSpawnConfig(AsReliableProducer("consumer", WithDurableQueue(queue)))
+		config := newSpawnConfig(AsReliableProducer("consumer", WithReliableDurableQueue(queue)))
 
 		require.Len(t, config.dependencies, 1)
 		require.Same(t, queue, config.dependencies[0])
@@ -353,7 +353,7 @@ func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 		queue := &mockDurableQueue{}
 		config := newSpawnConfig(
 			WithDependencies(queue),
-			AsReliableProducer("consumer", WithDurableQueue(queue)),
+			AsReliableProducer("consumer", WithReliableDurableQueue(queue)),
 		)
 
 		require.Len(t, config.dependencies, 1)
@@ -363,7 +363,7 @@ func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 	t.Run("With option order reversed", func(t *testing.T) {
 		queue := &mockDurableQueue{}
 		config := newSpawnConfig(
-			AsReliableProducer("consumer", WithDurableQueue(queue)),
+			AsReliableProducer("consumer", WithReliableDurableQueue(queue)),
 			WithDependencies(queue),
 		)
 

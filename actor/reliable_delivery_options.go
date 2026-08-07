@@ -34,12 +34,12 @@ type ReliableProducerOption func(config *reliableProducerConfig)
 // flow when spawning the consumer endpoint with AsReliableConsumer.
 type ReliableConsumerOption func(config *reliableConsumerConfig)
 
-// WithDurableQueue stores every produced message durably so a producer crash
+// WithReliableDurableQueue stores every produced message durably so a producer crash
 // or relocation redelivers unconfirmed messages. The queue is also registered
 // as a user dependency so relocation can reconstruct it by ID on any eligible
 // node. It applies only to point-to-point producers; work-pulling uses
-// WithDurableWorkQueue.
-func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
+// WithReliableDurableWorkQueue.
+func WithReliableDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -53,12 +53,12 @@ func WithDurableQueue(queue DurableProducerQueue) ReliableProducerOption {
 	}
 }
 
-// WithDurableWorkQueue stores every accepted work-pulling message durably so a
+// WithReliableDurableWorkQueue stores every accepted work-pulling message durably so a
 // producer crash or relocation reloads unconfirmed jobs into the pending pool
 // and re-dispatches them to current workers. Confirmation is per MessageID
 // because workers complete out of order. The queue is also registered as a
 // user dependency so relocation can reconstruct it by ID on any eligible node.
-func WithDurableWorkQueue(queue DurableWorkQueue) ReliableProducerOption {
+func WithReliableDurableWorkQueue(queue DurableWorkQueue) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -72,9 +72,9 @@ func WithDurableWorkQueue(queue DurableWorkQueue) ReliableProducerOption {
 	}
 }
 
-// WithQueueRetry bounds the retry policy applied to every durable queue
+// WithReliableQueueRetry bounds the retry policy applied to every durable queue
 // operation before the producer controller raises a reliability error.
-func WithQueueRetry(maxAttempts int, initialBackoff time.Duration) ReliableProducerOption {
+func WithReliableQueueRetry(maxAttempts int, initialBackoff time.Duration) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -87,25 +87,25 @@ func WithQueueRetry(maxAttempts int, initialBackoff time.Duration) ReliableProdu
 	}
 }
 
-// WithLocalRetryInterval sets the cadence at which the producer controller
+// WithReliableRetryInterval sets the cadence at which the producer controller
 // retries an unanswered RequestNext or Stored toward the producer endpoint.
-func WithLocalRetryInterval(interval time.Duration) ReliableProducerOption {
+func WithReliableRetryInterval(interval time.Duration) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
 		}
 
-		config.localRetryInterval = interval
+		config.retryInterval = interval
 	}
 }
 
-// WithDeliveryConfirmation tells the producer controller to send the producer
+// WithReliableDeliveryConfirmation tells the producer controller to send the producer
 // endpoint a DeliveryConfirmed for every message the consumer confirms, so a
 // producer can report completion to whoever submitted the work. The
 // notification carries no protocol obligation: it is best effort within one
 // controller incarnation, it repeats when a message is redelivered and
 // confirmed again, and the producer must handle it idempotently by MessageID.
-func WithDeliveryConfirmation() ReliableProducerOption {
+func WithReliableDeliveryConfirmation() ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -115,14 +115,14 @@ func WithDeliveryConfirmation() ReliableProducerOption {
 	}
 }
 
-// WithChunking splits every produced payload larger than maxChunkBytes into
+// WithReliableChunking splits every produced payload larger than maxChunkBytes into
 // parts that each consume one sequence number and are reassembled by the
 // consumer controller before Delivery, so one large message can never exceed
-// the remoting frame cap. The size must be in [MinChunkSize, MaxChunkSize],
+// the remoting frame cap. The size must be in [MinReliableChunkSize, MaxReliableChunkSize],
 // and a message must fit in the consumer's flow-control window worth of
 // chunks. Combined with a durable queue, the producer controller stores the
 // chunks through StoreChunked so a crash mid-message cannot mix encodings.
-func WithChunking(maxChunkBytes uint32) ReliableProducerOption {
+func WithReliableChunking(maxChunkBytes uint32) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -132,15 +132,15 @@ func WithChunking(maxChunkBytes uint32) ReliableProducerOption {
 	}
 }
 
-// WithRemoteConsumer names the remoting address of the node hosting the
+// WithReliableRemoteConsumer names the remoting address of the node hosting the
 // consumer endpoint, forming a remoting-only flow: the producer's controller
 // resolves the consumer's controller by asking that node directly instead of
 // the cluster registry. The producer endpoint must be spawned locally on a
 // system with remoting enabled and clustering disabled, and the consumer
-// endpoint must carry the mirror WithRemoteProducer option. Peer loss is
+// endpoint must carry the mirror WithReliableRemoteProducer option. Peer loss is
 // recovered by restarting the peer process at this address; the ordinary
 // registration resync then reconnects the flow.
-func WithRemoteConsumer(host string, port int) ReliableProducerOption {
+func WithReliableRemoteConsumer(host string, port int) ReliableProducerOption {
 	return func(config *reliableProducerConfig) {
 		if config == nil {
 			return
@@ -150,15 +150,15 @@ func WithRemoteConsumer(host string, port int) ReliableProducerOption {
 	}
 }
 
-// WithRemoteProducer names the remoting address of the node hosting the
+// WithReliableRemoteProducer names the remoting address of the node hosting the
 // producer endpoint, forming a remoting-only flow: the consumer's controller
 // resolves the producer's controller by asking that node directly instead of
 // the cluster registry. The consumer endpoint must be spawned locally on a
 // system with remoting enabled and clustering disabled, and the producer
-// endpoint must carry the mirror WithRemoteConsumer option. Peer loss is
+// endpoint must carry the mirror WithReliableRemoteConsumer option. Peer loss is
 // recovered by restarting the peer process at this address; the ordinary
 // registration resync then reconnects the flow.
-func WithRemoteProducer(host string, port int) ReliableConsumerOption {
+func WithReliableRemoteProducer(host string, port int) ReliableConsumerOption {
 	return func(config *reliableConsumerConfig) {
 		if config == nil {
 			return
@@ -168,10 +168,10 @@ func WithRemoteProducer(host string, port int) ReliableConsumerOption {
 	}
 }
 
-// WithFlowControlWindow sets the demand granted per consumer request and the
+// WithReliableFlowControlWindow sets the demand granted per consumer request and the
 // consumer controller's receive buffer capacity. It must be in
-// [1, MaxFlowControlWindow].
-func WithFlowControlWindow(window int) ReliableConsumerOption {
+// [1, MaxReliableFlowControlWindow].
+func WithReliableFlowControlWindow(window int) ReliableConsumerOption {
 	return func(config *reliableConsumerConfig) {
 		if config == nil {
 			return
@@ -181,9 +181,9 @@ func WithFlowControlWindow(window int) ReliableConsumerOption {
 	}
 }
 
-// WithResendInterval sets the cadence at which the consumer controller
+// WithReliableResendInterval sets the cadence at which the consumer controller
 // re-registers, retries the unconfirmed delivery, and requests gap resends.
-func WithResendInterval(interval time.Duration) ReliableConsumerOption {
+func WithReliableResendInterval(interval time.Duration) ReliableConsumerOption {
 	return func(config *reliableConsumerConfig) {
 		if config == nil {
 			return
@@ -202,11 +202,11 @@ func WithResendInterval(interval time.Duration) ReliableConsumerOption {
 // finite passivation is rejected at spawn.
 func AsReliableProducer(consumerName string, opts ...ReliableProducerOption) SpawnOption {
 	producer := &reliableProducerConfig{
-		consumerName:       consumerName,
-		localRetryInterval: DefaultLocalRetryInterval,
+		consumerName:  consumerName,
+		retryInterval: DefaultReliableProducerRetryInterval,
 		queueRetry: &reliableQueueRetryConfig{
-			maxAttempts:    DefaultQueueRetryAttempts,
-			initialBackoff: DefaultQueueRetryBackoff,
+			maxAttempts:    DefaultReliableQueueRetryAttempts,
+			initialBackoff: DefaultReliableQueueRetryBackoff,
 		},
 	}
 
@@ -229,8 +229,8 @@ func AsReliableProducer(consumerName string, opts ...ReliableProducerOption) Spa
 func AsReliableConsumer(producerName string, opts ...ReliableConsumerOption) SpawnOption {
 	consumer := &reliableConsumerConfig{
 		producerName:      producerName,
-		flowControlWindow: DefaultFlowControlWindow,
-		resendInterval:    DefaultResendInterval,
+		flowControlWindow: DefaultReliableFlowControlWindow,
+		resendInterval:    DefaultReliableResendInterval,
 	}
 
 	for _, opt := range opts {
@@ -242,21 +242,21 @@ func AsReliableConsumer(producerName string, opts ...ReliableConsumerOption) Spa
 	})
 }
 
-// AsWorkPullingProducer spawns the actor as the producer endpoint of a
+// AsReliableWorkPullingProducer spawns the actor as the producer endpoint of a
 // work-pulling reliable delivery flow. Authorized workers are discovered
 // through registration fencing rather than a peer name. The actor system
 // creates and owns a work-pulling producer controller next to the endpoint;
 // the producer answers the same RequestNext/Produced/Stored/StoredAck
-// contract as point-to-point. WithChunking and WithDurableQueue are
-// rejected; durability uses WithDurableWorkQueue. Reliable endpoints must be
+// contract as point-to-point. WithReliableChunking and WithReliableDurableQueue are
+// rejected; durability uses WithReliableDurableWorkQueue. Reliable endpoints must be
 // long-lived: finite passivation is rejected at spawn.
-func AsWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
+func AsReliableWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
 	producer := &reliableProducerConfig{
-		workPulling:        true,
-		localRetryInterval: DefaultLocalRetryInterval,
+		workPulling:   true,
+		retryInterval: DefaultReliableProducerRetryInterval,
 		queueRetry: &reliableQueueRetryConfig{
-			maxAttempts:    DefaultQueueRetryAttempts,
-			initialBackoff: DefaultQueueRetryBackoff,
+			maxAttempts:    DefaultReliableQueueRetryAttempts,
+			initialBackoff: DefaultReliableQueueRetryBackoff,
 		},
 	}
 
@@ -270,12 +270,12 @@ func AsWorkPullingProducer(opts ...ReliableProducerOption) SpawnOption {
 	})
 }
 
-// AsWorkPullingWorker spawns the actor as a work-pulling worker endpoint that
+// AsReliableWorkPullingWorker spawns the actor as a work-pulling worker endpoint that
 // pulls jobs from the named producer. The worker runs the unchanged consumer
 // controller and answers Delivery with Confirmed; processing must be
 // idempotent because a lost worker requeues unconfirmed work under the same
 // MessageID. Reliable endpoints must be long-lived: finite passivation is
 // rejected at spawn.
-func AsWorkPullingWorker(producerName string, opts ...ReliableConsumerOption) SpawnOption {
+func AsReliableWorkPullingWorker(producerName string, opts ...ReliableConsumerOption) SpawnOption {
 	return AsReliableConsumer(producerName, opts...)
 }

@@ -306,8 +306,8 @@ func (x *mockDurableQueue) snapshot() (int, []string, int64) {
 // controller needs, so a test states only the values it cares about.
 func testProducerConfig(consumerName string, retryAttempts int, retryBackoff, localRetryInterval time.Duration) *reliableProducerConfig {
 	return &reliableProducerConfig{
-		consumerName:       consumerName,
-		localRetryInterval: localRetryInterval,
+		consumerName:  consumerName,
+		retryInterval: localRetryInterval,
 		queueRetry: &reliableQueueRetryConfig{
 			maxAttempts:    retryAttempts,
 			initialBackoff: retryBackoff,
@@ -895,14 +895,14 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 	})
 
 	t.Run("With chunking reports one notice per business message at the last chunk seq", func(t *testing.T) {
-		harness := newProducerControllerHarnessFor(t, nil, true, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, nil, true, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -951,14 +951,14 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 
 func TestProducerControllerChunkedFlow(t *testing.T) {
 	t.Run("With a large payload split into flagged chunks under one Stored", func(t *testing.T) {
-		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		harness := newProducerControllerHarnessChunked(t, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		expected := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		expected := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, expected, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(expected)+5, false)
@@ -1001,7 +1001,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With frames at an exact chunk multiple and one byte over", func(t *testing.T) {
-		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		harness := newProducerControllerHarnessChunked(t, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
@@ -1011,15 +1011,15 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 
 		// pin the frame length to exactly two chunks by measuring the
 		// serializer overhead for a probe of the target content size
-		probe := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize)}
+		probe := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize)}
 		probeFrame, err := harness.system.getRemoting().Serializer(probe).Serialize(probe)
 		require.NoError(t, err)
-		overhead := len(probeFrame) - 2*MinChunkSize
+		overhead := len(probeFrame) - 2*MinReliableChunkSize
 
-		exact := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize-overhead)}
+		exact := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead)}
 		exactFrame, err := harness.system.getRemoting().Serializer(exact).Serialize(exact)
 		require.NoError(t, err)
-		require.Len(t, exactFrame, 2*MinChunkSize)
+		require.Len(t, exactFrame, 2*MinReliableChunkSize)
 
 		harness.produceOneWith(t, "m-exact", exact)
 
@@ -1028,11 +1028,11 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 
 		for _, emission := range harness.sequencedEmissions() {
-			assert.Equal(t, MinChunkSize, emission.PayloadSize())
+			assert.Equal(t, MinReliableChunkSize, emission.PayloadSize())
 		}
 
 		// one byte more of content splits into a third, one-byte chunk
-		over := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize-overhead+1)}
+		over := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead+1)}
 		harness.produceOneWith(t, "m-over", over)
 
 		require.Eventually(t, func() bool {
@@ -1040,14 +1040,14 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 
 		tail := harness.sequencedEmissions()[2:]
-		assert.Equal(t, MinChunkSize, tail[0].PayloadSize())
-		assert.Equal(t, MinChunkSize, tail[1].PayloadSize())
+		assert.Equal(t, MinReliableChunkSize, tail[0].PayloadSize())
+		assert.Equal(t, MinReliableChunkSize, tail[1].PayloadSize())
 		assert.Equal(t, 1, tail[2].PayloadSize())
 		assert.True(t, tail[2].LastChunk())
 	})
 
 	t.Run("With a payload at or below the chunk size stays whole", func(t *testing.T) {
-		harness := newProducerControllerHarnessChunked(t, MaxChunkSize)
+		harness := newProducerControllerHarnessChunked(t, MaxReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
@@ -1067,7 +1067,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With more chunks than the consumer window is terminal", func(t *testing.T) {
-		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		harness := newProducerControllerHarnessChunked(t, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
@@ -1080,7 +1080,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		harness.fromConsumerController(t, request)
 
 		credit := harness.freshRequestNext(t)
-		produced, err := NewProduced(credit, "m-oversized", &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)})
+		produced, err := NewProduced(credit, "m-oversized", &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)})
 		require.NoError(t, err)
 		harness.fromProducer(t, produced)
 
@@ -1091,14 +1091,14 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a mid-message demand pause resumed by a timeout request", func(t *testing.T) {
-		harness := newProducerControllerHarnessChunked(t, MinChunkSize)
+		harness := newProducerControllerHarnessChunked(t, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 2*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.Equal(t, 3, chunks)
 
 		// demand covers one whole message plus only part of the chunked one:
@@ -1141,14 +1141,14 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	t.Run("With StoreChunked then Accept under one business MessageID", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1186,14 +1186,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With a restart while unconfirmed chunks reload and resend", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1241,14 +1241,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With resubmit under a tight window reuses the stored batch", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1282,10 +1282,10 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 			return len(harness.sequencedEmissions()) >= 2*chunks
 		}, 3*time.Second, 10*time.Millisecond)
 
-		oversized := &testpb.Reply{Content: strings.Repeat("y", 20*MinChunkSize)}
+		oversized := &testpb.Reply{Content: strings.Repeat("y", 20*MinReliableChunkSize)}
 		overFrame, err := harness.system.getRemoting().Serializer(oversized).Serialize(oversized)
 		require.NoError(t, err)
-		require.Greater(t, (len(overFrame)+MinChunkSize-1)/MinChunkSize, chunks+1)
+		require.Greater(t, (len(overFrame)+MinReliableChunkSize-1)/MinReliableChunkSize, chunks+1)
 
 		harness.produceOneWith(t, "m-tight", oversized)
 
@@ -1311,17 +1311,17 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With resubmission after StoreChunked reuses the first-write batch", func(t *testing.T) {
 		_, system := newCompanionTestSystem(t)
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		stored := make([]UnconfirmedMessage, 0, chunks)
 
 		for index := 0; index < chunks; index++ {
-			start := index * MinChunkSize
-			end := min(start+MinChunkSize, len(frame))
+			start := index * MinReliableChunkSize
+			end := min(start+MinReliableChunkSize, len(frame))
 			part, err := NewReliablePayload(frame[start:end])
 			require.NoError(t, err)
 
@@ -1331,7 +1331,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		}
 
 		queue := &mockDurableQueue{currentSeq: int64(chunks), stored: stored}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
@@ -1345,7 +1345,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 		// different bytes, same business MessageID: StoreChunked returns the
 		// original batch and Accept completes the interrupted handshake
-		harness.produceOneWith(t, "m-retry", &testpb.Reply{Content: strings.Repeat("y", 3*MinChunkSize)})
+		harness.produceOneWith(t, "m-retry", &testpb.Reply{Content: strings.Repeat("y", 3*MinReliableChunkSize)})
 
 		require.Eventually(t, func() bool {
 			_, operations, _ := queue.snapshot()
@@ -1379,14 +1379,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With delivery confirmation reports one notice at the last chunk seq", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, true, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, true, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1417,7 +1417,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With a whole-stored resubmission re-encoded above the chunk size reuses the stored message", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
@@ -1434,7 +1434,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		// same MessageID re-encoded above the chunk threshold: the stored
 		// whole message stays authoritative, so no chunk batch is appended
 		// and the emission repeats the original shape
-		stored := harness.produceAgainWith(t, "m-mixed", &testpb.Reply{Content: strings.Repeat("y", 3*MinChunkSize)})
+		stored := harness.produceAgainWith(t, "m-mixed", &testpb.Reply{Content: strings.Repeat("y", 3*MinReliableChunkSize)})
 		assert.EqualValues(t, 1, stored.Seq())
 
 		require.Eventually(t, func() bool {
@@ -1456,14 +1456,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With a chunk-stored resubmission re-encoded below the chunk size reuses the stored batch", func(t *testing.T) {
 		queue := &mockDurableQueue{}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1509,14 +1509,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With a confirmed retained business MessageID resubmission completes benignly", func(t *testing.T) {
 		queue := &mockDurableQueue{retainConfirmed: true}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1566,14 +1566,14 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With a confirmed retained chunked MessageID resubmitted below the chunk threshold reuses the batch", func(t *testing.T) {
 		queue := &mockDurableQueue{retainConfirmed: true}
-		harness := newProducerControllerHarnessFor(t, queue, false, MinChunkSize)
+		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinChunkSize)}
+		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
-		chunks := (len(frame) + MinChunkSize - 1) / MinChunkSize
+		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
 		require.GreaterOrEqual(t, chunks, 3)
 
 		request, err := commands.NewRequest(sessionID, nonce, 0, int64(chunks)+5, false)
@@ -1712,7 +1712,7 @@ func TestProducerControllerTerminalFailures(t *testing.T) {
 		subscriber, err := harness.system.Subscribe()
 		require.NoError(t, err)
 
-		illegal, err := commands.NewRequest(sessionID, nonce, 0, MaxFlowControlWindow+1, false)
+		illegal, err := commands.NewRequest(sessionID, nonce, 0, MaxReliableFlowControlWindow+1, false)
 		require.NoError(t, err)
 		harness.fromConsumerController(t, illegal)
 

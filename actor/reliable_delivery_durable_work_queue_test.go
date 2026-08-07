@@ -44,6 +44,7 @@ type mockDurableWorkQueue struct {
 	entries    []workQueueEntry
 	loads      int
 	operations []string
+	loadErr    error
 }
 
 type workQueueEntry struct {
@@ -61,6 +62,11 @@ func (x *mockDurableWorkQueue) Load(context.Context) (WorkQueueState, QueueEpoch
 	defer x.mu.Unlock()
 
 	x.loads++
+
+	if x.loadErr != nil {
+		return WorkQueueState{}, 0, x.loadErr
+	}
+
 	x.epoch++
 
 	unconfirmed := make([]UnconfirmedMessage, 0, len(x.entries))
@@ -253,11 +259,11 @@ func TestWorkPullingDurableEndToEnd(t *testing.T) {
 	queue := &mockDurableWorkQueue{}
 
 	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
-		AsWorkPullingProducer(WithDurableWorkQueue(queue), WithLocalRetryInterval(100*time.Millisecond)))
+		AsReliableWorkPullingProducer(WithReliableDurableWorkQueue(queue), WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker, err := system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	for i := 1; i <= 2; i++ {
@@ -290,11 +296,11 @@ func TestWorkPullingDurableReloadRedispatches(t *testing.T) {
 	require.NoError(t, queue.seedAccepted("job-1", 1, seedPayload))
 
 	_, err = system.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
-		AsWorkPullingProducer(WithDurableWorkQueue(queue), WithLocalRetryInterval(100*time.Millisecond)))
+		AsReliableWorkPullingProducer(WithReliableDurableWorkQueue(queue), WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
 	worker, err := system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
-		AsWorkPullingWorker("jobs-producer", WithResendInterval(200*time.Millisecond)))
+		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	deliveries := awaitDeliveries(t, ctx, worker, 1)
@@ -314,9 +320,9 @@ func TestWorkPullingDurableReloadRedispatches(t *testing.T) {
 	assert.GreaterOrEqual(t, loads, 1)
 }
 
-func TestAsWorkPullingProducerWithDurableWorkQueue(t *testing.T) {
+func TestAsReliableWorkPullingProducerWithReliableDurableWorkQueue(t *testing.T) {
 	queue := &mockDurableWorkQueue{}
-	config := newSpawnConfig(AsWorkPullingProducer(WithDurableWorkQueue(queue)))
+	config := newSpawnConfig(AsReliableWorkPullingProducer(WithReliableDurableWorkQueue(queue)))
 	require.NotNil(t, config.durableWorkQueue)
 	assert.Same(t, queue, config.durableWorkQueue)
 	assert.True(t, config.reliableDelivery.producer.workPulling)

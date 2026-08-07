@@ -100,7 +100,7 @@ if err != nil {
 
 _, err = system.Spawn(ctx, "order-processor", &OrderProcessor{},
     actor.AsReliableConsumer("order-publisher",
-        actor.WithFlowControlWindow(50)))
+        actor.WithReliableFlowControlWindow(50)))
 if err != nil {
     return err
 }
@@ -204,12 +204,12 @@ Backpressure surfaces in the `pending` buffer. A slow consumer means the buffer 
 
 ## Knowing when the consumer confirmed
 
-By default the producer learns that a message was stored, never that it was processed. Enable `WithDeliveryConfirmation` and the controller tells the producer a `DeliveryConfirmed` for every message the consumer confirms:
+By default the producer learns that a message was stored, never that it was processed. Enable `WithReliableDeliveryConfirmation` and the controller tells the producer a `DeliveryConfirmed` for every message the consumer confirms:
 
 ```go
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
-        actor.WithDeliveryConfirmation()))
+        actor.WithReliableDeliveryConfirmation()))
 ```
 
 The producer records who should hear back when the work arrives, for example a `submitters map[string]*actor.PID` field keyed by `MessageID` and filled in the `*OrderCreated` case. The handler then relays with any message your submitter understands:
@@ -300,7 +300,7 @@ Confirm only after processing. Confirming early converts every later fault into 
 
 Every hop inside the machinery is a `Tell`; the flow carries one-way, ordered, confirmed transfers. `Ask` still works at the edges with bounded meaning:
 
-- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my buffer". `Stored` acknowledges controller storage; it is not consumer confirmation. When the producer needs to know the consumer confirmed, enable `WithDeliveryConfirmation` and handle `DeliveryConfirmed` (see [Knowing when the consumer confirmed](#knowing-when-the-consumer-confirmed)). Relaying that signal to an original submitter remains application code: `Ask` at the edge still cannot mean "delivered".
+- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my buffer". `Stored` acknowledges controller storage; it is not consumer confirmation. When the producer needs to know the consumer confirmed, enable `WithReliableDeliveryConfirmation` and handle `DeliveryConfirmed` (see [Knowing when the consumer confirmed](#knowing-when-the-consumer-confirmed)). Relaying that signal to an original submitter remains application code: `Ask` at the edge still cannot mean "delivered".
 - The consumer cannot reply to the original submitter through the flow, because `Delivery`'s sender is the controller. Carry correlation in the payload and reply through ordinary messaging, use `DeliveryConfirmed` at the producer when a completion signal is enough, or run a second flow in the opposite direction when the reply itself must be reliable.
 
 ## Payload serialization
@@ -326,10 +326,10 @@ One reliable payload rides one remoting transport frame. The remoting `maxFrameS
 ```go
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
-        actor.WithChunking(256*1024)))
+        actor.WithReliableChunking(256*1024)))
 ```
 
-The size must be in [`MinChunkSize`, `MaxChunkSize`] (1 KiB through 16 MiB minus envelope headroom). Each chunk consumes one sequence number; the consumer controller reassembles before `Delivery`, so your consumer still sees one business message. A message must fit in the consumer's flow-control window worth of chunks: the consumer confirms nothing mid-message, so a message needing more chunks than the window can never drain. A violation fails the flow terminally and names the remedy (raise `WithFlowControlWindow` or the chunk size).
+The size must be in [`MinReliableChunkSize`, `MaxReliableChunkSize`] (1 KiB through 16 MiB minus envelope headroom). Each chunk consumes one sequence number; the consumer controller reassembles before `Delivery`, so your consumer still sees one business message. A message must fit in the consumer's flow-control window worth of chunks: the consumer confirms nothing mid-message, so a message needing more chunks than the window can never drain. A violation fails the flow terminally and names the remedy (raise `WithReliableFlowControlWindow` or the chunk size).
 
 With a durable queue, the producer controller stores the whole chunked message through `StoreChunked` so a crash mid-message cannot mix two encodings of the same payload. A resubmission after a producer crash recovers the stored shape even when the re-encoded payload crosses the chunk threshold in either direction: the first write stays authoritative. Queue implementors must treat the batch as atomic; see [Durable delivery](#durable-delivery). The derived chunk identities live in a reserved namespace: an application `MessageID` must not start with `GoAktChunk:`, and `NewProduced` rejects one that does.
 
@@ -340,8 +340,8 @@ Without a durable queue, a producer-side restart loses the messages already hand
 ```go
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
-        actor.WithDurableQueue(queue),
-        actor.WithQueueRetry(3, 100*time.Millisecond)))
+        actor.WithReliableDurableQueue(queue),
+        actor.WithReliableQueueRetry(3, 100*time.Millisecond)))
 ```
 
 The queue is a pluggable contract you implement against your own store:
@@ -377,7 +377,7 @@ type DurableProducerQueue interface {
 }
 ```
 
-The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; a `Store` addressing a `MessageID` owned by a retained chunked batch returns `ErrQueueChunkedBatch` so the controller can recover the batch instead of appending a duplicate; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithQueueRetry`. The full contract is documented on the interface.
+The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; a `Store` addressing a `MessageID` owned by a retained chunked batch returns `ErrQueueChunkedBatch` so the controller can recover the batch instead of appending a duplicate; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithReliableQueueRetry`. The full contract is documented on the interface.
 
 A producer backed by its own recoverable source completes the loop: it durably marks or removes the submission before replying `StoredAck`, and after a crash it resubmits every unmarked item with its original `MessageID`. The queue's first-write ownership then guarantees one durable sequence per message.
 
@@ -423,15 +423,15 @@ An in-memory `seen` map, as in the example above, deduplicates within one consum
 
 | Option                     | Side     | Default           | Meaning                                                                                          |
 | -------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------ |
-| `WithFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                 |
-| `WithResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                     |
-| `WithDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                        |
-| `WithQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                       |
-| `WithLocalRetryInterval`   | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                               |
-| `WithChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinChunkSize`, `MaxChunkSize`]             |
-| `WithDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                     |
-| `WithRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow               |
-| `WithRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow               |
+| `WithReliableFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                 |
+| `WithReliableResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                     |
+| `WithReliableDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                        |
+| `WithReliableQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                       |
+| `WithReliableRetryInterval`   | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                               |
+| `WithReliableChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinReliableChunkSize`, `MaxReliableChunkSize`]             |
+| `WithReliableDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                     |
+| `WithReliableRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow               |
+| `WithReliableRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow               |
 
 The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
 
@@ -479,7 +479,7 @@ Relocation uses the existing replicated actor record and dependency reconstructi
 
 ## Remoting-only flows
 
-Two nodes with remoting enabled and no cluster form a flow by naming each other's address explicitly: the producer side carries `WithRemoteConsumer(host, port)` with the consumer node's remoting address, and the consumer side carries `WithRemoteProducer(host, port)` with the producer node's. Each endpoint is spawned locally on its own node; there is no remote placement in this mode.
+Two nodes with remoting enabled and no cluster form a flow by naming each other's address explicitly: the producer side carries `WithReliableRemoteConsumer(host, port)` with the consumer node's remoting address, and the consumer side carries `WithReliableRemoteProducer(host, port)` with the producer node's. Each endpoint is spawned locally on its own node; there is no remote placement in this mode.
 
 ```mermaid
 flowchart LR
@@ -502,12 +502,12 @@ flowchart LR
 // node A (remoting on 192.168.1.10:2280)
 publisher, err := producerSystem.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
-        actor.WithRemoteConsumer("192.168.1.11", 2280)))
+        actor.WithReliableRemoteConsumer("192.168.1.11", 2280)))
 
 // node B (remoting on 192.168.1.11:2280)
 _, err = consumerSystem.Spawn(ctx, "order-processor", &OrderProcessor{},
     actor.AsReliableConsumer("order-publisher",
-        actor.WithRemoteProducer("192.168.1.10", 2280)))
+        actor.WithReliableRemoteProducer("192.168.1.10", 2280)))
 ```
 
 Resolution asks the addressed node directly: an internal lookup served by the peer's remoting server resolves the endpoint's current controller from that node's local actor tree and validates its ownership before answering, so the caller always gets the peer's live incarnation, never a stale record. Registration fencing runs the same lookup in the other direction. An unreachable or not-yet-started peer is a transient condition: controllers retry on their timers and the flow forms once both sides are up, in either start order.

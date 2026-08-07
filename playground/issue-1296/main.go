@@ -224,11 +224,11 @@ func main() {
 	// the actor system creates and owns one controller per endpoint; the
 	// options only name the peer endpoint and tune the retry cadence
 	publisher, err := system.Spawn(ctx, publisherName, &OrderPublisher{},
-		actor.AsReliableProducer(processorName, actor.WithLocalRetryInterval(retryInterval)))
+		actor.AsReliableProducer(processorName, actor.WithReliableRetryInterval(retryInterval)))
 	must(err)
 
 	processor, err := system.Spawn(ctx, processorName, &OrderProcessor{},
-		actor.AsReliableConsumer(publisherName, actor.WithResendInterval(retryInterval)))
+		actor.AsReliableConsumer(publisherName, actor.WithReliableResendInterval(retryInterval)))
 	must(err)
 
 	fmt.Println("== act 1: five orders flow end to end ==")
