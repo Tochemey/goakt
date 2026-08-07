@@ -90,7 +90,18 @@ A worker pool spanning nodes requires both systems in the same GoAkt cluster, ex
 
 ## Durable delivery
 
-Without a durable work queue, a producer-side restart loses jobs already accepted into the controller but not yet confirmed by a worker. To survive producer crashes and relocation, attach a `DurableWorkQueue`:
+Without a durable work queue, a producer-side restart loses jobs already accepted into the controller but not yet confirmed by a worker. Worker loss alone does not need durability: the controller keeps the pending pool and each worker's unconfirmed jobs in memory and requeues them to a survivor. What memory cannot survive is the loss of the producer side itself. To survive producer crashes and relocation, attach a `DurableWorkQueue` so a fresh controller incarnation reloads accepted, unconfirmed jobs and re-dispatches them.
+
+### When to use one
+
+| Event                                                    | Without a durable work queue                                    | With a durable work queue                                                          |
+| -------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Worker crash, stop, respawn, or protocol violation        | Unconfirmed jobs requeue in the controller and re-dispatch      | Same: requeueing writes nothing to the queue                                       |
+| Producer endpoint crash, restart, or relocation           | Every accepted job is lost, pending and dispatched alike        | Accepted, unconfirmed jobs reload and re-dispatch to whichever workers are registered |
+| Retriable backend error after queue retries are exhausted | No durable operations exist                                     | The controller restarts, reloads authoritative state under a fresh epoch, and resumes |
+| `ErrQueueFenced` or `ErrQueueConflict`                    | No durable operations exist                                     | Terminal: the controller publishes `ReliableDeliveryFailed` and stops              |
+
+Attach one when an accepted job represents work that cannot simply be recreated: a payment to settle, an email to send, a customer-visible task the dispatcher already acknowledged. Leave it off when jobs are cheap to regenerate, for example a periodic scan that can be re-run or a stream the producer can replay from a source it never trims. Durability is not free: every job then costs a `Store`, an `Accept`, and a `ConfirmMessage` round trip against your backend.
 
 ```go
 dispatcher, err := system.Spawn(ctx, "job-dispatcher", &JobDispatcher{},
@@ -99,23 +110,49 @@ dispatcher, err := system.Spawn(ctx, "job-dispatcher", &JobDispatcher{},
         actor.WithReliableQueueRetry(3, 100*time.Millisecond)))
 ```
 
-The contract keeps Store and Accept on the same first-write-wins, epoch-fenced append model as point-to-point, but confirmation is per `MessageID`:
+### The queue contract
+
+`Store` and `Accept` keep the same first-write-wins, epoch-fenced append model as point-to-point. Confirmation is per `MessageID`, because workers complete out of order and a cumulative watermark cannot express holes:
 
 ```go
 type DurableWorkQueue interface {
     extension.Dependency
 
+    // Load restores state at controller (re)start and acquires exclusive
+    // writership; the returned epoch fences every earlier writer.
     Load(ctx context.Context) (WorkQueueState, QueueEpoch, error)
+
+    // Store durably records one job, indexed by MessageID and sequence.
+    // The first write for a MessageID is authoritative; retries return it.
     Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error)
+
+    // Accept records that the producer durably removed the submission from
+    // its own recoverable source.
     Accept(ctx context.Context, epoch QueueEpoch, messageID string) error
+
+    // ConfirmMessage marks one job complete after a worker confirmed it.
     ConfirmMessage(ctx context.Context, epoch QueueEpoch, messageID string) error
 }
 ```
 
-`WorkQueueState` carries the append cursor and every accepted, not-yet-confirmed message in store order. Holes are normal: worker A may confirm one job while worker B still holds an earlier store sequence. On reload, those unconfirmed jobs re-enter the pending pool and re-dispatch to whichever workers are registered. `ConfirmMessage` is idempotent for an already confirmed `MessageID` and returns `ErrQueueConflict` for an unknown one. Register the queue type on every eligible node when the producer may relocate, exactly as for point-to-point durable queues.
+The contract in brief: all four operations are linearizable and safe for concurrent use; `Load` returns a new positive epoch that fences every earlier one, and a stale writer receives `ErrQueueFenced`; the first `Store` for a `MessageID` wins, so a retry returns the authoritative sequence and payload with `AlreadyStored` true and appends nothing; `Accept` and `ConfirmMessage` are no-ops when repeated and return `ErrQueueConflict` for an unknown `MessageID`; state integrity violations return `ErrQueueConflict`; any other backend error is retried under `WithReliableQueueRetry`. A job may be compacted once it is both accepted and confirmed. The full contract is documented on the interface.
+
+### What a reload restores
+
+`Load` returns a `WorkQueueState`: the append cursor and every accepted, not-yet-confirmed job in ascending store-sequence order, with unique `MessageID`s and non-empty payloads. Holes are normal, because worker A may confirm one job while worker B still holds an earlier store sequence. Those jobs become the new controller's pending pool and dispatch in store order to whichever workers register with the new incarnation, and the append cursor continues from `CurrentSeq`.
+
+A reload therefore re-dispatches every job that was unconfirmed when the producer went down, including a job a worker already completed whose `ConfirmMessage` write had not landed yet, and including jobs that land on a different worker this time. This is the redelivery the [guarantees](#guarantees) above describe: dedupe by `MessageID` against shared state.
+
+`Load` returns accepted jobs only. A job stored while the producer crashed between `Stored` and `StoredAck` is never reloaded, so the producer must be able to resubmit it: durably mark or remove the submission from your own source before replying `StoredAck`, and after a restart resubmit everything still unmarked under its original `MessageID`. First-write ownership then gives one durable sequence per job, and the controller ignores a resubmission of a job it already holds instead of dispatching it twice.
+
+### Durable failures
+
+`ErrQueueFenced` and `ErrQueueConflict` are terminal. The controller publishes one `ReliableDeliveryFailed` carrying `ReliableDeliveryStageStore`, `ReliableDeliveryStageAccept`, or `ReliableDeliveryStageConfirm` and stops, while the producer endpoint keeps running; recovery is operator action followed by an explicit `ReSpawn`, which acquires a fresh epoch. Any other backend error, once the `WithReliableQueueRetry` attempts are exhausted, restarts the controller instead, which reloads authoritative state. A `Load` that fails on such a restart publishes `ReliableDeliveryStageLoad`.
+
+`WithReliableDurableWorkQueue` also registers the queue among the endpoint's dependencies so it serializes into the actor record. Register the queue type on every node eligible to host the producer, and make sure the reconstructed instance observes the same durable state from every node. `MarshalBinary` must carry reconnect configuration only, never queued jobs.
 
 <Warning>
-A durable work-pulling flow still performs `Store` plus `Accept` before the next credit, plus a `ConfirmMessage` per completed job. Backend latency bounds per-flow throughput; scale with independent producer flows when needed.
+A durable work-pulling flow still performs `Store` plus `Accept` before the next credit, plus a `ConfirmMessage` per completed job. Durable operations run one at a time on a single lane, where the in-flight handshake takes precedence over queued confirmations, so backend latency bounds per-flow throughput. Scale with independent producer flows when needed.
 </Warning>
 
 ## Configuration
