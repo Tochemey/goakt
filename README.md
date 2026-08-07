@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="500"/><br />
+  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="800"/><br />
   Distributed Actor framework for Go
 </h2>
 
@@ -22,7 +22,9 @@ GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Er
 
 Teams use GoAkt for event processing, IoT and edge workloads, real-time platforms, and distributed backends that would otherwise need a message broker plus custom coordination code.
 
-New to the actor model? Brian Storti's [short introduction](https://www.brianstorti.com/the-actor-model/) is a good starting point; the references at the end of that post go deeper.
+New to the actor model? Actors are isolated units of computation that share no memory and communicate only through asynchronous messages. Each actor has a mailbox and processes one message at a time, keeping private state that others cannot mutate. Because only one goroutine ever touches that state, the mutexes and channel choreography you would otherwise write disappear instead of moving somewhere else. On a message, an actor can create more actors, send messages, or decide how it will handle the next one. Failures stay contained under supervisors that can restart a crashed actor, and the same messaging model works whether the recipient is local or remote. For more depth, watch **Carl Hewitt**, the father of the actor model, explain it in his own words:
+
+[![Carl Hewitt on the actor model](https://img.youtube.com/vi/7erJ1DV_Tlo/hqdefault.jpg)](https://www.youtube.com/watch?v=7erJ1DV_Tlo)
 
 See the [documentation](https://docs.goakt.dev) for the full feature reference.
 

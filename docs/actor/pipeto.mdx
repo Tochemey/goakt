@@ -46,6 +46,27 @@ task func() (any, error)
 - On success: the `any` result is sent to the target as a normal message.
 - On failure: the error is forwarded to the dead-letter queue, unless `WithCircuitBreaker` is used and the breaker is open (in which case the outcome is dropped).
 
+<Warning>
+  The task runs on its own goroutine, not on the mailbox thread, so it must not read or write actor state. A field the
+  task reads while a later message handler writes it is a genuine data race, and it is the one way to reintroduce the
+  problem the actor model removes. Copy what the task needs into local variables first, return the result, and mutate
+  state when the result arrives as a message.
+</Warning>
+
+```go
+// Wrong: the closure reads actor state from another goroutine.
+ctx.PipeTo(ctx.Self(), func() (any, error) {
+    return http.Get(a.endpoint)
+})
+
+// Right: capture by value, then run.
+endpoint := a.endpoint
+
+ctx.PipeTo(ctx.Self(), func() (any, error) {
+    return http.Get(endpoint)
+})
+```
+
 ## PipeOption
 
 | Option                   | Purpose                                                           |

@@ -62,10 +62,110 @@ graph TD
 When a parent stops, all children stop first (depth-first). A parent supervises its children: on failure, the configured
 strategy decides whether to resume, restart, stop, or escalate.
 
-## Single-threaded execution
+## Concurrency without synchronization
 
-GoAkt guarantees that **only one goroutine processes messages for a given actor at any time**. You never need internal
-locks to protect actor state. Messages are processed sequentially from the actor's mailbox (FIFO).
+A data race needs two ingredients: more than one goroutine reaching the same memory, and no ordering between them. For
+state that lives inside an actor, GoAkt removes both.
+
+- **Mutual exclusion, not worker affinity.** At most one goroutine is inside a given actor's `Receive` at any instant.
+  The dispatcher enforces this with a per-actor state transition from `Scheduled` to `Processing`; a second worker that
+  reaches the same actor loses the compare-and-swap and moves on. Successive turns can run on different workers, because
+  idle workers steal work, so a handler must never rely on goroutine or thread identity.
+- **Sequential delivery.** Messages are drained from the mailbox in FIFO order, so handler N returns before handler N+1
+  starts.
+- **No shared memory.** Actor state lives in unexported fields, and the only way in is a message, unless you hand out a
+  reference yourself.
+
+A mutex exists to serialize concurrent callers. An actor has none, because the dispatcher already serialized them before
+the handler ran, which is why GoAkt actors hold plain fields and mutate them directly.
+
+### The same counter, both ways
+
+```go
+// Shared memory: correctness depends on every caller remembering the lock.
+type Counter struct {
+    mu    sync.Mutex
+    count int64
+}
+
+func (c *Counter) Inc() {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.count++
+}
+
+func (c *Counter) Count() int64 {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    return c.count
+}
+```
+
+```go
+// As an actor: no lock to forget, because no second goroutine can get in.
+type Counter struct {
+    count int64
+}
+
+func (a *Counter) PreStart(ctx *actor.Context) error { return nil }
+func (a *Counter) PostStop(ctx *actor.Context) error { return nil }
+
+func (a *Counter) Receive(ctx *actor.ReceiveContext) {
+    switch ctx.Message().(type) {
+    case *Inc:
+        a.count++
+    case *GetCount:
+        ctx.Response(&Count{Value: a.count})
+    default:
+        ctx.Unhandled()
+    }
+}
+```
+
+## Never block inside Receive
+
+<Warning>
+  A `Receive` handler must never block. In GoAkt this is a hard rule, not a performance preference.
+</Warning>
+
+Actors do not own goroutines. They run on a fixed [dispatcher pool](/architecture/dispatcher-pool) of
+`max(GOMAXPROCS, 2)` workers that multiplexes the entire actor population. A worker picks up an actor, runs its turn to
+completion, and only then moves on. A handler that blocks holds its worker for as long as it is stuck, withdrawing a
+fixed fraction of the whole process's processing capacity. Block a handful of handlers at once and every actor in the
+system stalls, including the ones being waited on.
+
+The fairness budget does not rescue you. `WithThroughputBudget` (default 32) caps how many messages an actor drains per
+turn, but a turn ends only when your handler returns. A blocked handler is not preemptible.
+
+So, inside `Receive`, do not:
+
+- acquire a mutex that another goroutine may hold
+- send on or receive from a Go channel
+- call `WaitGroup.Wait`
+- perform blocking network, disk, or database I/O
+- call `time.Sleep`
+- `Ask` or `SendSync` an actor that may be waiting on you
+
+The last one deadlocks rather than merely slowing things down. If A blocks in `Ask` to B while B blocks in `Ask` to A,
+both handlers are stuck, both hold a worker, and neither reply can ever be dequeued, because the goroutine that would
+process it is the one that is blocked. Use `Request` with [reentrancy](/actor/reentrancy) for call cycles.
+
+`PreStart` and `PostStop` are different: they run on the caller's goroutine, not on a dispatcher worker. Blocking setup
+and teardown belong there. `PreStart` is bounded by the init timeout, configurable per actor with `WithInitTimeout`.
+
+### Doing real work without blocking
+
+| Need                                 | Approach                                                                                                                        |
+|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| Call an HTTP API or a database       | [`ctx.PipeTo`](/actor/pipeto) or `ctx.PipeToName`; the result arrives as a message.                                             |
+| Ask another actor and stay responsive | `ctx.Request` or `ctx.RequestName` under a [reentrancy](/actor/reentrancy) policy; the reply runs through `Then` on the mailbox thread. |
+| Wait for a precondition              | [`ctx.Stash()`](/actor/stashing), then `ctx.UnstashAll()` once the condition holds.                                             |
+| CPU-heavy computation                | `PipeTo`, or spread the work across child actors.                                                                               |
+| Periodic work                        | [Scheduling](/actor/scheduling), not a sleep loop.                                                                              |
+
+The one way to bring the race back is a goroutine you start yourself. A `PipeTo` task runs off the mailbox thread, so it
+must not touch actor fields. Copy what it needs, return the result, and mutate state when the result arrives as a
+message.
 
 ## Message flow
 
