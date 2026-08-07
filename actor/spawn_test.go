@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -44,6 +45,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
+	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
@@ -2593,4 +2595,459 @@ func requireSamePID(t *testing.T, pids []*PID, errs []error) {
 		require.Truef(t, pid.IsRunning(), "call %d returned a non-running pid", i)
 		require.Truef(t, pids[0].Equals(pid), "call %d returned a different pid", i)
 	}
+}
+
+func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
+	t.Run("With a producer and its durable queue", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.registry = types.NewRegistry()
+		system.registry.Register(&mockDurableQueue{})
+		system.reflection = newReflection(system.registry)
+
+		queue := &mockDurableQueue{}
+		dependencies, err := codec.EncodeDependencies(queue)
+		require.NoError(t, err)
+
+		wire := producerDeliveryConfig("orders-consumer")
+		wire.producer.durableQueueID = queue.ID()
+
+		props := &internalpb.Actor{
+			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
+			Type:             types.Name(new(MockActor)),
+			Relocatable:      true,
+			Dependencies:     dependencies,
+			ReliableDelivery: wire.toProto(),
+		}
+
+		opts, err := system.wireSpawnOptions(props)
+		require.NoError(t, err)
+
+		config := newSpawnConfig(opts...)
+		require.NotNil(t, config.reliableDelivery)
+		assert.Equal(t, "orders-consumer", config.reliableDelivery.producer.consumerName)
+		require.NotNil(t, config.durableQueue)
+		assert.IsType(t, &mockDurableQueue{}, config.durableQueue)
+		require.NoError(t, config.Validate())
+	})
+
+	t.Run("With the queue type unregistered", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.registry = types.NewRegistry()
+		system.reflection = newReflection(system.registry)
+
+		queue := &mockDurableQueue{}
+		dependencies, err := codec.EncodeDependencies(queue)
+		require.NoError(t, err)
+
+		wire := producerDeliveryConfig("orders-consumer")
+		wire.producer.durableQueueID = queue.ID()
+
+		props := &internalpb.Actor{
+			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
+			Type:             types.Name(new(MockActor)),
+			Relocatable:      true,
+			Dependencies:     dependencies,
+			ReliableDelivery: wire.toProto(),
+		}
+
+		_, err = system.wireSpawnOptions(props)
+		require.Error(t, err)
+	})
+
+	t.Run("With the queue dependency missing from the record", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		system.registry = types.NewRegistry()
+		system.reflection = newReflection(system.registry)
+
+		wire := producerDeliveryConfig("orders-consumer")
+		wire.producer.durableQueueID = "orders-queue"
+
+		props := &internalpb.Actor{
+			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
+			Type:             types.Name(new(MockActor)),
+			Relocatable:      true,
+			ReliableDelivery: wire.toProto(),
+		}
+
+		_, err := system.wireSpawnOptions(props)
+		require.ErrorContains(t, err, "missing from the endpoint dependencies")
+	})
+}
+
+func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
+	// a relocated reliable endpoint record is respawned through the ordinary
+	// spawn transaction: the reliable settings and durable queue come back
+	// from the wire record, a fresh controller companion is created under the
+	// new incarnation, and the departed activation's controller record is
+	// withdrawn
+	ctx := context.Background()
+	sys, err := NewActorSystem("reliable-relocation", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	require.NoError(t, actorSystem.Register(ctx, &reliableProducerMock{}))
+	require.NoError(t, actorSystem.Inject(&mockDurableQueue{}))
+
+	clusterMock := mockcluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	departedNode := "127.0.0.1:7777"
+	oldIncarnation := uuid.NewString()
+	oldCompanion := reliableCompanionName(ReliableControllerRoleProducer, oldIncarnation)
+
+	queue := &mockDurableQueue{}
+	dependencies, err := codec.EncodeDependencies(queue)
+	require.NoError(t, err)
+
+	wire := producerDeliveryConfig("orders-consumer")
+	wire.producer.durableQueueID = queue.ID()
+
+	record := &internalpb.Actor{
+		Address:          address.New("orders-producer", actorSystem.name, "127.0.0.1", 7777).String(),
+		Type:             types.Name(&reliableProducerMock{}),
+		Relocatable:      true,
+		IncarnationId:    oldIncarnation,
+		Dependencies:     dependencies,
+		ReliableDelivery: wire.toProto(),
+	}
+
+	companionRecord := &internalpb.Actor{
+		Address:       address.New(oldCompanion, actorSystem.name, "127.0.0.1", 7777).String(),
+		IncarnationId: uuid.NewString(),
+	}
+
+	// the endpoint and departed companion records are released before the respawn
+	clusterMock.EXPECT().GetActor(mock.Anything, "orders-producer").Return(record, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
+	clusterMock.EXPECT().GetActor(mock.Anything, oldCompanion).Return(companionRecord, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, oldCompanion).Return(nil).Once()
+	// the respawn publishes the endpoint atomically and its fresh companion
+	clusterMock.EXPECT().ActorExists(mock.Anything, "orders-producer").Return(false, nil).Once()
+	clusterMock.EXPECT().PutActorIfAbsent(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+	require.NoError(t, actorSystem.recreateActorFromWire(ctx, record, departedNode))
+
+	node, ok := actorSystem.actors.nodeByName("orders-producer")
+	require.True(t, ok)
+
+	endpoint := node.value()
+	require.NotNil(t, endpoint.reliableDelivery)
+	assert.Equal(t, "orders-consumer", endpoint.reliableDelivery.producer.consumerName)
+	require.NotNil(t, endpoint.durableQueue)
+	assert.NotEqual(t, oldIncarnation, endpoint.IncarnationID())
+
+	companion, err := actorSystem.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
+	require.NoError(t, err)
+	assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID()), companion.Name())
+
+	clusterMock.AssertExpectations(t)
+}
+
+func TestRecreateActorFromWireNonRelocatableReliableEndpoint(t *testing.T) {
+	// a non-relocatable reliable endpoint is lost with its node by design, but
+	// its records are withdrawn instead of leaking: the endpoint publishes
+	// with if-absent semantics, so a leaked record would block the name
+	// cluster-wide
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+
+	departedNode := "127.0.0.1:7777"
+	incarnation := uuid.NewString()
+	companionName := reliableCompanionName(ReliableControllerRoleConsumer, incarnation)
+
+	record := &internalpb.Actor{
+		Address:          address.New("orders-consumer", system.name, "127.0.0.1", 7777).String(),
+		Type:             types.Name(new(MockActor)),
+		Relocatable:      false,
+		IncarnationId:    incarnation,
+		ReliableDelivery: consumerDeliveryConfig("orders-producer").toProto(),
+	}
+
+	companionRecord := &internalpb.Actor{
+		Address: address.New(companionName, system.name, "127.0.0.1", 7777).String(),
+	}
+
+	clusterMock.EXPECT().GetActor(mock.Anything, "orders-consumer").Return(record, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-consumer").Return(nil).Once()
+	clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+
+	require.NoError(t, system.recreateActorFromWire(context.Background(), record, departedNode))
+
+	_, ok := system.actors.nodeByName("orders-consumer")
+	assert.False(t, ok, "a non-relocatable reliable endpoint must never respawn")
+
+	clusterMock.AssertExpectations(t)
+}
+
+func TestRecreateActorFromWireNonRelocatableOrdinaryActorUntouched(t *testing.T) {
+	// ordinary non-relocatable actors keep their historical semantics: no
+	// registry mutation at all
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+
+	record := &internalpb.Actor{
+		Address:     address.New("worker", system.name, "127.0.0.1", 7777).String(),
+		Type:        types.Name(new(MockActor)),
+		Relocatable: false,
+	}
+
+	require.NoError(t, system.recreateActorFromWire(context.Background(), record, "127.0.0.1:7777"))
+	clusterMock.AssertExpectations(t)
+}
+
+func TestSpawnSingletonRetryClassification(t *testing.T) {
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+
+	// retry.Stop wraps without exposing Unwrap, so terminal classifications
+	// are asserted through the preserved message rather than errors.Is
+	t.Run("With a legacy singleton-exists error terminal", func(t *testing.T) {
+		var confirmed string
+		err := system.spawnSingletonRetryError(context.Background(), gerrors.ErrSingletonAlreadyExists, "kind", "", "name", &confirmed) //nolint:staticcheck // the deprecated sentinel is exactly what old-version hosts emit
+		require.ErrorContains(t, err, "singleton already exists")
+	})
+
+	t.Run("With a name conflict and a blank actor name terminal", func(t *testing.T) {
+		var confirmed string
+		err := system.handleSingletonNameConflict(context.Background(), gerrors.NewErrActorAlreadyExists("name"), "kind", "", "  ", &confirmed)
+		require.ErrorContains(t, err, "already exists")
+	})
+
+	t.Run("With a name conflict under a done context terminal", func(t *testing.T) {
+		done, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		var confirmed string
+		err := system.handleSingletonNameConflict(done, gerrors.NewErrActorAlreadyExists("name"), "kind", "", "name", &confirmed)
+		require.ErrorContains(t, err, "context canceled")
+	})
+
+	t.Run("With a network timeout retryable", func(t *testing.T) {
+		assert.True(t, shouldRetrySpawnSingleton(&net.DNSError{IsTimeout: true}))
+	})
+
+	t.Run("With an invalid confirmed singleton address", func(t *testing.T) {
+		pid, err := system.resolveExistingSingleton(context.Background(), "missing-singleton", "not-an-address")
+		require.Error(t, err)
+		assert.Nil(t, pid)
+	})
+
+	t.Run("With a fallback singleton lookup failure surfaced", func(t *testing.T) {
+		clusterMock.EXPECT().GetActor(mock.Anything, "flaky-singleton").Return(nil, errors.New("registry down")).Once()
+
+		pid, err := system.resolveExistingSingleton(context.Background(), "flaky-singleton", "")
+		require.Error(t, err)
+		assert.Nil(t, pid)
+		assert.NotErrorIs(t, err, gerrors.ErrActorNotFound)
+	})
+
+	t.Run("With no coalescing key the activation runs directly", func(t *testing.T) {
+		want := &PID{}
+		pid, err := system.runSpawnActivation(context.Background(), "", func() (*PID, error) { return want, nil })
+		require.NoError(t, err)
+		assert.Same(t, want, pid)
+	})
+}
+
+func TestSpawnOnReliableRejections(t *testing.T) {
+	clusterMock := mockcluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+
+	t.Run("With a data center placement", func(t *testing.T) {
+		target := &datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
+		_, err := system.SpawnOn(context.Background(), "dc-endpoint", NewMockActor(), AsReliableProducer("consumer"), WithDataCenter(target))
+		require.ErrorContains(t, err, "cannot be placed on another data center")
+	})
+
+	t.Run("With an explicit peer address in cluster mode", func(t *testing.T) {
+		clusterMock.EXPECT().ActorExists(mock.Anything, "peer-endpoint").Return(false, nil).Once()
+
+		_, err := system.SpawnOn(context.Background(), "peer-endpoint", NewMockActor(), AsReliableProducer("consumer", WithReliableRemoteConsumer("127.0.0.1", 9000)))
+		require.ErrorIs(t, err, gerrors.ErrReliablePeerClusterConflict)
+	})
+}
+
+func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
+	t.Run("With an invalid record address", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		err := system.recreateActorFromWire(context.Background(), &internalpb.Actor{Address: "not-an-address"}, "10.0.0.2:9000")
+		require.Error(t, err)
+	})
+
+	t.Run("With a system actor skipped", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		record := &internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/GoAktSystemHelper"}
+		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
+	})
+
+	t.Run("With a singleton skipped", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		record := &internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/lonely", Singleton: &internalpb.SingletonSpec{}}
+		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
+	})
+
+	t.Run("With a non-relocatable reliable endpoint withdrawing records", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+
+		record := &internalpb.Actor{
+			Address:          "goakt://test-replication@10.0.0.2:9000/orders",
+			IncarnationId:    uuid.NewString(),
+			Relocatable:      false,
+			ReliableDelivery: producerDeliveryConfig("consumer").toProto(),
+		}
+
+		// the endpoint release fails and is logged; the companion release still
+		// runs and the relocation returns cleanly because the endpoint is lost
+		// with its node by design
+		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, errors.New("registry down")).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, mock.MatchedBy(func(name string) bool {
+			return strings.HasPrefix(name, reliableProducerControllerNamePrefix)
+		})).Return(nil, cluster.ErrActorNotFound).Once()
+
+		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
+	})
+}
+
+func TestReleaseDepartedEntryBranches(t *testing.T) {
+	t.Run("With the record owned by another node", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "keeper").Return(&internalpb.Actor{Address: "goakt://test-replication@10.0.0.9:9000/keeper"}, nil).Once()
+
+		proceed, err := system.releaseDepartedEntry(context.Background(), "keeper", "10.0.0.2:9000")
+		require.NoError(t, err)
+		assert.False(t, proceed)
+	})
+
+	t.Run("With a remove failure", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(&internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/goner"}, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "goner").Return(errors.New("registry down")).Once()
+
+		proceed, err := system.releaseDepartedEntry(context.Background(), "goner", "10.0.0.2:9000")
+		require.Error(t, err)
+		assert.False(t, proceed)
+	})
+}
+
+func TestSpawnRemotePlacementAddressHandling(t *testing.T) {
+	t.Run("With a malformed confirmation from a host-and-port spawn", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+		system.remotingEnabled.Store(true)
+
+		malformed := "not-an-address"
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(&malformed, nil).Once()
+
+		_, err := system.Spawn(context.Background(), "afar", NewMockActor(), WithHostAndPort("10.0.0.7", 9000))
+		require.ErrorContains(t, err, "failed to parse address")
+	})
+
+	t.Run("With a remote placement failure on SpawnOn", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "10.0.0.7", RemotingPort: 9000}}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(nil, errors.New("remote node down")).Once()
+
+		_, err := system.SpawnOn(context.Background(), "placed", NewMockActor(), WithPlacement(Random))
+		require.ErrorContains(t, err, "remote node down")
+	})
+
+	t.Run("With a malformed confirmation on SpawnOn", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		malformed := "not-an-address"
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed-bad").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "10.0.0.7", RemotingPort: 9000}}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(&malformed, nil).Once()
+
+		_, err := system.SpawnOn(context.Background(), "placed-bad", NewMockActor(), WithPlacement(Random))
+		require.ErrorContains(t, err, "failed to parse address")
+	})
+}
+
+func TestSpawnSingletonWithRoleOnRemoteLeader(t *testing.T) {
+	leader := &cluster.Peer{Host: "10.0.0.7", PeersPort: 9500, RemotingPort: 9000, Roles: []string{"billing"}, CreatedAt: 1}
+
+	t.Run("With a remote spawn failure", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(nil, errors.New("leader unreachable")).Once()
+
+		_, err := system.spawnSingletonWithRole(context.Background(), clusterMock, "lonely", NewMockActor(), "billing", time.Second, 100*time.Millisecond, 3, nil)
+		require.ErrorContains(t, err, "leader unreachable")
+	})
+
+	t.Run("With a malformed confirmation", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		malformed := "not-an-address"
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(&malformed, nil).Once()
+
+		_, err := system.spawnSingletonWithRole(context.Background(), clusterMock, "lonely", NewMockActor(), "billing", time.Second, 100*time.Millisecond, 3, nil)
+		require.ErrorContains(t, err, "failed to parse address")
+	})
+
+	t.Run("With a confirmed remote singleton", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := MockReplicationTestSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		confirmed := "goakt://test-replication@10.0.0.7:9000/lonely"
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{leader}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, "10.0.0.7", 9000, mock.Anything).Return(&confirmed, nil).Once()
+
+		pid, err := system.spawnSingletonWithRole(context.Background(), clusterMock, "lonely", NewMockActor(), "billing", time.Second, 100*time.Millisecond, 3, nil)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+		assert.Equal(t, "lonely", pid.Name())
+	})
 }

@@ -124,6 +124,9 @@ type Cluster interface {
 	Stop(ctx context.Context) error
 	// PutActor stores the provided actor metadata within the cluster state.
 	PutActor(ctx context.Context, actor *internalpb.Actor) error
+	// PutActorIfAbsent stores the actor metadata only when no record already
+	// exists under its name and returns ErrActorAlreadyExists otherwise.
+	PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error
 	// GetActor retrieves actor metadata by name.
 	GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error)
 	// RemoveActor deletes an actor entry from the cluster store.
@@ -476,6 +479,38 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	}
 
 	return x.putRecord(ctx, namespaceActors, key, encoded)
+}
+
+// PutActorIfAbsent stores the actor metadata only when no record exists under
+// its name, making cluster-wide name uniqueness atomic for callers that must
+// not overwrite a concurrent registration. It returns ErrActorAlreadyExists
+// when another record already holds the name.
+func (x *cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	// no need to check for nil address as it is validated during actor creation
+	addr, _ := address.Parse(actor.GetAddress())
+	key := addr.Name()
+
+	encoded, err := encode(actor)
+	if err != nil {
+		return err
+	}
+
+	if err := x.putRecordIfAbsent(ctx, namespaceActors, key, encoded); err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrActorAlreadyExists
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 // GetActor fetches actor metadata by name from the unified map.

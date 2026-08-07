@@ -95,7 +95,11 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 
 		actorName := pid.Name()
 		actorTree.deleteNode(pid)
-		removeFromCluster := actorSys.InCluster() && !pid.isStateSet(systemState) && !actorSys.isStopping()
+		// system actors never publish registry records, with one exception:
+		// reliable-delivery controller companions do through their private
+		// publication path, so their records must leave the registry with them
+		removable := !pid.isStateSet(systemState) || pid.reliableCompanion != nil
+		removeFromCluster := actorSys.InCluster() && removable && !actorSys.isStopping()
 
 		if removeFromCluster {
 			ctx := ctx.withoutCancel()

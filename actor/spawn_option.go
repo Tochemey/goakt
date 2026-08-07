@@ -119,6 +119,19 @@ type spawnConfig struct {
 	// initTimeout overrides the actor system's init timeout for this actor.
 	// A nil value means the system-wide init timeout is used.
 	initTimeout *time.Duration
+	// reliableDelivery holds the endpoint's reliable-delivery settings when
+	// the actor is spawned as a reliable producer or consumer endpoint.
+	reliableDelivery *reliableDeliveryConfig
+	// reliableCompanion marks the actor as the endpoint-owned
+	// reliable-delivery controller described by the spec.
+	reliableCompanion *reliableCompanionSpec
+	// durableQueue is the point-to-point producer endpoint's durable queue
+	// instance; it travels by reference to the controller companion and is
+	// referenced by ID in the wire configuration.
+	durableQueue DurableProducerQueue
+	// durableWorkQueue is the work-pulling producer endpoint's durable work
+	// queue instance; it travels by reference like durableQueue.
+	durableWorkQueue DurableWorkQueue
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -140,6 +153,21 @@ func (s *spawnConfig) Validate() error {
 		return errors.ErrInvalidReentrancyMode
 	}
 
+	if s.reliableDelivery != nil {
+		if err := s.reliableDelivery.Validate(); err != nil {
+			return err
+		}
+
+		// a reliable endpoint must stay alive to keep its controller session;
+		// only the never-passivate strategy (or the long-lived default applied
+		// at spawn) is allowed
+		switch s.passivationStrategy.(type) {
+		case nil, *passivation.LongLivedStrategy:
+		default:
+			return errors.NewErrInvalidPassivationStrategy(s.passivationStrategy)
+		}
+	}
+
 	for _, dependency := range s.dependencies {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
@@ -154,6 +182,32 @@ func (s *spawnConfig) Validate() error {
 		if err := validation.NewTCPAddressValidator(address).Validate(); err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// rejectReliableRemotePlacement applies the placement rules of a reliable
+// endpoint spawned away from the calling node. Placement resolves peer
+// controllers through the cluster registry, so clustering is required:
+// without it the endpoint would spawn and never connect, and the rule is
+// permanent because remoting-only flows spawn each endpoint locally on its
+// own node with explicit peer addressing. An explicit peer address is
+// rejected on every placement route, because it excludes cluster resolution
+// and the placement wire never carries it, so accepting the spawn would
+// silently drop the setting instead of surfacing the authority conflict the
+// local spawn path reports.
+func (s *spawnConfig) rejectReliableRemotePlacement(clusterEnabled bool) error {
+	if s == nil || s.reliableDelivery == nil {
+		return nil
+	}
+
+	if !clusterEnabled {
+		return errors.ErrReliableClusterRequired
+	}
+
+	if s.reliableDelivery.peerAddress() != nil {
+		return errors.ErrReliablePeerClusterConflict
 	}
 
 	return nil
@@ -179,7 +233,37 @@ func newSpawnConfig(opts ...SpawnOption) *spawnConfig {
 	for _, opt := range opts {
 		opt.Apply(config)
 	}
+
+	config.normalizeDurableQueue()
 	return config
+}
+
+// normalizeDurableQueue registers the durable queue instance among the user
+// dependencies so it serializes into the actor record and can be
+// reconstructed by ID on any eligible node after remote placement or
+// relocation. The ID guard keeps exactly one entry when the caller also
+// passed the queue through WithDependencies and makes repeated normalization
+// idempotent. Running after all options are applied keeps the result
+// independent of option order.
+func (s *spawnConfig) normalizeDurableQueue() {
+	s.appendDurableDependency(s.durableQueue)
+	s.appendDurableDependency(s.durableWorkQueue)
+}
+
+// appendDurableDependency adds queue to the dependency list when it is set
+// and not already present by ID.
+func (s *spawnConfig) appendDurableDependency(queue extension.Dependency) {
+	if queue == nil {
+		return
+	}
+
+	for _, dependency := range s.dependencies {
+		if dependency != nil && dependency.ID() == queue.ID() {
+			return
+		}
+	}
+
+	s.dependencies = append(s.dependencies, queue)
 }
 
 // clone returns a deep copy of the spawnConfig and applies the given SpawnOption(s)
@@ -209,6 +293,10 @@ func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 		passivationStrategy: s.passivationStrategy,
 		reentrancy:          s.reentrancy,
 		dataCenter:          s.dataCenter,
+		reliableDelivery:    s.reliableDelivery,
+		reliableCompanion:   s.reliableCompanion,
+		durableQueue:        s.durableQueue,
+		durableWorkQueue:    s.durableWorkQueue,
 	}
 
 	if len(s.dependencies) > 0 {
@@ -546,5 +634,28 @@ func withSingleton(spec *singletonSpec) SpawnOption {
 func asSystem() SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.isSystem = true
+	})
+}
+
+// asReliableEndpoint records the endpoint's reliable-delivery settings. The
+// public AsReliableProducer and AsReliableConsumer options build on it.
+//
+// Returns:
+//   - SpawnOption that stores the reliable-delivery configuration.
+func asReliableEndpoint(config *reliableDeliveryConfig) SpawnOption {
+	return spawnOption(func(cfg *spawnConfig) {
+		cfg.reliableDelivery = config
+	})
+}
+
+// asReliableCompanion marks the spawned actor as the endpoint-owned
+// reliable-delivery controller described by spec. Only the companion spawn
+// machinery uses it.
+//
+// Returns:
+//   - SpawnOption that stores the runtime-companion metadata.
+func asReliableCompanion(spec *reliableCompanionSpec) SpawnOption {
+	return spawnOption(func(cfg *spawnConfig) {
+		cfg.reliableCompanion = spec
 	})
 }

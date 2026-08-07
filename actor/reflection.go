@@ -27,6 +27,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 )
@@ -39,6 +40,15 @@ type reflection struct {
 // newReflection creates an instance of Reflection
 func newReflection(registry types.Registry) *reflection {
 	return &reflection{registry: registry}
+}
+
+// addressFromActor restores an actor address and its incarnation identifier
+// from a cluster record.
+func addressFromActor(actor *internalpb.Actor) (*address.Address, error) {
+	if actor.GetIncarnationId() == "" {
+		return address.Parse(actor.GetAddress())
+	}
+	return address.ParseWithIncarnationID(actor.GetAddress(), actor.GetIncarnationId())
 }
 
 // instantiateActor creates a new instance of Actor from its FQN

@@ -183,7 +183,15 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 //
 // Note:
 //   - If you require custom balancing logic, use SpawnBalanced instead.
+//   - Reliable delivery endpoints cannot be spawned from the cluster client:
+//     a request carrying ReliableDelivery is rejected with
+//     ErrReliableSpawnUnsupported, because the spawning side of a reliable
+//     flow must participate in the delivery protocol.
 func (x *Client) Spawn(ctx context.Context, spawnRequest *remote.SpawnRequest) (err error) {
+	if spawnRequest.ReliableDelivery != nil {
+		return gerrors.ErrReliableSpawnUnsupported
+	}
+
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	x.locker.Unlock()
@@ -206,7 +214,17 @@ func (x *Client) Spawn(ctx context.Context, spawnRequest *remote.SpawnRequest) (
 //
 // Returns:
 //   - err: Non-nil if spawning the actor fails (e.g., invalid actor, placement error, etc.)
+//
+// Note:
+//   - Reliable delivery endpoints cannot be spawned from the cluster client:
+//     a request carrying ReliableDelivery is rejected with
+//     ErrReliableSpawnUnsupported, because the spawning side of a reliable
+//     flow must participate in the delivery protocol.
 func (x *Client) SpawnBalanced(ctx context.Context, spawnRequest *remote.SpawnRequest, strategy BalancerStrategy) (err error) {
+	if spawnRequest.ReliableDelivery != nil {
+		return gerrors.ErrReliableSpawnUnsupported
+	}
+
 	x.locker.Lock()
 	balancer := getBalancer(strategy)
 	balancer.Set(x.nodes...)

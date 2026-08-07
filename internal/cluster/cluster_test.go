@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"testing"
@@ -2352,6 +2353,60 @@ func TestNextRoundRobinValueReturnsErrorForInvalidKey(t *testing.T) {
 	require.EqualError(t, err, "invalid round-robin key: invalid-key")
 }
 
+func TestPutActorIfAbsent(t *testing.T) {
+	record := &internalpb.Actor{Address: address.New("endpoint", "testSystem", "127.0.0.1", 9000).String()}
+
+	t.Run("With an absent record", func(t *testing.T) {
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap: &MockDMap{
+				putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error { // nolint
+					require.Equal(t, composeKey(namespaceActors, "endpoint"), key)
+					// the write must carry the NX option that makes it conditional
+					require.Len(t, options, 1)
+					return nil
+				},
+			},
+		}
+
+		require.NoError(t, cl.PutActorIfAbsent(context.Background(), record))
+	})
+
+	t.Run("With an existing record", func(t *testing.T) {
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap:         &MockDMap{putErr: olric.ErrKeyFound},
+		}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, ErrActorAlreadyExists)
+	})
+
+	t.Run("With a backend failure", func(t *testing.T) {
+		putErr := errors.New("put failure")
+		cl := &cluster{
+			running:      atomic.NewBool(true),
+			logger:       log.DiscardLogger,
+			writeTimeout: time.Second,
+			dmap:         &MockDMap{putErr: putErr},
+		}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("With the engine not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
+
+		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+	})
+}
+
 func TestGetActorReturnsDMapError(t *testing.T) {
 	expectedErr := errors.New("get failure")
 	cl := &cluster{
@@ -3893,4 +3948,369 @@ func TestLastRebalanceEvent(t *testing.T) {
 	now := time.Now()
 	cl.lastRebalanceEventNanos.Store(now.UnixNano())
 	assert.WithinDuration(t, now, cl.LastRebalanceEvent(), time.Millisecond)
+}
+
+func TestStartReturnsNilWhenAlreadyRunning(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(true)}
+	require.NoError(t, cl.Start(context.Background()))
+}
+
+func TestActorExistsPropagatesDMapError(t *testing.T) {
+	// only a key-not-found maps to a clean false; any other read failure must
+	// surface so callers do not mistake an outage for absence
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
+				return nil, expectedErr
+			},
+		},
+	}
+
+	exists, err := cl.ActorExists(context.Background(), "actor")
+	require.False(t, exists)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestGrainExistsPropagatesDMapError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	cl := &cluster{
+		running:     atomic.NewBool(true),
+		logger:      log.DiscardLogger,
+		readTimeout: time.Second,
+		dmap: &MockDMap{
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
+				return nil, expectedErr
+			},
+		},
+	}
+
+	exists, err := cl.GrainExists(context.Background(), "grain")
+	require.False(t, exists)
+	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestCountActorsByHostReturnsErrorWhenNotRunning(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(false)}
+
+	counts, err := cl.CountActorsByHost(context.Background(), time.Second)
+	require.Nil(t, counts)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+}
+
+func TestCountActorsByHostSkipsMalformedAddress(t *testing.T) {
+	// a record whose address does not parse cannot be attributed to a host; it
+	// must be skipped rather than counted under a bogus key or failing the scan
+	good := address.New("a", "system", "127.0.0.1", 8080)
+	goodKey := composeKey(namespaceActors, good.String())
+	goodValue, err := encode(&internalpb.Actor{Address: good.String()})
+	require.NoError(t, err)
+
+	badKey := composeKey(namespaceActors, "malformed")
+	badValue, err := encode(&internalpb.Actor{Address: "not-a-valid-address"})
+	require.NoError(t, err)
+
+	values := map[string][]byte{goodKey: goodValue, badKey: badValue}
+
+	cl := &cluster{
+		running: atomic.NewBool(true),
+		logger:  log.DiscardLogger,
+		dmap: &MockDMap{
+			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) { // nolint
+				return &iteratorStub{keys: []string{goodKey, badKey}}, nil
+			},
+			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
+				return newGetResponseWithValue(values[key]), nil
+			},
+		},
+	}
+
+	counts, err := cl.CountActorsByHost(context.Background(), time.Second)
+	require.NoError(t, err)
+	require.Equal(t, map[string]int{address.FormatHostPort("127.0.0.1", 8080): 1}, counts)
+}
+
+func TestBuildConfigMapsLogLevels(t *testing.T) {
+	// the engine log level is derived from the goakt logger level; the error
+	// family and the warning level have their own mappings
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323}
+
+	errorCl := &cluster{logger: log.NewZap(log.ErrorLevel, io.Discard), node: node}
+	cfg, err := errorCl.buildConfig()
+	require.NoError(t, err)
+	require.Equal(t, "ERROR", cfg.LogLevel)
+
+	warnCl := &cluster{logger: log.NewZap(log.WarningLevel, io.Discard), node: node}
+	cfg, err = warnCl.buildConfig()
+	require.NoError(t, err)
+	require.Equal(t, "WARN", cfg.LogLevel)
+}
+
+func TestSetupMemberlistConfigReturnsTLSTransportError(t *testing.T) {
+	// the TLS transport binds during construction and rejects a host that is
+	// not a literal IP, so a bad bind host must surface as an error
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		ServerConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	cl := &cluster{
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "not-an-ip-literal", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	require.Error(t, cl.setupMemberlistConfig(&oconfig.Config{}))
+}
+
+func TestBootstrapReturnsMemberlistConfigError(t *testing.T) {
+	// bootstrap must wrap and return the memberlist configuration failure
+	// before any engine state is created
+	info := &gtls.Info{
+		ClientConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+		ServerConfig: &tls.Config{MinVersion: tls.VersionTLS12},
+	}
+	cl := &cluster{
+		logger:  log.DiscardLogger,
+		node:    &discovery.Node{Host: "not-an-ip-literal", PeersPort: 3322, DiscoveryPort: 3323},
+		tlsInfo: info,
+	}
+
+	err := cl.bootstrap(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to configure memberlist")
+}
+
+func TestBootstrapReturnsEngineConstructionError(t *testing.T) {
+	// a bind host that is neither an IP nor a resolvable name fails olric's
+	// network setup, so engine construction errors after the config and
+	// discovery steps succeed; the '!' keeps the name invalid to the resolver
+	// itself, so no environment can resolve it
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+
+	ports := dynaport.Get(2)
+	cl := &cluster{
+		logger:            log.DiscardLogger,
+		node:              &discovery.Node{Name: "invalid_host!", Host: "invalid_host!", DiscoveryPort: ports[0], PeersPort: ports[1]},
+		discoveryProvider: provider,
+	}
+
+	err := cl.bootstrap(context.Background())
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to start cluster engine")
+}
+
+func TestConsumeToleratesHandlerErrorsAndForeignChannels(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	msgs := make(chan *redis.Message, 3)
+	cl.messages = msgs
+	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	cl.consumeWg.Go(func() {
+		cl.consume()
+		close(done)
+	})
+
+	// a malformed payload is logged and must not kill the consumer, and a
+	// message on a foreign channel is ignored
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: "{invalid"}
+	msgs <- &redis.Message{Channel: "foreign-channel", Payload: "ignored"}
+
+	// the consumer is still alive: a valid join event must still be tracked
+	node := "127.0.0.1:9100"
+	payload, err := json.Marshal(events.NodeJoinEvent{
+		Kind:      events.KindNodeJoinEvent,
+		NodeJoin:  node,
+		Timestamp: time.Now().UnixNano(),
+	})
+	require.NoError(t, err)
+	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(payload)}
+
+	require.Eventually(t, func() bool {
+		cl.eventsLock.Lock()
+		defer cl.eventsLock.Unlock()
+		_, tracked := cl.nodeJoinTimestamps[node]
+		return tracked
+	}, time.Second, 10*time.Millisecond)
+
+	cl.consumeCancel()
+	<-done
+}
+
+func TestHandleClusterEventInvalidRebalanceStart(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	payload := fmt.Sprintf(`{"kind":%q,"epoch":{}}`, events.KindRebalanceStartEvent)
+	require.ErrorContains(t, cl.handleClusterEvent(payload), "unmarshal rebalance start")
+}
+
+func TestHandleClusterEventInvalidRebalanceComplete(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	payload := fmt.Sprintf(`{"kind":%q,"epoch":{}}`, events.KindRebalanceCompleteEvent)
+	require.ErrorContains(t, cl.handleClusterEvent(payload), "unmarshal rebalance complete")
+}
+
+func TestTrackNodeLeftEventIgnoresAlreadyEmittedNode(t *testing.T) {
+	// a departure whose NodeLeft already emitted must not restart the pending
+	// bookkeeping
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9200"
+	cl.nodeLeftEventsFilter.Add(node)
+
+	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: time.Now().UnixNano()})
+
+	require.Empty(t, cl.nodeLeftTimestamps)
+}
+
+func TestProcessRebalanceStartIgnoresIrrelevantReasons(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+
+	// a rebalance triggered by neither a join nor a departure carries no
+	// topology event duty
+	cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 7, Reason: "manual"})
+	require.Empty(t, cl.rebalanceStartSeen)
+
+	// the local node's own join rebalance is not a peer topology change
+	cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 8, Reason: rebalanceReasonNodeJoin, Node: cl.node.PeersAddress()})
+	require.Empty(t, cl.rebalanceStartSeen)
+}
+
+func TestProcessRebalanceStartEmitsWhenCompleteAlreadySeen(t *testing.T) {
+	// the completion event can land before its start event; the start must
+	// then emit the pending topology events immediately instead of waiting for
+	// a completion that already happened
+	t.Run("node left", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9300"
+
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 9})
+		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: time.Now().UnixNano()})
+		cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 9, Reason: rebalanceReasonNodeLeft, Node: node})
+
+		event := <-cl.events
+		require.Equal(t, NodeLeft, event.Type)
+	})
+
+	t.Run("node join", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9400"
+
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 9})
+		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: time.Now().UnixNano()})
+		cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 9, Reason: rebalanceReasonNodeJoin, Node: node})
+
+		event := <-cl.events
+		require.Equal(t, NodeJoined, event.Type)
+	})
+}
+
+func TestEmitPendingJoinForEpochLockedSkipsOtherEpochsAndPrunesOrphans(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+
+	// an entry tied to another epoch stays pending
+	cl.rebalanceJoinNodeEpochs["node-a"] = 3
+	cl.nodeJoinTimestamps["node-a"] = 42
+
+	// an entry with no recorded timestamp is an orphan and is pruned silently
+	cl.rebalanceJoinNodeEpochs["node-b"] = 5
+
+	cl.emitPendingJoinForEpochLocked(5)
+
+	require.Contains(t, cl.rebalanceJoinNodeEpochs, "node-a")
+	require.NotContains(t, cl.rebalanceJoinNodeEpochs, "node-b")
+	require.Zero(t, len(cl.events))
+}
+
+func TestEmitPendingLeftForEpochLockedSkipsOtherEpochsAndPrunesOrphans(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+
+	cl.rebalanceLeftNodeEpochs["node-a"] = 3
+	cl.nodeLeftTimestamps["node-a"] = 42
+
+	cl.rebalanceLeftNodeEpochs["node-b"] = 5
+
+	cl.emitPendingLeftForEpochLocked(5)
+
+	require.Contains(t, cl.rebalanceLeftNodeEpochs, "node-a")
+	require.NotContains(t, cl.rebalanceLeftNodeEpochs, "node-b")
+	require.Zero(t, len(cl.events))
+}
+
+func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9500"
+	cl.nodeLeftEventsFilter.Add(node)
+
+	cl.emitNodeLeftLocked(node, time.Now().UnixNano())
+
+	require.Zero(t, len(cl.events))
+}
+
+func TestEmitNodeJoinedLockedDeduplicates(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9600"
+	cl.nodeJoinedEventsFilter.Add(node)
+
+	cl.emitNodeJoinedLocked(node, time.Now().UnixNano())
+
+	require.Zero(t, len(cl.events))
+}
+
+func TestPutGrainIfAbsentInternalRejectsEmptyIDValue(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(true)}
+
+	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	err := cl.putGrainIfAbsent(context.Background(), grain)
+	require.EqualError(t, err, "grain id value is empty")
+}
+
+func TestStopWarnsWhenConsumeExceedsShutdownTimeout(t *testing.T) {
+	// when the consume goroutines outlive the shutdown budget, Stop must warn
+	// and proceed with the teardown instead of blocking forever
+	ctx := context.TODO()
+	nodePorts := dynaport.Get(3)
+	gossipPort, clusterPort, remotingPort := nodePorts[0], nodePorts[1], nodePorts[2]
+	host := "127.0.0.1"
+
+	provider := new(mocksdiscovery.Provider)
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return([]string{fmt.Sprintf("%s:%d", host, gossipPort)}, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	hostNode := discovery.Node{
+		Name:          host,
+		Host:          host,
+		DiscoveryPort: gossipPort,
+		PeersPort:     clusterPort,
+		RemotingPort:  remotingPort,
+	}
+
+	engine := New("testSystem", provider, &hostNode, WithLogger(log.DiscardLogger))
+	require.NoError(t, engine.Start(ctx))
+
+	// hold the consume wait group past the shutdown budget so Stop takes the
+	// timeout branch instead of the clean wait
+	cl := engine.(*cluster)
+	release := make(chan struct{})
+	cl.consumeWg.Go(func() { <-release })
+	cl.shutdownTimeout = 100 * time.Millisecond
+
+	start := time.Now()
+	_ = engine.Stop(ctx)
+	require.Less(t, time.Since(start), 5*time.Second)
+
+	// the timeout path must still have completed the teardown behind the wait
+	cl.eventsLock.Lock()
+	require.Nil(t, cl.events)
+	cl.eventsLock.Unlock()
+	require.False(t, engine.IsRunning())
+
+	close(release)
+	cl.consumeWg.Wait()
 }

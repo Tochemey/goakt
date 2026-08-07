@@ -50,6 +50,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/validation"
 )
@@ -79,21 +81,23 @@ var zeroAddress = &Address{}
 // protobuf Address. Validation treats the zero address as valid to allow it to be
 // used as a sentinel in message envelopes and internal signaling.
 type Address struct {
-	host      string
-	port      int
-	name      string
-	system    string
-	parent    *Address
-	cachedStr string // eagerly computed at construction; String() is a pure read
+	host          string
+	port          int
+	name          string
+	system        string
+	parent        *Address
+	incarnationID string
+	cachedStr     string // eagerly computed at construction; String() is a pure read
 }
 
 var _ validation.Validator = (*Address)(nil)
 
 // New creates a new Address with the given attributes.
 //
-// New generates a new unique ID for the address and sets the Parent to NoSender
-// (i.e., a zero/empty parent). New does not validate the inputs; call Validate
-// to verify the resulting address.
+// New mints a fresh incarnation identity: use it only where an actor is being
+// created. Use NewReference to refer to an actor that exists (or may exist)
+// elsewhere. The Parent is set to NoSender (i.e., a zero/empty parent). New
+// does not validate the inputs; call Validate to verify the resulting address.
 //
 // Parameters:
 //   - name: actor name within the system
@@ -106,10 +110,11 @@ var _ validation.Validator = (*Address)(nil)
 //	goakt://system@127.0.0.1:9000/actorName
 func New(name, system string, host string, port int) *Address {
 	a := &Address{
-		host:   host,
-		port:   port,
-		name:   name,
-		system: system,
+		host:          host,
+		port:          port,
+		name:          name,
+		system:        system,
+		incarnationID: uuid.NewString(),
 	}
 	a.cachedStr = a.buildString()
 	return a
@@ -143,13 +148,31 @@ func New(name, system string, host string, port int) *Address {
 //	}
 func NewWithParent(name, system, host string, port int, parent *Address) *Address {
 	a := &Address{
+		host:          host,
+		port:          port,
+		name:          name,
+		system:        system,
+		incarnationID: uuid.NewString(),
+	}
+	if parent != nil {
+		a.parent = parent
+	}
+	a.cachedStr = a.buildString()
+	return a
+}
+
+// NewReference creates an Address that refers to an actor living elsewhere,
+// for example to build a canonical lookup key or to target a remote actor.
+//
+// Unlike New, it mints no incarnation identity: IncarnationID is empty, so the
+// address does not pass Validate and SameIncarnation never matches it. Use
+// ParseWithIncarnationID to restore a reference carrying a known incarnation.
+func NewReference(name, system string, host string, port int) *Address {
+	a := &Address{
 		host:   host,
 		port:   port,
 		name:   name,
 		system: system,
-	}
-	if parent != nil {
-		a.parent = parent
 	}
 	a.cachedStr = a.buildString()
 	return a
@@ -205,6 +228,14 @@ func (x *Address) System() string {
 		return ""
 	}
 	return x.system
+}
+
+// IncarnationID returns the identifier of this actor incarnation.
+func (x *Address) IncarnationID() string {
+	if x == nil {
+		return ""
+	}
+	return x.incarnationID
 }
 
 // String returns the canonical, deterministic textual form of the Address.
@@ -347,6 +378,12 @@ func (x *Address) Equals(y *Address) bool {
 		x.Port() == y.Port()
 }
 
+// SameIncarnation reports whether both addresses identify the same actor
+// incarnation at the same logical path.
+func (x *Address) SameIncarnation(y *Address) bool {
+	return x.Equals(y) && x.IncarnationID() != "" && x.IncarnationID() == y.IncarnationID()
+}
+
 // Validate checks whether the Address is well-formed.
 //
 // Validation rules:
@@ -355,6 +392,9 @@ func (x *Address) Equals(y *Address) bool {
 //   - System must be non-empty and match pattern: ^[a-zA-Z0-9][a-zA-Z0-9-_.]*$
 //     (starts with alphanumeric; may contain alphanumerics, '-', '_' or '.')
 //   - Name must be non-empty, <= 255 characters, and match the same pattern.
+//   - IncarnationID must be a valid UUID. New and NewWithParent always set it;
+//     an address restored with Parse alone carries none and fails validation,
+//     so use ParseWithIncarnationID when the result must validate.
 //   - The underlying protobuf message must be non-nil.
 //
 // Validate returns an error on the first failure (fail-fast). The exact error
@@ -373,6 +413,7 @@ func (x *Address) Validate() error {
 		AddAssertion(len(x.Name()) <= 255, "actor name is too long. Maximum length is 255").
 		AddValidator(validation.NewPatternValidator(pattern, x.System(), customErr)).
 		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(x.Name()), customErr)).
+		AddAssertion(uuid.Validate(x.IncarnationID()) == nil, "actor incarnation ID is invalid").
 		Validate()
 
 	if x.Parent() != nil && !x.Parent().Equals(NoSender()) {
@@ -396,6 +437,22 @@ func (x *Address) Validate() error {
 	return verr
 }
 
+// ParseWithIncarnationID parses an actor address and restores its incarnation
+// identifier from actor metadata.
+func ParseWithIncarnationID(value, incarnationID string) (*Address, error) {
+	addr, err := Parse(value)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := uuid.Validate(incarnationID); err != nil {
+		return nil, err
+	}
+
+	addr.incarnationID = incarnationID
+	return addr, nil
+}
+
 // Parse parses a canonical address string into an Address.
 //
 // Accepted formats:
@@ -408,7 +465,10 @@ func (x *Address) Validate() error {
 //   - Port must be a base-10 integer.
 //   - Path may contain at most one '/' (to separate <parent>/<name>).
 //   - Raw IPv6 literals are not supported by this parser (use a hostname).
-//   - No semantic validation is performed; call Validate on the result.
+//   - No semantic validation is performed. The canonical string carries no
+//     incarnation identifier, so the result has an empty IncarnationID and does
+//     not pass Validate; use ParseWithIncarnationID to restore a validatable
+//     address from actor metadata.
 //   - If no parent component is present, the returned Address has no parent (nil).
 //
 // Errors:

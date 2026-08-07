@@ -147,6 +147,28 @@ type Client interface {
 	//   - Other server-side failures surfaced as proto errors.
 	RemoteLookup(ctx context.Context, host string, port int, name string) (addr *address.Address, err error)
 
+	// GetReliableCompanion resolves the live reliable-delivery controller
+	// companion of a named endpoint hosted on a remote node. The serving node
+	// validates the endpoint-companion pair against its local actor tree, so
+	// the returned address always names the peer's current controller
+	// incarnation. Remoting-only reliable flows use this to resolve their
+	// explicitly addressed peer without a cluster registry.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines.
+	//   - host, port: Location of the remote actor system hosting the endpoint.
+	//   - endpointName: The endpoint's registered name on that node.
+	//   - role: The controller role to resolve for the endpoint.
+	//
+	// Returns:
+	//   - addr: The validated companion address. If the endpoint or its
+	//     companion is not available, address.NoSender() is returned without error.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - Other server-side failures surfaced as proto errors.
+	GetReliableCompanion(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (addr *address.Address, err error)
+
 	// RemoteBatchTell sends multiple fire-and-forget messages to the same remote
 	// actor in a single RPC for efficiency.
 	//
@@ -193,11 +215,13 @@ type Client interface {
 	//   - ctx: Cancellation and deadlines.
 	//   - host, port: Location of the remote actor system.
 	//   - spawnRequest: Desired actor name, type (kind), singleton/relocatable
-	//     flags, passivation strategy, dependencies, and stash behavior.
+	//     flags, passivation strategy, dependencies, stash behavior, and
+	//     reliable-delivery settings.
 	//
 	// Behavior:
 	//   - Validates and sanitizes spawnRequest before sending.
-	//   - Dependencies and passivation strategy are encoded for transport.
+	//   - Dependencies, passivation strategy, and reliable-delivery settings
+	//     are encoded for transport.
 	//
 	// Errors:
 	//   - ErrTypeNotRegistered when the remote system does not recognize the
@@ -1939,6 +1963,54 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	return address.Parse(lookupResp.GetAddress())
 }
 
+// GetReliableCompanion resolves the live reliable-delivery controller
+// companion of a named endpoint hosted on a remote node. A NoSender address is
+// returned when the endpoint or its companion is not available on that node.
+//
+// Errors are returned for transport problems or other server-side failures.
+func (r *client) GetReliableCompanion(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (*address.Address, error) {
+	port32, err := strconvx.Int2Int32(port)
+	if err != nil {
+		return nil, err
+	}
+
+	// Enrich context with metadata
+	ctx, err = r.enrichContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get pooled client
+	client := r.NetClient(host, port)
+	request := &internalpb.GetReliableCompanionRequest{
+		Host:         host,
+		Port:         port32,
+		EndpointName: endpointName,
+		Role:         role,
+	}
+
+	// Send request
+	resp, err := client.SendProto(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+
+	// Handle NOT_FOUND specially - return NoSender without error
+	if errResp, ok := resp.(*internalpb.Error); ok {
+		if errResp.GetCode() == internalpb.Code_CODE_NOT_FOUND {
+			return address.NoSender(), nil
+		}
+		return nil, checkProtoError(errResp)
+	}
+
+	companionResp, ok := resp.(*internalpb.GetReliableCompanionResponse)
+	if !ok {
+		return nil, errors.New("invalid response type")
+	}
+
+	return address.Parse(companionResp.GetAddress())
+}
+
 // RemoteBatchTell sends multiple asynchronous messages to the same remote actor
 // in a single RPC. Nil entries in messages are ignored.
 //
@@ -2139,6 +2211,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
 		Reentrancy:          reentrancy,
 		InitTimeout:         initTimeout,
+		ReliableDelivery:    encodeReliableDelivery(spawnRequest.ReliableDelivery),
 	}
 
 	// Send request
@@ -2157,6 +2230,53 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	}
 
 	return nil, gerrors.ErrInvalidResponse
+}
+
+// encodeReliableDelivery converts the public reliable-delivery spec of a
+// spawn request to its wire form. A nil spec encodes as absent so ordinary
+// spawn requests stay unchanged.
+func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.ReliableDeliveryConfig {
+	switch {
+	case spec == nil:
+		return nil
+	case spec.Producer != nil:
+		pattern := internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT
+		if spec.Producer.WorkPulling {
+			pattern = internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
+		}
+
+		producer := &internalpb.ReliableProducerConfig{
+			ConsumerName: spec.Producer.ConsumerName,
+			QueueRetry: &internalpb.QueueRetryConfig{
+				MaxAttempts:    uint32(spec.Producer.QueueRetryMaxAttempts), // nolint
+				InitialBackoff: durationpb.New(spec.Producer.QueueRetryInitialBackoff),
+			},
+			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
+			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
+			MaxChunkBytes:        spec.Producer.MaxChunkBytes,
+			Pattern:              pattern,
+		}
+
+		if spec.Producer.DurableQueueID != types.EmptyString {
+			producer.DurableQueueId = new(spec.Producer.DurableQueueID)
+		}
+
+		return &internalpb.ReliableDeliveryConfig{
+			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
+		}
+	case spec.Consumer != nil:
+		return &internalpb.ReliableDeliveryConfig{
+			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
+				Consumer: &internalpb.ReliableConsumerConfig{
+					ProducerName:      spec.Consumer.ProducerName,
+					FlowControlWindow: uint32(spec.Consumer.FlowControlWindow), // nolint
+					ResendInterval:    durationpb.New(spec.Consumer.ResendInterval),
+				},
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 // RemoteReSpawn requests a restart of an existing actor on the remote node.

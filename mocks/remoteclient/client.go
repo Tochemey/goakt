@@ -122,6 +122,92 @@ func (_c *Client_Compression_Call) RunAndReturn(run func() remote.Compression) *
 	return _c
 }
 
+// GetReliableCompanion provides a mock function for the type Client
+func (_mock *Client) GetReliableCompanion(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (*address.Address, error) {
+	ret := _mock.Called(ctx, host, port, endpointName, role)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetReliableCompanion")
+	}
+
+	var r0 *address.Address
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, string, internalpb.ReliableControllerRole) (*address.Address, error)); ok {
+		return returnFunc(ctx, host, port, endpointName, role)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, string, internalpb.ReliableControllerRole) *address.Address); ok {
+		r0 = returnFunc(ctx, host, port, endpointName, role)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*address.Address)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, int, string, internalpb.ReliableControllerRole) error); ok {
+		r1 = returnFunc(ctx, host, port, endpointName, role)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Client_GetReliableCompanion_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetReliableCompanion'
+type Client_GetReliableCompanion_Call struct {
+	*mock.Call
+}
+
+// GetReliableCompanion is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - endpointName string
+//   - role internalpb.ReliableControllerRole
+func (_e *Client_Expecter) GetReliableCompanion(ctx any, host any, port any, endpointName any, role any) *Client_GetReliableCompanion_Call {
+	return &Client_GetReliableCompanion_Call{Call: _e.mock.On("GetReliableCompanion", ctx, host, port, endpointName, role)}
+}
+
+func (_c *Client_GetReliableCompanion_Call) Run(run func(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole)) *Client_GetReliableCompanion_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 string
+		if args[3] != nil {
+			arg3 = args[3].(string)
+		}
+		var arg4 internalpb.ReliableControllerRole
+		if args[4] != nil {
+			arg4 = args[4].(internalpb.ReliableControllerRole)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+			arg4,
+		)
+	})
+	return _c
+}
+
+func (_c *Client_GetReliableCompanion_Call) Return(addr *address.Address, err error) *Client_GetReliableCompanion_Call {
+	_c.Call.Return(addr, err)
+	return _c
+}
+
+func (_c *Client_GetReliableCompanion_Call) RunAndReturn(run func(ctx context.Context, host string, port int, endpointName string, role internalpb.ReliableControllerRole) (*address.Address, error)) *Client_GetReliableCompanion_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NetClient provides a mock function for the type Client
 func (_mock *Client) NetClient(host string, port int) *net.Client {
 	ret := _mock.Called(host, port)

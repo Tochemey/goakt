@@ -26,6 +26,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -130,9 +131,29 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, "host:1234", addr.HostPort())
 		assert.Equal(t, "host", addr.Host())
 		assert.Equal(t, "name", addr.Name())
+		assert.NoError(t, uuid.Validate(addr.IncarnationID()))
 		assert.EqualValues(t, 1234, addr.Port())
 		assert.Nil(t, addr.Parent())
 		assert.Equal(t, expected, addr.String())
+	})
+
+	t.Run("With distinct incarnations", func(t *testing.T) {
+		first := New("name", "system", "host", 1234)
+		second := New("name", "system", "host", 1234)
+
+		assert.True(t, first.Equals(second))
+		assert.False(t, first.SameIncarnation(second))
+	})
+
+	t.Run("With reference address", func(t *testing.T) {
+		minted := New("name", "system", "host", 1234)
+		reference := NewReference("name", "system", "host", 1234)
+
+		assert.Empty(t, reference.IncarnationID())
+		assert.Equal(t, minted.String(), reference.String())
+		assert.True(t, minted.Equals(reference))
+		assert.False(t, minted.SameIncarnation(reference))
+		assert.Error(t, reference.Validate())
 	})
 
 	t.Run("With parent string", func(t *testing.T) {
@@ -155,6 +176,28 @@ func TestAddress(t *testing.T) {
 	})
 }
 
+func TestParseWithIncarnationID(t *testing.T) {
+	t.Run("With valid inputs", func(t *testing.T) {
+		incarnationID := uuid.NewString()
+		addr, err := ParseWithIncarnationID("goakt://system@host:1234/name", incarnationID)
+
+		assert.NoError(t, err)
+		assert.Equal(t, incarnationID, addr.IncarnationID())
+	})
+
+	t.Run("With invalid address", func(t *testing.T) {
+		addr, err := ParseWithIncarnationID("", uuid.NewString())
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+
+	t.Run("With invalid incarnation", func(t *testing.T) {
+		addr, err := ParseWithIncarnationID("goakt://system@host:1234/name", "not-a-uuid")
+		assert.Error(t, err)
+		assert.Nil(t, addr)
+	})
+}
+
 func TestAddressNilReceiver(t *testing.T) {
 	var addr *Address
 	assert.Nil(t, addr.Parent())
@@ -162,6 +205,7 @@ func TestAddressNilReceiver(t *testing.T) {
 	assert.Equal(t, "", addr.Host())
 	assert.EqualValues(t, 0, addr.Port())
 	assert.Equal(t, "", addr.System())
+	assert.Equal(t, "", addr.IncarnationID())
 	assert.Equal(t, "", addr.String())
 	assert.Equal(t, ":0", addr.HostPort())
 	assert.False(t, addr.Equals(nil))

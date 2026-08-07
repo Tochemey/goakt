@@ -342,9 +342,15 @@ type Actor struct {
 	Reentrancy *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
 	// Specifies the init timeout override when explicitly set.
 	// When unset, the hosting node's system-wide init timeout is used.
-	InitTimeout   *durationpb.Duration `protobuf:"bytes,11,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	InitTimeout *durationpb.Duration `protobuf:"bytes,11,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
+	// Identifies this actor incarnation
+	IncarnationId string `protobuf:"bytes,12,opt,name=incarnation_id,json=incarnationId,proto3" json:"incarnation_id,omitempty"`
+	// Specifies the reliable-delivery configuration when explicitly set
+	ReliableDelivery *ReliableDeliveryConfig `protobuf:"bytes,13,opt,name=reliable_delivery,json=reliableDelivery,proto3" json:"reliable_delivery,omitempty"`
+	// Marks an endpoint-owned reliable-delivery controller record
+	ReliableCompanion *ReliableCompanionSpec `protobuf:"bytes,14,opt,name=reliable_companion,json=reliableCompanion,proto3" json:"reliable_companion,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -454,6 +460,27 @@ func (x *Actor) GetInitTimeout() *durationpb.Duration {
 	return nil
 }
 
+func (x *Actor) GetIncarnationId() string {
+	if x != nil {
+		return x.IncarnationId
+	}
+	return ""
+}
+
+func (x *Actor) GetReliableDelivery() *ReliableDeliveryConfig {
+	if x != nil {
+		return x.ReliableDelivery
+	}
+	return nil
+}
+
+func (x *Actor) GetReliableCompanion() *ReliableCompanionSpec {
+	if x != nil {
+		return x.ReliableCompanion
+	}
+	return nil
+}
+
 type SingletonSpec struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Specifies the spawn timeout for the singleton actor
@@ -522,7 +549,7 @@ var File_internal_actor_proto protoreflect.FileDescriptor
 const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"\x14internal/actor.proto\x12\n" +
-	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\x1a\x19internal/reentrancy.proto\"w\n" +
+	"internalpb\x1a\x1egoogle/protobuf/duration.proto\x1a\x17internal/delivery.proto\x1a\x19internal/dependency.proto\x1a\x1ainternal/passivation.proto\x1a\x19internal/reentrancy.proto\"w\n" +
 	"\x17SupervisorDirectiveRule\x12\x1d\n" +
 	"\n" +
 	"error_type\x18\x01 \x01(\tR\terrorType\x12=\n" +
@@ -536,7 +563,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
 	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
-	"\x14_any_error_directive\"\x9d\x04\n" +
+	"\x14_any_error_directive\"\xe7\x05\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -553,7 +580,10 @@ const file_internal_actor_proto_rawDesc = "" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
 	"reentrancy\x12<\n" +
-	"\finit_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vinitTimeoutB\a\n" +
+	"\finit_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12%\n" +
+	"\x0eincarnation_id\x18\f \x01(\tR\rincarnationId\x12O\n" +
+	"\x11reliable_delivery\x18\r \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDelivery\x12P\n" +
+	"\x12reliable_companion\x18\x0e \x01(\v2!.internalpb.ReliableCompanionSpecR\x11reliableCompanionB\a\n" +
 	"\x05_role\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
@@ -607,6 +637,8 @@ var file_internal_actor_proto_goTypes = []any{
 	(*PassivationStrategy)(nil),     // 8: internalpb.PassivationStrategy
 	(*Dependency)(nil),              // 9: internalpb.Dependency
 	(*ReentrancyConfig)(nil),        // 10: internalpb.ReentrancyConfig
+	(*ReliableDeliveryConfig)(nil),  // 11: internalpb.ReliableDeliveryConfig
+	(*ReliableCompanionSpec)(nil),   // 12: internalpb.ReliableCompanionSpec
 }
 var file_internal_actor_proto_depIdxs = []int32{
 	1,  // 0: internalpb.SupervisorDirectiveRule.directive:type_name -> internalpb.SupervisorDirective
@@ -620,13 +652,15 @@ var file_internal_actor_proto_depIdxs = []int32{
 	4,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
 	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
 	7,  // 10: internalpb.Actor.init_timeout:type_name -> google.protobuf.Duration
-	7,  // 11: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	7,  // 12: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	11, // 11: internalpb.Actor.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
+	12, // 12: internalpb.Actor.reliable_companion:type_name -> internalpb.ReliableCompanionSpec
+	7,  // 13: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	7,  // 14: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }
@@ -634,6 +668,7 @@ func file_internal_actor_proto_init() {
 	if File_internal_actor_proto != nil {
 		return
 	}
+	file_internal_delivery_proto_init()
 	file_internal_dependency_proto_init()
 	file_internal_passivation_proto_init()
 	file_internal_reentrancy_proto_init()

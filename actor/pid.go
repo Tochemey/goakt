@@ -210,6 +210,23 @@ type PID struct {
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
 
+	// reliableDelivery contains the endpoint's reliable-delivery settings.
+	reliableDelivery *reliableDeliveryConfig
+
+	// reliableCompanion marks an endpoint-owned reliable-delivery controller
+	// and pins it to its endpoint incarnation. It is nil for ordinary actors.
+	reliableCompanion *reliableCompanionSpec
+
+	// durableQueue is the point-to-point producer endpoint's durable queue
+	// instance, retained so ReSpawn can recreate a terminally stopped producer
+	// controller with its storage. It is nil for consumers, work-pulling
+	// producers, and volatile point-to-point producers.
+	durableQueue DurableProducerQueue
+
+	// durableWorkQueue is the work-pulling producer endpoint's durable work
+	// queue instance, retained for the same recovery path as durableQueue.
+	durableWorkQueue DurableWorkQueue
+
 	passivationStrategy passivation.Strategy
 	passivationManager  *passivationManager
 	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
@@ -457,6 +474,14 @@ func (pid *PID) Uptime() int64 {
 func (pid *PID) ID() string {
 	if path := pid.Path(); path != nil {
 		return path.String()
+	}
+	return ""
+}
+
+// IncarnationID returns the identifier of this actor incarnation.
+func (pid *PID) IncarnationID() string {
+	if path := pid.Path(); path != nil {
+		return path.IncarnationID()
 	}
 	return ""
 }
@@ -885,6 +910,13 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 	}
 
 	if pid.IsRemote() {
+		// the remote child spawn request cannot carry reliable-delivery
+		// settings: reject instead of silently spawning an endpoint without
+		// its controller
+		if config.reliableDelivery != nil {
+			return nil, errors.New("reliable delivery endpoints cannot be spawned as remote children")
+		}
+
 		return pid.spawnChildRemote(ctx, name, actor, config)
 	}
 
@@ -1507,9 +1539,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		return pid.remoting.RemoteStop(ctx, pid.Path().Host(), pid.Path().Port(), pid.Name())
 	}
 
-	// we should never shutdown system actors unless the whole system is terminating
+	// we should never shutdown system actors unless the whole system is
+	// terminating. Endpoint-owned reliable-delivery controllers are the one
+	// exception: their reserved identity hides them from every public API, yet
+	// spawn rollback, endpoint subtree shutdown, and their own terminal
+	// self-stop must all be able to stop them while the system keeps running.
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
-		if !actoryStem.isStopping() && isSystemName(pid.Name()) {
+		if !actoryStem.isStopping() && isSystemName(pid.Name()) && pid.reliableCompanion == nil {
 			pid.logger.Warnf("attempt to shutdown system actor=%s", pid.Name())
 			return gerrors.ErrShutdownForbidden
 		}
@@ -3264,6 +3300,9 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		Supervisor:          supervisorSpec,
 		Reentrancy:          reentrancy,
 		InitTimeout:         initTimeout,
+		IncarnationId:       pid.IncarnationID(),
+		ReliableDelivery:    pid.reliableDelivery.toProto(),
+		ReliableCompanion:   pid.reliableCompanion.toProto(),
 	}, nil
 }
 

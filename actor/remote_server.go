@@ -38,6 +38,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
@@ -217,7 +218,7 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 		return &internalpb.RemoteLookupResponse{Address: actor.GetAddress()}, nil
 	}
 
-	addr := address.New(actorName, x.Name(), request.GetHost(), int(request.GetPort()))
+	addr := address.NewReference(actorName, x.Name(), request.GetHost(), int(request.GetPort()))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -227,6 +228,41 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 
 	pid := pidNode.value()
 	return &internalpb.RemoteLookupResponse{Address: pid.ID()}, nil
+}
+
+// getReliableCompanionHandler handles GetReliableCompanion requests over the
+// proto TCP transport. It resolves the live controller companion of a locally
+// hosted reliable endpoint for a remoting-only peer, running the same
+// local-tree resolution and ownership validation local callers use, and never
+// consults the cluster registry: this node only answers for endpoints it
+// owns. Any resolution failure maps to NOT_FOUND, which the calling side
+// treats as the transient unavailable condition and retries on its next tick.
+func (x *actorSystem) getReliableCompanionHandler(_ context.Context, conn inet.Connection, req proto.Message) (proto.Message, error) {
+	request, ok := req.(*internalpb.GetReliableCompanionRequest)
+	if !ok {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
+	}
+
+	if !x.remotingEnabled.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
+	}
+
+	if err := x.validateRemoteHost(request.GetHost(), request.GetPort()); err != nil {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
+	}
+
+	role := reliableControllerRoleFromProto(request.GetRole())
+	if !role.valid() {
+		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("reliable controller role is not supported")), nil
+	}
+
+	companion, err := x.resolveLocalReliableCompanion(request.GetEndpointName(), role)
+	if err != nil {
+		x.logger.Debugf("get reliable companion: endpoint=%s role=%s did not resolve: %v", request.GetEndpointName(), role, err)
+		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
+	}
+
+	return &internalpb.GetReliableCompanionResponse{Address: companion.ID()}, nil
 }
 
 // remoteAskHandler handles RemoteAsk requests over the proto TCP transport.
@@ -394,7 +430,7 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 	}
 
 	// Fetch the actor address
-	actorAddress := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
@@ -452,7 +488,7 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 	}
 
 	// Fetch the actor address
-	actorAddress := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
@@ -510,7 +546,7 @@ func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, r
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	watcheeAddr := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	watcheeAddr := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	cidNode, exist := x.actors.node(watcheeAddr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(watcheeAddr.String())
@@ -558,7 +594,7 @@ func (x *actorSystem) remoteUnWatchHandler(_ context.Context, _ inet.Connection,
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	watcheeAddr := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	watcheeAddr := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	cidNode, exist := x.actors.node(watcheeAddr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(watcheeAddr.String())
@@ -683,13 +719,33 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	// Set the dependencies if any
+	var dependencies []extension.Dependency
+
 	if len(request.GetDependencies()) > 0 {
-		dependencies, err := x.reflection.dependenciesFromProto(request.GetDependencies()...)
+		dependencies, err = x.reflection.dependenciesFromProto(request.GetDependencies()...)
 		if err != nil {
 			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: verify actor type registered, check dependencies)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
 		opts = append(opts, WithDependencies(dependencies...))
+	}
+
+	// Restore the reliable-delivery settings so remote placement spawns the
+	// endpoint exactly like a local spawn, controller companion included.
+	// Remoting-only hosts cannot resolve peer controllers through the
+	// registry, so reject before spawning an endpoint that never connects.
+	if request.GetReliableDelivery() != nil {
+		if !x.clusterEnabled.Load() {
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrReliableClusterRequired), nil
+		}
+
+		reliableOption, err := reliableSpawnOptionFromWire(request.GetReliableDelivery(), dependencies)
+		if err != nil {
+			logger.Errorf("failed to create actor (%s) on host=%s port=%d: %v (hint: register the durable queue type on the hosting node)", request.GetActorName(), request.GetHost(), request.GetPort(), err)
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
+		}
+
+		opts = append(opts, reliableOption)
 	}
 
 	pid, err := x.Spawn(ctx, request.GetActorName(), actor, opts...)
@@ -735,7 +791,7 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(childName)), nil
 	}
 
-	parentAddress := address.New(parentName, x.Name(), host, int(port))
+	parentAddress := address.NewReference(parentName, x.Name(), host, int(port))
 	parentAddrStr := parentAddress.String()
 	parentNode, exist := x.actors.node(parentAddrStr)
 	if !exist {
@@ -829,7 +885,7 @@ func (x *actorSystem) remotePassivationStrategyHandler(ctx context.Context, conn
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -870,7 +926,7 @@ func (x *actorSystem) remoteStateHandler(ctx context.Context, conn inet.Connecti
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -917,7 +973,7 @@ func (x *actorSystem) remoteChildrenHandler(ctx context.Context, conn inet.Conne
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -962,7 +1018,7 @@ func (x *actorSystem) remoteParentHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1002,7 +1058,7 @@ func (x *actorSystem) remoteKindHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1042,7 +1098,7 @@ func (x *actorSystem) remoteDependenciesHandler(ctx context.Context, conn inet.C
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1095,7 +1151,7 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1154,7 +1210,7 @@ func (x *actorSystem) remoteRoleHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1194,7 +1250,7 @@ func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
-	addr := address.New(name, x.Name(), host, int(port))
+	addr := address.NewReference(name, x.Name(), host, int(port))
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
@@ -1238,7 +1294,7 @@ func (x *actorSystem) remoteReinstateHandler(ctx context.Context, conn inet.Conn
 	}
 
 	// Fetch the actor address
-	addr := address.New(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
+	addr := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	// Locate the given actor
 	pidNode, exist := x.actors.node(addr.String())
 	if !exist {
@@ -1579,6 +1635,7 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 	return []inet.ProtoServerOption{
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", x.remoteLookupHandler),
+		inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", x.getReliableCompanionHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", x.remoteAskHandler),
 		inet.WithProtoHandler("internalpb.RemoteTellRequest", x.remoteTellHandler),
 		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", x.remoteReSpawnHandler),

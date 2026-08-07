@@ -62,6 +62,29 @@ func TestNewReturnsErrorWithNoNodes(t *testing.T) {
 	require.ErrorContains(t, err, "nodes are required")
 }
 
+func TestSpawnRejectsReliableDelivery(t *testing.T) {
+	// the cluster client cannot participate in the delivery protocol, so a
+	// spawn request carrying reliable-delivery settings is rejected before
+	// anything goes on the wire
+	ctx := context.Background()
+	cl := &Client{}
+
+	spawnRequest := &remote.SpawnRequest{
+		Name: "orders-consumer",
+		Kind: "endpoint",
+		ReliableDelivery: &remote.ReliableDeliverySpec{
+			Consumer: &remote.ReliableConsumerSpec{
+				ProducerName:      "orders-producer",
+				FlowControlWindow: 16,
+				ResendInterval:    time.Second,
+			},
+		},
+	}
+
+	require.ErrorIs(t, cl.Spawn(ctx, spawnRequest), gerrors.ErrReliableSpawnUnsupported)
+	require.ErrorIs(t, cl.SpawnBalanced(ctx, spawnRequest, RoundRobinStrategy), gerrors.ErrReliableSpawnUnsupported)
+}
+
 // nolint:revive
 func TestClientUpdateNodes(t *testing.T) {
 	// Note: These tests now focus on Node weight management logic.

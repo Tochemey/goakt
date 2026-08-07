@@ -22,5 +22,35 @@
 
 package types
 
+import (
+	"reflect"
+	"strings"
+)
+
 // Unit type
 type Unit struct{}
+
+// EmptyString is a constant representing an empty string.
+const EmptyString = ""
+
+// IsBlank reports whether value contains no non-whitespace characters.
+func IsBlank(value string) bool {
+	return strings.TrimSpace(value) == ""
+}
+
+// IsNil reports whether value is nil, including a typed nil held in an
+// interface.
+func IsNil(value any) bool {
+	if value == nil {
+		return true
+	}
+
+	reflected := reflect.ValueOf(value)
+
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}

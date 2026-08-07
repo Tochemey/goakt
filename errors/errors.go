@@ -138,6 +138,50 @@ var (
 	// ErrInvalidMessage indicates that a message is structurally or semantically invalid.
 	ErrInvalidMessage = errors.New("invalid message")
 
+	// ErrQueueFenced indicates that a durable producer queue rejected a stale writer.
+	ErrQueueFenced = errors.New("durable producer queue writer is fenced")
+
+	// ErrQueueConflict indicates that a durable producer queue operation conflicts with its current state.
+	ErrQueueConflict = errors.New("durable producer queue state conflict")
+
+	// ErrQueueChunkedBatch indicates that a durable producer queue Store targeted
+	// a business MessageID whose authoritative first write is a chunked batch, so
+	// the caller must recover the batch through StoreChunked instead.
+	ErrQueueChunkedBatch = errors.New("durable producer queue message is stored as a chunked batch")
+
+	// ErrReliableStore indicates that reliable delivery could not store a message.
+	ErrReliableStore = errors.New("reliable delivery store failed")
+
+	// ErrReliableAccept indicates that reliable delivery could not record producer acceptance.
+	ErrReliableAccept = errors.New("reliable delivery acceptance failed")
+
+	// ErrReliableConfirm indicates that reliable delivery could not persist a confirmation.
+	ErrReliableConfirm = errors.New("reliable delivery confirmation failed")
+
+	// ErrReliableSpawnUnsupported is returned when a spawn path cannot host a reliable
+	// delivery endpoint, such as the standalone cluster client, whose caller does not
+	// participate in the delivery protocol.
+	ErrReliableSpawnUnsupported = errors.New("reliable delivery endpoints cannot be spawned from this caller")
+
+	// ErrReliableClusterRequired is returned when a reliable delivery endpoint would be
+	// placed over remoting without clustering. Remote placement resolves peer controllers
+	// through the cluster registry, so a remoting-only host would spawn an endpoint that
+	// never connects. Remoting-only flows instead spawn each endpoint locally on its own
+	// node with an explicit peer address.
+	ErrReliableClusterRequired = errors.New("reliable delivery remote placement requires clustering")
+
+	// ErrReliablePeerRemotingRequired is returned when a reliable delivery endpoint
+	// carries an explicit remote peer address on a system without remoting. The peer's
+	// node can neither be asked to resolve its controller nor reach this endpoint's
+	// controller, so the flow could never connect.
+	ErrReliablePeerRemotingRequired = errors.New("reliable delivery remote peer addressing requires remoting")
+
+	// ErrReliablePeerClusterConflict is returned when a reliable delivery endpoint
+	// combines an explicit remote peer address with cluster mode. A flow follows exactly
+	// one resolution authority: the cluster registry, or the explicitly addressed peer
+	// node, never both.
+	ErrReliablePeerClusterConflict = errors.New("reliable delivery remote peer addressing cannot be combined with clustering")
+
 	// ErrInvalidTimeout is returned when a timeout value is less than or equal to zero.
 	ErrInvalidTimeout = errors.New("invalid timeout")
 

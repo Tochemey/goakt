@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased
+
+### ✨ Features
+
+- **Point-to-point reliable delivery** ([#1296](https://github.com/Tochemey/goakt/issues/1296), [#1300](https://github.com/Tochemey/goakt/issues/1300)). Confirmed, ordered, flow-controlled delivery from one producer actor to one consumer actor, locally or across nodes; default `Tell` is unchanged. Enabled with one spawn option per side, `AsReliableProducer(consumerName)` and `AsReliableConsumer(producerName)`; the actor system runs an internal controller next to each endpoint for sequencing, demand, resends, sessions, and restart deduplication, invisible to every actor-management API.
+  - The endpoints stay ordinary actors: the producer answers `RequestNext` with `Produced` and acknowledges `Stored` with `StoredAck`; the consumer replies `Confirmed` after processing each `Delivery`. `IsAuthorizedFor` on these messages rejects spoofed controller traffic.
+  - Guarantees: effectively-once, in order on the fault-free path; loss, restart, or relocation redelivers, so processing must be idempotent keyed by `MessageID`. Reliability starts at the producer's handoff to its controller; ingress stays at-most-once.
+  - Flow control is consumer-driven. Tuning: `WithReliableFlowControlWindow` (default 50, max 10,000) and `WithReliableResendInterval` (2s) on the consumer; `WithReliableRetryInterval` (500ms), `WithReliableDurableQueue`, and `WithReliableQueueRetry` (3 attempts, 100ms) on the producer. Finite passivation is rejected.
+  - `WithReliableDeliveryConfirmation` sends the producer a `DeliveryConfirmed` for every message the consumer confirms. Best effort and repeated after redelivery: handle it idempotently by `MessageID`.
+  - `WithReliableChunking(maxChunkBytes)` splits oversized payloads into sequenced chunks reassembled before `Delivery`, so one large message cannot exceed the remoting frame cap. Size in [`MinReliableChunkSize`, `MaxReliableChunkSize`]; a message must fit in one flow-control window of chunks. With a durable queue, chunks store atomically through `StoreChunked` under the reserved `GoAktChunk:` prefix (forbidden for application `MessageID`s), and a resubmission recovers the stored shape even when the re-encode crosses the chunk threshold.
+  - `DurableProducerQueue` adds producer-crash survival: `Load` acquires epoch-fenced writership, `Store` and `StoreChunked` are first-write-wins per business `MessageID`, `Accept` and `Confirm` advance the durable state. New sentinels: `ErrQueueFenced`, `ErrQueueConflict`, `ErrQueueChunkedBatch`, `ErrReliableStore`, `ErrReliableAccept`, `ErrReliableConfirm`. A durable flow costs roughly two backend round trips per message.
+  - Payloads ride the remoting serializer dispatch even on one node: protobuf needs no setup; other types register through `remote.WithSerializables`. An unregistered payload fails the flow terminally.
+  - Cross-node flows run in cluster mode (relocation supported, queue types registered on every eligible node, registry replica count of at least 2) or remoting-only mode with explicit peer addresses (`WithReliableRemoteConsumer` on the producer, `WithReliableRemoteProducer` on the consumer; requires remoting, rejects clustering, no relocation: `ErrReliablePeerRemotingRequired`, `ErrReliablePeerClusterConflict`). Remote placement of a reliable endpoint always requires clustering (`ErrReliableClusterRequired`).
+  - Terminal failures publish one `ReliableDeliveryFailed` event (endpoint name, controller role, stage) while the endpoint stays alive; `ReSpawn` recreates the controller.
+- **Work-pulling reliable delivery** ([#1300](https://github.com/Tochemey/goakt/issues/1300)). `AsReliableWorkPullingProducer` and `AsReliableWorkPullingWorker` distribute a job stream from one producer across a dynamic set of uniform workers: a sibling mode of point-to-point on the same controller machinery and handshake.
+  - Per-message at-least-once with `MessageID` deduplication, no ordering across workers. Dispatch is round-robin among workers with free demand; a lost worker's unconfirmed messages requeue under their original `MessageID` for surviving workers, so workers must process idempotently.
+  - Workers register dynamically. A worker set spanning nodes requires cluster mode; the remoting-only peer addresses of point-to-point are not supported.
+  - `WithReliableDeliveryConfirmation` reports each worker confirmation with the producer-visible `Stored` sequence. `WithReliableChunking` and `WithReliableDurableQueue` are rejected: durability uses `WithReliableDurableWorkQueue` (`DurableWorkQueue` with per-`MessageID` `ConfirmMessage`), and reloaded unconfirmed jobs re-dispatch to current workers.
+
+### 📚 Documentation
+
+- [architecture/RELIABLE_DELIVERY.md](architecture/RELIABLE_DELIVERY.md) documents the internals of both reliable delivery modes for contributors. User guides live on the reliable-delivery pages of <https://docs.goakt.dev>, and runnable single-node and cluster samples sit in `playground/issue-1296`.
+
 ## v4.4.3 - 2026-08-02
 
 ### ✨ Features

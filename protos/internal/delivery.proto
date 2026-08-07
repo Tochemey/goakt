@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package internalpb;
+
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
+
+// ReliableControllerRole identifies which reliable-delivery controller a
+// companion actor runs for its endpoint.
+enum ReliableControllerRole {
+  // The role is not set; records carrying it never validate.
+  RELIABLE_CONTROLLER_ROLE_UNSPECIFIED = 0;
+  // The companion is a producer controller.
+  RELIABLE_CONTROLLER_ROLE_PRODUCER = 1;
+  // The companion is a consumer controller.
+  RELIABLE_CONTROLLER_ROLE_CONSUMER = 2;
+}
+
+// ReliableDeliveryPattern selects the producer-side delivery pattern.
+enum ReliableDeliveryPattern {
+  // The pattern is not set; decoded as point-to-point for compatibility with
+  // records written before the field existed.
+  RELIABLE_DELIVERY_PATTERN_UNSPECIFIED = 0;
+  // One producer endpoint feeds exactly one named consumer endpoint.
+  RELIABLE_DELIVERY_PATTERN_POINT_TO_POINT = 1;
+  // One producer endpoint distributes work across dynamically registered
+  // workers that each run a consumer controller.
+  RELIABLE_DELIVERY_PATTERN_WORK_PULLING = 2;
+}
+
+// ReliableCompanionSpec marks an actor record as the endpoint-owned
+// reliable-delivery controller of one endpoint incarnation and carries the
+// ownership fields that cluster resolution validates.
+message ReliableCompanionSpec {
+  // Identifies which controller role the companion runs.
+  ReliableControllerRole role = 1;
+  // Names the user-visible endpoint that owns the companion.
+  string endpoint_name = 2;
+  // Pins the companion to one endpoint incarnation.
+  string endpoint_incarnation_id = 3;
+}
+
+// ReliableDeliveryConfig defines one endpoint's reliable-delivery settings.
+message ReliableDeliveryConfig {
+  oneof endpoint {
+    // Configures a producer endpoint and its controller.
+    ReliableProducerConfig producer = 1;
+    // Configures a consumer endpoint and its controller.
+    ReliableConsumerConfig consumer = 2;
+  }
+}
+
+// ReliableProducerConfig defines producer-side delivery settings.
+message ReliableProducerConfig {
+  // Names the consumer endpoint authorized to receive messages.
+  // Empty when pattern is work-pulling: workers are discovered by registration.
+  string consumer_name = 1;
+  // Identifies the durable queue in the endpoint's user dependencies.
+  optional string durable_queue_id = 2;
+  // Defines retries for durable queue operations.
+  QueueRetryConfig queue_retry = 3;
+  // Defines how often unacknowledged local protocol messages are retried.
+  google.protobuf.Duration local_retry_interval = 4;
+  // Enables DeliveryConfirmed notifications toward the producer endpoint.
+  bool delivery_confirmation = 5;
+  // Splits payloads larger than this many bytes into sequenced chunks; zero
+  // disables chunking.
+  uint32 max_chunk_bytes = 6;
+  // Selects point-to-point or work-pulling on the producer side. Unspecified
+  // is treated as point-to-point.
+  ReliableDeliveryPattern pattern = 7;
+}
+
+// ReliableConsumerConfig defines consumer-side delivery settings.
+message ReliableConsumerConfig {
+  // Names the producer endpoint whose messages are accepted.
+  string producer_name = 1;
+  // Specifies the maximum demand granted in one request.
+  uint32 flow_control_window = 2;
+  // Defines how often registration, demand, and delivery are retried.
+  google.protobuf.Duration resend_interval = 3;
+}
+
+// QueueRetryConfig defines retries for durable queue operations.
+message QueueRetryConfig {
+  // Specifies the maximum number of attempts for one queue operation.
+  uint32 max_attempts = 1;
+  // Specifies the delay before the first retry.
+  google.protobuf.Duration initial_backoff = 2;
+}
+
+// ReliablePayload carries a self-describing serialized application message.
+message ReliablePayload {
+  // Contains the serializer's self-describing message frame.
+  bytes data = 1;
+}
+
+// RegisterConsumer asks a producer controller to establish a registration.
+message RegisterConsumer {
+  // Identifies this registration attempt.
+  string nonce = 1;
+}
+
+// RegistrationAck accepts the latest consumer registration attempt.
+message RegistrationAck {
+  // Identifies the producer controller incarnation.
+  string session_id = 1;
+  // Specifies the first sequence the consumer should expect.
+  int64 next_seq = 2;
+  // Echoes the registration attempt being accepted.
+  string nonce = 3;
+}
+
+// Request grants demand and carries the latest confirmed sequence.
+message Request {
+  // Identifies the producer controller incarnation.
+  string session_id = 1;
+  // Identifies the accepted consumer registration.
+  string registration_nonce = 2;
+  // Specifies the highest sequence processed by the consumer.
+  int64 confirmed_seq = 3;
+  // Specifies the highest sequence the producer may send.
+  int64 request_up_to_seq = 4;
+  // Indicates that the request should also resend unconfirmed messages.
+  bool via_timeout = 5;
+}
+
+// Ack advances the producer's confirmed sequence without granting demand.
+message Ack {
+  // Identifies the producer controller incarnation.
+  string session_id = 1;
+  // Identifies the accepted consumer registration.
+  string registration_nonce = 2;
+  // Specifies the highest sequence processed by the consumer.
+  int64 confirmed_seq = 3;
+}
+
+// ChunkInfo marks one part of a chunked payload. Its absence on a
+// SequencedMessage means the payload is a complete serialized message.
+message ChunkInfo {
+  // Marks the first chunk of a chunked message.
+  bool first = 1;
+  // Marks the last chunk of a chunked message.
+  bool last = 2;
+}
+
+// SequencedMessage carries one serialized application message in stream order.
+message SequencedMessage {
+  // Identifies the producer controller incarnation.
+  string session_id = 1;
+  // Identifies the application message across retries and sessions.
+  string message_id = 2;
+  // Specifies the message's ordered position in the stream.
+  int64 seq = 3;
+  // Contains the immutable serialized application message, or one chunk of it.
+  ReliablePayload payload = 4;
+  // Marks the payload as one chunk of a chunked message when present.
+  ChunkInfo chunk_info = 5;
+}
+
+// DeliveryEnvelope identifies the reliable-delivery command in a custom
+// serializer frame.
+message DeliveryEnvelope {
+  oneof command {
+    // Carries a consumer registration attempt.
+    RegisterConsumer register_consumer = 1;
+    // Carries a producer registration response.
+    RegistrationAck registration_ack = 2;
+    // Carries consumer demand and a confirmation watermark.
+    Request request = 3;
+    // Carries a confirmation watermark without additional demand.
+    Ack ack = 4;
+    // Carries one sequenced application message.
+    SequencedMessage sequenced_message = 5;
+  }
+}

@@ -5196,9 +5196,8 @@ func BenchmarkReplicatorUpdatePNCounter(b *testing.B) {
 	ctx := context.TODO()
 	counterKey := crdt.PNCounterKey("bench-counter")
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_, err := Ask(ctx, repl, &crdt.Update{
 			Key:     counterKey,
 			Initial: crdt.NewPNCounter(),
@@ -5219,9 +5218,8 @@ func BenchmarkReplicatorUpdateGCounter(b *testing.B) {
 	ctx := context.TODO()
 	counterKey := crdt.GCounterKey("bench-gcounter")
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_, err := Ask(ctx, repl, &crdt.Update{
 			Key:     counterKey,
 			Initial: crdt.NewGCounter(),
@@ -5266,9 +5264,8 @@ func BenchmarkReplicatorUpdateFlag(b *testing.B) {
 	ctx := context.TODO()
 	flagKey := crdt.FlagKey("bench-flag")
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_, err := Ask(ctx, repl, &crdt.Update{
 			Key:     flagKey,
 			Initial: crdt.NewFlag(),
@@ -5298,9 +5295,8 @@ func BenchmarkReplicatorGetPNCounter(b *testing.B) {
 	}, time.Second)
 	require.NoError(b, err)
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_, err := Ask(ctx, repl, &crdt.Get{Key: counterKey}, time.Second)
 		if err != nil {
 			b.Fatal(err)
@@ -5326,9 +5322,8 @@ func BenchmarkReplicatorGetORSet(b *testing.B) {
 		require.NoError(b, err)
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		_, err := Ask(ctx, repl, &crdt.Get{Key: setKey}, time.Second)
 		if err != nil {
 			b.Fatal(err)
@@ -5392,9 +5387,8 @@ func BenchmarkReplicatorDeltaMerge(b *testing.B) {
 	})
 	require.NoError(b, err)
 
-	b.ResetTimer()
 	b.ReportAllocs()
-	for range b.N {
+	for b.Loop() {
 		if err := Tell(ctx, repl, pbDelta); err != nil {
 			b.Fatal(err)
 		}

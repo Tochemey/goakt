@@ -591,6 +591,122 @@ func TestRemoteLookup_InvalidResponseType(t *testing.T) {
 	<-done
 }
 
+func TestGetReliableCompanion_InvalidPort(t *testing.T) {
+	r := NewClient()
+	port := int(math.MaxInt32) + 1
+
+	_, err := r.GetReliableCompanion(context.Background(), "host", port, "endpoint", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
+	assert.Error(t, err)
+	assert.ErrorContains(t, err, "out of range")
+}
+
+func TestGetReliableCompanion_Success(t *testing.T) {
+	companion := address.New("GoAktReliableProducerController-abc", "sys", "127.0.0.1", 2280)
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.GetReliableCompanionResponse{Address: companion.String()}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.GetReliableCompanion(context.Background(), host, port, "endpoint", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.Equal(t, companion.String(), addr.String())
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestGetReliableCompanion_NotFoundReturnsNoSender(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "companion not found"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	addr, err := r.GetReliableCompanion(context.Background(), host, port, "missing-endpoint", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER)
+	require.NoError(t, err)
+	require.NotNil(t, addr)
+	assert.True(t, addr.Equals(address.NoSender()))
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestGetReliableCompanion_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.GetReliableCompanion(context.Background(), host, port, "endpoint", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+func TestGetReliableCompanion_InvalidResponseType(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteAskResponse{}, nil // wrong type
+	}
+	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.GetReliableCompanion(context.Background(), host, port, "endpoint", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid response type")
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
 func TestRemoteStop_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil

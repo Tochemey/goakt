@@ -2008,6 +2008,7 @@ type testClusterConfig struct {
 	roles             []string
 	contextPropagator remote.ContextPropagator
 	extraGrains       []Grain
+	extraKinds        []Actor
 	replicaCount      uint32
 	writeQuorum       uint32
 	readQuorum        uint32
@@ -2067,6 +2068,14 @@ func withTestContextPropagator(propagator remote.ContextPropagator) testClusterO
 func withTestExtraGrains(grains ...Grain) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.extraGrains = append(tc.extraGrains, grains...)
+	}
+}
+
+// withTestExtraKinds registers additional actor kinds cluster-wide so tests
+// can relocate or remote-spawn their own actor types.
+func withTestExtraKinds(kinds ...Actor) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.extraKinds = append(tc.extraKinds, kinds...)
 	}
 }
 
@@ -2194,10 +2203,12 @@ func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...test
 
 	// build the cluster config
 	clusterConfig := NewClusterConfig().
-		WithKinds(new(MockActor),
+		WithKinds(append([]Actor{
+			new(MockActor),
 			new(MockEntity),
 			new(exchanger),
-			new(MockGrainActor)).
+			new(MockGrainActor),
+		}, cfg.extraKinds...)...).
 		WithGrains(append([]Grain{new(MockGrain)}, cfg.extraGrains...)...).
 		WithPartitionCount(7).
 		WithReplicaCount(cfg.replicaCount).

@@ -38,6 +38,10 @@
     {
       "source": "/clustering/clustered",
       "destination": "/clustering/overview"
+    },
+    {
+      "source": "/advanced/reliable-delivery",
+      "destination": "/clustering/reliable-delivery/point-to-point"
     }
   ],
   "navigation": {
@@ -99,7 +103,14 @@
           "/clustering/placement",
           "/clustering/multi-datacenter",
           "/clustering/service-discovery",
-          "/clustering/partition-hashing"
+          "/clustering/partition-hashing",
+          {
+            "group": "Reliable Delivery",
+            "pages": [
+              "/clustering/reliable-delivery/point-to-point",
+              "/clustering/reliable-delivery/work-pulling"
+            ]
+          }
         ],
         "icon": "network"
       },

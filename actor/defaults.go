@@ -79,6 +79,28 @@ const (
 	// trivial memory cost (at most 256 pointers plus their payloads queued
 	// per destination during a burst).
 	remoteSendCoalescingMaxBatch = 256
+
+	// DefaultReliableFlowControlWindow is the demand granted per consumer request and
+	// the consumer controller's receive buffer capacity when
+	// WithReliableFlowControlWindow is not used.
+	DefaultReliableFlowControlWindow = 50
+	// DefaultReliableResendInterval is the consumer controller's registration, demand,
+	// and delivery retry cadence when WithReliableResendInterval is not used.
+	DefaultReliableResendInterval = 2 * time.Second
+	// DefaultReliableProducerRetryInterval is the producer controller's RequestNext and
+	// Stored retry cadence when WithReliableRetryInterval is not used.
+	DefaultReliableProducerRetryInterval = 500 * time.Millisecond
+	// DefaultReliableQueueRetryAttempts bounds each durable queue operation's attempts
+	// when WithReliableQueueRetry is not used.
+	DefaultReliableQueueRetryAttempts = 3
+	// DefaultReliableQueueRetryBackoff is the delay before a durable queue operation
+	// retry when WithReliableQueueRetry is not used.
+	DefaultReliableQueueRetryBackoff = 100 * time.Millisecond
+	// DefaultReliableRegistrationLookupTimeout bounds a reliable-delivery controller's
+	// endpoint and companion ownership lookup so a slow cluster registry can
+	// never stall the controller mailbox; a timeout is a dropped registration
+	// recovered by the controller's recurring tick.
+	DefaultReliableRegistrationLookupTimeout = 500 * time.Millisecond
 )
 
 var (
