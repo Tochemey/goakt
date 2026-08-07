@@ -1,5 +1,5 @@
 <h2 align="center">
-  <img src="docs/assets/goakt-messaging-distributed-go.png" alt="GoAkt - Distributed Actor framework for Go" width="800"/><br />
+  <img src="docs/assets/goakt-messaging-distributed-go.jpg" alt="GoAkt - Distributed Actor framework for Go" width="640"/><br />
   Distributed Actor framework for Go
 </h2>
 
@@ -7,6 +7,8 @@
   <a href="https://github.com/Tochemey/goakt/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/Tochemey/goakt/build.yml?branch=main" alt="build" /></a>
   <a href="https://pkg.go.dev/github.com/tochemey/goakt"><img src="https://pkg.go.dev/badge/github.com/tochemey/goakt.svg" alt="Go Reference" /></a>
   <a href="https://codecov.io/gh/Tochemey/goakt"><img src="https://codecov.io/gh/Tochemey/goakt/graph/badge.svg?token=J0p9MzwSRH" alt="codecov" /></a>
+  <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
+  <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt?label=release" alt="Latest Release" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/github/license/Tochemey/goakt" alt="License" /></a>
   <a href="https://github.com/avelino/awesome-go"><img src="https://awesome.re/badge.svg" alt="Awesome" /></a>
   <a href="https://human-oss.dev"><img src="https://human-oss.dev/badge.svg" alt="Open Source AI Manifesto" /></a>
@@ -22,7 +24,7 @@ GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Er
 
 Teams use GoAkt for event processing, IoT and edge workloads, real-time platforms, and distributed backends that would otherwise need a message broker plus custom coordination code.
 
-New to the actor model? Actors are isolated units of computation that share no memory and communicate only through asynchronous messages. Each actor has a mailbox and processes one message at a time, keeping private state that others cannot mutate. Because only one goroutine ever touches that state, the mutexes and channel choreography you would otherwise write disappear instead of moving somewhere else. On a message, an actor can create more actors, send messages, or decide how it will handle the next one. Failures stay contained under supervisors that can restart a crashed actor, and the same messaging model works whether the recipient is local or remote. For more depth, watch **Carl Hewitt**, the father of the actor model, explain it in his own words:
+New to the actor model? Actors are isolated units of computation that share no memory, each with a mailbox, private state, and one message in flight at a time. On a message, an actor can create more actors, send messages, or change how it handles the next one. For more depth, watch **Carl Hewitt**, the father of the actor model, explain it in his own words:
 
 [![Carl Hewitt on the actor model](https://img.youtube.com/vi/7erJ1DV_Tlo/hqdefault.jpg)](https://www.youtube.com/watch?v=7erJ1DV_Tlo)
 
@@ -33,10 +35,6 @@ See the [documentation](https://docs.goakt.dev) for the full feature reference.
 ```bash
 go get github.com/tochemey/goakt/v4
 ```
-
-  <a href="https://go.dev/doc/install"><img src="https://img.shields.io/github/go-mod/go-version/Tochemey/goakt" alt="GitHub go.mod Go version" /></a>
-  <a href="https://github.com/Tochemey/goakt/releases/latest"><img src="https://img.shields.io/github/v/release/Tochemey/goakt?label=release" alt="Latest Release" /></a>
-  <a href="https://github.com/Tochemey/goakt/tags"><img src="https://img.shields.io/github/v/tag/Tochemey/goakt?include_prereleases&sort=semver&label=tag" alt="Latest Tag" /></a>
 
 ## Examples
 
@@ -49,21 +47,13 @@ This framework is used in production by the following projects/companies:
 - [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
 - [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
 
-## Support
-
-GoAkt is free and open source. If you need priority support on complex topics or request new features, please consider [sponsorship](https://github.com/sponsors/Tochemey).
-
 ## Security
 
-Applications using this library should routinely upgrade their **Go version** and refresh **dependencies** as needed to mitigate security vulnerabilities. **GoAkt** will make a best effort to keep dependencies current and perform vulnerability checks whenever necessary.
+Applications using this library should routinely upgrade their **Go version** and refresh **dependencies** as needed to mitigate security vulnerabilities. **GoAkt** will make a best effort to keep dependencies current and perform vulnerability checks whenever necessary. To report a vulnerability, use GitHub's [Report a Vulnerability](https://github.com/Tochemey/goakt/security/advisories/new) form, as described in [SECURITY.md](./SECURITY.md).
 
 ## Community
 
-You can join these groups and chat to discuss and ask GoAkt related questions on:
-
-[![GitHub Discussions](https://img.shields.io/github/discussions/Tochemey/goakt)](https://github.com/Tochemey/goakt/discussions)
-[![GitHub Issues or Pull Requests](https://img.shields.io/github/issues/Tochemey/goakt)](https://github.com/Tochemey/goakt/issues)
-[![Slack](https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white)](https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ)
+Ask questions and follow the work in [Discussions](https://github.com/Tochemey/goakt/discussions), [Issues](https://github.com/Tochemey/goakt/issues), or on [Slack](https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ). Feedback on the [tracking issue](https://github.com/Tochemey/goakt/issues/948) helps shape what we work on next.
 
 ## Contribution
 
@@ -71,20 +61,10 @@ You can join these groups and chat to discuss and ask GoAkt related questions on
 
 We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./architecture/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
 
-See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow.
-
-## Architecture
-
-Architecture documents: [Architecture](./architecture/).
-
-## Benchmark
-
-Benchmark suite: [Benchmark](./benchmark/).
+See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow, the other [design documents](./architecture/) covering the dispatcher pool, CRDTs, streams, reentrancy, and reliable delivery, and the [benchmark suite](./benchmark/) for the performance harness.
 
 ## Sponsors
 
+GoAkt is free and open source. If you need priority support on complex topics or want to fund new features, consider [sponsorship](https://github.com/sponsors/Tochemey).
+
 <!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><a href="https://github.com/StringKe"><img src="https:&#x2F;&#x2F;github.com&#x2F;StringKe.png" width="60px" alt="User avatar: StringKe" /></a><!-- sponsors -->
-
-## Feedback
-
-Share feedback on this [tracking issue](https://github.com/Tochemey/goakt/issues/948); it helps shape what we work on next.
