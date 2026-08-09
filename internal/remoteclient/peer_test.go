@@ -30,6 +30,7 @@ import (
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -491,6 +492,12 @@ func TestIsLegacyHandshakeFailure(t *testing.T) {
 	assert.True(t, isLegacyHandshakeFailure(io.ErrUnexpectedEOF))
 	assert.False(t, isLegacyHandshakeFailure(nil))
 	assert.False(t, isLegacyHandshakeFailure(context.DeadlineExceeded))
+
+	// Connect-phase failures prove neither protocol and stay non-legacy:
+	// duplex admission owns fire-and-forget delivery to unreachable peers.
+	assert.False(t, isLegacyHandshakeFailure(&net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}))
+	assert.False(t, isLegacyHandshakeFailure(&net.OpError{Op: "dial", Err: syscall.EINVAL}))
+	assert.True(t, isLegacyHandshakeFailure(&net.OpError{Op: "read", Err: syscall.ECONNRESET}))
 }
 
 func TestCompressionCodec(t *testing.T) {
@@ -636,12 +643,23 @@ func TestEncodeUserDataEnvelopeRemembersPathIDAtRevisionThree(t *testing.T) {
 
 // stubDuplexSession is an identity-only DuplexSession for route-cache tests.
 type stubDuplexSession struct {
-	id       int
-	revision uint32
-	refs     map[string]uint64
+	id            int
+	revision      uint32
+	refs          map[string]uint64
+	prepareRefErr error
+	tellErr       error
+	// tellHook, when set, runs at the start of every Tell. Tests use it to
+	// hold a write open so later admissions queue behind an in-flight tell.
+	tellHook func()
 }
 
-func (x *stubDuplexSession) Tell(context.Context, inet.Frame) error { return nil }
+func (x *stubDuplexSession) Tell(context.Context, inet.Frame) error {
+	if x.tellHook != nil {
+		x.tellHook()
+	}
+
+	return x.tellErr
+}
 
 func (x *stubDuplexSession) Ask(context.Context, inet.Frame) (inet.Frame, error) {
 	return inet.Frame{}, errors.New("stub")
@@ -672,6 +690,10 @@ func (x *stubDuplexSession) MaxConcurrentLargeTransfers() uint32 { return 0 }
 func (x *stubDuplexSession) ChunkSize() uint32 { return 0 }
 
 func (x *stubDuplexSession) PrepareRef(_ byte, literal string) (uint64, error) {
+	if x.prepareRefErr != nil {
+		return 0, x.prepareRefErr
+	}
+
 	if x.refs == nil {
 		return 0, nil
 	}
@@ -682,5 +704,7 @@ func (x *stubDuplexSession) PrepareRef(_ byte, literal string) (uint64, error) {
 func (x *stubDuplexSession) DecodeReplyEnvelope([]byte, bool) (inet.ReplyEnvelope, error) {
 	return inet.ReplyEnvelope{}, errors.New("stub")
 }
+
+func (x *stubDuplexSession) ReleasePayload(inet.Frame) {}
 
 func (x *stubDuplexSession) Close() error { return nil }

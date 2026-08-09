@@ -234,13 +234,17 @@ func (x *duplexConn) softRejectChunk(corr uint64, message string) {
 func (x *duplexConn) dispatchLogical(frame Frame) {
 	if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
 		if frame.Correlation != 0 {
-			_ = x.pending.complete(frame.Correlation, frame)
+			if !x.pending.complete(frame.Correlation, frame) {
+				x.releaseFramePayload(frame.Payload)
+			}
+
 			return
 		}
 	}
 
 	select {
 	case <-x.closed:
+		x.releaseFramePayload(frame.Payload)
 	case x.inbound <- frame:
 	}
 }

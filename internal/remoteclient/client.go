@@ -725,8 +725,8 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 //
 // Semantics (different from the synchronous default):
 //   - RemoteTell returns nil once the message is enqueued. It does NOT report
-//     transport or server-side errors. Use WithCoalescingErrorHandler to
-//     observe failed batches.
+//     transport or server-side errors. Use WithTellFailureHandler to observe
+//     failed batches (and duplex admission failures).
 //   - Messages to the same destination preserve submission order.
 //   - Cross-destination ordering is not guaranteed (it already isn't).
 //   - If the per-destination ring is full, RemoteTell falls back to a
@@ -750,15 +750,16 @@ func WithSendCoalescing(maxBatch int) ClientOption {
 	}
 }
 
-// WithCoalescingErrorHandler registers a callback invoked when a coalesced
-// batch fails to send. The handler receives the destination ("host:port"),
-// the messages in the failed batch, and the transport/server error. It runs
-// inline on the per-destination writer goroutine and must not block.
-//
-// Has no effect unless WithSendCoalescing is also set.
-func WithCoalescingErrorHandler(h CoalescingErrorHandler) ClientOption {
+// WithTellFailureHandler registers the shared fire-and-forget failure
+// callback: it is invoked when a coalesced legacy batch fails to send and
+// when a duplex-admitted tell fails on dial, encode, or write (see
+// tell_pump.go), so operators observe one failure model for undeliverable
+// tells. The handler receives the destination ("host:port"), the failed
+// messages, and the transport/server error. It runs inline on the
+// per-destination writer or lane-pump goroutine and must not block.
+func WithTellFailureHandler(h TellFailureHandler) ClientOption {
 	return func(r *client) {
-		r.coalescing.errHandler = h
+		r.tellFailureHandler = h
 	}
 }
 
@@ -924,9 +925,13 @@ type client struct {
 	// coalescing configures optional per-destination send coalescing. When
 	// enabled, RemoteTell returns as soon as the message is enqueued for the
 	// per-destination writer goroutine, and transport errors are reported via
-	// the configured CoalescingErrorHandler instead of the RemoteTell return
+	// the configured TellFailureHandler instead of the RemoteTell return
 	// value. Disabled by default.
 	coalescing coalescingConfig
+
+	// tellFailureHandler receives undeliverable fire-and-forget tells from
+	// the legacy coalescer and the duplex lane pump. See WithTellFailureHandler.
+	tellFailureHandler TellFailureHandler
 
 	// coalescers caches one coalescer per destination endpoint ("host:port").
 	// Populated lazily on first coalesced send to a new destination and
@@ -1935,7 +1940,7 @@ func (r *client) getCoalescer(host string, port int) *coalescer {
 		return c
 	}
 
-	coalescer := newCoalescer(dest, nc, r.coalescing)
+	coalescer := newCoalescer(dest, nc, r.coalescing, r.tellFailureHandler)
 	r.coalescers.Set(dest, coalescer)
 	return coalescer
 }

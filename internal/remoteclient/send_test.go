@@ -169,6 +169,48 @@ func TestDeserializeReplyEnvelope(t *testing.T) {
 	assert.True(t, proto.Equal(original, decoded.(*durationpb.Duration)))
 }
 
+type retainingReplySerializer struct {
+	last []byte
+}
+
+func (x *retainingReplySerializer) Serialize(any) ([]byte, error) {
+	return []byte("unused"), nil
+}
+
+func (x *retainingReplySerializer) Deserialize(data []byte) (any, error) {
+	x.last = data
+	return string(data), nil
+}
+
+func TestDeserializeReplyEnvelopeCustomCopiesPayload(t *testing.T) {
+	ser := &retainingReplySerializer{}
+	pooled := []byte("custom-payload")
+
+	got, err := deserializeReplyEnvelope(inet.ReplyEnvelope{
+		SerializerID: inet.SerializerIDCustom,
+		Payload:      pooled,
+	}, ser)
+	require.NoError(t, err)
+	require.Equal(t, "custom-payload", got)
+
+	pooled[0] = 'X'
+	require.Equal(t, []byte("custom-payload"), ser.last)
+}
+
+func TestDeserializeReplyEnvelopePublicDoesNotCopy(t *testing.T) {
+	ser := &retainingReplySerializer{}
+	pooled := []byte("public-payload")
+
+	_, err := deserializeReplyEnvelope(inet.ReplyEnvelope{
+		SerializerID: inet.SerializerIDPublicProto,
+		Payload:      pooled,
+	}, ser)
+	require.NoError(t, err)
+
+	pooled[0] = 'X'
+	require.Equal(t, byte('X'), ser.last[0])
+}
+
 func TestBuildUserTellParams(t *testing.T) {
 	r := NewClient().(*client)
 	msg := durationpb.New(time.Second)

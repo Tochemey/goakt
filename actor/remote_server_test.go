@@ -3021,3 +3021,14 @@ func TestRemoteTellGrainHandlerEnvelopeFailure(t *testing.T) {
 	requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
 	require.Empty(t, grain.recorded())
 }
+
+func TestCopyDuplexPayloadRetainsIndependently(t *testing.T) {
+	src := []byte("pooled-custom")
+	got := copyDuplexPayload(src)
+	require.Equal(t, src, got)
+
+	src[0] = 'X'
+	require.Equal(t, byte('p'), got[0])
+	require.Nil(t, copyDuplexPayload(nil))
+	require.Empty(t, copyDuplexPayload([]byte{}))
+}

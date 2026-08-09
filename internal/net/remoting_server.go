@@ -614,6 +614,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 				return
 			}
 		default:
+			conn.ReleasePayload(frame)
 			_ = submitErrorFrame(baseCtx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
 			return
 		}
@@ -668,10 +669,12 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 	if err != nil {
 		if errors.Is(err, ErrTableRefUnsupported) || errors.Is(err, ErrUnknownTableRef) {
 			_ = submitErrorFrame(ctx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, err.Error())
+			conn.ReleasePayload(frame)
 			return err
 		}
 
 		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
+		conn.ReleasePayload(frame)
 		return nil
 	}
 
@@ -681,6 +684,7 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 		md := NewMetadata()
 		if err := md.UnmarshalBinary(env.Metadata); err != nil {
 			_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
+			conn.ReleasePayload(frame)
 			return nil
 		}
 
@@ -694,6 +698,7 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 
 	if !frame.ExpectsReply() {
 		x.invokeDuplexTell(handlerCtx, env)
+		conn.ReleasePayload(frame)
 		return nil
 	}
 
@@ -709,7 +714,9 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 		if cancel != nil {
 			cancel()
 		}
+
 		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_UNAVAILABLE, err.Error())
+		conn.ReleasePayload(frame)
 	}
 
 	return nil

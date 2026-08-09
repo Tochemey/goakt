@@ -84,6 +84,8 @@ func handleDuplexAskTask(task duplexAskTask) {
 		defer task.cancel()
 	}
 
+	defer task.conn.ReleasePayload(task.frame)
+
 	x := task.server
 	corr := task.frame.Correlation
 	ctx := task.ctx

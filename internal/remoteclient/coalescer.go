@@ -43,17 +43,20 @@ var errCoalescerClosed = errors.New("remote send: coalescer is closed")
 // batch.
 const coalescerFlushTimeout = 5 * time.Second
 
-// CoalescingErrorHandler is invoked when a batched flush fails. It receives
-// the destination endpoint ("host:port"), the messages that were in the failed
-// batch, and the underlying error. Handlers run inline on the per-destination
-// writer goroutine and must not block for long.
-type CoalescingErrorHandler func(dest string, messages []*internalpb.RemoteMessage, err error)
+// TellFailureHandler is invoked when a fire-and-forget tell cannot be
+// delivered: a coalesced legacy batch flush fails, or a duplex-admitted tell
+// fails on dial/encode/write (see tell_pump.go). It receives the destination
+// endpoint ("host:port"), the failed messages, and the underlying error.
+// Handlers run inline on the coalescer writer or lane-pump goroutine and must
+// not block for long.
+type TellFailureHandler func(dest string, messages []*internalpb.RemoteMessage, err error)
 
 // coalescingConfig captures the tunables for send coalescing. A zero maxBatch
 // disables coalescing (the synchronous RemoteTell path is used instead).
+// Failure fan-out uses the client-level [TellFailureHandler], passed into
+// each coalescer at construction.
 type coalescingConfig struct {
-	maxBatch   int
-	errHandler CoalescingErrorHandler
+	maxBatch int
 }
 
 // enabled reports whether the configuration requests coalescing.
@@ -85,11 +88,11 @@ type coalescer struct {
 	wg        sync.WaitGroup
 
 	maxBatch   int
-	errHandler CoalescingErrorHandler
+	errHandler TellFailureHandler
 }
 
 // newCoalescer starts a writer goroutine for the given destination.
-func newCoalescer(dest string, nc *inet.Client, cfg coalescingConfig) *coalescer {
+func newCoalescer(dest string, nc *inet.Client, cfg coalescingConfig, failureHandler TellFailureHandler) *coalescer {
 	maxBatch := cfg.maxBatch
 	if maxBatch <= 0 {
 		maxBatch = 64
@@ -101,7 +104,7 @@ func newCoalescer(dest string, nc *inet.Client, cfg coalescingConfig) *coalescer
 		in:         make(chan *internalpb.RemoteMessage, maxBatch*4),
 		done:       make(chan struct{}),
 		maxBatch:   maxBatch,
-		errHandler: cfg.errHandler,
+		errHandler: failureHandler,
 	}
 
 	c.wg.Add(1)

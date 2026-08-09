@@ -24,6 +24,7 @@ package net
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,12 +35,19 @@ import (
 )
 
 func TestEncodeParseTablePayloadRoundTrip(t *testing.T) {
-	payload := encodeTablePayload(TableKindActorPath, 7, "goakt://sys@127.0.0.1:8080/user/a")
+	payload, err := encodeTablePayload(TableKindActorPath, 7, "goakt://sys@127.0.0.1:8080/user/a")
+	require.NoError(t, err)
+
 	kind, id, literal, err := parseTablePayload(payload)
 	require.NoError(t, err)
 	assert.Equal(t, TableKindActorPath, kind)
 	assert.Equal(t, uint64(7), id)
 	assert.Equal(t, "goakt://sys@127.0.0.1:8080/user/a", literal)
+}
+
+func TestEncodeTablePayloadRejectsOversizedLiteral(t *testing.T) {
+	_, err := encodeTablePayload(TableKindActorPath, 7, strings.Repeat("a", maxTableLiteralLen+1))
+	require.Error(t, err)
 }
 
 func TestParseTablePayloadRejects(t *testing.T) {

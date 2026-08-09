@@ -87,6 +87,11 @@ type DuplexSession interface {
 	// sessions; the package-level decoder rejects nonzero refs.
 	DecodeReplyEnvelope(src []byte, hasMetadata bool) (ReplyEnvelope, error)
 
+	// ReleasePayload returns a frame body previously obtained from this
+	// session (Ask, Recv, or a reassembled logical frame) to the connection
+	// read pool. It is safe on non-pooled buffers and empty payloads.
+	ReleasePayload(frame Frame)
+
 	// Close drains admitted outbound frames, stops reader/writer loops, and
 	// closes the underlying framed connection. It is safe to call more than
 	// once; subsequent calls are no-ops that return the first close error.

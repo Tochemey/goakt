@@ -260,7 +260,7 @@ func TestCoalescing_ErrorHandler(t *testing.T) {
 	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(2),
-		WithCoalescingErrorHandler(func(dest string, msgs []*internalpb.RemoteMessage, err error) {
+		WithTellFailureHandler(func(dest string, msgs []*internalpb.RemoteMessage, err error) {
 			mu.Lock()
 			defer mu.Unlock()
 			dests = append(dests, dest)
@@ -608,7 +608,7 @@ func TestCoalescing_DefaultTunables(t *testing.T) {
 // directly because the higher-level RemoteTell would rebuild a fresh
 // coalescer post-close.
 func TestCoalescing_SubmitAfterClose(t *testing.T) {
-	c := newCoalescer("127.0.0.1:1", nil, coalescingConfig{maxBatch: 4})
+	c := newCoalescer("127.0.0.1:1", nil, coalescingConfig{maxBatch: 4}, nil)
 	c.close()
 	err := c.submit(context.Background(), &internalpb.RemoteMessage{})
 	assert.ErrorIs(t, err, errCoalescerClosed, "submit must refuse after close")
@@ -676,7 +676,7 @@ func newStuckCoalescer(t *testing.T, maxBatch int) (c *coalescer, release func()
 	t.Helper()
 	bs, host, port, srvStop := startBlockingServer(t)
 	nc := inet.NewClient(net.JoinHostPort(host, strconv.Itoa(port)))
-	c = newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), nc, coalescingConfig{maxBatch: maxBatch})
+	c = newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), nc, coalescingConfig{maxBatch: maxBatch}, nil)
 	release = bs.closeRelease
 	stop = func() {
 		// Release any parked handler first so the writer goroutine's

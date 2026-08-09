@@ -49,6 +49,14 @@ const maxLaneReconnectBackoff = 30 * time.Second
 // compression-table capacity.
 const routeCacheLimit = 8192
 
+// maxTellRedeliverAttempts bounds how many delivery attempts the lane pump
+// makes for a single admitted tell whose write failed on a dying session. The
+// value 2 is the original write plus one redial-and-resend, so a peer that
+// keeps dropping the connection dead-letters the tell after one failed
+// redelivery rather than retrying indefinitely. Retrying the message in place
+// (never re-queuing it behind tells admitted later) preserves per-lane FIFO.
+const maxTellRedeliverAttempts = 2
+
 // pathEntry caches a sticky lane assignment and the receiver path's table ID
 // on the session that assigned it.
 type pathEntry struct {
@@ -123,6 +131,11 @@ type peer struct {
 	backoff map[laneKey]laneBackoff
 	// routes caches sticky receiver lane assignments and path table IDs.
 	routes map[string]pathEntry
+	// pumps stages admitted fire-and-forget tells per lane until a live
+	// session can carry them (see tell_pump.go). Guarded by mu.
+	pumps map[laneKey]*tellPump
+	// pumpStop tears down pump goroutines when the peer is discarded.
+	pumpStop chan types.Unit
 	// generation invalidates a dial that was in flight during ClosePeer.
 	generation uint64
 	// closed is set by closeAllLanes. Close and ClosePeer discard the peer
@@ -167,6 +180,8 @@ func (x *client) peerFor(host string, port int) *peer {
 		dialing:    make(map[laneKey]chan types.Unit),
 		backoff:    make(map[laneKey]laneBackoff),
 		routes:     make(map[string]pathEntry),
+		pumps:      make(map[laneKey]*tellPump),
+		pumpStop:   make(chan types.Unit),
 		dialCtx:    dialCtx,
 		dialCancel: dialCancel,
 	}
@@ -267,6 +282,12 @@ func (x *peer) closeAllLanes() {
 	x.routes = make(map[string]pathEntry)
 	x.backoff = make(map[laneKey]laneBackoff)
 	x.generation++
+
+	if !x.closed {
+		// Wake pump goroutines so queued admitted tells fan out as transport
+		// failures instead of vanishing with the discarded peer.
+		close(x.pumpStop)
+	}
 	x.closed = true
 
 	for _, wait := range x.dialing {
@@ -449,11 +470,14 @@ func (x *peer) monitorSession(key laneKey, session inet.DuplexSession) {
 		}
 
 		if frame.Type == inet.FrameTypeError && frame.Correlation == 0 {
+			session.ReleasePayload(frame)
 			x.retireLane(key, session)
 			return
 		}
+
 		// PING/PONG never reach Recv; connection-scoped ERROR is handled
 		// above. Remaining unsolicited frames are dropped.
+		session.ReleasePayload(frame)
 	}
 }
 
@@ -609,7 +633,12 @@ func (x *peer) recordDialFailure(key laneKey, wait chan types.Unit, generation u
 func (x *peer) route(receiver string) (entry pathEntry, cached bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	return x.routeLocked(receiver)
+}
 
+// routeLocked is [peer.route] with x.mu already held, so the tell fast path can
+// resolve the route and the live session under a single lock acquisition.
+func (x *peer) routeLocked(receiver string) (entry pathEntry, cached bool) {
 	if existing, ok := x.routes[receiver]; ok {
 		return existing, true
 	}
@@ -641,10 +670,361 @@ func (x *peer) rememberPathRef(receiver string, pathID uint64, session inet.Dupl
 	x.routes[receiver] = entry
 }
 
+// admitTell accepts one fire-and-forget tell for delivery on key's lane
+// without requiring a live session. The payload and metadata are copied
+// because callers may recycle their buffers (payload pool) once this
+// returns. Propagation headers and deadlines must already be snapshotted
+// into params.metadata (via enrichContext / buildUserTellParams); the pump
+// never sees the caller's context, so that wire blob is the sole carrier of
+// context meta for async delivery. A full byte window blocks until ctx
+// expires and then reports backpressure; a torn-down peer rejects admission.
+func (x *peer) admitTell(ctx context.Context, key laneKey, params tellParams) error {
+	pump, err := x.ensureTellPump(key)
+	if err != nil {
+		return err
+	}
+
+	owned := params
+	owned.payload = cloneBytes(params.payload)
+	owned.metadata = cloneBytes(params.metadata)
+	return x.enqueueOnPump(ctx, pump, owned)
+}
+
+// admitTellOrFanOut admits a fire-and-forget tell to the lane pump. A full
+// byte window surfaces backpressure to the caller so senders keep their own
+// deadline policy; a torn-down peer cannot deliver the tell, so it fans out as
+// a dead letter and admission reports success. This keeps the internal
+// teardown sentinel from leaking to fire-and-forget callers.
+func (x *peer) admitTellOrFanOut(ctx context.Context, key laneKey, params tellParams) error {
+	err := x.admitTell(ctx, key, params)
+	if err == nil {
+		return nil
+	}
+
+	if errors.Is(err, errLaneClosedDuringDial) {
+		x.fanOutTellFailure(params, err)
+		return nil
+	}
+
+	return err
+}
+
+// ensureTellPump returns the lane pump for key, creating it if needed.
+// Rejects admission when the peer is torn down. pending is incremented under
+// mu so directTellSession cannot race a live-session fast path ahead of the
+// tell being enqueued (FIFO fence).
+func (x *peer) ensureTellPump(key laneKey) (*tellPump, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if x.closed {
+		return nil, errLaneClosedDuringDial
+	}
+
+	pump, ok := x.pumps[key]
+	if !ok {
+		pump = newTellPump()
+		x.pumps[key] = pump
+		go x.runTellPump(key, pump)
+	}
+
+	pump.pending.Add(1)
+	return pump, nil
+}
+
+// enqueueOnPump blocks until params (already owned) is queued on pump, the
+// caller's ctx expires (backpressure), or the peer is torn down. Caller must
+// have already incremented pump.pending via ensureTellPump.
+func (x *peer) enqueueOnPump(ctx context.Context, pump *tellPump, params tellParams) error {
+	item := admittedTell{params: params, cost: admitCost(params)}
+
+	for {
+		if x.tryEnqueueAdmit(pump, item) {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			pump.pending.Add(-1)
+			return errors.Join(gerrors.ErrRemoteSendBackpressure, ctx.Err())
+		case <-x.pumpStop:
+			pump.pending.Add(-1)
+			return errLaneClosedDuringDial
+		case <-pump.space:
+		}
+	}
+}
+
+// tryEnqueueAdmit appends item when the byte window allows it (or the queue
+// is empty so an oversized single tell can still make progress). Returns
+// true when the item was enqueued.
+func (x *peer) tryEnqueueAdmit(pump *tellPump, item admittedTell) bool {
+	maxBytes := x.admitMaxBytes()
+
+	pump.mu.Lock()
+	defer pump.mu.Unlock()
+
+	if pump.liveLen() > 0 && pump.queuedBytes+item.cost > maxBytes {
+		return false
+	}
+
+	pump.queue = append(pump.queue, item)
+	pump.queuedBytes += item.cost
+	select {
+	case pump.notify <- types.Unit{}:
+	default:
+	}
+	return true
+}
+
+// admitMaxBytes is the per-lane admission window, matched to the duplex writer
+// credit window (initialCredits). A zero credit window floors to the default,
+// mirroring the duplex connection (see OpenDuplex), so admission is never
+// throttled to a single byte.
+func (x *peer) admitMaxBytes() int64 {
+	credits := x.client.initialCredits
+	if credits == 0 {
+		credits = remote.DefaultInitialCredits
+	}
+	return int64(credits)
+}
+
+// runTellPump drains admitted tells for key until the peer is torn down.
+// Teardown fans out anything still queued as transport failures so admitted
+// messages are never lost silently.
+func (x *peer) runTellPump(key laneKey, pump *tellPump) {
+	for {
+		select {
+		case <-x.pumpStop:
+			x.drainPumpOnStop(pump)
+			return
+		case <-pump.notify:
+			x.drainPumpQueue(key, pump)
+		}
+	}
+}
+
+// drainPumpQueue pops and delivers every tell currently queued.
+func (x *peer) drainPumpQueue(key laneKey, pump *tellPump) {
+	for {
+		item, ok := pump.popAdmit()
+		if !ok {
+			return
+		}
+		x.deliverAdmittedTell(key, pump, item.params)
+	}
+}
+
+// drainPumpOnStop empties the pump queue after peer teardown, reporting each
+// stranded tell through the failure fan-out. The dead-letter drain on the
+// actor side drops these gracefully when the system is already stopping.
+func (x *peer) drainPumpOnStop(pump *tellPump) {
+	for {
+		item, ok := pump.popAdmit()
+		if !ok {
+			return
+		}
+		x.fanOutTellFailureShared(item.params, errLaneClosedDuringDial)
+		pump.pending.Add(-1)
+	}
+}
+
+// deliverAdmittedTell carries one admitted tell to the wire: ensure a live
+// session (dialing if needed), encode with table refs, and submit to the
+// session writer queue. A peer that turns out to be legacy is served through
+// the legacy delivery path; every transport failure fans out instead of
+// surfacing, because the caller already received nil at admission.
+//
+// A write that fails because the session died is retried in place against a
+// freshly dialed lane, up to [maxTellRedeliverAttempts]. Retrying the same
+// message here (rather than re-queuing it) keeps it ahead of tells admitted
+// behind it on this lane (per-lane FIFO) and never re-enters the admission
+// byte window, so the pump goroutine cannot stall itself.
+//
+// The caller's context is intentionally not used here. Admission already
+// returned nil, so caller cancel must not abort delivery. Wire context meta
+// (propagator headers, absolute deadline) lives in params.metadata and is
+// encoded into the DATA frame. Dial is bounded by dialTimeout; Submit relies
+// on the duplex writeTimeout when the tell context has no deadline, so the
+// steady-state path (live session) allocates no per-message timer.
+func (x *peer) deliverAdmittedTell(key laneKey, pump *tellPump, params tellParams) {
+	defer pump.pending.Add(-1)
+
+	var lastErr error
+	for attempt := 0; attempt < maxTellRedeliverAttempts; attempt++ {
+		session := x.liveLane(key)
+		if session == nil {
+			ctx, cancel := x.dialBoundContext()
+			var err error
+			session, err = x.ensureLane(ctx, key.role, key.index)
+			cancel()
+			if err != nil {
+				if errors.Is(err, errPreferLegacy) {
+					x.deliverAdmittedTellLegacy(params)
+					return
+				}
+
+				x.fanOutTellFailureShared(params, err)
+				return
+			}
+		}
+
+		entry, cached := x.route(params.receiver)
+		encoded, flags, err := encodeTellFrame(x, session, entry, cached, params)
+		if err != nil {
+			x.fanOutTellFailureShared(params, err)
+			return
+		}
+
+		// Background: duplex Submit applies writeTimeout via bindWriteDeadline.
+		err = session.Tell(context.Background(), inet.Frame{
+			Type:    inet.FrameTypeData,
+			Flags:   flags,
+			Lane:    session.Lane(),
+			Payload: encoded,
+		})
+		if err == nil {
+			return
+		}
+
+		if !shouldRetireDuplexSession(err, inet.Frame{}) {
+			x.fanOutTellFailureShared(params, mapDuplexErr(err))
+			return
+		}
+
+		// The session died under the write: the frame never entered the writer
+		// queue. Retire the lane and retry this same message on the next
+		// iteration, which dials a fresh lane.
+		x.retireLane(key, session)
+		lastErr = mapDuplexErr(err)
+	}
+
+	x.fanOutTellFailureShared(params, lastErr)
+}
+
+// deliverAdmittedTellLegacy hands an admitted tell to the legacy path after
+// the peer proved legacy mid-pump: the coalescer when enabled (it owns
+// legacy-tell failure fan-out), otherwise one unary send whose failure fans
+// out here. The pump owns params, so the message can be handed off directly.
+func (x *peer) deliverAdmittedTellLegacy(params tellParams) {
+	if x.client.coalescing.enabled() {
+		if c := x.client.getCoalescer(x.host, x.port); c != nil {
+			// Coalescer submit only needs a cancelable ctx for queue wait;
+			// flush uses its own transport deadline.
+			if err := c.submit(context.Background(), tellRemoteMessage(params)); err != nil {
+				x.fanOutTellFailureShared(params, err)
+			}
+			return
+		}
+	}
+
+	ctx, cancel := x.dialBoundContext()
+	err := x.client.sendTellLegacy(ctx, x.host, x.port, params)
+	cancel()
+	if err != nil {
+		x.fanOutTellFailureShared(params, err)
+	}
+}
+
+// liveLane returns the current session for key when it is open, without
+// consulting the admit pump. Used by the pump delivery path so a live
+// session does not pay for a dial-timeout timer.
+func (x *peer) liveLane(key laneKey) inet.DuplexSession {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	session := x.laneLocked(key)
+	if session != nil && !session.IsClosed() {
+		return session
+	}
+	return nil
+}
+
+// dialBoundContext bounds a pump-side ensureLane / legacy dial. TCP dial
+// timeout also applies inside OpenDuplex; this caps waits on concurrent
+// dialers and black-hole peers.
+func (x *peer) dialBoundContext() (context.Context, context.CancelFunc) {
+	if d := x.client.dialTimeout; d > 0 {
+		return context.WithTimeout(context.Background(), d)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// fanOutTellFailure reports one undeliverable fire-and-forget tell through
+// the shared [TellFailureHandler]. The payload is copied because the
+// synchronous tell path may return the caller's buffer to the payload pool
+// immediately after this returns, while the actor-system handler queues the
+// message asynchronously.
+func (x *peer) fanOutTellFailure(params tellParams, cause error) {
+	x.dispatchTellFailure(tellRemoteMessageOwned(params), cause)
+}
+
+// fanOutTellFailureShared is the pump-side fan-out: params buffers are already
+// owned by the admit path and are not recycled, so the RemoteMessage can
+// share the payload slice (the async handler retains the message).
+func (x *peer) fanOutTellFailureShared(params tellParams, cause error) {
+	x.dispatchTellFailure(tellRemoteMessage(params), cause)
+}
+
+// dispatchTellFailure invokes the configured tell-failure handler, if any.
+func (x *peer) dispatchTellFailure(msg *internalpb.RemoteMessage, cause error) {
+	handler := x.client.tellFailureHandler
+	if handler == nil {
+		return
+	}
+
+	handler(x.addr, []*internalpb.RemoteMessage{msg}, cause)
+}
+
+// tellSendPlan resolves, under a single peer.mu acquisition, everything the
+// duplex tell fast path needs: whether the peer currently demands the legacy
+// path, the sticky route for receiver, and a live session to write on when the
+// FIFO fence permits the synchronous fast path. A nil session with preferLegacy
+// false means the caller must admit the tell to the lane pump.
+func (x *peer) tellSendPlan(receiver string) (entry pathEntry, cached bool, session inet.DuplexSession, preferLegacy bool) {
+	if x.client.pinRequiresLegacy() {
+		return pathEntry{}, false, nil, true
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if x.cache.isLegacy() && !x.cache.legacyExpired(time.Now()) {
+		return pathEntry{}, false, nil, true
+	}
+
+	entry, cached = x.routeLocked(receiver)
+	session = x.directTellSessionLocked(entry.lane)
+	return entry, cached, session, false
+}
+
+// directTellSessionLocked returns a live session for key only when no admitted
+// tell is queued or in flight on the lane pump, so the synchronous fast path
+// can never overtake earlier admitted tells (per sender-target pair FIFO). Nil
+// means the caller must admit instead. Caller holds x.mu.
+func (x *peer) directTellSessionLocked(key laneKey) inet.DuplexSession {
+	if x.closed {
+		return nil
+	}
+
+	if pump, ok := x.pumps[key]; ok && pump.pending.Load() > 0 {
+		return nil
+	}
+
+	if session := x.laneLocked(key); session != nil && !session.IsClosed() {
+		return session
+	}
+
+	return nil
+}
+
 // isLegacyHandshakeFailure reports whether err indicates the peer closed or
 // reset before HELLO_ACK, which auto mode treats as a legacy-only listener.
 // Timeouts are not treated as legacy: they surface to the caller so ask
-// deadlines remain enforceable against a silent peer.
+// deadlines remain enforceable against a silent peer. Connect-phase failures
+// (nobody listening) prove neither protocol and are not legacy: fire-and-forget
+// tells absorb them through duplex admission and the transport-failure
+// fan-out, never through the coalescer.
 func isLegacyHandshakeFailure(err error) bool {
 	if err == nil {
 		return false

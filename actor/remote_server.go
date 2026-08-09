@@ -1960,9 +1960,25 @@ func (x *actorSystem) deserializeDuplexPayload(env inet.DataEnvelope) (any, erro
 			return nil, err
 		}
 		return msg, nil
+	case inet.SerializerIDCustom:
+		// Custom serializers may retain the input slice; copy out of the
+		// pooled frame body before Deserialize so ReleasePayload is safe.
+		return x.remoting.Serializer(nil).Deserialize(copyDuplexPayload(env.Payload))
 	default:
 		return x.remoting.Serializer(nil).Deserialize(env.Payload)
 	}
+}
+
+// copyDuplexPayload returns a heap copy of payload for serializers that may
+// retain their input. Empty payloads are returned unchanged.
+func copyDuplexPayload(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+
+	out := make([]byte, len(payload))
+	copy(out, payload)
+	return out
 }
 
 // encodeDuplexReply serializes a user ask response into a REPLY envelope,
@@ -2239,13 +2255,14 @@ func (x *actorSystem) stopCoalescedFailureDrain() {
 	x.coalescedFailureQueue = nil
 }
 
-// enqueueCoalescedFailure is the CoalescingErrorHandler wired into the
-// outbound coalescer. It logs the whole-batch failure (operators still want
-// the "endpoint unreachable" signal with a destination) and hands the batch
-// off to the fan-out drain. Drops the handoff if the queue is full or the
-// system is shutting down.
+// enqueueCoalescedFailure is the TellFailureHandler wired into the outbound
+// remoting client. It logs the failure (operators still want the "endpoint
+// unreachable" signal with a destination) and hands the batch off to the
+// fan-out drain for both coalesced legacy flushes and duplex admission
+// failures. Drops the handoff if the queue is full or the system is shutting
+// down.
 func (x *actorSystem) enqueueCoalescedFailure(dest string, messages []*internalpb.RemoteMessage, cause error) {
-	x.logger.Warnf("coalesced remote tell to %s failed for %d message(s): %v", dest, len(messages), cause)
+	x.logger.Warnf("remote tell to %s failed for %d message(s): %v", dest, len(messages), cause)
 	if x.shuttingDown.Load() || x.coalescedFailureQueue == nil {
 		return
 	}

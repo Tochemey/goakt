@@ -621,3 +621,116 @@ func TestAdmitFrameFailureModes(t *testing.T) {
 	err = healthy.admitFrame(Frame{Type: FrameTypePing, Lane: healthy.Lane()})
 	require.ErrorIs(t, err, ErrDuplexClosed)
 }
+
+func TestDuplexTellReleasePayloadReusable(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+	t.Cleanup(func() {
+		_ = left.Close()
+		_ = right.Close()
+	})
+
+	ctx := context.Background()
+	body := []byte("zero-copy-tell")
+
+	for range 8 {
+		require.NoError(t, left.Tell(ctx, Frame{
+			Type:    FrameTypeData,
+			Lane:    LaneOrdinary,
+			Payload: body,
+		}))
+
+		frame, err := right.Recv(ctx)
+		require.NoError(t, err)
+		require.Equal(t, body, frame.Payload)
+		right.ReleasePayload(frame)
+	}
+}
+
+// BenchmarkDuplexTellAllocs states the steady-state whole-frame tell
+// allocation count for the #1301 milestone record: pooled read body, envelope
+// bytes handed to Recv, released after consumption.
+func BenchmarkDuplexTellAllocs(b *testing.B) {
+	c1, c2 := net.Pipe()
+	defer func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	}()
+
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+	defer func() {
+		_ = left.Close()
+		_ = right.Close()
+	}()
+
+	payload := make([]byte, 256)
+	ctx := context.Background()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		if err := left.Tell(ctx, Frame{
+			Type:    FrameTypeData,
+			Lane:    LaneOrdinary,
+			Payload: payload,
+		}); err != nil {
+			b.Fatal(err)
+		}
+
+		frame, err := right.Recv(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		right.ReleasePayload(frame)
+	}
+}
+
+func TestLateCorrelatedReplyDoesNotStallReader(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+	t.Cleanup(func() {
+		_ = left.Close()
+		_ = right.Close()
+	})
+
+	ctx := context.Background()
+
+	// A REPLY with no waiter must be dropped (and its pooled body released)
+	// without filling inbound or stalling the reader.
+	require.NoError(t, left.Submit(ctx, Frame{
+		Type:        FrameTypeReply,
+		Lane:        LaneOrdinary,
+		Correlation: 99,
+		Payload:     []byte("late-reply"),
+	}))
+
+	require.NoError(t, left.Tell(ctx, Frame{
+		Type:    FrameTypeData,
+		Lane:    LaneOrdinary,
+		Payload: []byte("after-late"),
+	}))
+
+	frame, err := right.Recv(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []byte("after-late"), frame.Payload)
+	right.ReleasePayload(frame)
+
+	require.Eventually(t, func() bool {
+		return right.pending.len() == 0
+	}, time.Second, 5*time.Millisecond)
+}

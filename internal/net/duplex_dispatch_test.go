@@ -223,6 +223,41 @@ func TestRecoverDuplexAskPanicWithoutHandler(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestHandleDuplexDataDecodeErrorRepliesAndKeepsConnection(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	conn := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024)
+	peer := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+	ps, err := NewRemotingServer("127.0.0.1:0")
+	require.NoError(t, err)
+
+	// A truncated envelope fails decode before dispatch: the frame is
+	// released pre-enqueue, a request-scoped ERROR is written, and the
+	// connection stays up (nil return).
+	err = ps.handleDuplexData(context.Background(), conn, Frame{
+		Type:        FrameTypeData,
+		Lane:        LaneOrdinary,
+		Correlation: 7,
+		Payload:     []byte{0},
+	})
+	require.NoError(t, err)
+
+	frame, err := peer.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, uint64(7), frame.Correlation)
+
+	require.NoError(t, conn.Close())
+	_ = peer.Close()
+}
+
 func TestHandleDuplexAskTaskWritesReply(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

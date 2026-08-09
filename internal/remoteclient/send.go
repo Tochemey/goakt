@@ -34,6 +34,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/remote"
@@ -112,7 +113,7 @@ func (x *client) sendControlLegacy(ctx context.Context, host string, port int, r
 // control traffic stays on the control lane. Any transport failure retires
 // the selected lane so the next call re-dials.
 func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Message) (proto.Message, error) {
-	payload, err := proto.Marshal(req)
+	payload, err := inet.MarshalProtoAppend(req)
 	if err != nil {
 		return nil, err
 	}
@@ -142,10 +143,12 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 
 	session, err := peer.ensureLane(ctx, role, index)
 	if err != nil {
+		inet.ReleaseMarshalBuffer(payload)
 		return nil, err
 	}
 
 	encoded, err := encodeControlDataEnvelope(session, env)
+	inet.ReleaseMarshalBuffer(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -163,10 +166,13 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 			peer.retireLane(laneKey{role: role, index: index}, session)
 		}
 
+		session.ReleasePayload(replyFrame)
 		return nil, mapDuplexErr(err)
 	}
 
-	return decodeControlReply(replyFrame, session.DecodeReplyEnvelope)
+	msg, err := decodeControlReply(replyFrame, session.DecodeReplyEnvelope)
+	session.ReleasePayload(replyFrame)
+	return msg, err
 }
 
 // encodeControlDataEnvelope registers a non-empty control type name and encodes
@@ -236,16 +242,78 @@ func (x *client) sendTellLegacy(ctx context.Context, host string, port int, para
 	return checkProtoError(resp)
 }
 
-// sendTellDuplex enqueues one DATA frame without expecting a reply. Transport
-// errors retire the selected lane so later sends re-probe that lane. The
-// frame lane byte matches the negotiated role/index for the routed session.
+// sendTellDuplex enqueues one DATA frame without expecting a reply. A live
+// session on an unfenced lane is written synchronously; otherwise the tell is
+// admitted to the lane pump, which dials, encodes, and writes it. Transport
+// failures fan out as dead letters rather than surfacing to this
+// fire-and-forget caller; only backpressure and caller cancellation stay
+// synchronous. The frame lane byte matches the negotiated role/index.
 func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellParams) error {
-	entry, cached := peer.route(params.receiver)
-	session, err := peer.ensureLane(ctx, entry.lane.role, entry.lane.index)
-	if err != nil {
-		return err
+	entry, cached, session, preferLegacy := peer.tellSendPlan(params.receiver)
+	if preferLegacy {
+		// A peer currently classified legacy keeps the synchronous legacy
+		// contract; duplex admission is only for duplex or unproven peers.
+		return errPreferLegacy
 	}
 
+	key := entry.lane
+	if session == nil {
+		// No live session (or earlier admitted tells still queued): admit
+		// and return. The lane pump dials, encodes, and writes; transport
+		// failures fan out as dead letters, never to this caller.
+		return peer.admitTellOrFanOut(ctx, key, params)
+	}
+
+	encoded, flags, err := encodeTellFrame(peer, session, entry, cached, params)
+	if err != nil {
+		// Encode failure is permanent for this message; fan out like the
+		// pump path so fire-and-forget callers never see a sync error here.
+		peer.fanOutTellFailure(params, err)
+		return nil
+	}
+
+	frame := inet.Frame{
+		Type:    inet.FrameTypeData,
+		Flags:   flags,
+		Lane:    session.Lane(),
+		Payload: encoded,
+	}
+
+	err = session.Tell(ctx, frame)
+	if err == nil {
+		return nil
+	}
+
+	if shouldRetireDuplexSession(err, inet.Frame{}) {
+		// The session died under the write: the frame never entered the
+		// writer queue, so re-admit for redial-or-dead-letter instead of
+		// surfacing transport loss to a fire-and-forget caller. This re-admit
+		// is a fresh admission, so a concurrent tell on the same lane can land
+		// ahead of it. That only reorders across sender-target pairs, which the
+		// pump never orders: a single sender is sequential per pair, so it is
+		// still blocked in this call and cannot be admitting concurrently here.
+		peer.retireLane(key, session)
+		return peer.admitTellOrFanOut(ctx, key, params)
+	}
+
+	mapped := mapDuplexErr(err)
+	// Backpressure and caller cancellation stay synchronous so senders can
+	// apply their own deadline policy. Permanent rejects (e.g. oversize)
+	// fan out as dead letters, matching admitted-tell failure semantics.
+	if errors.Is(mapped, gerrors.ErrRemoteSendBackpressure) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return mapped
+	}
+
+	peer.fanOutTellFailure(params, mapped)
+	return nil
+}
+
+// encodeTellFrame encodes one fire-and-forget tell as a DATA envelope on
+// session, using table refs where registered. It returns the envelope bytes
+// and the frame flags matching the metadata presence.
+func encodeTellFrame(peer *peer, session inet.DuplexSession, entry pathEntry, cached bool, params tellParams) ([]byte, byte, error) {
 	flags := byte(0)
 	if len(params.metadata) > 0 {
 		flags |= inet.FrameFlagHasMetadata
@@ -261,25 +329,7 @@ func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellPara
 	}
 
 	encoded, err := encodeUserDataEnvelope(peer, session, entry, cached, env)
-	if err != nil {
-		return err
-	}
-
-	frame := inet.Frame{
-		Type:    inet.FrameTypeData,
-		Flags:   flags,
-		Lane:    session.Lane(),
-		Payload: encoded,
-	}
-
-	if err := session.Tell(ctx, frame); err != nil {
-		if shouldRetireDuplexSession(err, inet.Frame{}) {
-			peer.retireLane(entry.lane, session)
-		}
-		return mapDuplexErr(err)
-	}
-
-	return nil
+	return encoded, flags, err
 }
 
 // encodeUserDataEnvelope registers sender/type (and receiver when cached) on
@@ -418,8 +468,12 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 		if shouldRetireDuplexSession(err, replyFrame) {
 			peer.retireLane(entry.lane, session)
 		}
+
+		session.ReleasePayload(replyFrame)
 		return nil, mapDuplexErr(err)
 	}
+
+	defer session.ReleasePayload(replyFrame)
 
 	replyEnv, err := session.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
 	if err != nil {
@@ -449,49 +503,15 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 
 	peer := x.peerFor(host, port)
 	for i, param := range params {
-		entry, cached := peer.route(param.receiver)
-		session, err := peer.ensureLane(ctx, entry.lane.role, entry.lane.index)
-		if err != nil {
+		if err := x.sendTellDuplex(ctx, peer, param); err != nil {
 			if errors.Is(err, errPreferLegacy) {
 				// Send only the remainder through the legacy path. Messages
-				// before i were already delivered on duplex lanes; re-sending
-				// the whole batch would duplicate them, breaking at-most-once.
+				// before i were already delivered or admitted on duplex
+				// lanes; re-sending the whole batch would duplicate them,
+				// breaking at-most-once.
 				return x.sendBatchTellLegacy(ctx, host, port, params[i:])
 			}
 			return err
-		}
-
-		flags := byte(0)
-		if len(param.metadata) > 0 {
-			flags |= inet.FrameFlagHasMetadata
-		}
-
-		env := inet.DataEnvelope{
-			Sender:       param.sender,
-			Receiver:     param.receiver,
-			TypeName:     param.typeName,
-			SerializerID: param.serID,
-			Metadata:     param.metadata,
-			Payload:      param.payload,
-		}
-
-		encoded, encErr := encodeUserDataEnvelope(peer, session, entry, cached, env)
-		if encErr != nil {
-			return encErr
-		}
-
-		frame := inet.Frame{
-			Type:    inet.FrameTypeData,
-			Flags:   flags,
-			Lane:    session.Lane(),
-			Payload: encoded,
-		}
-
-		if tellErr := session.Tell(ctx, frame); tellErr != nil {
-			if shouldRetireDuplexSession(tellErr, inet.Frame{}) {
-				peer.retireLane(entry.lane, session)
-			}
-			return mapDuplexErr(tellErr)
 		}
 	}
 
@@ -608,12 +628,17 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 					p.retireLane(entry.lane, session)
 				}
 
+				session.ReleasePayload(replyFrame)
+				// The payload was just released; the result must not carry a
+				// dangling slice into the pool's next reuse.
+				replyFrame.Payload = nil
 				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame, lane: entry.lane}
 				return
 			}
 
 			replyEnv, decErr := session.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
 			if decErr != nil {
+				session.ReleasePayload(replyFrame)
 				out <- batchAskResult{index: idx, err: decErr, lane: entry.lane}
 				return
 			}
@@ -626,6 +651,7 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 				}
 			}
 
+			session.ReleasePayload(replyFrame)
 			out <- batchAskResult{index: idx, value: val, err: desErr, lane: entry.lane}
 		}(i, param, serializers[i])
 	}
@@ -752,8 +778,12 @@ func deserializeReplyEnvelope(env inet.ReplyEnvelope, serializer remote.Serializ
 	}
 
 	switch env.SerializerID {
-	case inet.SerializerIDPublicProto, inet.SerializerIDJSON, inet.SerializerIDCBOR, inet.SerializerIDCustom:
+	case inet.SerializerIDPublicProto, inet.SerializerIDJSON, inet.SerializerIDCBOR:
 		return serializer.Deserialize(env.Payload)
+	case inet.SerializerIDCustom:
+		// Custom serializers may retain the input slice; copy out of the
+		// pooled frame body before Deserialize so ReleasePayload is safe.
+		return serializer.Deserialize(copyReplyPayload(env.Payload))
 	default:
 		msgType, err := inet.FindMessageType(protoreflect.FullName(env.TypeName))
 		if err != nil {
@@ -767,6 +797,18 @@ func deserializeReplyEnvelope(env inet.ReplyEnvelope, serializer remote.Serializ
 
 		return msg, nil
 	}
+}
+
+// copyReplyPayload returns a heap copy of payload for serializers that may
+// retain their input. Empty payloads are returned unchanged.
+func copyReplyPayload(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+
+	out := make([]byte, len(payload))
+	copy(out, payload)
+	return out
 }
 
 // serializerWireID maps the registered serializer and message to the duplex

@@ -408,6 +408,7 @@ func (x *duplexConn) submitRaw(ctx context.Context, frame Frame) error {
 // Recv returns the next inbound frame that is not a correlated REPLY/ERROR
 // (those complete [Ask] waiters). Buffered inbound frames are drained before
 // a closed connection error so shutdown does not drop already-delivered frames.
+// Callers that drop or finish consuming the frame must [ReleasePayload].
 func (x *duplexConn) Recv(ctx context.Context) (Frame, error) {
 	select {
 	case frame := <-x.inbound:
@@ -428,6 +429,12 @@ func (x *duplexConn) Recv(ctx context.Context) (Frame, error) {
 			return Frame{}, x.closedError()
 		}
 	}
+}
+
+// ReleasePayload returns frame.Payload to the framed connection's read pool.
+// Safe on non-pooled buffers and empty payloads.
+func (x *duplexConn) ReleasePayload(frame Frame) {
+	x.releaseFramePayload(frame.Payload)
 }
 
 // Close stops admitting new frames, drains the outbound queue (so a final
@@ -597,6 +604,7 @@ func (x *duplexConn) readLoop() {
 		x.lastInbound.Store(time.Now().UnixNano())
 
 		if x.enforceLane && frame.Lane != x.lane {
+			x.releaseFramePayload(frame.Payload)
 			x.rejectWrongLane()
 			return
 		}
@@ -627,7 +635,10 @@ func (x *duplexConn) readLoop() {
 			if frame.Correlation != 0 {
 				// Timeout abandons the waiter; a late REPLY/ERROR must not
 				// fill inbound or it will stall the reader after 64 drops.
-				_ = x.pending.complete(frame.Correlation, frame)
+				if !x.pending.complete(frame.Correlation, frame) {
+					x.releaseFramePayload(frame.Payload)
+				}
+
 				continue
 			}
 		}

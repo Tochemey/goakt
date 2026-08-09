@@ -978,11 +978,11 @@ func TestRemoteBatchTell_FiltersNilMessages(t *testing.T) {
 		nil, // should be filtered out
 	}
 
-	// This will fail to connect but should not panic on nil messages
+	// No server is reachable, but the important part is that nil messages
+	// are filtered without panicking. Per the fire-and-forget contract the
+	// batch is admitted for async delivery, so no error surfaces here.
 	err := r.RemoteBatchTell(context.Background(), from, to, messages)
-	// Error is expected since we're not actually connecting to a server
-	// but the important part is that it doesn't panic on nil messages
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 func TestRemoteBatchAsk_FiltersNilMessages(t *testing.T) {
@@ -1283,12 +1283,15 @@ func TestRemoteBatchAsk_NoSerializer(t *testing.T) {
 }
 
 func TestRemoteTell_ConnectionRefused(t *testing.T) {
+	// Fire-and-forget contract: dial failures never surface to the caller.
+	// Admission returns nil and the transport failure fans out through the
+	// shared handler (see TestRemoteTellUnreachablePeerAdmitsAndFansOut).
 	r := NewClient()
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
 	err := r.RemoteTell(context.Background(), from, to, durationpb.New(time.Second))
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 func TestRemoteAsk_ConnectionRefused(t *testing.T) {
@@ -1668,9 +1671,10 @@ func TestWithRemotingContextPropagator_EnrichesRequests(t *testing.T) {
 	from := address.New("from", "sys", "host", 1000)
 	to := address.New("to", "sys", "host", 1000)
 
-	// The send will fail at dial time, but enrichContext is still exercised.
+	// The dial failure fans out asynchronously per the fire-and-forget
+	// contract, but enrichContext still runs synchronously on this path.
 	err := r.RemoteTell(context.Background(), from, to, durationpb.New(time.Second))
-	assert.Error(t, err)
+	assert.NoError(t, err)
 }
 
 // --- RemoteChildren tests ---

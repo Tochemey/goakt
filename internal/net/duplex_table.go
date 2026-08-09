@@ -48,7 +48,11 @@ func (x *duplexConn) PrepareRef(kind byte, literal string) (uint64, error) {
 // emitTable admits one TABLE frame. It may wait on the connection mutex but
 // does not wait on byte capacity or writer-queue backpressure.
 func (x *duplexConn) emitTable(kind byte, id uint64, literal string) error {
-	payload := encodeTablePayload(kind, id, literal)
+	payload, err := encodeTablePayload(kind, id, literal)
+	if err != nil {
+		return err
+	}
+
 	return x.admitFrame(Frame{
 		Version: ProtocolVersion,
 		Type:    FrameTypeTable,

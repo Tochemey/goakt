@@ -659,9 +659,13 @@ func BenchmarkDuplexChunkedTellAllocs(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if _, err := right.Recv(ctx); err != nil {
+
+		frame, err := right.Recv(ctx)
+		if err != nil {
 			b.Fatal(err)
 		}
+
+		right.ReleasePayload(frame)
 	}
 }
 

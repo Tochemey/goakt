@@ -178,9 +178,9 @@ func (x *tcpAcceptor) Close() error {
 	return x.ln.Close()
 }
 
-// tcpReadPool recycles [tcpFramedConn.ReadFrame] CHUNK payloads, whose release
-// point is the copy into the reassembly buffer. Other frame types allocate
-// exact-size buffers because their payloads escape to dispatch.
+// tcpReadPool recycles [tcpFramedConn.ReadFrame] bodies for frame types with a
+// deterministic release point (CHUNK after reassembly copy; DATA/REPLY/ERROR
+// after Deserialize or drop). Other frame types allocate exact-size buffers.
 var tcpReadPool = NewFramePool()
 
 // tcpFramedConn implements [FramedConn] over a [net.Conn].
@@ -305,10 +305,7 @@ func (x *tcpFramedConn) ReadFrame() (Frame, error) {
 
 	payload := x.getReadPayload(frame.Type, int(frame.Length))
 	if _, err := io.ReadFull(x.conn, payload); err != nil {
-		if frame.Type == FrameTypeChunk {
-			x.releaseReadPayload(payload)
-		}
-
+		x.releaseReadPayload(payload)
 		return Frame{}, err
 	}
 
@@ -316,13 +313,21 @@ func (x *tcpFramedConn) ReadFrame() (Frame, error) {
 	return frame, nil
 }
 
-// getReadPayload returns an n-byte buffer for a frame body. Only CHUNK bodies
-// draw from the pool: they have a deterministic release point (the copy into
-// the reassembly buffer), while DATA/REPLY payloads escape to dispatch with
-// indefinite lifetime, so pooling them would leak Gets forever and pay the
-// power-of-two bucket rounding on every ordinary frame for nothing.
+// poolsReadPayload reports whether frameType bodies are drawn from [tcpReadPool].
+func poolsReadPayload(frameType byte) bool {
+	switch frameType {
+	case FrameTypeChunk, FrameTypeData, FrameTypeReply, FrameTypeError:
+		return true
+	default:
+		return false
+	}
+}
+
+// getReadPayload returns an n-byte buffer for a frame body. Pooled types are
+// listed by [poolsReadPayload]; callers must [releaseReadPayload] exactly once
+// after the body is consumed or dropped.
 func (x *tcpFramedConn) getReadPayload(frameType byte, n int) []byte {
-	if frameType == FrameTypeChunk && x.readPool != nil {
+	if x.readPool != nil && poolsReadPayload(frameType) {
 		return x.readPool.Get(n)
 	}
 

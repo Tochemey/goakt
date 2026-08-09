@@ -35,8 +35,32 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
+
+func TestMarshalProtoAppendRoundTrip(t *testing.T) {
+	msg := &internalpb.Hello{
+		Revision:     CapabilityRevisionTables,
+		SystemName:   "sys",
+		Host:         "127.0.0.1",
+		Port:         8080,
+		LaneRole:     internalpb.LaneRole_LANE_ROLE_CONTROL,
+		MaxFrameSize: defaultMaxFrameSize,
+	}
+
+	payload, err := MarshalProtoAppend(msg)
+	require.NoError(t, err)
+	require.NotEmpty(t, payload)
+
+	decoded := new(internalpb.Hello)
+	require.NoError(t, proto.Unmarshal(payload, decoded))
+	require.Equal(t, msg.GetSystemName(), decoded.GetSystemName())
+	require.Equal(t, msg.GetRevision(), decoded.GetRevision())
+
+	ReleaseMarshalBuffer(payload)
+	ReleaseMarshalBuffer(nil)
+}
 
 func TestProtoSerializer_MarshalUnmarshalBinary_Success(t *testing.T) {
 	orig := &testpb.Reply{Content: "hello world"}

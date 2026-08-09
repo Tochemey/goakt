@@ -46,17 +46,20 @@ func performHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, e
 		return nil, fmt.Errorf("tcp: hello local parameters are required")
 	}
 
-	payload, err := proto.Marshal(local)
+	payload, err := MarshalProtoAppend(local)
 	if err != nil {
 		return nil, err
 	}
 
 	lane, err := laneByte(local.GetLaneRole(), local.GetLaneIndex())
 	if err != nil {
+		ReleaseMarshalBuffer(payload)
 		return nil, err
 	}
 
-	if err := conn.WriteFrames(encodeHelloFrame(FrameTypeHello, lane, payload)); err != nil {
+	err = conn.WriteFrames(encodeHelloFrame(FrameTypeHello, lane, payload))
+	ReleaseMarshalBuffer(payload)
+	if err != nil {
 		return nil, err
 	}
 
@@ -67,17 +70,23 @@ func performHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, e
 	}
 
 	if frame.Type == FrameTypeError {
-		return nil, fmt.Errorf("tcp: handshake rejected: %v", decodeErrorPayload(frame.Payload))
+		err := fmt.Errorf("tcp: handshake rejected: %v", decodeErrorPayload(frame.Payload))
+		releaseConnPayload(conn, frame.Payload)
+		return nil, err
 	}
 
 	if frame.Type != FrameTypeHelloAck {
+		releaseConnPayload(conn, frame.Payload)
 		return nil, fmt.Errorf("tcp: expected HELLO_ACK, got frame type 0x%02x", frame.Type)
 	}
 
 	remote := new(internalpb.Hello)
 	if err := proto.Unmarshal(frame.Payload, remote); err != nil {
+		releaseConnPayload(conn, frame.Payload)
 		return nil, err
 	}
+
+	releaseConnPayload(conn, frame.Payload)
 
 	if remote.GetRevision() < CapabilityRevisionBaseline {
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "capability revision below baseline")
@@ -104,15 +113,19 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 	}
 
 	if frame.Type != FrameTypeHello {
+		releaseConnPayload(conn, frame.Payload)
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "expected HELLO")
 		return nil, fmt.Errorf("tcp: expected HELLO, got frame type 0x%02x", frame.Type)
 	}
 
 	remote := new(internalpb.Hello)
 	if err := proto.Unmarshal(frame.Payload, remote); err != nil {
+		releaseConnPayload(conn, frame.Payload)
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "invalid HELLO payload")
 		return nil, err
 	}
+
+	releaseConnPayload(conn, frame.Payload)
 
 	if remote.GetRevision() < CapabilityRevisionBaseline {
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "capability revision below baseline")
@@ -129,17 +142,20 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 	ack.Host = local.GetHost()
 	ack.Port = local.GetPort()
 
-	payload, err := proto.Marshal(ack)
+	payload, err := MarshalProtoAppend(ack)
 	if err != nil {
 		return nil, err
 	}
 
 	lane, err := laneByte(ack.GetLaneRole(), ack.GetLaneIndex())
 	if err != nil {
+		ReleaseMarshalBuffer(payload)
 		return nil, err
 	}
 
-	if err := conn.WriteFrames(encodeHelloFrame(FrameTypeHelloAck, lane, payload)); err != nil {
+	err = conn.WriteFrames(encodeHelloFrame(FrameTypeHelloAck, lane, payload))
+	ReleaseMarshalBuffer(payload)
+	if err != nil {
 		return nil, err
 	}
 
@@ -217,6 +233,14 @@ func decodeErrorPayload(payload []byte) error {
 	}
 
 	return fmt.Errorf("%s: %s", e.GetCode().String(), e.GetMessage())
+}
+
+// releaseConnPayload returns a ReadFrame body to the connection pool when the
+// concrete [FramedConn] supports it. Safe on non-pooled buffers.
+func releaseConnPayload(conn FramedConn, payload []byte) {
+	if releaser, ok := conn.(interface{ releaseReadPayload([]byte) }); ok {
+		releaser.releaseReadPayload(payload)
+	}
 }
 
 // laneByte maps a lane role/index to the header lane byte. Ordinary lanes use

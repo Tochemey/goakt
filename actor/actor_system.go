@@ -2968,7 +2968,7 @@ func (x *actorSystem) setupRemoting() error {
 	x.startCoalescedFailureDrain()
 	opts = append(opts,
 		remoteclient.WithSendCoalescing(remoteSendCoalescingMaxBatch),
-		remoteclient.WithCoalescingErrorHandler(x.enqueueCoalescedFailure),
+		remoteclient.WithTellFailureHandler(x.enqueueCoalescedFailure),
 	)
 
 	x.remoting = remoteclient.NewClient(opts...)

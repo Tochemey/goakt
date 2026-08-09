@@ -28,9 +28,21 @@ import (
 	"sync"
 )
 
+// maxTableLiteralLen bounds a TABLE literal (an actor path or type name) so the
+// payload size computation in encodeTablePayload cannot overflow int on any
+// platform (CWE-190). Real literals are far smaller; a literal beyond this is
+// rejected as malformed rather than allocated.
+const maxTableLiteralLen = 16 << 20 // 16 MiB
+
 // encodeTablePayload builds a TABLE frame body:
 // kind (1B) | uvarint id | uvarint literalLen | literal bytes.
-func encodeTablePayload(kind byte, id uint64, literal string) []byte {
+// It rejects a literal longer than maxTableLiteralLen so the size computation
+// for the returned buffer cannot overflow int.
+func encodeTablePayload(kind byte, id uint64, literal string) ([]byte, error) {
+	if len(literal) > maxTableLiteralLen {
+		return nil, fmt.Errorf("tcp: table literal length %d exceeds max %d", len(literal), maxTableLiteralLen)
+	}
+
 	size := 1 + uvarintSize(id) + uvarintSize(uint64(len(literal))) + len(literal)
 	buf := make([]byte, size)
 	buf[0] = kind
@@ -38,7 +50,7 @@ func encodeTablePayload(kind byte, id uint64, literal string) []byte {
 	n += binary.PutUvarint(buf[n:], id)
 	n += binary.PutUvarint(buf[n:], uint64(len(literal)))
 	copy(buf[n:], literal)
-	return buf
+	return buf, nil
 }
 
 // parseTablePayload decodes a TABLE frame body. Empty literals and zero IDs

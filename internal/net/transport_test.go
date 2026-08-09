@@ -173,9 +173,15 @@ func TestTCPFramedConnReadPoolRelease(t *testing.T) {
 	right.releaseReadPayload(buf)
 	require.NoError(t, <-errCh)
 
-	// Non-CHUNK frame types allocate exact-size buffers: their payloads
-	// escape to dispatch, so pooling them would leak Gets forever.
-	exact := right.getReadPayload(FrameTypeData, 8)
+	// DATA/REPLY/ERROR bodies also draw from the read pool and must be
+	// released after Deserialize or drop.
+	pooled := right.getReadPayload(FrameTypeData, 8)
+	require.Len(t, pooled, 8)
+	require.GreaterOrEqual(t, cap(pooled), 8)
+	right.releaseReadPayload(pooled)
+
+	// HELLO and other non-pooled types keep exact-size allocations.
+	exact := right.getReadPayload(FrameTypeHello, 8)
 	require.Len(t, exact, 8)
 	require.Equal(t, 8, cap(exact))
 
@@ -184,6 +190,21 @@ func TestTCPFramedConnReadPoolRelease(t *testing.T) {
 	got := bare.getReadPayload(FrameTypeChunk, 8)
 	require.Len(t, got, 8)
 	bare.releaseReadPayload(got)
+}
+
+func TestGetReadPayloadPoolsDataReplyError(t *testing.T) {
+	conn := newTCPFramedConn(nil, defaultMaxFrameSize)
+
+	for _, frameType := range []byte{FrameTypeData, FrameTypeReply, FrameTypeError, FrameTypeChunk} {
+		buf := conn.getReadPayload(frameType, 32)
+		require.Len(t, buf, 32)
+		require.GreaterOrEqual(t, cap(buf), 32)
+		conn.releaseReadPayload(buf)
+	}
+
+	hello := conn.getReadPayload(FrameTypeHello, 32)
+	require.Len(t, hello, 32)
+	require.Equal(t, 32, cap(hello))
 }
 
 func TestTCPFramedConnLengthMismatch(t *testing.T) {

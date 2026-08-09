@@ -171,7 +171,8 @@ func TestDecodeDataEnvelopeTableHitAllocs(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, handle, warm.SenderHandle)
 
-	allocs := testing.AllocsPerRun(100, func() {
+	// Steady-state tell decode on the table-hit path: 0 allocs per message.
+	allocs := testing.AllocsPerRun(200, func() {
 		env, decErr := decodeDataEnvelopeWithTables(encoded, false, paths, types, resolver)
 		if decErr != nil || env.SenderHandle != any(handle) {
 			t.Fatal("table-hit decode failed")
