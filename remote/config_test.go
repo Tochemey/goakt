@@ -51,6 +51,8 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, 15*time.Second, config.KeepAlive())
 		assert.EqualValues(t, DefaultOrdinaryLanes, config.OrdinaryLanes())
 		assert.EqualValues(t, DefaultMaxConcurrentLargeTransfers, config.MaxConcurrentLargeTransfers())
+		assert.EqualValues(t, DefaultChunkSize, config.ChunkSize())
+		assert.EqualValues(t, DefaultMaxMessageSize, config.MaxMessageSize())
 		assert.Nil(t, config.LargeMessageDestinations())
 	})
 	t.Run("With ordinary lanes and large destinations", func(t *testing.T) {
@@ -58,11 +60,27 @@ func TestConfig(t *testing.T) {
 			WithOrdinaryLanes(4),
 			WithLargeMessageDestinations("orders/*", "*/bulk-ingest"),
 			WithMaxConcurrentLargeTransfers(8),
+			WithChunkSize(64*size.KB),
+			WithMaxMessageSize(32*size.MB),
 		)
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 4, config.OrdinaryLanes())
 		assert.Equal(t, []string{"orders/*", "*/bulk-ingest"}, config.LargeMessageDestinations())
 		assert.EqualValues(t, 8, config.MaxConcurrentLargeTransfers())
+		assert.EqualValues(t, 64*size.KB, config.ChunkSize())
+		assert.EqualValues(t, 32*size.MB, config.MaxMessageSize())
+	})
+	t.Run("With invalid chunk size", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithChunkSize(8*size.KB))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "chunkSize must be between 16KB and 4MB")
+	})
+	t.Run("With maxMessageSize below maxFrameSize", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithMaxMessageSize(1024))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "maxMessageSize must be greater than or equal to maxFrameSize")
 	})
 	t.Run("With invalid ordinary lanes", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithOrdinaryLanes(0))

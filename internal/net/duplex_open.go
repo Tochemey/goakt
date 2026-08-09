@@ -61,6 +61,22 @@ type DuplexSession interface {
 	// Lane returns the negotiated connection lane byte.
 	Lane() byte
 
+	// Revision returns the negotiated capability revision for this session.
+	Revision() uint32
+
+	// MaxFrameSize returns the negotiated whole-frame ceiling.
+	MaxFrameSize() uint32
+
+	// MaxMessageSize returns the negotiated reassembled logical-frame ceiling.
+	MaxMessageSize() uint64
+
+	// MaxConcurrentLargeTransfers returns the negotiated concurrent CHUNK
+	// group cap for this session.
+	MaxConcurrentLargeTransfers() uint32
+
+	// ChunkSize returns the local CHUNK send threshold used by this session.
+	ChunkSize() uint32
+
 	// Close drains admitted outbound frames, stops reader/writer loops, and
 	// closes the underlying framed connection. It is safe to call more than
 	// once; subsequent calls are no-ops that return the first close error.
@@ -75,13 +91,14 @@ type DuplexSession interface {
 // silent peer cannot stall dial forever. writeTimeout bounds [DuplexSession]
 // submissions when a later caller's context carries no deadline. lane
 // overrides the lane fields in localHello and readIdleTimeout enables
-// connection-level PING/PONG liveness when nonzero. The session's effective
-// lane identity comes from the HELLO_ACK, which may differ from lane when the
-// acceptor predates lane echo and always answers CONTROL.
+// connection-level PING/PONG liveness when nonzero. chunkSize is the local
+// CHUNK send threshold (not negotiated). The session's effective lane identity
+// comes from the HELLO_ACK, which may differ from lane when the acceptor
+// predates lane echo and always answers CONTROL.
 //
 // On success the returned [HandshakeResult] holds local, remote, and effective
 // negotiated parameters. On failure the underlying connection is closed.
-func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, lane LaneSpec, writeTimeout, readIdleTimeout time.Duration) (DuplexSession, *HandshakeResult, error) {
+func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, lane LaneSpec, writeTimeout, readIdleTimeout time.Duration, chunkSize uint32) (DuplexSession, *HandshakeResult, error) {
 	if _, err := laneByte(lane.Role, lane.Index); err != nil {
 		return nil, nil, err
 	}
@@ -147,6 +164,8 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 		withDuplexWriteTimeout(writeTimeout),
 		withDuplexReadIdleTimeout(readIdleTimeout),
 		withDuplexLane(laneValue),
+		withDuplexChunkSize(chunkSize),
+		withDuplexNegotiated(result.Effective),
 	)
 	return conn, result, nil
 }

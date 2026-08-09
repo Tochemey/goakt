@@ -112,9 +112,9 @@ func WithOrdinaryLanes(n uint32) Option {
 // WithLargeMessageDestinations sets hierarchical actor-path glob patterns that
 // route matching user tell/ask traffic onto the large lane. Patterns match the
 // path suffix after host:port (for example "orders/*"), not the full goakt://
-// URI. An empty list matches nothing. Matching routes traffic for isolation
-// and head-of-line avoidance; payloads remain whole frames bounded by
-// MaxFrameSize.
+// URI. An empty list matches nothing. Matching is a performance and isolation
+// knob: oversized payloads to unlisted destinations still chunk in place on
+// their ordinary lane.
 func WithLargeMessageDestinations(patterns ...string) Option {
 	return OptionFunc(func(config *Config) {
 		if len(patterns) == 0 {
@@ -128,11 +128,28 @@ func WithLargeMessageDestinations(patterns ...string) Option {
 }
 
 // WithMaxConcurrentLargeTransfers sets the HELLO-advertised cap on concurrent
-// large-message transfers. The value is negotiated today; reassembly does not
-// enforce it yet.
+// large-message transfers per duplex connection. The value is negotiated and
+// enforced by the chunk reassembler and the sender-side gate.
 func WithMaxConcurrentLargeTransfers(n uint32) Option {
 	return OptionFunc(func(config *Config) {
 		config.maxConcurrentLargeTransfers = n
+	})
+}
+
+// WithChunkSize sets the logical-frame size above which duplex senders emit
+// CHUNK frames. Valid values are 16 KiB through 4 MiB. The value is local and
+// not negotiated; peers with different chunk sizes still interoperate.
+func WithChunkSize(size uint32) Option {
+	return OptionFunc(func(config *Config) {
+		config.chunkSize = size
+	})
+}
+
+// WithMaxMessageSize sets the HELLO-advertised cap on a reassembled logical
+// frame. It must be at least [Config.MaxFrameSize] and may exceed 16 MiB.
+func WithMaxMessageSize(size uint64) Option {
+	return OptionFunc(func(config *Config) {
+		config.maxMessageSize = size
 	})
 }
 

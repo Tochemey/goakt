@@ -60,6 +60,7 @@ func TestOpenDuplexRoundTripPing(t *testing.T) {
 		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
 		0,
+		DefaultChunkSize,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result.Effective)
@@ -117,6 +118,7 @@ func TestOpenDuplexHonorsContextDeadline(t *testing.T) {
 		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
 		0,
+		DefaultChunkSize,
 	)
 	elapsed := time.Since(start)
 
@@ -140,6 +142,7 @@ func TestOpenDuplexDialFailure(t *testing.T) {
 		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
 		0,
+		DefaultChunkSize,
 	)
 	require.Error(t, err)
 }
@@ -192,6 +195,7 @@ func TestOpenDuplexAdoptsAckLaneFromBaselinePeer(t *testing.T) {
 		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_ORDINARY, Index: 3},
 		time.Second,
 		0,
+		DefaultChunkSize,
 	)
 	require.NoError(t, err)
 

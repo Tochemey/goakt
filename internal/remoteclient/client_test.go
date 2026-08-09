@@ -44,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
@@ -2675,6 +2676,13 @@ func TestRemoteUnWatch_ConnectionRefused(t *testing.T) {
 
 	err := r.RemoteUnWatch(context.Background(), "host", 1000, "watchee", watcher)
 	assert.Error(t, err)
+}
+
+func TestNewNetClientHonorsMaxFrameSize(t *testing.T) {
+	r := NewClient(WithClientMaxFrameSize(4 * size.MB)).(*client)
+	nc := r.newNetClient("127.0.0.1", 1)
+	require.NotNil(t, nc)
+	assert.Equal(t, uint32(4*size.MB), nc.MaxFrameSize())
 }
 
 func TestSerializePayload(t *testing.T) {

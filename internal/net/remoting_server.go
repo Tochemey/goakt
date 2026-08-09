@@ -133,6 +133,8 @@ type RemotingServer struct {
 	writeTimeout                time.Duration
 	readIdleTimeout             time.Duration
 	maxFrameSize                uint32
+	maxMessageSize              uint64
+	chunkSize                   uint32
 	initialCredits              uint64
 	maxConcurrentLargeTransfers uint32
 	systemName                  string
@@ -159,6 +161,8 @@ func NewRemotingServer(listenAddr string, opts ...RemotingServerOption) (*Remoti
 		serializer:                  NewProtoSerializer(),
 		framePool:                   NewFramePool(),
 		maxFrameSize:                defaultMaxFrameSize, // Default: 16 MiB
+		maxMessageSize:              DefaultMaxMessageSize,
+		chunkSize:                   DefaultChunkSize,
 		initialCredits:              defaultInitialCredits,
 		maxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
 	}
@@ -364,12 +368,32 @@ func WithRemotingServerReadIdleTimeout(d time.Duration) RemotingServerOption {
 }
 
 // WithRemotingServerMaxConcurrentLargeTransfers sets the HELLO-advertised cap on
-// concurrent large-message transfers. The value is negotiated today;
-// reassembly does not enforce it yet.
+// concurrent large-message transfers. The value is negotiated and enforced by
+// the chunk reassembler and the sender-side gate.
 func WithRemotingServerMaxConcurrentLargeTransfers(n uint32) RemotingServerOption {
 	return func(x *RemotingServer) {
 		if n > 0 {
 			x.maxConcurrentLargeTransfers = n
+		}
+	}
+}
+
+// WithRemotingServerMaxMessageSize sets the HELLO-advertised cap on a
+// reassembled logical frame. Zero keeps the default (16 MiB).
+func WithRemotingServerMaxMessageSize(size uint64) RemotingServerOption {
+	return func(x *RemotingServer) {
+		if size > 0 {
+			x.maxMessageSize = size
+		}
+	}
+}
+
+// WithRemotingServerChunkSize sets the local CHUNK send threshold for
+// oversized REPLY frames. Zero keeps the default (256 KiB).
+func WithRemotingServerChunkSize(size uint32) RemotingServerOption {
+	return func(x *RemotingServer) {
+		if size > 0 {
+			x.chunkSize = size
 		}
 	}
 }
@@ -514,12 +538,12 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
-		Revision:                    CapabilityRevisionBaseline,
+		Revision:                    CapabilityRevisionChunking,
 		SystemName:                  x.systemName,
 		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
 		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
 		MaxFrameSize:                x.maxFrameSize,
-		MaxMessageSize:              uint64(x.maxFrameSize),
+		MaxMessageSize:              x.maxMessageSize,
 		InitialCredits:              x.initialCredits,
 		MaxConcurrentLargeTransfers: x.maxConcurrentLargeTransfers,
 	}
@@ -555,6 +579,8 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 		withDuplexReadIdleTimeout(x.readIdleTimeout),
 		withDuplexConnIdleTimeout(x.idleTimeout),
 		withDuplexLane(lane),
+		withDuplexChunkSize(x.chunkSize),
+		withDuplexNegotiated(result.Effective),
 	)
 	defer func() { _ = conn.Close() }()
 

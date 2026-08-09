@@ -468,11 +468,17 @@ func TestMapDuplexBackpressure(t *testing.T) {
 	require.ErrorIs(t, err, gerrors.ErrRemoteSendBackpressure)
 }
 
+func TestMapDuplexMessageTooLarge(t *testing.T) {
+	err := mapDuplexErr(inet.ErrMessageTooLarge)
+	require.ErrorIs(t, err, gerrors.ErrRemoteMessageTooLarge)
+}
+
 func TestShouldRetireDuplexSession(t *testing.T) {
 	assert.False(t, shouldRetireDuplexSession(nil, inet.Frame{}))
 	assert.False(t, shouldRetireDuplexSession(context.Canceled, inet.Frame{}))
 	assert.False(t, shouldRetireDuplexSession(context.DeadlineExceeded, inet.Frame{}))
 	assert.False(t, shouldRetireDuplexSession(inet.ErrDuplexBackpressure, inet.Frame{}))
+	assert.False(t, shouldRetireDuplexSession(inet.ErrMessageTooLarge, inet.Frame{}))
 	assert.False(t, shouldRetireDuplexSession(errors.New("handler"), inet.Frame{
 		Type:        inet.FrameTypeError,
 		Correlation: 7,

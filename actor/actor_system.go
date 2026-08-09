@@ -2926,6 +2926,8 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientLargeMessageDestinations(x.remoteConfig.LargeMessageDestinations()),
 		remoteclient.WithClientMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()),
 		remoteclient.WithClientMaxFrameSize(x.remoteConfig.MaxFrameSize()),
+		remoteclient.WithClientMaxMessageSize(x.remoteConfig.MaxMessageSize()),
+		remoteclient.WithClientChunkSize(x.remoteConfig.ChunkSize()),
 		remoteclient.WithClientInitialCredits(remote.DefaultInitialCredits),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.

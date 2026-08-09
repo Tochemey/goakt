@@ -106,15 +106,12 @@ func (x *client) sendControlLegacy(ctx context.Context, host string, port int, r
 	return nc.SendProto(ctx, req)
 }
 
-// sendControlDuplex encodes req as an expectsReply DATA frame on the control
-// lane, waits for the correlated REPLY, and decodes it with [decodeControlReply].
-// Any transport failure closes the peer session so the next call re-dials.
+// sendControlDuplex encodes req as an expectsReply DATA frame, waits for the
+// correlated REPLY, and decodes it with [decodeControlReply]. Oversized bulk
+// control RPCs ride the large lane (chunked when the peer supports it); other
+// control traffic stays on the control lane. Any transport failure retires
+// the selected lane so the next call re-dials.
 func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Message) (proto.Message, error) {
-	session, err := peer.ensureLane(ctx, internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
-	if err != nil {
-		return nil, err
-	}
-
 	payload, err := proto.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -135,22 +132,52 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 		return nil, err
 	}
 
+	role := internalpb.LaneRole_LANE_ROLE_CONTROL
+	index := uint32(0)
+	lane := inet.LaneControl
+	if isControlBulk(req) {
+		logicalLen := inet.FrameHeaderSize + len(encoded)
+		if uint32(logicalLen) > x.chunkSize {
+			role = internalpb.LaneRole_LANE_ROLE_LARGE
+			lane = inet.LaneLarge
+		}
+	}
+
+	session, err := peer.ensureLane(ctx, role, index)
+	if err != nil {
+		return nil, err
+	}
+
 	frame := inet.Frame{
 		Type:    inet.FrameTypeData,
 		Flags:   flags,
-		Lane:    inet.LaneControl,
+		Lane:    lane,
 		Payload: encoded,
 	}
 
 	replyFrame, err := session.Ask(ctx, frame)
 	if err != nil {
 		if shouldRetireDuplexSession(err, replyFrame) {
-			peer.retireLane(laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}, session)
+			peer.retireLane(laneKey{role: role, index: index}, session)
 		}
+
 		return nil, mapDuplexErr(err)
 	}
 
 	return decodeControlReply(replyFrame)
+}
+
+// isControlBulk reports whether req is a bulk control RPC that may leave the
+// control lane when its logical frame exceeds ChunkSize.
+func isControlBulk(req proto.Message) bool {
+	switch req.(type) {
+	case *internalpb.RelocateBatchRequest,
+		*internalpb.PersistPeerStateRequest,
+		*internalpb.RemoteStateRequest:
+		return true
+	default:
+		return false
+	}
 }
 
 // sendTell routes one fire-and-forget user message, falling back to legacy

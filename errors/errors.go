@@ -78,6 +78,11 @@ var (
 	// caller decides whether to retry, drop, or circuit-break.
 	ErrRemoteSendBackpressure = errors.New("remote send backpressure: outbound queue full")
 
+	// ErrRemoteMessageTooLarge is returned when a remoting payload exceeds the
+	// negotiated max message size, or exceeds the max frame size when the peer
+	// cannot accept CHUNK frames.
+	ErrRemoteMessageTooLarge = errors.New("remote message exceeds negotiated size limit")
+
 	// ErrNameRequired is returned when an actor system name is required but not provided.
 	ErrNameRequired = errors.New("actor system is required")
 

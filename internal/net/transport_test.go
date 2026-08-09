@@ -140,6 +140,52 @@ func TestTCPFramedConnWriteReadPayload(t *testing.T) {
 	require.NoError(t, <-errCh)
 }
 
+func TestTCPFramedConnReadPoolRelease(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newTCPFramedConn(c1, defaultMaxFrameSize)
+	right := newTCPFramedConn(c2, defaultMaxFrameSize)
+	require.NotNil(t, right.readPool)
+
+	payload := []byte("pooled-read-body")
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- left.WriteFrames(Frame{
+			Type:        FrameTypeChunk,
+			Lane:        LaneOrdinary,
+			Length:      uint32(len(payload)),
+			Correlation: 1,
+			Payload:     payload,
+		})
+	}()
+
+	frame, err := right.ReadFrame()
+	require.NoError(t, err)
+	require.Equal(t, payload, frame.Payload)
+
+	right.releaseReadPayload(frame.Payload)
+	buf := right.getReadPayload(FrameTypeChunk, len(payload))
+	require.Len(t, buf, len(payload))
+	right.releaseReadPayload(buf)
+	require.NoError(t, <-errCh)
+
+	// Non-CHUNK frame types allocate exact-size buffers: their payloads
+	// escape to dispatch, so pooling them would leak Gets forever.
+	exact := right.getReadPayload(FrameTypeData, 8)
+	require.Len(t, exact, 8)
+	require.Equal(t, 8, cap(exact))
+
+	// Nil pool path stays allocation-based and release is a no-op.
+	bare := &tcpFramedConn{}
+	got := bare.getReadPayload(FrameTypeChunk, 8)
+	require.Len(t, got, 8)
+	bare.releaseReadPayload(got)
+}
+
 func TestTCPFramedConnLengthMismatch(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() {

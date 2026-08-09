@@ -191,6 +191,11 @@ func WithMaxFrameSize(size uint32) ClientOption {
 	}
 }
 
+// MaxFrameSize returns the configured maximum proto frame size.
+func (c *Client) MaxFrameSize() uint32 {
+	return c.maxFrameSize
+}
+
 // Get returns a pooled connection or dials a new one. Stale idle
 // connections are closed transparently. The caller must call [Client.Put]
 // after a successful exchange or [Client.Discard] on error.

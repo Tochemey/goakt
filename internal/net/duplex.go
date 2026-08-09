@@ -68,6 +68,21 @@ type duplexConn struct {
 	// enforceLane enables frame.Lane validation. Set by [withDuplexLane]
 	// after HELLO; unit fixtures that skip negotiation leave it false.
 	enforceLane bool
+	// revision is the negotiated capability revision from HELLO.
+	revision uint32
+	// maxFrameSize is the negotiated whole-frame ceiling.
+	maxFrameSize uint32
+	// maxMessageSize is the negotiated reassembled logical-frame ceiling.
+	maxMessageSize uint64
+	// maxConcurrentLargeTransfers is the negotiated concurrent CHUNK-group cap.
+	maxConcurrentLargeTransfers uint32
+	// chunkSize is the local send threshold for splitting into CHUNK frames.
+	// It is not negotiated; zero disables chunked sends.
+	chunkSize uint32
+	// reassembler rebuilds inbound CHUNK groups on this connection.
+	reassembler *chunkReassembler
+	// largeSem gates outbound CHUNK groups at the negotiated concurrent cap.
+	largeSem chan types.Unit
 	// lastInbound records the latest successfully read frame timestamp.
 	lastInbound atomic.Int64
 
@@ -149,6 +164,37 @@ func withDuplexConnIdleTimeout(d time.Duration) duplexConnOption {
 	}
 }
 
+// withDuplexChunkSize sets the local CHUNK send threshold. Zero disables
+// chunked sends on this session.
+func withDuplexChunkSize(size uint32) duplexConnOption {
+	return func(x *duplexConn) {
+		x.chunkSize = size
+	}
+}
+
+// withDuplexNegotiated applies HELLO pairwise-effective limits and enables
+// chunk reassembly when the negotiated revision supports it.
+func withDuplexNegotiated(hello *internalpb.Hello) duplexConnOption {
+	return func(x *duplexConn) {
+		if hello == nil {
+			return
+		}
+
+		x.revision = hello.GetRevision()
+		x.maxFrameSize = hello.GetMaxFrameSize()
+		x.maxMessageSize = hello.GetMaxMessageSize()
+		x.maxConcurrentLargeTransfers = hello.GetMaxConcurrentLargeTransfers()
+		if x.maxConcurrentLargeTransfers == 0 {
+			x.maxConcurrentLargeTransfers = defaultMaxConcurrentLargeTransfers
+		}
+
+		if x.revision >= CapabilityRevisionChunking {
+			x.reassembler = newChunkReassembler(x.maxMessageSize, x.maxConcurrentLargeTransfers)
+			x.largeSem = make(chan types.Unit, x.maxConcurrentLargeTransfers)
+		}
+	}
+}
+
 // newDuplexConn starts reader and writer goroutines for framed.
 // maxOutBytes caps admitted outbound payload+header bytes; values <= 0
 // default to defaultMaxFrameSize.
@@ -172,6 +218,14 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 	for _, opt := range opts {
 		opt(x)
 	}
+
+	// A peer may negotiate a max frame size below the local chunk threshold.
+	// Clamp so chunked sends never emit a frame the peer would reject with a
+	// read error; splitLogicalChunks caps chunk bodies at this value.
+	if x.chunkSize > 0 && x.maxFrameSize > 0 && x.chunkSize > x.maxFrameSize {
+		x.chunkSize = x.maxFrameSize
+	}
+
 	x.lastInbound.Store(time.Now().UnixNano())
 
 	x.writeWG.Add(1)
@@ -186,7 +240,8 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 }
 
 // Tell enqueues a fire-and-forget frame. Correlation is forced to zero and
-// the expectsReply flag is cleared.
+// the expectsReply flag is cleared. Oversized frames are chunked when the
+// negotiated revision supports it.
 func (x *duplexConn) Tell(ctx context.Context, frame Frame) error {
 	frame.Correlation = 0
 	frame.Flags &^= FrameFlagExpectsReply
@@ -196,6 +251,8 @@ func (x *duplexConn) Tell(ctx context.Context, frame Frame) error {
 // Ask assigns a correlation ID, registers a waiter, submits frame with
 // expectsReply, and blocks until a REPLY/ERROR arrives, ctx is done, or the
 // duplex closes. Timeout abandons the waiter so a late reply is dropped.
+// Oversized frames are chunked when the negotiated revision supports it; a
+// soft-reject ERROR during chunk admission completes the waiter.
 func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 	corr := x.nextCorrelation()
 	frame.Correlation = corr
@@ -211,8 +268,17 @@ func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 	// [pendingTable.register]).
 	wait := x.pending.register(corr)
 	if err := x.Submit(ctx, frame); err != nil {
-		_ = x.pending.abandon(corr)
-		return Frame{}, err
+		select {
+		case resp := <-wait:
+			putPendingWaiter(wait)
+			if resp.Type == FrameTypeError {
+				return resp, decodeErrorPayload(resp.Payload)
+			}
+			return resp, nil
+		default:
+			_ = x.pending.abandon(corr)
+			return Frame{}, err
+		}
 	}
 
 	select {
@@ -231,12 +297,24 @@ func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 	}
 }
 
-// Submit enqueues frame for writing. It blocks until there is byte capacity,
-// ctx is done, or the duplex is closed. When ctx has no deadline and a write
-// timeout is configured, that timeout bounds the wait. A canceled context
-// returns ctx.Err(); a deadline that expires while waiting for capacity
-// returns [ErrDuplexBackpressure].
+// Submit enqueues frame for writing. DATA and REPLY frames are split into
+// CHUNK frames when they exceed the local chunk size and the peer supports
+// chunking. It blocks until there is byte capacity, ctx is done, or the
+// duplex is closed. When ctx has no deadline and a write timeout is
+// configured, that timeout bounds the wait. A canceled context returns
+// ctx.Err(); a deadline that expires while waiting for capacity returns
+// [ErrDuplexBackpressure].
 func (x *duplexConn) Submit(ctx context.Context, frame Frame) error {
+	switch frame.Type {
+	case FrameTypeData, FrameTypeReply:
+		return x.submitLogical(ctx, frame)
+	default:
+		return x.submitRaw(ctx, frame)
+	}
+}
+
+// submitRaw enqueues a single wire frame without chunking.
+func (x *duplexConn) submitRaw(ctx context.Context, frame Frame) error {
 	ctx, cancel := x.bindWriteDeadline(ctx)
 	defer cancel()
 
@@ -244,8 +322,8 @@ func (x *duplexConn) Submit(ctx context.Context, frame Frame) error {
 		frame.Version = ProtocolVersion
 	}
 
-	if int(frame.Length) != len(frame.Payload) {
-		frame.Length = uint32(len(frame.Payload))
+	if int(frame.Length) != frame.bodyLen() {
+		frame.Length = uint32(frame.bodyLen())
 	}
 
 	cost := int64(FrameHeaderSize) + int64(frame.Length)
@@ -380,6 +458,9 @@ func (x *duplexConn) signalClose() {
 		x.space.Broadcast()
 		x.mu.Unlock()
 		x.pending.failAll(Frame{Type: FrameTypeError})
+		if x.reassembler != nil {
+			x.reassembler.Close()
+		}
 	})
 }
 
@@ -507,6 +588,9 @@ func (x *duplexConn) readLoop() {
 				_ = x.pending.complete(frame.Correlation, frame)
 			}
 			continue
+		case FrameTypeChunk:
+			x.handleInboundChunk(frame)
+			continue
 		}
 
 		if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
@@ -544,6 +628,12 @@ func (x *duplexConn) rejectWrongLane() {
 		})
 	}
 
+	x.drainAndCloseFramed()
+}
+
+// drainAndCloseFramed signals shutdown, gives the writer a bounded window to
+// flush a best-effort ERROR, then closes the framed connection.
+func (x *duplexConn) drainAndCloseFramed() {
 	x.closing.Store(true)
 	x.signalClose()
 
@@ -557,10 +647,12 @@ func (x *duplexConn) rejectWrongLane() {
 	if drainBudget <= 0 {
 		drainBudget = duplexCloseDrainGrace
 	}
+
 	select {
 	case <-done:
 	case <-time.After(drainBudget):
 	}
+
 	_ = x.closeFramed()
 }
 
@@ -629,8 +721,8 @@ func (x *duplexConn) trySubmit(frame Frame) bool {
 	if frame.Version == 0 {
 		frame.Version = ProtocolVersion
 	}
-	if int(frame.Length) != len(frame.Payload) {
-		frame.Length = uint32(len(frame.Payload))
+	if int(frame.Length) != frame.bodyLen() {
+		frame.Length = uint32(frame.bodyLen())
 	}
 
 	cost := int64(FrameHeaderSize) + int64(frame.Length)
@@ -712,6 +804,31 @@ func (x *duplexConn) IsClosed() bool {
 // Lane returns the negotiated connection lane byte.
 func (x *duplexConn) Lane() byte {
 	return x.lane
+}
+
+// Revision returns the negotiated capability revision.
+func (x *duplexConn) Revision() uint32 {
+	return x.revision
+}
+
+// MaxFrameSize returns the negotiated whole-frame ceiling.
+func (x *duplexConn) MaxFrameSize() uint32 {
+	return x.maxFrameSize
+}
+
+// MaxMessageSize returns the negotiated reassembled logical-frame ceiling.
+func (x *duplexConn) MaxMessageSize() uint64 {
+	return x.maxMessageSize
+}
+
+// MaxConcurrentLargeTransfers returns the negotiated concurrent CHUNK-group cap.
+func (x *duplexConn) MaxConcurrentLargeTransfers() uint32 {
+	return x.maxConcurrentLargeTransfers
+}
+
+// ChunkSize returns the local CHUNK send threshold.
+func (x *duplexConn) ChunkSize() uint32 {
+	return x.chunkSize
 }
 
 // isClosed reports whether the duplex has been signaled closed. It only reads

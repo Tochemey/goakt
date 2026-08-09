@@ -86,6 +86,18 @@ const (
 	// CapabilityRevisionBaseline is the minimum duplex capability revision.
 	// It covers DATA, REPLY, ERROR, PING, and PONG.
 	CapabilityRevisionBaseline uint32 = 1
+
+	// CapabilityRevisionChunking is the revision that enables CHUNK frames and
+	// logical messages larger than the negotiated max frame size.
+	CapabilityRevisionChunking uint32 = 2
+
+	// DefaultChunkSize is the default logical-frame threshold above which a
+	// sender splits into CHUNK frames (256 KiB).
+	DefaultChunkSize uint32 = 256 * size.KB
+
+	// DefaultMaxMessageSize is the default cap on a reassembled logical frame
+	// (16 MiB). Operators may raise it above the max frame size.
+	DefaultMaxMessageSize uint64 = 16 * size.MB
 )
 
 // Frame is one duplex-protocol unit: a fixed 16-byte header plus an optional
@@ -120,9 +132,10 @@ type Frame struct {
 	// negotiated role.
 	Lane byte
 
-	// Length is the number of payload bytes following the header, encoded
-	// as a big-endian uint32. It must equal len(Payload) on write and is
-	// bounded by the negotiated max frame size on read.
+	// Length is the number of body bytes following the header, encoded as a
+	// big-endian uint32. On write it must equal len(Prefix)+len(Payload). On
+	// read the full body is placed in Payload (Prefix is unused) and Length
+	// is bounded by the negotiated max frame size.
 	Length uint32
 
 	// Correlation links requests to replies, errors, and chunk groups.
@@ -131,10 +144,22 @@ type Frame struct {
 	// correlation 0; request-scoped ERROR frames echo the failed request.
 	Correlation uint64
 
-	// Payload is the frame body. It may be nil or empty when Length is zero
-	// (for example PING/PONG). Callers must not retain a Payload slice past
-	// the lifetime of a pooled frame buffer when one is in use.
+	// Prefix is an optional body prefix written before Payload. CHUNK senders
+	// use it for the index/totalSize uvarints so Payload can be a subslice of
+	// the once-serialized logical buffer without a per-chunk copy. Readers
+	// always leave Prefix nil and place the full body in Payload.
+	Prefix []byte
+
+	// Payload is the frame body (or the body suffix when Prefix is set). It
+	// may be nil or empty when Length is zero (for example PING/PONG).
+	// Callers must not retain a Payload slice past the lifetime of a pooled
+	// frame buffer when one is in use.
 	Payload []byte
+}
+
+// bodyLen returns the on-wire body size of f (Prefix plus Payload).
+func (x Frame) bodyLen() int {
+	return len(x.Prefix) + len(x.Payload)
 }
 
 // HasMetadata reports whether the hasMetadata flag is set.

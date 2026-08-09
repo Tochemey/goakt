@@ -24,6 +24,7 @@ package remote
 
 import (
 	"maps"
+	"math"
 	"net"
 	"path"
 	"reflect"
@@ -57,6 +58,14 @@ const DefaultInitialCredits uint64 = 16 * size.MB
 // peer. One lane preserves per-destination-node FIFO for user traffic.
 const DefaultOrdinaryLanes uint32 = 1
 
+// DefaultChunkSize is the default logical-frame size above which duplex
+// senders emit CHUNK frames (256 KiB).
+const DefaultChunkSize uint32 = inet.DefaultChunkSize
+
+// DefaultMaxMessageSize is the default cap on a reassembled logical duplex
+// frame (16 MiB). It may be raised above [Config.MaxFrameSize].
+const DefaultMaxMessageSize uint64 = inet.DefaultMaxMessageSize
+
 // Config defines the remote config.
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so
@@ -88,6 +97,8 @@ type Config struct {
 	ordinaryLanes               uint32
 	largeMessageDestinations    []string
 	maxConcurrentLargeTransfers uint32
+	chunkSize                   uint32
+	maxMessageSize              uint64
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -114,6 +125,8 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		protocolPin:                 ProtocolPinAuto,
 		ordinaryLanes:               DefaultOrdinaryLanes,
 		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
+		chunkSize:                   DefaultChunkSize,
+		maxMessageSize:              DefaultMaxMessageSize,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -144,6 +157,8 @@ func DefaultConfig() *Config {
 		protocolPin:                 ProtocolPinAuto,
 		ordinaryLanes:               DefaultOrdinaryLanes,
 		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
+		chunkSize:                   DefaultChunkSize,
+		maxMessageSize:              DefaultMaxMessageSize,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -305,10 +320,22 @@ func (x *Config) LargeMessageDestinations() []string {
 }
 
 // MaxConcurrentLargeTransfers returns the HELLO-advertised cap on concurrent
-// large-message transfers. The value is negotiated today; reassembly does not
-// enforce it yet.
+// large-message transfers per duplex connection. The value is negotiated and
+// enforced by the chunk reassembler and the sender-side gate.
 func (x *Config) MaxConcurrentLargeTransfers() uint32 {
 	return x.maxConcurrentLargeTransfers
+}
+
+// ChunkSize returns the logical-frame size above which duplex senders split
+// into CHUNK frames. The value is local and not negotiated.
+func (x *Config) ChunkSize() uint32 {
+	return x.chunkSize
+}
+
+// MaxMessageSize returns the HELLO-advertised cap on a reassembled logical
+// frame. The value is negotiated as the pairwise minimum.
+func (x *Config) MaxMessageSize() uint64 {
+	return x.maxMessageSize
 }
 
 func (x *Config) Validate() error {
@@ -316,6 +343,10 @@ func (x *Config) Validate() error {
 		New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("bindAddr", x.bindAddr)).
 		AddAssertion(x.maxFrameSize >= 16*size.KB && x.maxFrameSize <= 16*size.MB, "maxFrameSize must be between 16KB and 16MB").
+		AddAssertion(x.chunkSize >= 16*size.KB && x.chunkSize <= 4*size.MB, "chunkSize must be between 16KB and 4MB").
+		AddAssertion(x.maxFrameSize >= x.chunkSize, "maxFrameSize must be at least chunkSize").
+		AddAssertion(x.maxMessageSize >= uint64(x.maxFrameSize), "maxMessageSize must be greater than or equal to maxFrameSize").
+		AddAssertion(x.maxMessageSize <= uint64(math.MaxUint32), "maxMessageSize must fit the 32-bit frame length").
 		AddAssertion(x.bindPort >= 0 && x.bindPort <= 65535, "invalid bindPort").
 		AddAssertion(x.readIdleTimeout >= 0, "invalid server read idle timeout").
 		AddAssertion(x.writeTimeout >= 0, "invalid server write timeout").

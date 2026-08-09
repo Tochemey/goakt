@@ -259,6 +259,13 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 	assert.Equal(t, 750*time.Millisecond, got)
 }
 
+func TestIsControlBulk(t *testing.T) {
+	assert.True(t, isControlBulk(new(internalpb.RelocateBatchRequest)))
+	assert.True(t, isControlBulk(new(internalpb.PersistPeerStateRequest)))
+	assert.True(t, isControlBulk(new(internalpb.RemoteStateRequest)))
+	assert.False(t, isControlBulk(new(internalpb.RemoteAskRequest)))
+}
+
 func TestSendTellAndAskDuplex(t *testing.T) {
 	var tellCount atomic.Int32
 	ps := startRemotingServer(t,

@@ -817,8 +817,8 @@ func WithClientLargeMessageDestinations(patterns []string) ClientOption {
 }
 
 // WithClientMaxConcurrentLargeTransfers sets the HELLO-advertised cap on
-// concurrent large-message transfers. The value is negotiated today;
-// reassembly does not enforce it yet.
+// concurrent large-message transfers. The value is negotiated and enforced
+// by the chunk reassembler and the sender-side gate.
 func WithClientMaxConcurrentLargeTransfers(n uint32) ClientOption {
 	return func(x *client) {
 		if n > 0 {
@@ -829,10 +829,30 @@ func WithClientMaxConcurrentLargeTransfers(n uint32) ClientOption {
 
 // WithClientMaxFrameSize sets the HELLO max_frame_size advertised to peers
 // and the initial framed-connection limit before negotiation replaces it
-// with the pairwise minimum.
+// with the pairwise minimum. It is also applied to the legacy unary client.
 func WithClientMaxFrameSize(maxSize uint32) ClientOption {
 	return func(x *client) {
 		x.maxFrameSize = maxSize
+	}
+}
+
+// WithClientChunkSize sets the local CHUNK send threshold. Zero keeps the
+// default (256 KiB). The value is not negotiated.
+func WithClientChunkSize(size uint32) ClientOption {
+	return func(x *client) {
+		if size > 0 {
+			x.chunkSize = size
+		}
+	}
+}
+
+// WithClientMaxMessageSize sets the HELLO-advertised cap on a reassembled
+// logical frame. Zero keeps the default (16 MiB).
+func WithClientMaxMessageSize(size uint64) ClientOption {
+	return func(x *client) {
+		if size > 0 {
+			x.maxMessageSize = size
+		}
 	}
 }
 
@@ -925,6 +945,8 @@ type client struct {
 	largeMessageDestinations    []string
 	maxConcurrentLargeTransfers uint32
 	maxFrameSize                uint32
+	maxMessageSize              uint64
+	chunkSize                   uint32
 	initialCredits              uint64
 
 	// peers holds one long-lived duplex session and protocol cache per endpoint.
@@ -972,6 +994,8 @@ func NewClient(opts ...ClientOption) Client {
 		ordinaryLanes:               remote.DefaultOrdinaryLanes,
 		maxConcurrentLargeTransfers: remote.DefaultMaxConcurrentLargeTransfers,
 		maxFrameSize:                16 * size.MB,
+		maxMessageSize:              remote.DefaultMaxMessageSize,
+		chunkSize:                   remote.DefaultChunkSize,
 		initialCredits:              remote.DefaultInitialCredits,
 		peers:                       xsync.NewMap[string, *peer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
@@ -2550,6 +2574,7 @@ func (r *client) newNetClient(host string, port int) *inet.Client {
 		inet.WithIdleTimeout(r.idleTimeout),
 		inet.WithDialTimeout(r.dialTimeout),
 		inet.WithKeepAlive(r.keepAlive),
+		inet.WithMaxFrameSize(r.maxFrameSize),
 	}
 
 	// Add TLS with session caching for connection reuse

@@ -1721,6 +1721,12 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 		serverOpts = append(serverOpts, inet.WithRemotingServerWriteTimeout(x.remoteConfig.WriteTimeout()))
 	}
 	serverOpts = append(serverOpts, inet.WithRemotingServerMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()))
+	if x.remoteConfig.MaxMessageSize() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerMaxMessageSize(x.remoteConfig.MaxMessageSize()))
+	}
+	if x.remoteConfig.ChunkSize() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerChunkSize(x.remoteConfig.ChunkSize()))
+	}
 	serverOpts = append(serverOpts,
 		inet.WithRemotingServerDuplexTellHandler(x.duplexRemoteTell),
 		inet.WithRemotingServerDuplexAskHandler(x.duplexRemoteAsk),

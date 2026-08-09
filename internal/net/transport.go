@@ -178,6 +178,11 @@ func (x *tcpAcceptor) Close() error {
 	return x.ln.Close()
 }
 
+// tcpReadPool recycles [tcpFramedConn.ReadFrame] CHUNK payloads, whose release
+// point is the copy into the reassembly buffer. Other frame types allocate
+// exact-size buffers because their payloads escape to dispatch.
+var tcpReadPool = NewFramePool()
+
 // tcpFramedConn implements [FramedConn] over a [net.Conn].
 // readHdr and the write-side scratch buffers are separate so the duplex reader
 // and writer goroutines can run concurrently without racing. WriteFrames must
@@ -194,6 +199,8 @@ type tcpFramedConn struct {
 	// writeBufs is the reusable vector for [net.Buffers.WriteTo]. Entries are
 	// nilled after each write so payload slices are not retained.
 	writeBufs net.Buffers
+	// readPool supplies ReadFrame payloads. Nil disables pooling (tests).
+	readPool *FramePool
 }
 
 // newTCPFramedConn wraps conn as a [FramedConn].
@@ -201,6 +208,7 @@ func newTCPFramedConn(conn net.Conn, maxFrameSize uint32) *tcpFramedConn {
 	return &tcpFramedConn{
 		conn:         conn,
 		maxFrameSize: floorMaxFrameSize(maxFrameSize),
+		readPool:     tcpReadPool,
 	}
 }
 
@@ -234,8 +242,8 @@ func (x *tcpFramedConn) WriteFrames(frames ...Frame) error {
 
 	for i := range frames {
 		f := frames[i]
-		if int(f.Length) != len(f.Payload) {
-			return fmt.Errorf("tcp: frame length %d does not match payload %d", f.Length, len(f.Payload))
+		if int(f.Length) != f.bodyLen() {
+			return fmt.Errorf("tcp: frame length %d does not match body %d", f.Length, f.bodyLen())
 		}
 
 		if f.Version == 0 {
@@ -254,6 +262,9 @@ func (x *tcpFramedConn) WriteFrames(frames ...Frame) error {
 		}
 
 		buffers = append(buffers, hdr)
+		if len(f.Prefix) > 0 {
+			buffers = append(buffers, f.Prefix)
+		}
 		if len(f.Payload) > 0 {
 			buffers = append(buffers, f.Payload)
 		}
@@ -283,22 +294,49 @@ func (x *tcpFramedConn) ReadFrame() (Frame, error) {
 		return Frame{}, err
 	}
 
-	f, err := decodeFrameHeader(x.readHdr[:], x.maxFrameSize)
+	frame, err := decodeFrameHeader(x.readHdr[:], x.maxFrameSize)
 	if err != nil {
 		return Frame{}, err
 	}
 
-	if f.Length == 0 {
-		return f, nil
+	if frame.Length == 0 {
+		return frame, nil
 	}
 
-	payload := make([]byte, f.Length)
+	payload := x.getReadPayload(frame.Type, int(frame.Length))
 	if _, err := io.ReadFull(x.conn, payload); err != nil {
+		if frame.Type == FrameTypeChunk {
+			x.releaseReadPayload(payload)
+		}
+
 		return Frame{}, err
 	}
 
-	f.Payload = payload
-	return f, nil
+	frame.Payload = payload
+	return frame, nil
+}
+
+// getReadPayload returns an n-byte buffer for a frame body. Only CHUNK bodies
+// draw from the pool: they have a deterministic release point (the copy into
+// the reassembly buffer), while DATA/REPLY payloads escape to dispatch with
+// indefinite lifetime, so pooling them would leak Gets forever and pay the
+// power-of-two bucket rounding on every ordinary frame for nothing.
+func (x *tcpFramedConn) getReadPayload(frameType byte, n int) []byte {
+	if frameType == FrameTypeChunk && x.readPool != nil {
+		return x.readPool.Get(n)
+	}
+
+	return make([]byte, n)
+}
+
+// releaseReadPayload returns a ReadFrame payload to the pool. Safe to call
+// with a nil pool or empty buffer.
+func (x *tcpFramedConn) releaseReadPayload(buf []byte) {
+	if x.readPool == nil || buf == nil {
+		return
+	}
+
+	x.readPool.Put(buf)
 }
 
 // Close closes the underlying connection.

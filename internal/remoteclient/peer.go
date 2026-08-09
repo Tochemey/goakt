@@ -500,12 +500,12 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 	}
 
 	localHello := &internalpb.Hello{
-		Revision:                    inet.CapabilityRevisionBaseline,
+		Revision:                    inet.CapabilityRevisionChunking,
 		LaneRole:                    role,
 		LaneIndex:                   index,
 		Compression:                 compressionCodec(x.client.compression),
 		MaxFrameSize:                x.client.maxFrameSize,
-		MaxMessageSize:              uint64(x.client.maxFrameSize),
+		MaxMessageSize:              x.client.maxMessageSize,
 		InitialCredits:              x.client.initialCredits,
 		MaxConcurrentLargeTransfers: x.client.maxConcurrentLargeTransfers,
 	}
@@ -518,6 +518,7 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 		inet.LaneSpec{Role: role, Index: index},
 		x.client.writeTimeout,
 		x.client.readIdleTimeout,
+		x.client.chunkSize,
 	)
 	return session, err
 }
@@ -656,8 +657,9 @@ func compressionCodec(c remote.Compression) internalpb.CompressionCodec {
 }
 
 // mapDuplexErr translates duplex transport errors to remoteclient semantics.
-// [inet.ErrDuplexBackpressure] becomes [gerrors.ErrRemoteSendBackpressure]
-// while preserving the original cause via [errors.Join].
+// [inet.ErrDuplexBackpressure] becomes [gerrors.ErrRemoteSendBackpressure] and
+// [inet.ErrMessageTooLarge] becomes [gerrors.ErrRemoteMessageTooLarge], while
+// preserving the original cause via [errors.Join].
 func mapDuplexErr(err error) error {
 	if err == nil {
 		return nil
@@ -665,6 +667,10 @@ func mapDuplexErr(err error) error {
 
 	if errors.Is(err, inet.ErrDuplexBackpressure) {
 		return errors.Join(gerrors.ErrRemoteSendBackpressure, err)
+	}
+
+	if errors.Is(err, inet.ErrMessageTooLarge) {
+		return errors.Join(gerrors.ErrRemoteMessageTooLarge, err)
 	}
 
 	return err
@@ -688,6 +694,10 @@ func shouldRetireDuplexSession(err error, reply inet.Frame) bool {
 	}
 
 	if errors.Is(err, inet.ErrDuplexBackpressure) {
+		return false
+	}
+
+	if errors.Is(err, inet.ErrMessageTooLarge) {
 		return false
 	}
 
