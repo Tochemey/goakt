@@ -509,7 +509,7 @@ func TestPeerRouteCacheBounded(t *testing.T) {
 
 	p := c.peerFor("127.0.0.1", 65500)
 	for i := 0; i < routeCacheLimit+5; i++ {
-		p.route("goakt://system@127.0.0.1:65500/actor-" + strconv.Itoa(i))
+		_, _ = p.route("goakt://system@127.0.0.1:65500/actor-" + strconv.Itoa(i))
 	}
 
 	p.mu.Lock()
@@ -519,6 +519,168 @@ func TestPeerRouteCacheBounded(t *testing.T) {
 
 	// Receivers beyond the cap are computed per send and stay deterministic.
 	overflow := "goakt://system@127.0.0.1:65500/actor-overflow"
-	first := p.route(overflow)
-	assert.Equal(t, first, p.route(overflow))
+	first, firstCached := p.route(overflow)
+	second, secondCached := p.route(overflow)
+	assert.Equal(t, first.lane, second.lane)
+	assert.False(t, firstCached)
+	assert.False(t, secondCached)
 }
+
+func TestPeerRememberPathRefSessionIdentity(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientOrdinaryLanes(1),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65501)
+	receiver := "goakt://system@127.0.0.1:65501/actor"
+	entry, cached := p.route(receiver)
+	require.True(t, cached)
+	assert.Equal(t, uint64(0), entry.pathID)
+	assert.Nil(t, entry.session)
+
+	sessA := &stubDuplexSession{id: 1}
+	p.rememberPathRef(receiver, 7, sessA)
+
+	entry, cached = p.route(receiver)
+	require.True(t, cached)
+	assert.Equal(t, uint64(7), entry.pathID)
+	assert.Same(t, sessA, entry.session)
+
+	sessB := &stubDuplexSession{id: 2}
+	p.rememberPathRef(receiver, 3, sessB)
+
+	entry, _ = p.route(receiver)
+	assert.Equal(t, uint64(3), entry.pathID)
+	assert.Same(t, sessB, entry.session)
+
+	p.closeAllLanes()
+	entry, cached = p.route(receiver)
+	require.True(t, cached)
+	assert.Equal(t, uint64(0), entry.pathID)
+	assert.Nil(t, entry.session)
+}
+
+func TestEncodeUserDataEnvelopeSkipsRememberBelowRevisionThree(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientOrdinaryLanes(1),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65502)
+	receiver := "goakt://system@127.0.0.1:65502/actor"
+	entry, cached := p.route(receiver)
+	require.True(t, cached)
+
+	session := &stubDuplexSession{id: 1, revision: inet.CapabilityRevisionChunking}
+	_, err := encodeUserDataEnvelope(p, session, entry, cached, inet.DataEnvelope{
+		Sender:       "goakt://system@127.0.0.1:65502/sender",
+		Receiver:     receiver,
+		TypeName:     "t",
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      []byte("x"),
+	})
+	require.NoError(t, err)
+
+	// Revision < 3 must not rewrite the route cache on every send.
+	entry, _ = p.route(receiver)
+	assert.Equal(t, uint64(0), entry.pathID)
+	assert.Nil(t, entry.session)
+
+	_, err = encodeUserDataEnvelope(p, session, entry, true, inet.DataEnvelope{
+		Sender:       "goakt://system@127.0.0.1:65502/sender",
+		Receiver:     receiver,
+		TypeName:     "t",
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      []byte("y"),
+	})
+	require.NoError(t, err)
+
+	entry, _ = p.route(receiver)
+	assert.Equal(t, uint64(0), entry.pathID)
+	assert.Nil(t, entry.session)
+}
+
+func TestEncodeUserDataEnvelopeRemembersPathIDAtRevisionThree(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientOrdinaryLanes(1),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65503)
+	receiver := "goakt://system@127.0.0.1:65503/actor"
+	entry, cached := p.route(receiver)
+	require.True(t, cached)
+
+	session := &stubDuplexSession{
+		id:       1,
+		revision: inet.CapabilityRevisionTables,
+		refs:     map[string]uint64{receiver: 7},
+	}
+	_, err := encodeUserDataEnvelope(p, session, entry, cached, inet.DataEnvelope{
+		Sender:       "goakt://system@127.0.0.1:65503/sender",
+		Receiver:     receiver,
+		TypeName:     "t",
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      []byte("x"),
+	})
+	require.NoError(t, err)
+
+	entry, _ = p.route(receiver)
+	assert.Equal(t, uint64(7), entry.pathID)
+	assert.Same(t, session, entry.session)
+}
+
+// stubDuplexSession is an identity-only DuplexSession for route-cache tests.
+type stubDuplexSession struct {
+	id       int
+	revision uint32
+	refs     map[string]uint64
+}
+
+func (x *stubDuplexSession) Tell(context.Context, inet.Frame) error { return nil }
+
+func (x *stubDuplexSession) Ask(context.Context, inet.Frame) (inet.Frame, error) {
+	return inet.Frame{}, errors.New("stub")
+}
+
+func (x *stubDuplexSession) Recv(context.Context) (inet.Frame, error) {
+	return inet.Frame{}, errors.New("stub")
+}
+
+func (x *stubDuplexSession) IsClosed() bool { return false }
+
+func (x *stubDuplexSession) Lane() byte { return 0 }
+
+func (x *stubDuplexSession) Revision() uint32 {
+	if x.revision == 0 {
+		return inet.CapabilityRevisionTables
+	}
+
+	return x.revision
+}
+
+func (x *stubDuplexSession) MaxFrameSize() uint32 { return 0 }
+
+func (x *stubDuplexSession) MaxMessageSize() uint64 { return 0 }
+
+func (x *stubDuplexSession) MaxConcurrentLargeTransfers() uint32 { return 0 }
+
+func (x *stubDuplexSession) ChunkSize() uint32 { return 0 }
+
+func (x *stubDuplexSession) PrepareRef(_ byte, literal string) (uint64, error) {
+	if x.refs == nil {
+		return 0, nil
+	}
+
+	return x.refs[literal], nil
+}
+
+func (x *stubDuplexSession) DecodeReplyEnvelope([]byte, bool) (inet.ReplyEnvelope, error) {
+	return inet.ReplyEnvelope{}, errors.New("stub")
+}
+
+func (x *stubDuplexSession) Close() error { return nil }

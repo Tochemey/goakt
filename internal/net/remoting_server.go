@@ -141,6 +141,7 @@ type RemotingServer struct {
 	acceptProtocol              AcceptProtocol
 	duplexTell                  DuplexTellHandler
 	duplexAsk                   DuplexAskHandler
+	senderResolver              func(path string) any
 	askPool                     *WorkerPool[duplexAskTask]
 }
 
@@ -415,6 +416,15 @@ func WithRemotingServerDuplexAskHandler(h DuplexAskHandler) RemotingServerOption
 	}
 }
 
+// WithRemotingServerSenderResolver installs the actor-layer hook used to
+// materialize opaque sender handles on path table hits. A nil resolver leaves
+// DataEnvelope.SenderHandle empty.
+func WithRemotingServerSenderResolver(resolve func(path string) any) RemotingServerOption {
+	return func(x *RemotingServer) {
+		x.senderResolver = resolve
+	}
+}
+
 // WithRemotingServerPanicHandler sets a [PanicHandlerFunc] that is called when a
 // [ProtoHandler] panics during dispatch. Without a panic handler, panics in
 // handlers will close the connection silently. With a handler set, panics are
@@ -538,7 +548,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
-		Revision:                    CapabilityRevisionChunking,
+		Revision:                    CapabilityRevisionTables,
 		SystemName:                  x.systemName,
 		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
 		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
@@ -581,6 +591,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 		withDuplexLane(lane),
 		withDuplexChunkSize(x.chunkSize),
 		withDuplexNegotiated(result.Effective),
+		withDuplexSenderResolver(x.senderResolver),
 	)
 	defer func() { _ = conn.Close() }()
 
@@ -653,9 +664,9 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 // Table-ref decode failures are connection-scoped (ERROR then close). Other
 // decode failures are request-scoped ERROR and the connection stays up.
 func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
-	env, err := decodeDataEnvelope(frame.Payload, frame.HasMetadata())
+	env, err := conn.DecodeDataEnvelope(frame.Payload, frame.HasMetadata())
 	if err != nil {
-		if errors.Is(err, ErrTableRefUnsupported) {
+		if errors.Is(err, ErrTableRefUnsupported) || errors.Is(err, ErrUnknownTableRef) {
 			_ = submitErrorFrame(ctx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, err.Error())
 			return err
 		}

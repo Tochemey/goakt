@@ -181,6 +181,16 @@ func TestRemotingServerOptions(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, ps)
 	})
+
+	t.Run("WithRemotingServerSenderResolver", func(t *testing.T) {
+		resolve := func(path string) any { return path }
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerSenderResolver(resolve),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, ps.senderResolver)
+		assert.Equal(t, "a", ps.senderResolver("a"))
+	})
 }
 
 func TestRemotingServer_RequestResponse(t *testing.T) {

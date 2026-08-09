@@ -77,6 +77,16 @@ type DuplexSession interface {
 	// ChunkSize returns the local CHUNK send threshold used by this session.
 	ChunkSize() uint32
 
+	// PrepareRef registers literal in the session sender table when the
+	// negotiated revision supports tables. It returns a table ID, or 0 when
+	// the caller must encode an inline ref.
+	PrepareRef(kind byte, literal string) (uint64, error)
+
+	// DecodeReplyEnvelope resolves table type refs through this session's
+	// receiver tables. Callers must use it for REPLY frames on table-capable
+	// sessions; the package-level decoder rejects nonzero refs.
+	DecodeReplyEnvelope(src []byte, hasMetadata bool) (ReplyEnvelope, error)
+
 	// Close drains admitted outbound frames, stops reader/writer loops, and
 	// closes the underlying framed connection. It is safe to call more than
 	// once; subsequent calls are no-ops that return the first close error.
@@ -98,17 +108,19 @@ type DuplexSession interface {
 //
 // On success the returned [HandshakeResult] holds local, remote, and effective
 // negotiated parameters. On failure the underlying connection is closed.
-func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, lane LaneSpec, writeTimeout, readIdleTimeout time.Duration, chunkSize uint32) (DuplexSession, *HandshakeResult, error) {
-	if _, err := laneByte(lane.Role, lane.Index); err != nil {
+func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, laneSpec LaneSpec, writeTimeout, readIdleTimeout time.Duration, chunkSize uint32) (DuplexSession, *HandshakeResult, error) {
+	if _, err := laneByte(laneSpec.Role, laneSpec.Index); err != nil {
 		return nil, nil, err
 	}
+
 	if localHello == nil {
 		return nil, nil, fmt.Errorf("tcp: hello local parameters are required")
 	}
-	localHello.LaneRole = lane.Role
-	localHello.LaneIndex = lane.Index
 
-	framed, err := transport.Dial(ctx, addr, lane)
+	localHello.LaneRole = laneSpec.Role
+	localHello.LaneIndex = laneSpec.Index
+
+	framed, err := transport.Dial(ctx, addr, laneSpec)
 	if err != nil {
 		return nil, nil, err
 	}

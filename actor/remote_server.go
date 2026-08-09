@@ -1720,16 +1720,22 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	if x.remoteConfig.WriteTimeout() > 0 {
 		serverOpts = append(serverOpts, inet.WithRemotingServerWriteTimeout(x.remoteConfig.WriteTimeout()))
 	}
+
 	serverOpts = append(serverOpts, inet.WithRemotingServerMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()))
 	if x.remoteConfig.MaxMessageSize() > 0 {
 		serverOpts = append(serverOpts, inet.WithRemotingServerMaxMessageSize(x.remoteConfig.MaxMessageSize()))
 	}
+
 	if x.remoteConfig.ChunkSize() > 0 {
 		serverOpts = append(serverOpts, inet.WithRemotingServerChunkSize(x.remoteConfig.ChunkSize()))
 	}
+
 	serverOpts = append(serverOpts,
 		inet.WithRemotingServerDuplexTellHandler(x.duplexRemoteTell),
 		inet.WithRemotingServerDuplexAskHandler(x.duplexRemoteAsk),
+		inet.WithRemotingServerSenderResolver(func(path string) any {
+			return x.newRemoteSenderPID(path)
+		}),
 	)
 
 	// Detach the server's base context from Start's cancelation/deadline: the server's
@@ -1850,7 +1856,12 @@ func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelop
 		return
 	}
 
-	x.deliverRemoteTellPayload(ctx, env.Sender, env.Receiver, payload)
+	from, ok := env.SenderHandle.(*PID)
+	if !ok || from == nil {
+		from = x.newRemoteSenderPID(env.Sender)
+	}
+
+	x.deliverRemoteTellFrom(ctx, from, env.Receiver, payload)
 }
 
 // duplexRemoteAsk handles an expectsReply duplex DATA envelope for a user
@@ -2030,6 +2041,12 @@ func envTypeNameFromFrame(data []byte) string {
 // refused) are routed to the local dead-letter actor and never returned to
 // the wire caller — matching the legacy batch tell contract.
 func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, receiver string, payload any) {
+	x.deliverRemoteTellFrom(ctx, x.newRemoteSenderPID(sender), receiver, payload)
+}
+
+// deliverRemoteTellFrom is the shared duplex/legacy tell dispatch path when
+// the sender PID is already materialized (table-hit cache or fresh lookup).
+func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, receiver string, payload any) {
 	logger := x.logger
 
 	parseForFailure := func(cause error) (*address.Address, bool) {
@@ -2049,7 +2066,6 @@ func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, rece
 			return
 		}
 
-		from := x.newRemoteSenderPID(sender)
 		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
@@ -2063,7 +2079,6 @@ func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, rece
 			return
 		}
 
-		from := x.newRemoteSenderPID(sender)
 		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
@@ -2076,18 +2091,17 @@ func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, rece
 			return
 		}
 
-		from := x.newRemoteSenderPID(sender)
 		logger.Errorf("remote tell: actor=%s not running: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
 	}
 
-	from := x.newRemoteSenderPID(sender)
 	if err := x.handleRemoteTell(ctx, from, pid, payload); err != nil {
 		addr, ok := parseForFailure(err)
 		if !ok {
 			return
 		}
+
 		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 	}

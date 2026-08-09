@@ -99,7 +99,7 @@ func handleDuplexAskTask(task duplexAskTask) {
 		return
 	}
 
-	payload, err := encodeReplyEnvelope(reply)
+	payload, err := task.conn.EncodeReplyEnvelope(reply)
 	if err != nil {
 		_ = submitErrorFrame(ctx, task.conn, corr, internalpb.Code_CODE_INTERNAL_ERROR, err.Error())
 		return

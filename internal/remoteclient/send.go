@@ -127,16 +127,13 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 		Payload:      payload,
 	}
 
-	encoded, err := inet.EncodeDataEnvelope(env)
-	if err != nil {
-		return nil, err
-	}
-
 	role := internalpb.LaneRole_LANE_ROLE_CONTROL
 	index := uint32(0)
 	lane := inet.LaneControl
 	if isControlBulk(req) {
-		logicalLen := inet.FrameHeaderSize + len(encoded)
+		// Conservative inline-ref size: table compression can only shrink the
+		// envelope, so oversized bulk still selects the large lane correctly.
+		logicalLen := inet.FrameHeaderSize + inet.InlineDataEnvelopeSize(env)
 		if uint32(logicalLen) > x.chunkSize {
 			role = internalpb.LaneRole_LANE_ROLE_LARGE
 			lane = inet.LaneLarge
@@ -144,6 +141,11 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 	}
 
 	session, err := peer.ensureLane(ctx, role, index)
+	if err != nil {
+		return nil, err
+	}
+
+	encoded, err := encodeControlDataEnvelope(session, env)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +166,18 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 		return nil, mapDuplexErr(err)
 	}
 
-	return decodeControlReply(replyFrame)
+	return decodeControlReply(replyFrame, session.DecodeReplyEnvelope)
+}
+
+// encodeControlDataEnvelope registers a non-empty control type name and encodes
+// the DATA envelope. Path refs stay empty/inline for control RPCs.
+func encodeControlDataEnvelope(session inet.DuplexSession, env inet.DataEnvelope) ([]byte, error) {
+	typeID, err := session.PrepareRef(inet.TableKindTypeName, env.TypeName)
+	if err != nil {
+		return nil, err
+	}
+
+	return inet.EncodeDataEnvelopeWithTables(env, 0, 0, typeID)
 }
 
 // isControlBulk reports whether req is a bulk control RPC that may leave the
@@ -227,8 +240,8 @@ func (x *client) sendTellLegacy(ctx context.Context, host string, port int, para
 // errors retire the selected lane so later sends re-probe that lane. The
 // frame lane byte matches the negotiated role/index for the routed session.
 func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellParams) error {
-	route := peer.route(params.receiver)
-	session, err := peer.ensureLane(ctx, route.role, route.index)
+	entry, cached := peer.route(params.receiver)
+	session, err := peer.ensureLane(ctx, entry.lane.role, entry.lane.index)
 	if err != nil {
 		return err
 	}
@@ -247,7 +260,7 @@ func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellPara
 		Payload:      params.payload,
 	}
 
-	encoded, err := inet.EncodeDataEnvelope(env)
+	encoded, err := encodeUserDataEnvelope(peer, session, entry, cached, env)
 	if err != nil {
 		return err
 	}
@@ -261,12 +274,47 @@ func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellPara
 
 	if err := session.Tell(ctx, frame); err != nil {
 		if shouldRetireDuplexSession(err, inet.Frame{}) {
-			peer.retireLane(route, session)
+			peer.retireLane(entry.lane, session)
 		}
 		return mapDuplexErr(err)
 	}
 
 	return nil
+}
+
+// encodeUserDataEnvelope registers sender/type (and receiver when cached) on
+// the session sender tables and encodes env with those IDs. A cached receiver
+// pathID is reused only when entry.session is the live session.
+func encodeUserDataEnvelope(peer *peer, session inet.DuplexSession, entry pathEntry, receiverCached bool, env inet.DataEnvelope) ([]byte, error) {
+	senderID, err := session.PrepareRef(inet.TableKindActorPath, env.Sender)
+	if err != nil {
+		return nil, err
+	}
+
+	typeID, err := session.PrepareRef(inet.TableKindTypeName, env.TypeName)
+	if err != nil {
+		return nil, err
+	}
+
+	receiverID := uint64(0)
+	if receiverCached {
+		if entry.pathID != 0 && entry.session == session {
+			receiverID = entry.pathID
+		} else if session.Revision() >= inet.CapabilityRevisionTables {
+			receiverID, err = session.PrepareRef(inet.TableKindActorPath, env.Receiver)
+			if err != nil {
+				return nil, err
+			}
+
+			// pathID 0 means inline (table full); do not rewrite the route
+			// cache or every later send pays a peer.mu write for no benefit.
+			if receiverID != 0 {
+				peer.rememberPathRef(env.Receiver, receiverID, session)
+			}
+		}
+	}
+
+	return inet.EncodeDataEnvelopeWithTables(env, senderID, receiverID, typeID)
 }
 
 // sendAsk routes one user ask and deserializes the response with serializer.
@@ -335,8 +383,8 @@ func (x *client) sendAskLegacy(ctx context.Context, host string, port int, param
 // [checkProtoError]. Terminal transport failures close the peer session;
 // caller timeouts and request-scoped ERROR frames do not.
 func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams, serializer remote.Serializer) (any, error) {
-	route := peer.route(params.receiver)
-	session, err := peer.ensureLane(ctx, route.role, route.index)
+	entry, cached := peer.route(params.receiver)
+	session, err := peer.ensureLane(ctx, entry.lane.role, entry.lane.index)
 	if err != nil {
 		return nil, err
 	}
@@ -353,7 +401,7 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 		Payload:      params.payload,
 	}
 
-	encoded, err := inet.EncodeDataEnvelope(env)
+	encoded, err := encodeUserDataEnvelope(peer, session, entry, cached, env)
 	if err != nil {
 		return nil, err
 	}
@@ -368,12 +416,12 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 	replyFrame, err := session.Ask(ctx, frame)
 	if err != nil {
 		if shouldRetireDuplexSession(err, replyFrame) {
-			peer.retireLane(route, session)
+			peer.retireLane(entry.lane, session)
 		}
 		return nil, mapDuplexErr(err)
 	}
 
-	replyEnv, err := inet.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
+	replyEnv, err := session.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
 	if err != nil {
 		return nil, err
 	}
@@ -401,8 +449,8 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 
 	peer := x.peerFor(host, port)
 	for i, param := range params {
-		route := peer.route(param.receiver)
-		session, err := peer.ensureLane(ctx, route.role, route.index)
+		entry, cached := peer.route(param.receiver)
+		session, err := peer.ensureLane(ctx, entry.lane.role, entry.lane.index)
 		if err != nil {
 			if errors.Is(err, errPreferLegacy) {
 				// Send only the remainder through the legacy path. Messages
@@ -412,6 +460,7 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 			}
 			return err
 		}
+
 		flags := byte(0)
 		if len(param.metadata) > 0 {
 			flags |= inet.FrameFlagHasMetadata
@@ -426,7 +475,7 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 			Payload:      param.payload,
 		}
 
-		encoded, encErr := inet.EncodeDataEnvelope(env)
+		encoded, encErr := encodeUserDataEnvelope(peer, session, entry, cached, env)
 		if encErr != nil {
 			return encErr
 		}
@@ -440,7 +489,7 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 
 		if tellErr := session.Tell(ctx, frame); tellErr != nil {
 			if shouldRetireDuplexSession(tellErr, inet.Frame{}) {
-				peer.retireLane(route, session)
+				peer.retireLane(entry.lane, session)
 			}
 			return mapDuplexErr(tellErr)
 		}
@@ -487,8 +536,8 @@ type batchAskResult struct {
 	// reply is the raw Ask frame when err came from session.Ask; used to
 	// distinguish request-scoped ERROR from terminal transport loss.
 	reply inet.Frame
-	// route identifies the lane used by this request.
-	route laneKey
+	// lane identifies the lane used by this request.
+	lane laneKey
 }
 
 // sendBatchAskDuplex issues N concurrent asks on one duplex session and returns
@@ -522,10 +571,11 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 		go func(idx int, ask askParams, ser remote.Serializer) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			route := p.route(ask.receiver)
-			session, sessionErr := p.ensureLane(ctx, route.role, route.index)
+
+			entry, cached := p.route(ask.receiver)
+			session, sessionErr := p.ensureLane(ctx, entry.lane.role, entry.lane.index)
 			if sessionErr != nil {
-				out <- batchAskResult{index: idx, err: sessionErr, route: route}
+				out <- batchAskResult{index: idx, err: sessionErr, lane: entry.lane}
 				return
 			}
 
@@ -538,9 +588,9 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 				Payload:      ask.payload,
 			}
 
-			encoded, encErr := inet.EncodeDataEnvelope(env)
+			encoded, encErr := encodeUserDataEnvelope(p, session, entry, cached, env)
 			if encErr != nil {
-				out <- batchAskResult{index: idx, err: encErr, route: route}
+				out <- batchAskResult{index: idx, err: encErr, lane: entry.lane}
 				return
 			}
 
@@ -555,15 +605,16 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 			replyFrame, askErr := session.Ask(ctx, frame)
 			if askErr != nil {
 				if shouldRetireDuplexSession(askErr, replyFrame) {
-					p.retireLane(route, session)
+					p.retireLane(entry.lane, session)
 				}
-				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame, route: route}
+
+				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame, lane: entry.lane}
 				return
 			}
 
-			replyEnv, decErr := inet.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
+			replyEnv, decErr := session.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
 			if decErr != nil {
-				out <- batchAskResult{index: idx, err: decErr, route: route}
+				out <- batchAskResult{index: idx, err: decErr, lane: entry.lane}
 				return
 			}
 
@@ -575,7 +626,7 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 				}
 			}
 
-			out <- batchAskResult{index: idx, value: val, err: desErr, route: route}
+			out <- batchAskResult{index: idx, value: val, err: desErr, lane: entry.lane}
 		}(i, param, serializers[i])
 	}
 
@@ -662,13 +713,15 @@ func (x *client) sendBatchAskLegacy(ctx context.Context, host string, port int, 
 
 // decodeControlReply unmarshals a duplex REPLY or ERROR frame into the
 // appropriate internal protobuf type. Control replies must use
-// SerializerIDInternalProto; other serializer IDs are rejected.
-func decodeControlReply(frame inet.Frame) (proto.Message, error) {
+// SerializerIDInternalProto; other serializer IDs are rejected. decodeReply
+// is typically [inet.DuplexSession.DecodeReplyEnvelope] so table type refs
+// resolve on the owning session.
+func decodeControlReply(frame inet.Frame, decodeReply func([]byte, bool) (inet.ReplyEnvelope, error)) (proto.Message, error) {
 	if frame.Type == inet.FrameTypeError {
 		return nil, decodeErrorPayload(frame.Payload)
 	}
 
-	replyEnv, err := inet.DecodeReplyEnvelope(frame.Payload, frame.HasMetadata())
+	replyEnv, err := decodeReply(frame.Payload, frame.HasMetadata())
 	if err != nil {
 		return nil, err
 	}

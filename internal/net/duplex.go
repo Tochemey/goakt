@@ -83,6 +83,17 @@ type duplexConn struct {
 	reassembler *chunkReassembler
 	// largeSem gates outbound CHUNK groups at the negotiated concurrent cap.
 	largeSem chan types.Unit
+	// pathSender assigns outbound actor-path table IDs when revision >= 3.
+	pathSender *senderTable
+	// typeSender assigns outbound type-name table IDs when revision >= 3.
+	typeSender *senderTable
+	// pathReceiver resolves inbound actor-path table IDs when revision >= 3.
+	pathReceiver *receiverTable
+	// typeReceiver resolves inbound type-name table IDs when revision >= 3.
+	typeReceiver *receiverTable
+	// senderResolver lazily materializes opaque sender handles for path
+	// table hits. Nil leaves SenderHandle empty (clients and unit tests).
+	senderResolver func(path string) any
 	// lastInbound records the latest successfully read frame timestamp.
 	lastInbound atomic.Int64
 
@@ -173,7 +184,8 @@ func withDuplexChunkSize(size uint32) duplexConnOption {
 }
 
 // withDuplexNegotiated applies HELLO pairwise-effective limits and enables
-// chunk reassembly when the negotiated revision supports it.
+// chunk reassembly and compression tables when the negotiated revision
+// supports them.
 func withDuplexNegotiated(hello *internalpb.Hello) duplexConnOption {
 	return func(x *duplexConn) {
 		if hello == nil {
@@ -192,6 +204,21 @@ func withDuplexNegotiated(hello *internalpb.Hello) duplexConnOption {
 			x.reassembler = newChunkReassembler(x.maxMessageSize, x.maxConcurrentLargeTransfers)
 			x.largeSem = make(chan types.Unit, x.maxConcurrentLargeTransfers)
 		}
+
+		if x.revision >= CapabilityRevisionTables {
+			x.pathSender = newSenderTable(DefaultTableCapacity)
+			x.typeSender = newSenderTable(DefaultTableCapacity)
+			x.pathReceiver = newReceiverTable(DefaultTableCapacity)
+			x.typeReceiver = newReceiverTable(DefaultTableCapacity)
+		}
+	}
+}
+
+// withDuplexSenderResolver installs the actor-layer hook used to materialize
+// opaque sender handles on path table hits.
+func withDuplexSenderResolver(resolve func(path string) any) duplexConnOption {
+	return func(x *duplexConn) {
+		x.senderResolver = resolve
 	}
 }
 
@@ -591,6 +618,9 @@ func (x *duplexConn) readLoop() {
 		case FrameTypeChunk:
 			x.handleInboundChunk(frame)
 			continue
+		case FrameTypeTable:
+			x.handleInboundTable(frame)
+			continue
 		}
 
 		if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
@@ -741,6 +771,42 @@ func (x *duplexConn) trySubmit(frame Frame) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// admitFrame enqueues frame only when byte capacity and a writer-queue slot
+// are immediately available. It may block briefly on the connection mutex but
+// never on backpressure, so unlike [duplexConn.trySubmit] (which must not
+// block a reader goroutine and gives up on a contended mutex) its only
+// failure modes are a closed connection and a genuinely full queue.
+func (x *duplexConn) admitFrame(frame Frame) error {
+	if frame.Version == 0 {
+		frame.Version = ProtocolVersion
+	}
+
+	if int(frame.Length) != frame.bodyLen() {
+		frame.Length = uint32(frame.bodyLen())
+	}
+
+	cost := int64(FrameHeaderSize) + int64(frame.Length)
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if x.isClosed() {
+		return ErrDuplexClosed
+	}
+
+	if x.outBytes+cost > x.maxOutBytes {
+		return ErrDuplexBackpressure
+	}
+
+	select {
+	case x.out <- frame:
+		x.outBytes += cost
+		return nil
+	default:
+		return ErrDuplexBackpressure
 	}
 }
 

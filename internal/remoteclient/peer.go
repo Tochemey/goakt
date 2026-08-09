@@ -46,8 +46,19 @@ const maxLaneReconnectBackoff = 30 * time.Second
 
 // routeCacheLimit bounds the per-peer sticky route cache so unbounded receiver
 // churn cannot grow peer memory without limit. It matches the per-kind
-// compression-table capacity the cache migrates onto in Milestone 5.
+// compression-table capacity.
 const routeCacheLimit = 8192
+
+// pathEntry caches a sticky lane assignment and the receiver path's table ID
+// on the session that assigned it.
+type pathEntry struct {
+	// lane is the sticky lane identity for the receiver.
+	lane laneKey
+	// pathID is the compression-table ID on session, or 0 for inline.
+	pathID uint64
+	// session is the duplex session that owns pathID; nil until registered.
+	session inet.DuplexSession
+}
 
 // remotingTransport dials framed TCP connections and optionally upgrades them
 // with TLS before the duplex HELLO exchange. Compression is applied after
@@ -110,8 +121,8 @@ type peer struct {
 	dialing map[laneKey]chan types.Unit
 	// backoff limits failed re-dials per lane.
 	backoff map[laneKey]laneBackoff
-	// routes caches sticky receiver lane assignments.
-	routes map[string]laneKey
+	// routes caches sticky receiver lane assignments and path table IDs.
+	routes map[string]pathEntry
 	// generation invalidates a dial that was in flight during ClosePeer.
 	generation uint64
 	// closed is set by closeAllLanes. Close and ClosePeer discard the peer
@@ -155,7 +166,7 @@ func (x *client) peerFor(host string, port int) *peer {
 		ordinary:   make([]inet.DuplexSession, x.ordinaryLanes),
 		dialing:    make(map[laneKey]chan types.Unit),
 		backoff:    make(map[laneKey]laneBackoff),
-		routes:     make(map[string]laneKey),
+		routes:     make(map[string]pathEntry),
 		dialCtx:    dialCtx,
 		dialCancel: dialCancel,
 	}
@@ -253,7 +264,7 @@ func (x *peer) closeAllLanes() {
 	x.large = nil
 	x.ordinary = make([]inet.DuplexSession, x.client.ordinaryLanes)
 	x.cache.clear()
-	x.routes = make(map[string]laneKey)
+	x.routes = make(map[string]pathEntry)
 	x.backoff = make(map[laneKey]laneBackoff)
 	x.generation++
 	x.closed = true
@@ -500,7 +511,7 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 	}
 
 	localHello := &internalpb.Hello{
-		Revision:                    inet.CapabilityRevisionChunking,
+		Revision:                    inet.CapabilityRevisionTables,
 		LaneRole:                    role,
 		LaneIndex:                   index,
 		Compression:                 compressionCodec(x.client.compression),
@@ -591,26 +602,43 @@ func (x *peer) recordDialFailure(key laneKey, wait chan types.Unit, generation u
 	x.backoff[key] = laneBackoff{err: err, delay: time.Second, until: time.Now().Add(time.Second)}
 }
 
-// route returns the cached sticky lane assignment for a user receiver.
-// Assignment is a pure function of the receiver, the lane count, and the
-// configured patterns, so receivers beyond [routeCacheLimit] are computed per
-// send instead of cached; they still land on the same lane every time.
-func (x *peer) route(receiver string) laneKey {
+// route returns the sticky lane assignment for a user receiver. cached is true
+// when the entry lives in the peer route map (so the receiver path may use a
+// session table ID). Receivers beyond [routeCacheLimit] still get a stable
+// lane every time, but the receiver ref stays inline on the wire.
+func (x *peer) route(receiver string) (entry pathEntry, cached bool) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if route, ok := x.routes[receiver]; ok {
-		return route
+	if existing, ok := x.routes[receiver]; ok {
+		return existing, true
 	}
 
 	role, index := routeUser(receiver, x.client.ordinaryLanes, x.client.largeMessageDestinations)
-	route := laneKey{role: role, index: index}
+	entry = pathEntry{lane: laneKey{role: role, index: index}}
 
 	if len(x.routes) < routeCacheLimit {
-		x.routes[receiver] = route
+		x.routes[receiver] = entry
+		return entry, true
 	}
 
-	return route
+	return entry, false
+}
+
+// rememberPathRef stores the receiver path table ID for the session that
+// assigned it. No-op when the receiver is not in the route cache.
+func (x *peer) rememberPathRef(receiver string, pathID uint64, session inet.DuplexSession) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	entry, ok := x.routes[receiver]
+	if !ok {
+		return
+	}
+
+	entry.pathID = pathID
+	entry.session = session
+	x.routes[receiver] = entry
 }
 
 // isLegacyHandshakeFailure reports whether err indicates the peer closed or

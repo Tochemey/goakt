@@ -32,8 +32,6 @@ import (
 )
 
 func TestLogicalFrameAllocSize(t *testing.T) {
-	t.Parallel()
-
 	size, err := logicalFrameAllocSize(0, 0)
 	require.NoError(t, err)
 	assert.Equal(t, FrameHeaderSize, size)

@@ -76,6 +76,9 @@ type DataEnvelope struct {
 	// Payload is the message body: raw proto bytes for ID 0, or a
 	// self-describing serializer frame for IDs 1/2/3/255.
 	Payload []byte
+	// SenderHandle is an opaque actor-layer cache populated on a sender-ref
+	// table hit (typically a *PID). It is never serialized.
+	SenderHandle any
 }
 
 // ReplyEnvelope is the hand-parsed payload of a duplex REPLY frame.
@@ -94,31 +97,64 @@ type ReplyEnvelope struct {
 	Payload []byte
 }
 
-// EncodeDataEnvelope serializes env into a DATA frame payload. Metadata is
-// written only when non-empty; callers must set FrameFlagHasMetadata on the
-// surrounding frame to match. Returns [ErrUnknownSerializerID] or a
-// typeRef/serializer mismatch error when env is invalid.
+// EncodeDataEnvelope serializes env into a DATA frame payload using inline
+// refs only. Metadata is written only when non-empty; callers must set
+// FrameFlagHasMetadata on the surrounding frame to match. Returns
+// [ErrUnknownSerializerID] or a typeRef/serializer mismatch error when env is
+// invalid.
 func EncodeDataEnvelope(env DataEnvelope) ([]byte, error) {
 	return encodeDataEnvelope(env)
 }
 
-// encodeDataEnvelope is the unexported implementation of [EncodeDataEnvelope].
+// InlineDataEnvelopeSize returns the byte length of env encoded with inline
+// refs only, without allocating the payload buffer. Callers use it for
+// conservative lane selection before table registration.
+func InlineDataEnvelopeSize(env DataEnvelope) int {
+	size := encodedRefSize(0, env.Sender) +
+		encodedRefSize(0, env.Receiver) +
+		encodedRefSize(0, env.TypeName) + 1
+
+	if len(env.Metadata) > 0 {
+		size += 4 + len(env.Metadata)
+	}
+
+	return size + len(env.Payload)
+}
+
+// encodeDataEnvelope is the inline-only encoder used by tests and the exported
+// [EncodeDataEnvelope] helper.
 func encodeDataEnvelope(env DataEnvelope) ([]byte, error) {
+	return encodeDataEnvelopeWithTables(env, 0, 0, 0)
+}
+
+// EncodeDataEnvelopeWithTables serializes env, encoding a table ref when the
+// corresponding ID is nonzero and an inline literal otherwise.
+func EncodeDataEnvelopeWithTables(env DataEnvelope, senderID, receiverID, typeID uint64) ([]byte, error) {
+	return encodeDataEnvelopeWithTables(env, senderID, receiverID, typeID)
+}
+
+// encodeDataEnvelopeWithTables is the unexported implementation of the DATA
+// envelope encoders.
+func encodeDataEnvelopeWithTables(env DataEnvelope, senderID, receiverID, typeID uint64) ([]byte, error) {
 	if err := validateSerializerID(env.SerializerID, env.TypeName); err != nil {
 		return nil, err
 	}
 
-	size := refSize(env.Sender) + refSize(env.Receiver) + refSize(env.TypeName) + 1
+	size := encodedRefSize(senderID, env.Sender) +
+		encodedRefSize(receiverID, env.Receiver) +
+		encodedRefSize(typeID, env.TypeName) + 1
+
 	if len(env.Metadata) > 0 {
 		size += 4 + len(env.Metadata)
 	}
+
 	size += len(env.Payload)
 
 	buf := make([]byte, size)
 	pos := 0
-	pos += putInlineRef(buf[pos:], env.Sender)
-	pos += putInlineRef(buf[pos:], env.Receiver)
-	pos += putInlineRef(buf[pos:], env.TypeName)
+	pos += putEncodedRef(buf[pos:], senderID, env.Sender)
+	pos += putEncodedRef(buf[pos:], receiverID, env.Receiver)
+	pos += putEncodedRef(buf[pos:], typeID, env.TypeName)
 	buf[pos] = env.SerializerID
 	pos++
 
@@ -133,32 +169,41 @@ func encodeDataEnvelope(env DataEnvelope) ([]byte, error) {
 }
 
 // DecodeDataEnvelope parses a DATA frame payload. hasMetadata must match the
-// surrounding frame's FrameFlagHasMetadata bit. A nonzero table ID is a
-// capability violation at revision 1 and returns [ErrTableRefUnsupported].
+// surrounding frame's FrameFlagHasMetadata bit. A nonzero table ID returns
+// [ErrTableRefUnsupported].
 func DecodeDataEnvelope(src []byte, hasMetadata bool) (DataEnvelope, error) {
 	return decodeDataEnvelope(src, hasMetadata)
 }
 
-// decodeDataEnvelope is the unexported implementation of [DecodeDataEnvelope].
+// decodeDataEnvelope is the inline-only decoder used by tests and the exported
+// [DecodeDataEnvelope] helper.
 func decodeDataEnvelope(src []byte, hasMetadata bool) (DataEnvelope, error) {
+	return decodeDataEnvelopeWithTables(src, hasMetadata, nil, nil, nil)
+}
+
+// decodeDataEnvelopeWithTables resolves table refs through the supplied
+// receiver tables. senderResolve, when non-nil, lazily fills SenderHandle on
+// a sender-ref table hit.
+func decodeDataEnvelopeWithTables(src []byte, hasMetadata bool, paths, types *receiverTable, senderResolve func(string) any) (DataEnvelope, error) {
 	var env DataEnvelope
 	pos := 0
 
-	sender, n, err := readRef(src[pos:])
+	sender, handle, n, err := readSenderRef(src[pos:], paths, senderResolve)
 	if err != nil {
 		return DataEnvelope{}, fmt.Errorf("tcp: data envelope sender: %w", err)
 	}
 	env.Sender = sender
+	env.SenderHandle = handle
 	pos += n
 
-	receiver, n, err := readRef(src[pos:])
+	receiver, _, n, err := readRefResolved(src[pos:], paths)
 	if err != nil {
 		return DataEnvelope{}, fmt.Errorf("tcp: data envelope receiver: %w", err)
 	}
 	env.Receiver = receiver
 	pos += n
 
-	typeName, n, err := readRef(src[pos:])
+	typeName, _, n, err := readRefResolved(src[pos:], types)
 	if err != nil {
 		return DataEnvelope{}, fmt.Errorf("tcp: data envelope type: %w", err)
 	}
@@ -194,28 +239,37 @@ func decodeDataEnvelope(src []byte, hasMetadata bool) (DataEnvelope, error) {
 	return env, nil
 }
 
-// EncodeReplyEnvelope serializes env into a REPLY frame payload. Metadata is
-// written only when non-empty; callers must set FrameFlagHasMetadata on the
-// surrounding frame to match.
+// EncodeReplyEnvelope serializes env into a REPLY frame payload using an
+// inline type ref. Metadata is written only when non-empty; callers must set
+// FrameFlagHasMetadata on the surrounding frame to match.
 func EncodeReplyEnvelope(env ReplyEnvelope) ([]byte, error) {
 	return encodeReplyEnvelope(env)
 }
 
-// encodeReplyEnvelope is the unexported implementation of [EncodeReplyEnvelope].
-func encodeReplyEnvelope(env ReplyEnvelope) ([]byte, error) {
+// EncodeReplyEnvelopeWithTables serializes env, encoding a table type ref when
+// typeID is nonzero.
+func EncodeReplyEnvelopeWithTables(env ReplyEnvelope, typeID uint64) ([]byte, error) {
+	return encodeReplyEnvelopeWithTables(env, typeID)
+}
+
+// encodeReplyEnvelopeWithTables is the unexported implementation of the REPLY
+// envelope encoders.
+func encodeReplyEnvelopeWithTables(env ReplyEnvelope, typeID uint64) ([]byte, error) {
 	if err := validateSerializerID(env.SerializerID, env.TypeName); err != nil {
 		return nil, err
 	}
 
-	size := refSize(env.TypeName) + 1
+	size := encodedRefSize(typeID, env.TypeName) + 1
+
 	if len(env.Metadata) > 0 {
 		size += 4 + len(env.Metadata)
 	}
+
 	size += len(env.Payload)
 
 	buf := make([]byte, size)
 	pos := 0
-	pos += putInlineRef(buf[pos:], env.TypeName)
+	pos += putEncodedRef(buf[pos:], typeID, env.TypeName)
 	buf[pos] = env.SerializerID
 	pos++
 
@@ -230,17 +284,31 @@ func encodeReplyEnvelope(env ReplyEnvelope) ([]byte, error) {
 }
 
 // DecodeReplyEnvelope parses a REPLY frame payload. hasMetadata must match the
-// surrounding frame's FrameFlagHasMetadata bit.
+// surrounding frame's FrameFlagHasMetadata bit. A nonzero table ID returns
+// [ErrTableRefUnsupported].
 func DecodeReplyEnvelope(src []byte, hasMetadata bool) (ReplyEnvelope, error) {
 	return decodeReplyEnvelope(src, hasMetadata)
 }
 
-// decodeReplyEnvelope is the unexported implementation of [DecodeReplyEnvelope].
+// decodeReplyEnvelope is the inline-only decoder used by tests and the exported
+// [DecodeReplyEnvelope] helper.
 func decodeReplyEnvelope(src []byte, hasMetadata bool) (ReplyEnvelope, error) {
+	return decodeReplyEnvelopeWithTables(src, hasMetadata, nil)
+}
+
+// encodeReplyEnvelope is the inline-only encoder used by tests and the duplex
+// reply path when table compression is unavailable.
+func encodeReplyEnvelope(env ReplyEnvelope) ([]byte, error) {
+	return encodeReplyEnvelopeWithTables(env, 0)
+}
+
+// decodeReplyEnvelopeWithTables resolves a table type ref through types when
+// non-nil.
+func decodeReplyEnvelopeWithTables(src []byte, hasMetadata bool, types *receiverTable) (ReplyEnvelope, error) {
 	var env ReplyEnvelope
 	pos := 0
 
-	typeName, n, err := readRef(src[pos:])
+	typeName, _, n, err := readRefResolved(src[pos:], types)
 	if err != nil {
 		return ReplyEnvelope{}, fmt.Errorf("tcp: reply envelope type: %w", err)
 	}
@@ -278,40 +346,109 @@ func decodeReplyEnvelope(src []byte, hasMetadata bool) (ReplyEnvelope, error) {
 
 // refSize returns the encoded size of an inline-literal ref for s.
 func refSize(s string) int {
-	return uvarintSize(0) + uvarintSize(uint64(len(s))) + len(s)
+	return encodedRefSize(0, s)
 }
 
-// putInlineRef writes an inline-literal ref for s into dst and returns the
-// number of bytes written. dst must have capacity of at least [refSize](s).
-func putInlineRef(dst []byte, s string) int {
+// encodedRefSize returns the wire size of a table or inline ref.
+func encodedRefSize(id uint64, literal string) int {
+	if id != 0 {
+		return uvarintSize(id)
+	}
+
+	return uvarintSize(0) + uvarintSize(uint64(len(literal))) + len(literal)
+}
+
+// putEncodedRef writes a table ref when id is nonzero, otherwise an inline
+// literal ref for literal.
+func putEncodedRef(dst []byte, id uint64, literal string) int {
+	if id != 0 {
+		return binary.PutUvarint(dst, id)
+	}
+
 	n := binary.PutUvarint(dst, 0)
-	n += binary.PutUvarint(dst[n:], uint64(len(s)))
-	n += copy(dst[n:], s)
+	n += binary.PutUvarint(dst[n:], uint64(len(literal)))
+	n += copy(dst[n:], literal)
 	return n
 }
 
 // readRef decodes one envelope ref from src. A nonzero table ID returns
 // [ErrTableRefUnsupported].
 func readRef(src []byte) (string, int, error) {
-	id, n := binary.Uvarint(src)
+	literal, _, n, err := readRefResolved(src, nil)
+	return literal, n, err
+}
+
+// readRefResolved decodes one envelope ref. When id is nonzero, table must
+// resolve it; a nil table rejects nonzero IDs with [ErrTableRefUnsupported].
+func readRefResolved(src []byte, table *receiverTable) (literal string, id uint64, n int, err error) {
+	id, n = binary.Uvarint(src)
 	if n <= 0 {
-		return "", 0, fmt.Errorf("truncated table id")
-	}
-	if id != 0 {
-		return "", 0, fmt.Errorf("%w: id %d", ErrTableRefUnsupported, id)
+		return "", 0, 0, fmt.Errorf("truncated table id")
 	}
 
-	length, m := binary.Uvarint(src[n:])
+	if id != 0 {
+		if table == nil {
+			return "", 0, 0, fmt.Errorf("%w: id %d", ErrTableRefUnsupported, id)
+		}
+
+		entry := table.lookup(id)
+		if entry == nil {
+			return "", 0, 0, fmt.Errorf("%w: id %d", ErrUnknownTableRef, id)
+		}
+
+		return entry.literal, id, n, nil
+	}
+
+	literal, m, err := readInlineLiteral(src[n:])
+	if err != nil {
+		return "", 0, 0, err
+	}
+
+	return literal, 0, n + m, nil
+}
+
+// readSenderRef decodes the DATA sender ref and, on a table hit, fills the
+// opaque sender handle in one table pass (resolve runs outside the mutex).
+func readSenderRef(src []byte, table *receiverTable, resolve func(string) any) (literal string, handle any, n int, err error) {
+	id, n := binary.Uvarint(src)
+	if n <= 0 {
+		return "", nil, 0, fmt.Errorf("truncated table id")
+	}
+
+	if id != 0 {
+		if table == nil {
+			return "", nil, 0, fmt.Errorf("%w: id %d", ErrTableRefUnsupported, id)
+		}
+
+		lit, h, ok := table.resolveRef(id, resolve)
+		if !ok {
+			return "", nil, 0, fmt.Errorf("%w: id %d", ErrUnknownTableRef, id)
+		}
+
+		return lit, h, n, nil
+	}
+
+	literal, m, err := readInlineLiteral(src[n:])
+	if err != nil {
+		return "", nil, 0, err
+	}
+
+	return literal, nil, n + m, nil
+}
+
+// readInlineLiteral decodes the length-prefixed bytes of an inline ref body.
+func readInlineLiteral(src []byte) (literal string, n int, err error) {
+	length, m := binary.Uvarint(src)
 	if m <= 0 {
 		return "", 0, fmt.Errorf("truncated inline length")
 	}
-	n += m
+
+	n = m
 	if length > uint64(len(src)-n) {
 		return "", 0, fmt.Errorf("inline length %d exceeds remaining %d", length, len(src)-n)
 	}
 
-	lit := string(src[n : n+int(length)])
-	return lit, n + int(length), nil
+	return string(src[n : n+int(length)]), n + int(length), nil
 }
 
 // validateSerializerID enforces the wire rules for serializer ID and typeRef.

@@ -91,6 +91,10 @@ const (
 	// logical messages larger than the negotiated max frame size.
 	CapabilityRevisionChunking uint32 = 2
 
+	// CapabilityRevisionTables is the revision that enables TABLE frames and
+	// compressed actor-path / type-name refs in DATA and REPLY envelopes.
+	CapabilityRevisionTables uint32 = 3
+
 	// DefaultChunkSize is the default logical-frame threshold above which a
 	// sender splits into CHUNK frames (256 KiB).
 	DefaultChunkSize uint32 = 256 * size.KB
@@ -98,6 +102,16 @@ const (
 	// DefaultMaxMessageSize is the default cap on a reassembled logical frame
 	// (16 MiB). Operators may raise it above the max frame size.
 	DefaultMaxMessageSize uint64 = 16 * size.MB
+
+	// DefaultTableCapacity is the per-kind per-connection bound on compression
+	// table entries (actor paths or type names).
+	DefaultTableCapacity = 8192
+
+	// TableKindActorPath identifies an actor-address literal in a TABLE frame.
+	TableKindActorPath byte = 0
+
+	// TableKindTypeName identifies a message type-name literal in a TABLE frame.
+	TableKindTypeName byte = 1
 )
 
 // Frame is one duplex-protocol unit: a fixed 16-byte header plus an optional
@@ -233,24 +247,24 @@ func decodeFrameHeader(src []byte, maxFrameSize uint32) (Frame, error) {
 // validateFrameHeader checks version, type, reserved flags, correlation
 // requirements, and optional length bound. A zero maxFrameSize skips the
 // length check (encode path); decode always supplies a positive bound.
-func validateFrameHeader(f Frame, maxFrameSize uint32) error {
-	if f.Version != ProtocolVersion {
-		return fmt.Errorf("%w: 0x%02x", ErrUnsupportedProtocolVersion, f.Version)
+func validateFrameHeader(frame Frame, maxFrameSize uint32) error {
+	if frame.Version != ProtocolVersion {
+		return fmt.Errorf("%w: 0x%02x", ErrUnsupportedProtocolVersion, frame.Version)
 	}
 
-	if !isKnownFrameType(f.Type) {
-		return fmt.Errorf("tcp: unknown frame type 0x%02x", f.Type)
+	if !isKnownFrameType(frame.Type) {
+		return fmt.Errorf("tcp: unknown frame type 0x%02x", frame.Type)
 	}
 
-	if f.Flags&frameFlagReservedMask != 0 {
-		return fmt.Errorf("tcp: reserved frame flags set: 0x%02x", f.Flags&frameFlagReservedMask)
+	if frame.Flags&frameFlagReservedMask != 0 {
+		return fmt.Errorf("tcp: reserved frame flags set: 0x%02x", frame.Flags&frameFlagReservedMask)
 	}
 
-	if maxFrameSize > 0 && f.Length > maxFrameSize {
-		return fmt.Errorf("%w: length %d exceeds max %d", ErrFrameTooLarge, f.Length, maxFrameSize)
+	if maxFrameSize > 0 && frame.Length > maxFrameSize {
+		return fmt.Errorf("%w: length %d exceeds max %d", ErrFrameTooLarge, frame.Length, maxFrameSize)
 	}
 
-	if err := validateCorrelation(f); err != nil {
+	if err := validateCorrelation(frame); err != nil {
 		return err
 	}
 
@@ -259,13 +273,13 @@ func validateFrameHeader(f Frame, maxFrameSize uint32) error {
 
 // validateCorrelation enforces nonzero correlation where the wire reference
 // requires it. Connection-scoped ERROR frames may use correlation 0.
-func validateCorrelation(f Frame) error {
-	needsCorrelation := f.Type == FrameTypeReply ||
-		f.Type == FrameTypeChunk ||
-		(f.Type == FrameTypeData && f.ExpectsReply())
+func validateCorrelation(frame Frame) error {
+	needsCorrelation := frame.Type == FrameTypeReply ||
+		frame.Type == FrameTypeChunk ||
+		(frame.Type == FrameTypeData && frame.ExpectsReply())
 
-	if needsCorrelation && f.Correlation == 0 {
-		return fmt.Errorf("tcp: frame type 0x%02x requires a nonzero correlation id", f.Type)
+	if needsCorrelation && frame.Correlation == 0 {
+		return fmt.Errorf("tcp: frame type 0x%02x requires a nonzero correlation id", frame.Type)
 	}
 
 	return nil

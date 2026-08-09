@@ -54,6 +54,10 @@ var (
 	// below 3). The protocol layer answers with a connection-scoped ERROR
 	// frame and closes.
 	ErrTableRefUnsupported = errors.New("tcp: compression table ref unsupported")
+	// ErrUnknownTableRef is returned when a DATA or REPLY envelope carries a
+	// table ID that was never installed on this connection. The protocol
+	// layer answers with a connection-scoped ERROR frame and closes.
+	ErrUnknownTableRef = errors.New("tcp: unknown compression table id")
 	// ErrUnknownSerializerID is returned when a DATA or REPLY envelope carries
 	// a serializer identifier outside the defined set.
 	ErrUnknownSerializerID = errors.New("tcp: unknown serializer id")

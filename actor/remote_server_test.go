@@ -435,6 +435,54 @@ func TestNewRemoteSenderPID(t *testing.T) {
 	})
 }
 
+func TestDuplexRemoteTellSenderHandle(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9010
+	ctx := context.Background()
+
+	newEnv := func(t *testing.T, handle any) inet.DataEnvelope {
+		t.Helper()
+		payload, err := proto.Marshal(&internalpb.Error{Message: "hello"})
+		require.NoError(t, err)
+
+		return inet.DataEnvelope{
+			Sender:       address.New("sender", "testSys", host, port).String(),
+			Receiver:     fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port),
+			TypeName:     "internalpb.Error",
+			SerializerID: inet.SerializerIDInternalProto,
+			Payload:      payload,
+			SenderHandle: handle,
+		}
+	}
+
+	t.Run("table-hit handle skips per-message materialization", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		handle := newRemotePID(address.New("sender", "testSys", host, port), sys.remoting)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, handle))
+
+		// The fallback would have parsed and cached the sender address; the
+		// cached handle must bypass newRemoteSenderPID entirely.
+		assert.Equal(t, 0, sys.remoteSenderAddresses.Len())
+	})
+
+	t.Run("missing handle falls back to newRemoteSenderPID", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, nil))
+
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+	})
+
+	t.Run("non-PID handle falls back to newRemoteSenderPID", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, "not-a-pid"))
+
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+	})
+}
+
 func TestRemoteAskHandler(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9001

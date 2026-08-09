@@ -117,7 +117,7 @@ func TestDecodeControlReply(t *testing.T) {
 	msg, err := decodeControlReply(inet.Frame{
 		Type:    inet.FrameTypeReply,
 		Payload: replyPayload,
-	})
+	}, inet.DecodeReplyEnvelope)
 	require.NoError(t, err)
 	got, ok := msg.(*internalpb.RemoteLookupResponse)
 	require.True(t, ok)
@@ -132,7 +132,7 @@ func TestDecodeControlReply(t *testing.T) {
 	_, err = decodeControlReply(inet.Frame{
 		Type:    inet.FrameTypeError,
 		Payload: errPayload,
-	})
+	}, inet.DecodeReplyEnvelope)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "NOT_FOUND")
 }

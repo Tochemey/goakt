@@ -592,3 +592,32 @@ func TestDuplexReadErrorSurfacedOnRecv(t *testing.T) {
 	require.Error(t, err)
 	require.NoError(t, d.Close())
 }
+
+func TestAdmitFrameFailureModes(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	starved := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1)
+	healthy := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), int64(defaultMaxFrameSize))
+	defer func() {
+		_ = starved.Close()
+		_ = healthy.Close()
+	}()
+
+	// One byte of outbound budget cannot admit any frame: the admit reports
+	// backpressure immediately instead of waiting for capacity.
+	err := starved.admitFrame(Frame{Type: FrameTypePing, Lane: starved.Lane()})
+	require.ErrorIs(t, err, ErrDuplexBackpressure)
+
+	// A frame within budget is admitted without error.
+	require.NoError(t, healthy.admitFrame(Frame{Type: FrameTypePing, Lane: healthy.Lane()}))
+
+	_ = healthy.Close()
+	err = healthy.admitFrame(Frame{Type: FrameTypePing, Lane: healthy.Lane()})
+	require.ErrorIs(t, err, ErrDuplexClosed)
+}

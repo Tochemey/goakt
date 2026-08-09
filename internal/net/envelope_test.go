@@ -120,6 +120,90 @@ func TestDataEnvelopeRejectsTableRef(t *testing.T) {
 	require.ErrorIs(t, err, ErrTableRefUnsupported)
 }
 
+func TestDataEnvelopeWithTablesRoundTrip(t *testing.T) {
+	paths := newReceiverTable(8)
+	types := newReceiverTable(8)
+	require.Equal(t, "", paths.install(1, "sender").HardError)
+	require.Equal(t, "", paths.install(2, "receiver").HardError)
+	require.Equal(t, "", types.install(3, "pkg.Type").HardError)
+
+	encoded, err := EncodeDataEnvelopeWithTables(DataEnvelope{
+		Sender:       "sender",
+		Receiver:     "receiver",
+		TypeName:     "pkg.Type",
+		SerializerID: SerializerIDInternalProto,
+		Payload:      []byte("body"),
+	}, 1, 2, 3)
+	require.NoError(t, err)
+
+	decoded, err := decodeDataEnvelopeWithTables(encoded, false, paths, types, func(path string) any {
+		return path + "-handle"
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "sender", decoded.Sender)
+	assert.Equal(t, "receiver", decoded.Receiver)
+	assert.Equal(t, "pkg.Type", decoded.TypeName)
+	assert.Equal(t, "sender-handle", decoded.SenderHandle)
+	assert.Equal(t, []byte("body"), decoded.Payload)
+}
+
+func TestDecodeDataEnvelopeTableHitAllocs(t *testing.T) {
+	paths := newReceiverTable(8)
+	types := newReceiverTable(8)
+	require.Empty(t, paths.install(1, "goakt://sys@127.0.0.1:1/user/s").HardError)
+	require.Empty(t, paths.install(2, "goakt://sys@127.0.0.1:1/user/r").HardError)
+	require.Empty(t, types.install(1, "pkg.Type").HardError)
+
+	handle := &struct{ name string }{name: "pid"}
+	resolver := func(string) any { return handle }
+
+	encoded, err := EncodeDataEnvelopeWithTables(DataEnvelope{
+		Sender:       "goakt://sys@127.0.0.1:1/user/s",
+		Receiver:     "goakt://sys@127.0.0.1:1/user/r",
+		TypeName:     "pkg.Type",
+		SerializerID: SerializerIDInternalProto,
+		Payload:      []byte("x"),
+	}, 1, 2, 1)
+	require.NoError(t, err)
+
+	// Warm the lazy sender handle so the loop measures the steady state.
+	warm, err := decodeDataEnvelopeWithTables(encoded, false, paths, types, resolver)
+	require.NoError(t, err)
+	require.Same(t, handle, warm.SenderHandle)
+
+	allocs := testing.AllocsPerRun(100, func() {
+		env, decErr := decodeDataEnvelopeWithTables(encoded, false, paths, types, resolver)
+		if decErr != nil || env.SenderHandle != any(handle) {
+			t.Fatal("table-hit decode failed")
+		}
+	})
+	assert.Zero(t, allocs)
+}
+
+func TestDataEnvelopeUnknownTableRef(t *testing.T) {
+	paths := newReceiverTable(8)
+	var buf []byte
+	buf = binary.AppendUvarint(buf, 9)
+
+	_, err := decodeDataEnvelopeWithTables(buf, false, paths, nil, nil)
+	require.ErrorIs(t, err, ErrUnknownTableRef)
+}
+
+func TestInlineDataEnvelopeSizeMatchesEncode(t *testing.T) {
+	env := DataEnvelope{
+		Sender:       "sender",
+		Receiver:     "receiver",
+		TypeName:     "pkg.Type",
+		SerializerID: SerializerIDInternalProto,
+		Metadata:     []byte{1, 2, 3},
+		Payload:      []byte("body"),
+	}
+
+	encoded, err := EncodeDataEnvelope(env)
+	require.NoError(t, err)
+	assert.Equal(t, len(encoded), InlineDataEnvelopeSize(env))
+}
+
 func TestDataEnvelopeTruncated(t *testing.T) {
 	_, err := decodeDataEnvelope([]byte{0}, false)
 	require.Error(t, err)
@@ -217,6 +301,6 @@ func TestValidateSerializerIDRequiresTypeName(t *testing.T) {
 // putInlineRefBytes is a test helper that returns an encoded inline ref.
 func putInlineRefBytes(s string) []byte {
 	buf := make([]byte, refSize(s))
-	putInlineRef(buf, s)
+	putEncodedRef(buf, 0, s)
 	return buf
 }
