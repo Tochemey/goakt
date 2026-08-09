@@ -49,6 +49,14 @@ var (
 	// advertises a capability revision below [CapabilityRevisionBaseline];
 	// revisions start at 1, so 0 marks a broken or mismatched peer.
 	ErrInvalidCapabilityRevision = errors.New("tcp: capability revision below baseline")
+	// ErrTableRefUnsupported is returned when a DATA or REPLY envelope carries
+	// a nonzero compression-table ID before tables are negotiated (revision
+	// below 3). The protocol layer answers with a connection-scoped ERROR
+	// frame and closes.
+	ErrTableRefUnsupported = errors.New("tcp: compression table ref unsupported")
+	// ErrUnknownSerializerID is returned when a DATA or REPLY envelope carries
+	// a serializer identifier outside the defined set.
+	ErrUnknownSerializerID = errors.New("tcp: unknown serializer id")
 )
 
 // TCPServer errors.

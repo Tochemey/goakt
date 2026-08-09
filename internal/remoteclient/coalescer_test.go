@@ -127,7 +127,7 @@ func TestCoalescing_DefaultDisabled(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(WithClientCompression(remote.NoCompression))
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy), WithClientCompression(remote.NoCompression))
 	defer r.Close()
 
 	from := address.New("from", "sys", host, port)
@@ -148,7 +148,7 @@ func TestCoalescing_BatchesUnderLoad(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(64),
 	)
@@ -172,7 +172,7 @@ func TestCoalescing_RespectsMaxBatch(t *testing.T) {
 	defer stop()
 
 	const maxBatch = 4
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(maxBatch),
 	)
@@ -219,7 +219,7 @@ func TestCoalescing_FlushOnClose(t *testing.T) {
 	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(1024),
 	)
@@ -257,7 +257,7 @@ func TestCoalescing_ErrorHandler(t *testing.T) {
 		dests []string
 		count int
 	)
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(2),
 		WithCoalescingErrorHandler(func(dest string, msgs []*internalpb.RemoteMessage, err error) {
@@ -295,7 +295,7 @@ func TestCoalescing_PropagatesPerMessageMetadata(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(64),
 		WithClientContextPropagator(headerInjector{"x-trace-id": "abc123"}),
@@ -322,7 +322,7 @@ func TestCoalescing_ContextCancelled(t *testing.T) {
 	_, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(64),
 	)
@@ -380,7 +380,7 @@ func TestCoalescing_InjectPropagatorError(t *testing.T) {
 	defer stop()
 
 	sentinel := errors.New("inject failure")
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(64),
 		WithClientContextPropagator(failingInjector{err: sentinel}),
@@ -400,7 +400,7 @@ func TestCoalescing_EmptyPropagatorYieldsNoMetadata(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(4),
 		WithClientContextPropagator(emptyInjector{}),
@@ -426,7 +426,7 @@ func TestCoalescing_NoPropagatorNoMetadata(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(4),
 	)
@@ -451,7 +451,7 @@ func TestCoalescing_PropagatorReceivesCallerContext(t *testing.T) {
 	defer stop()
 
 	injector := &ctxCapturingInjector{}
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(64),
 		WithClientContextPropagator(injector),
@@ -479,7 +479,7 @@ func TestCoalescing_MultipleDestinations(t *testing.T) {
 	tc2, host2, port2, stop2 := startCoalescingServer(t)
 	defer stop2()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(32),
 	)
@@ -507,7 +507,7 @@ func TestCoalescing_ConcurrentSubmitters(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(128),
 	)
@@ -538,7 +538,7 @@ func TestCoalescing_CloseIdempotent(t *testing.T) {
 	_, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(16),
 	)
@@ -562,7 +562,7 @@ func TestCoalescing_ErrorHandlerNilDoesNotPanic(t *testing.T) {
 	boom := errors.New("boom")
 	tc.retErr.Store(&boom)
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(2),
 	)
@@ -588,7 +588,7 @@ func TestCoalescing_DefaultTunables(t *testing.T) {
 	tc, host, port, stop := startCoalescingServer(t)
 	defer stop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(1), // 1 triggers immediate flush regardless of timer default
 	)
@@ -852,7 +852,7 @@ func TestCoalescing_RemoteTellSurfacesBackpressure(t *testing.T) {
 	bs, host, port, srvStop := startBlockingServer(t)
 	defer srvStop()
 
-	r := NewClient(
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy),
 		WithClientCompression(remote.NoCompression),
 		WithSendCoalescing(1), // channel depth 4
 	)
@@ -888,7 +888,7 @@ func TestCoalescing_RemoteTellSurfacesBackpressure(t *testing.T) {
 // TestInjectPerMessageMetadata_NilPropagator covers the early-return branch
 // that skips allocation when no propagator is configured.
 func TestInjectPerMessageMetadata_NilPropagator(t *testing.T) {
-	r := NewClient().(*client)
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy)).(*client)
 	md, err := r.injectMessageMetadata(context.Background())
 	require.NoError(t, err)
 	assert.Nil(t, md)
@@ -898,7 +898,7 @@ func TestInjectPerMessageMetadata_NilPropagator(t *testing.T) {
 // propagator is configured but emits no headers: we return (nil, nil) rather
 // than an empty map to avoid a wire-format allocation.
 func TestInjectPerMessageMetadata_EmptyHeaders(t *testing.T) {
-	r := NewClient(WithClientContextPropagator(emptyInjector{})).(*client)
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy), WithClientContextPropagator(emptyInjector{})).(*client)
 	md, err := r.injectMessageMetadata(context.Background())
 	require.NoError(t, err)
 	assert.Nil(t, md)
@@ -908,7 +908,7 @@ func TestInjectPerMessageMetadata_EmptyHeaders(t *testing.T) {
 // the caller.
 func TestInjectPerMessageMetadata_PropagatorError(t *testing.T) {
 	sentinel := errors.New("inject failure")
-	r := NewClient(WithClientContextPropagator(failingInjector{err: sentinel})).(*client)
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy), WithClientContextPropagator(failingInjector{err: sentinel})).(*client)
 	md, err := r.injectMessageMetadata(context.Background())
 	assert.Nil(t, md)
 	assert.ErrorIs(t, err, sentinel)
@@ -917,7 +917,7 @@ func TestInjectPerMessageMetadata_PropagatorError(t *testing.T) {
 // TestInjectPerMessageMetadata_HeadersRoundtrip confirms headers emitted by
 // the propagator reach the returned metadata map verbatim.
 func TestInjectPerMessageMetadata_HeadersRoundtrip(t *testing.T) {
-	r := NewClient(WithClientContextPropagator(headerInjector{"a": "1", "b": "2"})).(*client)
+	r := NewClient(WithClientProtocolPin(remote.ProtocolPinLegacy), WithClientContextPropagator(headerInjector{"a": "1", "b": "2"})).(*client)
 	md, err := r.injectMessageMetadata(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, "1", md["A"])

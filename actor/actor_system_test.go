@@ -3048,7 +3048,9 @@ func TestRemotingRecover(t *testing.T) {
 		defer cancel()
 
 		to := address.New("receiver", "remote-sys", host, remotingPort)
-		err = remoting.RemoteTell(callCtx, address.NoSender(), to, new(testpb.TestSend))
+		// Use Ask: duplex fire-and-forget Tell returns after enqueue and cannot
+		// surface a later handler panic. Ask receives the request-scoped ERROR.
+		_, err = remoting.RemoteAsk(callCtx, address.NoSender(), to, new(testpb.TestReply), time.Second)
 		require.Error(t, err)
 	})
 }

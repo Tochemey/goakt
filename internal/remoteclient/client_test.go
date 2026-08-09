@@ -364,7 +364,10 @@ func TestRemoteAsk_InvalidResponseType(t *testing.T) {
 	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	r := NewClient(WithClientCompression(remote.NoCompression))
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinLegacy),
+	)
 	defer r.Close()
 
 	from := address.New("from", "sys", host, port)
@@ -392,7 +395,10 @@ func TestRemoteAsk_EmptyMessagesReturnsNil(t *testing.T) {
 	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	r := NewClient(WithClientCompression(remote.NoCompression))
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinLegacy),
+	)
 	defer r.Close()
 
 	from := address.New("from", "sys", host, port)
@@ -1375,7 +1381,10 @@ func TestRemoteBatchAsk_Success(t *testing.T) {
 	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	r := NewClient(WithClientCompression(remote.NoCompression))
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinLegacy),
+	)
 	defer r.Close()
 
 	from := address.New("from", "sys", host, port)
@@ -1406,7 +1415,10 @@ func TestRemoteBatchAsk_InvalidResponseType(t *testing.T) {
 	port, err := strconv.Atoi(portStr)
 	require.NoError(t, err)
 
-	r := NewClient(WithClientCompression(remote.NoCompression))
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinLegacy),
+	)
 	defer r.Close()
 
 	from := address.New("from", "sys", host, port)

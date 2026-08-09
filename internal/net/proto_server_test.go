@@ -1309,14 +1309,12 @@ func TestProtoServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
 	_, err = performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
 	require.NoError(t, err)
 
+	// Unknown frame types are protocol violations: ERROR then close.
 	require.NoError(t, conn.WriteFrames(Frame{
 		Version:     ProtocolVersion,
-		Type:        FrameTypeData,
-		Lane:        LaneOrdinary,
-		Flags:       FrameFlagExpectsReply,
+		Type:        FrameTypeCredit,
+		Lane:        LaneControl,
 		Correlation: 1,
-		Length:      1,
-		Payload:     []byte{0x00},
 	}))
 
 	frame, err := conn.ReadFrame()

@@ -26,6 +26,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/binary"
+	"errors"
 	"io"
 	"net"
 	"time"
@@ -87,13 +88,13 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //	)
 //	if err != nil { ... }
 //
-//	if err := ps.Listen(); err != nil { ... }
+//	if err := x.Listen(); err != nil { ... }
 //
 //	// Serve blocks until shutdown.
-//	go func() { log.Fatal(ps.Serve()) }()
+//	go func() { log.Fatal(x.Serve()) }()
 //
 //	// Later …
-//	ps.Shutdown(5 * time.Second)
+//	x.Shutdown(5 * time.Second)
 //
 // # Low-GC design
 //
@@ -129,9 +130,14 @@ type ProtoServer struct {
 	serverOpts   []ServerOption
 
 	idleTimeout    time.Duration
+	writeTimeout   time.Duration
 	maxFrameSize   uint32
+	initialCredits uint64
 	systemName     string
 	acceptProtocol AcceptProtocol
+	duplexTell     DuplexTellHandler
+	duplexAsk      DuplexAskHandler
+	askPool        *WorkerPool[duplexAskTask]
 }
 
 // ProtoServerOption configures a [ProtoServer] before it is started.
@@ -146,33 +152,37 @@ type ProtoServerOption func(*ProtoServer)
 // no fallback handler (a frame carrying an unregistered message type closes
 // its connection), max frame size of 16 MiB.
 func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer, error) {
-	ps := &ProtoServer{
-		handlers:     make(map[protoreflect.FullName]ProtoHandler),
-		serializer:   NewProtoSerializer(),
-		framePool:    NewFramePool(),
-		maxFrameSize: defaultMaxFrameSize, // Default: 16 MiB
+	x := &ProtoServer{
+		handlers:       make(map[protoreflect.FullName]ProtoHandler),
+		serializer:     NewProtoSerializer(),
+		framePool:      NewFramePool(),
+		maxFrameSize:   defaultMaxFrameSize, // Default: 16 MiB
+		initialCredits: defaultInitialCredits,
 	}
 
 	for _, opt := range opts {
-		opt(ps)
+		opt(x)
 	}
+
+	x.askPool = NewWorkerPool(handleDuplexAskTask)
 
 	// Wire the legacy proto read-loop and the duplex acceptor used by the
 	// dual-protocol sniff. Accept-protocol and idle-timeout options must land
 	// after caller options so they reflect the final ProtoServer state.
-	ps.serverOpts = append(ps.serverOpts,
-		WithRequestHandler(ps.handleConn),
-		WithDuplexHandler(ps.handleDuplexConn),
-		WithAcceptProtocol(ps.acceptProtocol),
-		WithServerIdleTimeout(ps.idleTimeout),
+	x.serverOpts = append(x.serverOpts,
+		WithRequestHandler(x.handleConn),
+		WithDuplexHandler(x.handleDuplexConn),
+		WithAcceptProtocol(x.acceptProtocol),
+		WithServerIdleTimeout(x.idleTimeout),
 	)
 
-	srv, err := NewTCPServer(listenAddr, ps.serverOpts...)
+	srv, err := NewTCPServer(listenAddr, x.serverOpts...)
 	if err != nil {
 		return nil, err
 	}
-	ps.server = srv
-	return ps, nil
+
+	x.server = srv
+	return x, nil
 }
 
 // WithProtoHandler registers a [ProtoHandler] for the given fully qualified
@@ -184,8 +194,8 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 // previous one. Handlers must be registered before [ProtoServer.Serve] is
 // called.
 func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.handlers[fullName] = handler
+	return func(x *ProtoServer) {
+		x.handlers[fullName] = handler
 	}
 }
 
@@ -195,8 +205,8 @@ func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) Prot
 // so a request/response peer fails fast instead of waiting for a reply that
 // will never arrive.
 func WithFallbackProtoHandler(handler ProtoHandler) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.fallback = handler
+	return func(x *ProtoServer) {
+		x.fallback = handler
 	}
 }
 
@@ -205,8 +215,8 @@ func WithFallbackProtoHandler(handler ProtoHandler) ProtoServerOption {
 // (the default) means no idle timeout — the connection stays open until
 // the peer disconnects or the server shuts down.
 func WithProtoServerIdleTimeout(duration time.Duration) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.idleTimeout = duration
+	return func(x *ProtoServer) {
+		x.idleTimeout = duration
 	}
 }
 
@@ -214,8 +224,8 @@ func WithProtoServerIdleTimeout(duration time.Duration) ProtoServerOption {
 // [TCPServer], propagated to every [ProtoHandler] invocation. Use this for
 // cancellation signals or request-scoped values.
 func WithProtoServerContext(ctx context.Context) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithServerContext(ctx))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithServerContext(ctx))
 	}
 }
 
@@ -231,8 +241,8 @@ func WithProtoServerContext(ctx context.Context) ProtoServerOption {
 // Certificates / GetCertificate, and appropriate security settings such as
 // MinVersion).
 func WithProtoServerTLSConfig(config *tls.Config) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithTLSConfig(config))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithTLSConfig(config))
 	}
 }
 
@@ -248,8 +258,8 @@ func WithProtoServerTLSConfig(config *tls.Config) ProtoServerOption {
 //
 // The configuration must be set before calling Listen/ListenTLS.
 func WithProtoServerListenConfig(config *ListenConfig) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithListenConfig(config))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithListenConfig(config))
 	}
 }
 
@@ -273,8 +283,8 @@ func WithProtoServerListenConfig(config *ListenConfig) ProtoServerOption {
 // This option must be provided before calling [ProtoServer.Listen] /
 // [ProtoServer.ListenTLS].
 func WithProtoServerLoops(loops int) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithLoops(loops))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithLoops(loops))
 	}
 }
 
@@ -294,8 +304,8 @@ func WithProtoServerLoops(loops int) ProtoServerOption {
 //
 // Default: false.
 func WithProtoServerAllowThreadLocking(allow bool) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithAllowThreadLocking(allow))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithAllowThreadLocking(allow))
 	}
 }
 
@@ -303,24 +313,59 @@ func WithProtoServerAllowThreadLocking(allow bool) ProtoServerOption {
 // for incoming messages. Frames exceeding this limit cause the connection to
 // be closed. The default is 16 MiB ([defaultMaxFrameSize]).
 func WithProtoServerMaxFrameSize(size uint32) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.maxFrameSize = size
+	return func(x *ProtoServer) {
+		x.maxFrameSize = size
 	}
 }
 
 // WithProtoServerSystemName sets the system name advertised in duplex HELLO_ACK.
 // Empty (the default) leaves the field blank on the wire.
 func WithProtoServerSystemName(name string) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.systemName = name
+	return func(x *ProtoServer) {
+		x.systemName = name
 	}
 }
 
 // WithProtoServerAcceptProtocol selects which remoting wire protocols the
 // listener accepts. The default is [AcceptProtocolAuto].
 func WithProtoServerAcceptProtocol(protocol AcceptProtocol) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.acceptProtocol = protocol
+	return func(x *ProtoServer) {
+		x.acceptProtocol = protocol
+	}
+}
+
+// WithProtoServerInitialCredits sets the HELLO initial_credits value and the
+// duplex outbound queue byte cap. Zero keeps the default (16 MiB).
+func WithProtoServerInitialCredits(credits uint64) ProtoServerOption {
+	return func(x *ProtoServer) {
+		if credits > 0 {
+			x.initialCredits = credits
+		}
+	}
+}
+
+// WithProtoServerWriteTimeout bounds duplex Submit waits when the caller
+// context has no deadline.
+func WithProtoServerWriteTimeout(d time.Duration) ProtoServerOption {
+	return func(x *ProtoServer) {
+		x.writeTimeout = d
+	}
+}
+
+// WithProtoServerDuplexTellHandler registers the fire-and-forget DATA handler
+// for the duplex acceptor.
+func WithProtoServerDuplexTellHandler(h DuplexTellHandler) ProtoServerOption {
+	return func(x *ProtoServer) {
+		x.duplexTell = h
+	}
+}
+
+// WithProtoServerDuplexAskHandler registers the expectsReply user-message
+// handler for the duplex acceptor. Control RPCs continue to use registered
+// ProtoHandlers.
+func WithProtoServerDuplexAskHandler(h DuplexAskHandler) ProtoServerOption {
+	return func(x *ProtoServer) {
+		x.duplexAsk = h
 	}
 }
 
@@ -330,24 +375,24 @@ func WithProtoServerAcceptProtocol(protocol AcceptProtocol) ProtoServerOption {
 // recovered, the callback is invoked, and the read loop continues serving
 // subsequent messages on the same connection.
 func WithProtoServerPanicHandler(f PanicHandlerFunc) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.panicHandler = f
+	return func(x *ProtoServer) {
+		x.panicHandler = f
 	}
 }
 
 // WithProtoServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
 // underlying [TCPServer]'s wrapping pipeline.
 func WithProtoServerConnWrapper(w ConnWrapper) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithConnWrapper(w))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithConnWrapper(w))
 	}
 }
 
 // WithProtoServerMaxAcceptConnections sets the maximum total connections on the
 // underlying [TCPServer].
 func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithMaxAcceptConnections(limit))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithMaxAcceptConnections(limit))
 	}
 }
 
@@ -368,36 +413,38 @@ func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
 // Note: this option only affects the underlying server’s runtime/worker-pool
 // behavior; it does not change the wire protocol or per-connection semantics.
 func WithProtoServerBallast(sizeInMiB int) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithBallast(sizeInMiB))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithBallast(sizeInMiB))
 	}
 }
 
 // WithProtoServerConnectionCreator sets the factory used to create [Connection]
 // values for incoming connections on the underlying [TCPServer].
 func WithProtoServerConnectionCreator(f ConnectionCreatorFunc) ProtoServerOption {
-	return func(ps *ProtoServer) {
-		ps.serverOpts = append(ps.serverOpts, WithConnectionCreator(f))
+	return func(x *ProtoServer) {
+		x.serverOpts = append(x.serverOpts, WithConnectionCreator(f))
 	}
 }
 
 // Listen creates the TCP listener on the configured address. Call
 // [ProtoServer.Serve] afterwards to start accepting connections.
-func (ps *ProtoServer) Listen() error {
-	return ps.server.Listen()
+func (x *ProtoServer) Listen() error {
+	return x.server.Listen()
 }
 
 // ListenTLS enables TLS and creates the TCP listener. Returns
 // [ErrNoTLSConfig] if no TLS configuration was provided.
-func (ps *ProtoServer) ListenTLS() error {
-	return ps.server.ListenTLS()
+func (x *ProtoServer) ListenTLS() error {
+	return x.server.ListenTLS()
 }
 
 // Serve starts the accept loops and blocks until all loops and in-flight
 // connections complete. Use [ProtoServer.Shutdown] or [ProtoServer.Halt]
 // from another goroutine to stop the server.
-func (ps *ProtoServer) Serve() error {
-	return ps.server.Serve()
+func (x *ProtoServer) Serve() error {
+	x.askPool.Start()
+	defer x.askPool.Stop()
+	return x.server.Serve()
 }
 
 // Shutdown gracefully stops the server. See [TCPServer.Shutdown] for the
@@ -405,88 +452,205 @@ func (ps *ProtoServer) Serve() error {
 //   - d > 0: wait up to d for in-flight connections to finish.
 //   - d == 0: wait indefinitely.
 //   - d < 0: return immediately without waiting.
-func (ps *ProtoServer) Shutdown(d time.Duration) error {
-	return ps.server.Shutdown(d)
+func (x *ProtoServer) Shutdown(d time.Duration) error {
+	return x.server.Shutdown(d)
 }
 
 // Halt immediately stops the server without waiting for in-flight
 // connections. Equivalent to Shutdown(-1).
-func (ps *ProtoServer) Halt() error {
-	return ps.server.Halt()
+func (x *ProtoServer) Halt() error {
+	return x.server.Halt()
 }
 
 // ListenAddr returns the actual [*net.TCPAddr] the server is listening on.
 // Useful when the server was started on port 0. Returns nil if the server
 // has not started listening.
-func (ps *ProtoServer) ListenAddr() *net.TCPAddr {
-	return ps.server.ListenAddr()
+func (x *ProtoServer) ListenAddr() *net.TCPAddr {
+	return x.server.ListenAddr()
 }
 
 // ActiveConnections returns the number of connections currently being served.
-func (ps *ProtoServer) ActiveConnections() int32 {
-	return ps.server.ActiveConnections()
+func (x *ProtoServer) ActiveConnections() int32 {
+	return x.server.ActiveConnections()
 }
 
 // AcceptedConnections returns the total number of connections accepted since
 // the server started.
-func (ps *ProtoServer) AcceptedConnections() int32 {
-	return ps.server.AcceptedConnections()
+func (x *ProtoServer) AcceptedConnections() int32 {
+	return x.server.AcceptedConnections()
 }
 
 // handleDuplexConn accepts a sniffed duplex connection: it completes HELLO,
-// applies negotiated compression, and serves PING/PONG until the peer closes.
-// Unsupported frame types receive a connection-scoped ERROR then close.
-func (ps *ProtoServer) handleDuplexConn(raw net.Conn) {
-	framed := newTCPFramedConn(raw, ps.maxFrameSize)
-	defer func() { _ = framed.Close() }()
+// applies negotiated compression, and serves DATA/PING until the peer closes.
+//
+// Fire-and-forget DATA is handled inline on the read loop; expectsReply DATA
+// is offloaded to the ask worker pool so a slow actor cannot stall the socket.
+// Unknown frame types and table-ref capability violations receive a
+// connection-scoped ERROR then close. Close drains admitted outbound frames
+// so that ERROR reaches the peer before teardown.
+func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
+	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
 		Revision:                    CapabilityRevisionBaseline,
-		SystemName:                  ps.systemName,
+		SystemName:                  x.systemName,
 		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
 		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
-		MaxFrameSize:                ps.maxFrameSize,
-		MaxMessageSize:              uint64(ps.maxFrameSize),
-		InitialCredits:              uint64(ps.maxFrameSize),
+		MaxFrameSize:                x.maxFrameSize,
+		MaxMessageSize:              uint64(x.maxFrameSize),
+		InitialCredits:              x.initialCredits,
 		MaxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
 	}
 
 	result, err := acceptHello(framed, local)
 	if err != nil {
+		_ = framed.Close()
 		return
 	}
 
 	wrapped, err := wrapCompression(framed.NetConn(), result.Effective.GetCompression())
 	if err != nil {
+		_ = framed.Close()
 		return
 	}
 
 	framed.ReplaceNetConn(wrapped)
 
+	credits := int64(result.Effective.GetInitialCredits())
+	if credits <= 0 {
+		credits = int64(x.initialCredits)
+	}
+
+	conn := newDuplexConn(framed, credits, withDuplexWriteTimeout(x.writeTimeout))
+	defer func() { _ = conn.Close() }()
+
+	baseCtx := x.server.Context()
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
 	for {
-		if ps.idleTimeout > 0 {
-			_ = framed.NetConn().SetReadDeadline(time.Now().Add(ps.idleTimeout))
+		if x.idleTimeout > 0 {
+			_ = framed.NetConn().SetReadDeadline(time.Now().Add(x.idleTimeout))
 		}
 
-		frame, err := framed.ReadFrame()
+		frame, err := conn.Recv(baseCtx)
 		if err != nil {
-			writeProtocolVersionError(framed, err)
 			return
 		}
 
 		switch frame.Type {
 		case FrameTypePing:
-			_ = framed.WriteFrames(Frame{
+			_ = conn.Submit(baseCtx, Frame{
 				Version:     ProtocolVersion,
 				Type:        FrameTypePong,
 				Lane:        frame.Lane,
 				Correlation: frame.Correlation,
 			})
+		case FrameTypeData:
+			if err := x.handleDuplexData(baseCtx, conn, frame); err != nil {
+				return
+			}
 		default:
-			_ = writeErrorFrame(framed, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
+			_ = submitErrorFrame(baseCtx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
 			return
 		}
 	}
+}
+
+// invokeDuplexTell runs the registered duplex tell handler with optional panic
+// recovery so a misbehaving handler cannot crash the accept worker. When no
+// duplex tell handler is set, a registered RemoteTellRequest [ProtoHandler] is
+// used as a compatibility bridge for fixture servers.
+func (x *ProtoServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) {
+	if x.duplexTell != nil {
+		if x.panicHandler == nil {
+			x.duplexTell(ctx, env)
+			return
+		}
+
+		defer func() {
+			if r := recover(); r != nil {
+				x.panicHandler(protoreflect.FullName(env.TypeName), r)
+			}
+		}()
+
+		x.duplexTell(ctx, env)
+		return
+	}
+
+	handler, ok := x.handlers[remoteTellRequestName]
+	if !ok {
+		return
+	}
+
+	req := &internalpb.RemoteTellRequest{
+		RemoteMessages: []*internalpb.RemoteMessage{{
+			Sender:   env.Sender,
+			Receiver: env.Receiver,
+			Message:  env.Payload,
+			Metadata: metadataMapFromEnvelope(env.Metadata),
+		}},
+	}
+
+	_, _, _ = x.recover(ctx, handler, nil, req, remoteTellRequestName)
+}
+
+// handleDuplexData decodes a DATA frame and either runs a tell inline on the
+// read loop or enqueues an ask/control RPC on the ask worker pool.
+//
+// Table-ref decode failures are connection-scoped (ERROR then close). Other
+// decode failures are request-scoped ERROR and the connection stays up.
+func (x *ProtoServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
+	env, err := decodeDataEnvelope(frame.Payload, frame.HasMetadata())
+	if err != nil {
+		if errors.Is(err, ErrTableRefUnsupported) {
+			_ = submitErrorFrame(ctx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, err.Error())
+			return err
+		}
+
+		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
+		return nil
+	}
+
+	handlerCtx := ctx
+	var cancel context.CancelFunc
+	if len(env.Metadata) > 0 {
+		md := NewMetadata()
+		if err := md.UnmarshalBinary(env.Metadata); err != nil {
+			_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
+			return nil
+		}
+
+		handlerCtx = md.ToContext(ctx)
+		// Ask/control paths must enforce the rebased wire deadline; tell
+		// stays unbounded beyond the connection idle timeout.
+		if frame.ExpectsReply() {
+			handlerCtx, cancel = md.DeadlineContext(handlerCtx)
+		}
+	}
+
+	if !frame.ExpectsReply() {
+		x.invokeDuplexTell(handlerCtx, env)
+		return nil
+	}
+
+	task := duplexAskTask{
+		server: x,
+		conn:   conn,
+		frame:  frame,
+		env:    env,
+		ctx:    handlerCtx,
+		cancel: cancel,
+	}
+	if err := x.askPool.AddTask(task); err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_UNAVAILABLE, err.Error())
+	}
+
+	return nil
 }
 
 // handleConn is the [RequestHandlerFunc] wired into the underlying [TCPServer].
@@ -507,8 +671,8 @@ func (ps *ProtoServer) handleDuplexConn(raw net.Conn) {
 //     after deserialization.
 //   - Response serialization reuses the [ProtoSerializer]'s internal buffer
 //     pool.
-func (ps *ProtoServer) handleConn(conn Connection) {
-	ctx := ps.server.Context()
+func (x *ProtoServer) handleConn(conn Connection) {
+	ctx := x.server.Context()
 
 	// Buffer the read side for the connection's lifetime: the frame header
 	// and body coalesce into one kernel read, and back-to-back frames of a
@@ -519,8 +683,8 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 
 	for {
 		// Apply idle timeout if configured.
-		if ps.idleTimeout > 0 {
-			deadline := time.Now().Add(ps.idleTimeout)
+		if x.idleTimeout > 0 {
+			deadline := time.Now().Add(x.idleTimeout)
 			if err := conn.SetReadDeadline(deadline); err != nil {
 				return
 			}
@@ -536,16 +700,16 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		if totalLen < 8 {
 			return // Malformed frame — close connection.
 		}
-		if totalLen > ps.maxFrameSize {
+		if totalLen > x.maxFrameSize {
 			return // Frame too large — close connection.
 		}
 
 		// Acquire a pooled buffer for the frame body.
-		frame := ps.framePool.Get(int(totalLen))
+		frame := x.framePool.Get(int(totalLen))
 		copy(frame[:4], hdr[:])
 
 		if _, err := io.ReadFull(reader, frame[4:]); err != nil {
-			ps.framePool.Put(frame)
+			x.framePool.Put(frame)
 			return
 		}
 
@@ -564,19 +728,19 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		// Metadata frames have at least 12 bytes header; legacy frames have 8 bytes.
 		// Try metadata format first if frame is long enough.
 		if len(frame) >= 12 {
-			msg, md, typeName, err = ps.serializer.UnmarshalBinaryWithMetadata(frame)
+			msg, md, typeName, err = x.serializer.UnmarshalBinaryWithMetadata(frame)
 			if err == ErrInvalidMessageLength {
 				// Might be a legacy frame where bytes 8:12 are part of the type name
 				// or proto payload. Fall back to legacy unmarshaler.
-				msg, typeName, err = ps.serializer.UnmarshalBinary(frame)
+				msg, typeName, err = x.serializer.UnmarshalBinary(frame)
 			}
 		} else {
 			// Frame too short for metadata format — must be legacy.
-			msg, typeName, err = ps.serializer.UnmarshalBinary(frame)
+			msg, typeName, err = x.serializer.UnmarshalBinary(frame)
 		}
 
 		if err != nil {
-			ps.framePool.Put(frame)
+			x.framePool.Put(frame)
 			return // Corrupt frame — close connection.
 		}
 
@@ -585,12 +749,12 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		// the buffer is returned to the pool races with the next Get that
 		// reuses and overwrites the buffer, yielding a garbage name and a
 		// spurious lookup miss.
-		handler, ok := ps.handlers[typeName]
+		handler, ok := x.handlers[typeName]
 		if !ok {
-			handler = ps.fallback
+			handler = x.fallback
 		}
 
-		ps.framePool.Put(frame)
+		x.framePool.Put(frame)
 
 		// Enrich the context with metadata if present. This enables context
 		// propagation (tracing, auth, deadlines) across the proto TCP transport.
@@ -613,7 +777,7 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		// proto.MessageName reads the name from the decoded message's
 		// descriptor, which is heap-stable, unlike typeName, which must not
 		// outlive the frame buffer released above.
-		resp, panicked, herr := ps.recover(handlerCtx, handler, conn, msg, proto.MessageName(msg))
+		resp, panicked, herr := x.recover(handlerCtx, handler, conn, msg, proto.MessageName(msg))
 		if panicked {
 			// Handler panicked — close the connection so the client receives an
 			// immediate EOF instead of blocking forever waiting for a response
@@ -631,21 +795,21 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 		}
 
 		// Serialize and write the response frame.
-		respData, merr := ps.serializer.MarshalBinaryTo(ps.framePool, resp)
+		respData, merr := x.serializer.MarshalBinaryTo(x.framePool, resp)
 		if merr != nil {
 			return // Marshal failure — close connection.
 		}
 
-		if ps.idleTimeout > 0 {
-			deadline := time.Now().Add(ps.idleTimeout)
+		if x.idleTimeout > 0 {
+			deadline := time.Now().Add(x.idleTimeout)
 			if err := conn.SetWriteDeadline(deadline); err != nil {
-				ps.framePool.Put(respData)
+				x.framePool.Put(respData)
 				return
 			}
 		}
 
 		_, writeErr := conn.Write(respData)
-		ps.framePool.Put(respData)
+		x.framePool.Put(respData)
 		if writeErr != nil {
 			return // Write failure — close connection.
 		}
@@ -658,8 +822,8 @@ func (ps *ProtoServer) handleConn(conn Connection) {
 // tearing down the connection. When no panic handler is configured, the panic
 // propagates normally (closing the connection via the deferred close in
 // [TCPServer.serveConn]).
-func (ps *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn Connection, msg proto.Message, typeName protoreflect.FullName) (resp proto.Message, panicked bool, err error) {
-	if ps.panicHandler == nil {
+func (x *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn Connection, msg proto.Message, typeName protoreflect.FullName) (resp proto.Message, panicked bool, err error) {
+	if x.panicHandler == nil {
 		// No recovery configured — let panics propagate.
 		resp, err = handler(ctx, conn, msg)
 		return resp, false, err
@@ -667,7 +831,7 @@ func (ps *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn C
 
 	defer func() {
 		if r := recover(); r != nil {
-			ps.panicHandler(typeName, r)
+			x.panicHandler(typeName, r)
 			panicked = true
 		}
 	}()

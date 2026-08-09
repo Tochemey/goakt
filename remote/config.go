@@ -47,6 +47,10 @@ const DefaultMaxIdleConns = inet.DefaultMaxIdleConns
 // concurrent large-message transfers per duplex connection.
 const DefaultMaxConcurrentLargeTransfers uint32 = 4
 
+// DefaultInitialCredits is the default HELLO credit window and duplex
+// outbound queue byte cap (16 MiB).
+const DefaultInitialCredits uint64 = 16 * size.MB
+
 // Config defines the remote config.
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so

@@ -108,6 +108,126 @@ func TestDuplexBackpressure(t *testing.T) {
 	_ = left.Close()
 }
 
+func TestDuplexAskOutOfOrder(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	client := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+	server := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	type result struct {
+		corr uint64
+		err  error
+	}
+	results := make(chan result, 2)
+
+	go func() {
+		frame, err := client.Ask(ctx, Frame{Type: FrameTypeData, Lane: LaneOrdinary, Payload: []byte("a")})
+		results <- result{corr: frame.Correlation, err: err}
+	}()
+	go func() {
+		frame, err := client.Ask(ctx, Frame{Type: FrameTypeData, Lane: LaneOrdinary, Payload: []byte("b")})
+		results <- result{corr: frame.Correlation, err: err}
+	}()
+
+	req1, err := server.Recv(ctx)
+	require.NoError(t, err)
+	req2, err := server.Recv(ctx)
+	require.NoError(t, err)
+
+	// Reply out of order: second request first.
+	require.NoError(t, server.Submit(ctx, Frame{
+		Type:        FrameTypeReply,
+		Lane:        LaneOrdinary,
+		Correlation: req2.Correlation,
+		Payload:     []byte("rb"),
+	}))
+	require.NoError(t, server.Submit(ctx, Frame{
+		Type:        FrameTypeReply,
+		Lane:        LaneOrdinary,
+		Correlation: req1.Correlation,
+		Payload:     []byte("ra"),
+	}))
+
+	r1 := <-results
+	r2 := <-results
+	require.NoError(t, r1.err)
+	require.NoError(t, r2.err)
+	assert.ElementsMatch(t, []uint64{req1.Correlation, req2.Correlation}, []uint64{r1.corr, r2.corr})
+	assert.Equal(t, 0, client.pending.len())
+
+	require.NoError(t, client.Close())
+	require.NoError(t, server.Close())
+}
+
+func TestDuplexAskTimeoutClearsPending(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	client := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+	server := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+
+	_, err := client.Ask(ctx, Frame{Type: FrameTypeData, Lane: LaneOrdinary, Payload: []byte("x")})
+	require.Error(t, err)
+	assert.Equal(t, 0, client.pending.len())
+
+	// Late reply must not panic, re-populate the table, or fill inbound.
+	req, err := server.Recv(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, server.Submit(context.Background(), Frame{
+		Type:        FrameTypeReply,
+		Correlation: req.Correlation,
+	}))
+	assert.Equal(t, 0, client.pending.len())
+
+	// A subsequent correlated ask must still complete after many late replies
+	// (inbound capacity is 64; dropping keeps the reader unblocked).
+	for i := 0; i < 80; i++ {
+		require.NoError(t, server.Submit(context.Background(), Frame{
+			Type:        FrameTypeReply,
+			Correlation: req.Correlation + uint64(i) + 1,
+		}))
+	}
+
+	askCtx, askCancel := context.WithTimeout(context.Background(), time.Second)
+	defer askCancel()
+
+	go func() {
+		req2, recvErr := server.Recv(askCtx)
+		if recvErr != nil {
+			return
+		}
+		_ = server.Submit(askCtx, Frame{
+			Type:        FrameTypeReply,
+			Correlation: req2.Correlation,
+			Payload:     []byte("ok"),
+		})
+	}()
+
+	reply, err := client.Ask(askCtx, Frame{Type: FrameTypeData, Lane: LaneOrdinary, Payload: []byte("y")})
+	require.NoError(t, err)
+	assert.Equal(t, []byte("ok"), reply.Payload)
+
+	require.NoError(t, client.Close())
+	_ = server.Close()
+}
+
 func TestDuplexSubmitCanceledContext(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
@@ -278,7 +398,11 @@ func (e *writeErrFramedConn) ReadFrame() (Frame, error) {
 }
 
 func (e *writeErrFramedConn) Close() error {
-	close(e.closed)
+	select {
+	case <-e.closed:
+	default:
+		close(e.closed)
+	}
 	return nil
 }
 

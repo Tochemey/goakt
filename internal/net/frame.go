@@ -75,6 +75,10 @@ const (
 	// large-message transfers (see wire-reference defaults table).
 	defaultMaxConcurrentLargeTransfers uint32 = 4
 
+	// defaultInitialCredits is the HELLO default credit window and duplex
+	// outbound queue byte cap (16 MiB).
+	defaultInitialCredits uint64 = 16 * size.MB
+
 	// CapabilityRevisionBaseline is the minimum duplex capability revision.
 	// It covers DATA, REPLY, ERROR, PING, and PONG.
 	CapabilityRevisionBaseline uint32 = 1

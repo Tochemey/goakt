@@ -179,13 +179,21 @@ func (x *tcpAcceptor) Close() error {
 }
 
 // tcpFramedConn implements [FramedConn] over a [net.Conn].
-// readHdr and writeHdr are separate so the duplex reader and writer goroutines
-// can run concurrently without racing on a shared header scratch buffer.
+// readHdr and the write-side scratch buffers are separate so the duplex reader
+// and writer goroutines can run concurrently without racing. WriteFrames must
+// only be called from one goroutine at a time (the duplex writer loop or a
+// single handshake goroutine): writeHdrs and writeBufs are reused across
+// calls, which is safe because [net.Buffers.WriteTo] completes before return.
 type tcpFramedConn struct {
 	conn         net.Conn
 	maxFrameSize uint32
 	readHdr      [FrameHeaderSize]byte
-	writeHdr     [FrameHeaderSize]byte
+	// writeHdrs is a header arena for vectored writes: one 16-byte slot per
+	// frame of a writer batch, so multi-frame writes allocate nothing.
+	writeHdrs [duplexWriteBatchMax][FrameHeaderSize]byte
+	// writeBufs is the reusable vector for [net.Buffers.WriteTo]. Entries are
+	// nilled after each write so payload slices are not retained.
+	writeBufs net.Buffers
 }
 
 // newTCPFramedConn wraps conn as a [FramedConn].
@@ -212,8 +220,18 @@ func (x *tcpFramedConn) MaxFrameSize() uint32 {
 	return x.maxFrameSize
 }
 
-// WriteFrames encodes and writes each frame in order.
+// WriteFrames encodes and writes the frames in order as one vectored write.
+// Headers come from the per-connection arena and the buffer vector is reused,
+// so steady-state batches allocate nothing. Batches larger than the arena
+// (never produced by the duplex writer, which caps at [duplexWriteBatchMax])
+// fall back to a heap header per excess frame.
 func (x *tcpFramedConn) WriteFrames(frames ...Frame) error {
+	if len(frames) == 0 {
+		return nil
+	}
+
+	buffers := x.writeBufs[:0]
+
 	for i := range frames {
 		f := frames[i]
 		if int(f.Length) != len(f.Payload) {
@@ -224,22 +242,37 @@ func (x *tcpFramedConn) WriteFrames(frames ...Frame) error {
 			f.Version = ProtocolVersion
 		}
 
-		if err := encodeFrameHeader(x.writeHdr[:], f); err != nil {
+		var hdr []byte
+		if i < duplexWriteBatchMax {
+			hdr = x.writeHdrs[i][:]
+		} else {
+			hdr = make([]byte, FrameHeaderSize)
+		}
+
+		if err := encodeFrameHeader(hdr, f); err != nil {
 			return err
 		}
 
-		if _, err := x.conn.Write(x.writeHdr[:]); err != nil {
-			return err
-		}
-
+		buffers = append(buffers, hdr)
 		if len(f.Payload) > 0 {
-			if _, err := x.conn.Write(f.Payload); err != nil {
-				return err
-			}
+			buffers = append(buffers, f.Payload)
 		}
 	}
 
-	return nil
+	// Retain the vector's backing array for reuse before WriteTo consumes the
+	// local slice header.
+	x.writeBufs = buffers
+
+	_, err := buffers.WriteTo(x.conn)
+
+	// Drop payload references so the arena does not keep frame payloads alive
+	// until the next write.
+	for i := range x.writeBufs {
+		x.writeBufs[i] = nil
+	}
+	x.writeBufs = x.writeBufs[:0]
+
+	return err
 }
 
 // ReadFrame reads one complete frame from the connection. Protocol-version

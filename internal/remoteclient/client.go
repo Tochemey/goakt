@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -768,6 +769,42 @@ func WithDependencyRegistry(registry types.Registry) ClientOption {
 	}
 }
 
+// WithClientProtocolPin selects the remoting wire protocol dialing policy:
+// [remote.ProtocolPinAuto] (duplex-first with legacy fallback and per-peer
+// cache), [remote.ProtocolPinLegacy] (unary SendProto only), or
+// [remote.ProtocolPinDuplex] (duplex only, no fallback). The default is auto.
+func WithClientProtocolPin(pin remote.ProtocolPin) ClientOption {
+	return func(x *client) {
+		x.protocolPin = pin
+	}
+}
+
+// WithClientWriteTimeout sets the bound applied to duplex [inet.DuplexSession]
+// submissions when the caller's context carries no deadline. Zero disables
+// the bound (Submit waits until capacity, cancel, or close).
+func WithClientWriteTimeout(d time.Duration) ClientOption {
+	return func(x *client) {
+		x.writeTimeout = d
+	}
+}
+
+// WithClientMaxFrameSize sets the HELLO max_frame_size advertised to peers
+// and the initial framed-connection limit before negotiation replaces it
+// with the pairwise minimum.
+func WithClientMaxFrameSize(maxSize uint32) ClientOption {
+	return func(x *client) {
+		x.maxFrameSize = maxSize
+	}
+}
+
+// WithClientInitialCredits sets the HELLO initial_credits value and the
+// duplex outbound queue byte cap used by [inet.OpenDuplex].
+func WithClientInitialCredits(credits uint64) ClientOption {
+	return func(x *client) {
+		x.initialCredits = credits
+	}
+}
+
 // ifaceEntry pairs a reflect.Type that represents an interface with the
 // [Serializer] to use for any message that implements that interface.
 // Entries are appended via [WithClientSerializers] and evaluated in
@@ -839,6 +876,18 @@ type client struct {
 	coalescers   *xsync.Map[string, *coalescer]
 	coalescersMu sync.Mutex
 
+	// protocolPin selects duplex-first, legacy-only, or duplex-only dialing.
+	protocolPin remote.ProtocolPin
+
+	// Duplex transport limits advertised in HELLO and applied to OpenDuplex.
+	writeTimeout   time.Duration
+	maxFrameSize   uint32
+	initialCredits uint64
+
+	// peers holds one long-lived duplex session and protocol cache per endpoint.
+	peers   *xsync.Map[string, *peer]
+	peersMu sync.Mutex
+
 	// payloadPool recycles the intermediate payload frames produced when
 	// serializing outbound messages on the synchronous send paths. The frame
 	// is referenced by the request envelope only until the wire request has
@@ -867,13 +916,18 @@ var _ Client = (*client)(nil)
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns: inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
-		idleTimeout:  30 * time.Second,         // 30s before eviction
-		dialTimeout:  5 * time.Second,          // 5s dial timeout
-		keepAlive:    15 * time.Second,         // 15s TCP keep-alive
-		compression:  remote.NoCompression,     // No compression (matches server default in remote.Config)
-		clientCache:  xsync.NewMap[string, *inet.Client](),
-		coalescers:   xsync.NewMap[string, *coalescer](),
+		maxIdleConns:   inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		idleTimeout:    30 * time.Second,         // 30s before eviction
+		dialTimeout:    5 * time.Second,          // 5s dial timeout
+		keepAlive:      15 * time.Second,         // 15s TCP keep-alive
+		compression:    remote.NoCompression,     // No compression (matches server default in remote.Config)
+		clientCache:    xsync.NewMap[string, *inet.Client](),
+		coalescers:     xsync.NewMap[string, *coalescer](),
+		protocolPin:    remote.ProtocolPinAuto,
+		writeTimeout:   10 * time.Second,
+		maxFrameSize:   16 * size.MB,
+		initialCredits: remote.DefaultInitialCredits,
+		peers:          xsync.NewMap[string, *peer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
 		payloadPool: inet.NewFramePool(),
@@ -888,6 +942,13 @@ func NewClient(opts ...ClientOption) Client {
 	// Apply options
 	for _, opt := range opts {
 		opt(r)
+	}
+
+	// Install one shared TLS session cache on the stored config so every
+	// per-dial clone (legacy and duplex) resumes sessions across dials
+	// instead of handshaking from scratch each time.
+	if r.tlsConfig != nil && r.tlsConfig.ClientSessionCache == nil {
+		r.tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(32)
 	}
 
 	// Build the composite dispatcher once; it references the now-frozen
@@ -954,14 +1015,13 @@ func (r *client) RemoteChildren(ctx context.Context, host string, port int, name
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteChildrenRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1011,14 +1071,13 @@ func (r *client) RemoteDependencies(ctx context.Context, host string, port int, 
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteDependenciesRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,14 +1127,13 @@ func (r *client) RemoteKind(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteKindRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return "", err
 	}
@@ -1116,14 +1174,13 @@ func (r *client) RemoteMetric(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteMetricRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1164,14 +1221,13 @@ func (r *client) RemoteParent(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteParentRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1217,14 +1273,13 @@ func (r *client) RemotePassivationStrategy(ctx context.Context, host string, por
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemotePassivationStrategyRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1265,14 +1320,13 @@ func (r *client) RemoteRole(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteRoleRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return "", err
 	}
@@ -1339,7 +1393,6 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		initTimeout = durationpb.New(childRequest.InitTimeout)
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteSpawnChildRequest{
 		Host:                host,
 		Port:                port32,
@@ -1355,7 +1408,7 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		InitTimeout:         initTimeout,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1401,14 +1454,13 @@ func (r *client) RemoteStashSize(ctx context.Context, host string, port int, nam
 		return 0, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteStashSizeRequest{
 		Host: host,
 		Port: port32,
 		Name: name,
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return 0, err
 	}
@@ -1450,7 +1502,6 @@ func (r *client) RemoteState(ctx context.Context, host string, port int, name st
 		return false, err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteStateRequest{
 		Host:  host,
 		Port:  port32,
@@ -1458,7 +1509,7 @@ func (r *client) RemoteState(ctx context.Context, host string, port int, name st
 		State: codec.EncodeActorState(state),
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return false, err
 	}
@@ -1501,15 +1552,12 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteActivateGrainRequest{
 		Grain: grain,
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -1540,9 +1588,7 @@ func (r *client) RelocateBatch(ctx context.Context, host string, port int, reque
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1602,9 +1648,6 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteAskGrainRequest{
 		Grain:          grain,
 		Message:        marshaled,
@@ -1612,7 +1655,7 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1670,16 +1713,13 @@ func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, gra
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteTellGrainRequest{
 		Grain:   grain,
 		Message: marshaled,
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -1710,7 +1750,7 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 	// baggage correct even when many callers' messages share a batch.
 	// The payload outlives this call (it is flushed asynchronously), so it
 	// must not come from the payload pool.
-	if r.coalescing.enabled() {
+	if r.coalescing.enabled() && r.shouldUseCoalescer(to.Host(), to.Port()) {
 		marshaled, err := serializer.Serialize(message)
 		if err != nil {
 			return gerrors.NewErrInvalidMessage(err)
@@ -1756,9 +1796,7 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		}
 	}
 
-	// Non-coalesced path (WithSendCoalescing not set). One RPC per call.
-	// The payload frame is pooled: the envelope references it only until
-	// SendProto has marshaled and written the wire request.
+	// Non-coalesced path: duplex tell or legacy RemoteTellRequest fallback.
 	marshaled, pooled, err := r.serializePayload(serializer, message)
 	if err != nil {
 		return gerrors.NewErrInvalidMessage(err)
@@ -1772,23 +1810,12 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		return err
 	}
 
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteTellRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  marshaled,
-			},
-		},
-	}
-
-	resp, err := client.SendProto(ctx, request)
+	params, err := r.buildUserTellParams(ctx, from.String(), to.String(), message, serializer, marshaled)
 	if err != nil {
 		return err
 	}
 
-	return checkProtoError(resp)
+	return r.sendTell(ctx, to.Host(), to.Port(), params)
 }
 
 // injectMessageMetadata snapshots the configured context propagator's
@@ -1862,8 +1889,6 @@ func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, messa
 		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
 	}
 
-	// The payload frame is pooled: the envelope references it only until
-	// SendProto has marshaled and written the wire request.
 	marshaled, pooled, err := r.serializePayload(serializer, message)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
@@ -1872,49 +1897,17 @@ func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, messa
 		defer r.payloadPool.Put(marshaled)
 	}
 
-	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  marshaled,
-			},
-		},
-		Timeout: durationpb.New(timeout),
-	}
-
-	// Send request
-	resp, err := client.SendProto(ctx, request)
+	params, err := r.buildUserTellParams(ctx, from.String(), to.String(), message, serializer, marshaled)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := checkProtoError(resp); err != nil {
-		return nil, err
-	}
-
-	askResp, ok := resp.(*internalpb.RemoteAskResponse)
-	if !ok {
-		return nil, errors.New("invalid response type")
-	}
-
-	if len(askResp.Messages) == 0 {
-		return nil, nil
-	}
-
-	deserialized, err := serializer.Deserialize(askResp.Messages[0])
-	if err != nil {
-		return nil, gerrors.NewErrInvalidMessage(err)
-	}
-	return deserialized, nil
+	return r.sendAsk(ctx, to.Host(), to.Port(), askParams{tellParams: params, timeout: timeout}, serializer)
 }
 
 // RemoteLookup resolves the address of an actor hosted on a remote node. A
@@ -1932,9 +1925,6 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteLookupRequest{
 		Host: host,
 		Port: port32,
@@ -1942,7 +1932,7 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1979,9 +1969,6 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.GetReliableCompanionRequest{
 		Host:         host,
 		Port:         port32,
@@ -1990,7 +1977,7 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2017,127 +2004,97 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 // The call succeeds or fails as a whole at the transport layer; no per-message
 // acknowledgement is returned.
 func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
 	toStr := to.String()
+	params := make([]tellParams, 0, len(messages))
+
 	for _, message := range messages {
-		if message != nil {
-			serializer := r.resolveSerializer(message)
-			if serializer == nil {
-				return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
-			}
-
-			packed, err := serializer.Serialize(message)
-			if err != nil {
-				return gerrors.NewErrInvalidMessage(err)
-			}
-
-			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   fromStr,
-				Receiver: toStr,
-				Message:  packed,
-			})
+		if message == nil {
+			continue
 		}
+
+		serializer := r.resolveSerializer(message)
+		if serializer == nil {
+			return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+		}
+
+		packed, err := serializer.Serialize(message)
+		if err != nil {
+			return gerrors.NewErrInvalidMessage(err)
+		}
+
+		serID, typeName := serializerWireID(serializer, message, packed)
+		params = append(params, tellParams{
+			sender:   fromStr,
+			receiver: toStr,
+			payload:  packed,
+			serID:    serID,
+			typeName: typeName,
+		})
 	}
 
-	// Enrich context with metadata
 	ctx, err := r.enrichContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteTellRequest{
-		RemoteMessages: remoteMessages,
+	// One marshaled metadata blob serves the whole batch: every message
+	// shares ctx, so re-marshaling per message would only add allocations.
+	meta, _ := metadataWireFromContext(ctx)
+	for i := range params {
+		params[i].metadata = meta
 	}
 
-	// Send request
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	return checkProtoError(resp)
+	return r.sendBatchTellDuplex(ctx, to.Host(), to.Port(), params)
 }
 
 // RemoteBatchAsk delivers multiple request messages to a remote actor and
-// aggregates all responses received before the provided timeout elapses.
-//
-// The number and order of responses may not match the requests. If correlation
-// is required, include a correlation ID within your message payloads.
+// aggregates all responses. On the duplex path, responses are returned in
+// request order; on the legacy path, server collection order applies.
 func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
-	// Bound the whole round trip client-side; a lost response then fails the
-	// call after timeout instead of hanging forever on the socket read.
 	ctx, cancel := askContext(ctx, timeout)
 	defer cancel()
 
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	serializers := make([]remote.Serializer, 0, len(messages))
-	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
 	toStr := to.String()
+	params := make([]askParams, 0, len(messages))
+	serializers := make([]remote.Serializer, 0, len(messages))
 
 	for _, message := range messages {
-		if message != nil {
-			serializer := r.resolveSerializer(message)
-			if serializer == nil {
-				return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
-			}
-
-			packed, err := serializer.Serialize(message)
-			if err != nil {
-				return nil, gerrors.NewErrInvalidMessage(err)
-			}
-
-			serializers = append(serializers, serializer)
-			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   fromStr,
-				Receiver: toStr,
-				Message:  packed,
-			})
+		if message == nil {
+			continue
 		}
+
+		serializer := r.resolveSerializer(message)
+		if serializer == nil {
+			return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+		}
+
+		packed, err := serializer.Serialize(message)
+		if err != nil {
+			return nil, gerrors.NewErrInvalidMessage(err)
+		}
+
+		serID, typeName := serializerWireID(serializer, message, packed)
+		serializers = append(serializers, serializer)
+		params = append(params, askParams{
+			tellParams: tellParams{
+				sender:   fromStr,
+				receiver: toStr,
+				payload:  packed,
+				serID:    serID,
+				typeName: typeName,
+			},
+			timeout: timeout,
+		})
 	}
 
-	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessages: remoteMessages,
-		Timeout:        durationpb.New(timeout),
-	}
-
-	// Send request
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := checkProtoError(resp); err != nil {
-		return nil, err
-	}
-
-	askResp, ok := resp.(*internalpb.RemoteAskResponse)
-	if !ok {
-		return nil, errors.New("invalid response type")
-	}
-
-	responses = make([]any, 0, len(askResp.GetMessages()))
-	for index, message := range askResp.GetMessages() {
-		deserialized, err := serializers[index].Deserialize(message)
-		if err != nil {
-			return nil, gerrors.NewErrInvalidMessage(err)
-		}
-		responses = append(responses, deserialized)
-	}
-
-	return responses, nil
+	return r.sendBatchAskDuplex(ctx, to.Host(), to.Port(), params, serializers)
 }
 
 // RemoteSpawn creates an actor on a remote node using the provided spawn
@@ -2194,9 +2151,6 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	if spawnRequest.InitTimeout > 0 {
 		initTimeout = durationpb.New(spawnRequest.InitTimeout)
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteSpawnRequest{
 		Host:                host,
 		Port:                port32,
@@ -2215,7 +2169,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2291,9 +2245,6 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteReSpawnRequest{
 		Host: host,
 		Port: port32,
@@ -2301,7 +2252,7 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2339,9 +2290,6 @@ func (r *client) RemoteStop(ctx context.Context, host string, port int, name str
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteStopRequest{
 		Host: host,
 		Port: port32,
@@ -2349,7 +2297,7 @@ func (r *client) RemoteStop(ctx context.Context, host string, port int, name str
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2376,7 +2324,6 @@ func (r *client) RemoteWatch(ctx context.Context, host string, port int, name st
 		return err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteWatchRequest{
 		Host:           host,
 		Port:           port32,
@@ -2384,7 +2331,7 @@ func (r *client) RemoteWatch(ctx context.Context, host string, port int, name st
 		WatcherAddress: watcher.String(),
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2405,7 +2352,6 @@ func (r *client) RemoteUnWatch(ctx context.Context, host string, port int, name 
 		return err
 	}
 
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteUnWatchRequest{
 		Host:           host,
 		Port:           port32,
@@ -2413,7 +2359,7 @@ func (r *client) RemoteUnWatch(ctx context.Context, host string, port int, name 
 		WatcherAddress: watcher.String(),
 	}
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2440,9 +2386,6 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
 	request := &internalpb.RemoteReinstateRequest{
 		Host: host,
 		Port: port32,
@@ -2450,7 +2393,7 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 	}
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2477,6 +2420,11 @@ func (r *client) Close() {
 		c.close()
 	})
 	r.coalescers.Reset()
+
+	r.peers.Range(func(_ string, p *peer) {
+		p.closeSession()
+	})
+	r.peers.Reset()
 
 	// Close all pooled clients to release TCP connections and file descriptors
 	r.clientCache.Range(func(_ string, client *inet.Client) {

@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -1712,6 +1713,14 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 
 	serverOpts = append(serverOpts, inet.WithProtoServerSystemName(x.Name()))
 	serverOpts = append(serverOpts, inet.WithProtoServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
+	serverOpts = append(serverOpts, inet.WithProtoServerInitialCredits(remote.DefaultInitialCredits))
+	if x.remoteConfig.WriteTimeout() > 0 {
+		serverOpts = append(serverOpts, inet.WithProtoServerWriteTimeout(x.remoteConfig.WriteTimeout()))
+	}
+	serverOpts = append(serverOpts,
+		inet.WithProtoServerDuplexTellHandler(x.duplexRemoteTell),
+		inet.WithProtoServerDuplexAskHandler(x.duplexRemoteAsk),
+	)
 
 	// Detach the server's base context from Start's cancelation/deadline: the server's
 	// lifetime is governed by Stop, and a bounded startup context (a DI OnStart hook, a
@@ -1808,6 +1817,272 @@ func (x *actorSystem) stopRemoteServer(timeout time.Duration) error {
 	return nil
 }
 
+// duplexRemoteTell handles a fire-and-forget duplex DATA envelope on the
+// acceptor read loop. It deserializes the payload, applies context
+// propagation, and enqueues to the local actor mailbox. Failures are
+// dead-lettered; the handler must not block beyond mailbox enqueue so the
+// duplex read loop can keep draining the socket.
+func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelope) {
+	if !x.remotingEnabled.Load() {
+		return
+	}
+
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		x.logger.Errorf("duplex remote tell: context propagation failed: %v", err)
+		return
+	}
+
+	payload, err := x.deserializeDuplexPayload(env)
+	if err != nil {
+		x.logger.Errorf("duplex remote tell: deserialize for %s: %v", env.Receiver, err)
+		return
+	}
+
+	x.deliverRemoteTellPayload(ctx, env.Sender, env.Receiver, payload)
+}
+
+// duplexRemoteAsk handles an expectsReply duplex DATA envelope for a user
+// message. It looks up the local actor, waits for a reply within the ask
+// timeout (or the remaining context deadline, whichever is sooner), and
+// encodes the response as a REPLY envelope.
+//
+// Application failures are returned as a REPLY body carrying
+// [internalpb.Error] with a nil error so client checkProtoError semantics
+// match the legacy RemoteAskRequest path. Transport-level failures return
+// a non-nil error and become request-scoped ERROR frames.
+func (x *actorSystem) duplexRemoteAsk(ctx context.Context, env inet.DataEnvelope) (inet.ReplyEnvelope, error) {
+	if !x.remotingEnabled.Load() {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled)), nil
+	}
+
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+	}
+
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
+	payload, err := x.deserializeDuplexPayload(env)
+	if err != nil {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+	}
+
+	receiver := env.Receiver
+	node, exist := x.actors.node(receiver)
+	if !exist {
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, parseErr)), nil
+		}
+
+		if err := x.validateRemoteHost(addr.Host(), int32(addr.Port())); err != nil {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+		}
+
+		node, exist = x.actors.node(addr.String())
+		if !exist {
+			notFound := gerrors.NewErrAddressNotFound(receiver)
+			x.logger.Errorf("duplex remote ask: address=%s not found: %v", receiver, notFound)
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, notFound)), nil
+		}
+	}
+
+	pid := node.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, err)), nil
+	}
+
+	if !pid.IsRunning() {
+		err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)), nil
+	}
+
+	timeout := x.askTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+			timeout = remaining
+		}
+	}
+
+	reply, err := x.handleRemoteAsk(ctx, pid, payload, timeout)
+	if err != nil {
+		err = gerrors.NewErrRemoteSendFailure(err)
+		x.logger.Errorf("duplex remote ask failed: %v", err)
+		if errors.Is(err, gerrors.ErrRequestTimeout) {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_DEADLINE_EXCEEDED, err)), nil
+		}
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)), nil
+	}
+
+	return x.encodeDuplexReply(reply)
+}
+
+// deserializeDuplexPayload decodes a duplex DATA envelope payload. Internal
+// proto (serializer ID 0) unmarshals via the type registry using TypeName;
+// all other IDs use the remoting composite serializer on the self-describing
+// frame in Payload.
+func (x *actorSystem) deserializeDuplexPayload(env inet.DataEnvelope) (any, error) {
+	switch env.SerializerID {
+	case inet.SerializerIDInternalProto:
+		msgType, err := inet.FindMessageType(protoreflect.FullName(env.TypeName))
+		if err != nil {
+			return nil, err
+		}
+
+		msg := msgType.New().Interface()
+		if err := proto.Unmarshal(env.Payload, msg); err != nil {
+			return nil, err
+		}
+		return msg, nil
+	default:
+		return x.remoting.Serializer(nil).Deserialize(env.Payload)
+	}
+}
+
+// encodeDuplexReply serializes a user ask response into a REPLY envelope,
+// mapping the resolved serializer to the duplex serializer ID and typeRef
+// rules (public proto / JSON / CBOR / custom).
+func (x *actorSystem) encodeDuplexReply(reply any) (inet.ReplyEnvelope, error) {
+	if reply == nil {
+		return inet.ReplyEnvelope{}, nil
+	}
+
+	serializer := x.remoting.Serializer(reply)
+	if serializer == nil {
+		return inet.ReplyEnvelope{}, fmt.Errorf("no serializer for reply type %T", reply)
+	}
+
+	payload, err := serializer.Serialize(reply)
+	if err != nil {
+		return inet.ReplyEnvelope{}, err
+	}
+
+	serID := byte(inet.SerializerIDCustom)
+	typeName := ""
+	switch serializer.(type) {
+	case *remote.ProtoSerializer:
+		serID = inet.SerializerIDPublicProto
+		if msg, ok := reply.(proto.Message); ok {
+			typeName = string(proto.MessageName(msg))
+		}
+	case *remote.JSONSerializer:
+		serID = inet.SerializerIDJSON
+		typeName = envTypeNameFromFrame(payload)
+	case *remote.CBORSerializer:
+		serID = inet.SerializerIDCBOR
+		typeName = envTypeNameFromFrame(payload)
+	}
+
+	return inet.ReplyEnvelope{
+		TypeName:     typeName,
+		SerializerID: serID,
+		Payload:      payload,
+	}, nil
+}
+
+// duplexErrorReply encodes an application-level [internalpb.Error] as a REPLY
+// body with serializer ID 0 so the client can run checkProtoError on the
+// decoded message instead of treating it as a transport ERROR frame.
+func duplexErrorReply(errMsg *internalpb.Error) inet.ReplyEnvelope {
+	payload, err := proto.Marshal(errMsg)
+	if err != nil {
+		return inet.ReplyEnvelope{}
+	}
+	return inet.ReplyEnvelope{
+		TypeName:     string(proto.MessageName(errMsg)),
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      payload,
+	}
+}
+
+// envTypeNameFromFrame extracts the fully-qualified type name from a
+// self-describing serializer frame (totalLen | nameLen | name | bytes).
+// Returns empty string when the frame is truncated or inconsistent.
+func envTypeNameFromFrame(data []byte) string {
+	if len(data) < 8 {
+		return ""
+	}
+
+	nameLen := int(binary.BigEndian.Uint32(data[4:8]))
+	if nameLen <= 0 || 8+nameLen > len(data) {
+		return ""
+	}
+	return string(data[8 : 8+nameLen])
+}
+
+// deliverRemoteTellPayload dispatches an already-deserialized remote tell to a
+// local actor. Per-message failures (unknown actor, dead actor, mailbox
+// refused) are routed to the local dead-letter actor and never returned to
+// the wire caller — matching the legacy batch tell contract.
+func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, receiver string, payload any) {
+	logger := x.logger
+
+	parseForFailure := func(cause error) (*address.Address, bool) {
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, cause, parseErr)
+			return nil, false
+		}
+		return addr, true
+	}
+
+	node, exist := x.actors.node(receiver)
+	if !exist {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+
+		from := x.newRemoteSenderPID(sender)
+		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	pid := node.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+
+		from := x.newRemoteSenderPID(sender)
+		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	if !pid.IsRunning() {
+		err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+
+		from := x.newRemoteSenderPID(sender)
+		logger.Errorf("remote tell: actor=%s not running: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	from := x.newRemoteSenderPID(sender)
+	if err := x.handleRemoteTell(ctx, from, pid, payload); err != nil {
+		addr, ok := parseForFailure(err)
+		if !ok {
+			return
+		}
+		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+	}
+}
+
 // deliverRemoteTellMessage dispatches a single RemoteMessage from the
 // inbound batch to its local target actor. Per-message failures (bad
 // address, bad metadata, unknown actor, dead actor, mailbox refused) are
@@ -1817,28 +2092,6 @@ func (x *actorSystem) stopRemoteServer(timeout time.Duration) error {
 func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage) {
 	logger := x.logger
 	receiver := message.GetReceiver()
-
-	// The wire receiver is already in canonical form — it was produced by
-	// Address.String() on the sender side, and Parse(s).String() == s for any
-	// well-formed input. So we
-	// look up the local actor by the raw string on the happy path and only
-	// materialize a *address.Address when a dead-letter or structured log
-	// actually needs one. This keeps inbound dispatch allocation-free for
-	// address parsing.
-	//
-	// parseForFailure is the cold-path helper: it materializes the structured
-	// receiver address so callers can publish a meaningful dead-letter entry
-	// (Sender/Receiver on Deadletter are *address.Address). When parsing
-	// fails the receiver was malformed at the wire — log and bail since we
-	// have no routing information for a dead-letter record.
-	parseForFailure := func(cause error) (*address.Address, bool) {
-		addr, parseErr := address.Parse(receiver)
-		if parseErr != nil {
-			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, cause, parseErr)
-			return nil, false
-		}
-		return addr, true
-	}
 
 	// Decode the payload exactly once. Both the dispatch path
 	// (handleRemoteTell) and every dead-letter publication downstream need
@@ -1855,8 +2108,9 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 
 	msgCtx, err := x.messageMetadata(ctx, message.GetMetadata())
 	if err != nil {
-		addr, ok := parseForFailure(err)
-		if !ok {
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, err, parseErr)
 			return
 		}
 
@@ -1866,53 +2120,7 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		return
 	}
 
-	node, exist := x.actors.node(receiver)
-	if !exist {
-		err := gerrors.NewErrAddressNotFound(receiver)
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-		from := x.newRemoteSenderPID(message.GetSender())
-		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-		return
-	}
-
-	pid := node.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(receiver)
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-		from := x.newRemoteSenderPID(message.GetSender())
-		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-		return
-	}
-
-	if !pid.IsRunning() {
-		err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-		from := x.newRemoteSenderPID(message.GetSender())
-		logger.Errorf("remote tell: actor=%s not running: %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-		return
-	}
-
-	from := x.newRemoteSenderPID(message.GetSender())
-	if err := x.handleRemoteTell(msgCtx, from, pid, payload); err != nil {
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-	}
+	x.deliverRemoteTellPayload(msgCtx, message.GetSender(), receiver, payload)
 }
 
 // newRemoteSenderPID materializes a remote sender identity from the wire

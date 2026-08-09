@@ -27,6 +27,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/tochemey/goakt/v4/internal/types"
 )
@@ -39,34 +40,78 @@ var ErrDuplexClosed = errors.New("tcp: duplex connection is closed")
 // frame within the caller's deadline.
 var ErrDuplexBackpressure = errors.New("tcp: duplex outbound queue full")
 
-// duplexConn owns one reader goroutine, one writer goroutine, and a
-// byte-bounded outbound queue over a [FramedConn]. Submit admits frames up
-// to the byte cap; Recv delivers inbound frames from the reader loop.
-type duplexConn struct {
-	framed      FramedConn
-	maxOutBytes int64
+// duplexWriteBatchMax is the maximum number of frames the writer coalesces
+// into one vectored WriteFrames call per wakeup.
+const duplexWriteBatchMax = 32
 
-	mu       sync.Mutex
-	space    *sync.Cond
+// duplexConn owns one reader goroutine, one writer goroutine, a byte-bounded
+// outbound queue, and a correlation pending table over a [FramedConn].
+// It implements [DuplexSession].
+type duplexConn struct {
+	// framed is the underlying framed connection (post-HELLO, post-compression).
+	framed FramedConn
+	// maxOutBytes caps admitted outbound header+payload bytes (InitialCredits).
+	maxOutBytes int64
+	// writeTimeout bounds Submit when the caller's context has no deadline.
+	writeTimeout time.Duration
+
+	mu sync.Mutex
+	// space wakes Submit waiters when outbound capacity is released.
+	space *sync.Cond
+	// outBytes is the currently admitted outbound byte cost under mu.
 	outBytes int64
-	out      chan Frame
-	inbound  chan Frame
+	// out is the writer queue of admitted frames.
+	out chan Frame
+	// inbound delivers non-correlated frames to [Recv] (DATA, PING, …).
+	inbound chan Frame
+
+	// pending correlates Ask waiters by correlation ID.
+	pending *pendingTable
+	// nextCorr allocates nonzero correlation IDs for Ask (starts at 1).
+	nextCorr atomic.Uint64
 
 	closeOnce sync.Once
-	closed    chan types.Unit
+	// closed is closed exactly once to signal shutdown to loops and waiters.
+	closed chan types.Unit
 	// closing records that the local side initiated Close, so loop errors
 	// caused by tearing down our own connection are not recorded as peer
 	// failures. Errors observed while closing is false are genuine.
-	closing  atomic.Bool
-	wg       sync.WaitGroup
+	closing atomic.Bool
+	// closeDone ensures [Close] runs its teardown sequence at most once and
+	// subsequent callers observe the same stored error.
+	closeDone sync.Once
+	// framedCloseOnce closes the underlying framed connection at most once
+	// from either [Close] or [failTransport].
+	framedCloseOnce sync.Once
+	// closeResult stores the first [Close] outcome for idempotent returns.
+	closeResult atomic.Pointer[error]
+	// writeWG / readWG track the writer and reader loops for ordered shutdown:
+	// drain writes, then close framed to unblock the reader.
+	writeWG  sync.WaitGroup
+	readWG   sync.WaitGroup
 	writeErr atomic.Pointer[error]
 	readErr  atomic.Pointer[error]
+}
+
+// duplexCloseDrainGrace is used when writeTimeout is unset so Close cannot
+// block forever on a peer that stopped reading.
+const duplexCloseDrainGrace = 5 * time.Second
+
+// duplexConnOption configures a [duplexConn].
+type duplexConnOption func(*duplexConn)
+
+// withDuplexWriteTimeout sets the bound applied by [duplexConn.Submit] when
+// the caller's context carries no deadline.
+func withDuplexWriteTimeout(d time.Duration) duplexConnOption {
+	return func(x *duplexConn) {
+		x.writeTimeout = d
+	}
 }
 
 // newDuplexConn starts reader and writer goroutines for framed.
 // maxOutBytes caps admitted outbound payload+header bytes; values <= 0
 // default to defaultMaxFrameSize.
-func newDuplexConn(framed FramedConn, maxOutBytes int64) *duplexConn {
+func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOption) *duplexConn {
 	if maxOutBytes <= 0 {
 		maxOutBytes = int64(defaultMaxFrameSize)
 	}
@@ -77,20 +122,81 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64) *duplexConn {
 		out:         make(chan Frame, 64),
 		inbound:     make(chan Frame, 64),
 		closed:      make(chan types.Unit),
+		pending:     newPendingTable(),
 	}
 	x.space = sync.NewCond(&x.mu)
+	x.nextCorr.Store(1)
 
-	x.wg.Add(2)
+	for _, opt := range opts {
+		opt(x)
+	}
+
+	x.writeWG.Add(1)
+	x.readWG.Add(1)
 	go x.writeLoop()
 	go x.readLoop()
 	return x
 }
 
+// Tell enqueues a fire-and-forget frame. Correlation is forced to zero and
+// the expectsReply flag is cleared.
+func (x *duplexConn) Tell(ctx context.Context, frame Frame) error {
+	frame.Correlation = 0
+	frame.Flags &^= FrameFlagExpectsReply
+	return x.Submit(ctx, frame)
+}
+
+// Ask assigns a correlation ID, registers a waiter, submits frame with
+// expectsReply, and blocks until a REPLY/ERROR arrives, ctx is done, or the
+// duplex closes. Timeout abandons the waiter so a late reply is dropped.
+func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
+	corr := x.nextCorr.Add(1)
+	if corr == 0 {
+		corr = x.nextCorr.Add(1)
+	}
+
+	frame.Correlation = corr
+	frame.Flags |= FrameFlagExpectsReply
+	if frame.Version == 0 {
+		frame.Version = ProtocolVersion
+	}
+
+	// Channel ownership: receiving from wait transfers ownership to this
+	// goroutine (pool after use). On the abandon paths, abandon pools the
+	// channel only when it wins the slot; a lost race means a concurrent
+	// complete may still send, so the channel is left to the GC (see
+	// [pendingTable.register]).
+	wait := x.pending.register(corr)
+	if err := x.Submit(ctx, frame); err != nil {
+		_ = x.pending.abandon(corr)
+		return Frame{}, err
+	}
+
+	select {
+	case resp := <-wait:
+		putPendingWaiter(wait)
+		if resp.Type == FrameTypeError {
+			return resp, decodeErrorPayload(resp.Payload)
+		}
+		return resp, nil
+	case <-ctx.Done():
+		_ = x.pending.abandon(corr)
+		return Frame{}, ctx.Err()
+	case <-x.closed:
+		_ = x.pending.abandon(corr)
+		return Frame{}, x.closedError()
+	}
+}
+
 // Submit enqueues frame for writing. It blocks until there is byte capacity,
-// ctx is done, or the duplex is closed. A canceled context returns ctx.Err();
-// a deadline that expires while waiting for capacity returns
-// [ErrDuplexBackpressure].
+// ctx is done, or the duplex is closed. When ctx has no deadline and a write
+// timeout is configured, that timeout bounds the wait. A canceled context
+// returns ctx.Err(); a deadline that expires while waiting for capacity
+// returns [ErrDuplexBackpressure].
 func (x *duplexConn) Submit(ctx context.Context, frame Frame) error {
+	ctx, cancel := x.bindWriteDeadline(ctx)
+	defer cancel()
+
 	if frame.Version == 0 {
 		frame.Version = ProtocolVersion
 	}
@@ -151,9 +257,9 @@ func (x *duplexConn) Submit(ctx context.Context, frame Frame) error {
 	}
 }
 
-// Recv returns the next inbound frame or an error when the reader stops.
-// Buffered inbound frames are drained before a closed connection error so
-// shutdown does not drop already-delivered frames.
+// Recv returns the next inbound frame that is not a correlated REPLY/ERROR
+// (those complete [Ask] waiters). Buffered inbound frames are drained before
+// a closed connection error so shutdown does not drop already-delivered frames.
 func (x *duplexConn) Recv(ctx context.Context) (Frame, error) {
 	select {
 	case frame := <-x.inbound:
@@ -176,32 +282,61 @@ func (x *duplexConn) Recv(ctx context.Context) (Frame, error) {
 	}
 }
 
-// Close stops both loops and closes the underlying framed connection.
-// When the writer failed, that error is returned.
+// Close stops admitting new frames, drains the outbound queue (so a final
+// ERROR can reach the peer), then closes the underlying framed connection.
+// When the writer failed, that error is returned. Repeated calls are no-ops
+// that return the first close error.
 func (x *duplexConn) Close() error {
-	x.closing.Store(true)
-	closeErr := x.signalClose()
-	x.wg.Wait()
+	x.closeDone.Do(func() {
+		x.closing.Store(true)
+		x.signalClose()
 
-	if errPtr := x.writeErr.Load(); errPtr != nil {
+		drainBudget := x.writeTimeout
+		if drainBudget <= 0 {
+			drainBudget = duplexCloseDrainGrace
+		}
+
+		done := make(chan types.Unit)
+		go func() {
+			x.writeWG.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(drainBudget):
+			// Peer stopped reading: interrupt the blocked WriteFrames so
+			// shutdown cannot hang indefinitely.
+			_ = x.closeFramed()
+			<-done
+		}
+
+		closeErr := x.closeFramed()
+		x.readWG.Wait()
+
+		if errPtr := x.writeErr.Load(); errPtr != nil {
+			closeErr = *errPtr
+		}
+		x.closeResult.Store(&closeErr)
+	})
+
+	if errPtr := x.closeResult.Load(); errPtr != nil {
 		return *errPtr
 	}
-
-	return closeErr
+	return nil
 }
 
-// signalClose closes the framed connection exactly once without waiting for
-// the reader/writer goroutines. The loops call this on error; [Close] waits.
-func (x *duplexConn) signalClose() error {
-	var closeErr error
+// signalClose marks the duplex closed and wakes waiters without tearing down
+// the framed connection. The writer drains queued frames first; [Close] then
+// closes the framed connection to unblock the reader.
+func (x *duplexConn) signalClose() {
 	x.closeOnce.Do(func() {
 		close(x.closed)
 		x.mu.Lock()
 		x.space.Broadcast()
 		x.mu.Unlock()
-		closeErr = x.framed.Close()
+		x.pending.failAll(Frame{Type: FrameTypeError})
 	})
-	return closeErr
 }
 
 // release returns cost bytes to the outbound budget and wakes every waiting
@@ -217,48 +352,99 @@ func (x *duplexConn) release(cost int64) {
 }
 
 // writeLoop drains the outbound queue onto the framed connection until the
-// duplex closes or a write fails.
+// duplex closes or a write fails. Ready frames are coalesced into one
+// vectored WriteFrames call per wakeup. On shutdown it flushes any frames
+// already admitted so connection-scoped ERROR reaches the peer.
 func (x *duplexConn) writeLoop() {
-	defer x.wg.Done()
+	defer x.writeWG.Done()
+
+	batch := make([]Frame, 0, duplexWriteBatchMax)
+	costs := make([]int64, 0, duplexWriteBatchMax)
 
 	for {
+		batch = batch[:0]
+		costs = costs[:0]
+
 		select {
 		case <-x.closed:
+			x.drainOutbound()
 			return
 		case frame := <-x.out:
-			cost := int64(FrameHeaderSize) + int64(frame.Length)
-			if err := x.framed.WriteFrames(frame); err != nil {
-				// A write error during a locally initiated Close is our own
-				// teardown, not a peer failure, and is not recorded.
-				if !x.closing.Load() {
-					x.writeErr.Store(&err)
-				}
+			batch = append(batch, frame)
+			costs = append(costs, int64(FrameHeaderSize)+int64(frame.Length))
+		}
 
-				_ = x.signalClose()
-				return
+		for len(batch) < duplexWriteBatchMax {
+			select {
+			case frame := <-x.out:
+				batch = append(batch, frame)
+				costs = append(costs, int64(FrameHeaderSize)+int64(frame.Length))
+			default:
+				goto flush
 			}
+		}
 
+	flush:
+		x.applyWriteDeadline()
+		if err := x.framed.WriteFrames(batch...); err != nil {
+			if !x.closing.Load() {
+				x.writeErr.Store(&err)
+			}
+			x.failTransport()
+			return
+		}
+
+		for _, cost := range costs {
 			x.release(cost)
 		}
 	}
 }
 
-// readLoop pumps inbound frames from the framed connection into the inbound
-// channel until the duplex closes or a read fails.
+// drainOutbound writes every frame already admitted to the outbound queue.
+// Called once during shutdown after [signalClose] so no new Submits succeed.
+func (x *duplexConn) drainOutbound() {
+	for {
+		select {
+		case frame := <-x.out:
+			x.applyWriteDeadline()
+			if err := x.framed.WriteFrames(frame); err != nil {
+				if !x.closing.Load() {
+					x.writeErr.Store(&err)
+				}
+				return
+			}
+			x.release(int64(FrameHeaderSize) + int64(frame.Length))
+		default:
+			return
+		}
+	}
+}
+
+// readLoop pumps inbound frames from the framed connection. Correlated
+// REPLY/ERROR frames complete [Ask] waiters; late replies after a local
+// timeout are dropped. Everything else is delivered on the inbound channel
+// for [Recv].
 func (x *duplexConn) readLoop() {
-	defer x.wg.Done()
+	defer x.readWG.Done()
 
 	for {
 		frame, err := x.framed.ReadFrame()
 		if err != nil {
-			// Same guard as the writer: a read failure triggered by our own
-			// locally initiated Close must not masquerade as a peer error.
 			if !x.closing.Load() {
 				x.readErr.Store(&err)
 			}
 
-			_ = x.signalClose()
+			x.failTransport()
 			return
+		}
+
+		if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
+			if frame.Correlation != 0 {
+				// Timeout abandons the waiter; a late REPLY/ERROR must not
+				// fill inbound or it will stall the reader after 64 drops.
+				_ = x.pending.complete(frame.Correlation, frame)
+				continue
+			}
 		}
 
 		select {
@@ -267,6 +453,54 @@ func (x *duplexConn) readLoop() {
 		case x.inbound <- frame:
 		}
 	}
+}
+
+// failTransport marks the duplex closed and releases the underlying socket
+// when the peer drops the connection without a local [Close]. Closing the
+// framed connection unblocks a writer stuck in WriteFrames and prevents FD
+// retention until the next outbound call.
+func (x *duplexConn) failTransport() {
+	x.signalClose()
+	if !x.closing.Load() {
+		_ = x.closeFramed()
+	}
+}
+
+// closeFramed closes the underlying framed connection at most once.
+func (x *duplexConn) closeFramed() error {
+	var err error
+	x.framedCloseOnce.Do(func() {
+		err = x.framed.Close()
+	})
+	return err
+}
+
+// applyWriteDeadline bounds the next socket write when writeTimeout is set so
+// a stalled peer cannot block the writer loop indefinitely.
+func (x *duplexConn) applyWriteDeadline() {
+	if x.writeTimeout <= 0 {
+		return
+	}
+	if nc := x.framed.NetConn(); nc != nil {
+		_ = nc.SetWriteDeadline(time.Now().Add(x.writeTimeout))
+	}
+}
+
+// bindWriteDeadline applies writeTimeout when ctx has no deadline.
+func (x *duplexConn) bindWriteDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	if x.writeTimeout <= 0 {
+		return ctx, func() {}
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, x.writeTimeout)
+}
+
+// IsClosed reports whether the duplex has been signaled closed. Part of the
+// [DuplexSession] surface so owners can discard stale sessions before use.
+func (x *duplexConn) IsClosed() bool {
+	return x.isClosed()
 }
 
 // isClosed reports whether the duplex has been signaled closed. It only reads

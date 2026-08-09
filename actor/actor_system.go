@@ -2919,6 +2919,10 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientDialTimeout(x.remoteConfig.DialTimeout()),
 		// set the keep alive interval for the remoting client
 		remoteclient.WithClientKeepAlive(x.remoteConfig.KeepAlive()),
+		remoteclient.WithClientProtocolPin(x.remoteConfig.ProtocolPin()),
+		remoteclient.WithClientWriteTimeout(x.remoteConfig.WriteTimeout()),
+		remoteclient.WithClientMaxFrameSize(x.remoteConfig.MaxFrameSize()),
+		remoteclient.WithClientInitialCredits(remote.DefaultInitialCredits),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
