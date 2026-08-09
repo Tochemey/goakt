@@ -24,11 +24,37 @@ package net
 
 import (
 	"crypto/sha256"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestLogicalFrameAllocSize(t *testing.T) {
+	t.Parallel()
+
+	size, err := logicalFrameAllocSize(0, 0)
+	require.NoError(t, err)
+	assert.Equal(t, FrameHeaderSize, size)
+
+	size, err = logicalFrameAllocSize(4, 12)
+	require.NoError(t, err)
+	assert.Equal(t, FrameHeaderSize+16, size)
+
+	// Negative lengths are rejected before any unsigned conversion.
+	_, err = logicalFrameAllocSize(-1, 0)
+	require.ErrorIs(t, err, ErrMessageTooLarge)
+
+	// Bodies summing to just under MaxUint32 must still leave room for the
+	// header. MaxInt32 operands keep the case expressible on 32-bit ints.
+	_, err = logicalFrameAllocSize(math.MaxInt32, math.MaxInt32)
+	require.ErrorIs(t, err, ErrMessageTooLarge)
+
+	// Near-MaxInt inputs must be rejected before uint64 summation wraps.
+	_, err = logicalFrameAllocSize(math.MaxInt, math.MaxInt)
+	require.ErrorIs(t, err, ErrMessageTooLarge)
+}
 
 func TestSplitAndJoinLogicalChunks(t *testing.T) {
 	payload := make([]byte, 3000)

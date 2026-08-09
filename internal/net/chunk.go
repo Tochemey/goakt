@@ -25,7 +25,29 @@ package net
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 )
+
+// logicalFrameAllocSize returns the byte count of a logical frame with the
+// given prefix and payload lengths. Lengths are bounded before summing so
+// near-MaxInt inputs cannot wrap uint64 arithmetic; the result must fit both
+// the on-wire uint32 Length field and the int size passed to make.
+func logicalFrameAllocSize(prefixLen, payloadLen int) (int, error) {
+	if prefixLen < 0 || payloadLen < 0 {
+		return 0, fmt.Errorf("%w: negative length", ErrMessageTooLarge)
+	}
+	// Reject before summing: MaxInt+MaxInt wraps uint64, and body length is a
+	// uint32 on the wire anyway.
+	if uint64(prefixLen) > math.MaxUint32 || uint64(payloadLen) > math.MaxUint32 {
+		return 0, fmt.Errorf("%w: size exceeds the 32-bit frame length limit", ErrMessageTooLarge)
+	}
+
+	total := uint64(prefixLen) + uint64(payloadLen) + uint64(FrameHeaderSize)
+	if total > math.MaxUint32 || total > uint64(math.MaxInt) {
+		return 0, fmt.Errorf("%w: size %d exceeds the 32-bit frame length limit", ErrMessageTooLarge, total)
+	}
+	return int(total), nil
+}
 
 // encodeLogicalFrame serializes f as the contiguous logical bytes carried by a
 // CHUNK group: the 16-byte duplex header followed by the payload.
@@ -34,11 +56,17 @@ func encodeLogicalFrame(f Frame) ([]byte, error) {
 		f.Version = ProtocolVersion
 	}
 
-	if int(f.Length) != f.bodyLen() {
-		f.Length = uint32(f.bodyLen())
+	total, err := logicalFrameAllocSize(len(f.Prefix), len(f.Payload))
+	if err != nil {
+		return nil, err
 	}
 
-	out := make([]byte, FrameHeaderSize+f.bodyLen())
+	bodyLen := total - FrameHeaderSize
+	if int(f.Length) != bodyLen {
+		f.Length = uint32(bodyLen)
+	}
+
+	out := make([]byte, total)
 	if err := encodeFrameHeader(out[:FrameHeaderSize], f); err != nil {
 		return nil, err
 	}
@@ -72,6 +100,43 @@ func decodeLogicalFrame(buf []byte, maxFrameSize uint32) (Frame, error) {
 	return frame, nil
 }
 
+// validateChunkSplit rejects split parameters that cannot produce a valid
+// CHUNK group: a chunkSize too small to hold the uvarint prefix, a zero group
+// correlation, or an empty logical frame.
+func validateChunkSplit(logical []byte, correlation uint64, chunkSize uint32) error {
+	if chunkSize <= uint32(binary.MaxVarintLen64*2) {
+		return fmt.Errorf("tcp: chunk size %d cannot hold the chunk uvarint prefix", chunkSize)
+	}
+
+	if correlation == 0 {
+		return fmt.Errorf("tcp: chunk group correlation must be nonzero")
+	}
+
+	if len(logical) == 0 {
+		return fmt.Errorf("tcp: empty logical frame cannot be chunked")
+	}
+	return nil
+}
+
+// chunkFlags returns the frame flags for one chunk: firstChunk (plus
+// expectsReply when wantReply is set) on the first frame, lastChunk on the
+// final frame.
+func chunkFlags(first, last, wantReply bool) byte {
+	flags := byte(0)
+
+	if first {
+		flags |= FrameFlagFirstChunk
+		if wantReply {
+			flags |= FrameFlagExpectsReply
+		}
+	}
+
+	if last {
+		flags |= FrameFlagLastChunk
+	}
+	return flags
+}
+
 // splitLogicalChunks builds the CHUNK frames for logical. Each frame's body
 // (uvarint prefix plus data) is capped at chunkSize so a receiver's pooled
 // ReadFrame buffer lands in the chunkSize bucket instead of the next power of
@@ -81,16 +146,8 @@ func decodeLogicalFrame(buf []byte, maxFrameSize uint32) (Frame, error) {
 // Chunk data is a subslice of logical. Uvarint prefixes for every chunk share
 // one arena allocation so the split copies no logical bytes per chunk.
 func splitLogicalChunks(logical []byte, correlation uint64, lane byte, chunkSize uint32, wantReply bool) ([]Frame, error) {
-	if chunkSize <= uint32(binary.MaxVarintLen64*2) {
-		return nil, fmt.Errorf("tcp: chunk size %d cannot hold the chunk uvarint prefix", chunkSize)
-	}
-
-	if correlation == 0 {
-		return nil, fmt.Errorf("tcp: chunk group correlation must be nonzero")
-	}
-
-	if len(logical) == 0 {
-		return nil, fmt.Errorf("tcp: empty logical frame cannot be chunked")
+	if err := validateChunkSplit(logical, correlation, chunkSize); err != nil {
+		return nil, err
 	}
 
 	total := uint64(len(logical))
@@ -111,30 +168,15 @@ func splitLogicalChunks(logical []byte, correlation uint64, lane byte, chunkSize
 		}
 		prefix := prefixArena[prefixStart:]
 
-		end := offset + int(chunkSize) - len(prefix)
-		if end > len(logical) {
-			end = len(logical)
-		}
+		end := min(offset+int(chunkSize)-len(prefix), len(logical))
 
 		data := logical[offset:end]
 		last := end == len(logical)
 
-		flags := byte(0)
-		if first {
-			flags |= FrameFlagFirstChunk
-			if wantReply {
-				flags |= FrameFlagExpectsReply
-			}
-		}
-
-		if last {
-			flags |= FrameFlagLastChunk
-		}
-
 		frames = append(frames, Frame{
 			Version:     ProtocolVersion,
 			Type:        FrameTypeChunk,
-			Flags:       flags,
+			Flags:       chunkFlags(first, last, wantReply),
 			Lane:        lane,
 			Length:      uint32(len(prefix) + len(data)),
 			Correlation: correlation,

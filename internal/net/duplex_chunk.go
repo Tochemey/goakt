@@ -26,7 +26,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"google.golang.org/protobuf/proto"
 
@@ -55,11 +54,9 @@ func (x *duplexConn) submitLogical(ctx context.Context, frame Frame) error {
 		frame.Lane = x.lane
 	}
 
-	logicalLen := FrameHeaderSize + frame.bodyLen()
-	if uint64(logicalLen) > math.MaxUint32 {
-		// The logical frame header carries a 32-bit length, so no message
-		// beyond 4 GiB is expressible on the wire regardless of config.
-		return fmt.Errorf("%w: size %d exceeds the 32-bit frame length limit", ErrMessageTooLarge, logicalLen)
+	logicalLen, err := logicalFrameAllocSize(len(frame.Prefix), len(frame.Payload))
+	if err != nil {
+		return err
 	}
 
 	if !x.shouldChunk(logicalLen) {
