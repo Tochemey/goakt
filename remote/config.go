@@ -43,6 +43,10 @@ import (
 // closed, so this bounds the peak idle sockets kept per peer.
 const DefaultMaxIdleConns = inet.DefaultMaxIdleConns
 
+// DefaultMaxConcurrentLargeTransfers is the default HELLO / config cap on
+// concurrent large-message transfers per duplex connection.
+const DefaultMaxConcurrentLargeTransfers uint32 = 4
+
 // Config defines the remote config.
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so
@@ -70,6 +74,7 @@ type Config struct {
 	dialTimeout  time.Duration
 	keepAlive    time.Duration
 	tlsInfo      *gtls.Info
+	protocolPin  ProtocolPin
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -93,6 +98,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
 		dialTimeout:     5 * time.Second,     // 5s dial timeout
 		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
+		protocolPin:     ProtocolPinAuto,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -120,6 +126,7 @@ func DefaultConfig() *Config {
 		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
 		dialTimeout:     5 * time.Second,     // 5s dial timeout
 		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
+		protocolPin:     ProtocolPinAuto,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -254,6 +261,12 @@ func (x *Config) TLS() *gtls.Info {
 	return x.tlsInfo
 }
 
+// ProtocolPin returns the remoting protocol pin set with [WithProtocolPin].
+// The default is [ProtocolPinAuto].
+func (x *Config) ProtocolPin() ProtocolPin {
+	return x.protocolPin
+}
+
 func (x *Config) Validate() error {
 	return validation.
 		New(validation.FailFast()).
@@ -266,5 +279,6 @@ func (x *Config) Validate() error {
 		AddAssertion(x.maxIdleConns > 0, "maxIdleConns must be greater than 0").
 		AddAssertion(x.dialTimeout > 0, "dialTimeout must be greater than 0").
 		AddAssertion(x.keepAlive > 0, "keepAlive must be greater than 0").
+		AddAssertion(x.protocolPin.Valid(), "invalid protocol pin").
 		Validate()
 }

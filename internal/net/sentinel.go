@@ -38,6 +38,17 @@ var (
 	ErrClientClosed = errors.New("tcp: client is closed")
 	// ErrFrameTooLarge is returned when a received proto frame exceeds the maximum allowed size.
 	ErrFrameTooLarge = errors.New("tcp: proto frame exceeds maximum size")
+	// ErrUnsupportedProtocolVersion is returned when a duplex frame header carries
+	// a version other than [ProtocolVersion]. The protocol layer answers with a
+	// connection-scoped ERROR frame before closing.
+	ErrUnsupportedProtocolVersion = errors.New("tcp: unsupported protocol version")
+	// ErrInvalidLaneIndex is returned when an ordinary lane index cannot be
+	// encoded into the header lane byte (index+1 must stay below [LaneLarge]).
+	ErrInvalidLaneIndex = errors.New("tcp: ordinary lane index out of range")
+	// ErrInvalidCapabilityRevision is returned when a HELLO or HELLO_ACK
+	// advertises a capability revision below [CapabilityRevisionBaseline];
+	// revisions start at 1, so 0 marks a broken or mismatched peer.
+	ErrInvalidCapabilityRevision = errors.New("tcp: capability revision below baseline")
 )
 
 // TCPServer errors.

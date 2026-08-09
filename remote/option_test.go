@@ -67,6 +67,11 @@ func TestOption(t *testing.T) {
 			},
 		},
 		{
+			name:     "WithProtocolPin",
+			option:   WithProtocolPin(ProtocolPinLegacy),
+			expected: Config{protocolPin: ProtocolPinLegacy},
+		},
+		{
 			name:     "WithTLS",
 			option:   WithTLS(tlsInfo),
 			expected: Config{tlsInfo: tlsInfo},

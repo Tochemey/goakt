@@ -1664,6 +1664,19 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 	}
 }
 
+// acceptProtocolFromPin maps a remoting [remote.ProtocolPin] onto the listener
+// accept mode used by [inet.ProtoServer].
+func acceptProtocolFromPin(pin remote.ProtocolPin) inet.AcceptProtocol {
+	switch pin {
+	case remote.ProtocolPinLegacy:
+		return inet.AcceptProtocolLegacy
+	case remote.ProtocolPinDuplex:
+		return inet.AcceptProtocolDuplex
+	default:
+		return inet.AcceptProtocolAuto
+	}
+}
+
 // startRemoteServer initializes and starts the proto TCP server for handling remoting operations.
 // It creates a new ProtoServer instance configured with the remote config settings and registers
 // all RemotingService handlers.
@@ -1696,6 +1709,9 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	if x.remoteConfig.IdleTimeout() > 0 {
 		serverOpts = append(serverOpts, inet.WithProtoServerIdleTimeout(x.remoteConfig.IdleTimeout()))
 	}
+
+	serverOpts = append(serverOpts, inet.WithProtoServerSystemName(x.Name()))
+	serverOpts = append(serverOpts, inet.WithProtoServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
 
 	// Detach the server's base context from Start's cancelation/deadline: the server's
 	// lifetime is governed by Stop, and a bounded startup context (a DI OnStart hook, a

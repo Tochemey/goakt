@@ -23,21 +23,34 @@ Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. T
 
 | Option                  | Purpose                                               |
 | ----------------------- | ----------------------------------------------------- |
-| `WithCompression`       | None, Gzip, Zstd (default), Brotli                    |
+| `WithCompression`       | None (default), Gzip, Zstd, Brotli                    |
 | `WithMaxFrameSize`      | Max frame size (default 16MB)                         |
 | `WithWriteTimeout`      | Connection write timeout                              |
 | `WithReadIdleTimeout`   | Health check / ping interval                          |
+| `WithProtocolPin`       | `auto` (default), `legacy`, or `duplex` wire protocol |
 | `WithSerializers`       | Bind a `Serializer` to a message type or interface    |
 | `WithSerializables`     | Bulk-register types with the built-in CBOR serializer |
 | `WithJSONSerializables` | Bulk-register types with the built-in JSON serializer |
 | `WithContextPropagator` | Propagate trace IDs, auth tokens, correlation IDs     |
 | `WithTLS`               | TLS settings for all node transports. See [TLS](#tls) |
 
+<Note>
+`WithProtocolPin` selects the remoting wire protocol on both dial and accept:
+`auto` (dual-protocol compatibility), `legacy` (unary protobuf-over-TCP only),
+or `duplex` (multiplexed duplex only). Under `auto`, the listener classifies
+peers by the first byte after TLS (`0x02` for duplex). `legacy` skips that sniff
+entirely so brotli-compressed legacy peers cannot be misrouted; `duplex` refuses
+non-duplex first bytes. Legacy brotli has no magic byte and can collide with the
+`0x02` discriminator — pin `legacy` or `duplex` instead of `auto` in those
+deployments.
+</Note>
+
 ## Transport
 
-- Length-prefixed TCP frames
+- Length-prefixed TCP frames (legacy unary path)
+- Dual-protocol listener for duplex and legacy peers
 - Optional TLS (see [TLS](#tls))
-- Compression: None, Gzip, Zstd (default), Brotli
+- Compression: None (default), Gzip, Zstd, Brotli
 
 ## TLS
 

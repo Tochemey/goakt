@@ -34,10 +34,12 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -932,4 +934,249 @@ func generateTestCert(t *testing.T) ([]byte, []byte) {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(priv)})
 
 	return certPEM, keyPEM
+}
+
+func TestServeConnSniffRoutesFirstByte(t *testing.T) {
+	cases := []struct {
+		name       string
+		first      byte
+		wantDuplex bool
+	}{
+		{name: "legacy length 0x00", first: 0x00, wantDuplex: false},
+		{name: "legacy length 0x01", first: 0x01, wantDuplex: false},
+		{name: "legacy gzip magic", first: 0x1f, wantDuplex: false},
+		{name: "legacy zstd magic", first: 0x28, wantDuplex: false},
+		{name: "duplex protocol", first: ProtocolVersion, wantDuplex: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c1, c2 := net.Pipe()
+			t.Cleanup(func() {
+				_ = c1.Close()
+				_ = c2.Close()
+			})
+
+			var (
+				mu          sync.Mutex
+				gotDuplex   bool
+				legacyFirst byte
+				legacySeen  bool
+			)
+
+			srv, err := NewTCPServer("127.0.0.1:0",
+				WithLoops(1),
+				WithDuplexHandler(func(conn net.Conn) {
+					mu.Lock()
+					gotDuplex = true
+					mu.Unlock()
+
+					buf := make([]byte, 1)
+					_, _ = io.ReadFull(conn, buf)
+					assert.Equal(t, ProtocolVersion, buf[0])
+					_ = conn.Close()
+				}),
+				WithRequestHandler(func(conn Connection) {
+					buf := make([]byte, 1)
+					_, err := io.ReadFull(conn, buf)
+					require.NoError(t, err)
+
+					mu.Lock()
+					legacySeen = true
+					legacyFirst = buf[0]
+					mu.Unlock()
+				}),
+			)
+			require.NoError(t, err)
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				srv.serveConn(c2)
+			}()
+
+			_, err = c1.Write([]byte{tc.first})
+			require.NoError(t, err)
+
+			if !tc.wantDuplex {
+				time.Sleep(20 * time.Millisecond)
+			}
+
+			_ = c1.Close()
+			<-done
+
+			mu.Lock()
+			defer mu.Unlock()
+
+			if tc.wantDuplex {
+				assert.True(t, gotDuplex)
+				assert.False(t, legacySeen)
+				return
+			}
+
+			assert.False(t, gotDuplex)
+			assert.True(t, legacySeen)
+			assert.Equal(t, tc.first, legacyFirst)
+		})
+	}
+}
+
+func TestServeConnDuplexWithoutHandlerCloses(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	srv, err := NewTCPServer("127.0.0.1:0",
+		WithLoops(1),
+		WithRequestHandler(func(Connection) {}),
+	)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.serveConn(c2)
+	}()
+
+	_, err = c1.Write([]byte{ProtocolVersion})
+	require.NoError(t, err)
+
+	buf := make([]byte, 1)
+	_, err = c1.Read(buf)
+	require.Error(t, err)
+
+	<-done
+}
+
+func TestServeConnAcceptProtocolLegacySkipsSniff(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	var (
+		mu          sync.Mutex
+		legacySeen  bool
+		legacyFirst byte
+		gotDuplex   bool
+	)
+
+	srv, err := NewTCPServer("127.0.0.1:0",
+		WithLoops(1),
+		WithAcceptProtocol(AcceptProtocolLegacy),
+		WithDuplexHandler(func(conn net.Conn) {
+			mu.Lock()
+			gotDuplex = true
+			mu.Unlock()
+			_ = conn.Close()
+		}),
+		WithRequestHandler(func(conn Connection) {
+			buf := make([]byte, 1)
+			_, err := io.ReadFull(conn, buf)
+			require.NoError(t, err)
+			mu.Lock()
+			legacySeen = true
+			legacyFirst = buf[0]
+			mu.Unlock()
+		}),
+	)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.serveConn(c2)
+	}()
+
+	// 0x02 would be duplex under auto; legacy pin must keep it on the legacy path.
+	_, err = c1.Write([]byte{ProtocolVersion})
+	require.NoError(t, err)
+	_ = c1.Close()
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.True(t, legacySeen)
+	assert.Equal(t, ProtocolVersion, legacyFirst)
+	assert.False(t, gotDuplex)
+}
+
+func TestServeConnAcceptProtocolDuplexRefusesLegacy(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	var (
+		mu         sync.Mutex
+		legacySeen bool
+		gotDuplex  bool
+	)
+
+	srv, err := NewTCPServer("127.0.0.1:0",
+		WithLoops(1),
+		WithAcceptProtocol(AcceptProtocolDuplex),
+		WithDuplexHandler(func(conn net.Conn) {
+			mu.Lock()
+			gotDuplex = true
+			mu.Unlock()
+			_ = conn.Close()
+		}),
+		WithRequestHandler(func(Connection) {
+			mu.Lock()
+			legacySeen = true
+			mu.Unlock()
+		}),
+	)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.serveConn(c2)
+	}()
+
+	_, err = c1.Write([]byte{0x00})
+	require.NoError(t, err)
+
+	buf := make([]byte, 1)
+	_, err = c1.Read(buf)
+	require.Error(t, err)
+
+	<-done
+
+	mu.Lock()
+	defer mu.Unlock()
+	assert.False(t, legacySeen)
+	assert.False(t, gotDuplex)
+}
+
+func TestGetNetTCPConnUnwrapsPrepend(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		accepted <- c
+	}()
+
+	client, err := net.Dial("tcp", ln.Addr().String())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close() })
+
+	serverConn := <-accepted
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	tc := &TCPConn{}
+	tc.Reset(&prependConn{Conn: serverConn, prefix: []byte{0x01}})
+	require.NotNil(t, tc.GetNetTCPConn())
 }

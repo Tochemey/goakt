@@ -33,9 +33,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -1242,4 +1244,123 @@ func TestProtoServer_MetadataBackwardCompatibility(t *testing.T) {
 		require.NoError(t, ps.Shutdown(time.Second))
 		<-done
 	})
+}
+
+func TestProtoServerHandleDuplexConnHelloAndPing(t *testing.T) {
+	ps, err := NewProtoServer("127.0.0.1:0", WithProtoServerLoops(1))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
+
+	go func() { _ = ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	transport := NewTCPTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := transport.Dial(ctx, ps.ListenAddr().String(), LaneSpec{
+		Role: internalpb.LaneRole_LANE_ROLE_CONTROL,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	result, err := performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+	require.NoError(t, err)
+	require.NotNil(t, result.Effective)
+	assert.Equal(t, CapabilityRevisionBaseline, result.Effective.GetRevision())
+
+	wrapped, err := wrapCompression(conn.NetConn(), result.Effective.GetCompression())
+	require.NoError(t, err)
+	if tcp, ok := conn.(*tcpFramedConn); ok {
+		tcp.ReplaceNetConn(wrapped)
+	}
+
+	require.NoError(t, conn.WriteFrames(Frame{
+		Version:     ProtocolVersion,
+		Type:        FrameTypePing,
+		Lane:        LaneControl,
+		Correlation: 42,
+	}))
+
+	pong, err := conn.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypePong, pong.Type)
+	assert.Equal(t, uint64(42), pong.Correlation)
+}
+
+func TestProtoServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
+	ps, err := NewProtoServer("127.0.0.1:0", WithProtoServerLoops(1))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
+
+	go func() { _ = ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	transport := NewTCPTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := transport.Dial(ctx, ps.ListenAddr().String(), LaneSpec{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+	require.NoError(t, err)
+
+	require.NoError(t, conn.WriteFrames(Frame{
+		Version:     ProtocolVersion,
+		Type:        FrameTypeData,
+		Lane:        LaneOrdinary,
+		Flags:       FrameFlagExpectsReply,
+		Correlation: 1,
+		Length:      1,
+		Payload:     []byte{0x00},
+	}))
+
+	frame, err := conn.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, uint64(0), frame.Correlation)
+
+	_, err = conn.ReadFrame()
+	require.Error(t, err)
+}
+
+func TestProtoServerHandleDuplexConnNegotiatesCompression(t *testing.T) {
+	ps, err := NewProtoServer("127.0.0.1:0",
+		WithProtoServerLoops(1),
+		WithProtoServerMaxFrameSize(1<<20),
+	)
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
+
+	go func() { _ = ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	transport := NewTCPTransport()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := transport.Dial(ctx, ps.ListenAddr().String(), LaneSpec{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP, 1<<20)
+	result, err := performHello(conn, hello)
+	require.NoError(t, err)
+	assert.Equal(t, internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, result.Effective.GetCompression())
+
+	require.NoError(t, conn.WriteFrames(Frame{
+		Version:     ProtocolVersion,
+		Type:        FrameTypePing,
+		Lane:        LaneControl,
+		Correlation: 7,
+	}))
+
+	pong, err := conn.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypePong, pong.Type)
 }

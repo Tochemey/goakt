@@ -32,6 +32,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // ProtoHandler processes a deserialized protobuf request and returns a
@@ -126,8 +128,10 @@ type ProtoServer struct {
 	framePool    *FramePool
 	serverOpts   []ServerOption
 
-	idleTimeout  time.Duration
-	maxFrameSize uint32
+	idleTimeout    time.Duration
+	maxFrameSize   uint32
+	systemName     string
+	acceptProtocol AcceptProtocol
 }
 
 // ProtoServerOption configures a [ProtoServer] before it is started.
@@ -153,8 +157,15 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 		opt(ps)
 	}
 
-	// Always wire the proto read-loop as the underlying server's request handler.
-	ps.serverOpts = append(ps.serverOpts, WithRequestHandler(ps.handleConn))
+	// Wire the legacy proto read-loop and the duplex acceptor used by the
+	// dual-protocol sniff. Accept-protocol and idle-timeout options must land
+	// after caller options so they reflect the final ProtoServer state.
+	ps.serverOpts = append(ps.serverOpts,
+		WithRequestHandler(ps.handleConn),
+		WithDuplexHandler(ps.handleDuplexConn),
+		WithAcceptProtocol(ps.acceptProtocol),
+		WithServerIdleTimeout(ps.idleTimeout),
+	)
 
 	srv, err := NewTCPServer(listenAddr, ps.serverOpts...)
 	if err != nil {
@@ -297,6 +308,22 @@ func WithProtoServerMaxFrameSize(size uint32) ProtoServerOption {
 	}
 }
 
+// WithProtoServerSystemName sets the system name advertised in duplex HELLO_ACK.
+// Empty (the default) leaves the field blank on the wire.
+func WithProtoServerSystemName(name string) ProtoServerOption {
+	return func(ps *ProtoServer) {
+		ps.systemName = name
+	}
+}
+
+// WithProtoServerAcceptProtocol selects which remoting wire protocols the
+// listener accepts. The default is [AcceptProtocolAuto].
+func WithProtoServerAcceptProtocol(protocol AcceptProtocol) ProtoServerOption {
+	return func(ps *ProtoServer) {
+		ps.acceptProtocol = protocol
+	}
+}
+
 // WithProtoServerPanicHandler sets a [PanicHandlerFunc] that is called when a
 // [ProtoHandler] panics during dispatch. Without a panic handler, panics in
 // handlers will close the connection silently. With a handler set, panics are
@@ -404,6 +431,62 @@ func (ps *ProtoServer) ActiveConnections() int32 {
 // the server started.
 func (ps *ProtoServer) AcceptedConnections() int32 {
 	return ps.server.AcceptedConnections()
+}
+
+// handleDuplexConn accepts a sniffed duplex connection: it completes HELLO,
+// applies negotiated compression, and serves PING/PONG until the peer closes.
+// Unsupported frame types receive a connection-scoped ERROR then close.
+func (ps *ProtoServer) handleDuplexConn(raw net.Conn) {
+	framed := newTCPFramedConn(raw, ps.maxFrameSize)
+	defer func() { _ = framed.Close() }()
+
+	local := &internalpb.Hello{
+		Revision:                    CapabilityRevisionBaseline,
+		SystemName:                  ps.systemName,
+		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
+		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
+		MaxFrameSize:                ps.maxFrameSize,
+		MaxMessageSize:              uint64(ps.maxFrameSize),
+		InitialCredits:              uint64(ps.maxFrameSize),
+		MaxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
+	}
+
+	result, err := acceptHello(framed, local)
+	if err != nil {
+		return
+	}
+
+	wrapped, err := wrapCompression(framed.NetConn(), result.Effective.GetCompression())
+	if err != nil {
+		return
+	}
+
+	framed.ReplaceNetConn(wrapped)
+
+	for {
+		if ps.idleTimeout > 0 {
+			_ = framed.NetConn().SetReadDeadline(time.Now().Add(ps.idleTimeout))
+		}
+
+		frame, err := framed.ReadFrame()
+		if err != nil {
+			writeProtocolVersionError(framed, err)
+			return
+		}
+
+		switch frame.Type {
+		case FrameTypePing:
+			_ = framed.WriteFrames(Frame{
+				Version:     ProtocolVersion,
+				Type:        FrameTypePong,
+				Lane:        frame.Lane,
+				Correlation: frame.Correlation,
+			})
+		default:
+			_ = writeErrorFrame(framed, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
+			return
+		}
+	}
 }
 
 // handleConn is the [RequestHandlerFunc] wired into the underlying [TCPServer].

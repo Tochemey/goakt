@@ -114,6 +114,15 @@ func WithCompression(c Compression) Option {
 	})
 }
 
+// WithProtocolPin selects the remoting wire protocol dialing and accept mode.
+// See [ProtocolPin] for values and the brotli-collision note. The default is
+// [ProtocolPinAuto].
+func WithProtocolPin(pin ProtocolPin) Option {
+	return OptionFunc(func(config *Config) {
+		config.protocolPin = pin
+	})
+}
+
 // WithTLS sets the TLS settings used to secure the remoting transport.
 //
 // The tls.Info carries a standard crypto/tls configuration for each side of
