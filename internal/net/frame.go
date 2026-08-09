@@ -67,6 +67,10 @@ const (
 	// a header byte below [LaneLarge] (index+1 <= 0xFE).
 	maxOrdinaryLaneIndex uint32 = 0xFE - 1
 
+	// MaxOrdinaryLanes is the largest OrdinaryLanes count that can be encoded
+	// on the wire (indexes 0..maxOrdinaryLaneIndex → header bytes 1..0xFE).
+	MaxOrdinaryLanes uint32 = maxOrdinaryLaneIndex + 1
+
 	// minMaxFrameSize is the floor for negotiated max_frame_size, matching the
 	// legacy remote.Config validation lower bound (16 KiB).
 	minMaxFrameSize uint32 = 16 * size.KB

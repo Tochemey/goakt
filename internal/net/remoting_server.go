@@ -42,14 +42,14 @@ import (
 // fire-and-forget message — no response frame is written back to the client.
 //
 // The handler receives the server's base [context.Context] (set via
-// [WithProtoServerContext]) and the [Connection] that delivered the request,
+// [WithRemotingServerContext]) and the [Connection] that delivered the request,
 // allowing access to peer addresses and connection metadata.
 //
 // Implementations must be safe for concurrent use; the same handler may be
 // invoked from many connections simultaneously.
 type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) (proto.Message, error)
 
-// ProtoServer is a high-performance, low-GC protobuf-over-TCP server.
+// RemotingServer is a high-performance, low-GC remoting acceptor.
 //
 // It layers a self-describing protobuf wire protocol on top of [TCPServer],
 // providing:
@@ -81,10 +81,10 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 //
 // # Usage
 //
-//	ps, err := tcp.NewProtoServer("0.0.0.0:9000",
+//	ps, err := tcp.NewRemotingServer("0.0.0.0:9000",
 //		tcp.WithProtoHandler("myapp.PingRequest", pingHandler),
 //		tcp.WithProtoHandler("myapp.PutRequest", putHandler),
-//		tcp.WithProtoIdleTimeout(30 * time.Second),
+//		tcp.WithRemotingServerIdleTimeout(30 * time.Second),
 //	)
 //	if err != nil { ... }
 //
@@ -119,8 +119,8 @@ type ProtoHandler func(ctx context.Context, conn Connection, req proto.Message) 
 // recover block, so it must not re-panic.
 type PanicHandlerFunc func(typeName protoreflect.FullName, recovered any)
 
-// ProtoServer is a high-performance, low-GC protobuf-over-TCP server.
-type ProtoServer struct {
+// RemotingServer is a high-performance, low-GC remoting acceptor.
+type RemotingServer struct {
 	server       *TCPServer
 	handlers     map[protoreflect.FullName]ProtoHandler
 	fallback     ProtoHandler
@@ -129,35 +129,38 @@ type ProtoServer struct {
 	framePool    *FramePool
 	serverOpts   []ServerOption
 
-	idleTimeout    time.Duration
-	writeTimeout   time.Duration
-	maxFrameSize   uint32
-	initialCredits uint64
-	systemName     string
-	acceptProtocol AcceptProtocol
-	duplexTell     DuplexTellHandler
-	duplexAsk      DuplexAskHandler
-	askPool        *WorkerPool[duplexAskTask]
+	idleTimeout                 time.Duration
+	writeTimeout                time.Duration
+	readIdleTimeout             time.Duration
+	maxFrameSize                uint32
+	initialCredits              uint64
+	maxConcurrentLargeTransfers uint32
+	systemName                  string
+	acceptProtocol              AcceptProtocol
+	duplexTell                  DuplexTellHandler
+	duplexAsk                   DuplexAskHandler
+	askPool                     *WorkerPool[duplexAskTask]
 }
 
-// ProtoServerOption configures a [ProtoServer] before it is started.
-type ProtoServerOption func(*ProtoServer)
+// RemotingServerOption configures a [RemotingServer] before it is started.
+type RemotingServerOption func(*RemotingServer)
 
-// NewProtoServer creates a [ProtoServer] bound to the given address
+// NewRemotingServer creates a [RemotingServer] bound to the given address
 // (host:port). The returned server is not yet listening; call
-// [ProtoServer.Listen] followed by [ProtoServer.Serve] to start accepting
+// [RemotingServer.Listen] followed by [RemotingServer.Serve] to start accepting
 // connections.
 //
 // Defaults: no idle timeout (connections live until closed by the peer),
 // no fallback handler (a frame carrying an unregistered message type closes
 // its connection), max frame size of 16 MiB.
-func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer, error) {
-	x := &ProtoServer{
-		handlers:       make(map[protoreflect.FullName]ProtoHandler),
-		serializer:     NewProtoSerializer(),
-		framePool:      NewFramePool(),
-		maxFrameSize:   defaultMaxFrameSize, // Default: 16 MiB
-		initialCredits: defaultInitialCredits,
+func NewRemotingServer(listenAddr string, opts ...RemotingServerOption) (*RemotingServer, error) {
+	x := &RemotingServer{
+		handlers:                    make(map[protoreflect.FullName]ProtoHandler),
+		serializer:                  NewProtoSerializer(),
+		framePool:                   NewFramePool(),
+		maxFrameSize:                defaultMaxFrameSize, // Default: 16 MiB
+		initialCredits:              defaultInitialCredits,
+		maxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
 	}
 
 	for _, opt := range opts {
@@ -168,7 +171,7 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 
 	// Wire the legacy proto read-loop and the duplex acceptor used by the
 	// dual-protocol sniff. Accept-protocol and idle-timeout options must land
-	// after caller options so they reflect the final ProtoServer state.
+	// after caller options so they reflect the final RemotingServer state.
 	x.serverOpts = append(x.serverOpts,
 		WithRequestHandler(x.handleConn),
 		WithDuplexHandler(x.handleDuplexConn),
@@ -191,10 +194,10 @@ func NewProtoServer(listenAddr string, opts ...ProtoServerOption) (*ProtoServer,
 // message.
 //
 // Registering a handler for the same name twice silently overwrites the
-// previous one. Handlers must be registered before [ProtoServer.Serve] is
+// previous one. Handlers must be registered before [RemotingServer.Serve] is
 // called.
-func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.handlers[fullName] = handler
 	}
 }
@@ -204,52 +207,52 @@ func WithProtoHandler(fullName protoreflect.FullName, handler ProtoHandler) Prot
 // set, a frame carrying an unregistered message type closes its connection
 // so a request/response peer fails fast instead of waiting for a reply that
 // will never arrive.
-func WithFallbackProtoHandler(handler ProtoHandler) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithFallbackProtoHandler(handler ProtoHandler) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.fallback = handler
 	}
 }
 
-// WithProtoServerIdleTimeout sets the maximum duration a connection may remain
+// WithRemotingServerIdleTimeout sets the maximum duration a connection may remain
 // idle (no complete frame received) before the server closes it. Zero
 // (the default) means no idle timeout — the connection stays open until
 // the peer disconnects or the server shuts down.
-func WithProtoServerIdleTimeout(duration time.Duration) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerIdleTimeout(duration time.Duration) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.idleTimeout = duration
 	}
 }
 
-// WithProtoServerContext sets a base [context.Context] on the underlying
+// WithRemotingServerContext sets a base [context.Context] on the underlying
 // [TCPServer], propagated to every [ProtoHandler] invocation. Use this for
 // cancellation signals or request-scoped values.
-func WithProtoServerContext(ctx context.Context) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerContext(ctx context.Context) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithServerContext(ctx))
 	}
 }
 
-// WithProtoServerTLSConfig sets the TLS configuration used by the underlying
+// WithRemotingServerTLSConfig sets the TLS configuration used by the underlying
 // [TCPServer].
 //
-// Providing a non-nil config enables TLS for this ProtoServer when you call
-// [ProtoServer.ListenTLS]. If config is nil, TLS is not configured and
-// [ProtoServer.ListenTLS] will fail with [ErrNoTLSConfig] (you can still use
-// [ProtoServer.Listen] for plain TCP).
+// Providing a non-nil config enables TLS for this RemotingServer when you call
+// [RemotingServer.ListenTLS]. If config is nil, TLS is not configured and
+// [RemotingServer.ListenTLS] will fail with [ErrNoTLSConfig] (you can still use
+// [RemotingServer.Listen] for plain TCP).
 //
 // The supplied config should be fully populated for server use (e.g. with
 // Certificates / GetCertificate, and appropriate security settings such as
 // MinVersion).
-func WithProtoServerTLSConfig(config *tls.Config) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerTLSConfig(config *tls.Config) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithTLSConfig(config))
 	}
 }
 
-// WithProtoServerListenConfig overrides the [ListenConfig] used by the
+// WithRemotingServerListenConfig overrides the [ListenConfig] used by the
 // underlying [TCPServer] when creating its listener.
 //
-// This option affects calls to [ProtoServer.Listen] and [ProtoServer.ListenTLS]
+// This option affects calls to [RemotingServer.Listen] and [RemotingServer.ListenTLS]
 // (i.e., the bind/listen step). It does not modify per-connection behavior
 // after accept.
 //
@@ -257,13 +260,13 @@ func WithProtoServerTLSConfig(config *tls.Config) ProtoServerOption {
 // If provided multiple times, the last call wins.
 //
 // The configuration must be set before calling Listen/ListenTLS.
-func WithProtoServerListenConfig(config *ListenConfig) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerListenConfig(config *ListenConfig) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithListenConfig(config))
 	}
 }
 
-// WithProtoServerLoops sets the number of concurrent accept loops used by the
+// WithRemotingServerLoops sets the number of concurrent accept loops used by the
 // underlying [TCPServer].
 //
 // An “accept loop” is a goroutine that repeatedly calls Accept on the listener
@@ -277,18 +280,18 @@ func WithProtoServerListenConfig(config *ListenConfig) ProtoServerOption {
 //   - loops > 0: starts exactly that many accept loops.
 //   - This only affects the accept phase; it does not change per-connection
 //     read loops or [ProtoHandler] execution concurrency.
-//   - Consider pairing with [WithProtoServerAllowThreadLocking] only after
+//   - Consider pairing with [WithRemotingServerAllowThreadLocking] only after
 //     measuring, as pinning loops to OS threads can increase thread usage.
 //
-// This option must be provided before calling [ProtoServer.Listen] /
-// [ProtoServer.ListenTLS].
-func WithProtoServerLoops(loops int) ProtoServerOption {
-	return func(x *ProtoServer) {
+// This option must be provided before calling [RemotingServer.Listen] /
+// [RemotingServer.ListenTLS].
+func WithRemotingServerLoops(loops int) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithLoops(loops))
 	}
 }
 
-// WithProtoServerAllowThreadLocking controls whether the underlying [TCPServer]
+// WithRemotingServerAllowThreadLocking controls whether the underlying [TCPServer]
 // is permitted to pin (lock) its accept-loop goroutines to their current OS
 // threads (i.e. the equivalent of calling runtime.LockOSThread).
 //
@@ -303,100 +306,119 @@ func WithProtoServerLoops(loops int) ProtoServerOption {
 // read loops or your [ProtoHandler] executions.
 //
 // Default: false.
-func WithProtoServerAllowThreadLocking(allow bool) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerAllowThreadLocking(allow bool) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithAllowThreadLocking(allow))
 	}
 }
 
-// WithProtoServerMaxFrameSize sets the maximum allowed frame size (in bytes)
+// WithRemotingServerMaxFrameSize sets the maximum allowed frame size (in bytes)
 // for incoming messages. Frames exceeding this limit cause the connection to
 // be closed. The default is 16 MiB ([defaultMaxFrameSize]).
-func WithProtoServerMaxFrameSize(size uint32) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerMaxFrameSize(size uint32) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.maxFrameSize = size
 	}
 }
 
-// WithProtoServerSystemName sets the system name advertised in duplex HELLO_ACK.
+// WithRemotingServerSystemName sets the system name advertised in duplex HELLO_ACK.
 // Empty (the default) leaves the field blank on the wire.
-func WithProtoServerSystemName(name string) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerSystemName(name string) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.systemName = name
 	}
 }
 
-// WithProtoServerAcceptProtocol selects which remoting wire protocols the
+// WithRemotingServerAcceptProtocol selects which remoting wire protocols the
 // listener accepts. The default is [AcceptProtocolAuto].
-func WithProtoServerAcceptProtocol(protocol AcceptProtocol) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerAcceptProtocol(protocol AcceptProtocol) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.acceptProtocol = protocol
 	}
 }
 
-// WithProtoServerInitialCredits sets the HELLO initial_credits value and the
+// WithRemotingServerInitialCredits sets the HELLO initial_credits value and the
 // duplex outbound queue byte cap. Zero keeps the default (16 MiB).
-func WithProtoServerInitialCredits(credits uint64) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerInitialCredits(credits uint64) RemotingServerOption {
+	return func(x *RemotingServer) {
 		if credits > 0 {
 			x.initialCredits = credits
 		}
 	}
 }
 
-// WithProtoServerWriteTimeout bounds duplex Submit waits when the caller
+// WithRemotingServerWriteTimeout bounds duplex Submit waits when the caller
 // context has no deadline.
-func WithProtoServerWriteTimeout(d time.Duration) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerWriteTimeout(d time.Duration) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.writeTimeout = d
 	}
 }
 
-// WithProtoServerDuplexTellHandler registers the fire-and-forget DATA handler
+// WithRemotingServerReadIdleTimeout sets the duplex PING/PONG liveness interval.
+// Zero disables liveness probes.
+func WithRemotingServerReadIdleTimeout(d time.Duration) RemotingServerOption {
+	return func(x *RemotingServer) {
+		x.readIdleTimeout = d
+	}
+}
+
+// WithRemotingServerMaxConcurrentLargeTransfers sets the HELLO-advertised cap on
+// concurrent large-message transfers. The value is negotiated today;
+// reassembly does not enforce it yet.
+func WithRemotingServerMaxConcurrentLargeTransfers(n uint32) RemotingServerOption {
+	return func(x *RemotingServer) {
+		if n > 0 {
+			x.maxConcurrentLargeTransfers = n
+		}
+	}
+}
+
+// WithRemotingServerDuplexTellHandler registers the fire-and-forget DATA handler
 // for the duplex acceptor.
-func WithProtoServerDuplexTellHandler(h DuplexTellHandler) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerDuplexTellHandler(h DuplexTellHandler) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.duplexTell = h
 	}
 }
 
-// WithProtoServerDuplexAskHandler registers the expectsReply user-message
+// WithRemotingServerDuplexAskHandler registers the expectsReply user-message
 // handler for the duplex acceptor. Control RPCs continue to use registered
 // ProtoHandlers.
-func WithProtoServerDuplexAskHandler(h DuplexAskHandler) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerDuplexAskHandler(h DuplexAskHandler) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.duplexAsk = h
 	}
 }
 
-// WithProtoServerPanicHandler sets a [PanicHandlerFunc] that is called when a
+// WithRemotingServerPanicHandler sets a [PanicHandlerFunc] that is called when a
 // [ProtoHandler] panics during dispatch. Without a panic handler, panics in
 // handlers will close the connection silently. With a handler set, panics are
 // recovered, the callback is invoked, and the read loop continues serving
 // subsequent messages on the same connection.
-func WithProtoServerPanicHandler(f PanicHandlerFunc) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerPanicHandler(f PanicHandlerFunc) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.panicHandler = f
 	}
 }
 
-// WithProtoServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
+// WithRemotingServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
 // underlying [TCPServer]'s wrapping pipeline.
-func WithProtoServerConnWrapper(w ConnWrapper) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerConnWrapper(w ConnWrapper) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithConnWrapper(w))
 	}
 }
 
-// WithProtoServerMaxAcceptConnections sets the maximum total connections on the
+// WithRemotingServerMaxAcceptConnections sets the maximum total connections on the
 // underlying [TCPServer].
-func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerMaxAcceptConnections(limit int32) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithMaxAcceptConnections(limit))
 	}
 }
 
-// WithProtoServerBallast sets the GC ballast size (in MiB) on the underlying
+// WithRemotingServerBallast sets the GC ballast size (in MiB) on the underlying
 // [TCPServer].
 //
 // A “GC ballast” is a deliberately retained heap allocation used to bias the
@@ -412,36 +434,36 @@ func WithProtoServerMaxAcceptConnections(limit int32) ProtoServerOption {
 //
 // Note: this option only affects the underlying server’s runtime/worker-pool
 // behavior; it does not change the wire protocol or per-connection semantics.
-func WithProtoServerBallast(sizeInMiB int) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerBallast(sizeInMiB int) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithBallast(sizeInMiB))
 	}
 }
 
-// WithProtoServerConnectionCreator sets the factory used to create [Connection]
+// WithRemotingServerConnectionCreator sets the factory used to create [Connection]
 // values for incoming connections on the underlying [TCPServer].
-func WithProtoServerConnectionCreator(f ConnectionCreatorFunc) ProtoServerOption {
-	return func(x *ProtoServer) {
+func WithRemotingServerConnectionCreator(f ConnectionCreatorFunc) RemotingServerOption {
+	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithConnectionCreator(f))
 	}
 }
 
 // Listen creates the TCP listener on the configured address. Call
-// [ProtoServer.Serve] afterwards to start accepting connections.
-func (x *ProtoServer) Listen() error {
+// [RemotingServer.Serve] afterwards to start accepting connections.
+func (x *RemotingServer) Listen() error {
 	return x.server.Listen()
 }
 
 // ListenTLS enables TLS and creates the TCP listener. Returns
 // [ErrNoTLSConfig] if no TLS configuration was provided.
-func (x *ProtoServer) ListenTLS() error {
+func (x *RemotingServer) ListenTLS() error {
 	return x.server.ListenTLS()
 }
 
 // Serve starts the accept loops and blocks until all loops and in-flight
-// connections complete. Use [ProtoServer.Shutdown] or [ProtoServer.Halt]
+// connections complete. Use [RemotingServer.Shutdown] or [RemotingServer.Halt]
 // from another goroutine to stop the server.
-func (x *ProtoServer) Serve() error {
+func (x *RemotingServer) Serve() error {
 	x.askPool.Start()
 	defer x.askPool.Stop()
 	return x.server.Serve()
@@ -452,31 +474,31 @@ func (x *ProtoServer) Serve() error {
 //   - d > 0: wait up to d for in-flight connections to finish.
 //   - d == 0: wait indefinitely.
 //   - d < 0: return immediately without waiting.
-func (x *ProtoServer) Shutdown(d time.Duration) error {
+func (x *RemotingServer) Shutdown(d time.Duration) error {
 	return x.server.Shutdown(d)
 }
 
 // Halt immediately stops the server without waiting for in-flight
 // connections. Equivalent to Shutdown(-1).
-func (x *ProtoServer) Halt() error {
+func (x *RemotingServer) Halt() error {
 	return x.server.Halt()
 }
 
 // ListenAddr returns the actual [*net.TCPAddr] the server is listening on.
 // Useful when the server was started on port 0. Returns nil if the server
 // has not started listening.
-func (x *ProtoServer) ListenAddr() *net.TCPAddr {
+func (x *RemotingServer) ListenAddr() *net.TCPAddr {
 	return x.server.ListenAddr()
 }
 
 // ActiveConnections returns the number of connections currently being served.
-func (x *ProtoServer) ActiveConnections() int32 {
+func (x *RemotingServer) ActiveConnections() int32 {
 	return x.server.ActiveConnections()
 }
 
 // AcceptedConnections returns the total number of connections accepted since
 // the server started.
-func (x *ProtoServer) AcceptedConnections() int32 {
+func (x *RemotingServer) AcceptedConnections() int32 {
 	return x.server.AcceptedConnections()
 }
 
@@ -488,7 +510,7 @@ func (x *ProtoServer) AcceptedConnections() int32 {
 // Unknown frame types and table-ref capability violations receive a
 // connection-scoped ERROR then close. Close drains admitted outbound frames
 // so that ERROR reaches the peer before teardown.
-func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
+func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
@@ -499,7 +521,7 @@ func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
 		MaxFrameSize:                x.maxFrameSize,
 		MaxMessageSize:              uint64(x.maxFrameSize),
 		InitialCredits:              x.initialCredits,
-		MaxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
+		MaxConcurrentLargeTransfers: x.maxConcurrentLargeTransfers,
 	}
 
 	result, err := acceptHello(framed, local)
@@ -520,8 +542,20 @@ func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
 	if credits <= 0 {
 		credits = int64(x.initialCredits)
 	}
+	lane, err := laneByte(result.Effective.GetLaneRole(), result.Effective.GetLaneIndex())
+	if err != nil {
+		_ = framed.Close()
+		return
+	}
 
-	conn := newDuplexConn(framed, credits, withDuplexWriteTimeout(x.writeTimeout))
+	conn := newDuplexConn(
+		framed,
+		credits,
+		withDuplexWriteTimeout(x.writeTimeout),
+		withDuplexReadIdleTimeout(x.readIdleTimeout),
+		withDuplexConnIdleTimeout(x.idleTimeout),
+		withDuplexLane(lane),
+	)
 	defer func() { _ = conn.Close() }()
 
 	baseCtx := x.server.Context()
@@ -530,23 +564,14 @@ func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
 	}
 
 	for {
-		if x.idleTimeout > 0 {
-			_ = framed.NetConn().SetReadDeadline(time.Now().Add(x.idleTimeout))
-		}
-
 		frame, err := conn.Recv(baseCtx)
 		if err != nil {
 			return
 		}
 
+		// Lane identity is enforced in duplexConn.readLoop for every frame,
+		// including PING/PONG that never reach Recv.
 		switch frame.Type {
-		case FrameTypePing:
-			_ = conn.Submit(baseCtx, Frame{
-				Version:     ProtocolVersion,
-				Type:        FrameTypePong,
-				Lane:        frame.Lane,
-				Correlation: frame.Correlation,
-			})
 		case FrameTypeData:
 			if err := x.handleDuplexData(baseCtx, conn, frame); err != nil {
 				return
@@ -562,7 +587,7 @@ func (x *ProtoServer) handleDuplexConn(raw net.Conn) {
 // recovery so a misbehaving handler cannot crash the accept worker. When no
 // duplex tell handler is set, a registered RemoteTellRequest [ProtoHandler] is
 // used as a compatibility bridge for fixture servers.
-func (x *ProtoServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) {
+func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) {
 	if x.duplexTell != nil {
 		if x.panicHandler == nil {
 			x.duplexTell(ctx, env)
@@ -601,7 +626,7 @@ func (x *ProtoServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) {
 //
 // Table-ref decode failures are connection-scoped (ERROR then close). Other
 // decode failures are request-scoped ERROR and the connection stays up.
-func (x *ProtoServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
+func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
 	env, err := decodeDataEnvelope(frame.Payload, frame.HasMetadata())
 	if err != nil {
 		if errors.Is(err, ErrTableRefUnsupported) {
@@ -671,7 +696,7 @@ func (x *ProtoServer) handleDuplexData(ctx context.Context, conn *duplexConn, fr
 //     after deserialization.
 //   - Response serialization reuses the [ProtoSerializer]'s internal buffer
 //     pool.
-func (x *ProtoServer) handleConn(conn Connection) {
+func (x *RemotingServer) handleConn(conn Connection) {
 	ctx := x.server.Context()
 
 	// Buffer the read side for the connection's lifetime: the frame header
@@ -822,7 +847,7 @@ func (x *ProtoServer) handleConn(conn Connection) {
 // tearing down the connection. When no panic handler is configured, the panic
 // propagates normally (closing the connection via the deferred close in
 // [TCPServer.serveConn]).
-func (x *ProtoServer) recover(ctx context.Context, handler ProtoHandler, conn Connection, msg proto.Message, typeName protoreflect.FullName) (resp proto.Message, panicked bool, err error) {
+func (x *RemotingServer) recover(ctx context.Context, handler ProtoHandler, conn Connection, msg proto.Message, typeName protoreflect.FullName) (resp proto.Message, panicked bool, err error) {
 	if x.panicHandler == nil {
 		// No recovery configured — let panics propagate.
 		resp, err = handler(ctx, conn, msg)

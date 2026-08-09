@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -108,8 +109,8 @@ func (x *client) sendControlLegacy(ctx context.Context, host string, port int, r
 // sendControlDuplex encodes req as an expectsReply DATA frame on the control
 // lane, waits for the correlated REPLY, and decodes it with [decodeControlReply].
 // Any transport failure closes the peer session so the next call re-dials.
-func (x *client) sendControlDuplex(ctx context.Context, p *peer, req proto.Message) (proto.Message, error) {
-	session, err := p.ensureDuplex(ctx)
+func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Message) (proto.Message, error) {
+	session, err := peer.ensureLane(ctx, internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +145,7 @@ func (x *client) sendControlDuplex(ctx context.Context, p *peer, req proto.Messa
 	replyFrame, err := session.Ask(ctx, frame)
 	if err != nil {
 		if shouldRetireDuplexSession(err, replyFrame) {
-			p.retireSession(session)
+			peer.retireLane(laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}, session)
 		}
 		return nil, mapDuplexErr(err)
 	}
@@ -159,8 +160,8 @@ func (x *client) sendTell(ctx context.Context, host string, port int, params tel
 		return x.sendTellLegacy(ctx, host, port, params)
 	}
 
-	p := x.peerFor(host, port)
-	err := x.sendTellDuplex(ctx, p, params)
+	peer := x.peerFor(host, port)
+	err := x.sendTellDuplex(ctx, peer, params)
 	if err == nil {
 		return nil
 	}
@@ -175,9 +176,9 @@ func (x *client) sendTell(ctx context.Context, host string, port int, params tel
 // sendTellLegacy wraps params in RemoteTellRequest and sends via SendProto.
 // beginLegacySend/endLegacySend bracket the call for switchover drain.
 func (x *client) sendTellLegacy(ctx context.Context, host string, port int, params tellParams) error {
-	p := x.peerFor(host, port)
-	p.beginLegacySend()
-	defer p.endLegacySend()
+	peer := x.peerFor(host, port)
+	peer.beginLegacySend()
+	defer peer.endLegacySend()
 
 	nc := x.NetClient(host, port)
 	resp, err := nc.SendProto(ctx, &internalpb.RemoteTellRequest{
@@ -196,11 +197,11 @@ func (x *client) sendTellLegacy(ctx context.Context, host string, port int, para
 }
 
 // sendTellDuplex enqueues one DATA frame without expecting a reply. Transport
-// errors retire the duplex session so later sends re-probe. All Milestone 2
-// frames carry the control lane byte, matching the single negotiated
-// control-role connection; per-role lane bytes arrive with Milestone 3.
-func (x *client) sendTellDuplex(ctx context.Context, p *peer, params tellParams) error {
-	session, err := p.ensureDuplex(ctx)
+// errors retire the selected lane so later sends re-probe that lane. The
+// frame lane byte matches the negotiated role/index for the routed session.
+func (x *client) sendTellDuplex(ctx context.Context, peer *peer, params tellParams) error {
+	route := peer.route(params.receiver)
+	session, err := peer.ensureLane(ctx, route.role, route.index)
 	if err != nil {
 		return err
 	}
@@ -227,13 +228,13 @@ func (x *client) sendTellDuplex(ctx context.Context, p *peer, params tellParams)
 	frame := inet.Frame{
 		Type:    inet.FrameTypeData,
 		Flags:   flags,
-		Lane:    inet.LaneControl,
+		Lane:    session.Lane(),
 		Payload: encoded,
 	}
 
 	if err := session.Tell(ctx, frame); err != nil {
 		if shouldRetireDuplexSession(err, inet.Frame{}) {
-			p.retireSession(session)
+			peer.retireLane(route, session)
 		}
 		return mapDuplexErr(err)
 	}
@@ -248,8 +249,8 @@ func (x *client) sendAsk(ctx context.Context, host string, port int, params askP
 		return x.sendAskLegacy(ctx, host, port, params, serializer)
 	}
 
-	p := x.peerFor(host, port)
-	resp, err := x.sendAskDuplex(ctx, p, params, serializer)
+	peer := x.peerFor(host, port)
+	resp, err := x.sendAskDuplex(ctx, peer, params, serializer)
 	if err == nil {
 		return resp, nil
 	}
@@ -264,9 +265,9 @@ func (x *client) sendAsk(ctx context.Context, host string, port int, params askP
 // sendAskLegacy sends RemoteAskRequest via SendProto and deserializes the first
 // response message. An empty Messages slice yields a nil reply without error.
 func (x *client) sendAskLegacy(ctx context.Context, host string, port int, params askParams, serializer remote.Serializer) (any, error) {
-	p := x.peerFor(host, port)
-	p.beginLegacySend()
-	defer p.endLegacySend()
+	peer := x.peerFor(host, port)
+	peer.beginLegacySend()
+	defer peer.endLegacySend()
 
 	nc := x.NetClient(host, port)
 	req := &internalpb.RemoteAskRequest{
@@ -306,8 +307,9 @@ func (x *client) sendAskLegacy(ctx context.Context, host string, port int, param
 // the REPLY envelope, and maps internalpb.Error payloads to Go errors via
 // [checkProtoError]. Terminal transport failures close the peer session;
 // caller timeouts and request-scoped ERROR frames do not.
-func (x *client) sendAskDuplex(ctx context.Context, p *peer, params askParams, serializer remote.Serializer) (any, error) {
-	session, err := p.ensureDuplex(ctx)
+func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams, serializer remote.Serializer) (any, error) {
+	route := peer.route(params.receiver)
+	session, err := peer.ensureLane(ctx, route.role, route.index)
 	if err != nil {
 		return nil, err
 	}
@@ -332,14 +334,14 @@ func (x *client) sendAskDuplex(ctx context.Context, p *peer, params askParams, s
 	frame := inet.Frame{
 		Type:    inet.FrameTypeData,
 		Flags:   flags,
-		Lane:    inet.LaneControl,
+		Lane:    session.Lane(),
 		Payload: encoded,
 	}
 
 	replyFrame, err := session.Ask(ctx, frame)
 	if err != nil {
 		if shouldRetireDuplexSession(err, replyFrame) {
-			p.retireSession(session)
+			peer.retireLane(route, session)
 		}
 		return nil, mapDuplexErr(err)
 	}
@@ -370,17 +372,19 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 		return x.sendBatchTellLegacy(ctx, host, port, params)
 	}
 
-	p := x.peerFor(host, port)
-	session, err := p.ensureDuplex(ctx)
-	if err != nil {
-		if errors.Is(err, errPreferLegacy) {
-			return x.sendBatchTellLegacy(ctx, host, port, params)
+	peer := x.peerFor(host, port)
+	for i, param := range params {
+		route := peer.route(param.receiver)
+		session, err := peer.ensureLane(ctx, route.role, route.index)
+		if err != nil {
+			if errors.Is(err, errPreferLegacy) {
+				// Send only the remainder through the legacy path. Messages
+				// before i were already delivered on duplex lanes; re-sending
+				// the whole batch would duplicate them, breaking at-most-once.
+				return x.sendBatchTellLegacy(ctx, host, port, params[i:])
+			}
+			return err
 		}
-
-		return err
-	}
-
-	for _, param := range params {
 		flags := byte(0)
 		if len(param.metadata) > 0 {
 			flags |= inet.FrameFlagHasMetadata
@@ -403,13 +407,13 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 		frame := inet.Frame{
 			Type:    inet.FrameTypeData,
 			Flags:   flags,
-			Lane:    inet.LaneControl,
+			Lane:    session.Lane(),
 			Payload: encoded,
 		}
 
 		if tellErr := session.Tell(ctx, frame); tellErr != nil {
 			if shouldRetireDuplexSession(tellErr, inet.Frame{}) {
-				p.retireSession(session)
+				peer.retireLane(route, session)
 			}
 			return mapDuplexErr(tellErr)
 		}
@@ -456,6 +460,8 @@ type batchAskResult struct {
 	// reply is the raw Ask frame when err came from session.Ask; used to
 	// distinguish request-scoped ERROR from terminal transport loss.
 	reply inet.Frame
+	// route identifies the lane used by this request.
+	route laneKey
 }
 
 // sendBatchAskDuplex issues N concurrent asks on one duplex session and returns
@@ -468,19 +474,15 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 	}
 
 	p := x.peerFor(host, port)
-	session, err := p.ensureDuplex(ctx)
-	if err != nil {
-		if errors.Is(err, errPreferLegacy) {
-			return x.sendBatchAskLegacy(ctx, host, port, params, serializers)
-		}
-
-		return nil, err
-	}
-
 	results := make([]any, len(params))
 	var wg sync.WaitGroup
 	out := make(chan batchAskResult, len(params))
 	sem := make(chan struct{}, maxBatchAskConcurrency)
+
+	// submitted counts asks handed to a duplex session. The whole-batch legacy
+	// fallback is safe only while it is zero: once any ask may have reached the
+	// peer, re-sending the batch would duplicate it, breaking at-most-once.
+	var submitted atomic.Int32
 
 	// One metadata blob and flag set serve every ask in the batch: all asks
 	// share ctx, so per-goroutine marshaling would only add allocations.
@@ -493,6 +495,12 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 		go func(idx int, ask askParams, ser remote.Serializer) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			route := p.route(ask.receiver)
+			session, sessionErr := p.ensureLane(ctx, route.role, route.index)
+			if sessionErr != nil {
+				out <- batchAskResult{index: idx, err: sessionErr, route: route}
+				return
+			}
 
 			env := inet.DataEnvelope{
 				Sender:       ask.sender,
@@ -505,26 +513,30 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 
 			encoded, encErr := inet.EncodeDataEnvelope(env)
 			if encErr != nil {
-				out <- batchAskResult{index: idx, err: encErr}
+				out <- batchAskResult{index: idx, err: encErr, route: route}
 				return
 			}
 
 			frame := inet.Frame{
 				Type:    inet.FrameTypeData,
 				Flags:   flags,
-				Lane:    inet.LaneControl,
+				Lane:    session.Lane(),
 				Payload: encoded,
 			}
 
+			submitted.Add(1)
 			replyFrame, askErr := session.Ask(ctx, frame)
 			if askErr != nil {
-				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame}
+				if shouldRetireDuplexSession(askErr, replyFrame) {
+					p.retireLane(route, session)
+				}
+				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame, route: route}
 				return
 			}
 
 			replyEnv, decErr := inet.DecodeReplyEnvelope(replyFrame.Payload, replyFrame.HasMetadata())
 			if decErr != nil {
-				out <- batchAskResult{index: idx, err: decErr}
+				out <- batchAskResult{index: idx, err: decErr, route: route}
 				return
 			}
 
@@ -536,7 +548,7 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 				}
 			}
 
-			out <- batchAskResult{index: idx, value: val, err: desErr}
+			out <- batchAskResult{index: idx, value: val, err: desErr, route: route}
 		}(i, param, serializers[i])
 	}
 
@@ -544,11 +556,9 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 	close(out)
 
 	var firstErr error
-	var firstReply inet.Frame
 	for res := range out {
 		if res.err != nil && firstErr == nil {
 			firstErr = res.err
-			firstReply = res.reply
 		}
 
 		if res.err == nil {
@@ -557,8 +567,14 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 	}
 
 	if firstErr != nil {
-		if shouldRetireDuplexSession(firstErr, firstReply) {
-			p.retireSession(session)
+		if errors.Is(firstErr, errPreferLegacy) {
+			if submitted.Load() == 0 {
+				return x.sendBatchAskLegacy(ctx, host, port, params, serializers)
+			}
+
+			// Some asks already reached duplex lanes; re-sending the batch on
+			// the legacy path would execute them twice on the target actors.
+			return nil, fmt.Errorf("remote batch ask aborted: peer switched to the legacy protocol after %d of %d asks were submitted on duplex lanes", submitted.Load(), len(params))
 		}
 		return nil, firstErr
 	}

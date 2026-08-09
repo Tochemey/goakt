@@ -24,6 +24,7 @@ package net
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"time"
 
@@ -47,8 +48,8 @@ type DuplexSession interface {
 	Ask(ctx context.Context, frame Frame) (Frame, error)
 
 	// Recv returns the next inbound frame that is not a correlated
-	// REPLY/ERROR (those complete Ask waiters): connection-scoped ERROR
-	// frames, PONGs, and any unsolicited traffic. It blocks until a frame
+	// REPLY/ERROR (those complete Ask waiters): connection-scoped ERROR and
+	// any unsolicited traffic. It blocks until a frame
 	// arrives, ctx is done, or the session closes.
 	Recv(ctx context.Context) (Frame, error)
 
@@ -56,6 +57,9 @@ type DuplexSession interface {
 	// closed session fails every subsequent Tell/Ask, so owners should
 	// discard it and dial a fresh one.
 	IsClosed() bool
+
+	// Lane returns the negotiated connection lane byte.
+	Lane() byte
 
 	// Close drains admitted outbound frames, stops reader/writer loops, and
 	// closes the underlying framed connection. It is safe to call more than
@@ -69,12 +73,25 @@ type DuplexSession interface {
 //
 // When ctx carries a deadline, that deadline bounds the HELLO exchange so a
 // silent peer cannot stall dial forever. writeTimeout bounds [DuplexSession]
-// submissions when a later caller's context carries no deadline.
+// submissions when a later caller's context carries no deadline. lane
+// overrides the lane fields in localHello and readIdleTimeout enables
+// connection-level PING/PONG liveness when nonzero. The session's effective
+// lane identity comes from the HELLO_ACK, which may differ from lane when the
+// acceptor predates lane echo and always answers CONTROL.
 //
 // On success the returned [HandshakeResult] holds local, remote, and effective
 // negotiated parameters. On failure the underlying connection is closed.
-func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, writeTimeout time.Duration) (DuplexSession, *HandshakeResult, error) {
-	framed, err := transport.Dial(ctx, addr, LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL})
+func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, lane LaneSpec, writeTimeout, readIdleTimeout time.Duration) (DuplexSession, *HandshakeResult, error) {
+	if _, err := laneByte(lane.Role, lane.Index); err != nil {
+		return nil, nil, err
+	}
+	if localHello == nil {
+		return nil, nil, fmt.Errorf("tcp: hello local parameters are required")
+	}
+	localHello.LaneRole = lane.Role
+	localHello.LaneIndex = lane.Index
+
+	framed, err := transport.Dial(ctx, addr, lane)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -86,7 +103,24 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 		defer func() { _ = framed.NetConn().SetDeadline(time.Time{}) }()
 	}
 
+	// Cancellation without a deadline (ClosePeer) must still unblock ReadFrame.
+	stopCancel := context.AfterFunc(ctx, func() {
+		_ = framed.Close()
+	})
+	defer stopCancel()
+
 	result, err := performHello(framed, localHello)
+	if err != nil {
+		_ = framed.Close()
+		return nil, nil, err
+	}
+
+	// Stamp and enforce the negotiated lane from the ACK, not the requested
+	// one. A baseline acceptor that predates lane echo answers CONTROL for
+	// every dial; adopting its identity keeps frame stamping consistent with
+	// the ERROR/REPLY lane bytes that peer emits instead of failing the lane
+	// on its first server-originated frame.
+	laneValue, err := laneByte(result.Effective.GetLaneRole(), result.Effective.GetLaneIndex())
 	if err != nil {
 		_ = framed.Close()
 		return nil, nil, err
@@ -107,6 +141,12 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 		credits = int64(defaultInitialCredits)
 	}
 
-	conn := newDuplexConn(framed, credits, withDuplexWriteTimeout(writeTimeout))
+	conn := newDuplexConn(
+		framed,
+		credits,
+		withDuplexWriteTimeout(writeTimeout),
+		withDuplexReadIdleTimeout(readIdleTimeout),
+		withDuplexLane(laneValue),
+	)
 	return conn, result, nil
 }

@@ -25,8 +25,10 @@ package remote
 import (
 	"maps"
 	"net"
+	"path"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -51,6 +53,10 @@ const DefaultMaxConcurrentLargeTransfers uint32 = 4
 // outbound queue byte cap (16 MiB).
 const DefaultInitialCredits uint64 = 16 * size.MB
 
+// DefaultOrdinaryLanes is the default number of ordinary duplex lanes per
+// peer. One lane preserves per-destination-node FIFO for user traffic.
+const DefaultOrdinaryLanes uint32 = 1
+
 // Config defines the remote config.
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so
@@ -73,12 +79,15 @@ type Config struct {
 	// serializers holds all per-type and per-interface serializer entries
 	// evaluated in registration order by [Config.Serializer].
 	// Populated only during construction; never mutated afterwards.
-	serializers  map[reflect.Type]Serializer
-	maxIdleConns int
-	dialTimeout  time.Duration
-	keepAlive    time.Duration
-	tlsInfo      *gtls.Info
-	protocolPin  ProtocolPin
+	serializers                 map[reflect.Type]Serializer
+	maxIdleConns                int
+	dialTimeout                 time.Duration
+	keepAlive                   time.Duration
+	tlsInfo                     *gtls.Info
+	protocolPin                 ProtocolPin
+	ordinaryLanes               uint32
+	largeMessageDestinations    []string
+	maxConcurrentLargeTransfers uint32
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -91,18 +100,20 @@ var _ validation.Validator = (*Config)(nil)
 // timeout tuning.
 func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 	cfg := &Config{
-		maxFrameSize:    16 * size.MB,
-		writeTimeout:    10 * time.Second,
-		readIdleTimeout: 10 * time.Second,
-		idleTimeout:     1200 * time.Second,
-		bindAddr:        bindAddr,
-		bindPort:        bindPort,
-		compression:     NoCompression,
-		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
-		dialTimeout:     5 * time.Second,     // 5s dial timeout
-		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
-		protocolPin:     ProtocolPinAuto,
+		maxFrameSize:                16 * size.MB,
+		writeTimeout:                10 * time.Second,
+		readIdleTimeout:             10 * time.Second,
+		idleTimeout:                 1200 * time.Second,
+		bindAddr:                    bindAddr,
+		bindPort:                    bindPort,
+		compression:                 NoCompression,
+		serializers:                 make(map[reflect.Type]Serializer, 10),
+		maxIdleConns:                DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:                 5 * time.Second,     // 5s dial timeout
+		keepAlive:                   15 * time.Second,    // 15s TCP keep-alive
+		protocolPin:                 ProtocolPinAuto,
+		ordinaryLanes:               DefaultOrdinaryLanes,
+		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -119,18 +130,20 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 // DefaultConfig returns the default remote config
 func DefaultConfig() *Config {
 	cfg := &Config{
-		maxFrameSize:    16 * size.MB,
-		writeTimeout:    10 * time.Second,
-		readIdleTimeout: 10 * time.Second,
-		idleTimeout:     1200 * time.Second,
-		bindAddr:        "127.0.0.1",
-		bindPort:        0,
-		compression:     NoCompression,
-		serializers:     make(map[reflect.Type]Serializer, 10),
-		maxIdleConns:    DefaultMaxIdleConns, // pooled connections retained per endpoint
-		dialTimeout:     5 * time.Second,     // 5s dial timeout
-		keepAlive:       15 * time.Second,    // 15s TCP keep-alive
-		protocolPin:     ProtocolPinAuto,
+		maxFrameSize:                16 * size.MB,
+		writeTimeout:                10 * time.Second,
+		readIdleTimeout:             10 * time.Second,
+		idleTimeout:                 1200 * time.Second,
+		bindAddr:                    "127.0.0.1",
+		bindPort:                    0,
+		compression:                 NoCompression,
+		serializers:                 make(map[reflect.Type]Serializer, 10),
+		maxIdleConns:                DefaultMaxIdleConns, // pooled connections retained per endpoint
+		dialTimeout:                 5 * time.Second,     // 5s dial timeout
+		keepAlive:                   15 * time.Second,    // 15s TCP keep-alive
+		protocolPin:                 ProtocolPinAuto,
+		ordinaryLanes:               DefaultOrdinaryLanes,
+		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -271,8 +284,35 @@ func (x *Config) ProtocolPin() ProtocolPin {
 	return x.protocolPin
 }
 
+// OrdinaryLanes returns the number of ordinary duplex lanes dialed per peer.
+// The default is [DefaultOrdinaryLanes]. Raising the count narrows the
+// per-destination-node FIFO domain for user traffic.
+func (x *Config) OrdinaryLanes() uint32 {
+	return x.ordinaryLanes
+}
+
+// LargeMessageDestinations returns the hierarchical actor-path glob patterns
+// that route user tell/ask traffic onto the large lane. Patterns match the
+// path suffix after host:port (for example orders/*), not the full goakt://
+// URI. An empty list matches nothing.
+func (x *Config) LargeMessageDestinations() []string {
+	if len(x.largeMessageDestinations) == 0 {
+		return nil
+	}
+	out := make([]string, len(x.largeMessageDestinations))
+	copy(out, x.largeMessageDestinations)
+	return out
+}
+
+// MaxConcurrentLargeTransfers returns the HELLO-advertised cap on concurrent
+// large-message transfers. The value is negotiated today; reassembly does not
+// enforce it yet.
+func (x *Config) MaxConcurrentLargeTransfers() uint32 {
+	return x.maxConcurrentLargeTransfers
+}
+
 func (x *Config) Validate() error {
-	return validation.
+	v := validation.
 		New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("bindAddr", x.bindAddr)).
 		AddAssertion(x.maxFrameSize >= 16*size.KB && x.maxFrameSize <= 16*size.MB, "maxFrameSize must be between 16KB and 16MB").
@@ -284,5 +324,35 @@ func (x *Config) Validate() error {
 		AddAssertion(x.dialTimeout > 0, "dialTimeout must be greater than 0").
 		AddAssertion(x.keepAlive > 0, "keepAlive must be greater than 0").
 		AddAssertion(x.protocolPin.Valid(), "invalid protocol pin").
-		Validate()
+		AddAssertion(x.ordinaryLanes >= 1 && x.ordinaryLanes <= inet.MaxOrdinaryLanes, "ordinaryLanes must be between 1 and 254").
+		AddAssertion(x.maxConcurrentLargeTransfers >= 1, "maxConcurrentLargeTransfers must be greater than 0")
+
+	if x.readIdleTimeout > 0 && x.idleTimeout > 0 {
+		v = v.AddAssertion(x.readIdleTimeout < x.idleTimeout, "readIdleTimeout must be less than idleTimeout when both are set")
+	}
+
+	for _, pattern := range x.largeMessageDestinations {
+		p := pattern
+		v = v.AddAssertion(p != "", "largeMessageDestinations patterns must be non-empty").
+			AddAssertion(isValidLargeDestinationPattern(p), "invalid largeMessageDestinations pattern: "+p)
+	}
+
+	return v.Validate()
+}
+
+// isValidLargeDestinationPattern reports whether pattern is accepted by the
+// hierarchical-path matcher used for large-lane routing.
+func isValidLargeDestinationPattern(pattern string) bool {
+	normalized := normalizeHierarchicalPath(pattern)
+	if normalized == "" {
+		return false
+	}
+	_, err := path.Match(normalized, "/probe")
+	return err == nil
+}
+
+// normalizeHierarchicalPath strips a leading slash so path.Match patterns and
+// receiver path suffixes compare in the same shape.
+func normalizeHierarchicalPath(p string) string {
+	return strings.TrimPrefix(strings.TrimSpace(p), "/")
 }

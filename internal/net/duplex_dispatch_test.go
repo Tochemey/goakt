@@ -105,12 +105,12 @@ func TestSubmitErrorFrame(t *testing.T) {
 }
 
 func TestDispatchDuplexAskControlAndUser(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("internalpb.RemoteLookupRequest", func(_ context.Context, _ Connection, msg proto.Message) (proto.Message, error) {
 			req := msg.(*internalpb.RemoteLookupRequest)
 			return &internalpb.RemoteLookupResponse{Address: req.GetName()}, nil
 		}),
-		WithProtoServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
+		WithRemotingServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
 			return ReplyEnvelope{
 				TypeName:     env.TypeName,
 				SerializerID: SerializerIDInternalProto,
@@ -145,7 +145,7 @@ func TestDispatchDuplexAskControlAndUser(t *testing.T) {
 }
 
 func TestDispatchDuplexAskLegacyBridge(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("internalpb.RemoteAskRequest", func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 			msg := durationpb.New(3 * time.Second)
 			packed, packErr := proto.Marshal(msg)
@@ -176,7 +176,7 @@ func TestDispatchDuplexAskLegacyBridge(t *testing.T) {
 }
 
 func TestDispatchDuplexAskNoHandler(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0")
+	ps, err := NewRemotingServer("127.0.0.1:0")
 	require.NoError(t, err)
 
 	_, err = ps.dispatchDuplexAsk(context.Background(), DataEnvelope{
@@ -190,9 +190,9 @@ func TestDispatchDuplexAskNoHandler(t *testing.T) {
 
 func TestRecoverDuplexAskPanic(t *testing.T) {
 	var recovered any
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerPanicHandler(func(_ protoreflect.FullName, r any) { recovered = r }),
-		WithProtoServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerPanicHandler(func(_ protoreflect.FullName, r any) { recovered = r }),
+		WithRemotingServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
 			panic("ask boom")
 		}),
 	)
@@ -208,8 +208,8 @@ func TestRecoverDuplexAskPanic(t *testing.T) {
 }
 
 func TestRecoverDuplexAskPanicWithoutHandler(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
 			panic("ask boom")
 		}),
 	)
@@ -235,8 +235,8 @@ func TestHandleDuplexAskTaskWritesReply(t *testing.T) {
 	conn := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024)
 	peer := newTCPFramedConn(c2, defaultMaxFrameSize)
 
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
 			return ReplyEnvelope{
 				TypeName:     env.TypeName,
 				SerializerID: SerializerIDInternalProto,
@@ -282,8 +282,8 @@ func TestHandleDuplexAskTaskWritesErrorOnHandlerFailure(t *testing.T) {
 	conn := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024)
 	peer := newTCPFramedConn(c2, defaultMaxFrameSize)
 
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerDuplexAskHandler(func(context.Context, DataEnvelope) (ReplyEnvelope, error) {
 			return ReplyEnvelope{}, errors.New("handler failed")
 		}),
 	)

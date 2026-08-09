@@ -191,7 +191,7 @@ func TestBuildUserTellParams(t *testing.T) {
 }
 
 func TestSendControlDuplexRoundTrip(t *testing.T) {
-	ps := startProtoServer(t,
+	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
 	)
 	host, port := serverHostPort(t, ps)
@@ -216,7 +216,7 @@ func TestSendControlDuplexRoundTrip(t *testing.T) {
 
 func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 	var got time.Duration
-	ps := startProtoServer(t,
+	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
 			req := msg.(*internalpb.RemoteAskRequest)
 			if req.GetTimeout() != nil {
@@ -233,7 +233,7 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 			copy(frame[8+len(name):], packed)
 			return &internalpb.RemoteAskResponse{Messages: [][]byte{frame}}, nil
 		}),
-		inet.WithProtoServerAcceptProtocol(inet.AcceptProtocolLegacy),
+		inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolLegacy),
 	)
 	host, port := serverHostPort(t, ps)
 
@@ -253,7 +253,7 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 
 	_, err = r.sendAsk(context.Background(), host, port, askParams{
 		tellParams: params,
-		timeout:        750 * time.Millisecond,
+		timeout:    750 * time.Millisecond,
 	}, ser)
 	require.NoError(t, err)
 	assert.Equal(t, 750*time.Millisecond, got)
@@ -261,11 +261,11 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 
 func TestSendTellAndAskDuplex(t *testing.T) {
 	var tellCount atomic.Int32
-	ps := startProtoServer(t,
-		inet.WithProtoServerDuplexTellHandler(func(context.Context, inet.DataEnvelope) {
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerDuplexTellHandler(func(context.Context, inet.DataEnvelope) {
 			tellCount.Add(1)
 		}),
-		inet.WithProtoServerDuplexAskHandler(func(_ context.Context, env inet.DataEnvelope) (inet.ReplyEnvelope, error) {
+		inet.WithRemotingServerDuplexAskHandler(func(_ context.Context, env inet.DataEnvelope) (inet.ReplyEnvelope, error) {
 			return inet.ReplyEnvelope{
 				TypeName:     env.TypeName,
 				SerializerID: inet.SerializerIDPublicProto,

@@ -1626,15 +1626,15 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	return nil
 }
 
-// protoServerOptions returns ProtoServer options with all RemotingService and ClusterService
+// remotingServerOptions returns RemotingServer options with all RemotingService and ClusterService
 // handlers registered. This enables the actor system to handle remoting and cluster operations
 // over the proto TCP transport.
 // This enables the actor system to handle remoting operations over the proto TCP transport.
 //
-// The returned options should be passed to internalnet.NewProtoServer during actor system
+// The returned options should be passed to internalnet.NewRemotingServer during actor system
 // initialization to configure the proto TCP server with all necessary handlers.
-func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
-	return []inet.ProtoServerOption{
+func (x *actorSystem) remotingServerOptions() []inet.RemotingServerOption {
+	return []inet.RemotingServerOption{
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", x.remoteLookupHandler),
 		inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", x.getReliableCompanionHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", x.remoteAskHandler),
@@ -1666,7 +1666,7 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 }
 
 // acceptProtocolFromPin maps a remoting [remote.ProtocolPin] onto the listener
-// accept mode used by [inet.ProtoServer].
+// accept mode used by [inet.RemotingServer].
 func acceptProtocolFromPin(pin remote.ProtocolPin) inet.AcceptProtocol {
 	switch pin {
 	case remote.ProtocolPinLegacy:
@@ -1679,11 +1679,11 @@ func acceptProtocolFromPin(pin remote.ProtocolPin) inet.AcceptProtocol {
 }
 
 // startRemoteServer initializes and starts the proto TCP server for handling remoting operations.
-// It creates a new ProtoServer instance configured with the remote config settings and registers
+// It creates a new RemotingServer instance configured with the remote config settings and registers
 // all RemotingService handlers.
 //
 // The server is started in a background goroutine and will serve incoming connections until
-// stopped via stopProtoServer.
+// stopped via stopRemotingServer.
 //
 // Returns an error if the server fails to initialize or listen on the configured address.
 func (x *actorSystem) startRemoteServer(ctx context.Context) error {
@@ -1699,36 +1699,40 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	x.remoteHostPort = hostPort
 
 	// Create proto server options based on the remote config.
-	serverOpts := x.protoServerOptions()
+	serverOpts := x.remotingServerOptions()
 
 	// Add max frame size from config if specified.
 	if x.remoteConfig.MaxFrameSize() > 0 {
-		serverOpts = append(serverOpts, inet.WithProtoServerMaxFrameSize(x.remoteConfig.MaxFrameSize()))
+		serverOpts = append(serverOpts, inet.WithRemotingServerMaxFrameSize(x.remoteConfig.MaxFrameSize()))
 	}
 
 	// Add idle timeout if configured.
 	if x.remoteConfig.IdleTimeout() > 0 {
-		serverOpts = append(serverOpts, inet.WithProtoServerIdleTimeout(x.remoteConfig.IdleTimeout()))
+		serverOpts = append(serverOpts, inet.WithRemotingServerIdleTimeout(x.remoteConfig.IdleTimeout()))
+	}
+	if x.remoteConfig.ReadIdleTimeout() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerReadIdleTimeout(x.remoteConfig.ReadIdleTimeout()))
 	}
 
-	serverOpts = append(serverOpts, inet.WithProtoServerSystemName(x.Name()))
-	serverOpts = append(serverOpts, inet.WithProtoServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
-	serverOpts = append(serverOpts, inet.WithProtoServerInitialCredits(remote.DefaultInitialCredits))
+	serverOpts = append(serverOpts, inet.WithRemotingServerSystemName(x.Name()))
+	serverOpts = append(serverOpts, inet.WithRemotingServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
+	serverOpts = append(serverOpts, inet.WithRemotingServerInitialCredits(remote.DefaultInitialCredits))
 	if x.remoteConfig.WriteTimeout() > 0 {
-		serverOpts = append(serverOpts, inet.WithProtoServerWriteTimeout(x.remoteConfig.WriteTimeout()))
+		serverOpts = append(serverOpts, inet.WithRemotingServerWriteTimeout(x.remoteConfig.WriteTimeout()))
 	}
+	serverOpts = append(serverOpts, inet.WithRemotingServerMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()))
 	serverOpts = append(serverOpts,
-		inet.WithProtoServerDuplexTellHandler(x.duplexRemoteTell),
-		inet.WithProtoServerDuplexAskHandler(x.duplexRemoteAsk),
+		inet.WithRemotingServerDuplexTellHandler(x.duplexRemoteTell),
+		inet.WithRemotingServerDuplexAskHandler(x.duplexRemoteAsk),
 	)
 
 	// Detach the server's base context from Start's cancelation/deadline: the server's
 	// lifetime is governed by Stop, and a bounded startup context (a DI OnStart hook, a
 	// startup timeout) expiring later must not poison every inbound handler context.
-	serverOpts = append(serverOpts, inet.WithProtoServerContext(context.WithoutCancel(ctx)))
+	serverOpts = append(serverOpts, inet.WithRemotingServerContext(context.WithoutCancel(ctx)))
 
 	// Add panic recovery so a misbehaving handler does not crash the connection.
-	serverOpts = append(serverOpts, inet.WithProtoServerPanicHandler(func(typeName protoreflect.FullName, recovered any) {
+	serverOpts = append(serverOpts, inet.WithRemotingServerPanicHandler(func(typeName protoreflect.FullName, recovered any) {
 		x.logger.Errorf("Remoting panic in handler for %s: %v", typeName, recovered)
 	}))
 
@@ -1736,59 +1740,59 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	switch x.remoteConfig.Compression() {
 	case remote.BrotliCompression:
 		wrapper := inet.NewBrotliConnWrapper()
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	case remote.ZstdCompression:
 		wrapper, err := inet.NewZstdConnWrapper()
 		if err != nil {
 			x.logger.Error(fmt.Errorf("failed to create Zstd compression wrapper: %w", err))
 			return err
 		}
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	case remote.GzipCompression:
 		wrapper, err := inet.NewGzipConnWrapper()
 		if err != nil {
 			x.logger.Error(fmt.Errorf("failed to create Gzip compression wrapper: %w", err))
 			return err
 		}
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	}
 
 	// Add TLS configuration if enabled.
 	var useTLS bool
 	if x.tlsInfo != nil && x.tlsInfo.ServerConfig != nil {
-		serverOpts = append(serverOpts, inet.WithProtoServerTLSConfig(x.tlsInfo.ServerConfig))
+		serverOpts = append(serverOpts, inet.WithRemotingServerTLSConfig(x.tlsInfo.ServerConfig))
 		useTLS = true
 		x.logger.Info("TLS enabled for proto remote server")
 	}
 
 	// Create the proto server.
-	protoServer, err := inet.NewProtoServer(hostPort, serverOpts...)
+	remotingServer, err := inet.NewRemotingServer(hostPort, serverOpts...)
 	if err != nil {
 		x.logger.Error(fmt.Errorf("failed to create remote server: %w", err))
 		return err
 	}
 
 	// Store the server instance for later shutdown.
-	x.remoteServer = protoServer
+	x.remoteServer = remotingServer
 
 	// Start listening (with or without TLS).
 	if useTLS {
-		if err := protoServer.ListenTLS(); err != nil {
+		if err := remotingServer.ListenTLS(); err != nil {
 			x.logger.Error(fmt.Errorf("failed to listen on %s with TLS: %w", hostPort, err))
 			return err
 		}
 	} else {
-		if err := protoServer.Listen(); err != nil {
+		if err := remotingServer.Listen(); err != nil {
 			x.logger.Error(fmt.Errorf("failed to listen on %s: %w", hostPort, err))
 			return err
 		}
 	}
 
-	x.logger.Infof("Remote server listening on %s", protoServer.ListenAddr().String())
+	x.logger.Infof("Remote server listening on %s", remotingServer.ListenAddr().String())
 
 	// Start serving in a background goroutine.
 	go func() {
-		if err := protoServer.Serve(); err != nil {
+		if err := remotingServer.Serve(); err != nil {
 			x.logger.Error(fmt.Errorf("remote server failed: %w", err))
 			os.Exit(1)
 		}

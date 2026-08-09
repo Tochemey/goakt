@@ -145,7 +145,7 @@ func (r *gzipLazyReader) Read(p []byte) (int, error) {
 // gzipFlushWriter adapts a [gzip.Writer] to the [flushWriter] interface
 // required by [compressedConn]. Each Write is followed by a Flush to ensure
 // the compressed data is immediately available on the wire — critical for
-// the request/response framing used by [ProtoServer] and [Client].
+// the request/response framing used by [RemotingServer] and [Client].
 type gzipFlushWriter struct {
 	w *gzip.Writer
 }

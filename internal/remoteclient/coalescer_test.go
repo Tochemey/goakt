@@ -100,7 +100,7 @@ func (t *tellCounter) allReceived() []*internalpb.RemoteMessage {
 func startCoalescingServer(t *testing.T) (*tellCounter, string, int, func()) {
 	t.Helper()
 	tc := &tellCounter{}
-	ps, err := inet.NewProtoServer("127.0.0.1:0",
+	ps, err := inet.NewRemotingServer("127.0.0.1:0",
 		inet.WithProtoHandler("internalpb.RemoteTellRequest", tc.handler),
 	)
 	require.NoError(t, err)
@@ -206,7 +206,7 @@ func TestCoalescing_FlushOnClose(t *testing.T) {
 		<-release
 		return &internalpb.RemoteTellResponse{}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteTellRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteTellRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -643,7 +643,7 @@ func (b *blockingServer) handler(ctx context.Context, _ inet.Connection, _ proto
 func startBlockingServer(t *testing.T) (*blockingServer, string, int, func()) {
 	t.Helper()
 	bs := &blockingServer{release: make(chan struct{})}
-	ps, err := inet.NewProtoServer("127.0.0.1:0",
+	ps, err := inet.NewRemotingServer("127.0.0.1:0",
 		inet.WithProtoHandler("internalpb.RemoteTellRequest", bs.handler),
 	)
 	require.NoError(t, err)

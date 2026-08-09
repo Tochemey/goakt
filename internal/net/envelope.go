@@ -55,10 +55,11 @@ const (
 //	senderRef | receiverRef | typeRef | serializerID (1B) | [metaLen(4B) metadata] | payload
 //
 // Each ref is a uvarint table ID, or 0 followed by a uvarint length and that
-// many bytes of inline literal. Encoders always emit inline literals until
-// compression tables land (Milestone 5). Control RPCs use empty Sender and
-// Receiver with SerializerIDInternalProto; user messages carry address
-// strings and a public/JSON/CBOR/custom serializer ID.
+// many bytes of inline literal. Encoders currently always emit inline
+// literals (table IDs are reserved for negotiated compression tables).
+// Control RPCs use empty Sender and Receiver with SerializerIDInternalProto;
+// user messages carry address strings and a public/JSON/CBOR/custom
+// serializer ID.
 type DataEnvelope struct {
 	// Sender is the wire actor address of the origin, or empty for control RPCs.
 	Sender string

@@ -322,7 +322,7 @@ func TestRemoteReSpawn_EmptyAddressResponse(t *testing.T) {
 		return &internalpb.RemoteReSpawnResponse{Address: ""}, nil
 	}
 
-	ps, err := inet.NewProtoServer("127.0.0.1:0",
+	ps, err := inet.NewRemotingServer("127.0.0.1:0",
 		inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler),
 	)
 	require.NoError(t, err)
@@ -353,7 +353,7 @@ func TestRemoteAsk_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteLookupResponse{}, nil // wrong type
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -384,7 +384,7 @@ func TestRemoteAsk_EmptyMessagesReturnsNil(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteAskResponse{Messages: nil}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -415,7 +415,7 @@ func TestRemoteAsk_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -522,7 +522,7 @@ func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -549,7 +549,7 @@ func TestRemoteLookup_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -575,7 +575,7 @@ func TestRemoteLookup_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteAskResponse{}, nil // wrong type
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -611,7 +611,7 @@ func TestGetReliableCompanion_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.GetReliableCompanionResponse{Address: companion.String()}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -638,7 +638,7 @@ func TestGetReliableCompanion_NotFoundReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "companion not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -665,7 +665,7 @@ func TestGetReliableCompanion_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -691,7 +691,7 @@ func TestGetReliableCompanion_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteAskResponse{}, nil // wrong type
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -717,7 +717,7 @@ func TestRemoteStop_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStopRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStopRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -742,7 +742,7 @@ func TestRemoteReinstate_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReinstateRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReinstateRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -767,7 +767,7 @@ func TestRemoteReSpawn_NotFoundReturnsNil(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -807,7 +807,7 @@ func TestRemoteAskGrain_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteLookupResponse{}, nil // wrong type
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -835,7 +835,7 @@ func TestRemoteAskGrain_DeserializeError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteAskGrainResponse{Message: []byte("invalid-proto-bytes")}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -862,7 +862,7 @@ func TestRemoteBatchAsk_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1369,7 +1369,7 @@ func TestRemoteBatchAsk_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteAskResponse{Messages: [][]byte{packed}}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1403,7 +1403,7 @@ func TestRemoteBatchAsk_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteLookupResponse{}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1443,7 +1443,7 @@ func TestRemoteSpawn_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1471,7 +1471,7 @@ func TestRemoteSpawn_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrTypeNotRegistered.Error()}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1498,7 +1498,7 @@ func TestRemoteSpawn_InvalidResponse(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteSpawnResponse{Address: ""}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1538,7 +1538,7 @@ func TestRemoteSpawn_WithSingleton(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1576,7 +1576,7 @@ func TestRemoteReSpawn_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteReSpawnResponse{Address: childAddr}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1686,7 +1686,7 @@ func TestRemoteChildren_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1712,7 +1712,7 @@ func TestRemoteChildren_InvalidResponseType(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteLookupResponse{}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1739,7 +1739,7 @@ func TestRemoteChildren_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteChildrenResponse{Addresses: []string{childAddr}}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1768,7 +1768,7 @@ func TestRemoteChildren_SuccessEmpty(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteChildrenResponse{Addresses: nil}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1804,7 +1804,7 @@ func TestRemoteParent_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1831,7 +1831,7 @@ func TestRemoteParent_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteParentResponse{Address: parentAddr}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1859,7 +1859,7 @@ func TestRemoteParent_EmptyAddressReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteParentResponse{Address: ""}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1895,7 +1895,7 @@ func TestRemoteKind_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1922,7 +1922,7 @@ func TestRemoteKind_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteKindResponse{Kind: kind}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1958,7 +1958,7 @@ func TestRemoteMetric_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -1990,7 +1990,7 @@ func TestRemoteMetric_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteMetricResponse{Metric: m}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2019,7 +2019,7 @@ func TestRemoteMetric_SuccessNilMetric(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteMetricResponse{Metric: nil}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2055,7 +2055,7 @@ func TestRemoteRole_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2082,7 +2082,7 @@ func TestRemoteRole_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteRoleResponse{Role: role}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2118,7 +2118,7 @@ func TestRemoteStashSize_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2145,7 +2145,7 @@ func TestRemoteStashSize_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteStashSizeResponse{Size: size}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2181,7 +2181,7 @@ func TestRemoteState_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2207,7 +2207,7 @@ func TestRemoteState_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteStateResponse{State: true}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2243,7 +2243,7 @@ func TestRemotePassivationStrategy_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2278,7 +2278,7 @@ func TestRemotePassivationStrategy_Success(t *testing.T) {
 			},
 		}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2315,7 +2315,7 @@ func TestRemoteDependencies_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2341,7 +2341,7 @@ func TestRemoteDependencies_SuccessEmpty(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteDependenciesResponse{Dependencies: nil}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2375,7 +2375,7 @@ func TestRemoteDependencies_DependenciesWithoutRegistryReturnsError(t *testing.T
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteDependenciesResponse{Dependencies: []*internalpb.Dependency{pbDep}}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2409,7 +2409,7 @@ func TestRemoteDependencies_SuccessWithRegistry(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteDependenciesResponse{Dependencies: []*internalpb.Dependency{pbDep}}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2457,7 +2457,7 @@ func TestRemoteSpawnChild_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "parent not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2485,7 +2485,7 @@ func TestRemoteSpawnChild_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteSpawnChildResponse{Address: childAddr}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2514,7 +2514,7 @@ func TestRemoteSpawnChild_EmptyAddressReturnsError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.RemoteSpawnChildResponse{Address: ""}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2541,7 +2541,7 @@ func TestRemoteWatch_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return new(internalpb.RemoteWatchResponse), nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2567,7 +2567,7 @@ func TestRemoteWatch_ServerError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2611,7 +2611,7 @@ func TestRemoteUnWatch_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return new(internalpb.RemoteUnWatchResponse), nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)
@@ -2637,7 +2637,7 @@ func TestRemoteUnWatch_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
 		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
 	}
-	ps, err := inet.NewProtoServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)

@@ -1235,7 +1235,7 @@ func TestSelectActivationPeer_LeastLoadActivation_Success(t *testing.T) {
 	handler := func(_ context.Context, _ internalnet.Connection, req proto.Message) (proto.Message, error) {
 		return &internalpb.GetNodeMetricResponse{NodeAddress: "127.0.0.1:16000", Load: 5}, nil
 	}
-	ps, err := internalnet.NewProtoServer("127.0.0.1:0", internalnet.WithProtoHandler("internalpb.GetNodeMetricRequest", handler))
+	ps, err := internalnet.NewRemotingServer("127.0.0.1:0", internalnet.WithProtoHandler("internalpb.GetNodeMetricRequest", handler))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	done := make(chan error, 1)

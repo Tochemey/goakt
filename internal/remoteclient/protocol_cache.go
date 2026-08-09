@@ -32,6 +32,11 @@ import (
 // peer is legacy-only (EOF or connection reset before HELLO_ACK).
 var errPreferLegacy = errors.New("remote: prefer legacy protocol")
 
+// errLaneClosedDuringDial is an internal sentinel returned when ClosePeer or
+// shutdown reset the peer's lane set while a lane dial was in flight; the
+// freshly dialed session is discarded rather than installed on the reset peer.
+var errLaneClosedDuringDial = errors.New("duplex lane closed during dial")
+
 // peerLegacyReprobeInterval is how long auto mode trusts a legacy
 // classification before clearing the cache and probing duplex again. This
 // enables switchover when a peer is upgraded without requiring a process

@@ -90,10 +90,49 @@ func WithWriteTimeout(timeout time.Duration) Option {
 // WithReadIdleTimeout sets the read timeout
 // ReadIdleTimeout is the timeout after which a health check using a ping
 // frame will be carried out if no frame is received on the connection.
-// If zero, no health check is performed.
+// If zero, no health check is performed. When both this and IdleTimeout are
+// nonzero, ReadIdleTimeout must be strictly less than IdleTimeout so liveness
+// PINGs keep healthy idle lanes from being reclaimed.
 func WithReadIdleTimeout(timeout time.Duration) Option {
 	return OptionFunc(func(config *Config) {
 		config.readIdleTimeout = timeout
+	})
+}
+
+// WithOrdinaryLanes sets the number of ordinary duplex lanes dialed per peer
+// for user tell/ask traffic. The default is [DefaultOrdinaryLanes] (1), which
+// preserves per-destination-node FIFO. Valid values are 1 through 254.
+// Raising the count trades ordering breadth for send parallelism.
+func WithOrdinaryLanes(n uint32) Option {
+	return OptionFunc(func(config *Config) {
+		config.ordinaryLanes = n
+	})
+}
+
+// WithLargeMessageDestinations sets hierarchical actor-path glob patterns that
+// route matching user tell/ask traffic onto the large lane. Patterns match the
+// path suffix after host:port (for example "orders/*"), not the full goakt://
+// URI. An empty list matches nothing. Matching routes traffic for isolation
+// and head-of-line avoidance; payloads remain whole frames bounded by
+// MaxFrameSize.
+func WithLargeMessageDestinations(patterns ...string) Option {
+	return OptionFunc(func(config *Config) {
+		if len(patterns) == 0 {
+			config.largeMessageDestinations = nil
+			return
+		}
+		out := make([]string, len(patterns))
+		copy(out, patterns)
+		config.largeMessageDestinations = out
+	})
+}
+
+// WithMaxConcurrentLargeTransfers sets the HELLO-advertised cap on concurrent
+// large-message transfers. The value is negotiated today; reassembly does not
+// enforce it yet.
+func WithMaxConcurrentLargeTransfers(n uint32) Option {
+	return OptionFunc(func(config *Config) {
+		config.maxConcurrentLargeTransfers = n
 	})
 }
 

@@ -118,14 +118,16 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "capability revision below baseline")
 		return nil, fmt.Errorf("%w: %d", ErrInvalidCapabilityRevision, remote.GetRevision())
 	}
+	if _, err := laneByte(remote.GetLaneRole(), remote.GetLaneIndex()); err != nil {
+		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "invalid HELLO lane")
+		return nil, err
+	}
 
 	ack := negotiateHello(local, remote)
 	ack.Compression = selectCompression(local.GetCompression(), remote.GetCompression())
 	ack.SystemName = local.GetSystemName()
 	ack.Host = local.GetHost()
 	ack.Port = local.GetPort()
-	ack.LaneRole = local.GetLaneRole()
-	ack.LaneIndex = local.GetLaneIndex()
 
 	payload, err := proto.Marshal(ack)
 	if err != nil {
@@ -147,15 +149,16 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 
 // negotiateHello returns pairwise minima and the lower capability revision.
 // max_frame_size is floored at [minMaxFrameSize] so a peer advertising zero
-// cannot disable length validation.
+// cannot disable length validation. Lane identity comes from remote because
+// the dialer selects the connection lane.
 func negotiateHello(local, remote *internalpb.Hello) *internalpb.Hello {
 	return &internalpb.Hello{
 		Revision:                    minUint32(local.GetRevision(), remote.GetRevision()),
 		SystemName:                  local.GetSystemName(),
 		Host:                        local.GetHost(),
 		Port:                        local.GetPort(),
-		LaneRole:                    local.GetLaneRole(),
-		LaneIndex:                   local.GetLaneIndex(),
+		LaneRole:                    remote.GetLaneRole(),
+		LaneIndex:                   remote.GetLaneIndex(),
 		Compression:                 remote.GetCompression(),
 		MaxFrameSize:                floorMaxFrameSize(minUint32(local.GetMaxFrameSize(), remote.GetMaxFrameSize())),
 		MaxMessageSize:              minUint64(local.GetMaxMessageSize(), remote.GetMaxMessageSize()),
@@ -231,7 +234,7 @@ func laneByte(role internalpb.LaneRole, index uint32) (byte, error) {
 
 		return byte(index + 1), nil
 	default:
-		return LaneControl, nil
+		return 0, fmt.Errorf("tcp: unknown lane role %d", role)
 	}
 }
 

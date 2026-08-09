@@ -61,7 +61,7 @@ type DuplexAskHandler func(ctx context.Context, env DataEnvelope) (ReplyEnvelope
 // originating frame lets the worker write REPLY/ERROR without re-reading.
 type duplexAskTask struct {
 	// server owns handlers, the ask pool, and panic recovery for this task.
-	server *ProtoServer
+	server *RemotingServer
 	// conn is the duplex connection that must receive the REPLY or ERROR.
 	conn *duplexConn
 	// frame is the inbound DATA frame (lane and correlation are echoed).
@@ -121,11 +121,11 @@ func handleDuplexAskTask(task duplexAskTask) {
 	})
 }
 
-// recoverDuplexAsk invokes [ProtoServer.dispatchDuplexAsk] with panic recovery
+// recoverDuplexAsk invokes [RemotingServer.dispatchDuplexAsk] with panic recovery
 // so worker-pool goroutines never crash the process. When a panic handler is
 // configured it is notified; panicked is always true on panic so the caller
 // can emit a request-scoped ERROR.
-func (x *ProtoServer) recoverDuplexAsk(ctx context.Context, env DataEnvelope) (reply ReplyEnvelope, panicked bool, err error) {
+func (x *RemotingServer) recoverDuplexAsk(ctx context.Context, env DataEnvelope) (reply ReplyEnvelope, panicked bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if x.panicHandler != nil {
@@ -143,7 +143,7 @@ func (x *ProtoServer) recoverDuplexAsk(ctx context.Context, env DataEnvelope) (r
 // control [ProtoHandler] (typeRef matches a handler key), the configured
 // duplex ask handler, or the legacy RemoteAskRequest bridge. Control frames
 // use serializer ID 0 and empty sender/receiver refs.
-func (x *ProtoServer) dispatchDuplexAsk(ctx context.Context, env DataEnvelope) (ReplyEnvelope, error) {
+func (x *RemotingServer) dispatchDuplexAsk(ctx context.Context, env DataEnvelope) (ReplyEnvelope, error) {
 	name := protoreflect.FullName(env.TypeName)
 	if handler, ok := x.handlers[name]; ok {
 		return x.dispatchDuplexControl(ctx, handler, env)
@@ -165,7 +165,7 @@ func (x *ProtoServer) dispatchDuplexAsk(ctx context.Context, env DataEnvelope) (
 // The first response message becomes a public-proto REPLY body; an
 // [internalpb.Error] response is returned as an internal-proto REPLY so
 // clients can apply checkProtoError.
-func (x *ProtoServer) dispatchDuplexUserAskViaLegacy(ctx context.Context, handler ProtoHandler, env DataEnvelope) (ReplyEnvelope, error) {
+func (x *RemotingServer) dispatchDuplexUserAskViaLegacy(ctx context.Context, handler ProtoHandler, env DataEnvelope) (ReplyEnvelope, error) {
 	req := &internalpb.RemoteAskRequest{
 		RemoteMessages: []*internalpb.RemoteMessage{{
 			Sender:   env.Sender,
@@ -269,7 +269,7 @@ func metadataMapFromEnvelope(wire []byte) map[string]string {
 // [ProtoHandler]. The response is encoded as an internal-proto REPLY,
 // including application-level [internalpb.Error] bodies so checkProtoError
 // continues to work on the client.
-func (x *ProtoServer) dispatchDuplexControl(ctx context.Context, handler ProtoHandler, env DataEnvelope) (ReplyEnvelope, error) {
+func (x *RemotingServer) dispatchDuplexControl(ctx context.Context, handler ProtoHandler, env DataEnvelope) (ReplyEnvelope, error) {
 	if env.SerializerID != SerializerIDInternalProto {
 		return ReplyEnvelope{}, errors.New("tcp: control frames require internal proto serializer")
 	}
@@ -335,7 +335,7 @@ func submitErrorFrame(ctx context.Context, conn *duplexConn, correlation uint64,
 	return conn.Submit(ctx, Frame{
 		Version:     ProtocolVersion,
 		Type:        FrameTypeError,
-		Lane:        LaneControl,
+		Lane:        conn.Lane(),
 		Length:      uint32(len(payload)),
 		Correlation: correlation,
 		Payload:     payload,

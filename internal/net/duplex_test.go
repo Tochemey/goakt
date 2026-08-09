@@ -34,7 +34,7 @@ import (
 	"go.uber.org/goleak"
 )
 
-func TestDuplexStartStopNoLeak(t *testing.T) {
+func TestDuplexPingAnsweredWithPong(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
 	c1, c2 := net.Pipe()
@@ -49,18 +49,101 @@ func TestDuplexStartStopNoLeak(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
+	leftWait := left.pending.register(1)
 	require.NoError(t, left.Submit(ctx, Frame{
-		Type: FrameTypePing,
-		Lane: LaneControl,
+		Type:        FrameTypePing,
+		Lane:        LaneControl,
+		Correlation: 1,
 	}))
 
-	frame, err := right.Recv(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, FrameTypePing, frame.Type)
-	assert.Equal(t, ProtocolVersion, frame.Version)
+	select {
+	case frame := <-leftWait:
+		putPendingWaiter(leftWait)
+		assert.Equal(t, FrameTypePong, frame.Type)
+		assert.Equal(t, uint64(1), frame.Correlation)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for left PONG")
+	}
+
+	rightWait := right.pending.register(2)
+	require.NoError(t, right.Submit(ctx, Frame{
+		Type:        FrameTypePing,
+		Lane:        LaneControl,
+		Correlation: 2,
+	}))
+
+	select {
+	case frame := <-rightWait:
+		putPendingWaiter(rightWait)
+		assert.Equal(t, FrameTypePong, frame.Type)
+		assert.Equal(t, uint64(2), frame.Correlation)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for right PONG")
+	}
 
 	require.NoError(t, left.Close())
 	require.NoError(t, right.Close())
+}
+
+func TestDuplexPongCompletesPendingWaiter(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1024)
+
+	wait := left.pending.register(42)
+	require.NoError(t, right.Submit(context.Background(), Frame{
+		Type:        FrameTypePong,
+		Lane:        LaneControl,
+		Correlation: 42,
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	select {
+	case frame := <-wait:
+		putPendingWaiter(wait)
+		assert.Equal(t, FrameTypePong, frame.Type)
+		assert.Equal(t, uint64(42), frame.Correlation)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for PONG")
+	}
+
+	require.NoError(t, left.Close())
+	require.NoError(t, right.Close())
+}
+
+func TestDuplexLivenessClosesAfterTwoMissedPongs(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	const interval = 20 * time.Millisecond
+	start := time.Now()
+	conn := newDuplexConn(
+		newTCPFramedConn(c1, defaultMaxFrameSize),
+		1024,
+		withDuplexReadIdleTimeout(interval),
+	)
+
+	require.Eventually(t, conn.IsClosed, time.Second, 5*time.Millisecond)
+	// Two missed PONGs are required: the first silent interval only sends a
+	// probe, and each of the next two counts one miss, so teardown cannot
+	// happen before three intervals elapse. Timers never fire early, so this
+	// lower bound is deterministic.
+	assert.GreaterOrEqual(t, time.Since(start), 3*interval)
+	require.NoError(t, c2.Close())
+	_ = conn.Close()
 }
 
 func TestDuplexDefaultMaxOutBytes(t *testing.T) {
@@ -201,7 +284,7 @@ func TestDuplexAskTimeoutClearsPending(t *testing.T) {
 	for i := 0; i < 80; i++ {
 		require.NoError(t, server.Submit(context.Background(), Frame{
 			Type:        FrameTypeReply,
-			Correlation: req.Correlation + uint64(i) + 1,
+			Correlation: req.Correlation + uint64(i) + 1000,
 		}))
 	}
 
@@ -271,7 +354,8 @@ func TestDuplexSubmitWakesMultipleWaiters(t *testing.T) {
 	payload := []byte{1}
 	frame := Frame{
 		Version: ProtocolVersion,
-		Type:    FrameTypePing,
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
 		Payload: payload,
 		Length:  uint32(len(payload)),
 	}
@@ -359,6 +443,74 @@ func TestDuplexRecvContextCanceled(t *testing.T) {
 
 	require.NoError(t, left.Close())
 	require.NoError(t, right.Close())
+}
+
+func TestDuplexRejectsMismatchedLanePing(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newDuplexConn(
+		newTCPFramedConn(c1, defaultMaxFrameSize),
+		1<<20,
+		withDuplexLane(LaneControl),
+	)
+	right := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+	require.NoError(t, right.WriteFrames(Frame{
+		Version:     ProtocolVersion,
+		Type:        FrameTypePing,
+		Lane:        LaneOrdinary,
+		Correlation: 9,
+	}))
+
+	frame, err := right.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, LaneControl, frame.Lane)
+	assert.Zero(t, frame.Correlation)
+
+	require.Eventually(t, left.IsClosed, time.Second, 10*time.Millisecond)
+	_ = left.Close()
+}
+
+func TestDuplexConnIdleTimeoutRefreshedByPing(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newDuplexConn(
+		newTCPFramedConn(c1, defaultMaxFrameSize),
+		1<<20,
+		withDuplexLane(LaneControl),
+		withDuplexConnIdleTimeout(80*time.Millisecond),
+	)
+	right := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+	deadline := time.Now().Add(250 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		require.NoError(t, right.WriteFrames(Frame{
+			Version:     ProtocolVersion,
+			Type:        FrameTypePing,
+			Lane:        LaneControl,
+			Correlation: 1,
+		}))
+		pong, err := right.ReadFrame()
+		require.NoError(t, err)
+		require.Equal(t, FrameTypePong, pong.Type)
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	assert.False(t, left.IsClosed())
+	require.NoError(t, left.Close())
 }
 
 func TestDuplexWriteErrorCloses(t *testing.T) {

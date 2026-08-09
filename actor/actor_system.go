@@ -932,7 +932,7 @@ type actorSystem struct {
 	remoting        remoteclient.Client
 
 	// Specifies the remoting server
-	remoteServer *inet.ProtoServer // Proto TCP server
+	remoteServer *inet.RemotingServer
 	remoteConfig *remote.Config
 
 	// coalescedFailureQueue receives whole-batch failures surfaced by the
@@ -2921,6 +2921,10 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientKeepAlive(x.remoteConfig.KeepAlive()),
 		remoteclient.WithClientProtocolPin(x.remoteConfig.ProtocolPin()),
 		remoteclient.WithClientWriteTimeout(x.remoteConfig.WriteTimeout()),
+		remoteclient.WithClientReadIdleTimeout(x.remoteConfig.ReadIdleTimeout()),
+		remoteclient.WithClientOrdinaryLanes(x.remoteConfig.OrdinaryLanes()),
+		remoteclient.WithClientLargeMessageDestinations(x.remoteConfig.LargeMessageDestinations()),
+		remoteclient.WithClientMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()),
 		remoteclient.WithClientMaxFrameSize(x.remoteConfig.MaxFrameSize()),
 		remoteclient.WithClientInitialCredits(remote.DefaultInitialCredits),
 		// Register built-in serializers for native actor message types.
@@ -3341,6 +3345,15 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := event.Payload.(*cluster.NodeLeftEvent)
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
+	if x.remoting != nil {
+		if port, ok := x.peerRemotingPort(nodeLeft.Address); ok {
+			if hostPort, ok := address.HostPortOf(nodeLeft.Address); ok {
+				if host, _, err := net.SplitHostPort(hostPort); err == nil {
+					x.remoting.ClosePeer(host, port)
+				}
+			}
+		}
+	}
 
 	// The departed node is already gone from membership, so prune its cached
 	// remoting port once its departure has been fully handled. Doing so keeps

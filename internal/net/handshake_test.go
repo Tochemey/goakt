@@ -383,8 +383,85 @@ func TestLaneByte(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidLaneIndex)
 
 	got, err = laneByte(internalpb.LaneRole(99), 0)
+	require.Error(t, err)
+	assert.Zero(t, got)
+}
+
+func TestAcceptHelloAckEchoesDialerLane(t *testing.T) {
+	for _, lane := range []LaneSpec{
+		{Role: internalpb.LaneRole_LANE_ROLE_ORDINARY, Index: 3},
+		{Role: internalpb.LaneRole_LANE_ROLE_LARGE},
+	} {
+		c1, c2 := net.Pipe()
+
+		serverResult := make(chan *HandshakeResult, 1)
+		serverErr := make(chan error, 1)
+		go func() {
+			framed := newTCPFramedConn(c2, defaultMaxFrameSize)
+			result, err := acceptHello(framed, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+			serverResult <- result
+			serverErr <- err
+			_ = framed.Close()
+		}()
+
+		client := newTCPFramedConn(c1, defaultMaxFrameSize)
+		hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
+		hello.LaneRole = lane.Role
+		hello.LaneIndex = lane.Index
+		payload, err := proto.Marshal(hello)
+		require.NoError(t, err)
+		laneByte, err := laneByte(lane.Role, lane.Index)
+		require.NoError(t, err)
+		require.NoError(t, client.WriteFrames(encodeHelloFrame(FrameTypeHello, laneByte, payload)))
+
+		frame, err := client.ReadFrame()
+		require.NoError(t, err)
+		require.Equal(t, FrameTypeHelloAck, frame.Type)
+		require.Equal(t, laneByte, frame.Lane)
+
+		ack := new(internalpb.Hello)
+		require.NoError(t, proto.Unmarshal(frame.Payload, ack))
+		assert.Equal(t, lane.Role, ack.GetLaneRole())
+		assert.Equal(t, lane.Index, ack.GetLaneIndex())
+
+		result := <-serverResult
+		require.NoError(t, <-serverErr)
+		assert.Equal(t, lane.Role, result.Effective.GetLaneRole())
+		assert.Equal(t, lane.Index, result.Effective.GetLaneIndex())
+		require.NoError(t, client.Close())
+	}
+}
+
+func TestAcceptHelloRejectsInvalidOrdinaryLaneIndex(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	serverErr := make(chan error, 1)
+	go func() {
+		framed := newTCPFramedConn(c2, defaultMaxFrameSize)
+		_, err := acceptHello(framed, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+		serverErr <- err
+		_ = framed.Close()
+	}()
+
+	hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
+	hello.LaneRole = internalpb.LaneRole_LANE_ROLE_ORDINARY
+	hello.LaneIndex = maxOrdinaryLaneIndex + 1
+	payload, err := proto.Marshal(hello)
 	require.NoError(t, err)
-	assert.Equal(t, LaneControl, got)
+
+	client := newTCPFramedConn(c1, defaultMaxFrameSize)
+	require.NoError(t, client.WriteFrames(encodeHelloFrame(FrameTypeHello, LaneOrdinary, payload)))
+	frame, err := client.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, uint64(0), frame.Correlation)
+	require.ErrorIs(t, <-serverErr, ErrInvalidLaneIndex)
 }
 
 func TestWrapCompression(t *testing.T) {

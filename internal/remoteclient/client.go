@@ -547,6 +547,10 @@ type Client interface {
 	// cancellation for that.
 	Close()
 
+	// ClosePeer closes every duplex lane for host:port. Future traffic dials a
+	// fresh lane set on demand.
+	ClosePeer(host string, port int)
+
 	// Compression returns the payload compression strategy configured on this
 	// client. This governs the content encoding used for both requests and responses.
 	Compression() remote.Compression
@@ -788,6 +792,41 @@ func WithClientWriteTimeout(d time.Duration) ClientOption {
 	}
 }
 
+// WithClientReadIdleTimeout sets the duplex PING/PONG liveness interval.
+func WithClientReadIdleTimeout(d time.Duration) ClientOption {
+	return func(x *client) {
+		x.readIdleTimeout = d
+	}
+}
+
+// WithClientOrdinaryLanes sets the number of lazily opened ordinary lanes.
+func WithClientOrdinaryLanes(n uint32) ClientOption {
+	return func(x *client) {
+		if n > 0 {
+			x.ordinaryLanes = n
+		}
+	}
+}
+
+// WithClientLargeMessageDestinations sets hierarchical-path patterns routed
+// to the isolated large lane.
+func WithClientLargeMessageDestinations(patterns []string) ClientOption {
+	return func(x *client) {
+		x.largeMessageDestinations = append([]string(nil), patterns...)
+	}
+}
+
+// WithClientMaxConcurrentLargeTransfers sets the HELLO-advertised cap on
+// concurrent large-message transfers. The value is negotiated today;
+// reassembly does not enforce it yet.
+func WithClientMaxConcurrentLargeTransfers(n uint32) ClientOption {
+	return func(x *client) {
+		if n > 0 {
+			x.maxConcurrentLargeTransfers = n
+		}
+	}
+}
+
 // WithClientMaxFrameSize sets the HELLO max_frame_size advertised to peers
 // and the initial framed-connection limit before negotiation replaces it
 // with the pairwise minimum.
@@ -880,9 +919,13 @@ type client struct {
 	protocolPin remote.ProtocolPin
 
 	// Duplex transport limits advertised in HELLO and applied to OpenDuplex.
-	writeTimeout   time.Duration
-	maxFrameSize   uint32
-	initialCredits uint64
+	writeTimeout                time.Duration
+	readIdleTimeout             time.Duration
+	ordinaryLanes               uint32
+	largeMessageDestinations    []string
+	maxConcurrentLargeTransfers uint32
+	maxFrameSize                uint32
+	initialCredits              uint64
 
 	// peers holds one long-lived duplex session and protocol cache per endpoint.
 	peers   *xsync.Map[string, *peer]
@@ -916,18 +959,21 @@ var _ Client = (*client)(nil)
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns:   inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
-		idleTimeout:    30 * time.Second,         // 30s before eviction
-		dialTimeout:    5 * time.Second,          // 5s dial timeout
-		keepAlive:      15 * time.Second,         // 15s TCP keep-alive
-		compression:    remote.NoCompression,     // No compression (matches server default in remote.Config)
-		clientCache:    xsync.NewMap[string, *inet.Client](),
-		coalescers:     xsync.NewMap[string, *coalescer](),
-		protocolPin:    remote.ProtocolPinAuto,
-		writeTimeout:   10 * time.Second,
-		maxFrameSize:   16 * size.MB,
-		initialCredits: remote.DefaultInitialCredits,
-		peers:          xsync.NewMap[string, *peer](),
+		maxIdleConns:                inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		idleTimeout:                 30 * time.Second,         // 30s before eviction
+		dialTimeout:                 5 * time.Second,          // 5s dial timeout
+		keepAlive:                   15 * time.Second,         // 15s TCP keep-alive
+		compression:                 remote.NoCompression,     // No compression (matches server default in remote.Config)
+		clientCache:                 xsync.NewMap[string, *inet.Client](),
+		coalescers:                  xsync.NewMap[string, *coalescer](),
+		protocolPin:                 remote.ProtocolPinAuto,
+		writeTimeout:                10 * time.Second,
+		readIdleTimeout:             10 * time.Second,
+		ordinaryLanes:               remote.DefaultOrdinaryLanes,
+		maxConcurrentLargeTransfers: remote.DefaultMaxConcurrentLargeTransfers,
+		maxFrameSize:                16 * size.MB,
+		initialCredits:              remote.DefaultInitialCredits,
+		peers:                       xsync.NewMap[string, *peer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
 		payloadPool: inet.NewFramePool(),
@@ -2422,7 +2468,7 @@ func (r *client) Close() {
 	r.coalescers.Reset()
 
 	r.peers.Range(func(_ string, p *peer) {
-		p.closeSession()
+		p.closeAllLanes()
 	})
 	r.peers.Reset()
 
@@ -2433,6 +2479,15 @@ func (r *client) Close() {
 
 	// Clear the cache to release references
 	r.clientCache.Reset()
+}
+
+// ClosePeer closes cached lanes for an endpoint and removes the peer entry.
+func (r *client) ClosePeer(host string, port int) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	if p, ok := r.peers.Get(addr); ok {
+		p.closeAllLanes()
+		r.peers.Delete(addr)
+	}
 }
 
 // Compression returns the compression algorithm configured on the remoting

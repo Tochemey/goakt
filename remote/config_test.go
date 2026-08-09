@@ -49,6 +49,38 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, DefaultMaxIdleConns, config.MaxIdleConns())
 		assert.Exactly(t, 5*time.Second, config.DialTimeout())
 		assert.Exactly(t, 15*time.Second, config.KeepAlive())
+		assert.EqualValues(t, DefaultOrdinaryLanes, config.OrdinaryLanes())
+		assert.EqualValues(t, DefaultMaxConcurrentLargeTransfers, config.MaxConcurrentLargeTransfers())
+		assert.Nil(t, config.LargeMessageDestinations())
+	})
+	t.Run("With ordinary lanes and large destinations", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080,
+			WithOrdinaryLanes(4),
+			WithLargeMessageDestinations("orders/*", "*/bulk-ingest"),
+			WithMaxConcurrentLargeTransfers(8),
+		)
+		require.NoError(t, config.Validate())
+		assert.EqualValues(t, 4, config.OrdinaryLanes())
+		assert.Equal(t, []string{"orders/*", "*/bulk-ingest"}, config.LargeMessageDestinations())
+		assert.EqualValues(t, 8, config.MaxConcurrentLargeTransfers())
+	})
+	t.Run("With invalid ordinary lanes", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithOrdinaryLanes(0))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "ordinaryLanes must be between 1 and 254")
+	})
+	t.Run("With readIdleTimeout not less than idleTimeout", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(1200*time.Second))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "readIdleTimeout must be less than idleTimeout when both are set")
+	})
+	t.Run("With invalid large destination pattern", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithLargeMessageDestinations("["))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid largeMessageDestinations pattern")
 	})
 	t.Run("With config", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(10*time.Second), WithWriteTimeout(10*time.Second))

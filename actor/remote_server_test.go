@@ -326,9 +326,9 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 	})
 }
 
-func TestProtoServerOptions(t *testing.T) {
+func TestRemotingServerOptions(t *testing.T) {
 	sys := newRemoteServerTestSystem("127.0.0.1", 9000)
-	opts := sys.protoServerOptions()
+	opts := sys.remotingServerOptions()
 	// There must be exactly as many options as registered handlers in the function body.
 	assert.NotEmpty(t, opts)
 }

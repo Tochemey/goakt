@@ -42,9 +42,9 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-func TestNewProtoServer(t *testing.T) {
+func TestNewRemotingServer(t *testing.T) {
 	t.Run("valid address with defaults", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0")
+		ps, err := NewRemotingServer("127.0.0.1:0")
 		require.NoError(t, err)
 		require.NotNil(t, ps)
 		require.NotNil(t, ps.server)
@@ -56,7 +56,7 @@ func TestNewProtoServer(t *testing.T) {
 	})
 
 	t.Run("invalid address", func(t *testing.T) {
-		_, err := NewProtoServer("invalid:::address")
+		_, err := NewRemotingServer("invalid:::address")
 		require.Error(t, err)
 	})
 
@@ -64,7 +64,7 @@ func TestNewProtoServer(t *testing.T) {
 		h := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 			return nil, nil
 		}
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", h),
 		)
 		require.NoError(t, err)
@@ -75,7 +75,7 @@ func TestNewProtoServer(t *testing.T) {
 		h := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 			return nil, nil
 		}
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", h),
 			WithProtoHandler("testpb.TestSend", h),
 			WithProtoHandler("testpb.TestPing", h),
@@ -85,10 +85,10 @@ func TestNewProtoServer(t *testing.T) {
 	})
 }
 
-func TestProtoServerOptions(t *testing.T) {
+func TestRemotingServerOptions(t *testing.T) {
 	t.Run("WithProtoIdleTimeout", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerIdleTimeout(10*time.Second),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerIdleTimeout(10*time.Second),
 		)
 		require.NoError(t, err)
 		require.Equal(t, 10*time.Second, ps.idleTimeout)
@@ -98,7 +98,7 @@ func TestProtoServerOptions(t *testing.T) {
 		h := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 			return nil, nil
 		}
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithFallbackProtoHandler(h),
 		)
 		require.NoError(t, err)
@@ -106,26 +106,26 @@ func TestProtoServerOptions(t *testing.T) {
 	})
 
 	t.Run("WithProtoLoops", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerLoops(4),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerLoops(4),
 		)
 		require.NoError(t, err)
 		require.Equal(t, 4, ps.server.Loops())
 	})
 
 	// nolint
-	t.Run("WithProtoServerContext", func(t *testing.T) {
+	t.Run("WithRemotingServerContext", func(t *testing.T) {
 		ctx := context.WithValue(context.Background(), "someKey", "someValue")
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerContext(ctx),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerContext(ctx),
 		)
 		require.NoError(t, err)
 		require.Equal(t, ctx, ps.server.Context())
 	})
 
 	t.Run("WithProtoBallast", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerBallast(10),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerBallast(10),
 		)
 		require.NoError(t, err)
 		require.Len(t, ps.server.ballast, 10*1024*1024)
@@ -133,8 +133,8 @@ func TestProtoServerOptions(t *testing.T) {
 
 	t.Run("WithProtoTLSConfig", func(t *testing.T) {
 		tlsCfg := &tls.Config{} //nolint:gosec
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerTLSConfig(tlsCfg),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerTLSConfig(tlsCfg),
 		)
 		require.NoError(t, err)
 		require.Equal(t, tlsCfg, ps.server.TLSConfig())
@@ -142,16 +142,16 @@ func TestProtoServerOptions(t *testing.T) {
 
 	t.Run("WithProtoListenConfig", func(t *testing.T) {
 		custom := &ListenConfig{SocketReusePort: false, SocketFastOpen: true}
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerListenConfig(custom),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerListenConfig(custom),
 		)
 		require.NoError(t, err)
 		require.Equal(t, custom, ps.server.ListenConfig())
 	})
 
 	t.Run("WithProtoAllowThreadLocking", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerAllowThreadLocking(true),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerAllowThreadLocking(true),
 		)
 		require.NoError(t, err)
 		require.True(t, ps.server.allowThreadLock)
@@ -159,36 +159,36 @@ func TestProtoServerOptions(t *testing.T) {
 
 	t.Run("WithProtoConnWrapper", func(t *testing.T) {
 		w := &testWrapper{}
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerConnWrapper(w),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerConnWrapper(w),
 		)
 		require.NoError(t, err)
 		require.Len(t, ps.server.connWrappers, 1)
 	})
 
 	t.Run("WithProtoMaxAcceptConnections", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerMaxAcceptConnections(100),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerMaxAcceptConnections(100),
 		)
 		require.NoError(t, err)
 		require.Equal(t, int32(100), ps.server.maxAcceptConns.Load())
 	})
 
 	t.Run("WithProtoConnectionCreator", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0",
-			WithProtoServerConnectionCreator(func() Connection { return &TCPConn{} }),
+		ps, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerConnectionCreator(func() Connection { return &TCPConn{} }),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, ps)
 	})
 }
 
-func TestProtoServer_RequestResponse(t *testing.T) {
+func TestRemotingServer_RequestResponse(t *testing.T) {
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	require.NoError(t, err)
@@ -230,12 +230,12 @@ func TestProtoServer_RequestResponse(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_BatchRequestResponse(t *testing.T) {
+func TestRemotingServer_BatchRequestResponse(t *testing.T) {
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestProtoServer_BatchRequestResponse(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_FireAndForget(t *testing.T) {
+func TestRemotingServer_FireAndForget(t *testing.T) {
 	var received atomic.Int32
 
 	sinkHandler := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
@@ -277,7 +277,7 @@ func TestProtoServer_FireAndForget(t *testing.T) {
 		return nil, nil // fire-and-forget: no response
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", sinkHandler),
 	)
 	require.NoError(t, err)
@@ -301,7 +301,7 @@ func TestProtoServer_FireAndForget(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_FireAndForgetBatch(t *testing.T) {
+func TestRemotingServer_FireAndForgetBatch(t *testing.T) {
 	var received atomic.Int32
 
 	sinkHandler := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
@@ -309,7 +309,7 @@ func TestProtoServer_FireAndForgetBatch(t *testing.T) {
 		return nil, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", sinkHandler),
 	)
 	require.NoError(t, err)
@@ -339,7 +339,7 @@ func TestProtoServer_FireAndForgetBatch(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_MultipleMessageTypes(t *testing.T) {
+func TestRemotingServer_MultipleMessageTypes(t *testing.T) {
 	replyHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		r := req.(*testpb.Reply)
 		return &testpb.Reply{Content: "reply:" + r.Content}, nil
@@ -349,7 +349,7 @@ func TestProtoServer_MultipleMessageTypes(t *testing.T) {
 		return &testpb.TestPong{}, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", replyHandler),
 		WithProtoHandler("testpb.TestPing", pingHandler),
 	)
@@ -381,7 +381,7 @@ func TestProtoServer_MultipleMessageTypes(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_FallbackHandler(t *testing.T) {
+func TestRemotingServer_FallbackHandler(t *testing.T) {
 	var fallbackCalled atomic.Int32
 
 	fallback := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
@@ -389,7 +389,7 @@ func TestProtoServer_FallbackHandler(t *testing.T) {
 		return req, nil // echo back
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithFallbackProtoHandler(fallback),
 	)
 	require.NoError(t, err)
@@ -418,11 +418,11 @@ func TestProtoServer_FallbackHandler(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_UnregisteredMessageClosesConn(t *testing.T) {
+func TestRemotingServer_UnregisteredMessageClosesConn(t *testing.T) {
 	// No handlers registered and no fallback — an unroutable frame must close
 	// the connection so a request/response peer observes an immediate EOF
 	// instead of blocking forever on a response that will never arrive.
-	ps, err := NewProtoServer("127.0.0.1:0")
+	ps, err := NewRemotingServer("127.0.0.1:0")
 	require.NoError(t, err)
 
 	require.NoError(t, ps.Listen())
@@ -453,12 +453,12 @@ func TestProtoServer_UnregisteredMessageClosesConn(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_HandlerError(t *testing.T) {
+func TestRemotingServer_HandlerError(t *testing.T) {
 	errHandler := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 		return nil, errors.New("handler failed")
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", errHandler),
 	)
 	require.NoError(t, err)
@@ -481,12 +481,12 @@ func TestProtoServer_HandlerError(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_ConcurrentClients(t *testing.T) {
+func TestRemotingServer_ConcurrentClients(t *testing.T) {
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	require.NoError(t, err)
@@ -535,14 +535,14 @@ func TestProtoServer_ConcurrentClients(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_IdleTimeout(t *testing.T) {
+func TestRemotingServer_IdleTimeout(t *testing.T) {
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
-		WithProtoServerIdleTimeout(200*time.Millisecond),
+		WithRemotingServerIdleTimeout(200*time.Millisecond),
 	)
 	require.NoError(t, err)
 
@@ -575,12 +575,12 @@ func TestProtoServer_IdleTimeout(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_GracefulShutdown(t *testing.T) {
+func TestRemotingServer_GracefulShutdown(t *testing.T) {
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	require.NoError(t, err)
@@ -600,8 +600,8 @@ func TestProtoServer_GracefulShutdown(t *testing.T) {
 	require.NoError(t, ps.Shutdown(time.Second))
 }
 
-func TestProtoServer_Halt(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0",
+func TestRemotingServer_Halt(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 			return req, nil
 		}),
@@ -618,15 +618,15 @@ func TestProtoServer_Halt(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_ListenAddr(t *testing.T) {
+func TestRemotingServer_ListenAddr(t *testing.T) {
 	t.Run("before listen", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0")
+		ps, err := NewRemotingServer("127.0.0.1:0")
 		require.NoError(t, err)
 		require.Nil(t, ps.ListenAddr())
 	})
 
 	t.Run("after listen", func(t *testing.T) {
-		ps, err := NewProtoServer("127.0.0.1:0")
+		ps, err := NewRemotingServer("127.0.0.1:0")
 		require.NoError(t, err)
 
 		require.NoError(t, ps.Listen())
@@ -638,10 +638,10 @@ func TestProtoServer_ListenAddr(t *testing.T) {
 	})
 }
 
-func TestProtoServer_ActiveConnections(t *testing.T) {
+func TestRemotingServer_ActiveConnections(t *testing.T) {
 	blockCh := make(chan struct{})
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 			<-blockCh
 			return req, nil
@@ -674,7 +674,7 @@ func TestProtoServer_ActiveConnections(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_WithTLS(t *testing.T) {
+func TestRemotingServer_WithTLS(t *testing.T) {
 	cert, key := generateTestCert(t)
 	tlsCert, err := tls.X509KeyPair(cert, key)
 	require.NoError(t, err)
@@ -683,8 +683,8 @@ func TestProtoServer_WithTLS(t *testing.T) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerTLSConfig(&tls.Config{Certificates: []tls.Certificate{tlsCert}}), //nolint:gosec
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerTLSConfig(&tls.Config{Certificates: []tls.Certificate{tlsCert}}), //nolint:gosec
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	require.NoError(t, err)
@@ -711,7 +711,7 @@ func TestProtoServer_WithTLS(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_HandlerOverwrite(t *testing.T) {
+func TestRemotingServer_HandlerOverwrite(t *testing.T) {
 	h1 := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
 		return &testpb.Reply{Content: "h1"}, nil
 	}
@@ -720,7 +720,7 @@ func TestProtoServer_HandlerOverwrite(t *testing.T) {
 	}
 
 	// Register h1 first, then overwrite with h2.
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", h1),
 		WithProtoHandler("testpb.Reply", h2),
 	)
@@ -746,8 +746,8 @@ func TestProtoServer_HandlerOverwrite(t *testing.T) {
 	<-done
 }
 
-func TestProtoServer_ListenTLS_NoConfig(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0")
+func TestRemotingServer_ListenTLS_NoConfig(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0")
 	require.NoError(t, err)
 
 	err = ps.ListenTLS()
@@ -843,7 +843,7 @@ func TestBucketIndexExact(t *testing.T) {
 	}
 }
 
-func TestProtoServer_MetadataExtraction(t *testing.T) {
+func TestRemotingServer_MetadataExtraction(t *testing.T) {
 	t.Run("extract metadata from request", func(t *testing.T) {
 		var receivedHeaders map[string]string
 		var receivedDeadline time.Time
@@ -867,7 +867,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -920,7 +920,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -966,7 +966,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -1019,7 +1019,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -1071,7 +1071,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -1143,7 +1143,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -1190,7 +1190,7 @@ func TestProtoServer_MetadataExtraction(t *testing.T) {
 	})
 }
 
-func TestProtoServer_MetadataBackwardCompatibility(t *testing.T) {
+func TestRemotingServer_MetadataBackwardCompatibility(t *testing.T) {
 	t.Run("mixed metadata and non-metadata requests", func(t *testing.T) {
 		var withMetadataCount atomic.Int32
 		var withoutMetadataCount atomic.Int32
@@ -1204,7 +1204,7 @@ func TestProtoServer_MetadataBackwardCompatibility(t *testing.T) {
 			return req, nil
 		}
 
-		ps, err := NewProtoServer("127.0.0.1:0",
+		ps, err := NewRemotingServer("127.0.0.1:0",
 			WithProtoHandler("testpb.Reply", handler),
 		)
 		require.NoError(t, err)
@@ -1246,8 +1246,8 @@ func TestProtoServer_MetadataBackwardCompatibility(t *testing.T) {
 	})
 }
 
-func TestProtoServerHandleDuplexConnHelloAndPing(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0", WithProtoServerLoops(1))
+func TestRemotingServerHandleDuplexConnHelloAndPing(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0", WithRemotingServerLoops(1))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
@@ -1289,8 +1289,8 @@ func TestProtoServerHandleDuplexConnHelloAndPing(t *testing.T) {
 	assert.Equal(t, uint64(42), pong.Correlation)
 }
 
-func TestProtoServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0", WithProtoServerLoops(1))
+func TestRemotingServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0", WithRemotingServerLoops(1))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
@@ -1326,10 +1326,85 @@ func TestProtoServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestProtoServerHandleDuplexConnNegotiatesCompression(t *testing.T) {
-	ps, err := NewProtoServer("127.0.0.1:0",
-		WithProtoServerLoops(1),
-		WithProtoServerMaxFrameSize(1<<20),
+func TestRemotingServerHandleDuplexConnRejectsMismatchedLane(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0", WithRemotingServerLoops(1))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
+
+	go func() { _ = ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := NewTCPTransport().Dial(ctx, ps.ListenAddr().String(), LaneSpec{
+		Role: internalpb.LaneRole_LANE_ROLE_CONTROL,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+	require.NoError(t, err)
+
+	require.NoError(t, conn.WriteFrames(Frame{
+		Version: ProtocolVersion,
+		Type:    FrameTypeData,
+		Lane:    LaneOrdinary,
+	}))
+
+	frame, err := conn.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, LaneControl, frame.Lane)
+	assert.Equal(t, uint64(0), frame.Correlation)
+
+	_, err = conn.ReadFrame()
+	require.Error(t, err)
+}
+
+func TestRemotingServerHandleDuplexConnRejectsMismatchedLanePing(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0", WithRemotingServerLoops(1))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
+
+	go func() { _ = ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := NewTCPTransport().Dial(ctx, ps.ListenAddr().String(), LaneSpec{
+		Role: internalpb.LaneRole_LANE_ROLE_CONTROL,
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+
+	_, err = performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
+	require.NoError(t, err)
+
+	require.NoError(t, conn.WriteFrames(Frame{
+		Version:     ProtocolVersion,
+		Type:        FrameTypePing,
+		Lane:        LaneOrdinary,
+		Correlation: 11,
+	}))
+
+	frame, err := conn.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, FrameTypeError, frame.Type)
+	assert.Equal(t, LaneControl, frame.Lane)
+	assert.Zero(t, frame.Correlation)
+
+	_, err = conn.ReadFrame()
+	require.Error(t, err)
+}
+
+func TestRemotingServerHandleDuplexConnNegotiatesCompression(t *testing.T) {
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerLoops(1),
+		WithRemotingServerMaxFrameSize(1<<20),
 	)
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())

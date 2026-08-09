@@ -55,6 +55,21 @@ func TestOption(t *testing.T) {
 			expected: Config{readIdleTimeout: 10 * time.Second},
 		},
 		{
+			name:     "WithOrdinaryLanes",
+			option:   WithOrdinaryLanes(4),
+			expected: Config{ordinaryLanes: 4},
+		},
+		{
+			name:     "WithLargeMessageDestinations",
+			option:   WithLargeMessageDestinations("orders/*"),
+			expected: Config{largeMessageDestinations: []string{"orders/*"}},
+		},
+		{
+			name:     "WithMaxConcurrentLargeTransfers",
+			option:   WithMaxConcurrentLargeTransfers(8),
+			expected: Config{maxConcurrentLargeTransfers: 8},
+		},
+		{
 			name:     "WithMaxFrameSize",
 			option:   WithMaxFrameSize(1024),
 			expected: Config{maxFrameSize: 1024},

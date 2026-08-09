@@ -28,6 +28,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,10 +46,10 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 )
 
-func startProtoServer(t *testing.T, opts ...inet.ProtoServerOption) *inet.ProtoServer {
+func startRemotingServer(t *testing.T, opts ...inet.RemotingServerOption) *inet.RemotingServer {
 	t.Helper()
 
-	ps, err := inet.NewProtoServer("127.0.0.1:0", opts...)
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", opts...)
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 
@@ -64,7 +65,7 @@ func startProtoServer(t *testing.T, opts ...inet.ProtoServerOption) *inet.ProtoS
 	return ps
 }
 
-func serverHostPort(t *testing.T, ps *inet.ProtoServer) (string, int) {
+func serverHostPort(t *testing.T, ps *inet.RemotingServer) (string, int) {
 	t.Helper()
 	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
 	require.NoError(t, err)
@@ -74,8 +75,8 @@ func serverHostPort(t *testing.T, ps *inet.ProtoServer) (string, int) {
 }
 
 func TestProtocolCacheAutoFallbackLegacy(t *testing.T) {
-	ps := startProtoServer(t,
-		inet.WithProtoServerAcceptProtocol(inet.AcceptProtocolLegacy),
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolLegacy),
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
 	)
 	host, port := serverHostPort(t, ps)
@@ -95,7 +96,7 @@ func TestProtocolCacheAutoFallbackLegacy(t *testing.T) {
 	assert.Equal(t, "actor", addr.Name())
 
 	assert.Equal(t, peerProtocolLegacy, p.cachedProtocol())
-	assert.Nil(t, p.session)
+	assert.Nil(t, p.control)
 }
 
 func legacyLookupHandler(t *testing.T) inet.ProtoHandler {
@@ -109,7 +110,7 @@ func legacyLookupHandler(t *testing.T) inet.ProtoHandler {
 }
 
 func TestProtocolPinLegacyOnDuplexCapableServer(t *testing.T) {
-	ps := startProtoServer(t,
+	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
 	)
 	host, port := serverHostPort(t, ps)
@@ -127,11 +128,11 @@ func TestProtocolPinLegacyOnDuplexCapableServer(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "actor", addr.Name())
 	assert.Equal(t, peerProtocolUnknown, p.cachedProtocol())
-	assert.Nil(t, p.session)
+	assert.Nil(t, p.control)
 }
 
 func TestProtocolPinDuplexControlRPC(t *testing.T) {
-	ps := startProtoServer(t,
+	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
 	)
 	host, port := serverHostPort(t, ps)
@@ -149,11 +150,194 @@ func TestProtocolPinDuplexControlRPC(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "actor", addr.Name())
 	assert.Equal(t, peerProtocolDuplex, p.cachedProtocol())
-	assert.NotNil(t, p.session)
+	assert.NotNil(t, p.control)
+}
+
+func TestEnsureLaneDialsOrdinaryAndLarge(t *testing.T) {
+	ps := startRemotingServer(t)
+	host, port := serverHostPort(t, ps)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientOrdinaryLanes(4),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+	ordinary, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_ORDINARY, 3)
+	require.NoError(t, err)
+	assert.Equal(t, byte(4), ordinary.Lane())
+
+	large, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_LARGE, 0)
+	require.NoError(t, err)
+	assert.NotEqual(t, ordinary.Lane(), large.Lane())
+	assert.Same(t, ordinary, p.ordinary[3])
+	assert.Same(t, large, p.large)
+}
+
+func TestClosePeerClosesEveryLane(t *testing.T) {
+	ps := startRemotingServer(t)
+	host, port := serverHostPort(t, ps)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientOrdinaryLanes(2),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+	control, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
+	require.NoError(t, err)
+	ordinary, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_ORDINARY, 0)
+	require.NoError(t, err)
+	large, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_LARGE, 0)
+	require.NoError(t, err)
+
+	c.ClosePeer(host, port)
+	assert.True(t, control.IsClosed())
+	assert.True(t, ordinary.IsClosed())
+	assert.True(t, large.IsClosed())
+	_, ok := c.peers.Get(net.JoinHostPort(host, strconv.Itoa(port)))
+	assert.False(t, ok)
+}
+
+func TestClosePeerCancelsInFlightDial(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientDialTimeout(5*time.Second),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+	errCh := make(chan error, 1)
+	go func() {
+		_, dialErr := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
+		errCh <- dialErr
+	}()
+
+	select {
+	case conn := <-accepted:
+		t.Cleanup(func() { _ = conn.Close() })
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for dial accept")
+	}
+
+	c.ClosePeer(host, port)
+
+	select {
+	case dialErr := <-errCh:
+		require.Error(t, dialErr)
+		assert.True(t,
+			errors.Is(dialErr, context.Canceled) ||
+				errors.Is(dialErr, errLaneClosedDuringDial) ||
+				errors.Is(dialErr, io.EOF) ||
+				errors.Is(dialErr, net.ErrClosed) ||
+				strings.Contains(dialErr.Error(), "use of closed network connection"),
+			"unexpected dial error: %v", dialErr,
+		)
+	case <-time.After(2 * time.Second):
+		t.Fatal("ClosePeer did not unblock in-flight dial")
+	}
+}
+
+func TestClosePeerDoesNotRedialForWaiters(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		accepted <- conn
+	}()
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientDialTimeout(5*time.Second),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+	dialerErr := make(chan error, 1)
+	waiterErr := make(chan error, 1)
+
+	go func() {
+		_, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
+		dialerErr <- err
+	}()
+
+	select {
+	case conn := <-accepted:
+		t.Cleanup(func() { _ = conn.Close() })
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for dial accept")
+	}
+
+	// Wait until the dialer has published the single-flight marker.
+	require.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		_, ok := p.dialing[laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}]
+		return ok
+	}, time.Second, 5*time.Millisecond)
+
+	go func() {
+		_, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
+		waiterErr <- err
+	}()
+
+	c.ClosePeer(host, port)
+
+	select {
+	case err := <-dialerErr:
+		require.Error(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("dialer was not unblocked")
+	}
+
+	select {
+	case err := <-waiterErr:
+		require.ErrorIs(t, err, errLaneClosedDuringDial)
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter redialed or hung after ClosePeer")
+	}
+
+	assert.Nil(t, p.control)
+	assert.Empty(t, p.dialing)
 }
 
 func TestSwitchoverDrainOrder(t *testing.T) {
-	ps := startProtoServer(t,
+	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
 	)
 	host, port := serverHostPort(t, ps)
@@ -167,7 +351,7 @@ func TestSwitchoverDrainOrder(t *testing.T) {
 	c := r.(*client)
 	p := c.peerFor(host, port)
 	p.cache.set(peerProtocolLegacy)
-	// Age the legacy mark so ensureDuplex re-probes and drains first.
+	// Age the legacy mark so ensureLane re-probes and drains first.
 	p.cache.markedAt = time.Now().Add(-peerLegacyReprobeInterval - time.Second)
 
 	order := make(chan string, 2)
@@ -181,7 +365,7 @@ func TestSwitchoverDrainOrder(t *testing.T) {
 	started := make(chan struct{})
 	go func() {
 		close(started)
-		_, err := p.ensureDuplex(context.Background())
+		_, err := p.ensureLane(context.Background(), internalpb.LaneRole_LANE_ROLE_CONTROL, 0)
 		require.NoError(t, err)
 		order <- "duplex-ready"
 	}()
@@ -207,7 +391,7 @@ func TestBatchAskOrderDuplex(t *testing.T) {
 		}, nil
 	}
 
-	ps := startProtoServer(t, inet.WithProtoServerDuplexAskHandler(duplexAsk))
+	ps := startRemotingServer(t, inet.WithRemotingServerDuplexAskHandler(duplexAsk))
 	host, port := serverHostPort(t, ps)
 
 	r := NewClient(
@@ -253,9 +437,9 @@ func TestDuplexTellAskRoundTrip(t *testing.T) {
 		tellCount.Add(1)
 	}
 
-	ps := startProtoServer(t,
-		inet.WithProtoServerDuplexAskHandler(duplexAsk),
-		inet.WithProtoServerDuplexTellHandler(duplexTell),
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerDuplexAskHandler(duplexAsk),
+		inet.WithRemotingServerDuplexTellHandler(duplexTell),
 	)
 	host, port := serverHostPort(t, ps)
 
@@ -308,4 +492,27 @@ func TestCompressionCodec(t *testing.T) {
 	assert.Equal(t, internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP, compressionCodec(remote.GzipCompression))
 	assert.Equal(t, internalpb.CompressionCodec_COMPRESSION_CODEC_ZSTD, compressionCodec(remote.ZstdCompression))
 	assert.Equal(t, internalpb.CompressionCodec_COMPRESSION_CODEC_BROTLI, compressionCodec(remote.BrotliCompression))
+}
+
+func TestPeerRouteCacheBounded(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientOrdinaryLanes(4),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65500)
+	for i := 0; i < routeCacheLimit+5; i++ {
+		p.route("goakt://system@127.0.0.1:65500/actor-" + strconv.Itoa(i))
+	}
+
+	p.mu.Lock()
+	cached := len(p.routes)
+	p.mu.Unlock()
+	assert.Equal(t, routeCacheLimit, cached)
+
+	// Receivers beyond the cap are computed per send and stay deterministic.
+	overflow := "goakt://system@127.0.0.1:65500/actor-overflow"
+	first := p.route(overflow)
+	assert.Equal(t, first, p.route(overflow))
 }

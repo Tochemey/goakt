@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -40,7 +41,7 @@ import (
 func TestOpenDuplexRoundTripPing(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	ps, err := NewProtoServer("127.0.0.1:0", WithProtoServerLoops(1))
+	ps, err := NewRemotingServer("127.0.0.1:0", WithRemotingServerLoops(1))
 	require.NoError(t, err)
 	require.NoError(t, ps.Listen())
 
@@ -56,23 +57,31 @@ func TestOpenDuplexRoundTripPing(t *testing.T) {
 		NewTCPTransport(),
 		ps.ListenAddr().String(),
 		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
+		0,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result.Effective)
 
-	// PONG completes via Recv, not Ask: readLoop only correlates REPLY/ERROR.
+	// PONG completes a matching pending waiter in the reader.
 	dc, ok := session.(*duplexConn)
 	require.True(t, ok)
 
-	require.NoError(t, session.Tell(ctx, Frame{
-		Type: FrameTypePing,
-		Lane: LaneControl,
+	wait := dc.pending.register(99)
+	require.NoError(t, dc.Submit(ctx, Frame{
+		Type:        FrameTypePing,
+		Lane:        LaneControl,
+		Correlation: 99,
 	}))
 
-	pong, err := dc.Recv(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, FrameTypePong, pong.Type)
+	select {
+	case pong := <-wait:
+		putPendingWaiter(wait)
+		assert.Equal(t, FrameTypePong, pong.Type)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for PONG")
+	}
 
 	require.NoError(t, session.Close())
 	require.NoError(t, ps.Shutdown(time.Second))
@@ -105,7 +114,9 @@ func TestOpenDuplexHonorsContextDeadline(t *testing.T) {
 		NewTCPTransport(),
 		ln.Addr().String(),
 		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
+		0,
 	)
 	elapsed := time.Since(start)
 
@@ -126,7 +137,68 @@ func TestOpenDuplexDialFailure(t *testing.T) {
 		NewTCPTransport(),
 		"127.0.0.1:1",
 		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
 		time.Second,
+		0,
 	)
 	require.Error(t, err)
+}
+
+func TestOpenDuplexAdoptsAckLaneFromBaselinePeer(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = ln.Close() })
+
+	// A baseline acceptor that predates lane echo answers every dial with its
+	// own CONTROL identity regardless of the requested lane.
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+
+		raw, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+
+		framed := newTCPFramedConn(raw, defaultMaxFrameSize)
+		defer func() { _ = framed.Close() }()
+
+		frame, readErr := framed.ReadFrame()
+		if readErr != nil || frame.Type != FrameTypeHello {
+			return
+		}
+
+		ack := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
+		payload, marshalErr := proto.Marshal(ack)
+		if marshalErr != nil {
+			return
+		}
+
+		if writeErr := framed.WriteFrames(encodeHelloFrame(FrameTypeHelloAck, LaneControl, payload)); writeErr != nil {
+			return
+		}
+
+		// Hold the connection open until the dialer closes it.
+		_, _ = framed.ReadFrame()
+	}()
+
+	session, result, err := OpenDuplex(
+		context.Background(),
+		NewTCPTransport(),
+		ln.Addr().String(),
+		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_ORDINARY, Index: 3},
+		time.Second,
+		0,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(t, LaneControl, session.Lane())
+	assert.Equal(t, internalpb.LaneRole_LANE_ROLE_CONTROL, result.Effective.GetLaneRole())
+	assert.Zero(t, result.Effective.GetLaneIndex())
+
+	require.NoError(t, session.Close())
+	<-acceptDone
 }

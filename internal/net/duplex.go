@@ -29,6 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
@@ -54,6 +57,19 @@ type duplexConn struct {
 	maxOutBytes int64
 	// writeTimeout bounds Submit when the caller's context has no deadline.
 	writeTimeout time.Duration
+	// readIdleTimeout is the interval without inbound activity before probing.
+	readIdleTimeout time.Duration
+	// connIdleTimeout is the server reclaim window. When nonzero, readLoop
+	// refreshes the socket read deadline on every frame (including PING/PONG)
+	// so liveness traffic keeps an otherwise-idle duplex connection alive.
+	connIdleTimeout time.Duration
+	// lane is the negotiated connection lane.
+	lane byte
+	// enforceLane enables frame.Lane validation. Set by [withDuplexLane]
+	// after HELLO; unit fixtures that skip negotiation leave it false.
+	enforceLane bool
+	// lastInbound records the latest successfully read frame timestamp.
+	lastInbound atomic.Int64
 
 	mu sync.Mutex
 	// space wakes Submit waiters when outbound capacity is released.
@@ -62,7 +78,7 @@ type duplexConn struct {
 	outBytes int64
 	// out is the writer queue of admitted frames.
 	out chan Frame
-	// inbound delivers non-correlated frames to [Recv] (DATA, PING, …).
+	// inbound delivers non-correlated application frames to [Recv].
 	inbound chan Frame
 
 	// pending correlates Ask waiters by correlation ID.
@@ -87,10 +103,11 @@ type duplexConn struct {
 	closeResult atomic.Pointer[error]
 	// writeWG / readWG track the writer and reader loops for ordered shutdown:
 	// drain writes, then close framed to unblock the reader.
-	writeWG  sync.WaitGroup
-	readWG   sync.WaitGroup
-	writeErr atomic.Pointer[error]
-	readErr  atomic.Pointer[error]
+	writeWG    sync.WaitGroup
+	readWG     sync.WaitGroup
+	livenessWG sync.WaitGroup
+	writeErr   atomic.Pointer[error]
+	readErr    atomic.Pointer[error]
 }
 
 // duplexCloseDrainGrace is used when writeTimeout is unset so Close cannot
@@ -105,6 +122,30 @@ type duplexConnOption func(*duplexConn)
 func withDuplexWriteTimeout(d time.Duration) duplexConnOption {
 	return func(x *duplexConn) {
 		x.writeTimeout = d
+	}
+}
+
+// withDuplexReadIdleTimeout sets the idle interval for correlated PING probes.
+func withDuplexReadIdleTimeout(d time.Duration) duplexConnOption {
+	return func(x *duplexConn) {
+		x.readIdleTimeout = d
+	}
+}
+
+// withDuplexLane sets the negotiated connection lane and enables inbound
+// frame.Lane validation against that value.
+func withDuplexLane(lane byte) duplexConnOption {
+	return func(x *duplexConn) {
+		x.lane = lane
+		x.enforceLane = true
+	}
+}
+
+// withDuplexConnIdleTimeout sets the connection reclaim window enforced via
+// socket read deadlines refreshed on every inbound frame.
+func withDuplexConnIdleTimeout(d time.Duration) duplexConnOption {
+	return func(x *duplexConn) {
+		x.connIdleTimeout = d
 	}
 }
 
@@ -123,6 +164,7 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 		inbound:     make(chan Frame, 64),
 		closed:      make(chan types.Unit),
 		pending:     newPendingTable(),
+		lane:        LaneControl,
 	}
 	x.space = sync.NewCond(&x.mu)
 	x.nextCorr.Store(1)
@@ -130,11 +172,16 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 	for _, opt := range opts {
 		opt(x)
 	}
+	x.lastInbound.Store(time.Now().UnixNano())
 
 	x.writeWG.Add(1)
 	x.readWG.Add(1)
 	go x.writeLoop()
 	go x.readLoop()
+	if x.readIdleTimeout > 0 {
+		x.livenessWG.Add(1)
+		go x.livenessLoop()
+	}
 	return x
 }
 
@@ -150,11 +197,7 @@ func (x *duplexConn) Tell(ctx context.Context, frame Frame) error {
 // expectsReply, and blocks until a REPLY/ERROR arrives, ctx is done, or the
 // duplex closes. Timeout abandons the waiter so a late reply is dropped.
 func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
-	corr := x.nextCorr.Add(1)
-	if corr == 0 {
-		corr = x.nextCorr.Add(1)
-	}
-
+	corr := x.nextCorrelation()
 	frame.Correlation = corr
 	frame.Flags |= FrameFlagExpectsReply
 	if frame.Version == 0 {
@@ -313,6 +356,7 @@ func (x *duplexConn) Close() error {
 
 		closeErr := x.closeFramed()
 		x.readWG.Wait()
+		x.livenessWG.Wait()
 
 		if errPtr := x.writeErr.Load(); errPtr != nil {
 			closeErr = *errPtr
@@ -421,13 +465,17 @@ func (x *duplexConn) drainOutbound() {
 }
 
 // readLoop pumps inbound frames from the framed connection. Correlated
-// REPLY/ERROR frames complete [Ask] waiters; late replies after a local
-// timeout are dropped. Everything else is delivered on the inbound channel
-// for [Recv].
+// REPLY/ERROR/PONG frames complete registered waiters; PING frames receive a
+// best-effort PONG response. Late correlated frames are dropped. Everything
+// else is delivered on the inbound channel for [Recv].
 func (x *duplexConn) readLoop() {
 	defer x.readWG.Done()
 
 	for {
+		if x.connIdleTimeout > 0 {
+			_ = x.framed.NetConn().SetReadDeadline(time.Now().Add(x.connIdleTimeout))
+		}
+
 		frame, err := x.framed.ReadFrame()
 		if err != nil {
 			if !x.closing.Load() {
@@ -436,6 +484,29 @@ func (x *duplexConn) readLoop() {
 
 			x.failTransport()
 			return
+		}
+
+		x.lastInbound.Store(time.Now().UnixNano())
+
+		if x.enforceLane && frame.Lane != x.lane {
+			x.rejectWrongLane()
+			return
+		}
+
+		switch frame.Type {
+		case FrameTypePing:
+			_ = x.trySubmit(Frame{
+				Version:     ProtocolVersion,
+				Type:        FrameTypePong,
+				Lane:        x.lane,
+				Correlation: frame.Correlation,
+			})
+			continue
+		case FrameTypePong:
+			if frame.Correlation != 0 {
+				_ = x.pending.complete(frame.Correlation, frame)
+			}
+			continue
 		}
 
 		if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
@@ -453,6 +524,141 @@ func (x *duplexConn) readLoop() {
 		case x.inbound <- frame:
 		}
 	}
+}
+
+// rejectWrongLane emits a best-effort connection-scoped ERROR then tears down
+// the transport. Called from the reader: admit via trySubmit, signal writer
+// drain, then close the socket so the ERROR can leave before teardown.
+func (x *duplexConn) rejectWrongLane() {
+	payload, err := proto.Marshal(&internalpb.Error{
+		Code:    internalpb.Code_CODE_FAILED_PRECONDITION,
+		Message: "frame lane does not match connection lane",
+	})
+	if err == nil {
+		_ = x.trySubmit(Frame{
+			Version: ProtocolVersion,
+			Type:    FrameTypeError,
+			Lane:    x.lane,
+			Length:  uint32(len(payload)),
+			Payload: payload,
+		})
+	}
+
+	x.closing.Store(true)
+	x.signalClose()
+
+	done := make(chan types.Unit, 1)
+	go func() {
+		x.writeWG.Wait()
+		done <- types.Unit{}
+	}()
+
+	drainBudget := x.writeTimeout
+	if drainBudget <= 0 {
+		drainBudget = duplexCloseDrainGrace
+	}
+	select {
+	case <-done:
+	case <-time.After(drainBudget):
+	}
+	_ = x.closeFramed()
+}
+
+// livenessLoop probes a silent peer and closes the transport after two missed
+// PONGs: two admitted probes that each passed a full idle interval with no
+// inbound traffic of any kind. A miss is counted only one interval after its
+// probe was admitted, so a peer always gets a full interval to answer the
+// second probe before the transport fails.
+func (x *duplexConn) livenessLoop() {
+	defer x.livenessWG.Done()
+
+	timer := time.NewTimer(x.readIdleTimeout)
+	defer timer.Stop()
+
+	var misses int
+	var probeOutstanding bool
+	lastObserved := x.lastInbound.Load()
+
+	for {
+		select {
+		case <-x.closed:
+			return
+		case <-timer.C:
+			lastInbound := x.lastInbound.Load()
+			elapsed := time.Since(time.Unix(0, lastInbound))
+			if elapsed < x.readIdleTimeout {
+				timer.Reset(x.readIdleTimeout - elapsed)
+				continue
+			}
+
+			if lastInbound != lastObserved {
+				// Inbound traffic (including a PONG) proves the peer is
+				// alive; restart the idle window without probing.
+				misses = 0
+				probeOutstanding = false
+				lastObserved = lastInbound
+				timer.Reset(x.readIdleTimeout)
+				continue
+			}
+
+			if probeOutstanding {
+				misses++
+
+				if misses >= 2 {
+					x.failTransport()
+					return
+				}
+			}
+
+			// Track admission only: a backpressure drop must not punish a
+			// peer that never received the PING.
+			probeOutstanding = x.trySubmit(Frame{
+				Version:     ProtocolVersion,
+				Type:        FrameTypePing,
+				Lane:        x.lane,
+				Correlation: x.nextCorrelation(),
+			})
+			timer.Reset(x.readIdleTimeout)
+		}
+	}
+}
+
+// trySubmit admits frame only when capacity and the writer queue are
+// immediately available. It never blocks the reader or liveness goroutine.
+func (x *duplexConn) trySubmit(frame Frame) bool {
+	if frame.Version == 0 {
+		frame.Version = ProtocolVersion
+	}
+	if int(frame.Length) != len(frame.Payload) {
+		frame.Length = uint32(len(frame.Payload))
+	}
+
+	cost := int64(FrameHeaderSize) + int64(frame.Length)
+	if !x.mu.TryLock() {
+		return false
+	}
+	defer x.mu.Unlock()
+
+	if x.isClosed() || x.outBytes+cost > x.maxOutBytes {
+		return false
+	}
+
+	select {
+	case x.out <- frame:
+		x.outBytes += cost
+		return true
+	default:
+		return false
+	}
+}
+
+// nextCorrelation allocates a nonzero correlation identifier.
+func (x *duplexConn) nextCorrelation() uint64 {
+	corr := x.nextCorr.Add(1)
+	if corr == 0 {
+		corr = x.nextCorr.Add(1)
+	}
+	return corr
 }
 
 // failTransport marks the duplex closed and releases the underlying socket
@@ -501,6 +707,11 @@ func (x *duplexConn) bindWriteDeadline(ctx context.Context) (context.Context, co
 // [DuplexSession] surface so owners can discard stale sessions before use.
 func (x *duplexConn) IsClosed() bool {
 	return x.isClosed()
+}
+
+// Lane returns the negotiated connection lane byte.
+func (x *duplexConn) Lane() byte {
+	return x.lane
 }
 
 // isClosed reports whether the duplex has been signaled closed. It only reads
