@@ -1716,7 +1716,7 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 
 	serverOpts = append(serverOpts, inet.WithRemotingServerSystemName(x.Name()))
 	serverOpts = append(serverOpts, inet.WithRemotingServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
-	serverOpts = append(serverOpts, inet.WithRemotingServerInitialCredits(remote.DefaultInitialCredits))
+	serverOpts = append(serverOpts, inet.WithRemotingServerInitialCredits(x.remoteConfig.CreditWindow()))
 	if x.remoteConfig.WriteTimeout() > 0 {
 		serverOpts = append(serverOpts, inet.WithRemotingServerWriteTimeout(x.remoteConfig.WriteTimeout()))
 	}

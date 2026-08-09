@@ -153,6 +153,30 @@ func WithMaxMessageSize(size uint64) Option {
 	})
 }
 
+// WithCreditWindow sets how much unreclaimed send traffic a peer may have in
+// flight on one duplex connection, in bytes.
+//
+// Credit is end-to-end permission to send. The receiver opens a byte budget at
+// handshake; every DATA/CHUNK write spends from that budget; the receiver
+// returns credit only after it has taken ownership of those bytes (mailbox
+// enqueue for tells, ask worker-pool handoff, or CHUNK reassembly append).
+// That keeps a slow or stuck actor from forcing the sender to grow memory
+// without bound: when credit runs out the writer parks, and further sends
+// surface as admission backpressure instead of silent buffering. Fire-and-forget
+// traffic is not dropped for flow control; it is slowed.
+//
+// The same value also sizes the local outbound admission queue, so
+// per-connection buffering stays on the order of one window queued plus one
+// window in flight. Peers advertise it in HELLO and take the pairwise minimum
+// when both support capability revision 4; older peers keep an unlimited send
+// window. Defaults to [DefaultCreditWindow] (16 MiB). Must be greater than zero
+// and at least [Config.ChunkSize].
+func WithCreditWindow(bytes uint64) Option {
+	return OptionFunc(func(config *Config) {
+		config.creditWindow = bytes
+	})
+}
+
 // WithMaxFrameSize specifies the largest frame
 // this server is willing to read. A valid value is between
 // 16k and 16M, inclusive. If zero or otherwise invalid, an error will be thrown.

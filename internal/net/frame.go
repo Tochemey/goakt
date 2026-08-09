@@ -95,6 +95,11 @@ const (
 	// compressed actor-path / type-name refs in DATA and REPLY envelopes.
 	CapabilityRevisionTables uint32 = 3
 
+	// CapabilityRevisionCredits is the revision that enables receiver-granted
+	// credit windows on duplex connections. Below this revision the send
+	// window is unlimited (pre-credit behavior).
+	CapabilityRevisionCredits uint32 = 4
+
 	// DefaultChunkSize is the default logical-frame threshold above which a
 	// sender splits into CHUNK frames (256 KiB).
 	DefaultChunkSize uint32 = 256 * size.KB

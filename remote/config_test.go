@@ -53,6 +53,7 @@ func TestConfig(t *testing.T) {
 		assert.EqualValues(t, DefaultMaxConcurrentLargeTransfers, config.MaxConcurrentLargeTransfers())
 		assert.EqualValues(t, DefaultChunkSize, config.ChunkSize())
 		assert.EqualValues(t, DefaultMaxMessageSize, config.MaxMessageSize())
+		assert.EqualValues(t, DefaultCreditWindow, config.CreditWindow())
 		assert.Nil(t, config.LargeMessageDestinations())
 	})
 	t.Run("With ordinary lanes and large destinations", func(t *testing.T) {
@@ -62,6 +63,7 @@ func TestConfig(t *testing.T) {
 			WithMaxConcurrentLargeTransfers(8),
 			WithChunkSize(64*size.KB),
 			WithMaxMessageSize(32*size.MB),
+			WithCreditWindow(2*size.MB),
 		)
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 4, config.OrdinaryLanes())
@@ -69,6 +71,13 @@ func TestConfig(t *testing.T) {
 		assert.EqualValues(t, 8, config.MaxConcurrentLargeTransfers())
 		assert.EqualValues(t, 64*size.KB, config.ChunkSize())
 		assert.EqualValues(t, 32*size.MB, config.MaxMessageSize())
+		assert.EqualValues(t, 2*size.MB, config.CreditWindow())
+	})
+	t.Run("With creditWindow below chunkSize", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithCreditWindow(8*size.KB))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "creditWindow must be at least chunkSize")
 	})
 	t.Run("With invalid chunk size", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithChunkSize(8*size.KB))

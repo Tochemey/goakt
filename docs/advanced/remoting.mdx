@@ -21,18 +21,24 @@ defer sys.Stop()
 
 Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. The bind address should be a concrete IP (e.g., `127.0.0.1` or `0.0.0.0`), not a hostname. Pass it to the actor system via `actor.WithRemote(cfg)`.
 
-| Option                  | Purpose                                               |
-| ----------------------- | ----------------------------------------------------- |
-| `WithCompression`       | None (default), Gzip, Zstd, Brotli                    |
-| `WithMaxFrameSize`      | Max frame size (default 16MB)                         |
-| `WithWriteTimeout`      | Connection write timeout                              |
-| `WithReadIdleTimeout`   | Health check / ping interval                          |
-| `WithProtocolPin`       | `auto` (default), `legacy`, or `duplex` wire protocol |
-| `WithSerializers`       | Bind a `Serializer` to a message type or interface    |
-| `WithSerializables`     | Bulk-register types with the built-in CBOR serializer |
-| `WithJSONSerializables` | Bulk-register types with the built-in JSON serializer |
-| `WithContextPropagator` | Propagate trace IDs, auth tokens, correlation IDs     |
-| `WithTLS`               | TLS settings for all node transports. See [TLS](#tls) |
+| Option                           | Purpose                                                                 |
+| -------------------------------- | ----------------------------------------------------------------------- |
+| `WithCompression`                | None (default), Gzip, Zstd, Brotli                                      |
+| `WithMaxFrameSize`               | Max whole-frame size (default 16 MiB); enforced on client and server    |
+| `WithMaxMessageSize`             | Cap on a reassembled logical frame (default 16 MiB; may exceed frame)   |
+| `WithChunkSize`                  | Logical size above which senders emit `CHUNK` frames (default 256 KiB)  |
+| `WithCreditWindow`               | Unreclaimed in-flight byte budget per duplex connection (default 16 MiB)|
+| `WithOrdinaryLanes`              | Ordinary duplex lanes per peer (default 1; preserves per-target FIFO)   |
+| `WithLargeMessageDestinations`   | Actor-path patterns that prefer the large lane (isolation knob)         |
+| `WithMaxConcurrentLargeTransfers`| Concurrent CHUNK reassembly groups per connection (default 4)           |
+| `WithWriteTimeout`               | Bound on outbound queue admission when the caller has no deadline       |
+| `WithReadIdleTimeout`            | Duplex PING interval; two missed PONGs close the connection             |
+| `WithProtocolPin`                | `auto` (default), `legacy`, or `duplex` wire protocol                   |
+| `WithSerializers`                | Bind a `Serializer` to a message type or interface                      |
+| `WithSerializables`              | Bulk-register types with the built-in CBOR serializer                   |
+| `WithJSONSerializables`          | Bulk-register types with the built-in JSON serializer                   |
+| `WithContextPropagator`          | Propagate trace IDs, auth tokens, correlation IDs                       |
+| `WithTLS`                        | TLS settings for all node transports. See [TLS](#tls)                   |
 
 <Note>
 `WithProtocolPin` selects the remoting wire protocol on both dial and accept:
@@ -45,10 +51,43 @@ non-duplex first bytes. Legacy brotli has no magic byte and can collide with the
 deployments.
 </Note>
 
+### Send semantics
+
+On the duplex path:
+
+- Enqueue success returns `nil` (fire-and-forget does not wait for the peer).
+- A full outbound admission queue blocks until the caller's deadline, or
+  `WithWriteTimeout` when none is set, then returns
+  `errors.ErrRemoteSendBackpressure`.
+- Transport failures dead-letter with an event; messages are not silently dropped
+  for flow control.
+- Slow receivers slow senders through credit: `WithCreditWindow` is the HELLO
+  `initial_credits` budget (pairwise minimum when both peers negotiate revision
+  4). The writer parks when the window is exhausted; the receiver returns credit
+  after mailbox enqueue, ask worker-pool handoff, or CHUNK reassembly append.
+
+### Large-message destinations
+
+`WithLargeMessageDestinations` lists actor-path patterns that route over the
+large lane. It is a **performance and isolation** knob, not a correctness gate:
+an oversized message to an unlisted destination still chunks in place on its
+ordinary lane and arrives in order with surrounding small messages to that
+actor. List destinations that return or receive bulk payloads when you want
+those transfers off the ordinary lanes.
+
+```go
+cfg := remote.NewConfig("0.0.0.0", 8080,
+    remote.WithLargeMessageDestinations("bulk/*", "archive/exporter"),
+    remote.WithChunkSize(256*1024),
+    remote.WithCreditWindow(16*1024*1024),
+)
+```
+
 ## Transport
 
 - Length-prefixed TCP frames (legacy unary path)
 - Dual-protocol listener for duplex and legacy peers
+- Multiplexed duplex lanes (control, ordinary, large) with credit-based flow control
 - Optional TLS (see [TLS](#tls))
 - Compression: None (default), Gzip, Zstd, Brotli
 

@@ -159,7 +159,9 @@ func (x *duplexConn) emitChunkAbort(ctx context.Context, corr uint64, index uint
 
 // handleInboundChunk feeds a CHUNK frame into the reassembler and dispatches
 // the completed logical frame or emits soft/hard errors. The wire payload is
-// released after Push copies into the reassembly buffer.
+// released after Push copies into the reassembly buffer. Each CHUNK that keeps
+// the connection open is granted exactly once at this disposition; the
+// reassembled logical frame is not granted again.
 func (x *duplexConn) handleInboundChunk(frame Frame) {
 	if x.revision < CapabilityRevisionChunking {
 		x.releaseFramePayload(frame.Payload)
@@ -173,6 +175,7 @@ func (x *duplexConn) handleInboundChunk(frame Frame) {
 		return
 	}
 
+	cost := frameWireCost(frame)
 	out := x.reassembler.Push(frame)
 	x.releaseFramePayload(frame.Payload)
 
@@ -180,9 +183,15 @@ func (x *duplexConn) handleInboundChunk(frame Frame) {
 	case out.HardError != "":
 		x.rejectProtocol(out.HardError)
 	case out.SoftReject != "":
+		x.noteOwnedBytes(cost)
 		x.softRejectChunk(frame.Correlation, out.SoftReject)
 	case out.Complete:
+		x.noteOwnedBytes(cost)
 		x.dispatchLogical(out.Frame)
+	default:
+		// Mid-group append, abort, or ignored orphan continuation: the
+		// connection stays open, so the charged wire frame must be granted.
+		x.noteOwnedBytes(cost)
 	}
 }
 

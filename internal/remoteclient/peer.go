@@ -535,7 +535,7 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 	}
 
 	localHello := &internalpb.Hello{
-		Revision:                    inet.CapabilityRevisionTables,
+		Revision:                    inet.CapabilityRevisionCredits,
 		LaneRole:                    role,
 		LaneIndex:                   index,
 		Compression:                 compressionCodec(x.client.compression),
@@ -784,7 +784,7 @@ func (x *peer) tryEnqueueAdmit(pump *tellPump, item admittedTell) bool {
 func (x *peer) admitMaxBytes() int64 {
 	credits := x.client.initialCredits
 	if credits == 0 {
-		credits = remote.DefaultInitialCredits
+		credits = remote.DefaultCreditWindow
 	}
 	return int64(credits)
 }

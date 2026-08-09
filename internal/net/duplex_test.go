@@ -178,10 +178,11 @@ func TestDuplexBackpressure(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
+	// Use DATA: PING is admission-exempt so it can exceed the byte cap.
 	payload := []byte{1, 2}
 	err := left.Submit(ctx, Frame{
 		Version: ProtocolVersion,
-		Type:    FrameTypePing,
+		Type:    FrameTypeData,
 		Payload: payload,
 		Length:  uint32(len(payload)),
 	})
@@ -325,10 +326,12 @@ func TestDuplexSubmitCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
+	// Use DATA: PING is admission-exempt and would admit past the byte cap
+	// instead of blocking until the canceled context surfaces.
 	payload := []byte{1, 2}
 	err := left.Submit(ctx, Frame{
 		Version: ProtocolVersion,
-		Type:    FrameTypePing,
+		Type:    FrameTypeData,
 		Payload: payload,
 		Length:  uint32(len(payload)),
 	})
@@ -609,9 +612,10 @@ func TestAdmitFrameFailureModes(t *testing.T) {
 		_ = healthy.Close()
 	}()
 
-	// One byte of outbound budget cannot admit any frame: the admit reports
-	// backpressure immediately instead of waiting for capacity.
-	err := starved.admitFrame(Frame{Type: FrameTypePing, Lane: starved.Lane()})
+	// One byte of outbound budget cannot admit a windowed frame: the admit
+	// reports backpressure immediately instead of waiting for capacity.
+	// PING is admission-exempt and would still fit past a tiny byte cap.
+	err := starved.admitFrame(Frame{Type: FrameTypeData, Lane: starved.Lane()})
 	require.ErrorIs(t, err, ErrDuplexBackpressure)
 
 	// A frame within budget is admitted without error.

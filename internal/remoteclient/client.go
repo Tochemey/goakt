@@ -857,8 +857,9 @@ func WithClientMaxMessageSize(size uint64) ClientOption {
 	}
 }
 
-// WithClientInitialCredits sets the HELLO initial_credits value and the
-// duplex outbound queue byte cap used by [inet.OpenDuplex].
+// WithClientInitialCredits sets the client's flow-control window advertised in
+// HELLO (wire field initial_credits) and used as the duplex outbound admission
+// cap. Callers typically pass [remote.Config.CreditWindow].
 func WithClientInitialCredits(credits uint64) ClientOption {
 	return func(x *client) {
 		x.initialCredits = credits
@@ -1001,7 +1002,7 @@ func NewClient(opts ...ClientOption) Client {
 		maxFrameSize:                16 * size.MB,
 		maxMessageSize:              remote.DefaultMaxMessageSize,
 		chunkSize:                   remote.DefaultChunkSize,
-		initialCredits:              remote.DefaultInitialCredits,
+		initialCredits:              remote.DefaultCreditWindow,
 		peers:                       xsync.NewMap[string, *peer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),

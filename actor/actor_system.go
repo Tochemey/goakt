@@ -2928,7 +2928,7 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientMaxFrameSize(x.remoteConfig.MaxFrameSize()),
 		remoteclient.WithClientMaxMessageSize(x.remoteConfig.MaxMessageSize()),
 		remoteclient.WithClientChunkSize(x.remoteConfig.ChunkSize()),
-		remoteclient.WithClientInitialCredits(remote.DefaultInitialCredits),
+		remoteclient.WithClientInitialCredits(x.remoteConfig.CreditWindow()),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),

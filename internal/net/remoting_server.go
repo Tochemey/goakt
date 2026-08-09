@@ -342,8 +342,10 @@ func WithRemotingServerAcceptProtocol(protocol AcceptProtocol) RemotingServerOpt
 	}
 }
 
-// WithRemotingServerInitialCredits sets the HELLO initial_credits value and the
-// duplex outbound queue byte cap. Zero keeps the default (16 MiB).
+// WithRemotingServerInitialCredits sets the server's flow-control window
+// advertised in HELLO (wire field initial_credits) and used as the duplex
+// outbound admission cap. Zero keeps the default (16 MiB). Callers typically
+// pass [remote.Config.CreditWindow].
 func WithRemotingServerInitialCredits(credits uint64) RemotingServerOption {
 	return func(x *RemotingServer) {
 		if credits > 0 {
@@ -548,7 +550,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
-		Revision:                    CapabilityRevisionTables,
+		Revision:                    CapabilityRevisionCredits,
 		SystemName:                  x.systemName,
 		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
 		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
@@ -664,6 +666,9 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 //
 // Table-ref decode failures are connection-scoped (ERROR then close). Other
 // decode failures are request-scoped ERROR and the connection stays up.
+// Each DATA frame that keeps the connection open is credit-granted exactly
+// once at its first terminal disposition (tell enqueue, ask handoff, or
+// request-scoped failure).
 func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
 	env, err := conn.DecodeDataEnvelope(frame.Payload, frame.HasMetadata())
 	if err != nil {
@@ -675,6 +680,7 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 
 		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
 		conn.ReleasePayload(frame)
+		conn.noteOwnedFrame(frame)
 		return nil
 	}
 
@@ -685,6 +691,7 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 		if err := md.UnmarshalBinary(env.Metadata); err != nil {
 			_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_INVALID_ARGUMENT, err.Error())
 			conn.ReleasePayload(frame)
+			conn.noteOwnedFrame(frame)
 			return nil
 		}
 
@@ -699,6 +706,7 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 	if !frame.ExpectsReply() {
 		x.invokeDuplexTell(handlerCtx, env)
 		conn.ReleasePayload(frame)
+		conn.noteOwnedFrame(frame)
 		return nil
 	}
 
@@ -717,8 +725,13 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 
 		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_UNAVAILABLE, err.Error())
 		conn.ReleasePayload(frame)
+		conn.noteOwnedFrame(frame)
+		return nil
 	}
 
+	// Ownership left the read loop at worker-pool handoff; grant here, never
+	// at the worker's deferred ReleasePayload (that runs after user code).
+	conn.noteOwnedFrame(frame)
 	return nil
 }
 

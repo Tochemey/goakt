@@ -171,15 +171,43 @@ func TestDuplexChunkInboundFullBlocksUntilDrained(t *testing.T) {
 func TestSoftRejectChunkFailsTransportWhenErrorNotAdmitted(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	c1, c2 := net.Pipe()
-	t.Cleanup(func() {
-		_ = c1.Close()
-		_ = c2.Close()
-	})
-
-	// Tiny credit window so the request-scoped ERROR cannot be admitted.
-	conn := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), FrameHeaderSize)
+	// ERROR is admission-exempt for the byte cap, so the only way soft-reject
+	// cannot admit is a full writer queue. Kill the writer first so nothing
+	// drains `out`, then fill the channel to capacity.
+	framed := &writeErrFramedConn{err: assert.AnError, closed: make(chan struct{})}
+	conn := newDuplexConn(framed, FrameHeaderSize)
 	defer func() { _ = conn.Close() }()
+
+	require.True(t, conn.trySubmit(Frame{
+		Version: ProtocolVersion,
+		Type:    FrameTypePing,
+		Lane:    conn.Lane(),
+	}))
+	require.Eventually(t, func() bool {
+		return conn.writeErr.Load() != nil
+	}, time.Second, time.Millisecond)
+
+	for conn.trySubmit(Frame{
+		Version: ProtocolVersion,
+		Type:    FrameTypePing,
+		Lane:    conn.Lane(),
+	}) {
+	}
+
+	// trySubmit can return false on a contended mutex; require sustained
+	// failures so the queue is actually full when soft-reject runs.
+	require.Eventually(t, func() bool {
+		for range 32 {
+			if conn.trySubmit(Frame{
+				Version: ProtocolVersion,
+				Type:    FrameTypePing,
+				Lane:    conn.Lane(),
+			}) {
+				return false
+			}
+		}
+		return true
+	}, time.Second, time.Millisecond)
 
 	conn.softRejectChunk(7, "max concurrent large transfers exceeded")
 

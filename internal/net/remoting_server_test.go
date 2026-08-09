@@ -1234,10 +1234,11 @@ func TestRemotingServerHandleDuplexConnClosesOnUnsupportedFrame(t *testing.T) {
 	_, err = performHello(conn, testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20))
 	require.NoError(t, err)
 
-	// Unknown frame types are protocol violations: ERROR then close.
+	// Post-handshake HELLO is a known wire type but unsupported by the
+	// remoting duplex handler (CREDIT/PING/etc. are consumed by the read loop).
 	require.NoError(t, conn.WriteFrames(Frame{
 		Version:     ProtocolVersion,
-		Type:        FrameTypeCredit,
+		Type:        FrameTypeHello,
 		Lane:        LaneControl,
 		Correlation: 1,
 	}))

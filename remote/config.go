@@ -50,9 +50,9 @@ const DefaultMaxIdleConns = inet.DefaultMaxIdleConns
 // concurrent large-message transfers per duplex connection.
 const DefaultMaxConcurrentLargeTransfers uint32 = 4
 
-// DefaultInitialCredits is the default HELLO credit window and duplex
-// outbound queue byte cap (16 MiB).
-const DefaultInitialCredits uint64 = 16 * size.MB
+// DefaultCreditWindow is the default unreclaimed in-flight byte budget per
+// duplex connection (16 MiB). See [WithCreditWindow].
+const DefaultCreditWindow uint64 = 16 * size.MB
 
 // DefaultOrdinaryLanes is the default number of ordinary duplex lanes per
 // peer. One lane preserves per-destination-node FIFO for user traffic.
@@ -99,6 +99,7 @@ type Config struct {
 	maxConcurrentLargeTransfers uint32
 	chunkSize                   uint32
 	maxMessageSize              uint64
+	creditWindow                uint64
 }
 
 var _ validation.Validator = (*Config)(nil)
@@ -127,6 +128,7 @@ func NewConfig(bindAddr string, bindPort int, opts ...Option) *Config {
 		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
 		chunkSize:                   DefaultChunkSize,
 		maxMessageSize:              DefaultMaxMessageSize,
+		creditWindow:                DefaultCreditWindow,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -159,6 +161,7 @@ func DefaultConfig() *Config {
 		maxConcurrentLargeTransfers: DefaultMaxConcurrentLargeTransfers,
 		chunkSize:                   DefaultChunkSize,
 		maxMessageSize:              DefaultMaxMessageSize,
+		creditWindow:                DefaultCreditWindow,
 	}
 
 	// Register the default proto serializer for all proto.Message implementations.
@@ -338,6 +341,13 @@ func (x *Config) MaxMessageSize() uint64 {
 	return x.maxMessageSize
 }
 
+// CreditWindow returns the unreclaimed in-flight byte budget per duplex
+// connection. See [WithCreditWindow] for the purpose of credit and how the
+// value is negotiated.
+func (x *Config) CreditWindow() uint64 {
+	return x.creditWindow
+}
+
 func (x *Config) Validate() error {
 	v := validation.
 		New(validation.FailFast()).
@@ -347,6 +357,8 @@ func (x *Config) Validate() error {
 		AddAssertion(x.maxFrameSize >= x.chunkSize, "maxFrameSize must be at least chunkSize").
 		AddAssertion(x.maxMessageSize >= uint64(x.maxFrameSize), "maxMessageSize must be greater than or equal to maxFrameSize").
 		AddAssertion(x.maxMessageSize <= uint64(math.MaxUint32), "maxMessageSize must fit the 32-bit frame length").
+		AddAssertion(x.creditWindow > 0, "creditWindow must be greater than 0").
+		AddAssertion(x.creditWindow >= uint64(x.chunkSize), "creditWindow must be at least chunkSize").
 		AddAssertion(x.bindPort >= 0 && x.bindPort <= 65535, "invalid bindPort").
 		AddAssertion(x.readIdleTimeout >= 0, "invalid server read idle timeout").
 		AddAssertion(x.writeTimeout >= 0, "invalid server write timeout").

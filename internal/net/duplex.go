@@ -94,6 +94,21 @@ type duplexConn struct {
 	// senderResolver lazily materializes opaque sender handles for path
 	// table hits. Nil leaves SenderHandle empty (clients and unit tests).
 	senderResolver func(path string) any
+	// creditEnabled is true when the negotiated revision supports receiver
+	// grants (revision >= 4). When false the send window is unlimited.
+	creditEnabled bool
+	// creditWindow is the negotiated HELLO credit budget used as the full
+	// window size for oversized-frame progress and grant batching.
+	creditWindow int64
+	// sendWindow is the remaining receiver-granted outbound budget. It is
+	// decremented by the writer at write time and increased by inbound CREDIT.
+	sendWindow atomic.Int64
+	// creditWake wakes a writer parked on an exhausted send window.
+	creditWake chan types.Unit
+	// grantMu protects grantAccum on the receiver grant path.
+	grantMu sync.Mutex
+	// grantAccum is owned wire bytes not yet flushed as a CREDIT frame.
+	grantAccum int64
 	// lastInbound records the latest successfully read frame timestamp.
 	lastInbound atomic.Int64
 
@@ -211,6 +226,10 @@ func withDuplexNegotiated(hello *internalpb.Hello) duplexConnOption {
 			x.pathReceiver = newReceiverTable(DefaultTableCapacity)
 			x.typeReceiver = newReceiverTable(DefaultTableCapacity)
 		}
+
+		if x.revision >= CapabilityRevisionCredits {
+			x.creditEnabled = true
+		}
 	}
 }
 
@@ -251,6 +270,12 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 	// read error; splitLogicalChunks caps chunk bodies at this value.
 	if x.chunkSize > 0 && x.maxFrameSize > 0 && x.chunkSize > x.maxFrameSize {
 		x.chunkSize = x.maxFrameSize
+	}
+
+	if x.creditEnabled {
+		x.creditWindow = x.maxOutBytes
+		x.sendWindow.Store(x.maxOutBytes)
+		x.creditWake = make(chan types.Unit, 1)
 	}
 
 	x.lastInbound.Store(time.Now().UnixNano())
@@ -372,7 +397,7 @@ func (x *duplexConn) submitRaw(ctx context.Context, frame Frame) error {
 			return ErrDuplexClosed
 		}
 
-		if x.outBytes+cost <= x.maxOutBytes {
+		if x.canAdmitLocked(cost, frame.Type) {
 			x.outBytes += cost
 			x.mu.Unlock()
 
@@ -512,43 +537,48 @@ func (x *duplexConn) release(cost int64) {
 
 // writeLoop drains the outbound queue onto the framed connection until the
 // duplex closes or a write fails. Ready frames are coalesced into one
-// vectored WriteFrames call per wakeup. On shutdown it flushes any frames
-// already admitted so connection-scoped ERROR reaches the peer.
+// vectored WriteFrames call per wakeup. When credits are enabled, windowed
+// frames (DATA/CHUNK) wait for send-window room while exempt control frames
+// bypass a parked writer. On shutdown it flushes any frames already admitted
+// so connection-scoped ERROR reaches the peer.
 func (x *duplexConn) writeLoop() {
 	defer x.writeWG.Done()
 
 	batch := make([]Frame, 0, duplexWriteBatchMax)
 	costs := make([]int64, 0, duplexWriteBatchMax)
 
+	var pending []Frame
+	if x.creditEnabled {
+		pending = make([]Frame, 0, duplexWriteBatchMax)
+	}
+
 	for {
 		batch = batch[:0]
 		costs = costs[:0]
 
-		select {
-		case <-x.closed:
-			x.drainOutbound()
+		if !x.waitOutbound(&pending, &batch, &costs) {
+			x.drainOutboundPending(pending)
 			return
-		case frame := <-x.out:
-			batch = append(batch, frame)
-			costs = append(costs, int64(FrameHeaderSize)+int64(frame.Length))
 		}
 
-		for len(batch) < duplexWriteBatchMax {
-			select {
-			case frame := <-x.out:
-				batch = append(batch, frame)
-				costs = append(costs, int64(FrameHeaderSize)+int64(frame.Length))
-			default:
-				goto flush
-			}
+		x.drainOutboundNonblocking(&pending, &batch, &costs)
+		if x.creditEnabled {
+			pending, batch, costs = x.fillWindowedBatch(pending, batch, costs)
 		}
 
-	flush:
+		if len(batch) == 0 {
+			// Classification moved frames out of the queue even though nothing
+			// was written; retry any deferred grant now that slots are free.
+			x.flushGrants()
+			continue
+		}
+
 		x.applyWriteDeadline()
 		if err := x.framed.WriteFrames(batch...); err != nil {
 			if !x.closing.Load() {
 				x.writeErr.Store(&err)
 			}
+
 			x.failTransport()
 			return
 		}
@@ -556,12 +586,122 @@ func (x *duplexConn) writeLoop() {
 		for _, cost := range costs {
 			x.release(cost)
 		}
+
+		// The write freed queue slots; retry any CREDIT grant that was deferred
+		// on a full queue so a parked peer is never stranded without credit.
+		x.flushGrants()
 	}
+}
+
+// waitOutbound blocks until at least one outbound frame is classified into
+// batch/pending, a credit wake arrives while parked, or the duplex closes.
+// It returns false when the connection is closed.
+func (x *duplexConn) waitOutbound(pending *[]Frame, batch *[]Frame, costs *[]int64) bool {
+	if x.creditEnabled && len(*pending) > 0 {
+		select {
+		case <-x.closed:
+			return false
+		case frame := <-x.out:
+			*pending, *batch, *costs = x.classifyOutbound(frame, *pending, *batch, *costs)
+			return true
+		case <-x.creditWake:
+			return true
+		}
+	}
+
+	select {
+	case <-x.closed:
+		return false
+	case frame := <-x.out:
+		if x.creditEnabled {
+			*pending, *batch, *costs = x.classifyOutbound(frame, *pending, *batch, *costs)
+		} else {
+			*batch = append(*batch, frame)
+			*costs = append(*costs, frameWireCost(frame))
+		}
+
+		return true
+	}
+}
+
+// drainOutboundNonblocking pulls ready frames from the writer queue without
+// blocking, classifying them for credit-aware writes when enabled.
+func (x *duplexConn) drainOutboundNonblocking(pending *[]Frame, batch *[]Frame, costs *[]int64) {
+	for len(*batch) < duplexWriteBatchMax {
+		select {
+		case frame := <-x.out:
+			if x.creditEnabled {
+				*pending, *batch, *costs = x.classifyOutbound(frame, *pending, *batch, *costs)
+			} else {
+				*batch = append(*batch, frame)
+				*costs = append(*costs, frameWireCost(frame))
+			}
+		default:
+			return
+		}
+	}
+}
+
+// classifyOutbound routes frame into the exempt write batch or the windowed
+// pending buffer. Exempt frames may overtake parked windowed frames.
+func (x *duplexConn) classifyOutbound(frame Frame, pending, batch []Frame, costs []int64) ([]Frame, []Frame, []int64) {
+	if !windowedFrameType(frame.Type) {
+		batch = append(batch, frame)
+		costs = append(costs, frameWireCost(frame))
+		return pending, batch, costs
+	}
+
+	pending = append(pending, frame)
+	return pending, batch, costs
+}
+
+// fillWindowedBatch moves the longest prefix of pending windowed frames that
+// fit the send window into batch, charging the window at move time. Consumed
+// pending slots are cleared so large payloads are not retained by the slice
+// backing array after the frame has been handed to the writer batch.
+func (x *duplexConn) fillWindowedBatch(pending, batch []Frame, costs []int64) ([]Frame, []Frame, []int64) {
+	for len(pending) > 0 && len(batch) < duplexWriteBatchMax {
+		cost := frameWireCost(pending[0])
+		if !x.canChargeWindow(cost) {
+			break
+		}
+
+		x.chargeWindow(cost)
+		batch = append(batch, pending[0])
+		costs = append(costs, cost)
+		pending[0] = Frame{}
+		pending = pending[1:]
+	}
+
+	return pending, batch, costs
 }
 
 // drainOutbound writes every frame already admitted to the outbound queue.
 // Called once during shutdown after [signalClose] so no new Submits succeed.
 func (x *duplexConn) drainOutbound() {
+	x.drainOutboundPending(nil)
+}
+
+// drainOutboundPending writes pending windowed frames then every remaining
+// admitted frame. Shutdown ignores the send window so a best-effort ERROR can
+// leave even when the peer has stopped granting.
+func (x *duplexConn) drainOutboundPending(pending []Frame) {
+	for i := range pending {
+		frame := pending[i]
+		pending[i] = Frame{}
+
+		x.applyWriteDeadline()
+		if err := x.framed.WriteFrames(frame); err != nil {
+			if !x.closing.Load() {
+				x.writeErr.Store(&err)
+			}
+
+			return
+		}
+
+		x.release(frameWireCost(frame))
+	}
+
 	for {
 		select {
 		case frame := <-x.out:
@@ -570,9 +710,11 @@ func (x *duplexConn) drainOutbound() {
 				if !x.closing.Load() {
 					x.writeErr.Store(&err)
 				}
+
 				return
 			}
-			x.release(int64(FrameHeaderSize) + int64(frame.Length))
+
+			x.release(frameWireCost(frame))
 		default:
 			return
 		}
@@ -622,6 +764,9 @@ func (x *duplexConn) readLoop() {
 			if frame.Correlation != 0 {
 				_ = x.pending.complete(frame.Correlation, frame)
 			}
+			continue
+		case FrameTypeCredit:
+			x.handleInboundCredit(frame)
 			continue
 		case FrameTypeChunk:
 			x.handleInboundChunk(frame)
@@ -758,6 +903,8 @@ func (x *duplexConn) livenessLoop() {
 
 // trySubmit admits frame only when capacity and the writer queue are
 // immediately available. It never blocks the reader or liveness goroutine.
+// CREDIT, PING, PONG, and ERROR may exceed the admission byte cap so control
+// traffic can enter the queue while windowed DATA is parked in the writer.
 func (x *duplexConn) trySubmit(frame Frame) bool {
 	if frame.Version == 0 {
 		frame.Version = ProtocolVersion
@@ -772,7 +919,7 @@ func (x *duplexConn) trySubmit(frame Frame) bool {
 	}
 	defer x.mu.Unlock()
 
-	if x.isClosed() || x.outBytes+cost > x.maxOutBytes {
+	if x.isClosed() || !x.canAdmitLocked(cost, frame.Type) {
 		return false
 	}
 
@@ -808,7 +955,7 @@ func (x *duplexConn) admitFrame(frame Frame) error {
 		return ErrDuplexClosed
 	}
 
-	if x.outBytes+cost > x.maxOutBytes {
+	if !x.canAdmitLocked(cost, frame.Type) {
 		return ErrDuplexBackpressure
 	}
 
@@ -819,6 +966,22 @@ func (x *duplexConn) admitFrame(frame Frame) error {
 	default:
 		return ErrDuplexBackpressure
 	}
+}
+
+// canAdmitLocked reports whether cost bytes of frameType may enter the
+// outbound queue. The caller must hold mu. Control frames may exceed the
+// admission cap; a single oversized windowed frame may enter an empty queue
+// so a peer with a smaller credit window can still make progress.
+func (x *duplexConn) canAdmitLocked(cost int64, frameType byte) bool {
+	if admissionExemptFrameType(frameType) {
+		return true
+	}
+
+	if x.outBytes+cost <= x.maxOutBytes {
+		return true
+	}
+
+	return x.creditEnabled && windowedFrameType(frameType) && x.outBytes == 0
 }
 
 // nextCorrelation allocates a nonzero correlation identifier.
