@@ -676,12 +676,6 @@ func (x *duplexConn) fillWindowedBatch(pending, batch []Frame, costs []int64) ([
 	return pending, batch, costs
 }
 
-// drainOutbound writes every frame already admitted to the outbound queue.
-// Called once during shutdown after [signalClose] so no new Submits succeed.
-func (x *duplexConn) drainOutbound() {
-	x.drainOutboundPending(nil)
-}
-
 // drainOutboundPending writes pending windowed frames then every remaining
 // admitted frame. Shutdown ignores the send window so a best-effort ERROR can
 // leave even when the peer has stopped granting.

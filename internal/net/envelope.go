@@ -371,13 +371,6 @@ func putEncodedRef(dst []byte, id uint64, literal string) int {
 	return n
 }
 
-// readRef decodes one envelope ref from src. A nonzero table ID returns
-// [ErrTableRefUnsupported].
-func readRef(src []byte) (string, int, error) {
-	literal, _, n, err := readRefResolved(src, nil)
-	return literal, n, err
-}
-
 // readRefResolved decodes one envelope ref. When id is nonzero, table must
 // resolve it; a nil table rejects nonzero IDs with [ErrTableRefUnsupported].
 func readRefResolved(src []byte, table *receiverTable) (literal string, id uint64, n int, err error) {

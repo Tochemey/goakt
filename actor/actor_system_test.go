@@ -3115,18 +3115,17 @@ func TestRemotingLookup(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		const actorName = "test"
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		addr, err := remoting.RemoteLookup(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
-		require.Nil(t, addr)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteLookupHandler(ctx, nullConn, &internalpb.RemoteLookupRequest{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		})
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -3259,21 +3258,17 @@ func TestRemotingReSpawn(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteReSpawnHandler(ctx, nullConn, &internalpb.RemoteReSpawnRequest{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		})
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		_, err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -3712,21 +3707,17 @@ func TestRemotingStop(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteStopHandler(ctx, nullConn, &internalpb.RemoteStopRequest{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		})
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		err = remoting.RemoteStop(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -4689,22 +4680,18 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		require.NoError(t, sys.Register(ctx, &exchanger{}))
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		request := &remote.SpawnRequest{
-			Name: uuid.NewString(),
-			Kind: "actor.exchanger",
-		}
-		_, err = remoting.RemoteSpawn(ctx, actualHost, actualPort, request)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteSpawnHandler(ctx, nullConn, &internalpb.RemoteSpawnRequest{
+			Host:      "10.0.0.1",
+			Port:      int32(as.Port()),
+			ActorName: uuid.NewString(),
+			ActorType: "actor.exchanger",
+		})
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -5578,21 +5565,17 @@ func TestRemotingReinstate(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteReinstateHandler(ctx, nullConn, &internalpb.RemoteReinstateRequest{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		})
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		err = remoting.RemoteReinstate(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})

@@ -34,11 +34,6 @@ import (
 // creditWindow / creditGrantBatchDivisor owned bytes.
 const creditGrantBatchDivisor = 4
 
-// appendCreditPayload appends the CREDIT body encoding of grant as a uvarint.
-func appendCreditPayload(dst []byte, grant uint64) []byte {
-	return binary.AppendUvarint(dst, grant)
-}
-
 // encodeCreditPayload returns a heap CREDIT body for grant. Encoding uses a
 // stack scratch buffer so only the exact-sized result escapes; CREDIT frames
 // are batched at a quarter window, so this allocation is not on the per-message

@@ -39,16 +39,11 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
-func TestAppendConsumeCreditPayload(t *testing.T) {
+func TestEncodeConsumeCreditPayload(t *testing.T) {
 	defer goleak.VerifyNone(t)
 
-	payload := appendCreditPayload(nil, 12345)
+	payload := encodeCreditPayload(12345)
 	grant, ok := consumeCreditPayload(payload)
-	require.True(t, ok)
-	assert.Equal(t, uint64(12345), grant)
-
-	encoded := encodeCreditPayload(12345)
-	grant, ok = consumeCreditPayload(encoded)
 	require.True(t, ok)
 	assert.Equal(t, uint64(12345), grant)
 
@@ -261,7 +256,7 @@ func TestCreditRevisionThreeIgnoresCredit(t *testing.T) {
 
 	require.True(t, left.trySubmit(Frame{
 		Type:    FrameTypeCredit,
-		Payload: appendCreditPayload(nil, 100),
+		Payload: encodeCreditPayload(100),
 	}))
 
 	recvCtx, recvCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

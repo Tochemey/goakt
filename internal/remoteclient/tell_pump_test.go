@@ -175,6 +175,36 @@ func TestAdmitTellBackpressureOnFullByteWindow(t *testing.T) {
 	require.ErrorIs(t, err, gerrors.ErrRemoteSendBackpressure)
 }
 
+func TestAdmitTellNoDeadlineBoundedByWriteTimeout(t *testing.T) {
+	const window = 64
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientInitialCredits(window),
+		WithClientWriteTimeout(50*time.Millisecond),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65530)
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_ORDINARY, index: 0}
+
+	// Pre-install a full pump with no goroutine: a caller context without a
+	// deadline must still surface backpressure once the write timeout elapses
+	// instead of blocking forever.
+	pump := newTellPump()
+	filler := tellParams{payload: make([]byte, window)}
+	pump.queue = []admittedTell{{params: filler, cost: admitCost(filler)}}
+	pump.queuedBytes = admitCost(filler)
+
+	p.mu.Lock()
+	p.pumps[key] = pump
+	p.mu.Unlock()
+
+	start := time.Now()
+	err := p.admitTell(context.Background(), key, tellParams{payload: []byte("x")})
+	require.ErrorIs(t, err, gerrors.ErrRemoteSendBackpressure)
+	assert.Less(t, time.Since(start), 5*time.Second)
+}
+
 func TestAdmitTellAllowsOversizedWhenQueueEmpty(t *testing.T) {
 	recorder := &tellFailureRecorder{}
 	const window = 8

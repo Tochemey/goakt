@@ -194,9 +194,32 @@ func WithCompression(c Compression) Option {
 	})
 }
 
-// WithProtocolPin selects the remoting wire protocol dialing and accept mode.
-// See [ProtocolPin] for values and the brotli-collision note. The default is
-// [ProtocolPinAuto].
+// WithProtocolPin selects which remoting wire protocol this node dials and
+// accepts. The pin applies to both sides of the actor system: the remoting
+// listener's accept mode and the outbound client's dial mode.
+//
+// Remoting currently speaks two wire protocols:
+//   - duplex: multiplexed, correlation-driven frames over persistent lane
+//     connections (the default path for current peers);
+//   - legacy: unary protobuf-over-TCP with pooled sockets and the send
+//     coalescer (kept so mixed-version clusters can roll node by node).
+//
+// [ProtocolPinAuto] (the default) keeps both paths live. On accept, the
+// listener peeks the first byte after TLS and routes duplex traffic when that
+// byte is the duplex version discriminator (0x02); anything else is replayed
+// into the legacy path. On dial, the client prefers duplex and falls back to
+// legacy when the peer closes or resets before HELLO_ACK, caching that peer as
+// legacy and re-probing duplex after 30 seconds so an upgraded peer can
+// switch over without a dialer restart.
+//
+// [ProtocolPinLegacy] and [ProtocolPinDuplex] force a single protocol on both
+// dial and accept. Use them for homogeneous clusters, or whenever first-byte
+// discrimination is unsafe: legacy brotli compression has no magic byte and
+// can collide with the duplex 0x02 discriminator under [ProtocolPinAuto].
+// Pinning also makes rollout behavior deterministic when operators do not want
+// automatic fallback.
+//
+// Must be a valid [ProtocolPin]; [Config.Validate] rejects unknown values.
 func WithProtocolPin(pin ProtocolPin) Option {
 	return OptionFunc(func(config *Config) {
 		config.protocolPin = pin

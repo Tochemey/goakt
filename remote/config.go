@@ -296,8 +296,9 @@ func (x *Config) TLS() *gtls.Info {
 	return x.tlsInfo
 }
 
-// ProtocolPin returns the remoting protocol pin set with [WithProtocolPin].
-// The default is [ProtocolPinAuto].
+// ProtocolPin returns the remoting wire-protocol pin set with
+// [WithProtocolPin]. The default is [ProtocolPinAuto]. See [WithProtocolPin]
+// for dial/accept behavior and when to pin away from auto.
 func (x *Config) ProtocolPin() ProtocolPin {
 	return x.protocolPin
 }

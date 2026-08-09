@@ -733,10 +733,19 @@ func (x *peer) ensureTellPump(key laneKey) (*tellPump, error) {
 }
 
 // enqueueOnPump blocks until params (already owned) is queued on pump, the
-// caller's ctx expires (backpressure), or the peer is torn down. Caller must
-// have already incremented pump.pending via ensureTellPump.
+// admission deadline expires (backpressure), or the peer is torn down. A
+// caller context without a deadline is bounded by the client write timeout,
+// matching the duplex Submit contract, so a full admission window cannot
+// block a sender forever. Caller must have already incremented pump.pending
+// via ensureTellPump.
 func (x *peer) enqueueOnPump(ctx context.Context, pump *tellPump, params tellParams) error {
 	item := admittedTell{params: params, cost: admitCost(params)}
+	if x.tryEnqueueAdmit(pump, item) {
+		return nil
+	}
+
+	ctx, cancel := x.bindAdmitDeadline(ctx)
+	defer cancel()
 
 	for {
 		if x.tryEnqueueAdmit(pump, item) {
@@ -753,6 +762,22 @@ func (x *peer) enqueueOnPump(ctx context.Context, pump *tellPump, params tellPar
 		case <-pump.space:
 		}
 	}
+}
+
+// bindAdmitDeadline bounds a blocking pump admission by the client write
+// timeout when ctx carries no deadline of its own. The timer is armed only
+// after a first failed admit so the non-blocking fast path stays free of
+// context allocations.
+func (x *peer) bindAdmitDeadline(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+
+	if d := x.client.writeTimeout; d > 0 {
+		return context.WithTimeout(ctx, d)
+	}
+
+	return ctx, func() {}
 }
 
 // tryEnqueueAdmit appends item when the byte window allows it (or the queue

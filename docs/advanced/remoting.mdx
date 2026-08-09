@@ -1,57 +1,140 @@
 ---
 title: Remoting
-description: Configure TCP-based messaging between actors across nodes.
+description: Configure multiplexed TCP remoting between actors across nodes.
 sidebarTitle: "Remoting"
 ---
 
 ## Overview
 
-The remoting layer enables actors on different nodes to exchange messages over TCP. It is configured via `WithRemote` (passing `remote.Config`). From inside the actor system, you interact through `ActorOf` and messaging. For external callers (CLI, API servers, batch jobs), use the [Client](/advanced/client) package to connect to the cluster without running an actor system.
+Remoting lets actors on different nodes exchange messages over TCP. Enable it
+with `actor.WithRemote` and a `remote.Config`. From inside the actor system, use
+`ActorOf` and the usual `Tell` / `Ask` APIs; the framework routes remote messages
+automatically. For callers outside an actor system (CLI, API servers, batch
+jobs), use the [Client](/advanced/client) package.
+
+Current peers speak a **multiplexed duplex** protocol: persistent lane
+connections per peer, correlation-driven asks, chunked large messages, and
+credit-based flow control. A **legacy** unary protobuf-over-TCP path remains for
+mixed-version rollouts. Delivery at the transport is at-most-once; use
+[reliable delivery](/clustering/reliable-delivery/point-to-point) when you need
+confirmed delivery.
 
 ## Quick example
 
 ```go
 cfg := remote.NewConfig("0.0.0.0", 8080)
-sys, _ := actor.NewActorSystem("my-system", actor.WithRemote(cfg))
-sys.Start(ctx)
-defer sys.Stop()
+sys, err := actor.NewActorSystem("my-system", actor.WithRemote(cfg))
+if err != nil {
+    panic(err)
+}
+if err := sys.Start(ctx); err != nil {
+    panic(err)
+}
+defer sys.Stop(ctx)
 ```
 
 ## Configuration
 
-Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. The bind address should be a concrete IP (e.g., `127.0.0.1` or `0.0.0.0`), not a hostname. Pass it to the actor system via `actor.WithRemote(cfg)`.
+Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`.
+The bind address must be a concrete IP (`127.0.0.1`, `0.0.0.0`, …), not a
+hostname. When the bind address is `0.0.0.0`, GoAkt picks a suitable private IP
+to advertise. Pass the config via `actor.WithRemote(cfg)`.
 
-| Option                           | Purpose                                                                 |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| `WithCompression`                | None (default), Gzip, Zstd, Brotli                                      |
-| `WithMaxFrameSize`               | Max whole-frame size (default 16 MiB); enforced on client and server    |
-| `WithMaxMessageSize`             | Cap on a reassembled logical frame (default 16 MiB; may exceed frame)   |
-| `WithChunkSize`                  | Logical size above which senders emit `CHUNK` frames (default 256 KiB)  |
-| `WithCreditWindow`               | Unreclaimed in-flight byte budget per duplex connection (default 16 MiB)|
-| `WithOrdinaryLanes`              | Ordinary duplex lanes per peer (default 1; preserves per-target FIFO)   |
-| `WithLargeMessageDestinations`   | Actor-path patterns that prefer the large lane (isolation knob)         |
-| `WithMaxConcurrentLargeTransfers`| Concurrent CHUNK reassembly groups per connection (default 4)           |
-| `WithWriteTimeout`               | Bound on outbound queue admission when the caller has no deadline       |
-| `WithReadIdleTimeout`            | Duplex PING interval; two missed PONGs close the connection             |
-| `WithProtocolPin`                | `auto` (default), `legacy`, or `duplex` wire protocol                   |
-| `WithSerializers`                | Bind a `Serializer` to a message type or interface                      |
-| `WithSerializables`              | Bulk-register types with the built-in CBOR serializer                   |
-| `WithJSONSerializables`          | Bulk-register types with the built-in JSON serializer                   |
-| `WithContextPropagator`          | Propagate trace IDs, auth tokens, correlation IDs                       |
-| `WithTLS`                        | TLS settings for all node transports. See [TLS](#tls)                   |
+| Option                            | Purpose                                                                 | Default        |
+| --------------------------------- | ----------------------------------------------------------------------- | -------------- |
+| `WithProtocolPin`                 | Wire protocol on dial and accept: `auto`, `legacy`, or `duplex`         | `auto`         |
+| `WithOrdinaryLanes`               | Ordinary duplex lanes per peer for user tell/ask                        | `1`            |
+| `WithLargeMessageDestinations`    | Actor-path patterns that prefer the large lane                          | none           |
+| `WithChunkSize`                   | Logical size above which senders emit `CHUNK` frames (16 KiB–4 MiB)     | `256 KiB`      |
+| `WithMaxMessageSize`              | Cap on a reassembled logical frame (≥ max frame, ≤ 4 GiB−1; negotiated) | `16 MiB`       |
+| `WithMaxFrameSize`                | Max whole-frame size (16 KiB–16 MiB; HELLO pairwise minimum)            | `16 MiB`       |
+| `WithMaxConcurrentLargeTransfers` | Concurrent CHUNK reassembly groups per connection (negotiated)          | `4`            |
+| `WithCreditWindow`                | Unreclaimed in-flight byte budget per duplex connection (≥ chunk size)  | `16 MiB`       |
+| `WithWriteTimeout`                | Duplex outbound admission bound when the caller has no deadline         | `10s`          |
+| `WithReadIdleTimeout`             | Duplex PING interval; two missed PONGs close the connection (`0` = off) | `10s`          |
+| `WithCompression`                 | None, Gzip, Zstd, or Brotli                                             | None           |
+| `WithSerializers`                 | Bind a `Serializer` to a message type or interface                      | protobuf       |
+| `WithSerializables`               | Bulk-register types with the built-in CBOR serializer                   | none           |
+| `WithJSONSerializables`           | Bulk-register types with the built-in JSON serializer                   | none           |
+| `WithContextPropagator`           | Propagate trace IDs, auth tokens, correlation IDs                       | none           |
+| `WithTLS`                         | TLS for remoting (and cluster transports when clustering). See [TLS](#tls) | off         |
 
-<Note>
-`WithProtocolPin` selects the remoting wire protocol on both dial and accept:
-`auto` (dual-protocol compatibility), `legacy` (unary protobuf-over-TCP only),
-or `duplex` (multiplexed duplex only). Under `auto`, the listener classifies
-peers by the first byte after TLS (`0x02` for duplex). `legacy` skips that sniff
-entirely so brotli-compressed legacy peers cannot be misrouted; `duplex` refuses
-non-duplex first bytes. Legacy brotli has no magic byte and can collide with the
-`0x02` discriminator — pin `legacy` or `duplex` instead of `auto` in those
-deployments.
-</Note>
+Message serialization is covered on the [Serialization](/advanced/serialization) page.
 
-### Send semantics
+### Protocol pin
+
+`WithProtocolPin` selects which remoting wire protocol this node dials and
+accepts. It applies to both the remoting listener and the outbound client.
+
+| Pin      | Constant                   | Behavior |
+| -------- | -------------------------- | -------- |
+| `auto`   | `remote.ProtocolPinAuto`   | Default. Accept: sniff the first byte after TLS (`0x02` → duplex, otherwise legacy). Dial: prefer duplex, fall back to legacy on EOF or connection reset before `HELLO_ACK`; a peer classified legacy is re-probed for duplex after 30 seconds. |
+| `legacy` | `remote.ProtocolPinLegacy` | Unary protobuf-over-TCP only. No duplex sniff, dial, or fallback. |
+| `duplex` | `remote.ProtocolPinDuplex` | Multiplexed duplex only. Non-duplex first bytes are refused; no legacy fallback. |
+
+Use `auto` for mixed-version rolling upgrades. Pin `legacy` or `duplex` for
+homogeneous clusters, deterministic rollout, or when first-byte discrimination
+is unsafe: legacy brotli has no magic byte and can collide with the duplex
+`0x02` discriminator under `auto`.
+
+```go
+cfg := remote.NewConfig("0.0.0.0", 8080,
+    remote.WithProtocolPin(remote.ProtocolPinDuplex),
+)
+```
+
+### Lanes and ordering
+
+Per peer, duplex remoting opens a small set of persistent connections:
+
+| Lane     | Role |
+| -------- | ---- |
+| Control  | System traffic (watch/unwatch, spawn/stop, cluster RPCs, liveness) so user floods cannot delay death-watch |
+| Ordinary | User tells and asks; hashed by the receiver’s full canonical address across `WithOrdinaryLanes` |
+| Large    | Destinations listed in `WithLargeMessageDestinations` |
+
+Ordering is **per sender–target pair FIFO**. With the default single ordinary
+lane, that matches today’s effective ordering except that control may overtake
+user traffic (deliberate) and large destinations ride their own lane (opt-in).
+Raising `WithOrdinaryLanes` (1–254) narrows the FIFO domain in exchange for
+parallel sends.
+
+### Large messages
+
+Logical frames larger than `WithChunkSize` are split into `CHUNK` frames and
+reassembled by correlation ID, up to `WithMaxMessageSize`. Concurrent
+reassembly groups per connection are capped by
+`WithMaxConcurrentLargeTransfers`. Oversize and cap violations return in-band
+errors; the connection stays usable when the peer supports chunking (capability
+revision ≥ 2). `WithChunkSize` is local and not negotiated (it is clamped down
+to the negotiated max frame size when larger); peers with different chunk sizes
+still interoperate. `WithMaxFrameSize`, `WithMaxMessageSize`, and
+`WithMaxConcurrentLargeTransfers` are HELLO-advertised and take the pairwise
+minimum, so raising only one side has no effect if the peer advertises less.
+
+`WithLargeMessageDestinations` lists hierarchical actor-path glob patterns that
+route matching user traffic onto the large lane. Patterns match the path suffix
+after `host:port` (for example `orders/*`), not the full `goakt://` URI. It is a
+**performance and isolation** knob, not a correctness gate: an oversized message
+to an unlisted destination still chunks in place on its ordinary lane and stays
+in order with surrounding small messages to that actor.
+
+```go
+cfg := remote.NewConfig("0.0.0.0", 8080,
+    remote.WithLargeMessageDestinations("bulk/*", "archive/exporter"),
+    remote.WithChunkSize(256*1024),
+    remote.WithMaxMessageSize(64*1024*1024),
+)
+```
+
+### Flow control and send semantics
+
+`WithCreditWindow` is advertised as HELLO `initial_credits` and negotiated as
+the pairwise minimum. It sizes the local outbound admission queue on every
+duplex session. End-to-end send-window enforcement (writer park / `CREDIT`
+grants) applies only when both peers negotiate capability revision ≥ 4; older
+peers keep an unlimited send window but still honor the admission cap. The
+value must be greater than zero and at least `WithChunkSize`.
 
 On the duplex path:
 
@@ -59,41 +142,62 @@ On the duplex path:
 - A full outbound admission queue blocks until the caller's deadline, or
   `WithWriteTimeout` when none is set, then returns
   `errors.ErrRemoteSendBackpressure`.
-- Transport failures dead-letter with an event; messages are not silently dropped
-  for flow control.
-- Slow receivers slow senders through credit: `WithCreditWindow` is the HELLO
-  `initial_credits` budget (pairwise minimum when both peers negotiate revision
-  4). The writer parks when the window is exhausted; the receiver returns credit
-  after mailbox enqueue, ask worker-pool handoff, or CHUNK reassembly append.
+- Transport failures dead-letter with an event; messages are not silently
+  dropped for flow control.
+- Slow receivers slow senders: DATA/CHUNK writes spend credit; the receiver
+  returns credit after mailbox enqueue, ask worker-pool handoff, or CHUNK
+  reassembly append. When credit is exhausted the writer parks.
 
-### Large-message destinations
+Asks are multiplexed by correlation ID on the same connection: the socket read
+loop stays free while asks run on a bounded worker pool, so one slow actor does
+not block the connection. A saturated ask pool answers with an in-band
+unavailable error for that request.
 
-`WithLargeMessageDestinations` lists actor-path patterns that route over the
-large lane. It is a **performance and isolation** knob, not a correctness gate:
-an oversized message to an unlisted destination still chunks in place on its
-ordinary lane and arrives in order with surrounding small messages to that
-actor. List destinations that return or receive bulk payloads when you want
-those transfers off the ordinary lanes.
+### Compression
 
-```go
-cfg := remote.NewConfig("0.0.0.0", 8080,
-    remote.WithLargeMessageDestinations("bulk/*", "archive/exporter"),
-    remote.WithChunkSize(256*1024),
-    remote.WithCreditWindow(16*1024*1024),
-)
-```
+`WithCompression` selects None (default), Gzip, Zstd, or Brotli. On the duplex
+path HELLO requires an exact match of the configured codec on both sides;
+otherwise the session falls back to None. On the legacy path both sides must be
+configured alike; a mismatch produces garbage. Prefer `WithProtocolPin` away
+from `auto` if you still use brotli on legacy peers (see
+[Protocol pin](#protocol-pin)).
+
+### Deadlines and liveness
+
+- `WithWriteTimeout` (default 10s) bounds duplex outbound queue admission when
+  the caller’s context has no deadline, and bounds duplex socket writes.
+- `WithReadIdleTimeout` (default 10s) arms duplex PING/PONG liveness probes.
+  After two missed PONGs the connection is closed. Set to `0` to disable
+  probes. PINGs also refresh the server’s connection idle deadline, so a healthy
+  idle lane is not reclaimed while liveness is succeeding.
+- The config idle timeout (default 20 minutes; no public option) is the legacy
+  unary read/write deadline and the duplex connection reclaim window. When both
+  idle timeout and `WithReadIdleTimeout` are set, read-idle must be strictly
+  less than idle timeout.
+
+`WithWriteTimeout` and `WithReadIdleTimeout` apply to the duplex path. The
+legacy unary path uses the idle timeout alone.
 
 ## Transport
 
-- Length-prefixed TCP frames (legacy unary path)
-- Dual-protocol listener for duplex and legacy peers
-- Multiplexed duplex lanes (control, ordinary, large) with credit-based flow control
+- Dual-protocol listener: duplex and legacy on the same remoting port
+- Duplex: persistent control / ordinary / large lanes, credit window, chunking
+- Legacy: length-prefixed unary frames and the send coalescer (legacy peers only)
 - Optional TLS (see [TLS](#tls))
-- Compression: None (default), Gzip, Zstd, Brotli
+- Compression as above
+
+## Using remoting
+
+Once remoting is configured, `ActorOf(ctx, name)` returns a `*PID` whether the
+actor is local or remote. Use `Tell` and `Ask` as usual; no application code
+changes are required for remote vs local. Batch APIs and control RPCs use the
+same remoting stack.
 
 ## TLS
 
-TLS is configured on the remote config with `remote.WithTLS`. It takes a `tls.Info` from the GoAkt `tls` package, which carries a standard `crypto/tls` configuration for each side of a connection:
+TLS is configured on the remote config with `remote.WithTLS`. It takes a
+`tls.Info` from the GoAkt `tls` package, which carries a standard `crypto/tls`
+configuration for each side of a connection:
 
 ```go
 type Info struct {
@@ -102,7 +206,11 @@ type Info struct {
 }
 ```
 
-For an actor system both fields must be set; `NewActorSystem` fails with `ErrInvalidTLSConfiguration` when either is nil. Every node dials other nodes and accepts connections from them, so each node is always both a client and a server. The TLS settings are validated and applied only when remoting is enabled; without remoting they are ignored.
+For an actor system both fields must be set; `NewActorSystem` fails with
+`ErrInvalidTLSConfiguration` when either is nil. Every node dials other nodes
+and accepts connections from them, so each node is always both a client and a
+server. The TLS settings are validated and applied only when remoting is
+enabled; without remoting they are ignored.
 
 <Note>
 The actor system option `actor.WithTLS` is deprecated in favor of `remote.WithTLS`. It keeps working for existing systems, and when both are set the remote config settings take precedence.
@@ -176,23 +284,34 @@ func main() {
 
 ### Mutual TLS
 
-GoAkt passes your `tls.Config` values through unchanged, so mutual TLS is a matter of standard `crypto/tls` settings, as in the example above: the server sets `ClientCAs` and `ClientAuth: tls.RequireAndVerifyClientCert`, and the client presents its own certificate in `Certificates`. Without those, you get server-only TLS: traffic is encrypted and clients authenticate the server, but any client can connect.
+GoAkt passes your `tls.Config` values through unchanged, so mutual TLS is a
+matter of standard `crypto/tls` settings, as in the example above: the server
+sets `ClientCAs` and `ClientAuth: tls.RequireAndVerifyClientCert`, and the
+client presents its own certificate in `Certificates`. Without those, you get
+server-only TLS: traffic is encrypted and clients authenticate the server, but
+any client can connect.
 
 ### Cluster requirements
 
-- **Same root CA everywhere.** All nodes must trust the same CA, and every certificate must chain to it, otherwise handshakes between nodes fail.
-- **All nodes or none.** TLS and plaintext nodes cannot talk to each other. Enabling TLS on a running plaintext cluster (or the reverse) is a full-restart change, not a rolling one.
-- **Certificate names must match how nodes address each other.** Nodes dial each other by the advertised host, so certificates need that host in their SANs, or the client config must relax verification.
+- **Same root CA everywhere.** All nodes must trust the same CA, and every
+  certificate must chain to it, otherwise handshakes between nodes fail.
+- **All nodes or none.** TLS and plaintext nodes cannot talk to each other.
+  Enabling TLS on a running plaintext cluster (or the reverse) is a full-restart
+  change, not a rolling one.
+- **Certificate names must match how nodes address each other.** Nodes dial each
+  other by the advertised host, so certificates need that host in their SANs, or
+  the client config must relax verification.
 
 <Note>
 Discovery providers (Consul, etcd, Kubernetes, NATS) talk to their own backends and secure those connections through their own provider-specific configuration; `remote.WithTLS` does not apply to them. The standalone [Client](/advanced/client) package picks up the TLS settings from the `remote.Config` passed to its nodes.
 </Note>
 
-Once remoting is configured, `ActorOf(ctx, name)` returns a `*PID` whether the actor is local or remote. Use `Tell` and `Ask` as usual; the framework routes remote messages automatically. No code changes are needed for remote vs local.
-
 ## Context propagation
 
-When messages cross node boundaries, request-scoped metadata (trace IDs, auth tokens, correlation IDs) must travel with them. Implement `remote.ContextPropagator` and pass it via `WithContextPropagator` on the remote config.
+When messages cross node boundaries, request-scoped metadata (trace IDs, auth
+tokens, correlation IDs) must travel with them. Implement
+`remote.ContextPropagator` and pass it via `WithContextPropagator` on the remote
+config.
 
 ### The ContextPropagator interface
 
@@ -210,7 +329,9 @@ type ContextPropagator interface {
 | **Inject**  | Write context values into headers for outgoing requests. Called before sending a remote message.                           |
 | **Extract** | Read headers from an incoming request and return a context with propagated values. Called when receiving a remote message. |
 
-The carrier is `http.Header` (string-keyed map)—the transport is TCP, not HTTP. The receiving actor's `ReceiveContext.Context()` or `GrainContext.Context()` will contain the propagated values.
+The carrier is `http.Header` as a string-keyed map; the transport is TCP, not HTTP.
+The receiving actor's `ReceiveContext.Context()` or `GrainContext.Context()`
+will contain the propagated values.
 
 ### Implementation notes
 
