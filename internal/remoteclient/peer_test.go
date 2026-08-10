@@ -296,10 +296,12 @@ func TestRetireLaneReleasesMutexBeforeClose(t *testing.T) {
 	session := &stubDuplexSession{id: 1}
 	session.closeHook = func() {
 		// Stands in for the read loop's closed handler, which retires
-		// through peer.mu while Close waits for it. It can only take the
-		// mutex if retireLane released it before calling Close.
+		// through peer.mu while Close waits for it: take the mutex and
+		// inspect the cached lane exactly as retireLaneAsync does. It can
+		// only run if retireLane released the mutex before calling Close.
 		go func() {
 			p.mu.Lock()
+			_ = p.laneLocked(key)
 			p.mu.Unlock()
 			close(locked)
 		}()
