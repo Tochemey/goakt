@@ -138,6 +138,67 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 	require.ErrorContains(t, events[0].Error(), expectedErr.Error())
 }
 
+// TestRelocationWorkerAbortsWhenSystemStopping closes the relocation-racing-
+// shutdown window. When the system is already tearing down as the worker begins
+// to relocate, the entry guard must release the relocation job and return
+// without touching the cluster, dialing peers, deleting peer state, or
+// publishing a RelocationFailed event. Both a strict cluster mock and a strict
+// remoting mock carry no expectations, so a regression that skips the guard and
+// fans work into a shutting-down system fails this test instead of racing.
+func TestRelocationWorkerAbortsWhenSystemStopping(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	remotingMock := mocksremote.NewClient(t)
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := internalpb.PeerState_builder{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Actors: map[string]*internalpb.Actor{
+			"a1": internalpb.Actor_builder{Address: "actor-1", Relocatable: true}.Build(),
+		},
+	}.Build()
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	// The system is already stopping when the worker starts to relocate.
+	sys.shuttingDown.Store(true)
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
+	worker.relocate(receiveCtx, peerState)
+
+	// The guard released the job without deleting peer state and without
+	// publishing a failure; the strict mocks assert no cluster or remote calls.
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight, "shutdown guard must release the relocation job")
+	require.False(t, store.deleteCalled, "shutdown guard must not delete peer state")
+	require.Empty(t, collectRelocationFailedEvents(consumer), "shutdown guard must not publish a relocation failure")
+}
+
 // TestRelocationWorkerPartialFailureListsExactlyFailedItems verifies per-item
 // failure isolation: a failing actor does not abort the rebalance, skipped
 // items are not reported, and the RelocationFailed event lists exactly the

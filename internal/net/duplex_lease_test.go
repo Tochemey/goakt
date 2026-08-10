@@ -24,10 +24,15 @@ package net
 
 import (
 	"context"
+	"net"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
 // leaseTestConn returns a credit-enabled connection whose grant accumulator
@@ -202,4 +207,157 @@ func TestCreditLeaseReleaseOutstanding(t *testing.T) {
 	// lease; the panic path must tolerate that.
 	var none *CreditLease
 	assert.NotPanics(t, none.releaseOutstanding)
+}
+
+// disposeLease drives one received tell frame's lease through the terminal
+// disposition selected by variant, mirroring every path handleDuplexData and
+// the actor dispatch surface can take. Each variant must repay the frame's full
+// cost, so the sender's window is conserved regardless of which one runs.
+func disposeLease(lease *CreditLease, variant int) {
+	switch variant % 5 {
+	case 0:
+		// Single-message consume: split into one share and release it.
+		shares := lease.Split(1)
+
+		for i := range shares {
+			shares[i].Release()
+		}
+
+	case 1:
+		// Handler ignored the lease entirely (foreign/legacy tell handler):
+		// the frame-level grant repays the full cost.
+		lease.releaseUnclaimed()
+
+	case 2:
+		// Handler panicked immediately after splitting: nothing released, the
+		// recovered dispatch surface repays every outstanding share.
+		_ = lease.Split(3)
+		lease.releaseOutstanding()
+
+	case 3:
+		// Batch consume: split across several messages, release each.
+		shares := lease.Split(4)
+
+		for i := range shares {
+			shares[i].Release()
+		}
+
+	case 4:
+		// Partial consume then panic: release one share, then the recovered
+		// dispatch surface repays the rest via releaseOutstanding (idempotent
+		// over the already-released share).
+		shares := lease.Split(3)
+
+		if len(shares) > 0 {
+			shares[0].Release()
+		}
+
+		lease.releaseOutstanding()
+	}
+}
+
+// TestCreditLeaseConservationUnderConcurrentDispositions is the credit-lease
+// leak guard for the release campaign. It streams many windowed tell frames
+// through a real credit-negotiated connection pair while the receiver disposes
+// each frame's lease through a rotating mix of every terminal path, from
+// several goroutines at once. The invariant is conservation: every byte the
+// sender debited from its window is repaid, either restored to the sender's
+// available window or still pending in the receiver's grant accumulator. If any
+// disposition failed to repay, the sum falls below the negotiated window and
+// this test fails. Running under -race additionally guards the concurrent
+// noteOwnedBytes/flushGrants accounting.
+func TestCreditLeaseConservationUnderConcurrentDispositions(t *testing.T) {
+	const (
+		credits = int64(1 << 16)
+		senders = 4
+		perSend = 500
+		total   = senders * perSend
+		payload = 512
+	)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	hello := internalpb.Hello_builder{
+		Revision:                    CapabilityRevisionCredits,
+		MaxFrameSize:                defaultMaxFrameSize,
+		MaxMessageSize:              DefaultMaxMessageSize,
+		MaxConcurrentLargeTransfers: 4,
+		InitialCredits:              uint64(credits),
+	}.Build()
+
+	// A generous write timeout keeps the sender parked on a full window rather
+	// than failing when the receiver's batched grant has not yet flushed; the
+	// in-memory receiver drains fast, so a real stall still surfaces well
+	// inside it.
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
+		withDuplexWriteTimeout(5*time.Second),
+		withDuplexNegotiated(hello),
+	)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), credits,
+		withDuplexWriteTimeout(5*time.Second),
+		withDuplexNegotiated(hello),
+	)
+	t.Cleanup(func() {
+		_ = left.Close()
+		_ = right.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	sendErr := make(chan error, senders)
+
+	for range senders {
+		go func() {
+			for range perSend {
+				frame := Frame{
+					Version: ProtocolVersion,
+					Type:    FrameTypeData,
+					Lane:    LaneControl,
+					Payload: make([]byte, payload),
+				}
+
+				if err := left.Tell(ctx, frame); err != nil {
+					sendErr <- err
+					return
+				}
+			}
+
+			sendErr <- nil
+		}()
+	}
+
+	var dispatched sync.WaitGroup
+
+	for received := 0; received < total; received++ {
+		frame, err := right.Recv(ctx)
+		require.NoError(t, err, "receiver stalled after %d frames", received)
+
+		lease := right.newTellLease(frame)
+		right.ReleasePayload(frame)
+
+		dispatched.Add(1)
+		go func(l *CreditLease, variant int) {
+			defer dispatched.Done()
+			disposeLease(l, variant)
+		}(lease, received)
+	}
+
+	dispatched.Wait()
+
+	for range senders {
+		require.NoError(t, <-sendErr, "a sender failed before delivering its share")
+	}
+
+	// Conservation: available window plus not-yet-flushed grants equals the
+	// full negotiated window. A leak on any disposition drops the sum below it.
+	require.Eventually(t, func() bool {
+		return left.sendWindow.Load()+right.grantAccum.Load() == credits
+	}, 5*time.Second, 5*time.Millisecond,
+		"window not fully reconciled: sendWindow=%d grantAccum=%d want sum=%d",
+		left.sendWindow.Load(), right.grantAccum.Load(), credits)
 }

@@ -982,3 +982,353 @@ func TestPeerCloseRacingRemoteTells(t *testing.T) {
 		t.Fatal("peer close racing remote tells hung: a teardown path failed to make progress")
 	}
 }
+
+// The teardown fault-injection campaign. Each test drives the duplex teardown
+// surface while a specific transport fault is active, racing many concurrent
+// sends against repeated ClosePeer. The invariant is uniform: a send that
+// races a fault or a teardown may fail, but no send and no close may hang, and
+// -race must stay quiet. These complement TestPeerCloseRacingRemoteTells, which
+// races close against a healthy server; here the peer is faulty.
+
+// runTeardownRace hammers send from several goroutines while teardown races it
+// for a fixed window, then fails if the whole race does not drain within a
+// generous outer guard. send receives a per-call context bounded by
+// callTimeout; a send that loses the race may return an error, but it must
+// never block past its context. teardown runs repeatedly in its own goroutine
+// (typically ClosePeer) so a close is always in flight against some send.
+func runTeardownRace(t *testing.T, callTimeout time.Duration, send func(ctx context.Context), teardown func()) {
+	t.Helper()
+
+	const (
+		senders = 8
+		window  = 2 * time.Second
+		guard   = 30 * time.Second
+	)
+
+	deadline := time.Now().Add(window)
+
+	var wg sync.WaitGroup
+	wg.Add(senders + 1)
+
+	for range senders {
+		go func() {
+			defer wg.Done()
+
+			for time.Now().Before(deadline) {
+				ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+				send(ctx)
+				cancel()
+			}
+		}()
+	}
+
+	go func() {
+		defer wg.Done()
+
+		for time.Now().Before(deadline) {
+			teardown()
+			pause.For(2 * time.Millisecond)
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(guard):
+		t.Fatal("teardown race hung: a send or close path failed to make progress")
+	}
+}
+
+// faultMode selects how startFaultListener mistreats each accepted connection
+// so a dialing duplex client exercises a specific dial/handshake failure path.
+type faultMode int
+
+const (
+	// faultSilent accepts the connection and never speaks HELLO, so the dial
+	// stalls in the handshake until the caller's deadline elapses or ClosePeer
+	// cancels the dial. It exercises the OpenDuplex cancel-close path (the
+	// connMu-guarded region) with the handshake frozen mid-exchange.
+	faultSilent faultMode = iota
+
+	// faultAcceptClose accepts then immediately closes, so the handshake read
+	// fails with EOF. It exercises the dial-failure classification and backoff
+	// path racing ClosePeer.
+	faultAcceptClose
+)
+
+// startFaultListener starts a bare TCP listener that mistreats every accepted
+// connection per mode and returns its host, port, and a stop func. It never
+// speaks the framed protocol; it exists only to drive the dial and handshake
+// failure paths a well-behaved RemotingServer would never produce on demand.
+func startFaultListener(t *testing.T, mode faultMode) (string, int, func()) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	var mu sync.Mutex
+	var held []net.Conn
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+
+			switch mode {
+			case faultAcceptClose:
+				_ = conn.Close()
+
+			case faultSilent:
+				// Retain the connection so the peer's handshake read blocks
+				// rather than seeing EOF; stop() closes them to unblock any
+				// dial still parked at teardown.
+				mu.Lock()
+				held = append(held, conn)
+				mu.Unlock()
+			}
+		}
+	}()
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	stop := func() {
+		_ = ln.Close()
+
+		mu.Lock()
+		for _, c := range held {
+			_ = c.Close()
+		}
+
+		held = nil
+		mu.Unlock()
+	}
+
+	return host, port, stop
+}
+
+// newDuplexStressClient builds a duplex-pinned, uncompressed client with
+// coalescing off so every RemoteTell drives the lane synchronously: a send is
+// in flight on the wire exactly when ClosePeer tears the lane down.
+func newDuplexStressClient(t *testing.T, opts ...ClientOption) *client {
+	t.Helper()
+
+	base := []ClientOption{
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientCompression(remote.NoCompression),
+	}
+
+	return NewClient(append(base, opts...)...).(*client)
+}
+
+// TestDialFailureRacingClose races sends against ClosePeer when every dial is
+// refused (the listener is bound then closed, so connects return ECONNREFUSED).
+// It exercises recordDialFailure, per-lane backoff, and the single-flight dial
+// marker teardown while ClosePeer repeatedly resets the peer.
+func TestDialFailureRacingClose(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	host, portStr, err := net.SplitHostPort(ln.Addr().String())
+	require.NoError(t, err)
+
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	// Close the listener so every subsequent connect is refused.
+	require.NoError(t, ln.Close())
+
+	r := newDuplexStressClient(t)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	runTeardownRace(t, time.Second, func(ctx context.Context) {
+		_ = r.RemoteTell(ctx, from, to, durationpb.New(time.Millisecond))
+	}, func() {
+		r.ClosePeer(host, port)
+	})
+}
+
+// TestHandshakeStallRacingClose races sends against ClosePeer when the peer
+// accepts the connection but never completes HELLO, so each dial parks in the
+// handshake. It exercises the OpenDuplex cancel-close path (dialCancel firing
+// the AfterFunc that closes the framed conn) against the compression-wrapper
+// swap, the connMu-guarded region that once carried a data race, with the
+// handshake frozen rather than racing the swap directly.
+func TestHandshakeStallRacingClose(t *testing.T) {
+	host, port, stop := startFaultListener(t, faultSilent)
+	defer stop()
+
+	r := newDuplexStressClient(t)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	// A short per-call timeout keeps the parked handshakes churning so many
+	// dials are in flight when ClosePeer cancels them.
+	runTeardownRace(t, 200*time.Millisecond, func(ctx context.Context) {
+		_ = r.RemoteTell(ctx, from, to, durationpb.New(time.Millisecond))
+	}, func() {
+		r.ClosePeer(host, port)
+	})
+}
+
+// TestAcceptThenCloseRacingClose races sends against ClosePeer when the peer
+// accepts then immediately drops the connection, so the handshake read fails
+// with EOF. It exercises the handshake-failure classification, dial-marker
+// release, and backoff recording while ClosePeer resets the peer.
+func TestAcceptThenCloseRacingClose(t *testing.T) {
+	host, port, stop := startFaultListener(t, faultAcceptClose)
+	defer stop()
+
+	r := newDuplexStressClient(t)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	runTeardownRace(t, time.Second, func(ctx context.Context) {
+		_ = r.RemoteTell(ctx, from, to, durationpb.New(time.Millisecond))
+	}, func() {
+		r.ClosePeer(host, port)
+	})
+}
+
+// TestServerDeathMidStreamRacingSends drives healthy sends against a live
+// server, then kills the server out from under the in-flight lane while sends
+// continue and ClosePeer races. It exercises the read-loop closed-handler
+// retire (handleLaneClosed -> retireLaneAsync) racing send-path retire and
+// ClosePeer, the transition from a healthy lane to a dead one under load.
+func TestServerDeathMidStreamRacingSends(t *testing.T) {
+	_, host, port, stopServer := startCoalescingServer(t)
+
+	var stopOnce sync.Once
+	killServer := func() { stopOnce.Do(stopServer) }
+	defer killServer()
+
+	r := newDuplexStressClient(t)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	const (
+		senders = 8
+		window  = 2 * time.Second
+		guard   = 30 * time.Second
+	)
+
+	deadline := time.Now().Add(window)
+
+	var wg sync.WaitGroup
+	wg.Add(senders + 1)
+
+	for range senders {
+		go func() {
+			defer wg.Done()
+
+			for time.Now().Before(deadline) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				_ = r.RemoteTell(ctx, from, to, durationpb.New(time.Millisecond))
+				cancel()
+			}
+		}()
+	}
+
+	go func() {
+		defer wg.Done()
+
+		for time.Now().Before(deadline) {
+			r.ClosePeer(host, port)
+			pause.For(2 * time.Millisecond)
+		}
+	}()
+
+	// Let the lane warm up on a healthy server, then kill it mid-stream so the
+	// read loop discovers the death while sends and closes are racing.
+	pause.For(400 * time.Millisecond)
+	killServer()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(guard):
+		t.Fatal("server death racing sends hung: a teardown path failed to make progress")
+	}
+}
+
+// TestUnresponsiveReceiverSendsReleasedByClose races sends against ClosePeer
+// when the server accepts traffic but never processes it: its tell handler
+// blocks, so it stops returning credit. With a small credit window the sender
+// parks on the window, and ClosePeer (or the per-call context) must release
+// the parked send. It exercises close and cancellation interrupting a send
+// blocked on flow control rather than on a dead socket.
+func TestUnresponsiveReceiverSendsReleasedByClose(t *testing.T) {
+	release := make(chan struct{})
+
+	blocking := func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
+		if _, ok := msg.(*internalpb.RemoteTellRequest); ok {
+			<-release
+		}
+
+		return &internalpb.RemoteTellResponse{}, nil
+	}
+
+	ps, err := inet.NewRemotingServer("127.0.0.1:0",
+		inet.WithProtoHandler("internalpb.RemoteTellRequest", blocking),
+	)
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- ps.Serve() }()
+	pause.For(50 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	// Shut the server down last; unblock the handlers first so Shutdown drains.
+	defer func() {
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-serveDone
+	}()
+	defer close(release)
+
+	// A small window and a short write timeout make the sender park on flow
+	// control quickly and give a bounded floor when no caller deadline applies.
+	r := newDuplexStressClient(t,
+		WithClientInitialCredits(4096),
+		WithClientWriteTimeout(500*time.Millisecond),
+	)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	runTeardownRace(t, 500*time.Millisecond, func(ctx context.Context) {
+		_ = r.RemoteTell(ctx, from, to, durationpb.New(time.Millisecond))
+	}, func() {
+		r.ClosePeer(host, port)
+	})
+}
