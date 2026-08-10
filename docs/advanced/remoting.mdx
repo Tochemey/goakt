@@ -145,13 +145,34 @@ On the duplex path:
 - Transport failures dead-letter with an event; messages are not silently
   dropped for flow control.
 - Slow receivers slow senders: DATA/CHUNK writes spend credit; the receiver
-  returns credit after mailbox enqueue, ask worker-pool handoff, or CHUNK
-  reassembly append. When credit is exhausted the writer parks.
+  returns credit when a tell leaves the mailbox for dispatch, at ask
+  worker-pool handoff, or on CHUNK reassembly append. Because a tell's credit
+  is returned only as the message leaves the mailbox, flow control tracks
+  mailbox residency: a stalled consumer stops returning credit and its senders
+  park instead of the receiver absorbing at wire speed. When credit is
+  exhausted the writer parks.
 
 Asks are multiplexed by correlation ID on the same connection: the socket read
 loop stays free while asks run on a bounded worker pool, so one slow actor does
 not block the connection. A saturated ask pool answers with an in-band
 unavailable error for that request.
+
+<Warning>
+The credit window is shared by every receiver on a duplex connection. Because a
+tell's credit is not returned until the message leaves the mailbox, a single
+stalled consumer can hold the window and slow senders to **other** actors on
+the same peer that hash to the same ordinary lane. Two mitigations:
+
+- Give an actor you expect to be slow a **bounded mailbox**. When it fills, the
+  receiver refuses and returns the credit, which frees the shared window for
+  siblings and backpressures that actor's own sender.
+- Raise `WithOrdinaryLanes` so receivers shard across more connections, each
+  with its own window, making a collision between a slow and a fast receiver
+  less likely.
+
+Guaranteed per-receiver isolation (a stalled receiver backpressuring only its
+own sender) is planned as a follow-up.
+</Warning>
 
 ### Compression
 

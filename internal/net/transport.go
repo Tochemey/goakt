@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -197,6 +198,16 @@ var tcpReadPool = NewFramePool()
 // single handshake goroutine): writeHdrs and writeBufs are reused across
 // calls, which is safe because [net.Buffers.WriteTo] completes before return.
 type tcpFramedConn struct {
+	// conn is written once during dial (ReplaceNetConn installs the
+	// compression wrapper) and read on every frame. connMu orders that lone
+	// setup write against a concurrent Close: OpenDuplex arms a
+	// context-cancel AfterFunc that calls Close on its own goroutine to
+	// unblock a stalled HELLO read (ClosePeer), and that can fire exactly as
+	// the dial reaches ReplaceNetConn. Every other conn access is
+	// goroutine-ordered (the dial goroutine before the swap, the read and
+	// write loops after OpenDuplex returns), so only these two take the lock
+	// and the hot path stays lock-free.
+	connMu       sync.Mutex
 	conn         net.Conn
 	maxFrameSize uint32
 	// br batches frame reads through one fixed buffer so a stream of small
@@ -454,17 +465,27 @@ func (x *tcpFramedConn) releaseReadPayload(buf []byte) {
 	x.readPool.Put(buf)
 }
 
-// Close closes the underlying connection.
+// Close closes the underlying connection. It reads conn under connMu so a
+// cancel-driven Close (the OpenDuplex AfterFunc) cannot race the dial's
+// ReplaceNetConn swap; the close syscall runs outside the lock.
 func (x *tcpFramedConn) Close() error {
-	return x.conn.Close()
+	x.connMu.Lock()
+	conn := x.conn
+	x.connMu.Unlock()
+
+	return conn.Close()
 }
 
 // ReplaceNetConn swaps the underlying connection, used after the handshake
-// installs a negotiated compression wrapper. A read buffer installed earlier
-// is rebuilt over the new connection; by the EnableReadBuffering contract it
-// holds no unread bytes at swap time.
+// installs a negotiated compression wrapper. The swap is taken under connMu
+// so a concurrent cancel-driven Close observes one whole conn value. A read
+// buffer installed earlier is rebuilt over the new connection; by the
+// EnableReadBuffering contract it holds no unread bytes at swap time, and only
+// the dial goroutine touches br here, so its rebuild stays outside the lock.
 func (x *tcpFramedConn) ReplaceNetConn(conn net.Conn) {
+	x.connMu.Lock()
 	x.conn = conn
+	x.connMu.Unlock()
 
 	if x.br != nil {
 		x.br = bufio.NewReaderSize(conn, framedReadBufferSize)

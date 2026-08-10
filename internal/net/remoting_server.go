@@ -37,6 +37,17 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
+// acceptHandshakeTimeout bounds the acceptor-side handshake: the protocol
+// sniff (first byte) and the duplex HELLO exchange. It stops a peer that
+// connects and then never speaks from pinning the accept path, independently
+// of the connection idle timeout (which may be unset, or set long for
+// steady-state traffic while the handshake should still be prompt). It is
+// cleared before the read and write loops start, so it never leaks into their
+// own liveness deadlines. The sniff byte and HELLO frame are tiny, so the
+// window is generous. A var (not a const) only so the slow-loris test can
+// lower it; production never changes it.
+var acceptHandshakeTimeout = 10 * time.Second
+
 // ProtoHandler processes a deserialized protobuf request and returns a
 // response. Returning a nil [proto.Message] with a nil error signals a
 // fire-and-forget message — no response frame is written back to the client.
@@ -554,17 +565,23 @@ func (x *RemotingServer) AcceptedConnections() int32 {
 func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
-	local := &internalpb.Hello{}
-	local.SetRevision(CapabilityRevisionCredits)
-	local.SetSystemName(x.systemName)
-	local.SetLaneRole(internalpb.LaneRole_LANE_ROLE_CONTROL)
-	local.SetCompression(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE)
-	local.SetMaxFrameSize(x.maxFrameSize)
-	local.SetMaxMessageSize(x.maxMessageSize)
-	local.SetInitialCredits(x.initialCredits)
-	local.SetMaxConcurrentLargeTransfers(x.maxConcurrentLargeTransfers)
+	hello := &internalpb.Hello{}
+	hello.SetRevision(CapabilityRevisionCredits)
+	hello.SetSystemName(x.systemName)
+	hello.SetLaneRole(internalpb.LaneRole_LANE_ROLE_CONTROL)
+	hello.SetCompression(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE)
+	hello.SetMaxFrameSize(x.maxFrameSize)
+	hello.SetMaxMessageSize(x.maxMessageSize)
+	hello.SetInitialCredits(x.initialCredits)
+	hello.SetMaxConcurrentLargeTransfers(x.maxConcurrentLargeTransfers)
 
-	result, err := acceptHello(framed, local)
+	// Bound the HELLO exchange so a silent or stalled peer cannot pin this
+	// accept worker. Cleared immediately after: the handshake I/O is done,
+	// and the read and write loops arm their own deadlines, so a stale
+	// handshake deadline must not leak into them.
+	_ = raw.SetDeadline(time.Now().Add(acceptHandshakeTimeout))
+	result, err := acceptHello(framed, hello)
+	_ = raw.SetDeadline(time.Time{})
 	if err != nil {
 		_ = framed.Close()
 		release()
@@ -587,6 +604,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	if credits <= 0 {
 		credits = int64(x.initialCredits)
 	}
+
 	lane, err := laneByte(result.Effective.GetLaneRole(), result.Effective.GetLaneIndex())
 	if err != nil {
 		_ = framed.Close()

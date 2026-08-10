@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"net"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -1387,4 +1388,41 @@ func TestInvokeDuplexTellReportsPanic(t *testing.T) {
 	)
 	require.NoError(t, err)
 	assert.False(t, calm.invokeDuplexTell(context.Background(), env), "a clean handler must not report a panic")
+}
+
+// TestAcceptHelloHandshakeTimeout pins the slow-loris floor: a peer that opens
+// a connection and never sends HELLO must be dropped by the acceptor within
+// the handshake deadline, not pin an accept worker until an idle timeout that
+// may be unset.
+func TestAcceptHelloHandshakeTimeout(t *testing.T) {
+	restore := acceptHandshakeTimeout
+	acceptHandshakeTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { acceptHandshakeTimeout = restore })
+
+	ps, err := NewRemotingServer("127.0.0.1:0")
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	t.Cleanup(func() {
+		require.NoError(t, ps.Shutdown(time.Second))
+		<-done
+	})
+
+	conn, err := net.Dial("tcp", ps.ListenAddr().String())
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	// Never send HELLO. A generous client read deadline is only a backstop: if
+	// the acceptor drops the silent peer (correct), the read returns EOF well
+	// inside the handshake window; if it does not, the read would block until
+	// this deadline instead.
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	start := time.Now()
+	_, readErr := conn.Read(make([]byte, 1))
+	elapsed := time.Since(start)
+
+	require.Error(t, readErr, "acceptor must drop a peer that never sends HELLO")
+	require.Less(t, elapsed, time.Second, "the drop must come from the handshake deadline, not the client backstop")
 }

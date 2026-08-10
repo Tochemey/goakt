@@ -571,9 +571,18 @@ func (s *TCPServer) serveDuplexOnlyConn(netConn net.Conn, release func()) {
 // sniffFirstByte reads the protocol discriminator with an optional idle
 // deadline, then clears the deadline so the chosen path can set its own.
 func (s *TCPServer) sniffFirstByte(netConn net.Conn) (byte, bool) {
+	// Bound the first-byte read so a peer that connects and never speaks
+	// cannot pin the accept path. The handshake window applies even when no
+	// idle timeout is configured (the default); a shorter idle timeout, if
+	// set, wins. Cleared after the byte arrives so it never leaks into the
+	// connection's steady-state deadlines.
+	deadline := time.Now().Add(acceptHandshakeTimeout)
 	if s.idleTimeout > 0 {
-		_ = netConn.SetReadDeadline(time.Now().Add(s.idleTimeout))
+		if idle := time.Now().Add(s.idleTimeout); idle.Before(deadline) {
+			deadline = idle
+		}
 	}
+	_ = netConn.SetReadDeadline(deadline)
 
 	var first [1]byte
 	if _, err := io.ReadFull(netConn, first[:]); err != nil {
@@ -581,10 +590,7 @@ func (s *TCPServer) sniffFirstByte(netConn net.Conn) (byte, bool) {
 		return 0, false
 	}
 
-	if s.idleTimeout > 0 {
-		_ = netConn.SetReadDeadline(time.Time{})
-	}
-
+	_ = netConn.SetReadDeadline(time.Time{})
 	return first[0], true
 }
 

@@ -918,3 +918,67 @@ func (x *stubDuplexSession) Close() error {
 
 	return nil
 }
+
+// TestPeerCloseRacingRemoteTells stresses the teardown path that produced the
+// CI deadlock: many concurrent duplex RemoteTells to a peer while that peer is
+// repeatedly closed out from under them. It exercises peer close racing
+// in-flight sends, lane death racing redial, and the duplexConn.Close versus
+// read-loop closed-handler retire that the retireLane lock-ordering fix
+// addressed. Every send must complete (deliver or return a clean error) and
+// every close must return: nothing may hang, and -race must stay quiet.
+func TestPeerCloseRacingRemoteTells(t *testing.T) {
+	_, host, port, stop := startCoalescingServer(t)
+	defer stop()
+
+	// No coalescing: RemoteTell drives the duplex lane synchronously, so a send
+	// is in flight on the lane exactly when ClosePeer tears it down.
+	r := NewClient(
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientCompression(remote.NoCompression),
+	).(*client)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	const senders = 8
+	deadline := time.Now().Add(2 * time.Second)
+
+	var wg sync.WaitGroup
+	wg.Add(senders + 1)
+
+	for range senders {
+		go func() {
+			defer wg.Done()
+
+			for time.Now().Before(deadline) {
+				callCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+				// A send that races a close may fail; that is fine. A send that
+				// hangs is not, and the outer guard catches it.
+				_ = r.RemoteTell(callCtx, from, to, durationpb.New(time.Millisecond))
+				cancel()
+			}
+		}()
+	}
+
+	go func() {
+		defer wg.Done()
+
+		for time.Now().Before(deadline) {
+			r.ClosePeer(host, port)
+			pause.For(2 * time.Millisecond)
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("peer close racing remote tells hung: a teardown path failed to make progress")
+	}
+}
