@@ -260,7 +260,8 @@ func (c *coalescer) sendBatch(batch []*internalpb.RemoteMessage) []*internalpb.R
 		return batch
 	}
 
-	req := &internalpb.RemoteTellRequest{RemoteMessages: batch}
+	req := &internalpb.RemoteTellRequest{}
+	req.SetRemoteMessages(batch)
 	// Per-message propagation metadata is already carried inside each
 	// RemoteMessage, so the batch context only needs a transport deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), coalescerFlushTimeout)

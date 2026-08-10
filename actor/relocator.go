@@ -147,7 +147,9 @@ func (r *relocator) startWorker(ctx *ReceiveContext, peerState *internalpb.PeerS
 
 	ctx.Watch(worker)
 	r.workers[name] = workerJob{address: address, peerState: peerState}
-	ctx.Tell(worker, &internalpb.Rebalance{PeerState: peerState})
+	rebalance := &internalpb.Rebalance{}
+	rebalance.SetPeerState(peerState)
+	ctx.Tell(worker, rebalance)
 }
 
 // handleTerminated reconciles the death of a relocation worker. A worker that

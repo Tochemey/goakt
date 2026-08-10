@@ -105,7 +105,7 @@ func TestMetadataMapFromBytes(t *testing.T) {
 }
 
 func TestDecodeControlReply(t *testing.T) {
-	resp := &internalpb.RemoteLookupResponse{Address: "actor"}
+	resp := internalpb.RemoteLookupResponse_builder{Address: "actor"}.Build()
 	payload, err := proto.Marshal(resp)
 	require.NoError(t, err)
 
@@ -125,10 +125,10 @@ func TestDecodeControlReply(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "actor", got.GetAddress())
 
-	errPayload, err := proto.Marshal(&internalpb.Error{
+	errPayload, err := proto.Marshal(internalpb.Error_builder{
 		Code:    internalpb.Code_CODE_NOT_FOUND,
 		Message: "missing",
-	})
+	}.Build())
 	require.NoError(t, err)
 
 	_, err = decodeControlReply(inet.Frame{
@@ -247,11 +247,11 @@ func TestSendControlDuplexRoundTrip(t *testing.T) {
 	defer r.Close()
 
 	ctx := context.Background()
-	resp, err := r.(*client).sendControl(ctx, host, port, &internalpb.RemoteLookupRequest{
+	resp, err := r.(*client).sendControl(ctx, host, port, internalpb.RemoteLookupRequest_builder{
 		Host: host,
 		Port: int32(port),
 		Name: "actor",
-	})
+	}.Build())
 	require.NoError(t, err)
 	got, ok := resp.(*internalpb.RemoteLookupResponse)
 	require.True(t, ok)
@@ -275,7 +275,7 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 			binary.BigEndian.PutUint32(frame[4:8], uint32(len(name)))
 			copy(frame[8:], name)
 			copy(frame[8+len(name):], packed)
-			return &internalpb.RemoteAskResponse{Messages: [][]byte{frame}}, nil
+			return internalpb.RemoteAskResponse_builder{Messages: [][]byte{frame}}.Build(), nil
 		}),
 		inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolLegacy),
 	)
@@ -465,7 +465,7 @@ func TestRemoteBatchTellSplitsOversizedFlush(t *testing.T) {
 			payload[j] = byte(i)
 		}
 
-		batch = append(batch, &internalpb.RemoteMessage{Message: payload})
+		batch = append(batch, internalpb.RemoteMessage_builder{Message: payload}.Build())
 	}
 
 	require.NoError(t, r.RemoteBatchTell(context.Background(), from, to, batch))

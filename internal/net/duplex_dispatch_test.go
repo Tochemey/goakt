@@ -108,7 +108,7 @@ func TestDispatchDuplexAskControlAndUser(t *testing.T) {
 	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("internalpb.RemoteLookupRequest", func(_ context.Context, _ Connection, msg proto.Message) (proto.Message, error) {
 			req := msg.(*internalpb.RemoteLookupRequest)
-			return &internalpb.RemoteLookupResponse{Address: req.GetName()}, nil
+			return internalpb.RemoteLookupResponse_builder{Address: req.GetName()}.Build(), nil
 		}),
 		WithRemotingServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
 			return ReplyEnvelope{
@@ -120,7 +120,7 @@ func TestDispatchDuplexAskControlAndUser(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	lookup := &internalpb.RemoteLookupRequest{Name: "actor", Host: "127.0.0.1", Port: 1}
+	lookup := internalpb.RemoteLookupRequest_builder{Name: "actor", Host: "127.0.0.1", Port: 1}.Build()
 	payload, err := proto.Marshal(lookup)
 	require.NoError(t, err)
 
@@ -158,7 +158,7 @@ func TestDispatchDuplexAskLegacyBridge(t *testing.T) {
 			copy(frame[8:], name)
 			copy(frame[8+len(name):], packed)
 
-			return &internalpb.RemoteAskResponse{Messages: [][]byte{frame}}, nil
+			return internalpb.RemoteAskResponse_builder{Messages: [][]byte{frame}}.Build(), nil
 		}),
 	)
 	require.NoError(t, err)

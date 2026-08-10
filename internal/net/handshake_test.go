@@ -164,14 +164,14 @@ func TestHandshakeVersionMismatchInBandError(t *testing.T) {
 
 func TestNegotiateHelloPairwiseMinimum(t *testing.T) {
 	local := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 8<<20)
-	local.MaxMessageSize = 32 << 20
-	local.InitialCredits = 16 << 20
-	local.Revision = 4
+	local.SetMaxMessageSize(32 << 20)
+	local.SetInitialCredits(16 << 20)
+	local.SetRevision(4)
 
 	remote := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 4<<20)
-	remote.MaxMessageSize = 64 << 20
-	remote.InitialCredits = 8 << 20
-	remote.Revision = 2
+	remote.SetMaxMessageSize(64 << 20)
+	remote.SetInitialCredits(8 << 20)
+	remote.SetRevision(2)
 
 	got := negotiateHello(local, remote)
 	assert.Equal(t, uint32(2), got.GetRevision())
@@ -343,10 +343,10 @@ func TestPerformHelloInvalidAckPayload(t *testing.T) {
 }
 
 func TestDecodeErrorPayload(t *testing.T) {
-	payload, err := proto.Marshal(&internalpb.Error{
+	payload, err := proto.Marshal(internalpb.Error_builder{
 		Code:    internalpb.Code_CODE_NOT_FOUND,
 		Message: "missing",
-	})
+	}.Build())
 	require.NoError(t, err)
 
 	decoded := decodeErrorPayload(payload)
@@ -406,8 +406,8 @@ func TestAcceptHelloAckEchoesDialerLane(t *testing.T) {
 
 		client := newTCPFramedConn(c1, defaultMaxFrameSize)
 		hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
-		hello.LaneRole = lane.Role
-		hello.LaneIndex = lane.Index
+		hello.SetLaneRole(lane.Role)
+		hello.SetLaneIndex(lane.Index)
 		payload, err := proto.Marshal(hello)
 		require.NoError(t, err)
 		laneByte, err := laneByte(lane.Role, lane.Index)
@@ -450,8 +450,8 @@ func TestAcceptHelloRejectsInvalidOrdinaryLaneIndex(t *testing.T) {
 	}()
 
 	hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
-	hello.LaneRole = internalpb.LaneRole_LANE_ROLE_ORDINARY
-	hello.LaneIndex = maxOrdinaryLaneIndex + 1
+	hello.SetLaneRole(internalpb.LaneRole_LANE_ROLE_ORDINARY)
+	hello.SetLaneIndex(maxOrdinaryLaneIndex + 1)
 	payload, err := proto.Marshal(hello)
 	require.NoError(t, err)
 
@@ -549,7 +549,7 @@ func TestAcceptHelloRejectsZeroRevision(t *testing.T) {
 	}()
 
 	hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
-	hello.Revision = 0
+	hello.SetRevision(0)
 	payload, err := proto.Marshal(hello)
 	require.NoError(t, err)
 
@@ -586,7 +586,7 @@ func TestPerformHelloRejectsZeroRevisionAck(t *testing.T) {
 		}
 
 		ack := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
-		ack.Revision = 0
+		ack.SetRevision(0)
 
 		payload, err := proto.Marshal(ack)
 		if err != nil {
@@ -616,7 +616,7 @@ func TestMinUintHelpers(t *testing.T) {
 }
 
 func testHello(codec internalpb.CompressionCodec, maxFrame uint32) *internalpb.Hello {
-	return &internalpb.Hello{
+	return internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionBaseline,
 		SystemName:                  "test",
 		Host:                        "127.0.0.1",
@@ -627,5 +627,5 @@ func testHello(codec internalpb.CompressionCodec, maxFrame uint32) *internalpb.H
 		MaxMessageSize:              uint64(maxFrame),
 		InitialCredits:              uint64(maxFrame),
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 }

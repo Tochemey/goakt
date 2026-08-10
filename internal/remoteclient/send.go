@@ -242,14 +242,14 @@ func (x *client) sendTellLegacy(ctx context.Context, host string, port int, para
 	defer peer.endLegacySend()
 
 	nc := x.NetClient(host, port)
-	resp, err := nc.SendProto(ctx, &internalpb.RemoteTellRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{{
-			Sender:   params.sender,
-			Receiver: params.receiver,
-			Message:  params.payload,
-			Metadata: metadataMapFromBytes(params.metadata),
-		}},
-	})
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(params.sender)
+	rm.SetReceiver(params.receiver)
+	rm.SetMessage(params.payload)
+	rm.SetMetadata(metadataMapFromBytes(params.metadata))
+	rtr := &internalpb.RemoteTellRequest{}
+	rtr.SetRemoteMessages([]*internalpb.RemoteMessage{rm})
+	resp, err := nc.SendProto(ctx, rtr)
 	if err != nil {
 		return err
 	}
@@ -410,16 +410,15 @@ func (x *client) sendAskLegacy(ctx context.Context, host string, port int, param
 	defer peer.endLegacySend()
 
 	nc := x.NetClient(host, port)
-	req := &internalpb.RemoteAskRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{{
-			Sender:   params.sender,
-			Receiver: params.receiver,
-			Message:  params.payload,
-			Metadata: metadataMapFromBytes(params.metadata),
-		}},
-	}
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(params.sender)
+	rm.SetReceiver(params.receiver)
+	rm.SetMessage(params.payload)
+	rm.SetMetadata(metadataMapFromBytes(params.metadata))
+	req := &internalpb.RemoteAskRequest{}
+	req.SetRemoteMessages([]*internalpb.RemoteMessage{rm})
 	if params.timeout > 0 {
-		req.Timeout = durationpb.New(params.timeout)
+		req.SetTimeout(durationpb.New(params.timeout))
 	}
 
 	resp, err := nc.SendProto(ctx, req)
@@ -436,11 +435,11 @@ func (x *client) sendAskLegacy(ctx context.Context, host string, port int, param
 		return nil, errors.New("invalid response type")
 	}
 
-	if len(askResp.Messages) == 0 {
+	if len(askResp.GetMessages()) == 0 {
 		return nil, nil
 	}
 
-	return serializer.Deserialize(askResp.Messages[0])
+	return serializer.Deserialize(askResp.GetMessages()[0])
 }
 
 // sendAskDuplex sends an expectsReply DATA frame on the ordinary lane, decodes
@@ -560,12 +559,11 @@ func (x *client) submitBatchTellCoalesced(ctx context.Context, host string, port
 	}
 
 	for _, param := range params {
-		msg := &internalpb.RemoteMessage{
-			Sender:   param.sender,
-			Receiver: param.receiver,
-			Message:  param.payload,
-			Metadata: metadataMapFromBytes(param.metadata),
-		}
+		msg := &internalpb.RemoteMessage{}
+		msg.SetSender(param.sender)
+		msg.SetReceiver(param.receiver)
+		msg.SetMessage(param.payload)
+		msg.SetMetadata(metadataMapFromBytes(param.metadata))
 
 		switch err := c.submit(ctx, msg); {
 		case err == nil:
@@ -585,15 +583,17 @@ func batchTellRequest(params []tellParams) *internalpb.RemoteTellRequest {
 	msgs := make([]*internalpb.RemoteMessage, 0, len(params))
 
 	for _, param := range params {
-		msgs = append(msgs, &internalpb.RemoteMessage{
-			Sender:   param.sender,
-			Receiver: param.receiver,
-			Message:  param.payload,
-			Metadata: metadataMapFromBytes(param.metadata),
-		})
+		rm := &internalpb.RemoteMessage{}
+		rm.SetSender(param.sender)
+		rm.SetReceiver(param.receiver)
+		rm.SetMessage(param.payload)
+		rm.SetMetadata(metadataMapFromBytes(param.metadata))
+		msgs = append(msgs, rm)
 	}
 
-	return &internalpb.RemoteTellRequest{RemoteMessages: msgs}
+	rtr := &internalpb.RemoteTellRequest{}
+	rtr.SetRemoteMessages(msgs)
+	return rtr
 }
 
 // batchAskResult holds one goroutine outcome from [sendBatchAskDuplex].
@@ -748,18 +748,19 @@ func (x *client) sendBatchAskLegacy(ctx context.Context, host string, port int, 
 
 	msgs := make([]*internalpb.RemoteMessage, 0, len(params))
 	for _, param := range params {
-		msgs = append(msgs, &internalpb.RemoteMessage{
-			Sender:   param.sender,
-			Receiver: param.receiver,
-			Message:  param.payload,
-			Metadata: metadataMapFromBytes(param.metadata),
-		})
+		rm := &internalpb.RemoteMessage{}
+		rm.SetSender(param.sender)
+		rm.SetReceiver(param.receiver)
+		rm.SetMessage(param.payload)
+		rm.SetMetadata(metadataMapFromBytes(param.metadata))
+		msgs = append(msgs, rm)
 	}
 
 	nc := x.NetClient(host, port)
-	req := &internalpb.RemoteAskRequest{RemoteMessages: msgs}
+	req := &internalpb.RemoteAskRequest{}
+	req.SetRemoteMessages(msgs)
 	if len(params) > 0 && params[0].timeout > 0 {
-		req.Timeout = durationpb.New(params[0].timeout)
+		req.SetTimeout(durationpb.New(params[0].timeout))
 	}
 
 	resp, err := nc.SendProto(ctx, req)
@@ -776,8 +777,8 @@ func (x *client) sendBatchAskLegacy(ctx context.Context, host string, port int, 
 		return nil, errors.New("invalid response type")
 	}
 
-	responses := make([]any, 0, len(askResp.Messages))
-	for i, msg := range askResp.Messages {
+	responses := make([]any, 0, len(askResp.GetMessages()))
+	for i, msg := range askResp.GetMessages() {
 		des, desErr := serializers[i].Deserialize(msg)
 		if desErr != nil {
 			return nil, desErr
@@ -1048,7 +1049,8 @@ func (x *client) flushTellBatchDuplex(ctx context.Context, peer *peer, laneIndex
 			end++
 		}
 
-		sub := &internalpb.RemoteTellRequest{RemoteMessages: msgs[start:end]}
+		sub := &internalpb.RemoteTellRequest{}
+		sub.SetRemoteMessages(msgs[start:end])
 		payload, err := inet.MarshalProtoAppend(sub)
 		if err != nil {
 			return msgs[start:], err

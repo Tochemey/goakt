@@ -94,7 +94,7 @@ func performHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, e
 	}
 
 	effective := negotiateHello(local, remote)
-	effective.Compression = remote.GetCompression()
+	effective.SetCompression(remote.GetCompression())
 	conn.SetMaxFrameSize(effective.GetMaxFrameSize())
 	return &HandshakeResult{Local: local, Remote: remote, Effective: effective}, nil
 }
@@ -137,10 +137,10 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 	}
 
 	ack := negotiateHello(local, remote)
-	ack.Compression = selectCompression(local.GetCompression(), remote.GetCompression())
-	ack.SystemName = local.GetSystemName()
-	ack.Host = local.GetHost()
-	ack.Port = local.GetPort()
+	ack.SetCompression(selectCompression(local.GetCompression(), remote.GetCompression()))
+	ack.SetSystemName(local.GetSystemName())
+	ack.SetHost(local.GetHost())
+	ack.SetPort(local.GetPort())
 
 	payload, err := MarshalProtoAppend(ack)
 	if err != nil {
@@ -168,19 +168,19 @@ func acceptHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, er
 // cannot disable length validation. Lane identity comes from remote because
 // the dialer selects the connection lane.
 func negotiateHello(local, remote *internalpb.Hello) *internalpb.Hello {
-	return &internalpb.Hello{
-		Revision:                    minUint32(local.GetRevision(), remote.GetRevision()),
-		SystemName:                  local.GetSystemName(),
-		Host:                        local.GetHost(),
-		Port:                        local.GetPort(),
-		LaneRole:                    remote.GetLaneRole(),
-		LaneIndex:                   remote.GetLaneIndex(),
-		Compression:                 remote.GetCompression(),
-		MaxFrameSize:                floorMaxFrameSize(minUint32(local.GetMaxFrameSize(), remote.GetMaxFrameSize())),
-		MaxMessageSize:              minUint64(local.GetMaxMessageSize(), remote.GetMaxMessageSize()),
-		InitialCredits:              minUint64(local.GetInitialCredits(), remote.GetInitialCredits()),
-		MaxConcurrentLargeTransfers: minUint32(local.GetMaxConcurrentLargeTransfers(), remote.GetMaxConcurrentLargeTransfers()),
-	}
+	hello := &internalpb.Hello{}
+	hello.SetRevision(minUint32(local.GetRevision(), remote.GetRevision()))
+	hello.SetSystemName(local.GetSystemName())
+	hello.SetHost(local.GetHost())
+	hello.SetPort(local.GetPort())
+	hello.SetLaneRole(remote.GetLaneRole())
+	hello.SetLaneIndex(remote.GetLaneIndex())
+	hello.SetCompression(remote.GetCompression())
+	hello.SetMaxFrameSize(floorMaxFrameSize(minUint32(local.GetMaxFrameSize(), remote.GetMaxFrameSize())))
+	hello.SetMaxMessageSize(minUint64(local.GetMaxMessageSize(), remote.GetMaxMessageSize()))
+	hello.SetInitialCredits(minUint64(local.GetInitialCredits(), remote.GetInitialCredits()))
+	hello.SetMaxConcurrentLargeTransfers(minUint32(local.GetMaxConcurrentLargeTransfers(), remote.GetMaxConcurrentLargeTransfers()))
+	return hello
 }
 
 // selectCompression picks the codec both sides will use. The acceptor answers
@@ -197,10 +197,10 @@ func selectCompression(local, remote internalpb.CompressionCodec) internalpb.Com
 // writeErrorFrame writes an ERROR frame with an [internalpb.Error] payload.
 // Correlation may be zero for connection-scoped errors.
 func writeErrorFrame(conn FramedConn, correlation uint64, code internalpb.Code, message string) error {
-	payload, err := proto.Marshal(&internalpb.Error{
-		Code:    code,
-		Message: message,
-	})
+	error2 := &internalpb.Error{}
+	error2.SetCode(code)
+	error2.SetMessage(message)
+	payload, err := proto.Marshal(error2)
 	if err != nil {
 		return err
 	}

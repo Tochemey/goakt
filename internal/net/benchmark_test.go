@@ -54,7 +54,7 @@ var benchPayload [benchPayloadSize]byte
 
 // benchProtoReq is a small protobuf message reused across all proto
 // benchmark iterations. It is read-only and safe for concurrent use.
-var benchProtoReq = &testpb.Reply{Content: "bench"}
+var benchProtoReq = testpb.Reply_builder{Content: "bench"}.Build()
 
 func init() {
 	for i := range benchPayload {

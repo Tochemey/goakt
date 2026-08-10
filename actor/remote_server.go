@@ -75,10 +75,10 @@ type coalescedFailure struct {
 // This is the standard way to return errors from proto TCP handlers to match the error
 // semantics of the existing ConnectRPC implementation.
 func toProtoError(code internalpb.Code, err error) *internalpb.Error {
-	return &internalpb.Error{
-		Code:    code,
-		Message: err.Error(),
-	}
+	error2 := &internalpb.Error{}
+	error2.SetCode(code)
+	error2.SetMessage(err.Error())
+	return error2
 }
 
 // spawnErrorToProto maps a spawn failure to the proto error returned to a remote
@@ -216,7 +216,9 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
-		return &internalpb.RemoteLookupResponse{Address: actor.GetAddress()}, nil
+		rlr := &internalpb.RemoteLookupResponse{}
+		rlr.SetAddress(actor.GetAddress())
+		return rlr, nil
 	}
 
 	addr := address.NewReference(actorName, x.Name(), request.GetHost(), int(request.GetPort()))
@@ -228,7 +230,9 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 	}
 
 	pid := pidNode.value()
-	return &internalpb.RemoteLookupResponse{Address: pid.ID()}, nil
+	rlr := &internalpb.RemoteLookupResponse{}
+	rlr.SetAddress(pid.ID())
+	return rlr, nil
 }
 
 // getReliableCompanionHandler handles GetReliableCompanion requests over the
@@ -263,7 +267,9 @@ func (x *actorSystem) getReliableCompanionHandler(_ context.Context, conn inet.C
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.GetReliableCompanionResponse{Address: companion.ID()}, nil
+	grcr := &internalpb.GetReliableCompanionResponse{}
+	grcr.SetAddress(companion.ID())
+	return grcr, nil
 }
 
 // remoteAskHandler handles RemoteAsk requests over the proto TCP transport.
@@ -360,7 +366,9 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		responses = append(responses, marshaled)
 	}
 
-	return &internalpb.RemoteAskResponse{Messages: responses}, nil
+	rar := &internalpb.RemoteAskResponse{}
+	rar.SetMessages(responses)
+	return rar, nil
 }
 
 // remoteTellHandler handles RemoteTell requests over the proto TCP transport.
@@ -469,7 +477,9 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	return &internalpb.RemoteReSpawnResponse{Address: actorAddress.String()}, nil
+	rrsr := &internalpb.RemoteReSpawnResponse{}
+	rrsr.SetAddress(actorAddress.String())
+	return rrsr, nil
 }
 
 // remoteStopHandler handles RemoteStop requests over the proto TCP transport.
@@ -699,7 +709,9 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		}
 
 		logger.Debugf("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
-		return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
+		rsr := &internalpb.RemoteSpawnResponse{}
+		rsr.SetAddress(pid.ID())
+		return rsr, nil
 	}
 
 	opts := []SpawnOption{
@@ -770,7 +782,9 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	logger.Debugf("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
-	return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
+	rsr := &internalpb.RemoteSpawnResponse{}
+	rsr.SetAddress(pid.ID())
+	return rsr, nil
 }
 
 // remoteSpawnChildHandler handles RemoteSpawnChild requests over the proto TCP transport.
@@ -875,7 +889,9 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 	}
 
 	x.logger.Debugf("actor=%s parent=%s host=%s port=%d child actor created successfully", childName, parentName, host, port)
-	return &internalpb.RemoteSpawnChildResponse{Address: cid.ID()}, nil
+	rscr := &internalpb.RemoteSpawnChildResponse{}
+	rscr.SetAddress(cid.ID())
+	return rscr, nil
 }
 
 // remotePassivationStrategyHandler handles RemotePassivationStrategy requests over the proto TCP transport.
@@ -915,7 +931,9 @@ func (x *actorSystem) remotePassivationStrategyHandler(ctx context.Context, conn
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemotePassivationStrategyResponse{PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy())}, nil
+	rpsr := &internalpb.RemotePassivationStrategyResponse{}
+	rpsr.SetPassivationStrategy(codec.EncodePassivationStrategy(pid.PassivationStrategy()))
+	return rpsr, nil
 }
 
 // remoteStateHandler handles RemoteState requests over the proto TCP transport.
@@ -952,18 +970,30 @@ func (x *actorSystem) remoteStateHandler(ctx context.Context, conn inet.Connecti
 	pid := pidNode.value()
 	switch state {
 	case internalpb.State_STATE_RUNNING:
-		return &internalpb.RemoteStateResponse{State: pid.IsRunning()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsRunning())
+		return rsr, nil
 	case internalpb.State_STATE_STOPPING:
-		return &internalpb.RemoteStateResponse{State: pid.IsStopping()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsStopping())
+		return rsr, nil
 	case internalpb.State_STATE_SUSPENDED:
-		return &internalpb.RemoteStateResponse{State: pid.IsSuspended()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsSuspended())
+		return rsr, nil
 	case internalpb.State_STATE_RELOCATABLE:
-		return &internalpb.RemoteStateResponse{State: pid.IsRelocatable()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsRelocatable())
+		return rsr, nil
 	case internalpb.State_STATE_SINGLETON:
-		return &internalpb.RemoteStateResponse{State: pid.IsSingleton()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsSingleton())
+		return rsr, nil
 	}
 
-	return &internalpb.RemoteStateResponse{State: false}, nil
+	rsr := &internalpb.RemoteStateResponse{}
+	rsr.SetState(false)
+	return rsr, nil
 }
 
 // remoteChildrenHandler handles RemoteChildren requests over the proto TCP transport.
@@ -1008,7 +1038,9 @@ func (x *actorSystem) remoteChildrenHandler(ctx context.Context, conn inet.Conne
 	for _, child := range children {
 		addresses = append(addresses, child.ID())
 	}
-	return &internalpb.RemoteChildrenResponse{Addresses: addresses}, nil
+	rcr := &internalpb.RemoteChildrenResponse{}
+	rcr.SetAddresses(addresses)
+	return rcr, nil
 }
 
 // remoteParentHandler handles RemoteParent requests over the proto TCP transport.
@@ -1048,7 +1080,9 @@ func (x *actorSystem) remoteParentHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteParentResponse{Address: pid.Parent().ID()}, nil
+	rpr := &internalpb.RemoteParentResponse{}
+	rpr.SetAddress(pid.Parent().ID())
+	return rpr, nil
 }
 
 // remoteKindHandler handles RemoteKind requests over the proto TCP transport.
@@ -1088,7 +1122,9 @@ func (x *actorSystem) remoteKindHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteKindResponse{Kind: pid.Kind()}, nil
+	rkr := &internalpb.RemoteKindResponse{}
+	rkr.SetKind(pid.Kind())
+	return rkr, nil
 }
 
 // remoteDependenciesHandler handles RemoteDependencies requests over the proto TCP transport.
@@ -1134,7 +1170,9 @@ func (x *actorSystem) remoteDependenciesHandler(ctx context.Context, conn inet.C
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	return &internalpb.RemoteDependenciesResponse{Dependencies: dependencies}, nil
+	rdr := &internalpb.RemoteDependenciesResponse{}
+	rdr.SetDependencies(dependencies)
+	return rdr, nil
 }
 
 // remoteMetricHandler handles RemoteMetric requests over the proto TCP transport.
@@ -1190,17 +1228,19 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 		return new(internalpb.RemoteMetricResponse), nil
 	}
 
-	return &internalpb.RemoteMetricResponse{Metric: &internalpb.Metric{
-		DeadlettersCount:        metric.DeadlettersCount(),
-		ChildrenCount:           metric.ChidrenCount(),
-		Uptime:                  metric.Uptime(),
-		LatestProcessedDuration: durationpb.New(metric.LatestProcessedDuration()),
-		RestartCount:            metric.RestartCount(),
-		ProcessedCount:          metric.ProcessedCount(),
-		StashSize:               metric.StashSize(),
-		FailureCount:            metric.FailureCount(),
-		ReinstateCount:          metric.ReinstateCount(),
-	}}, nil
+	metric2 := &internalpb.Metric{}
+	metric2.SetDeadlettersCount(metric.DeadlettersCount())
+	metric2.SetChildrenCount(metric.ChidrenCount())
+	metric2.SetUptime(metric.Uptime())
+	metric2.SetLatestProcessedDuration(durationpb.New(metric.LatestProcessedDuration()))
+	metric2.SetRestartCount(metric.RestartCount())
+	metric2.SetProcessedCount(metric.ProcessedCount())
+	metric2.SetStashSize(metric.StashSize())
+	metric2.SetFailureCount(metric.FailureCount())
+	metric2.SetReinstateCount(metric.ReinstateCount())
+	rmr := &internalpb.RemoteMetricResponse{}
+	rmr.SetMetric(metric2)
+	return rmr, nil
 }
 
 // remoteRoleHandler handles RemoteRole requests over the proto TCP transport.
@@ -1240,7 +1280,9 @@ func (x *actorSystem) remoteRoleHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteRoleResponse{Role: pointer.Deref(pid.Role(), "")}, nil
+	rrr := &internalpb.RemoteRoleResponse{}
+	rrr.SetRole(pointer.Deref(pid.Role(), ""))
+	return rrr, nil
 }
 
 // remoteStashSizeHandler handles RemoteStashSize requests over the proto TCP transport.
@@ -1280,7 +1322,9 @@ func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteStashSizeResponse{Size: pid.StashSize()}, nil
+	rssr := &internalpb.RemoteStashSizeResponse{}
+	rssr.SetSize(pid.StashSize())
+	return rssr, nil
 }
 
 // remoteReinstateHandler handles RemoteReinstate requests over the proto TCP transport.
@@ -1387,7 +1431,9 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 	if err != nil {
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
-	return &internalpb.RemoteAskGrainResponse{Message: response}, nil
+	ragr := &internalpb.RemoteAskGrainResponse{}
+	ragr.SetMessage(response)
+	return ragr, nil
 }
 
 // remoteTellGrainHandler handles RemoteTellGrain requests over the proto TCP transport.
@@ -1578,7 +1624,9 @@ func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connectio
 	enqueueRelocation(ctx, eg, x, logger, departedNode, request.GetActors(), request.GetGrains(), failures.record)
 	_ = eg.Wait()
 
-	return &internalpb.RelocateBatchResponse{Failures: failures.items()}, nil
+	rbr := &internalpb.RelocateBatchResponse{}
+	rbr.SetFailures(failures.items())
+	return rbr, nil
 }
 
 // getNodeMetricHandler handles GetNodeMetric requests over the proto TCP transport.
@@ -1598,10 +1646,10 @@ func (x *actorSystem) getNodeMetricHandler(_ context.Context, _ inet.Connection,
 	}
 
 	load := x.actorsCounter.Load() + uint64(x.grains.Len())
-	return &internalpb.GetNodeMetricResponse{
-		NodeAddress: x.remoteHostPort,
-		Load:        load,
-	}, nil
+	gnmr := &internalpb.GetNodeMetricResponse{}
+	gnmr.SetNodeAddress(x.remoteHostPort)
+	gnmr.SetLoad(load)
+	return gnmr, nil
 }
 
 // getKindsHandler handles GetKinds requests over the proto TCP transport.
@@ -1625,7 +1673,9 @@ func (x *actorSystem) getKindsHandler(_ context.Context, _ inet.Connection, req 
 		kinds[i] = types.Name(kind)
 	}
 
-	return &internalpb.GetKindsResponse{Kinds: kinds}, nil
+	gkr := &internalpb.GetKindsResponse{}
+	gkr.SetKinds(kinds)
+	return gkr, nil
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.

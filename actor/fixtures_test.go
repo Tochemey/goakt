@@ -205,7 +205,7 @@ func (p *MockActor) Receive(ctx *ReceiveContext) {
 	case *testpb.TestPanic:
 		panic("Boom")
 	case *testpb.TestReply:
-		ctx.Response(&testpb.Reply{Content: "received message"})
+		ctx.Response(testpb.Reply_builder{Content: "received message"}.Build())
 	case *testpb.TestTimeout:
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
@@ -555,7 +555,7 @@ func (x *MockRouter) Receive(ctx *ReceiveContext) {
 		x.logger.Infof("Got message: %s", msg.GetText())
 	case *testpb.TestGetCount:
 		x.counter++
-		ctx.Response(&testpb.TestCount{Value: int32(x.counter)})
+		ctx.Response(testpb.TestCount_builder{Value: int32(x.counter)}.Build())
 	default:
 		ctx.Unhandled()
 	}
@@ -584,9 +584,9 @@ func (x *MockRoutee) Receive(ctx *ReceiveContext) {
 		x.logger.Infof("Got message: %s", msg.GetText())
 	case *testpb.TestGetCount:
 		x.counter++
-		ctx.Response(&testpb.TestCount{Value: int32(x.counter)})
+		ctx.Response(testpb.TestCount_builder{Value: int32(x.counter)}.Build())
 	case *testpb.TestSum:
-		if msg.Delay != nil {
+		if msg.HasDelay() {
 			wg := sync.WaitGroup{}
 			wg.Go(func() {
 				pause.For(msg.GetDelay().AsDuration())
@@ -595,7 +595,7 @@ func (x *MockRoutee) Receive(ctx *ReceiveContext) {
 		}
 
 		sum := msg.GetA() + msg.GetB()
-		ctx.Response(&testpb.TestSumResult{Result: sum})
+		ctx.Response(testpb.TestSumResult_builder{Result: sum}.Build())
 	default:
 		ctx.Unhandled()
 	}
@@ -650,11 +650,11 @@ func (m *MockSum) Receive(ctx *ReceiveContext) {
 	case *testpb.TestSumResult:
 		m.sum = msg.GetResult()
 	case *testpb.TestGetSumResult:
-		ctx.Response(&testpb.TestSumResult{Result: m.sum})
+		ctx.Response(testpb.TestSumResult_builder{Result: m.sum}.Build())
 	case *StatusFailure:
 		m.failureCount++
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: m.failureCount})
+		ctx.Response(testpb.TestCount_builder{Value: m.failureCount}.Build())
 	}
 }
 
@@ -691,9 +691,9 @@ func (x *TailChopProbe) Receive(ctx *ReceiveContext) {
 		default:
 		}
 	case *testpb.TestGetSumResult:
-		ctx.Response(&testpb.TestSumResult{Result: x.sum.Load()})
+		ctx.Response(testpb.TestSumResult_builder{Result: x.sum.Load()}.Build())
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: x.failures.Load()})
+		ctx.Response(testpb.TestCount_builder{Value: x.failures.Load()}.Build())
 	}
 }
 
@@ -823,10 +823,10 @@ func (m *MockEntity) Receive(ctx *ReceiveContext) {
 		// TODO: in production extra validation will be needed.
 		balance := received.GetAccountBalance()
 		newBalance := m.currentState.Load().GetAccountBalance() + balance
-		m.currentState.Store(&testpb.Account{
+		m.currentState.Store(testpb.Account_builder{
 			AccountId:      m.persistenceID,
 			AccountBalance: newBalance,
-		})
+		}.Build())
 		// persist the actor state
 		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
 			ctx.Err(err)
@@ -839,10 +839,10 @@ func (m *MockEntity) Receive(ctx *ReceiveContext) {
 		// TODO: in production extra validation will be needed.
 		balance := received.GetBalance()
 		newBalance := m.currentState.Load().GetAccountBalance() + balance
-		m.currentState.Store(&testpb.Account{
+		m.currentState.Store(testpb.Account_builder{
 			AccountId:      m.persistenceID,
 			AccountBalance: newBalance,
-		})
+		}.Build())
 		// persist the actor state
 		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
 			ctx.Err(err)
@@ -1106,7 +1106,7 @@ func (m *MockGrain) OnReceive(ctx *GrainContext) {
 		ctx.NoErr()
 
 	case *testpb.TestReply:
-		ctx.Response(&testpb.Reply{Content: "received message"})
+		ctx.Response(testpb.Reply_builder{Content: "received message"}.Build())
 	case *testpb.TestTimeout:
 		wg := sync.WaitGroup{}
 		wg.Go(func() {
@@ -1253,10 +1253,10 @@ func (m *MockPersistenceGrain) OnReceive(ctx *GrainContext) {
 	case *testpb.CreateAccount:
 		balance := received.GetAccountBalance()
 		newBalance := m.currentState.Load().GetAccountBalance() + balance
-		m.currentState.Store(&testpb.Account{
+		m.currentState.Store(testpb.Account_builder{
 			AccountId:      m.persistenceID,
 			AccountBalance: newBalance,
-		})
+		}.Build())
 
 		// persist the Grain state
 		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
@@ -1269,10 +1269,10 @@ func (m *MockPersistenceGrain) OnReceive(ctx *GrainContext) {
 		// TODO: in production extra validation will be needed.
 		balance := received.GetBalance()
 		newBalance := m.currentState.Load().GetAccountBalance() + balance
-		m.currentState.Store(&testpb.Account{
+		m.currentState.Store(testpb.Account_builder{
 			AccountId:      m.persistenceID,
 			AccountBalance: newBalance,
-		})
+		}.Build())
 
 		// persist the Grain state
 		if err := m.stateStore.WriteState(m.persistenceID, m.currentState.Load()); err != nil {
@@ -1754,7 +1754,7 @@ func (*contextEchoGrain) OnDeactivate(context.Context, *GrainProps) error { retu
 func (g *contextEchoGrain) OnReceive(ctx *GrainContext) {
 	g.setSeen(ctx.Context().Value(g.key))
 	if _, ok := ctx.Message().(*testpb.TestReply); ok {
-		ctx.Response(&testpb.Reply{Content: fmt.Sprint(g.Seen())})
+		ctx.Response(testpb.Reply_builder{Content: fmt.Sprint(g.Seen())}.Build())
 		return
 	}
 	ctx.NoErr()
@@ -1786,7 +1786,7 @@ func (a *contextEchoActor) Receive(ctx *ReceiveContext) {
 
 	switch ctx.Message().(type) {
 	case *testpb.TestReply:
-		ctx.Response(&testpb.Reply{Content: fmt.Sprint(a.Seen())})
+		ctx.Response(testpb.Reply_builder{Content: fmt.Sprint(a.Seen())}.Build())
 	case *testpb.TestSend:
 		// no-op
 	default:

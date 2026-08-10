@@ -554,16 +554,15 @@ func (x *RemotingServer) AcceptedConnections() int32 {
 func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
-	local := &internalpb.Hello{
-		Revision:                    CapabilityRevisionCredits,
-		SystemName:                  x.systemName,
-		LaneRole:                    internalpb.LaneRole_LANE_ROLE_CONTROL,
-		Compression:                 internalpb.CompressionCodec_COMPRESSION_CODEC_NONE,
-		MaxFrameSize:                x.maxFrameSize,
-		MaxMessageSize:              x.maxMessageSize,
-		InitialCredits:              x.initialCredits,
-		MaxConcurrentLargeTransfers: x.maxConcurrentLargeTransfers,
-	}
+	local := &internalpb.Hello{}
+	local.SetRevision(CapabilityRevisionCredits)
+	local.SetSystemName(x.systemName)
+	local.SetLaneRole(internalpb.LaneRole_LANE_ROLE_CONTROL)
+	local.SetCompression(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE)
+	local.SetMaxFrameSize(x.maxFrameSize)
+	local.SetMaxMessageSize(x.maxMessageSize)
+	local.SetInitialCredits(x.initialCredits)
+	local.SetMaxConcurrentLargeTransfers(x.maxConcurrentLargeTransfers)
 
 	result, err := acceptHello(framed, local)
 	if err != nil {
@@ -690,14 +689,13 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 		return false
 	}
 
-	req := &internalpb.RemoteTellRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{{
-			Sender:   env.Sender,
-			Receiver: env.Receiver,
-			Message:  env.Payload,
-			Metadata: metadataMapFromEnvelope(env.Metadata),
-		}},
-	}
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(env.Sender)
+	rm.SetReceiver(env.Receiver)
+	rm.SetMessage(env.Payload)
+	rm.SetMetadata(metadataMapFromEnvelope(env.Metadata))
+	req := &internalpb.RemoteTellRequest{}
+	req.SetRemoteMessages([]*internalpb.RemoteMessage{rm})
 
 	_, panicked, _ = x.recover(ctx, handler, nil, req, remoteTellRequestName)
 	return panicked

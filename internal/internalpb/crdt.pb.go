@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -81,20 +80,13 @@ func (x CRDTDataType) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use CRDTDataType.Descriptor instead.
-func (CRDTDataType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{0}
-}
-
 // CRDTKey is a typed, serializable CRDT key.
 type CRDTKey struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the key's string identifier.
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies the CRDT data type this key holds.
-	DataType      CRDTDataType `protobuf:"varint,2,opt,name=data_type,json=dataType,proto3,enum=internalpb.CRDTDataType" json:"data_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id       string                 `protobuf:"bytes,1,opt,name=id,proto3"`
+	xxx_hidden_DataType CRDTDataType           `protobuf:"varint,2,opt,name=data_type,json=dataType,proto3,enum=internalpb.CRDTDataType"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *CRDTKey) Reset() {
@@ -122,40 +114,52 @@ func (x *CRDTKey) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTKey.ProtoReflect.Descriptor instead.
-func (*CRDTKey) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *CRDTKey) GetId() string {
 	if x != nil {
-		return x.Id
+		return x.xxx_hidden_Id
 	}
 	return ""
 }
 
 func (x *CRDTKey) GetDataType() CRDTDataType {
 	if x != nil {
-		return x.DataType
+		return x.xxx_hidden_DataType
 	}
 	return CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED
 }
 
+func (x *CRDTKey) SetId(v string) {
+	x.xxx_hidden_Id = v
+}
+
+func (x *CRDTKey) SetDataType(v CRDTDataType) {
+	x.xxx_hidden_DataType = v
+}
+
+type CRDTKey_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the key's string identifier.
+	Id string
+	// Specifies the CRDT data type this key holds.
+	DataType CRDTDataType
+}
+
+func (b0 CRDTKey_builder) Build() *CRDTKey {
+	m0 := &CRDTKey{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_DataType = b.DataType
+	return m0
+}
+
 // CRDTData is a union of all CRDT state representations.
 type CRDTData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Type:
-	//
-	//	*CRDTData_GCounter
-	//	*CRDTData_PnCounter
-	//	*CRDTData_LwwRegister
-	//	*CRDTData_OrSet
-	//	*CRDTData_OrMap
-	//	*CRDTData_Flag
-	//	*CRDTData_MvRegister
-	Type          isCRDTData_Type `protobuf_oneof:"type"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Type isCRDTData_Type        `protobuf_oneof:"type"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CRDTData) Reset() {
@@ -183,21 +187,9 @@ func (x *CRDTData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTData.ProtoReflect.Descriptor instead.
-func (*CRDTData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *CRDTData) GetType() isCRDTData_Type {
-	if x != nil {
-		return x.Type
-	}
-	return nil
-}
-
 func (x *CRDTData) GetGCounter() *GCounterData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_GCounter); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_GCounter); ok {
 			return x.GCounter
 		}
 	}
@@ -206,7 +198,7 @@ func (x *CRDTData) GetGCounter() *GCounterData {
 
 func (x *CRDTData) GetPnCounter() *PNCounterData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_PnCounter); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_PnCounter); ok {
 			return x.PnCounter
 		}
 	}
@@ -215,7 +207,7 @@ func (x *CRDTData) GetPnCounter() *PNCounterData {
 
 func (x *CRDTData) GetLwwRegister() *LWWRegisterData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_LwwRegister); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_LwwRegister); ok {
 			return x.LwwRegister
 		}
 	}
@@ -224,7 +216,7 @@ func (x *CRDTData) GetLwwRegister() *LWWRegisterData {
 
 func (x *CRDTData) GetOrSet() *ORSetData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_OrSet); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_OrSet); ok {
 			return x.OrSet
 		}
 	}
@@ -233,7 +225,7 @@ func (x *CRDTData) GetOrSet() *ORSetData {
 
 func (x *CRDTData) GetOrMap() *ORMapData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_OrMap); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_OrMap); ok {
 			return x.OrMap
 		}
 	}
@@ -242,7 +234,7 @@ func (x *CRDTData) GetOrMap() *ORMapData {
 
 func (x *CRDTData) GetFlag() *FlagData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_Flag); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_Flag); ok {
 			return x.Flag
 		}
 	}
@@ -251,66 +243,315 @@ func (x *CRDTData) GetFlag() *FlagData {
 
 func (x *CRDTData) GetMvRegister() *MVRegisterData {
 	if x != nil {
-		if x, ok := x.Type.(*CRDTData_MvRegister); ok {
+		if x, ok := x.xxx_hidden_Type.(*cRDTData_MvRegister); ok {
 			return x.MvRegister
 		}
 	}
 	return nil
 }
 
+func (x *CRDTData) SetGCounter(v *GCounterData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_GCounter{v}
+}
+
+func (x *CRDTData) SetPnCounter(v *PNCounterData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_PnCounter{v}
+}
+
+func (x *CRDTData) SetLwwRegister(v *LWWRegisterData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_LwwRegister{v}
+}
+
+func (x *CRDTData) SetOrSet(v *ORSetData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_OrSet{v}
+}
+
+func (x *CRDTData) SetOrMap(v *ORMapData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_OrMap{v}
+}
+
+func (x *CRDTData) SetFlag(v *FlagData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_Flag{v}
+}
+
+func (x *CRDTData) SetMvRegister(v *MVRegisterData) {
+	if v == nil {
+		x.xxx_hidden_Type = nil
+		return
+	}
+	x.xxx_hidden_Type = &cRDTData_MvRegister{v}
+}
+
+func (x *CRDTData) HasType() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Type != nil
+}
+
+func (x *CRDTData) HasGCounter() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_GCounter)
+	return ok
+}
+
+func (x *CRDTData) HasPnCounter() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_PnCounter)
+	return ok
+}
+
+func (x *CRDTData) HasLwwRegister() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_LwwRegister)
+	return ok
+}
+
+func (x *CRDTData) HasOrSet() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_OrSet)
+	return ok
+}
+
+func (x *CRDTData) HasOrMap() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_OrMap)
+	return ok
+}
+
+func (x *CRDTData) HasFlag() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_Flag)
+	return ok
+}
+
+func (x *CRDTData) HasMvRegister() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Type.(*cRDTData_MvRegister)
+	return ok
+}
+
+func (x *CRDTData) ClearType() {
+	x.xxx_hidden_Type = nil
+}
+
+func (x *CRDTData) ClearGCounter() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_GCounter); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearPnCounter() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_PnCounter); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearLwwRegister() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_LwwRegister); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearOrSet() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_OrSet); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearOrMap() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_OrMap); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearFlag() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_Flag); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+func (x *CRDTData) ClearMvRegister() {
+	if _, ok := x.xxx_hidden_Type.(*cRDTData_MvRegister); ok {
+		x.xxx_hidden_Type = nil
+	}
+}
+
+const CRDTData_Type_not_set_case case_CRDTData_Type = 0
+const CRDTData_GCounter_case case_CRDTData_Type = 1
+const CRDTData_PnCounter_case case_CRDTData_Type = 2
+const CRDTData_LwwRegister_case case_CRDTData_Type = 3
+const CRDTData_OrSet_case case_CRDTData_Type = 4
+const CRDTData_OrMap_case case_CRDTData_Type = 5
+const CRDTData_Flag_case case_CRDTData_Type = 6
+const CRDTData_MvRegister_case case_CRDTData_Type = 7
+
+func (x *CRDTData) WhichType() case_CRDTData_Type {
+	if x == nil {
+		return CRDTData_Type_not_set_case
+	}
+	switch x.xxx_hidden_Type.(type) {
+	case *cRDTData_GCounter:
+		return CRDTData_GCounter_case
+	case *cRDTData_PnCounter:
+		return CRDTData_PnCounter_case
+	case *cRDTData_LwwRegister:
+		return CRDTData_LwwRegister_case
+	case *cRDTData_OrSet:
+		return CRDTData_OrSet_case
+	case *cRDTData_OrMap:
+		return CRDTData_OrMap_case
+	case *cRDTData_Flag:
+		return CRDTData_Flag_case
+	case *cRDTData_MvRegister:
+		return CRDTData_MvRegister_case
+	default:
+		return CRDTData_Type_not_set_case
+	}
+}
+
+type CRDTData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Fields of oneof xxx_hidden_Type:
+	GCounter    *GCounterData
+	PnCounter   *PNCounterData
+	LwwRegister *LWWRegisterData
+	OrSet       *ORSetData
+	OrMap       *ORMapData
+	Flag        *FlagData
+	MvRegister  *MVRegisterData
+	// -- end of xxx_hidden_Type
+}
+
+func (b0 CRDTData_builder) Build() *CRDTData {
+	m0 := &CRDTData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.GCounter != nil {
+		x.xxx_hidden_Type = &cRDTData_GCounter{b.GCounter}
+	}
+	if b.PnCounter != nil {
+		x.xxx_hidden_Type = &cRDTData_PnCounter{b.PnCounter}
+	}
+	if b.LwwRegister != nil {
+		x.xxx_hidden_Type = &cRDTData_LwwRegister{b.LwwRegister}
+	}
+	if b.OrSet != nil {
+		x.xxx_hidden_Type = &cRDTData_OrSet{b.OrSet}
+	}
+	if b.OrMap != nil {
+		x.xxx_hidden_Type = &cRDTData_OrMap{b.OrMap}
+	}
+	if b.Flag != nil {
+		x.xxx_hidden_Type = &cRDTData_Flag{b.Flag}
+	}
+	if b.MvRegister != nil {
+		x.xxx_hidden_Type = &cRDTData_MvRegister{b.MvRegister}
+	}
+	return m0
+}
+
+type case_CRDTData_Type protoreflect.FieldNumber
+
+func (x case_CRDTData_Type) String() string {
+	md := file_internal_crdt_proto_msgTypes[1].Descriptor()
+	if x == 0 {
+		return "not set"
+	}
+	return protoimpl.X.MessageFieldStringOf(md, protoreflect.FieldNumber(x))
+}
+
 type isCRDTData_Type interface {
 	isCRDTData_Type()
 }
 
-type CRDTData_GCounter struct {
+type cRDTData_GCounter struct {
 	GCounter *GCounterData `protobuf:"bytes,1,opt,name=g_counter,json=gCounter,proto3,oneof"`
 }
 
-type CRDTData_PnCounter struct {
+type cRDTData_PnCounter struct {
 	PnCounter *PNCounterData `protobuf:"bytes,2,opt,name=pn_counter,json=pnCounter,proto3,oneof"`
 }
 
-type CRDTData_LwwRegister struct {
+type cRDTData_LwwRegister struct {
 	LwwRegister *LWWRegisterData `protobuf:"bytes,3,opt,name=lww_register,json=lwwRegister,proto3,oneof"`
 }
 
-type CRDTData_OrSet struct {
+type cRDTData_OrSet struct {
 	OrSet *ORSetData `protobuf:"bytes,4,opt,name=or_set,json=orSet,proto3,oneof"`
 }
 
-type CRDTData_OrMap struct {
+type cRDTData_OrMap struct {
 	OrMap *ORMapData `protobuf:"bytes,5,opt,name=or_map,json=orMap,proto3,oneof"`
 }
 
-type CRDTData_Flag struct {
+type cRDTData_Flag struct {
 	Flag *FlagData `protobuf:"bytes,6,opt,name=flag,proto3,oneof"`
 }
 
-type CRDTData_MvRegister struct {
+type cRDTData_MvRegister struct {
 	MvRegister *MVRegisterData `protobuf:"bytes,7,opt,name=mv_register,json=mvRegister,proto3,oneof"`
 }
 
-func (*CRDTData_GCounter) isCRDTData_Type() {}
+func (*cRDTData_GCounter) isCRDTData_Type() {}
 
-func (*CRDTData_PnCounter) isCRDTData_Type() {}
+func (*cRDTData_PnCounter) isCRDTData_Type() {}
 
-func (*CRDTData_LwwRegister) isCRDTData_Type() {}
+func (*cRDTData_LwwRegister) isCRDTData_Type() {}
 
-func (*CRDTData_OrSet) isCRDTData_Type() {}
+func (*cRDTData_OrSet) isCRDTData_Type() {}
 
-func (*CRDTData_OrMap) isCRDTData_Type() {}
+func (*cRDTData_OrMap) isCRDTData_Type() {}
 
-func (*CRDTData_Flag) isCRDTData_Type() {}
+func (*cRDTData_Flag) isCRDTData_Type() {}
 
-func (*CRDTData_MvRegister) isCRDTData_Type() {}
+func (*cRDTData_MvRegister) isCRDTData_Type() {}
 
 // GCounterData is the serialized state of a GCounter.
 type GCounterData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the per-node counter slots.
-	State         map[string]uint64 `protobuf:"bytes,1,rep,name=state,proto3" json:"state,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_State map[string]uint64      `protobuf:"bytes,1,rep,name=state,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GCounterData) Reset() {
@@ -338,27 +579,39 @@ func (x *GCounterData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GCounterData.ProtoReflect.Descriptor instead.
-func (*GCounterData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *GCounterData) GetState() map[string]uint64 {
 	if x != nil {
-		return x.State
+		return x.xxx_hidden_State
 	}
 	return nil
 }
 
+func (x *GCounterData) SetState(v map[string]uint64) {
+	x.xxx_hidden_State = v
+}
+
+type GCounterData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the per-node counter slots.
+	State map[string]uint64
+}
+
+func (b0 GCounterData_builder) Build() *GCounterData {
+	m0 := &GCounterData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_State = b.State
+	return m0
+}
+
 // PNCounterData is the serialized state of a PNCounter.
 type PNCounterData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the increment counter.
-	Increments *GCounterData `protobuf:"bytes,1,opt,name=increments,proto3" json:"increments,omitempty"`
-	// Specifies the decrement counter.
-	Decrements    *GCounterData `protobuf:"bytes,2,opt,name=decrements,proto3" json:"decrements,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Increments *GCounterData          `protobuf:"bytes,1,opt,name=increments,proto3"`
+	xxx_hidden_Decrements *GCounterData          `protobuf:"bytes,2,opt,name=decrements,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *PNCounterData) Reset() {
@@ -386,36 +639,76 @@ func (x *PNCounterData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PNCounterData.ProtoReflect.Descriptor instead.
-func (*PNCounterData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *PNCounterData) GetIncrements() *GCounterData {
 	if x != nil {
-		return x.Increments
+		return x.xxx_hidden_Increments
 	}
 	return nil
 }
 
 func (x *PNCounterData) GetDecrements() *GCounterData {
 	if x != nil {
-		return x.Decrements
+		return x.xxx_hidden_Decrements
 	}
 	return nil
 }
 
+func (x *PNCounterData) SetIncrements(v *GCounterData) {
+	x.xxx_hidden_Increments = v
+}
+
+func (x *PNCounterData) SetDecrements(v *GCounterData) {
+	x.xxx_hidden_Decrements = v
+}
+
+func (x *PNCounterData) HasIncrements() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Increments != nil
+}
+
+func (x *PNCounterData) HasDecrements() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Decrements != nil
+}
+
+func (x *PNCounterData) ClearIncrements() {
+	x.xxx_hidden_Increments = nil
+}
+
+func (x *PNCounterData) ClearDecrements() {
+	x.xxx_hidden_Decrements = nil
+}
+
+type PNCounterData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the increment counter.
+	Increments *GCounterData
+	// Specifies the decrement counter.
+	Decrements *GCounterData
+}
+
+func (b0 PNCounterData_builder) Build() *PNCounterData {
+	m0 := &PNCounterData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Increments = b.Increments
+	x.xxx_hidden_Decrements = b.Decrements
+	return m0
+}
+
 // LWWRegisterData is the serialized state of a LWWRegister.
 type LWWRegisterData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized value as raw bytes.
-	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
-	// Specifies the write timestamp in nanoseconds since epoch.
-	TimestampNanos int64 `protobuf:"varint,2,opt,name=timestamp_nanos,json=timestampNanos,proto3" json:"timestamp_nanos,omitempty"`
-	// Specifies the node that last wrote this value.
-	NodeId        string `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Value          []byte                 `protobuf:"bytes,1,opt,name=value,proto3"`
+	xxx_hidden_TimestampNanos int64                  `protobuf:"varint,2,opt,name=timestamp_nanos,json=timestampNanos,proto3"`
+	xxx_hidden_NodeId         string                 `protobuf:"bytes,3,opt,name=node_id,json=nodeId,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *LWWRegisterData) Reset() {
@@ -443,41 +736,70 @@ func (x *LWWRegisterData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LWWRegisterData.ProtoReflect.Descriptor instead.
-func (*LWWRegisterData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{4}
-}
-
 func (x *LWWRegisterData) GetValue() []byte {
 	if x != nil {
-		return x.Value
+		return x.xxx_hidden_Value
 	}
 	return nil
 }
 
 func (x *LWWRegisterData) GetTimestampNanos() int64 {
 	if x != nil {
-		return x.TimestampNanos
+		return x.xxx_hidden_TimestampNanos
 	}
 	return 0
 }
 
 func (x *LWWRegisterData) GetNodeId() string {
 	if x != nil {
-		return x.NodeId
+		return x.xxx_hidden_NodeId
 	}
 	return ""
 }
 
+func (x *LWWRegisterData) SetValue(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Value = v
+}
+
+func (x *LWWRegisterData) SetTimestampNanos(v int64) {
+	x.xxx_hidden_TimestampNanos = v
+}
+
+func (x *LWWRegisterData) SetNodeId(v string) {
+	x.xxx_hidden_NodeId = v
+}
+
+type LWWRegisterData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the serialized value as raw bytes.
+	Value []byte
+	// Specifies the write timestamp in nanoseconds since epoch.
+	TimestampNanos int64
+	// Specifies the node that last wrote this value.
+	NodeId string
+}
+
+func (b0 LWWRegisterData_builder) Build() *LWWRegisterData {
+	m0 := &LWWRegisterData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Value = b.Value
+	x.xxx_hidden_TimestampNanos = b.TimestampNanos
+	x.xxx_hidden_NodeId = b.NodeId
+	return m0
+}
+
 // ORSetData is the serialized state of an ORSet.
 type ORSetData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the set entries.
-	Entries []*ORSetData_ORSetEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	// Specifies the per-node vector clock.
-	Clock         map[string]uint64 `protobuf:"bytes,2,rep,name=clock,proto3" json:"clock,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState   `protogen:"opaque.v1"`
+	xxx_hidden_Entries *[]*ORSetData_ORSetEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Clock   map[string]uint64        `protobuf:"bytes,2,rep,name=clock,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ORSetData) Reset() {
@@ -505,34 +827,55 @@ func (x *ORSetData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ORSetData.ProtoReflect.Descriptor instead.
-func (*ORSetData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{5}
-}
-
 func (x *ORSetData) GetEntries() []*ORSetData_ORSetEntry {
 	if x != nil {
-		return x.Entries
+		if x.xxx_hidden_Entries != nil {
+			return *x.xxx_hidden_Entries
+		}
 	}
 	return nil
 }
 
 func (x *ORSetData) GetClock() map[string]uint64 {
 	if x != nil {
-		return x.Clock
+		return x.xxx_hidden_Clock
 	}
 	return nil
 }
 
+func (x *ORSetData) SetEntries(v []*ORSetData_ORSetEntry) {
+	x.xxx_hidden_Entries = &v
+}
+
+func (x *ORSetData) SetClock(v map[string]uint64) {
+	x.xxx_hidden_Clock = v
+}
+
+type ORSetData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the set entries.
+	Entries []*ORSetData_ORSetEntry
+	// Specifies the per-node vector clock.
+	Clock map[string]uint64
+}
+
+func (b0 ORSetData_builder) Build() *ORSetData {
+	m0 := &ORSetData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Entries = &b.Entries
+	x.xxx_hidden_Clock = b.Clock
+	return m0
+}
+
 // ORMapData is the serialized state of an ORMap.
 type ORMapData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the map entries.
-	Entries []*ORMapData_ORMapEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	// Specifies the OR-Set that manages the key set.
-	KeySet        *ORSetData `protobuf:"bytes,2,opt,name=key_set,json=keySet,proto3" json:"key_set,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState   `protogen:"opaque.v1"`
+	xxx_hidden_Entries *[]*ORMapData_ORMapEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_KeySet  *ORSetData               `protobuf:"bytes,2,opt,name=key_set,json=keySet,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ORMapData) Reset() {
@@ -560,32 +903,65 @@ func (x *ORMapData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ORMapData.ProtoReflect.Descriptor instead.
-func (*ORMapData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{6}
-}
-
 func (x *ORMapData) GetEntries() []*ORMapData_ORMapEntry {
 	if x != nil {
-		return x.Entries
+		if x.xxx_hidden_Entries != nil {
+			return *x.xxx_hidden_Entries
+		}
 	}
 	return nil
 }
 
 func (x *ORMapData) GetKeySet() *ORSetData {
 	if x != nil {
-		return x.KeySet
+		return x.xxx_hidden_KeySet
 	}
 	return nil
 }
 
+func (x *ORMapData) SetEntries(v []*ORMapData_ORMapEntry) {
+	x.xxx_hidden_Entries = &v
+}
+
+func (x *ORMapData) SetKeySet(v *ORSetData) {
+	x.xxx_hidden_KeySet = v
+}
+
+func (x *ORMapData) HasKeySet() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_KeySet != nil
+}
+
+func (x *ORMapData) ClearKeySet() {
+	x.xxx_hidden_KeySet = nil
+}
+
+type ORMapData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the map entries.
+	Entries []*ORMapData_ORMapEntry
+	// Specifies the OR-Set that manages the key set.
+	KeySet *ORSetData
+}
+
+func (b0 ORMapData_builder) Build() *ORMapData {
+	m0 := &ORMapData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Entries = &b.Entries
+	x.xxx_hidden_KeySet = b.KeySet
+	return m0
+}
+
 // FlagData is the serialized state of a Flag.
 type FlagData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies whether the flag is enabled.
-	Enabled       bool `protobuf:"varint,1,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Enabled bool                   `protobuf:"varint,1,opt,name=enabled,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *FlagData) Reset() {
@@ -613,27 +989,39 @@ func (x *FlagData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use FlagData.ProtoReflect.Descriptor instead.
-func (*FlagData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{7}
-}
-
 func (x *FlagData) GetEnabled() bool {
 	if x != nil {
-		return x.Enabled
+		return x.xxx_hidden_Enabled
 	}
 	return false
 }
 
+func (x *FlagData) SetEnabled(v bool) {
+	x.xxx_hidden_Enabled = v
+}
+
+type FlagData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies whether the flag is enabled.
+	Enabled bool
+}
+
+func (b0 FlagData_builder) Build() *FlagData {
+	m0 := &FlagData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Enabled = b.Enabled
+	return m0
+}
+
 // MVRegisterData is the serialized state of an MVRegister.
 type MVRegisterData struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the register entries (one per concurrent value).
-	Entries []*MVRegisterData_MVRegisterEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	// Specifies the per-node vector clock.
-	Clock         map[string]uint64 `protobuf:"bytes,2,rep,name=clock,proto3" json:"clock,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState             `protogen:"opaque.v1"`
+	xxx_hidden_Entries *[]*MVRegisterData_MVRegisterEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Clock   map[string]uint64                  `protobuf:"bytes,2,rep,name=clock,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MVRegisterData) Reset() {
@@ -661,38 +1049,58 @@ func (x *MVRegisterData) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MVRegisterData.ProtoReflect.Descriptor instead.
-func (*MVRegisterData) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{8}
-}
-
 func (x *MVRegisterData) GetEntries() []*MVRegisterData_MVRegisterEntry {
 	if x != nil {
-		return x.Entries
+		if x.xxx_hidden_Entries != nil {
+			return *x.xxx_hidden_Entries
+		}
 	}
 	return nil
 }
 
 func (x *MVRegisterData) GetClock() map[string]uint64 {
 	if x != nil {
-		return x.Clock
+		return x.xxx_hidden_Clock
 	}
 	return nil
+}
+
+func (x *MVRegisterData) SetEntries(v []*MVRegisterData_MVRegisterEntry) {
+	x.xxx_hidden_Entries = &v
+}
+
+func (x *MVRegisterData) SetClock(v map[string]uint64) {
+	x.xxx_hidden_Clock = v
+}
+
+type MVRegisterData_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the register entries (one per concurrent value).
+	Entries []*MVRegisterData_MVRegisterEntry
+	// Specifies the per-node vector clock.
+	Clock map[string]uint64
+}
+
+func (b0 MVRegisterData_builder) Build() *MVRegisterData {
+	m0 := &MVRegisterData{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Entries = &b.Entries
+	x.xxx_hidden_Clock = b.Clock
+	return m0
 }
 
 // CRDTDelta is the delta message published to the shared goakt.crdt.deltas
 // topic via TopicActor. The key is carried inside the payload so that
 // receivers can route the delta to the correct local store entry.
 type CRDTDelta struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key this delta belongs to.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the node that originated this delta.
-	OriginNode string `protobuf:"bytes,2,opt,name=origin_node,json=originNode,proto3" json:"origin_node,omitempty"`
-	// Specifies the delta state.
-	Data          *CRDTData `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key        *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_OriginNode string                 `protobuf:"bytes,2,opt,name=origin_node,json=originNode,proto3"`
+	xxx_hidden_Data       *CRDTData              `protobuf:"bytes,3,opt,name=data,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *CRDTDelta) Reset() {
@@ -720,41 +1128,89 @@ func (x *CRDTDelta) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTDelta.ProtoReflect.Descriptor instead.
-func (*CRDTDelta) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{9}
-}
-
 func (x *CRDTDelta) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTDelta) GetOriginNode() string {
 	if x != nil {
-		return x.OriginNode
+		return x.xxx_hidden_OriginNode
 	}
 	return ""
 }
 
 func (x *CRDTDelta) GetData() *CRDTData {
 	if x != nil {
-		return x.Data
+		return x.xxx_hidden_Data
 	}
 	return nil
 }
 
+func (x *CRDTDelta) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTDelta) SetOriginNode(v string) {
+	x.xxx_hidden_OriginNode = v
+}
+
+func (x *CRDTDelta) SetData(v *CRDTData) {
+	x.xxx_hidden_Data = v
+}
+
+func (x *CRDTDelta) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTDelta) HasData() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Data != nil
+}
+
+func (x *CRDTDelta) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+func (x *CRDTDelta) ClearData() {
+	x.xxx_hidden_Data = nil
+}
+
+type CRDTDelta_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key this delta belongs to.
+	Key *CRDTKey
+	// Specifies the node that originated this delta.
+	OriginNode string
+	// Specifies the delta state.
+	Data *CRDTData
+}
+
+func (b0 CRDTDelta_builder) Build() *CRDTDelta {
+	m0 := &CRDTDelta{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_OriginNode = b.OriginNode
+	x.xxx_hidden_Data = b.Data
+	return m0
+}
+
 // CRDTDigestEntry is a single entry in an anti-entropy digest.
 type CRDTDigestEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the local version of this key.
-	Version       uint64 `protobuf:"varint,2,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key     *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Version uint64                 `protobuf:"varint,2,opt,name=version,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CRDTDigestEntry) Reset() {
@@ -782,32 +1238,63 @@ func (x *CRDTDigestEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTDigestEntry.ProtoReflect.Descriptor instead.
-func (*CRDTDigestEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{10}
-}
-
 func (x *CRDTDigestEntry) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTDigestEntry) GetVersion() uint64 {
 	if x != nil {
-		return x.Version
+		return x.xxx_hidden_Version
 	}
 	return 0
 }
 
+func (x *CRDTDigestEntry) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTDigestEntry) SetVersion(v uint64) {
+	x.xxx_hidden_Version = v
+}
+
+func (x *CRDTDigestEntry) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTDigestEntry) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+type CRDTDigestEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key.
+	Key *CRDTKey
+	// Specifies the local version of this key.
+	Version uint64
+}
+
+func (b0 CRDTDigestEntry_builder) Build() *CRDTDigestEntry {
+	m0 := &CRDTDigestEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_Version = b.Version
+	return m0
+}
+
 // CRDTDigest is exchanged between Replicators during anti-entropy.
 type CRDTDigest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the digest entries.
-	Entries       []*CRDTDigestEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries *[]*CRDTDigestEntry    `protobuf:"bytes,1,rep,name=entries,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CRDTDigest) Reset() {
@@ -835,27 +1322,41 @@ func (x *CRDTDigest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTDigest.ProtoReflect.Descriptor instead.
-func (*CRDTDigest) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{11}
-}
-
 func (x *CRDTDigest) GetEntries() []*CRDTDigestEntry {
 	if x != nil {
-		return x.Entries
+		if x.xxx_hidden_Entries != nil {
+			return *x.xxx_hidden_Entries
+		}
 	}
 	return nil
 }
 
+func (x *CRDTDigest) SetEntries(v []*CRDTDigestEntry) {
+	x.xxx_hidden_Entries = &v
+}
+
+type CRDTDigest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the digest entries.
+	Entries []*CRDTDigestEntry
+}
+
+func (b0 CRDTDigest_builder) Build() *CRDTDigest {
+	m0 := &CRDTDigest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Entries = &b.Entries
+	return m0
+}
+
 // CRDTFullStateEntry is a single key's full state in an anti-entropy response.
 type CRDTFullStateEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the full CRDT state.
-	Data          *CRDTData `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key  *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Data *CRDTData              `protobuf:"bytes,2,opt,name=data,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CRDTFullStateEntry) Reset() {
@@ -883,32 +1384,74 @@ func (x *CRDTFullStateEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTFullStateEntry.ProtoReflect.Descriptor instead.
-func (*CRDTFullStateEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{12}
-}
-
 func (x *CRDTFullStateEntry) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTFullStateEntry) GetData() *CRDTData {
 	if x != nil {
-		return x.Data
+		return x.xxx_hidden_Data
 	}
 	return nil
 }
 
+func (x *CRDTFullStateEntry) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTFullStateEntry) SetData(v *CRDTData) {
+	x.xxx_hidden_Data = v
+}
+
+func (x *CRDTFullStateEntry) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTFullStateEntry) HasData() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Data != nil
+}
+
+func (x *CRDTFullStateEntry) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+func (x *CRDTFullStateEntry) ClearData() {
+	x.xxx_hidden_Data = nil
+}
+
+type CRDTFullStateEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key.
+	Key *CRDTKey
+	// Specifies the full CRDT state.
+	Data *CRDTData
+}
+
+func (b0 CRDTFullStateEntry_builder) Build() *CRDTFullStateEntry {
+	m0 := &CRDTFullStateEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_Data = b.Data
+	return m0
+}
+
 // CRDTFullState is the anti-entropy response containing full state for divergent keys.
 type CRDTFullState struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the full state entries.
-	Entries       []*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3" json:"entries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries *[]*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CRDTFullState) Reset() {
@@ -936,29 +1479,42 @@ func (x *CRDTFullState) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTFullState.ProtoReflect.Descriptor instead.
-func (*CRDTFullState) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{13}
-}
-
 func (x *CRDTFullState) GetEntries() []*CRDTFullStateEntry {
 	if x != nil {
-		return x.Entries
+		if x.xxx_hidden_Entries != nil {
+			return *x.xxx_hidden_Entries
+		}
 	}
 	return nil
 }
 
+func (x *CRDTFullState) SetEntries(v []*CRDTFullStateEntry) {
+	x.xxx_hidden_Entries = &v
+}
+
+type CRDTFullState_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the full state entries.
+	Entries []*CRDTFullStateEntry
+}
+
+func (b0 CRDTFullState_builder) Build() *CRDTFullState {
+	m0 := &CRDTFullState{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Entries = &b.Entries
+	return m0
+}
+
 // CRDTTombstone marks a deleted CRDT key.
 type CRDTTombstone struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the deleted key.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies when the key was deleted in nanoseconds since epoch.
-	DeletedAtNanos int64 `protobuf:"varint,2,opt,name=deleted_at_nanos,json=deletedAtNanos,proto3" json:"deleted_at_nanos,omitempty"`
-	// Specifies the node that performed the deletion.
-	DeletedByNode string `protobuf:"bytes,3,opt,name=deleted_by_node,json=deletedByNode,proto3" json:"deleted_by_node,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key            *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_DeletedAtNanos int64                  `protobuf:"varint,2,opt,name=deleted_at_nanos,json=deletedAtNanos,proto3"`
+	xxx_hidden_DeletedByNode  string                 `protobuf:"bytes,3,opt,name=deleted_by_node,json=deletedByNode,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *CRDTTombstone) Reset() {
@@ -986,42 +1542,79 @@ func (x *CRDTTombstone) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTTombstone.ProtoReflect.Descriptor instead.
-func (*CRDTTombstone) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{14}
-}
-
 func (x *CRDTTombstone) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTTombstone) GetDeletedAtNanos() int64 {
 	if x != nil {
-		return x.DeletedAtNanos
+		return x.xxx_hidden_DeletedAtNanos
 	}
 	return 0
 }
 
 func (x *CRDTTombstone) GetDeletedByNode() string {
 	if x != nil {
-		return x.DeletedByNode
+		return x.xxx_hidden_DeletedByNode
 	}
 	return ""
+}
+
+func (x *CRDTTombstone) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTTombstone) SetDeletedAtNanos(v int64) {
+	x.xxx_hidden_DeletedAtNanos = v
+}
+
+func (x *CRDTTombstone) SetDeletedByNode(v string) {
+	x.xxx_hidden_DeletedByNode = v
+}
+
+func (x *CRDTTombstone) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTTombstone) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+type CRDTTombstone_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the deleted key.
+	Key *CRDTKey
+	// Specifies when the key was deleted in nanoseconds since epoch.
+	DeletedAtNanos int64
+	// Specifies the node that performed the deletion.
+	DeletedByNode string
+}
+
+func (b0 CRDTTombstone_builder) Build() *CRDTTombstone {
+	m0 := &CRDTTombstone{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_DeletedAtNanos = b.DeletedAtNanos
+	x.xxx_hidden_DeletedByNode = b.DeletedByNode
+	return m0
 }
 
 // CRDTReadRequest asks a peer Replicator for its local value of a key
 // during a coordinated read (ReadFrom: Majority or All).
 type CRDTReadRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key to read.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the node requesting the read.
-	FromNode      string `protobuf:"bytes,2,opt,name=from_node,json=fromNode,proto3" json:"from_node,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key      *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_FromNode string                 `protobuf:"bytes,2,opt,name=from_node,json=fromNode,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *CRDTReadRequest) Reset() {
@@ -1049,37 +1642,66 @@ func (x *CRDTReadRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTReadRequest.ProtoReflect.Descriptor instead.
-func (*CRDTReadRequest) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{15}
-}
-
 func (x *CRDTReadRequest) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTReadRequest) GetFromNode() string {
 	if x != nil {
-		return x.FromNode
+		return x.xxx_hidden_FromNode
 	}
 	return ""
+}
+
+func (x *CRDTReadRequest) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTReadRequest) SetFromNode(v string) {
+	x.xxx_hidden_FromNode = v
+}
+
+func (x *CRDTReadRequest) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTReadRequest) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+type CRDTReadRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key to read.
+	Key *CRDTKey
+	// Specifies the node requesting the read.
+	FromNode string
+}
+
+func (b0 CRDTReadRequest_builder) Build() *CRDTReadRequest {
+	m0 := &CRDTReadRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_FromNode = b.FromNode
+	return m0
 }
 
 // CRDTReadResponse returns a peer Replicator's local value for a key
 // in response to a CRDTReadRequest.
 type CRDTReadResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the local CRDT state. Nil if the key is not found.
-	Data *CRDTData `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	// Specifies the node returning the response.
-	FromNode      string `protobuf:"bytes,3,opt,name=from_node,json=fromNode,proto3" json:"from_node,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key      *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Data     *CRDTData              `protobuf:"bytes,2,opt,name=data,proto3"`
+	xxx_hidden_FromNode string                 `protobuf:"bytes,3,opt,name=from_node,json=fromNode,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *CRDTReadResponse) Reset() {
@@ -1107,43 +1729,90 @@ func (x *CRDTReadResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTReadResponse.ProtoReflect.Descriptor instead.
-func (*CRDTReadResponse) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{16}
-}
-
 func (x *CRDTReadResponse) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTReadResponse) GetData() *CRDTData {
 	if x != nil {
-		return x.Data
+		return x.xxx_hidden_Data
 	}
 	return nil
 }
 
 func (x *CRDTReadResponse) GetFromNode() string {
 	if x != nil {
-		return x.FromNode
+		return x.xxx_hidden_FromNode
 	}
 	return ""
 }
 
+func (x *CRDTReadResponse) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTReadResponse) SetData(v *CRDTData) {
+	x.xxx_hidden_Data = v
+}
+
+func (x *CRDTReadResponse) SetFromNode(v string) {
+	x.xxx_hidden_FromNode = v
+}
+
+func (x *CRDTReadResponse) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTReadResponse) HasData() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Data != nil
+}
+
+func (x *CRDTReadResponse) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+func (x *CRDTReadResponse) ClearData() {
+	x.xxx_hidden_Data = nil
+}
+
+type CRDTReadResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key.
+	Key *CRDTKey
+	// Specifies the local CRDT state. Nil if the key is not found.
+	Data *CRDTData
+	// Specifies the node returning the response.
+	FromNode string
+}
+
+func (b0 CRDTReadResponse_builder) Build() *CRDTReadResponse {
+	m0 := &CRDTReadResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_Data = b.Data
+	x.xxx_hidden_FromNode = b.FromNode
+	return m0
+}
+
 // CRDTSnapshotEntry is a single key's state in a durable BoltDB snapshot.
 type CRDTSnapshotEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the CRDT key.
-	Key *CRDTKey `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the full CRDT state.
-	Data *CRDTData `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
-	// Specifies the local version counter.
-	Version       uint64 `protobuf:"varint,3,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key     *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Data    *CRDTData              `protobuf:"bytes,2,opt,name=data,proto3"`
+	xxx_hidden_Version uint64                 `protobuf:"varint,3,opt,name=version,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CRDTSnapshotEntry) Reset() {
@@ -1171,46 +1840,92 @@ func (x *CRDTSnapshotEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTSnapshotEntry.ProtoReflect.Descriptor instead.
-func (*CRDTSnapshotEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{17}
-}
-
 func (x *CRDTSnapshotEntry) GetKey() *CRDTKey {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *CRDTSnapshotEntry) GetData() *CRDTData {
 	if x != nil {
-		return x.Data
+		return x.xxx_hidden_Data
 	}
 	return nil
 }
 
 func (x *CRDTSnapshotEntry) GetVersion() uint64 {
 	if x != nil {
-		return x.Version
+		return x.xxx_hidden_Version
 	}
 	return 0
+}
+
+func (x *CRDTSnapshotEntry) SetKey(v *CRDTKey) {
+	x.xxx_hidden_Key = v
+}
+
+func (x *CRDTSnapshotEntry) SetData(v *CRDTData) {
+	x.xxx_hidden_Data = v
+}
+
+func (x *CRDTSnapshotEntry) SetVersion(v uint64) {
+	x.xxx_hidden_Version = v
+}
+
+func (x *CRDTSnapshotEntry) HasKey() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Key != nil
+}
+
+func (x *CRDTSnapshotEntry) HasData() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Data != nil
+}
+
+func (x *CRDTSnapshotEntry) ClearKey() {
+	x.xxx_hidden_Key = nil
+}
+
+func (x *CRDTSnapshotEntry) ClearData() {
+	x.xxx_hidden_Data = nil
+}
+
+type CRDTSnapshotEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the CRDT key.
+	Key *CRDTKey
+	// Specifies the full CRDT state.
+	Data *CRDTData
+	// Specifies the local version counter.
+	Version uint64
+}
+
+func (b0 CRDTSnapshotEntry_builder) Build() *CRDTSnapshotEntry {
+	m0 := &CRDTSnapshotEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_Data = b.Data
+	x.xxx_hidden_Version = b.Version
+	return m0
 }
 
 // CRDTDeltaBatch is a batched collection of deltas and tombstones forwarded
 // between CRDT bridge actors across datacenters.
 type CRDTDeltaBatch struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the deltas accumulated since the last flush.
-	Deltas []*CRDTDelta `protobuf:"bytes,1,rep,name=deltas,proto3" json:"deltas,omitempty"`
-	// Specifies the tombstones accumulated since the last flush.
-	Tombstones []*CRDTTombstone `protobuf:"bytes,2,rep,name=tombstones,proto3" json:"tombstones,omitempty"`
-	// Specifies the datacenter that originated this batch.
-	OriginDc *DataCenter `protobuf:"bytes,3,opt,name=origin_dc,json=originDc,proto3" json:"origin_dc,omitempty"`
-	// Specifies when the batch was sent in nanoseconds since epoch.
-	SentAtNanos   int64 `protobuf:"varint,4,opt,name=sent_at_nanos,json=sentAtNanos,proto3" json:"sent_at_nanos,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Deltas      *[]*CRDTDelta          `protobuf:"bytes,1,rep,name=deltas,proto3"`
+	xxx_hidden_Tombstones  *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
+	xxx_hidden_OriginDc    *DataCenter            `protobuf:"bytes,3,opt,name=origin_dc,json=originDc,proto3"`
+	xxx_hidden_SentAtNanos int64                  `protobuf:"varint,4,opt,name=sent_at_nanos,json=sentAtNanos,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *CRDTDeltaBatch) Reset() {
@@ -1238,48 +1953,96 @@ func (x *CRDTDeltaBatch) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CRDTDeltaBatch.ProtoReflect.Descriptor instead.
-func (*CRDTDeltaBatch) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{18}
-}
-
 func (x *CRDTDeltaBatch) GetDeltas() []*CRDTDelta {
 	if x != nil {
-		return x.Deltas
+		if x.xxx_hidden_Deltas != nil {
+			return *x.xxx_hidden_Deltas
+		}
 	}
 	return nil
 }
 
 func (x *CRDTDeltaBatch) GetTombstones() []*CRDTTombstone {
 	if x != nil {
-		return x.Tombstones
+		if x.xxx_hidden_Tombstones != nil {
+			return *x.xxx_hidden_Tombstones
+		}
 	}
 	return nil
 }
 
 func (x *CRDTDeltaBatch) GetOriginDc() *DataCenter {
 	if x != nil {
-		return x.OriginDc
+		return x.xxx_hidden_OriginDc
 	}
 	return nil
 }
 
 func (x *CRDTDeltaBatch) GetSentAtNanos() int64 {
 	if x != nil {
-		return x.SentAtNanos
+		return x.xxx_hidden_SentAtNanos
 	}
 	return 0
 }
 
+func (x *CRDTDeltaBatch) SetDeltas(v []*CRDTDelta) {
+	x.xxx_hidden_Deltas = &v
+}
+
+func (x *CRDTDeltaBatch) SetTombstones(v []*CRDTTombstone) {
+	x.xxx_hidden_Tombstones = &v
+}
+
+func (x *CRDTDeltaBatch) SetOriginDc(v *DataCenter) {
+	x.xxx_hidden_OriginDc = v
+}
+
+func (x *CRDTDeltaBatch) SetSentAtNanos(v int64) {
+	x.xxx_hidden_SentAtNanos = v
+}
+
+func (x *CRDTDeltaBatch) HasOriginDc() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_OriginDc != nil
+}
+
+func (x *CRDTDeltaBatch) ClearOriginDc() {
+	x.xxx_hidden_OriginDc = nil
+}
+
+type CRDTDeltaBatch_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the deltas accumulated since the last flush.
+	Deltas []*CRDTDelta
+	// Specifies the tombstones accumulated since the last flush.
+	Tombstones []*CRDTTombstone
+	// Specifies the datacenter that originated this batch.
+	OriginDc *DataCenter
+	// Specifies when the batch was sent in nanoseconds since epoch.
+	SentAtNanos int64
+}
+
+func (b0 CRDTDeltaBatch_builder) Build() *CRDTDeltaBatch {
+	m0 := &CRDTDeltaBatch{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Deltas = &b.Deltas
+	x.xxx_hidden_Tombstones = &b.Tombstones
+	x.xxx_hidden_OriginDc = b.OriginDc
+	x.xxx_hidden_SentAtNanos = b.SentAtNanos
+	return m0
+}
+
 // ORSetDot represents a single causal event.
 type ORSetData_ORSetDot struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the node that produced this dot.
-	NodeId string `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	// Specifies the monotonic counter for the event.
-	Counter       uint64 `protobuf:"varint,2,opt,name=counter,proto3" json:"counter,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_NodeId  string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3"`
+	xxx_hidden_Counter uint64                 `protobuf:"varint,2,opt,name=counter,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ORSetData_ORSetDot) Reset() {
@@ -1307,34 +2070,53 @@ func (x *ORSetData_ORSetDot) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ORSetData_ORSetDot.ProtoReflect.Descriptor instead.
-func (*ORSetData_ORSetDot) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{5, 0}
-}
-
 func (x *ORSetData_ORSetDot) GetNodeId() string {
 	if x != nil {
-		return x.NodeId
+		return x.xxx_hidden_NodeId
 	}
 	return ""
 }
 
 func (x *ORSetData_ORSetDot) GetCounter() uint64 {
 	if x != nil {
-		return x.Counter
+		return x.xxx_hidden_Counter
 	}
 	return 0
 }
 
+func (x *ORSetData_ORSetDot) SetNodeId(v string) {
+	x.xxx_hidden_NodeId = v
+}
+
+func (x *ORSetData_ORSetDot) SetCounter(v uint64) {
+	x.xxx_hidden_Counter = v
+}
+
+type ORSetData_ORSetDot_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the node that produced this dot.
+	NodeId string
+	// Specifies the monotonic counter for the event.
+	Counter uint64
+}
+
+func (b0 ORSetData_ORSetDot_builder) Build() *ORSetData_ORSetDot {
+	m0 := &ORSetData_ORSetDot{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_NodeId = b.NodeId
+	x.xxx_hidden_Counter = b.Counter
+	return m0
+}
+
 // ORSetEntry is an element with its associated causal dots.
 type ORSetData_ORSetEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized element as raw bytes.
-	Element []byte `protobuf:"bytes,1,opt,name=element,proto3" json:"element,omitempty"`
-	// Specifies the causal dots associated with this element.
-	Dots          []*ORSetData_ORSetDot `protobuf:"bytes,2,rep,name=dots,proto3" json:"dots,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Element []byte                 `protobuf:"bytes,1,opt,name=element,proto3"`
+	xxx_hidden_Dots    *[]*ORSetData_ORSetDot `protobuf:"bytes,2,rep,name=dots,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ORSetData_ORSetEntry) Reset() {
@@ -1362,34 +2144,58 @@ func (x *ORSetData_ORSetEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ORSetData_ORSetEntry.ProtoReflect.Descriptor instead.
-func (*ORSetData_ORSetEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{5, 1}
-}
-
 func (x *ORSetData_ORSetEntry) GetElement() []byte {
 	if x != nil {
-		return x.Element
+		return x.xxx_hidden_Element
 	}
 	return nil
 }
 
 func (x *ORSetData_ORSetEntry) GetDots() []*ORSetData_ORSetDot {
 	if x != nil {
-		return x.Dots
+		if x.xxx_hidden_Dots != nil {
+			return *x.xxx_hidden_Dots
+		}
 	}
 	return nil
 }
 
+func (x *ORSetData_ORSetEntry) SetElement(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Element = v
+}
+
+func (x *ORSetData_ORSetEntry) SetDots(v []*ORSetData_ORSetDot) {
+	x.xxx_hidden_Dots = &v
+}
+
+type ORSetData_ORSetEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the serialized element as raw bytes.
+	Element []byte
+	// Specifies the causal dots associated with this element.
+	Dots []*ORSetData_ORSetDot
+}
+
+func (b0 ORSetData_ORSetEntry_builder) Build() *ORSetData_ORSetEntry {
+	m0 := &ORSetData_ORSetEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Element = b.Element
+	x.xxx_hidden_Dots = &b.Dots
+	return m0
+}
+
 // ORMapEntry is a single key-value pair in the map.
 type ORMapData_ORMapEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized map key as raw bytes.
-	Key []byte `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	// Specifies the CRDT value associated with this key.
-	Value         *CRDTData `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key   []byte                 `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Value *CRDTData              `protobuf:"bytes,2,opt,name=value,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ORMapData_ORMapEntry) Reset() {
@@ -1417,36 +2223,68 @@ func (x *ORMapData_ORMapEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ORMapData_ORMapEntry.ProtoReflect.Descriptor instead.
-func (*ORMapData_ORMapEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{6, 0}
-}
-
 func (x *ORMapData_ORMapEntry) GetKey() []byte {
 	if x != nil {
-		return x.Key
+		return x.xxx_hidden_Key
 	}
 	return nil
 }
 
 func (x *ORMapData_ORMapEntry) GetValue() *CRDTData {
 	if x != nil {
-		return x.Value
+		return x.xxx_hidden_Value
 	}
 	return nil
 }
 
+func (x *ORMapData_ORMapEntry) SetKey(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Key = v
+}
+
+func (x *ORMapData_ORMapEntry) SetValue(v *CRDTData) {
+	x.xxx_hidden_Value = v
+}
+
+func (x *ORMapData_ORMapEntry) HasValue() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Value != nil
+}
+
+func (x *ORMapData_ORMapEntry) ClearValue() {
+	x.xxx_hidden_Value = nil
+}
+
+type ORMapData_ORMapEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the serialized map key as raw bytes.
+	Key []byte
+	// Specifies the CRDT value associated with this key.
+	Value *CRDTData
+}
+
+func (b0 ORMapData_ORMapEntry_builder) Build() *ORMapData_ORMapEntry {
+	m0 := &ORMapData_ORMapEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Key = b.Key
+	x.xxx_hidden_Value = b.Value
+	return m0
+}
+
 // MVRegisterEntry is a single value with its causal dot.
 type MVRegisterData_MVRegisterEntry struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the serialized value as raw bytes.
-	Value []byte `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
-	// Specifies the node that wrote this value.
-	NodeId string `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	// Specifies the monotonic counter for the write event.
-	Counter       uint64 `protobuf:"varint,3,opt,name=counter,proto3" json:"counter,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Value   []byte                 `protobuf:"bytes,1,opt,name=value,proto3"`
+	xxx_hidden_NodeId  string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3"`
+	xxx_hidden_Counter uint64                 `protobuf:"varint,3,opt,name=counter,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *MVRegisterData_MVRegisterEntry) Reset() {
@@ -1474,30 +2312,61 @@ func (x *MVRegisterData_MVRegisterEntry) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MVRegisterData_MVRegisterEntry.ProtoReflect.Descriptor instead.
-func (*MVRegisterData_MVRegisterEntry) Descriptor() ([]byte, []int) {
-	return file_internal_crdt_proto_rawDescGZIP(), []int{8, 0}
-}
-
 func (x *MVRegisterData_MVRegisterEntry) GetValue() []byte {
 	if x != nil {
-		return x.Value
+		return x.xxx_hidden_Value
 	}
 	return nil
 }
 
 func (x *MVRegisterData_MVRegisterEntry) GetNodeId() string {
 	if x != nil {
-		return x.NodeId
+		return x.xxx_hidden_NodeId
 	}
 	return ""
 }
 
 func (x *MVRegisterData_MVRegisterEntry) GetCounter() uint64 {
 	if x != nil {
-		return x.Counter
+		return x.xxx_hidden_Counter
 	}
 	return 0
+}
+
+func (x *MVRegisterData_MVRegisterEntry) SetValue(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Value = v
+}
+
+func (x *MVRegisterData_MVRegisterEntry) SetNodeId(v string) {
+	x.xxx_hidden_NodeId = v
+}
+
+func (x *MVRegisterData_MVRegisterEntry) SetCounter(v uint64) {
+	x.xxx_hidden_Counter = v
+}
+
+type MVRegisterData_MVRegisterEntry_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the serialized value as raw bytes.
+	Value []byte
+	// Specifies the node that wrote this value.
+	NodeId string
+	// Specifies the monotonic counter for the write event.
+	Counter uint64
+}
+
+func (b0 MVRegisterData_MVRegisterEntry_builder) Build() *MVRegisterData_MVRegisterEntry {
+	m0 := &MVRegisterData_MVRegisterEntry{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Value = b.Value
+	x.xxx_hidden_NodeId = b.NodeId
+	x.xxx_hidden_Counter = b.Counter
+	return m0
 }
 
 var File_internal_crdt_proto protoreflect.FileDescriptor
@@ -1623,18 +2492,6 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
 
-var (
-	file_internal_crdt_proto_rawDescOnce sync.Once
-	file_internal_crdt_proto_rawDescData []byte
-)
-
-func file_internal_crdt_proto_rawDescGZIP() []byte {
-	file_internal_crdt_proto_rawDescOnce.Do(func() {
-		file_internal_crdt_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_crdt_proto_rawDesc), len(file_internal_crdt_proto_rawDesc)))
-	})
-	return file_internal_crdt_proto_rawDescData
-}
-
 var file_internal_crdt_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_crdt_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_internal_crdt_proto_goTypes = []any{
@@ -1717,13 +2574,13 @@ func file_internal_crdt_proto_init() {
 	}
 	file_internal_datacenter_proto_init()
 	file_internal_crdt_proto_msgTypes[1].OneofWrappers = []any{
-		(*CRDTData_GCounter)(nil),
-		(*CRDTData_PnCounter)(nil),
-		(*CRDTData_LwwRegister)(nil),
-		(*CRDTData_OrSet)(nil),
-		(*CRDTData_OrMap)(nil),
-		(*CRDTData_Flag)(nil),
-		(*CRDTData_MvRegister)(nil),
+		(*cRDTData_GCounter)(nil),
+		(*cRDTData_PnCounter)(nil),
+		(*cRDTData_LwwRegister)(nil),
+		(*cRDTData_OrSet)(nil),
+		(*cRDTData_OrMap)(nil),
+		(*cRDTData_Flag)(nil),
+		(*cRDTData_MvRegister)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

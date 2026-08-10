@@ -168,14 +168,13 @@ func (x *RemotingServer) dispatchDuplexAsk(ctx context.Context, env DataEnvelope
 // [internalpb.Error] response is returned as an internal-proto REPLY so
 // clients can apply checkProtoError.
 func (x *RemotingServer) dispatchDuplexUserAskViaLegacy(ctx context.Context, handler ProtoHandler, env DataEnvelope) (ReplyEnvelope, error) {
-	req := &internalpb.RemoteAskRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{{
-			Sender:   env.Sender,
-			Receiver: env.Receiver,
-			Message:  env.Payload,
-			Metadata: metadataMapFromEnvelope(env.Metadata),
-		}},
-	}
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(env.Sender)
+	rm.SetReceiver(env.Receiver)
+	rm.SetMessage(env.Payload)
+	rm.SetMetadata(metadataMapFromEnvelope(env.Metadata))
+	req := &internalpb.RemoteAskRequest{}
+	req.SetRemoteMessages([]*internalpb.RemoteMessage{rm})
 
 	if len(env.Metadata) > 0 {
 		md := NewMetadata()
@@ -326,10 +325,10 @@ func (x *RemotingServer) dispatchDuplexControl(ctx context.Context, handler Prot
 // Correlation 0 marks a connection-scoped error; a nonzero value echoes the
 // failed request's correlation ID for request-scoped errors.
 func submitErrorFrame(ctx context.Context, conn *duplexConn, correlation uint64, code internalpb.Code, message string) error {
-	payload, err := proto.Marshal(&internalpb.Error{
-		Code:    code,
-		Message: message,
-	})
+	error2 := &internalpb.Error{}
+	error2.SetCode(code)
+	error2.SetMessage(message)
+	payload, err := proto.Marshal(error2)
 	if err != nil {
 		return err
 	}

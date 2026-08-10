@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -22,11 +21,10 @@ const (
 )
 
 type GetNodeMetricRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the node address
-	NodeAddress   string `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_NodeAddress string                 `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetNodeMetricRequest) Reset() {
@@ -54,26 +52,38 @@ func (x *GetNodeMetricRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetNodeMetricRequest.ProtoReflect.Descriptor instead.
-func (*GetNodeMetricRequest) Descriptor() ([]byte, []int) {
-	return file_internal_cluster_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *GetNodeMetricRequest) GetNodeAddress() string {
 	if x != nil {
-		return x.NodeAddress
+		return x.xxx_hidden_NodeAddress
 	}
 	return ""
 }
 
-type GetNodeMetricResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *GetNodeMetricRequest) SetNodeAddress(v string) {
+	x.xxx_hidden_NodeAddress = v
+}
+
+type GetNodeMetricRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the node address
-	NodeAddress string `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
-	// Specifies the total number of actors and grains for the given node
-	Load          uint64 `protobuf:"varint,2,opt,name=load,proto3" json:"load,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NodeAddress string
+}
+
+func (b0 GetNodeMetricRequest_builder) Build() *GetNodeMetricRequest {
+	m0 := &GetNodeMetricRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_NodeAddress = b.NodeAddress
+	return m0
+}
+
+type GetNodeMetricResponse struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_NodeAddress string                 `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3"`
+	xxx_hidden_Load        uint64                 `protobuf:"varint,2,opt,name=load,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetNodeMetricResponse) Reset() {
@@ -101,31 +111,51 @@ func (x *GetNodeMetricResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetNodeMetricResponse.ProtoReflect.Descriptor instead.
-func (*GetNodeMetricResponse) Descriptor() ([]byte, []int) {
-	return file_internal_cluster_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *GetNodeMetricResponse) GetNodeAddress() string {
 	if x != nil {
-		return x.NodeAddress
+		return x.xxx_hidden_NodeAddress
 	}
 	return ""
 }
 
 func (x *GetNodeMetricResponse) GetLoad() uint64 {
 	if x != nil {
-		return x.Load
+		return x.xxx_hidden_Load
 	}
 	return 0
 }
 
-type GetKindsRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *GetNodeMetricResponse) SetNodeAddress(v string) {
+	x.xxx_hidden_NodeAddress = v
+}
+
+func (x *GetNodeMetricResponse) SetLoad(v uint64) {
+	x.xxx_hidden_Load = v
+}
+
+type GetNodeMetricResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the node address
-	NodeAddress   string `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3" json:"node_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	NodeAddress string
+	// Specifies the total number of actors and grains for the given node
+	Load uint64
+}
+
+func (b0 GetNodeMetricResponse_builder) Build() *GetNodeMetricResponse {
+	m0 := &GetNodeMetricResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_NodeAddress = b.NodeAddress
+	x.xxx_hidden_Load = b.Load
+	return m0
+}
+
+type GetKindsRequest struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_NodeAddress string                 `protobuf:"bytes,1,opt,name=node_address,json=nodeAddress,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetKindsRequest) Reset() {
@@ -153,24 +183,37 @@ func (x *GetKindsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetKindsRequest.ProtoReflect.Descriptor instead.
-func (*GetKindsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_cluster_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *GetKindsRequest) GetNodeAddress() string {
 	if x != nil {
-		return x.NodeAddress
+		return x.xxx_hidden_NodeAddress
 	}
 	return ""
 }
 
+func (x *GetKindsRequest) SetNodeAddress(v string) {
+	x.xxx_hidden_NodeAddress = v
+}
+
+type GetKindsRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the node address
+	NodeAddress string
+}
+
+func (b0 GetKindsRequest_builder) Build() *GetKindsRequest {
+	m0 := &GetKindsRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_NodeAddress = b.NodeAddress
+	return m0
+}
+
 type GetKindsResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the list of kinds
-	Kinds         []string `protobuf:"bytes,1,rep,name=kinds,proto3" json:"kinds,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Kinds []string               `protobuf:"bytes,1,rep,name=kinds,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GetKindsResponse) Reset() {
@@ -198,16 +241,30 @@ func (x *GetKindsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetKindsResponse.ProtoReflect.Descriptor instead.
-func (*GetKindsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_cluster_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *GetKindsResponse) GetKinds() []string {
 	if x != nil {
-		return x.Kinds
+		return x.xxx_hidden_Kinds
 	}
 	return nil
+}
+
+func (x *GetKindsResponse) SetKinds(v []string) {
+	x.xxx_hidden_Kinds = v
+}
+
+type GetKindsResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the list of kinds
+	Kinds []string
+}
+
+func (b0 GetKindsResponse_builder) Build() *GetKindsResponse {
+	m0 := &GetKindsResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Kinds = b.Kinds
+	return m0
 }
 
 var File_internal_cluster_proto protoreflect.FileDescriptor
@@ -229,18 +286,6 @@ const file_internal_cluster_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_cluster_proto_rawDescOnce sync.Once
-	file_internal_cluster_proto_rawDescData []byte
-)
-
-func file_internal_cluster_proto_rawDescGZIP() []byte {
-	file_internal_cluster_proto_rawDescOnce.Do(func() {
-		file_internal_cluster_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_cluster_proto_rawDesc), len(file_internal_cluster_proto_rawDesc)))
-	})
-	return file_internal_cluster_proto_rawDescData
-}
 
 var file_internal_cluster_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_cluster_proto_goTypes = []any{

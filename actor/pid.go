@@ -855,7 +855,7 @@ func (pid *PID) RestartCount() int {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return int(metric.RestartCount)
+			return int(metric.GetRestartCount())
 		}
 		return 0
 	}
@@ -877,7 +877,7 @@ func (pid *PID) ProcessedCount() int {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return int(metric.ProcessedCount)
+			return int(metric.GetProcessedCount())
 		}
 		return 0
 	}
@@ -894,7 +894,7 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return metric.LatestProcessedDuration.AsDuration()
+			return metric.GetLatestProcessedDuration().AsDuration()
 		}
 		return 0
 	}
@@ -3356,11 +3356,10 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 
 	var singletonSpec *internalpb.SingletonSpec
 	if pid.IsSingleton() && pid.singletonSpec != nil {
-		singletonSpec = &internalpb.SingletonSpec{
-			SpawnTimeout: durationpb.New(pid.singletonSpec.SpawnTimeout),
-			WaitInterval: durationpb.New(pid.singletonSpec.WaitInterval),
-			MaxRetries:   pid.singletonSpec.MaxRetries,
-		}
+		singletonSpec = &internalpb.SingletonSpec{}
+		singletonSpec.SetSpawnTimeout(durationpb.New(pid.singletonSpec.SpawnTimeout))
+		singletonSpec.SetWaitInterval(durationpb.New(pid.singletonSpec.WaitInterval))
+		singletonSpec.SetMaxRetries(pid.singletonSpec.MaxRetries)
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
@@ -3376,22 +3375,24 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		initTimeout = durationpb.New(*override)
 	}
 
-	return &internalpb.Actor{
-		Address:             pid.ID(),
-		Type:                types.Name(pid.Actor()),
-		Singleton:           singletonSpec,
-		Relocatable:         pid.IsRelocatable(),
-		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
-		Dependencies:        dependencies,
-		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
-		Role:                pid.Role(),
-		Supervisor:          supervisorSpec,
-		Reentrancy:          reentrancy,
-		InitTimeout:         initTimeout,
-		IncarnationId:       pid.IncarnationID(),
-		ReliableDelivery:    pid.reliableDelivery.toProto(),
-		ReliableCompanion:   pid.reliableCompanion.toProto(),
-	}, nil
+	actor := &internalpb.Actor{}
+	actor.SetAddress(pid.ID())
+	actor.SetType(types.Name(pid.Actor()))
+	actor.SetSingleton(singletonSpec)
+	actor.SetRelocatable(pid.IsRelocatable())
+	actor.SetPassivationStrategy(codec.EncodePassivationStrategy(pid.PassivationStrategy()))
+	actor.SetDependencies(dependencies)
+	actor.SetEnableStash(pid.stashState != nil && pid.stashState.box != nil)
+	if x := pid.Role(); x != nil {
+		actor.SetRole(*x)
+	}
+	actor.SetSupervisor(supervisorSpec)
+	actor.SetReentrancy(reentrancy)
+	actor.SetInitTimeout(initTimeout)
+	actor.SetIncarnationId(pid.IncarnationID())
+	actor.SetReliableDelivery(pid.reliableDelivery.toProto())
+	actor.SetReliableCompanion(pid.reliableCompanion.toProto())
+	return actor, nil
 }
 
 func (pid *PID) registerMetrics() error {

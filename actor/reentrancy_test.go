@@ -105,7 +105,7 @@ func TestReentrancyCycleAllowAll(t *testing.T) {
 				}
 			})
 		case *testpb.TestGetCount:
-			rctx.Response(&testpb.TestCount{Value: 42})
+			rctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		default:
 			rctx.Unhandled()
 		}
@@ -141,7 +141,7 @@ func TestRequestNameAcrossNodes(t *testing.T) {
 	_, err := node2.Spawn(ctx, "remote-responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
 		switch rctx.Message().(type) {
 		case *testpb.TestPing:
-			rctx.Response(&testpb.TestCount{Value: 42})
+			rctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		default:
 			rctx.Unhandled()
 		}
@@ -215,7 +215,7 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	targetGrain := &scriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestPing:
-			gctx.Response(&testpb.TestCount{Value: 42})
+			gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		default:
 			gctx.Unhandled()
 		}
@@ -228,7 +228,7 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	_, err = node2.Spawn(ctx, "edge-target-actor", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
 		switch rctx.Message().(type) {
 		case *testpb.TestPing:
-			rctx.Response(&testpb.TestCount{Value: 42})
+			rctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		default:
 			rctx.Unhandled()
 		}
@@ -321,7 +321,7 @@ func TestRequestRequiresReentrancy(t *testing.T) {
 	requester := spawnReentrancyActor(t, sys, ctx, "requester", func(rctx *ReceiveContext) {
 		switch rctx.Message().(type) {
 		case *testpb.TestSend:
-			call := rctx.Request(target, &testpb.TestWait{Duration: 1})
+			call := rctx.Request(target, testpb.TestWait_builder{Duration: 1}.Build())
 			if call != nil {
 				return
 			}
@@ -362,7 +362,7 @@ func TestRequestAllowAllProcessesOtherMessages(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
 	waitForProcessedBeforeReply(t, processedCh, replyCh, errCh, reentrancyProcessWait)
@@ -398,7 +398,7 @@ func TestRequestStashNonReentrant(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
 	assertNoSignal(t, processedCh, errCh, reentrancyShortWait, "unexpected message processed while awaiting response")
@@ -434,7 +434,7 @@ func TestRequestStashOverride(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
 	assertNoSignal(t, processedCh, errCh, reentrancyShortWait, "unexpected message processed while awaiting response")
@@ -468,7 +468,7 @@ func TestRequestName(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 1}.Build()))
 	waitForReply(t, replyCh, errCh, reentrancyReplyTimeout)
 }
 
@@ -491,7 +491,7 @@ func TestRequestTimeout(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	waitForError(t, errCh, gerrors.ErrRequestTimeout, reentrancyReplyTimeout)
 }
 
@@ -527,7 +527,7 @@ func TestRequestCallCancel(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	pause.For(reentrancyDispatchWait)
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
@@ -563,7 +563,7 @@ func TestRequestCallThenAfterCompletion(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 1}.Build()))
 	pause.For(reentrancyDispatchWait)
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
@@ -586,7 +586,7 @@ func TestRequestInvalidMode(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 1}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 1}.Build()))
 	waitForError(t, errCh, gerrors.ErrInvalidReentrancyMode, reentrancyReplyTimeout)
 }
 
@@ -600,7 +600,7 @@ func TestRequestMaxInFlight(t *testing.T) {
 		case *testpb.TestWait:
 			_ = rctx.Request(target, msg)
 		case *testpb.TestSend:
-			call := rctx.Request(target, &testpb.TestWait{Duration: 200})
+			call := rctx.Request(target, testpb.TestWait_builder{Duration: 200}.Build())
 			if call != nil {
 				return
 			}
@@ -608,7 +608,7 @@ func TestRequestMaxInFlight(t *testing.T) {
 		}
 	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll), reentrancy.WithMaxInFlight(1))))
 
-	require.NoError(t, Tell(ctx, requester, &testpb.TestWait{Duration: 200}))
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 200}.Build()))
 	pause.For(reentrancyDispatchWait)
 	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
 
@@ -620,7 +620,7 @@ func TestCancelInFlightRequests(t *testing.T) {
 	target := spawnReentrancyActor(t, sys, ctx, "cancel-inflight-target", responderWithDelay(reentrancyDelay, nil))
 
 	requester := spawnReentrancyActor(t, sys, ctx, "cancel-inflight-requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
-	call, err := requester.request(ctx, target, &testpb.TestWait{Duration: 200})
+	call, err := requester.request(ctx, target, testpb.TestWait_builder{Duration: 200}.Build())
 	require.NoError(t, err)
 	require.NotNil(t, call)
 
@@ -824,7 +824,7 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 	sys.actors = newTree()
 
 	remoteAddr := address.New("remote-actor", "remote-system", "127.0.0.1", 9001).String()
-	clusterMock.EXPECT().GetActor(mock.Anything, "remote-actor").Return(&internalpb.Actor{Address: remoteAddr}, nil)
+	clusterMock.EXPECT().GetActor(mock.Anything, "remote-actor").Return(internalpb.Actor_builder{Address: remoteAddr}.Build(), nil)
 
 	pid := &PID{
 		actorSystem: sys,
@@ -999,7 +999,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 			}
 		})
 
-		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		payload, err := anypb.New(testpb.Reply_builder{Content: "ok"}.Build())
 		require.NoError(t, err)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
 			CorrelationID: state.id,
@@ -1021,7 +1021,7 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 
 	t.Run("success unknown", func(t *testing.T) {
 		pid := newRunningPIDWithReentrancy(t, reentrancy.AllowAll, 0)
-		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		payload, err := anypb.New(testpb.Reply_builder{Content: "ok"}.Build())
 		require.NoError(t, err)
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{
 			CorrelationID: "missing",
@@ -1228,7 +1228,7 @@ func TestCompleteRequest(t *testing.T) {
 			}
 		})
 
-		payload := &testpb.Reply{Content: "ok"}
+		payload := testpb.Reply_builder{Content: "ok"}.Build()
 		require.True(t, pid.completeRequest(state.id, payload, nil))
 
 		select {
@@ -1379,11 +1379,11 @@ func responderWithDelay(delay time.Duration, corrCh chan string) func(*ReceiveCo
 			if wait > 0 {
 				pause.For(wait)
 			}
-			ctx.Response(&testpb.Reply{Content: "ok"})
+			ctx.Response(testpb.Reply_builder{Content: "ok"}.Build())
 		case *testpb.TestTimeout:
 			// intentionally no response
 		default:
-			ctx.Response(&testpb.Reply{Content: "ok"})
+			ctx.Response(testpb.Reply_builder{Content: "ok"}.Build())
 		}
 	}
 }
@@ -1466,7 +1466,7 @@ func TestActorRequestGrain(t *testing.T) {
 	system := sys.(*actorSystem)
 
 	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
-		gctx.Response(&testpb.TestCount{Value: 21})
+		gctx.Response(testpb.TestCount_builder{Value: 21}.Build())
 	}}
 	identity := activateReentrantGrain(t, system, grain, "answering-grain")
 
@@ -1623,7 +1623,7 @@ func TestActorEnableReentrancyAtRuntime(t *testing.T) {
 
 	target := spawnReentrancyActor(t, sys, ctx, "runtime-target", func(rctx *ReceiveContext) {
 		if _, ok := rctx.Message().(*testpb.TestPing); ok {
-			rctx.Response(&testpb.TestCount{Value: 11})
+			rctx.Response(testpb.TestCount_builder{Value: 11}.Build())
 		}
 	})
 
@@ -1713,7 +1713,7 @@ func TestActorDisableReentrancyKeepsInFlight(t *testing.T) {
 
 			go func() {
 				<-release
-				_ = self.ActorSystem().routeAsyncReply(context.Background(), self, replyTo, requestID, &testpb.TestCount{Value: 5}, nil)
+				_ = self.ActorSystem().routeAsyncReply(context.Background(), self, replyTo, requestID, testpb.TestCount_builder{Value: 5}.Build(), nil)
 				_ = sender
 			}()
 		}
@@ -1811,7 +1811,7 @@ func TestDisableReentrancyPerCallOverride(t *testing.T) {
 
 	target := spawnReentrancyActor(t, sys, ctx, "override-target", func(rctx *ReceiveContext) {
 		if _, ok := rctx.Message().(*testpb.TestPing); ok {
-			rctx.Response(&testpb.TestCount{Value: 3})
+			rctx.Response(testpb.TestCount_builder{Value: 3}.Build())
 		}
 	})
 

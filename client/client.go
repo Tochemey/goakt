@@ -146,9 +146,8 @@ func (x *Client) Kinds(ctx context.Context) ([]string, error) {
 	host, port := node.hostAndPort()
 	client := node.remoteClient().NetClient(host, port)
 
-	request := &internalpb.GetKindsRequest{
-		NodeAddress: node.getAddress(),
-	}
+	request := &internalpb.GetKindsRequest{}
+	request.SetNodeAddress(node.getAddress())
 
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {
@@ -584,7 +583,8 @@ func getNodeMetric(ctx context.Context, node *Node) (int, bool, error) {
 	host, port := node.hostAndPort()
 	client := node.remoteClient().NetClient(host, port)
 
-	request := &internalpb.GetNodeMetricRequest{NodeAddress: node.getAddress()}
+	request := &internalpb.GetNodeMetricRequest{}
+	request.SetNodeAddress(node.getAddress())
 
 	resp, err := client.SendProto(ctx, request)
 	if err != nil {

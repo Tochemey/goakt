@@ -124,24 +124,24 @@ func (x *tellPump) popAdmit() (admittedTell, bool) {
 // tellRemoteMessage converts tell params to the wire message shape shared by
 // the coalescer submit path. The payload slice is shared with params.
 func tellRemoteMessage(params tellParams) *internalpb.RemoteMessage {
-	return &internalpb.RemoteMessage{
-		Sender:   params.sender,
-		Receiver: params.receiver,
-		Message:  params.payload,
-		Metadata: metadataMapFromBytes(params.metadata),
-	}
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(params.sender)
+	rm.SetReceiver(params.receiver)
+	rm.SetMessage(params.payload)
+	rm.SetMetadata(metadataMapFromBytes(params.metadata))
+	return rm
 }
 
 // tellRemoteMessageOwned is like tellRemoteMessage but copies the payload so
 // async failure handlers may retain the message after the caller recycles
 // its buffers (payload pool on the synchronous tell path).
 func tellRemoteMessageOwned(params tellParams) *internalpb.RemoteMessage {
-	return &internalpb.RemoteMessage{
-		Sender:   params.sender,
-		Receiver: params.receiver,
-		Message:  cloneBytes(params.payload),
-		Metadata: metadataMapFromBytes(params.metadata),
-	}
+	rm := &internalpb.RemoteMessage{}
+	rm.SetSender(params.sender)
+	rm.SetReceiver(params.receiver)
+	rm.SetMessage(cloneBytes(params.payload))
+	rm.SetMetadata(metadataMapFromBytes(params.metadata))
+	return rm
 }
 
 // cloneBytes returns a copy of b, or nil when b is empty, so admitted tells

@@ -208,10 +208,10 @@ func (x *duplexConn) releaseFramePayload(payload []byte) {
 // ERROR cannot be admitted, the transport is failed so the peer observes
 // connection loss instead of a silent drop.
 func (x *duplexConn) softRejectChunk(corr uint64, message string) {
-	payload, err := proto.Marshal(&internalpb.Error{
-		Code:    internalpb.Code_CODE_FAILED_PRECONDITION,
-		Message: message,
-	})
+	error2 := &internalpb.Error{}
+	error2.SetCode(internalpb.Code_CODE_FAILED_PRECONDITION)
+	error2.SetMessage(message)
+	payload, err := proto.Marshal(error2)
 	if err != nil {
 		return
 	}
@@ -277,10 +277,10 @@ func (x *duplexConn) dispatchLogical(frame Frame) {
 // rejectProtocol emits a connection-scoped ERROR then drains the writer and
 // tears down the transport, matching [duplexConn.rejectWrongLane].
 func (x *duplexConn) rejectProtocol(message string) {
-	payload, err := proto.Marshal(&internalpb.Error{
-		Code:    internalpb.Code_CODE_FAILED_PRECONDITION,
-		Message: message,
-	})
+	error2 := &internalpb.Error{}
+	error2.SetCode(internalpb.Code_CODE_FAILED_PRECONDITION)
+	error2.SetMessage(message)
+	payload, err := proto.Marshal(error2)
 	if err == nil {
 		_ = x.trySubmit(Frame{
 			Version: ProtocolVersion,

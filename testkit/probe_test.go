@@ -143,7 +143,7 @@ func TestTestProbe(t *testing.T) {
 		msg := new(testpb.TestPong)
 		// send a message to the actor to be tested
 		duration := time.Second
-		probe.Send("pinger", &testpb.TestWait{Duration: uint64(duration)})
+		probe.Send("pinger", testpb.TestWait_builder{Duration: uint64(duration)}.Build())
 
 		probe.ExpectMessageWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
@@ -166,7 +166,7 @@ func TestTestProbe(t *testing.T) {
 		msg := new(testpb.TestPong)
 		// send a message to the actor to be tested
 		duration := time.Second
-		probe.Send("pinger", &testpb.TestWait{Duration: uint64(duration)})
+		probe.Send("pinger", testpb.TestWait_builder{Duration: uint64(duration)}.Build())
 
 		probe.ExpectMessageOfTypeWithin(2*time.Second, msg)
 		probe.ExpectNoMessage()
@@ -414,7 +414,7 @@ func (x pinger) Receive(ctx *actor.ReceiveContext) {
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
 		wg.Go(func() {
-			pause.For(time.Duration(x.Duration))
+			pause.For(time.Duration(x.GetDuration()))
 		})
 		// block until timer is up
 		wg.Wait()

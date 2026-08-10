@@ -581,13 +581,13 @@ func newRevisionPair(t *testing.T, revision uint32, credits int64) (*duplexConn,
 		_ = c2.Close()
 	})
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    revision,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
 		InitialCredits:              uint64(credits),
-	}
+	}.Build()
 
 	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
 		withDuplexWriteTimeout(100*time.Millisecond),
@@ -613,13 +613,13 @@ func newCreditsChunkPair(t *testing.T, credits int64, chunkSize uint32) (*duplex
 		_ = c2.Close()
 	})
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionCredits,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
 		InitialCredits:              uint64(credits),
-	}
+	}.Build()
 
 	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
 		withDuplexWriteTimeout(100*time.Millisecond),

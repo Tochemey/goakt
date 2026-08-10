@@ -133,7 +133,7 @@ func TestConfig(t *testing.T) {
 	})
 	t.Run("With_default_serializer_resolves_proto_message", func(t *testing.T) {
 		config := DefaultConfig()
-		msg := &testpb.Reply{Content: "hello"}
+		msg := testpb.Reply_builder{Content: "hello"}.Build()
 		s := config.Serializer(msg)
 		require.NotNil(t, s, "expected default ProtoSerializer for proto.Message")
 		_, ok := s.(*ProtoSerializer)

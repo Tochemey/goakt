@@ -106,7 +106,7 @@ func (t *tellCounter) handler(_ context.Context, _ inet.Connection, msg proto.Me
 	t.all = append(t.all, req.GetRemoteMessages()...)
 	t.mu.Unlock()
 	if ep := t.retErr.Load(); ep != nil && *ep != nil {
-		return &internalpb.Error{Code: internalpb.Code_CODE_INTERNAL, Message: (*ep).Error()}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_INTERNAL, Message: (*ep).Error()}.Build(), nil
 	}
 	return &internalpb.RemoteTellResponse{}, nil
 }
@@ -1062,9 +1062,9 @@ func TestCoalescerFansOutUndeliveredOnly(t *testing.T) {
 
 	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 8}, handler, flush)
 
-	first := &internalpb.RemoteMessage{Receiver: "one"}
-	second := &internalpb.RemoteMessage{Receiver: "two"}
-	third := &internalpb.RemoteMessage{Receiver: "three"}
+	first := internalpb.RemoteMessage_builder{Receiver: "one"}.Build()
+	second := internalpb.RemoteMessage_builder{Receiver: "two"}.Build()
+	third := internalpb.RemoteMessage_builder{Receiver: "three"}.Build()
 
 	// Stuff the buffer directly so close()'s final drain flushes all three
 	// as one deterministic batch.

@@ -3465,7 +3465,9 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 
 		// dispatch to the relocator; its mailbox is the queue, so a burst of
 		// node departures never blocks the cluster events loop
-		if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+		rebalance := &internalpb.Rebalance{}
+		rebalance.SetPeerState(peerState)
+		if err := x.systemGuardian.Tell(ctx, x.relocator, rebalance); err != nil {
 			x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
 			x.endRelocation(nodeLeft.Address)
 		}
@@ -3583,7 +3585,9 @@ func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress 
 		return
 	}
 
-	if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+	rebalance := &internalpb.Rebalance{}
+	rebalance.SetPeerState(peerState)
+	if err := x.systemGuardian.Tell(ctx, x.relocator, rebalance); err != nil {
 		x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
 		x.endRelocation(peerAddress)
 	}
@@ -3715,13 +3719,13 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 			x.String(), peerAddress, host, remotingPort, len(wireActors), len(wireGrains))
 	}
 
-	return &internalpb.PeerState{
-		Host:         host,
-		PeersPort:    peersPort32,
-		RemotingPort: remotingPort32,
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}, true
+	peerState := &internalpb.PeerState{}
+	peerState.SetHost(host)
+	peerState.SetPeersPort(peersPort32)
+	peerState.SetRemotingPort(remotingPort32)
+	peerState.SetActors(wireActors)
+	peerState.SetGrains(wireGrains)
+	return peerState, true
 }
 
 // publishRelocationStarted emits a RelocationStarted event for a departed node
@@ -4754,13 +4758,12 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 		wireGrains[grain.getIdentity().String()] = wireGrain
 	}
 
-	peerState := &internalpb.PeerState{
-		Host:         x.Host(),
-		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
-		RemotingPort: int32(x.Port()),                // nolint
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}
+	peerState := &internalpb.PeerState{}
+	peerState.SetHost(x.Host())
+	peerState.SetPeersPort(int32(x.clusterNode.PeersPort)) // nolint
+	peerState.SetRemotingPort(int32(x.Port()))             // nolint
+	peerState.SetActors(wireActors)
+	peerState.SetGrains(wireGrains)
 
 	return peerState, nil
 }
@@ -4820,9 +4823,8 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 		go func() {
 			// Get pooled proto TCP client
 			client := remoting.NetClient(peer.Host, peer.RemotingPort)
-			request := &internalpb.PersistPeerStateRequest{
-				PeerState: peerState,
-			}
+			request := &internalpb.PersistPeerStateRequest{}
+			request.SetPeerState(peerState)
 
 			// Send request using proto TCP
 			resp, err := client.SendProto(rpcCtx, request)

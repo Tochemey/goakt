@@ -1120,10 +1120,10 @@ func isTimeoutError(err error) bool {
 // the transport. Called from the reader: admit via trySubmit, signal writer
 // drain, then close the socket so the ERROR can leave before teardown.
 func (x *duplexConn) rejectWrongLane() {
-	payload, err := proto.Marshal(&internalpb.Error{
-		Code:    internalpb.Code_CODE_FAILED_PRECONDITION,
-		Message: "frame lane does not match connection lane",
-	})
+	error2 := &internalpb.Error{}
+	error2.SetCode(internalpb.Code_CODE_FAILED_PRECONDITION)
+	error2.SetMessage("frame lane does not match connection lane")
+	payload, err := proto.Marshal(error2)
 	if err == nil {
 		_ = x.trySubmit(Frame{
 			Version: ProtocolVersion,

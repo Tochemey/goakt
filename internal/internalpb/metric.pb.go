@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -23,18 +22,18 @@ const (
 )
 
 type Metric struct {
-	state                   protoimpl.MessageState `protogen:"open.v1"`
-	Uptime                  int64                  `protobuf:"varint,1,opt,name=uptime,proto3" json:"uptime,omitempty"`
-	LatestProcessedDuration *durationpb.Duration   `protobuf:"bytes,2,opt,name=latest_processed_duration,json=latestProcessedDuration,proto3" json:"latest_processed_duration,omitempty"`
-	ChildrenCount           uint64                 `protobuf:"varint,3,opt,name=children_count,json=childrenCount,proto3" json:"children_count,omitempty"`
-	DeadlettersCount        uint64                 `protobuf:"varint,4,opt,name=deadletters_count,json=deadlettersCount,proto3" json:"deadletters_count,omitempty"`
-	RestartCount            uint64                 `protobuf:"varint,5,opt,name=restart_count,json=restartCount,proto3" json:"restart_count,omitempty"`
-	ProcessedCount          uint64                 `protobuf:"varint,6,opt,name=processed_count,json=processedCount,proto3" json:"processed_count,omitempty"`
-	StashSize               uint64                 `protobuf:"varint,7,opt,name=stash_size,json=stashSize,proto3" json:"stash_size,omitempty"`
-	FailureCount            uint64                 `protobuf:"varint,8,opt,name=failure_count,json=failureCount,proto3" json:"failure_count,omitempty"`
-	ReinstateCount          uint64                 `protobuf:"varint,9,opt,name=reinstate_count,json=reinstateCount,proto3" json:"reinstate_count,omitempty"`
-	unknownFields           protoimpl.UnknownFields
-	sizeCache               protoimpl.SizeCache
+	state                              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Uptime                  int64                  `protobuf:"varint,1,opt,name=uptime,proto3"`
+	xxx_hidden_LatestProcessedDuration *durationpb.Duration   `protobuf:"bytes,2,opt,name=latest_processed_duration,json=latestProcessedDuration,proto3"`
+	xxx_hidden_ChildrenCount           uint64                 `protobuf:"varint,3,opt,name=children_count,json=childrenCount,proto3"`
+	xxx_hidden_DeadlettersCount        uint64                 `protobuf:"varint,4,opt,name=deadletters_count,json=deadlettersCount,proto3"`
+	xxx_hidden_RestartCount            uint64                 `protobuf:"varint,5,opt,name=restart_count,json=restartCount,proto3"`
+	xxx_hidden_ProcessedCount          uint64                 `protobuf:"varint,6,opt,name=processed_count,json=processedCount,proto3"`
+	xxx_hidden_StashSize               uint64                 `protobuf:"varint,7,opt,name=stash_size,json=stashSize,proto3"`
+	xxx_hidden_FailureCount            uint64                 `protobuf:"varint,8,opt,name=failure_count,json=failureCount,proto3"`
+	xxx_hidden_ReinstateCount          uint64                 `protobuf:"varint,9,opt,name=reinstate_count,json=reinstateCount,proto3"`
+	unknownFields                      protoimpl.UnknownFields
+	sizeCache                          protoimpl.SizeCache
 }
 
 func (x *Metric) Reset() {
@@ -62,72 +61,144 @@ func (x *Metric) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Metric.ProtoReflect.Descriptor instead.
-func (*Metric) Descriptor() ([]byte, []int) {
-	return file_internal_metric_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *Metric) GetUptime() int64 {
 	if x != nil {
-		return x.Uptime
+		return x.xxx_hidden_Uptime
 	}
 	return 0
 }
 
 func (x *Metric) GetLatestProcessedDuration() *durationpb.Duration {
 	if x != nil {
-		return x.LatestProcessedDuration
+		return x.xxx_hidden_LatestProcessedDuration
 	}
 	return nil
 }
 
 func (x *Metric) GetChildrenCount() uint64 {
 	if x != nil {
-		return x.ChildrenCount
+		return x.xxx_hidden_ChildrenCount
 	}
 	return 0
 }
 
 func (x *Metric) GetDeadlettersCount() uint64 {
 	if x != nil {
-		return x.DeadlettersCount
+		return x.xxx_hidden_DeadlettersCount
 	}
 	return 0
 }
 
 func (x *Metric) GetRestartCount() uint64 {
 	if x != nil {
-		return x.RestartCount
+		return x.xxx_hidden_RestartCount
 	}
 	return 0
 }
 
 func (x *Metric) GetProcessedCount() uint64 {
 	if x != nil {
-		return x.ProcessedCount
+		return x.xxx_hidden_ProcessedCount
 	}
 	return 0
 }
 
 func (x *Metric) GetStashSize() uint64 {
 	if x != nil {
-		return x.StashSize
+		return x.xxx_hidden_StashSize
 	}
 	return 0
 }
 
 func (x *Metric) GetFailureCount() uint64 {
 	if x != nil {
-		return x.FailureCount
+		return x.xxx_hidden_FailureCount
 	}
 	return 0
 }
 
 func (x *Metric) GetReinstateCount() uint64 {
 	if x != nil {
-		return x.ReinstateCount
+		return x.xxx_hidden_ReinstateCount
 	}
 	return 0
+}
+
+func (x *Metric) SetUptime(v int64) {
+	x.xxx_hidden_Uptime = v
+}
+
+func (x *Metric) SetLatestProcessedDuration(v *durationpb.Duration) {
+	x.xxx_hidden_LatestProcessedDuration = v
+}
+
+func (x *Metric) SetChildrenCount(v uint64) {
+	x.xxx_hidden_ChildrenCount = v
+}
+
+func (x *Metric) SetDeadlettersCount(v uint64) {
+	x.xxx_hidden_DeadlettersCount = v
+}
+
+func (x *Metric) SetRestartCount(v uint64) {
+	x.xxx_hidden_RestartCount = v
+}
+
+func (x *Metric) SetProcessedCount(v uint64) {
+	x.xxx_hidden_ProcessedCount = v
+}
+
+func (x *Metric) SetStashSize(v uint64) {
+	x.xxx_hidden_StashSize = v
+}
+
+func (x *Metric) SetFailureCount(v uint64) {
+	x.xxx_hidden_FailureCount = v
+}
+
+func (x *Metric) SetReinstateCount(v uint64) {
+	x.xxx_hidden_ReinstateCount = v
+}
+
+func (x *Metric) HasLatestProcessedDuration() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_LatestProcessedDuration != nil
+}
+
+func (x *Metric) ClearLatestProcessedDuration() {
+	x.xxx_hidden_LatestProcessedDuration = nil
+}
+
+type Metric_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Uptime                  int64
+	LatestProcessedDuration *durationpb.Duration
+	ChildrenCount           uint64
+	DeadlettersCount        uint64
+	RestartCount            uint64
+	ProcessedCount          uint64
+	StashSize               uint64
+	FailureCount            uint64
+	ReinstateCount          uint64
+}
+
+func (b0 Metric_builder) Build() *Metric {
+	m0 := &Metric{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Uptime = b.Uptime
+	x.xxx_hidden_LatestProcessedDuration = b.LatestProcessedDuration
+	x.xxx_hidden_ChildrenCount = b.ChildrenCount
+	x.xxx_hidden_DeadlettersCount = b.DeadlettersCount
+	x.xxx_hidden_RestartCount = b.RestartCount
+	x.xxx_hidden_ProcessedCount = b.ProcessedCount
+	x.xxx_hidden_StashSize = b.StashSize
+	x.xxx_hidden_FailureCount = b.FailureCount
+	x.xxx_hidden_ReinstateCount = b.ReinstateCount
+	return m0
 }
 
 var File_internal_metric_proto protoreflect.FileDescriptor
@@ -151,18 +222,6 @@ const file_internal_metric_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_metric_proto_rawDescOnce sync.Once
-	file_internal_metric_proto_rawDescData []byte
-)
-
-func file_internal_metric_proto_rawDescGZIP() []byte {
-	file_internal_metric_proto_rawDescOnce.Do(func() {
-		file_internal_metric_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_metric_proto_rawDesc), len(file_internal_metric_proto_rawDesc)))
-	})
-	return file_internal_metric_proto_rawDescData
-}
 
 var file_internal_metric_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_internal_metric_proto_goTypes = []any{

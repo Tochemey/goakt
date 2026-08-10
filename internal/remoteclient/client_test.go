@@ -320,7 +320,7 @@ func TestRemoteReSpawn_InvalidPort(t *testing.T) {
 // a RemoteReSpawnResponse with an empty address (line 1174: ErrInvalidResponse).
 func TestRemoteReSpawn_EmptyAddressResponse(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteReSpawnResponse{Address: ""}, nil
+		return internalpb.RemoteReSpawnResponse_builder{Address: ""}.Build(), nil
 	}
 
 	ps, err := inet.NewRemotingServer("127.0.0.1:0",
@@ -383,7 +383,7 @@ func TestRemoteAsk_InvalidResponseType(t *testing.T) {
 
 func TestRemoteAsk_EmptyMessagesReturnsNil(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteAskResponse{Messages: nil}, nil
+		return internalpb.RemoteAskResponse_builder{Messages: nil}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
@@ -414,7 +414,7 @@ func TestRemoteAsk_EmptyMessagesReturnsNil(t *testing.T) {
 
 func TestRemoteAsk_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
@@ -521,7 +521,7 @@ func TestAskContext(t *testing.T) {
 
 func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
 	require.NoError(t, err)
@@ -548,7 +548,7 @@ func TestRemoteLookup_NotFoundReturnsNoSender(t *testing.T) {
 
 func TestRemoteLookup_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteLookupRequest", handler))
 	require.NoError(t, err)
@@ -610,7 +610,7 @@ func TestGetReliableCompanion_InvalidPort(t *testing.T) {
 func TestGetReliableCompanion_Success(t *testing.T) {
 	companion := address.New("GoAktReliableProducerController-abc", "sys", "127.0.0.1", 2280)
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.GetReliableCompanionResponse{Address: companion.String()}, nil
+		return internalpb.GetReliableCompanionResponse_builder{Address: companion.String()}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
@@ -637,7 +637,7 @@ func TestGetReliableCompanion_Success(t *testing.T) {
 
 func TestGetReliableCompanion_NotFoundReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "companion not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "companion not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
@@ -664,7 +664,7 @@ func TestGetReliableCompanion_NotFoundReturnsNoSender(t *testing.T) {
 
 func TestGetReliableCompanion_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_UNAVAILABLE, Message: "unavailable"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", handler))
 	require.NoError(t, err)
@@ -716,7 +716,7 @@ func TestGetReliableCompanion_InvalidResponseType(t *testing.T) {
 
 func TestRemoteStop_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStopRequest", handler))
 	require.NoError(t, err)
@@ -741,7 +741,7 @@ func TestRemoteStop_NotFoundReturnsNoError(t *testing.T) {
 
 func TestRemoteReinstate_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReinstateRequest", handler))
 	require.NoError(t, err)
@@ -766,7 +766,7 @@ func TestRemoteReinstate_NotFoundReturnsNoError(t *testing.T) {
 
 func TestRemoteReSpawn_NotFoundReturnsNil(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
 	require.NoError(t, err)
@@ -834,7 +834,7 @@ func TestRemoteAskGrain_InvalidResponseType(t *testing.T) {
 func TestRemoteAskGrain_DeserializeError(t *testing.T) {
 	// Return valid RemoteAskGrainResponse but with message that will fail deserialization
 	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteAskGrainResponse{Message: []byte("invalid-proto-bytes")}, nil
+		return internalpb.RemoteAskGrainResponse_builder{Message: []byte("invalid-proto-bytes")}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
 	require.NoError(t, err)
@@ -861,7 +861,7 @@ func TestRemoteAskGrain_DeserializeError(t *testing.T) {
 
 func TestRemoteBatchAsk_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED, Message: "timeout"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
@@ -1120,51 +1120,51 @@ func TestCheckProtoError(t *testing.T) {
 	})
 
 	t.Run("CODE_NOT_FOUND returns ErrAddressNotFound", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "gone"}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "gone"}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrAddressNotFound)
 	})
 
 	t.Run("CODE_DEADLINE_EXCEEDED returns ErrRequestTimeout", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 	})
 
 	t.Run("CODE_UNAVAILABLE returns ErrRemoteSendFailure", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_UNAVAILABLE}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_UNAVAILABLE}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
 	})
 
 	t.Run("CODE_FAILED_PRECONDITION delegates to parseFailedPrecondition", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrRemotingDisabled.Error()}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrRemotingDisabled.Error()}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 	})
 
 	t.Run("CODE_ALREADY_EXISTS delegates to parseAlreadyExists", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_ALREADY_EXISTS, Message: "actor conflict"}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_ALREADY_EXISTS, Message: "actor conflict"}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 
 	t.Run("CODE_INVALID_ARGUMENT returns formatted error", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_INVALID_ARGUMENT, Message: "bad field"}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_INVALID_ARGUMENT, Message: "bad field"}.Build()
 		err := checkProtoError(resp)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "bad field")
 	})
 
 	t.Run("CODE_INTERNAL_ERROR returns plain error with message", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_INTERNAL_ERROR, Message: "oops"}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_INTERNAL_ERROR, Message: "oops"}.Build()
 		err := checkProtoError(resp)
 		require.Error(t, err)
 		assert.EqualError(t, err, "oops")
 	})
 
 	t.Run("unrecognized code falls through to default", func(t *testing.T) {
-		resp := &internalpb.Error{Code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, Message: "quota"}
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, Message: "quota"}.Build()
 		err := checkProtoError(resp)
 		require.Error(t, err)
 		assert.EqualError(t, err, "quota")
@@ -1371,7 +1371,7 @@ func TestRemoteBatchAsk_Success(t *testing.T) {
 	require.NoError(t, err)
 
 	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteAskResponse{Messages: [][]byte{packed}}, nil
+		return internalpb.RemoteAskResponse_builder{Messages: [][]byte{packed}}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskRequest", handler))
 	require.NoError(t, err)
@@ -1445,7 +1445,7 @@ func TestRemoteSpawn_ConnectionRefused(t *testing.T) {
 func TestRemoteSpawn_Success(t *testing.T) {
 	childAddr := "goakt://sys@127.0.0.1:9000/actor"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
+		return internalpb.RemoteSpawnResponse_builder{Address: childAddr}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
@@ -1473,7 +1473,7 @@ func TestRemoteSpawn_Success(t *testing.T) {
 
 func TestRemoteSpawn_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrTypeNotRegistered.Error()}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrTypeNotRegistered.Error()}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
@@ -1500,7 +1500,7 @@ func TestRemoteSpawn_ProtoError(t *testing.T) {
 
 func TestRemoteSpawn_InvalidResponse(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteSpawnResponse{Address: ""}, nil
+		return internalpb.RemoteSpawnResponse_builder{Address: ""}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
@@ -1540,7 +1540,7 @@ func TestRemoteSpawn_DependenciesEncodeError(t *testing.T) {
 func TestRemoteSpawn_WithSingleton(t *testing.T) {
 	childAddr := "goakt://sys@127.0.0.1:9000/singleton"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteSpawnResponse{Address: childAddr}, nil
+		return internalpb.RemoteSpawnResponse_builder{Address: childAddr}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
 	require.NoError(t, err)
@@ -1578,7 +1578,7 @@ func TestRemoteSpawn_WithSingleton(t *testing.T) {
 func TestRemoteReSpawn_Success(t *testing.T) {
 	childAddr := "goakt://sys@127.0.0.1:9000/actor"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteReSpawnResponse{Address: childAddr}, nil
+		return internalpb.RemoteReSpawnResponse_builder{Address: childAddr}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteReSpawnRequest", handler))
 	require.NoError(t, err)
@@ -1689,7 +1689,7 @@ func TestRemoteChildren_InvalidPort(t *testing.T) {
 
 func TestRemoteChildren_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
@@ -1742,7 +1742,7 @@ func TestRemoteChildren_InvalidResponseType(t *testing.T) {
 func TestRemoteChildren_Success(t *testing.T) {
 	childAddr := "goakt://sys@127.0.0.1:9000/child1"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteChildrenResponse{Addresses: []string{childAddr}}, nil
+		return internalpb.RemoteChildrenResponse_builder{Addresses: []string{childAddr}}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
@@ -1771,7 +1771,7 @@ func TestRemoteChildren_Success(t *testing.T) {
 
 func TestRemoteChildren_SuccessEmpty(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteChildrenResponse{Addresses: nil}, nil
+		return internalpb.RemoteChildrenResponse_builder{Addresses: nil}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteChildrenRequest", handler))
 	require.NoError(t, err)
@@ -1807,7 +1807,7 @@ func TestRemoteParent_InvalidPort(t *testing.T) {
 
 func TestRemoteParent_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
@@ -1834,7 +1834,7 @@ func TestRemoteParent_ProtoError(t *testing.T) {
 func TestRemoteParent_Success(t *testing.T) {
 	parentAddr := "goakt://sys@127.0.0.1:9000/parent"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteParentResponse{Address: parentAddr}, nil
+		return internalpb.RemoteParentResponse_builder{Address: parentAddr}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
@@ -1862,7 +1862,7 @@ func TestRemoteParent_Success(t *testing.T) {
 
 func TestRemoteParent_EmptyAddressReturnsNoSender(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteParentResponse{Address: ""}, nil
+		return internalpb.RemoteParentResponse_builder{Address: ""}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteParentRequest", handler))
 	require.NoError(t, err)
@@ -1898,7 +1898,7 @@ func TestRemoteKind_InvalidPort(t *testing.T) {
 
 func TestRemoteKind_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
 	require.NoError(t, err)
@@ -1925,7 +1925,7 @@ func TestRemoteKind_ProtoError(t *testing.T) {
 func TestRemoteKind_Success(t *testing.T) {
 	kind := "actor.MockActor"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteKindResponse{Kind: kind}, nil
+		return internalpb.RemoteKindResponse_builder{Kind: kind}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteKindRequest", handler))
 	require.NoError(t, err)
@@ -1961,7 +1961,7 @@ func TestRemoteMetric_InvalidPort(t *testing.T) {
 
 func TestRemoteMetric_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
@@ -1986,14 +1986,14 @@ func TestRemoteMetric_ProtoError(t *testing.T) {
 }
 
 func TestRemoteMetric_Success(t *testing.T) {
-	m := &internalpb.Metric{
+	m := internalpb.Metric_builder{
 		Uptime:           100,
 		ProcessedCount:   42,
 		ChildrenCount:    2,
 		DeadlettersCount: 0,
-	}
+	}.Build()
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteMetricResponse{Metric: m}, nil
+		return internalpb.RemoteMetricResponse_builder{Metric: m}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
@@ -2022,7 +2022,7 @@ func TestRemoteMetric_Success(t *testing.T) {
 
 func TestRemoteMetric_SuccessNilMetric(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteMetricResponse{Metric: nil}, nil
+		return internalpb.RemoteMetricResponse_builder{Metric: nil}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteMetricRequest", handler))
 	require.NoError(t, err)
@@ -2058,7 +2058,7 @@ func TestRemoteRole_InvalidPort(t *testing.T) {
 
 func TestRemoteRole_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
 	require.NoError(t, err)
@@ -2085,7 +2085,7 @@ func TestRemoteRole_ProtoError(t *testing.T) {
 func TestRemoteRole_Success(t *testing.T) {
 	role := "api"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteRoleResponse{Role: role}, nil
+		return internalpb.RemoteRoleResponse_builder{Role: role}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteRoleRequest", handler))
 	require.NoError(t, err)
@@ -2121,7 +2121,7 @@ func TestRemoteStashSize_InvalidPort(t *testing.T) {
 
 func TestRemoteStashSize_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
 	require.NoError(t, err)
@@ -2148,7 +2148,7 @@ func TestRemoteStashSize_ProtoError(t *testing.T) {
 func TestRemoteStashSize_Success(t *testing.T) {
 	size := uint64(5)
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteStashSizeResponse{Size: size}, nil
+		return internalpb.RemoteStashSizeResponse_builder{Size: size}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStashSizeRequest", handler))
 	require.NoError(t, err)
@@ -2184,7 +2184,7 @@ func TestRemoteState_InvalidPort(t *testing.T) {
 
 func TestRemoteState_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
 	require.NoError(t, err)
@@ -2210,7 +2210,7 @@ func TestRemoteState_ProtoError(t *testing.T) {
 
 func TestRemoteState_Success(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteStateResponse{State: true}, nil
+		return internalpb.RemoteStateResponse_builder{State: true}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteStateRequest", handler))
 	require.NoError(t, err)
@@ -2246,7 +2246,7 @@ func TestRemotePassivationStrategy_InvalidPort(t *testing.T) {
 
 func TestRemotePassivationStrategy_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
 	require.NoError(t, err)
@@ -2273,15 +2273,13 @@ func TestRemotePassivationStrategy_ProtoError(t *testing.T) {
 func TestRemotePassivationStrategy_Success(t *testing.T) {
 	timeout := 30 * time.Second
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemotePassivationStrategyResponse{
-			PassivationStrategy: &internalpb.PassivationStrategy{
-				Strategy: &internalpb.PassivationStrategy_TimeBased{
-					TimeBased: &internalpb.TimeBasedPassivation{
-						PassivateAfter: durationpb.New(timeout),
-					},
-				},
-			},
-		}, nil
+		return internalpb.RemotePassivationStrategyResponse_builder{
+			PassivationStrategy: internalpb.PassivationStrategy_builder{
+				TimeBased: internalpb.TimeBasedPassivation_builder{
+					PassivateAfter: durationpb.New(timeout),
+				}.Build(),
+			}.Build(),
+		}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemotePassivationStrategyRequest", handler))
 	require.NoError(t, err)
@@ -2318,7 +2316,7 @@ func TestRemoteDependencies_InvalidPort(t *testing.T) {
 
 func TestRemoteDependencies_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
@@ -2344,7 +2342,7 @@ func TestRemoteDependencies_ProtoError(t *testing.T) {
 
 func TestRemoteDependencies_SuccessEmpty(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteDependenciesResponse{Dependencies: nil}, nil
+		return internalpb.RemoteDependenciesResponse_builder{Dependencies: nil}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
@@ -2372,13 +2370,13 @@ func TestRemoteDependencies_DependenciesWithoutRegistryReturnsError(t *testing.T
 	dep := &mockDependencyForRemote{}
 	dep.id = "dep1"
 	bytea, _ := dep.MarshalBinary()
-	pbDep := &internalpb.Dependency{
+	pbDep := internalpb.Dependency_builder{
 		Id:       dep.ID(),
 		TypeName: types.Name(dep),
 		Bytea:    bytea,
-	}
+	}.Build()
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteDependenciesResponse{Dependencies: []*internalpb.Dependency{pbDep}}, nil
+		return internalpb.RemoteDependenciesResponse_builder{Dependencies: []*internalpb.Dependency{pbDep}}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
@@ -2406,13 +2404,13 @@ func TestRemoteDependencies_SuccessWithRegistry(t *testing.T) {
 	dep := &mockDependencyForRemote{}
 	dep.id = "dep1"
 	bytea, _ := dep.MarshalBinary()
-	pbDep := &internalpb.Dependency{
+	pbDep := internalpb.Dependency_builder{
 		Id:       dep.ID(),
 		TypeName: types.Name(dep),
 		Bytea:    bytea,
-	}
+	}.Build()
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteDependenciesResponse{Dependencies: []*internalpb.Dependency{pbDep}}, nil
+		return internalpb.RemoteDependenciesResponse_builder{Dependencies: []*internalpb.Dependency{pbDep}}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteDependenciesRequest", handler))
 	require.NoError(t, err)
@@ -2460,7 +2458,7 @@ func TestRemoteSpawnChild_InvalidPort(t *testing.T) {
 
 func TestRemoteSpawnChild_ProtoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "parent not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "parent not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
@@ -2488,7 +2486,7 @@ func TestRemoteSpawnChild_ProtoError(t *testing.T) {
 func TestRemoteSpawnChild_Success(t *testing.T) {
 	childAddr := "goakt://sys@127.0.0.1:9000/child"
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteSpawnChildResponse{Address: childAddr}, nil
+		return internalpb.RemoteSpawnChildResponse_builder{Address: childAddr}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
@@ -2517,7 +2515,7 @@ func TestRemoteSpawnChild_Success(t *testing.T) {
 
 func TestRemoteSpawnChild_EmptyAddressReturnsError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.RemoteSpawnChildResponse{Address: ""}, nil
+		return internalpb.RemoteSpawnChildResponse_builder{Address: ""}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
 	require.NoError(t, err)
@@ -2570,7 +2568,7 @@ func TestRemoteWatch_Success(t *testing.T) {
 
 func TestRemoteWatch_ServerError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteWatchRequest", handler))
 	require.NoError(t, err)
@@ -2640,7 +2638,7 @@ func TestRemoteUnWatch_Success(t *testing.T) {
 
 func TestRemoteUnWatch_NotFoundReturnsNoError(t *testing.T) {
 	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
-		return &internalpb.Error{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}, nil
+		return internalpb.Error_builder{Code: internalpb.Code_CODE_NOT_FOUND, Message: "actor not found"}.Build(), nil
 	}
 	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteUnWatchRequest", handler))
 	require.NoError(t, err)

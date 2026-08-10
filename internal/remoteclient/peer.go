@@ -511,21 +511,29 @@ func (x *peer) retireLaneAsync(key laneKey, session inet.DuplexSession) {
 
 // retireLane closes session and clears the peer's cached state only when
 // session is still the current one, so a newer session installed after the
-// failure is never clobbered.
+// failure is never clobbered. Unlike [peer.retireLaneAsync] the close is
+// synchronous, so a caller on a send path blocks until the dead lane is torn
+// down before its error propagates.
+//
+// The close runs after peer.mu is released, never under it: Close waits for
+// the session's read loop to exit, and that read loop's closed handler
+// retires the lane through peer.mu (see retireLaneAsync). Closing under the
+// lock would deadlock the two against each other, a send-path retire against
+// the read loop it is trying to tear down.
 func (x *peer) retireLane(key laneKey, session inet.DuplexSession) {
 	x.mu.Lock()
-	defer x.mu.Unlock()
 
-	_ = session.Close()
-
-	if x.laneLocked(key) != session {
-		return
-	}
-	x.setLaneLocked(key, nil)
 	// Keep the peer classified as duplex while any sibling lane is still
 	// live. Clearing here would force an unnecessary re-probe on the next
 	// send even though other lanes already proved the peer speaks duplex.
-	x.clearCacheIfNoLanesLocked()
+	if x.laneLocked(key) == session {
+		x.setLaneLocked(key, nil)
+		x.clearCacheIfNoLanesLocked()
+	}
+
+	x.mu.Unlock()
+
+	_ = session.Close()
 }
 
 // clearCacheIfNoLanesLocked clears the protocol cache only when every lane
@@ -565,16 +573,15 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 		tlsConfig: x.client.tlsConfig,
 	}
 
-	localHello := &internalpb.Hello{
-		Revision:                    inet.CapabilityRevisionCredits,
-		LaneRole:                    role,
-		LaneIndex:                   index,
-		Compression:                 compressionCodec(x.client.compression),
-		MaxFrameSize:                x.client.maxFrameSize,
-		MaxMessageSize:              x.client.maxMessageSize,
-		InitialCredits:              x.client.initialCredits,
-		MaxConcurrentLargeTransfers: x.client.maxConcurrentLargeTransfers,
-	}
+	localHello := &internalpb.Hello{}
+	localHello.SetRevision(inet.CapabilityRevisionCredits)
+	localHello.SetLaneRole(role)
+	localHello.SetLaneIndex(index)
+	localHello.SetCompression(compressionCodec(x.client.compression))
+	localHello.SetMaxFrameSize(x.client.maxFrameSize)
+	localHello.SetMaxMessageSize(x.client.maxMessageSize)
+	localHello.SetInitialCredits(x.client.initialCredits)
+	localHello.SetMaxConcurrentLargeTransfers(x.client.maxConcurrentLargeTransfers)
 
 	key := laneKey{role: role, index: index}
 	session, _, err := inet.OpenDuplex(

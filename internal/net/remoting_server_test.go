@@ -214,26 +214,26 @@ func TestRemotingServer_RequestResponse(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	t.Run("single request-response", func(t *testing.T) {
-		req := &testpb.Reply{Content: "hello proto server"}
+		req := testpb.Reply_builder{Content: "hello proto server"}.Build()
 		resp, err := client.SendProto(context.Background(), req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "hello proto server", reply.Content)
+		require.Equal(t, "hello proto server", reply.GetContent())
 	})
 
 	t.Run("multiple sequential requests on same connection", func(t *testing.T) {
 		for i := range 5 {
-			req := &testpb.Reply{Content: time.Now().String()}
+			req := testpb.Reply_builder{Content: time.Now().String()}.Build()
 			resp, err := client.SendProto(context.Background(), req)
 			require.NoError(t, err, "request %d failed", i)
 			require.NotNil(t, resp)
 
 			reply, ok := resp.(*testpb.Reply)
 			require.True(t, ok)
-			require.Equal(t, req.Content, reply.Content)
+			require.Equal(t, req.GetContent(), reply.GetContent())
 		}
 	})
 
@@ -261,9 +261,9 @@ func TestRemotingServer_BatchRequestResponse(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	reqs := []proto.Message{
-		&testpb.Reply{Content: "msg1"},
-		&testpb.Reply{Content: "msg2"},
-		&testpb.Reply{Content: "msg3"},
+		testpb.Reply_builder{Content: "msg1"}.Build(),
+		testpb.Reply_builder{Content: "msg2"}.Build(),
+		testpb.Reply_builder{Content: "msg3"}.Build(),
 	}
 
 	resps, err := client.SendBatchProto(context.Background(), reqs)
@@ -273,7 +273,7 @@ func TestRemotingServer_BatchRequestResponse(t *testing.T) {
 	for i, resp := range resps {
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, reqs[i].(*testpb.Reply).Content, reply.Content)
+		require.Equal(t, reqs[i].(*testpb.Reply).GetContent(), reply.GetContent())
 	}
 
 	require.NoError(t, ps.Shutdown(time.Second))
@@ -302,7 +302,7 @@ func TestRemotingServer_FireAndForget(t *testing.T) {
 	client := NewClient(ps.ListenAddr().String())
 	defer func() { _ = client.Close() }()
 
-	err = client.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "fire"})
+	err = client.SendProtoNoReply(context.Background(), testpb.Reply_builder{Content: "fire"}.Build())
 	require.NoError(t, err)
 
 	pause.For(100 * time.Millisecond)
@@ -335,9 +335,9 @@ func TestRemotingServer_FireAndForgetBatch(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	reqs := []proto.Message{
-		&testpb.Reply{Content: "a"},
-		&testpb.Reply{Content: "b"},
-		&testpb.Reply{Content: "c"},
+		testpb.Reply_builder{Content: "a"}.Build(),
+		testpb.Reply_builder{Content: "b"}.Build(),
+		testpb.Reply_builder{Content: "c"}.Build(),
 	}
 
 	err = client.SendProtoManyNoReply(context.Background(), reqs)
@@ -353,7 +353,7 @@ func TestRemotingServer_FireAndForgetBatch(t *testing.T) {
 func TestRemotingServer_MultipleMessageTypes(t *testing.T) {
 	replyHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		r := req.(*testpb.Reply)
-		return &testpb.Reply{Content: "reply:" + r.Content}, nil
+		return testpb.Reply_builder{Content: "reply:" + r.GetContent()}.Build(), nil
 	}
 
 	pingHandler := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
@@ -376,11 +376,11 @@ func TestRemotingServer_MultipleMessageTypes(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	// Send a Reply message.
-	resp, err := client.SendProto(context.Background(), &testpb.Reply{Content: "hello"})
+	resp, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "hello"}.Build())
 	require.NoError(t, err)
 	reply, ok := resp.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, "reply:hello", reply.Content)
+	require.Equal(t, "reply:hello", reply.GetContent())
 
 	// Send a TestPing message.
 	resp, err = client.SendProto(context.Background(), &testpb.TestPing{})
@@ -415,13 +415,13 @@ func TestRemotingServer_FallbackHandler(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	// No handler registered for Reply — fallback should be invoked.
-	resp, err := client.SendProto(context.Background(), &testpb.Reply{Content: "fallback"})
+	resp, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "fallback"}.Build())
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 
 	reply, ok := resp.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, "fallback", reply.Content)
+	require.Equal(t, "fallback", reply.GetContent())
 
 	require.Equal(t, int32(1), fallbackCalled.Load())
 
@@ -446,7 +446,7 @@ func TestRemotingServer_UnregisteredMessageClosesConn(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	t.Run("request/response caller fails fast with EOF", func(t *testing.T) {
-		_, err := client.SendProto(context.Background(), &testpb.Reply{Content: "ignored"})
+		_, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "ignored"}.Build())
 		require.Error(t, err)
 		require.ErrorIs(t, err, io.EOF)
 	})
@@ -454,7 +454,7 @@ func TestRemotingServer_UnregisteredMessageClosesConn(t *testing.T) {
 	t.Run("fire-and-forget caller is unaffected", func(t *testing.T) {
 		// The write completes before the server processes the frame; the
 		// connection closing afterwards does not fail the no-reply call.
-		err := client.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "ignored"})
+		err := client.SendProtoNoReply(context.Background(), testpb.Reply_builder{Content: "ignored"}.Build())
 		require.NoError(t, err)
 	})
 
@@ -485,7 +485,7 @@ func TestRemotingServer_HandlerError(t *testing.T) {
 
 	// The handler returns an error — the server closes the connection.
 	// The client's readProtoFrame will get an EOF.
-	_, err = client.SendProto(context.Background(), &testpb.Reply{Content: "fail"})
+	_, err = client.SendProto(context.Background(), testpb.Reply_builder{Content: "fail"}.Build())
 	require.Error(t, err)
 
 	require.NoError(t, ps.Shutdown(time.Second))
@@ -522,7 +522,7 @@ func TestRemotingServer_ConcurrentClients(t *testing.T) {
 			defer func() { _ = client.Close() }()
 
 			for j := range numReqs {
-				req := &testpb.Reply{Content: time.Now().String()}
+				req := testpb.Reply_builder{Content: time.Now().String()}.Build()
 				resp, err := client.SendProto(context.Background(), req)
 				if err != nil {
 					errCount.Add(1)
@@ -530,7 +530,7 @@ func TestRemotingServer_ConcurrentClients(t *testing.T) {
 				}
 
 				reply, ok := resp.(*testpb.Reply)
-				if !ok || reply.Content != req.Content {
+				if !ok || reply.GetContent() != req.GetContent() {
 					errCount.Add(1)
 					return
 				}
@@ -567,11 +567,11 @@ func TestRemotingServer_IdleTimeout(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	// First request should work.
-	resp, err := client.SendProto(context.Background(), &testpb.Reply{Content: "alive"})
+	resp, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "alive"}.Build())
 	require.NoError(t, err)
 	reply, ok := resp.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, "alive", reply.Content)
+	require.Equal(t, "alive", reply.GetContent())
 
 	// Wait for the idle timeout to expire.
 	pause.For(400 * time.Millisecond)
@@ -580,7 +580,7 @@ func TestRemotingServer_IdleTimeout(t *testing.T) {
 	// connection is stale — next request may fail or dial a new connection.
 	// This is expected behaviour: the idle timeout reclaimed the connection.
 	// We just verify no panic or hang occurs.
-	_, _ = client.SendProto(context.Background(), &testpb.Reply{Content: "after timeout"}) //nolint:errcheck
+	_, _ = client.SendProto(context.Background(), testpb.Reply_builder{Content: "after timeout"}.Build()) //nolint:errcheck
 
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
@@ -671,7 +671,7 @@ func TestRemotingServer_ActiveConnections(t *testing.T) {
 
 	// Start a request that blocks in the handler.
 	go func() {
-		_, _ = client.SendProto(context.Background(), &testpb.Reply{Content: "block"}) //nolint:errcheck
+		_, _ = client.SendProto(context.Background(), testpb.Reply_builder{Content: "block"}.Build()) //nolint:errcheck
 	}()
 
 	pause.For(100 * time.Millisecond)
@@ -712,11 +712,11 @@ func TestRemotingServer_WithTLS(t *testing.T) {
 	)
 	defer func() { _ = client.Close() }()
 
-	resp, err := client.SendProto(context.Background(), &testpb.Reply{Content: "tls"})
+	resp, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "tls"}.Build())
 	require.NoError(t, err)
 	reply, ok := resp.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, "tls", reply.Content)
+	require.Equal(t, "tls", reply.GetContent())
 
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
@@ -724,10 +724,10 @@ func TestRemotingServer_WithTLS(t *testing.T) {
 
 func TestRemotingServer_HandlerOverwrite(t *testing.T) {
 	h1 := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
-		return &testpb.Reply{Content: "h1"}, nil
+		return testpb.Reply_builder{Content: "h1"}.Build(), nil
 	}
 	h2 := func(_ context.Context, _ Connection, _ proto.Message) (proto.Message, error) {
-		return &testpb.Reply{Content: "h2"}, nil
+		return testpb.Reply_builder{Content: "h2"}.Build(), nil
 	}
 
 	// Register h1 first, then overwrite with h2.
@@ -746,12 +746,12 @@ func TestRemotingServer_HandlerOverwrite(t *testing.T) {
 	client := NewClient(ps.ListenAddr().String())
 	defer func() { _ = client.Close() }()
 
-	resp, err := client.SendProto(context.Background(), &testpb.Reply{Content: "x"})
+	resp, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 	require.NoError(t, err)
 
 	reply, ok := resp.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, "h2", reply.Content, "second handler should have overwritten the first")
+	require.Equal(t, "h2", reply.GetContent(), "second handler should have overwritten the first")
 
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
@@ -817,7 +817,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 		ctx := ContextWithMetadata(context.Background(), md)
 
 		// Send request with metadata.
-		req := &testpb.Reply{Content: "with metadata"}
+		req := testpb.Reply_builder{Content: "with metadata"}.Build()
 		resp, _, err := client.SendProtoWithMetadata(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -860,14 +860,14 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 		defer func() { _ = client.Close() }()
 
 		// Send request WITHOUT metadata (legacy format).
-		req := &testpb.Reply{Content: "no metadata"}
+		req := testpb.Reply_builder{Content: "no metadata"}.Build()
 		resp, err := client.SendProto(context.Background(), req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "no metadata", reply.Content)
+		require.Equal(t, "no metadata", reply.GetContent())
 
 		// Verify no metadata was present (backward compatibility).
 		require.False(t, metadataPresent, "metadata should not be present for legacy frames")
@@ -909,7 +909,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 		md := NewMetadata()
 		ctx := ContextWithMetadata(context.Background(), md)
 
-		req := &testpb.Reply{Content: "empty metadata"}
+		req := testpb.Reply_builder{Content: "empty metadata"}.Build()
 		resp, _, err := client.SendProtoWithMetadata(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -965,7 +965,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 
 		ctx := ContextWithMetadata(context.Background(), md)
 
-		req := &testpb.Reply{Content: "deadline test"}
+		req := testpb.Reply_builder{Content: "deadline test"}.Build()
 		resp, _, err := client.SendProtoWithMetadata(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -1027,7 +1027,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 
 		ctx := ContextWithMetadata(context.Background(), md)
 
-		req := &testpb.Reply{Content: "many headers"}
+		req := testpb.Reply_builder{Content: "many headers"}.Build()
 		resp, _, err := client.SendProtoWithMetadata(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -1060,7 +1060,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 
 			traceID, _ := md.Get("trace-id")
 			spanID, _ := md.Get("span-id")
-			content := req.(*testpb.Reply).Content
+			content := req.(*testpb.Reply).GetContent()
 
 			mu.Lock()
 			captured[content] = capturedMD{traceID: traceID, spanID: spanID}
@@ -1097,7 +1097,7 @@ func TestRemotingServer_MetadataExtraction(t *testing.T) {
 
 				ctx := ContextWithMetadata(context.Background(), md)
 				content := time.Now().String() + "-" + strconv.Itoa(idx)
-				req := &testpb.Reply{Content: content}
+				req := testpb.Reply_builder{Content: content}.Build()
 
 				_, _, err := client.SendProtoWithMetadata(ctx, req)
 				require.NoError(t, err)
@@ -1149,14 +1149,14 @@ func TestRemotingServer_MetadataBackwardCompatibility(t *testing.T) {
 			md.Set("request-id", strconv.Itoa(i))
 			ctx := ContextWithMetadata(context.Background(), md)
 
-			req := &testpb.Reply{Content: "with-md"}
+			req := testpb.Reply_builder{Content: "with-md"}.Build()
 			_, _, err := client.SendProtoWithMetadata(ctx, req)
 			require.NoError(t, err)
 		}
 
 		// Send some requests without metadata (legacy client).
 		for range 3 {
-			req := &testpb.Reply{Content: "no-md"}
+			req := testpb.Reply_builder{Content: "no-md"}.Build()
 			_, err := client.SendProto(context.Background(), req)
 			require.NoError(t, err)
 		}

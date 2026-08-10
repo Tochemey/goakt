@@ -32,6 +32,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"google.golang.org/protobuf/proto"
 )
 
 // producerDeliveryConfig builds a complete producer endpoint configuration.
@@ -346,37 +347,37 @@ func TestReliableDeliveryConfigWireRoundTrip(t *testing.T) {
 	t.Run("With malformed producer durations", func(t *testing.T) {
 		malformed := &durationpb.Duration{Seconds: 315576000001}
 
-		producer := &internalpb.ReliableProducerConfig{
+		producer := internalpb.ReliableProducerConfig_builder{
 			ConsumerName:       "consumer",
 			LocalRetryInterval: malformed,
-		}
-		_, err := reliableDeliveryConfigFromProto(&internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
-		})
+		}.Build()
+		_, err := reliableDeliveryConfigFromProto(internalpb.ReliableDeliveryConfig_builder{
+			Producer: proto.ValueOrDefault(producer),
+		}.Build())
 		require.Error(t, err)
 
-		producer = &internalpb.ReliableProducerConfig{
+		producer = internalpb.ReliableProducerConfig_builder{
 			ConsumerName: "consumer",
-			QueueRetry: &internalpb.QueueRetryConfig{
+			QueueRetry: internalpb.QueueRetryConfig_builder{
 				MaxAttempts:    3,
 				InitialBackoff: malformed,
-			},
-		}
-		_, err = reliableDeliveryConfigFromProto(&internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
-		})
+			}.Build(),
+		}.Build()
+		_, err = reliableDeliveryConfigFromProto(internalpb.ReliableDeliveryConfig_builder{
+			Producer: proto.ValueOrDefault(producer),
+		}.Build())
 		require.Error(t, err)
 	})
 
 	t.Run("With malformed consumer duration", func(t *testing.T) {
-		consumer := &internalpb.ReliableConsumerConfig{
+		consumer := internalpb.ReliableConsumerConfig_builder{
 			ProducerName:      "producer",
 			FlowControlWindow: 50,
 			ResendInterval:    &durationpb.Duration{Seconds: 315576000001},
-		}
-		_, err := reliableDeliveryConfigFromProto(&internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{Consumer: consumer},
-		})
+		}.Build()
+		_, err := reliableDeliveryConfigFromProto(internalpb.ReliableDeliveryConfig_builder{
+			Consumer: proto.ValueOrDefault(consumer),
+		}.Build())
 		require.Error(t, err)
 	})
 }

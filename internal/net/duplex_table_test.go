@@ -39,22 +39,22 @@ import (
 
 // tablesHello returns a HELLO advertising compression tables (revision 3).
 func tablesHello() *internalpb.Hello {
-	return &internalpb.Hello{
+	return internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionTables,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 }
 
 // chunkingHello returns a HELLO advertising chunking only (revision 2).
 func chunkingHello() *internalpb.Hello {
-	return &internalpb.Hello{
+	return internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionChunking,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 }
 
 func TestPrepareRefEmitsTableBeforeData(t *testing.T) {

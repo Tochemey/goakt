@@ -50,6 +50,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
+	"google.golang.org/protobuf/proto"
 )
 
 // Spawn creates and starts a new actor in the local actor system.
@@ -621,7 +622,7 @@ func (x *actorSystem) handleSingletonNameConflict(ctx context.Context, err error
 
 	existing, gerr := x.cluster.GetActor(ctx, actorName)
 	if gerr == nil && existing != nil {
-		actualRole := strings.TrimSpace(pointer.Deref(existing.Role, ""))
+		actualRole := strings.TrimSpace(pointer.Deref(proto.ValueOrNil(existing.HasRole(), existing.GetRole), ""))
 		if existing.GetSingleton() != nil && existing.GetType() == kind && actualRole == role {
 			// The name is already bound to the singleton we wanted: treat as success/idempotent.
 			// Hand back the address we just read so the caller can resolve the PID directly.

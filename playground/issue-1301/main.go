@@ -418,7 +418,9 @@ func (x *Ping) Receive(ctx *actor.ReceiveContext) {
 		x.target = msg.rounds
 		x.count = 0
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: int32(x.count)})
+		testCount := &testpb.TestCount{}
+		testCount.SetValue(int32(x.count))
+		ctx.Response(testCount)
 	case *testpb.Reply:
 		x.count++
 		if x.count >= x.target {
@@ -446,7 +448,9 @@ func (x *Pong) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *actor.PostStart:
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: int32(x.received)})
+		testCount := &testpb.TestCount{}
+		testCount.SetValue(int32(x.received))
+		ctx.Response(testCount)
 	case *testpb.TestSend:
 		x.received++
 	case *testpb.TestReply:
@@ -529,7 +533,9 @@ func (x *Echo) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *actor.PostStart:
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: int32(x.received)})
+		testCount := &testpb.TestCount{}
+		testCount.SetValue(int32(x.received))
+		ctx.Response(testCount)
 	case *testpb.TestReply:
 		x.received++
 		ctx.Response(new(testpb.Reply))
@@ -558,7 +564,9 @@ func (x *Sleeper) Receive(ctx *actor.ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *actor.PostStart:
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: int32(x.received)})
+		testCount := &testpb.TestCount{}
+		testCount.SetValue(int32(x.received))
+		ctx.Response(testCount)
 	case *testpb.TestSend:
 		x.received++
 		pause.For(x.delay)
@@ -677,7 +685,9 @@ func runLargeSmall(ctx context.Context, ping *actor.PID, pongSys actor.ActorSyst
 		go func() {
 			defer wg.Done()
 			for time.Now().Before(deadline) {
-				if err := ping.Tell(ctx, remoteEcho, &testpb.Account{AccountId: payload}); err == nil {
+				account := &testpb.Account{}
+				account.SetAccountId(payload)
+				if err := ping.Tell(ctx, remoteEcho, account); err == nil {
 					largeSent.Add(1)
 				} else {
 					errs.Add(1)

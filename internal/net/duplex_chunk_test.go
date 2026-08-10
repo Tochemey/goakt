@@ -226,12 +226,12 @@ func TestDuplexRevisionOneRejectsInboundChunk(t *testing.T) {
 		_ = c2.Close()
 	})
 
-	baseline := &internalpb.Hello{
+	baseline := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionBaseline,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), int64(defaultMaxFrameSize),
 		withDuplexChunkSize(1024),
 		withDuplexNegotiated(baseline),
@@ -270,12 +270,12 @@ func TestDuplexRevisionOneOversizeFailsFast(t *testing.T) {
 		_ = c2.Close()
 	})
 
-	baseline := &internalpb.Hello{
+	baseline := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionBaseline,
 		MaxFrameSize:                2048,
 		MaxMessageSize:              2048,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 	left := newDuplexConn(newTCPFramedConn(c1, 2048), 64*1024,
 		withDuplexChunkSize(512),
 		withDuplexNegotiated(baseline),
@@ -445,12 +445,12 @@ func TestDuplexMixedRevisionWholeFrame(t *testing.T) {
 		_ = c2.Close()
 	})
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionBaseline,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), int64(defaultMaxFrameSize),
 		withDuplexChunkSize(DefaultChunkSize),
 		withDuplexNegotiated(hello),
@@ -829,12 +829,12 @@ func newChunkingPairB(b *testing.B, chunkSize uint32, maxMsg uint64, maxConcurre
 func openChunkingPair(chunkSize uint32, maxMsg uint64, maxConcurrent uint32) (*duplexConn, *duplexConn) {
 	c1, c2 := net.Pipe()
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionChunking,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              maxMsg,
 		MaxConcurrentLargeTransfers: maxConcurrent,
-	}
+	}.Build()
 
 	// Size the outbound queue to the credit window so large transfers stream.
 	credits := int64(defaultInitialCredits)
@@ -860,12 +860,12 @@ func TestDuplexChunkSizeClampedToNegotiatedFrameLimit(t *testing.T) {
 
 	// The peer negotiated a frame limit below the local chunk threshold; the
 	// session must clamp so no chunk frame can exceed what the peer accepts.
-	negotiated := &internalpb.Hello{
+	negotiated := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionChunking,
 		MaxFrameSize:                32 * 1024,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 	conn := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), int64(defaultMaxFrameSize),
 		withDuplexChunkSize(1024*1024),
 		withDuplexNegotiated(negotiated),
@@ -904,12 +904,12 @@ func TestDuplexChunkedTellReachesInboundHandler(t *testing.T) {
 		_ = c2.Close()
 	})
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionChunking,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 
 	credits := int64(defaultInitialCredits)
 	sender := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
@@ -975,12 +975,12 @@ func TestDuplexChunkedTellReachesPipelinedHandler(t *testing.T) {
 		_ = c2.Close()
 	})
 
-	hello := &internalpb.Hello{
+	hello := internalpb.Hello_builder{
 		Revision:                    CapabilityRevisionChunking,
 		MaxFrameSize:                defaultMaxFrameSize,
 		MaxMessageSize:              DefaultMaxMessageSize,
 		MaxConcurrentLargeTransfers: 4,
-	}
+	}.Build()
 
 	credits := int64(defaultInitialCredits)
 	sender := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,

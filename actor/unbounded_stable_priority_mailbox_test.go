@@ -42,9 +42,9 @@ func highestPriority(msg1, msg2 any) bool {
 func TestUnboundedStablePriorityMailbox(t *testing.T) {
 	t.Run("With priority ordering", func(t *testing.T) {
 		mailbox := NewUnboundedStablePriorityMailbox(highestPriority)
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 1}}))
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 5}}))
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 2}}))
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}))
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}))
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 2}.Build()}))
 		require.EqualValues(t, 3, mailbox.Len())
 
 		require.EqualValues(t, 5, mailbox.Dequeue().Message().(*testpb.TestMessage).GetPriority())
@@ -56,11 +56,11 @@ func TestUnboundedStablePriorityMailbox(t *testing.T) {
 	t.Run("With FIFO ordering among equal priorities", func(t *testing.T) {
 		mailbox := NewUnboundedStablePriorityMailbox(highestPriority)
 
-		low1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		low2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		low3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		high1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
-		high2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
+		low1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		low2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		low3 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		high1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
+		high2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
 
 		require.NoError(t, mailbox.Enqueue(low1))
 		require.NoError(t, mailbox.Enqueue(low2))
@@ -97,7 +97,7 @@ func TestUnboundedStablePriorityMailbox(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				for range perProducer {
-					require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 1}}))
+					require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}))
 				}
 			}()
 		}

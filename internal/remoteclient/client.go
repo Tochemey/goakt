@@ -1091,11 +1091,10 @@ func (r *client) RemoteChildren(ctx context.Context, host string, port int, name
 		return nil, err
 	}
 
-	request := &internalpb.RemoteChildrenRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteChildrenRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1147,11 +1146,10 @@ func (r *client) RemoteDependencies(ctx context.Context, host string, port int, 
 		return nil, err
 	}
 
-	request := &internalpb.RemoteDependenciesRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteDependenciesRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1203,11 +1201,10 @@ func (r *client) RemoteKind(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	request := &internalpb.RemoteKindRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteKindRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1250,11 +1247,10 @@ func (r *client) RemoteMetric(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	request := &internalpb.RemoteMetricRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteMetricRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1297,11 +1293,10 @@ func (r *client) RemoteParent(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	request := &internalpb.RemoteParentRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteParentRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1349,11 +1344,10 @@ func (r *client) RemotePassivationStrategy(ctx context.Context, host string, por
 		return nil, err
 	}
 
-	request := &internalpb.RemotePassivationStrategyRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemotePassivationStrategyRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1396,11 +1390,10 @@ func (r *client) RemoteRole(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	request := &internalpb.RemoteRoleRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteRoleRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1469,20 +1462,19 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		initTimeout = durationpb.New(childRequest.InitTimeout)
 	}
 
-	request := &internalpb.RemoteSpawnChildRequest{
-		Host:                host,
-		Port:                port32,
-		ActorName:           childRequest.Name,
-		ActorType:           childRequest.Kind,
-		Parent:              childRequest.Parent,
-		Relocatable:         childRequest.Relocatable,
-		PassivationStrategy: codec.EncodePassivationStrategy(childRequest.PassivationStrategy),
-		Dependencies:        dependencies,
-		EnableStash:         childRequest.EnableStashing,
-		Reentrancy:          reentrancy,
-		Supervisor:          codec.EncodeSupervisor(childRequest.Supervisor),
-		InitTimeout:         initTimeout,
-	}
+	request := &internalpb.RemoteSpawnChildRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetActorName(childRequest.Name)
+	request.SetActorType(childRequest.Kind)
+	request.SetParent(childRequest.Parent)
+	request.SetRelocatable(childRequest.Relocatable)
+	request.SetPassivationStrategy(codec.EncodePassivationStrategy(childRequest.PassivationStrategy))
+	request.SetDependencies(dependencies)
+	request.SetEnableStash(childRequest.EnableStashing)
+	request.SetReentrancy(reentrancy)
+	request.SetSupervisor(codec.EncodeSupervisor(childRequest.Supervisor))
+	request.SetInitTimeout(initTimeout)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1530,11 +1522,10 @@ func (r *client) RemoteStashSize(ctx context.Context, host string, port int, nam
 		return 0, err
 	}
 
-	request := &internalpb.RemoteStashSizeRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteStashSizeRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1578,12 +1569,11 @@ func (r *client) RemoteState(ctx context.Context, host string, port int, name st
 		return false, err
 	}
 
-	request := &internalpb.RemoteStateRequest{
-		Host:  host,
-		Port:  port32,
-		Name:  name,
-		State: codec.EncodeActorState(state),
-	}
+	request := &internalpb.RemoteStateRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetState(codec.EncodeActorState(state))
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -1628,9 +1618,8 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 	if err != nil {
 		return err
 	}
-	request := &internalpb.RemoteActivateGrainRequest{
-		Grain: grain,
-	}
+	request := &internalpb.RemoteActivateGrainRequest{}
+	request.SetGrain(grain)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -1724,11 +1713,10 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 	if err != nil {
 		return nil, err
 	}
-	request := &internalpb.RemoteAskGrainRequest{
-		Grain:          grain,
-		Message:        marshaled,
-		RequestTimeout: durationpb.New(timeout),
-	}
+	request := &internalpb.RemoteAskGrainRequest{}
+	request.SetGrain(grain)
+	request.SetMessage(marshaled)
+	request.SetRequestTimeout(durationpb.New(timeout))
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -1789,10 +1777,9 @@ func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, gra
 	if err != nil {
 		return err
 	}
-	request := &internalpb.RemoteTellGrainRequest{
-		Grain:   grain,
-		Message: marshaled,
-	}
+	request := &internalpb.RemoteTellGrainRequest{}
+	request.SetGrain(grain)
+	request.SetMessage(marshaled)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -1843,12 +1830,11 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 			return err
 		}
 
-		msg := &internalpb.RemoteMessage{
-			Sender:   from.String(),
-			Receiver: to.String(),
-			Message:  marshaled,
-			Metadata: md,
-		}
+		msg := &internalpb.RemoteMessage{}
+		msg.SetSender(from.String())
+		msg.SetReceiver(to.String())
+		msg.SetMessage(marshaled)
+		msg.SetMetadata(md)
 
 		c := r.getCoalescer(to.Host(), to.Port(), r.ordinaryLaneForReceiver(msg.GetReceiver()))
 		if c == nil {
@@ -2029,11 +2015,10 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	if err != nil {
 		return nil, err
 	}
-	request := &internalpb.RemoteLookupRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteLookupRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2073,12 +2058,11 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	if err != nil {
 		return nil, err
 	}
-	request := &internalpb.GetReliableCompanionRequest{
-		Host:         host,
-		Port:         port32,
-		EndpointName: endpointName,
-		Role:         role,
-	}
+	request := &internalpb.GetReliableCompanionRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetEndpointName(endpointName)
+	request.SetRole(role)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2237,11 +2221,10 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 
 	var singletonSpec *internalpb.SingletonSpec
 	if spawnRequest.Singleton != nil {
-		singletonSpec = &internalpb.SingletonSpec{
-			SpawnTimeout: durationpb.New(spawnRequest.Singleton.SpawnTimeout),
-			WaitInterval: durationpb.New(spawnRequest.Singleton.WaitInterval),
-			MaxRetries:   spawnRequest.Singleton.MaxRetries,
-		}
+		singletonSpec = &internalpb.SingletonSpec{}
+		singletonSpec.SetSpawnTimeout(durationpb.New(spawnRequest.Singleton.SpawnTimeout))
+		singletonSpec.SetWaitInterval(durationpb.New(spawnRequest.Singleton.WaitInterval))
+		singletonSpec.SetMaxRetries(spawnRequest.Singleton.MaxRetries)
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
@@ -2259,22 +2242,23 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	if spawnRequest.InitTimeout > 0 {
 		initTimeout = durationpb.New(spawnRequest.InitTimeout)
 	}
-	request := &internalpb.RemoteSpawnRequest{
-		Host:                host,
-		Port:                port32,
-		ActorName:           spawnRequest.Name,
-		ActorType:           spawnRequest.Kind,
-		Singleton:           singletonSpec,
-		Relocatable:         spawnRequest.Relocatable,
-		PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
-		Dependencies:        dependencies,
-		EnableStash:         spawnRequest.EnableStashing,
-		Role:                spawnRequest.Role,
-		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
-		Reentrancy:          reentrancy,
-		InitTimeout:         initTimeout,
-		ReliableDelivery:    encodeReliableDelivery(spawnRequest.ReliableDelivery),
+	request := &internalpb.RemoteSpawnRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetActorName(spawnRequest.Name)
+	request.SetActorType(spawnRequest.Kind)
+	request.SetSingleton(singletonSpec)
+	request.SetRelocatable(spawnRequest.Relocatable)
+	request.SetPassivationStrategy(codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy))
+	request.SetDependencies(dependencies)
+	request.SetEnableStash(spawnRequest.EnableStashing)
+	if spawnRequest.Role != nil {
+		request.SetRole(*spawnRequest.Role)
 	}
+	request.SetSupervisor(codec.EncodeSupervisor(spawnRequest.Supervisor))
+	request.SetReentrancy(reentrancy)
+	request.SetInitTimeout(initTimeout)
+	request.SetReliableDelivery(encodeReliableDelivery(spawnRequest.ReliableDelivery))
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2307,35 +2291,32 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 			pattern = internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
 		}
 
-		producer := &internalpb.ReliableProducerConfig{
-			ConsumerName: spec.Producer.ConsumerName,
-			QueueRetry: &internalpb.QueueRetryConfig{
-				MaxAttempts:    uint32(spec.Producer.QueueRetryMaxAttempts), // nolint
-				InitialBackoff: durationpb.New(spec.Producer.QueueRetryInitialBackoff),
-			},
-			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
-			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
-			MaxChunkBytes:        spec.Producer.MaxChunkBytes,
-			Pattern:              pattern,
-		}
+		qrc := &internalpb.QueueRetryConfig{}
+		qrc.SetMaxAttempts(uint32(spec.Producer.QueueRetryMaxAttempts)) // nolint
+		qrc.SetInitialBackoff(durationpb.New(spec.Producer.QueueRetryInitialBackoff))
+		producer := &internalpb.ReliableProducerConfig{}
+		producer.SetConsumerName(spec.Producer.ConsumerName)
+		producer.SetQueueRetry(qrc)
+		producer.SetLocalRetryInterval(durationpb.New(spec.Producer.LocalRetryInterval))
+		producer.SetDeliveryConfirmation(spec.Producer.DeliveryConfirmation)
+		producer.SetMaxChunkBytes(spec.Producer.MaxChunkBytes)
+		producer.SetPattern(pattern)
 
 		if spec.Producer.DurableQueueID != types.EmptyString {
-			producer.DurableQueueId = new(spec.Producer.DurableQueueID)
+			producer.SetDurableQueueId(spec.Producer.DurableQueueID)
 		}
 
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
-		}
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetProducer(proto.ValueOrDefault(producer))
+		return rdc
 	case spec.Consumer != nil:
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
-				Consumer: &internalpb.ReliableConsumerConfig{
-					ProducerName:      spec.Consumer.ProducerName,
-					FlowControlWindow: uint32(spec.Consumer.FlowControlWindow), // nolint
-					ResendInterval:    durationpb.New(spec.Consumer.ResendInterval),
-				},
-			},
-		}
+		rcc := &internalpb.ReliableConsumerConfig{}
+		rcc.SetProducerName(spec.Consumer.ProducerName)
+		rcc.SetFlowControlWindow(uint32(spec.Consumer.FlowControlWindow)) // nolint
+		rcc.SetResendInterval(durationpb.New(spec.Consumer.ResendInterval))
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetConsumer(proto.ValueOrDefault(rcc))
+		return rdc
 	default:
 		return nil
 	}
@@ -2353,11 +2334,10 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	if err != nil {
 		return nil, err
 	}
-	request := &internalpb.RemoteReSpawnRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteReSpawnRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2398,11 +2378,10 @@ func (r *client) RemoteStop(ctx context.Context, host string, port int, name str
 	if err != nil {
 		return err
 	}
-	request := &internalpb.RemoteStopRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteStopRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2432,12 +2411,11 @@ func (r *client) RemoteWatch(ctx context.Context, host string, port int, name st
 		return err
 	}
 
-	request := &internalpb.RemoteWatchRequest{
-		Host:           host,
-		Port:           port32,
-		Name:           name,
-		WatcherAddress: watcher.String(),
-	}
+	request := &internalpb.RemoteWatchRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetWatcherAddress(watcher.String())
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -2460,12 +2438,11 @@ func (r *client) RemoteUnWatch(ctx context.Context, host string, port int, name 
 		return err
 	}
 
-	request := &internalpb.RemoteUnWatchRequest{
-		Host:           host,
-		Port:           port32,
-		Name:           name,
-		WatcherAddress: watcher.String(),
-	}
+	request := &internalpb.RemoteUnWatchRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetWatcherAddress(watcher.String())
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -2494,11 +2471,10 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 	if err != nil {
 		return err
 	}
-	request := &internalpb.RemoteReinstateRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteReinstateRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2803,22 +2779,21 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		}
 	}
 
-	grain := &internalpb.Grain{
-		Host: host,
-		Port: port32,
-		GrainId: &internalpb.GrainId{
-			Kind:  grainRequest.Kind,
-			Name:  grainRequest.Name,
-			Value: fmt.Sprintf("%s%s%s", grainRequest.Kind, id.GrainIdentitySeparator, grainRequest.Name),
-		},
-		Dependencies:      dependencies,
-		ActivationRetries: int32(grainRequest.ActivationRetries),
-		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
-		MailboxCapacity:   new(grainRequest.MailboxCapacity),
-		DisableRelocation: grainRequest.DisableRelocation,
-		EagerRelocation:   grainRequest.EagerRelocation,
-		Reentrancy:        codec.EncodeReentrancy(grainRequest.Reentrancy),
-	}
+	grainID := &internalpb.GrainId{}
+	grainID.SetKind(grainRequest.Kind)
+	grainID.SetName(grainRequest.Name)
+	grainID.SetValue(fmt.Sprintf("%s%s%s", grainRequest.Kind, id.GrainIdentitySeparator, grainRequest.Name))
+	grain := &internalpb.Grain{}
+	grain.SetHost(host)
+	grain.SetPort(port32)
+	grain.SetGrainId(grainID)
+	grain.SetDependencies(dependencies)
+	grain.SetActivationRetries(int32(grainRequest.ActivationRetries))
+	grain.SetActivationTimeout(durationpb.New(grainRequest.ActivationTimeout))
+	grain.SetMailboxCapacity(grainRequest.MailboxCapacity)
+	grain.SetDisableRelocation(grainRequest.DisableRelocation)
+	grain.SetEagerRelocation(grainRequest.EagerRelocation)
+	grain.SetReentrancy(codec.EncodeReentrancy(grainRequest.Reentrancy))
 
 	return grain, nil
 }

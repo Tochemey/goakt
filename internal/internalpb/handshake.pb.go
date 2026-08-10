@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -67,11 +66,6 @@ func (x LaneRole) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use LaneRole.Descriptor instead.
-func (LaneRole) EnumDescriptor() ([]byte, []int) {
-	return file_internal_handshake_proto_rawDescGZIP(), []int{0}
-}
-
 // CompressionCodec is the whole-connection compression wrapper negotiated
 // during the duplex handshake. Both peers wrap the connection only after
 // HELLO/HELLO_ACK completes.
@@ -122,40 +116,23 @@ func (x CompressionCodec) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use CompressionCodec.Descriptor instead.
-func (CompressionCodec) EnumDescriptor() ([]byte, []int) {
-	return file_internal_handshake_proto_rawDescGZIP(), []int{1}
-}
-
 // Hello is the payload of HELLO and HELLO_ACK frames on the duplex protocol.
 // Effective limits are the pairwise minimum of the dialer and acceptor values.
 type Hello struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Capability revision. Cumulative: 1 = baseline DATA/REPLY/ERROR/PING/PONG,
-	// 2 = chunking, 3 = compression tables, 4 = credit-based flow control.
-	Revision uint32 `protobuf:"varint,1,opt,name=revision,proto3" json:"revision,omitempty"`
-	// Actor system name of the sending node.
-	SystemName string `protobuf:"bytes,2,opt,name=system_name,json=systemName,proto3" json:"system_name,omitempty"`
-	// Advertised host of the sending node.
-	Host string `protobuf:"bytes,3,opt,name=host,proto3" json:"host,omitempty"`
-	// Advertised remoting port of the sending node.
-	Port uint32 `protobuf:"varint,4,opt,name=port,proto3" json:"port,omitempty"`
-	// Role of this connection within the peer lane set.
-	LaneRole LaneRole `protobuf:"varint,5,opt,name=lane_role,json=laneRole,proto3,enum=internalpb.LaneRole" json:"lane_role,omitempty"`
-	// Index within the role (meaningful for ordinary lanes).
-	LaneIndex uint32 `protobuf:"varint,6,opt,name=lane_index,json=laneIndex,proto3" json:"lane_index,omitempty"`
-	// Proposed (dialer) or selected (acceptor) compression codec.
-	Compression CompressionCodec `protobuf:"varint,7,opt,name=compression,proto3,enum=internalpb.CompressionCodec" json:"compression,omitempty"`
-	// Largest frame payload the sender is willing to accept.
-	MaxFrameSize uint32 `protobuf:"varint,8,opt,name=max_frame_size,json=maxFrameSize,proto3" json:"max_frame_size,omitempty"`
-	// Largest reassembled message the sender is willing to accept.
-	MaxMessageSize uint64 `protobuf:"varint,9,opt,name=max_message_size,json=maxMessageSize,proto3" json:"max_message_size,omitempty"`
-	// Initial credit window in bytes proposed by the sender.
-	InitialCredits uint64 `protobuf:"varint,10,opt,name=initial_credits,json=initialCredits,proto3" json:"initial_credits,omitempty"`
-	// Maximum concurrent chunk reassembly groups the sender will hold.
-	MaxConcurrentLargeTransfers uint32 `protobuf:"varint,11,opt,name=max_concurrent_large_transfers,json=maxConcurrentLargeTransfers,proto3" json:"max_concurrent_large_transfers,omitempty"`
-	unknownFields               protoimpl.UnknownFields
-	sizeCache                   protoimpl.SizeCache
+	state                                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Revision                    uint32                 `protobuf:"varint,1,opt,name=revision,proto3"`
+	xxx_hidden_SystemName                  string                 `protobuf:"bytes,2,opt,name=system_name,json=systemName,proto3"`
+	xxx_hidden_Host                        string                 `protobuf:"bytes,3,opt,name=host,proto3"`
+	xxx_hidden_Port                        uint32                 `protobuf:"varint,4,opt,name=port,proto3"`
+	xxx_hidden_LaneRole                    LaneRole               `protobuf:"varint,5,opt,name=lane_role,json=laneRole,proto3,enum=internalpb.LaneRole"`
+	xxx_hidden_LaneIndex                   uint32                 `protobuf:"varint,6,opt,name=lane_index,json=laneIndex,proto3"`
+	xxx_hidden_Compression                 CompressionCodec       `protobuf:"varint,7,opt,name=compression,proto3,enum=internalpb.CompressionCodec"`
+	xxx_hidden_MaxFrameSize                uint32                 `protobuf:"varint,8,opt,name=max_frame_size,json=maxFrameSize,proto3"`
+	xxx_hidden_MaxMessageSize              uint64                 `protobuf:"varint,9,opt,name=max_message_size,json=maxMessageSize,proto3"`
+	xxx_hidden_InitialCredits              uint64                 `protobuf:"varint,10,opt,name=initial_credits,json=initialCredits,proto3"`
+	xxx_hidden_MaxConcurrentLargeTransfers uint32                 `protobuf:"varint,11,opt,name=max_concurrent_large_transfers,json=maxConcurrentLargeTransfers,proto3"`
+	unknownFields                          protoimpl.UnknownFields
+	sizeCache                              protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -183,86 +160,171 @@ func (x *Hello) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Hello.ProtoReflect.Descriptor instead.
-func (*Hello) Descriptor() ([]byte, []int) {
-	return file_internal_handshake_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *Hello) GetRevision() uint32 {
 	if x != nil {
-		return x.Revision
+		return x.xxx_hidden_Revision
 	}
 	return 0
 }
 
 func (x *Hello) GetSystemName() string {
 	if x != nil {
-		return x.SystemName
+		return x.xxx_hidden_SystemName
 	}
 	return ""
 }
 
 func (x *Hello) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *Hello) GetPort() uint32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *Hello) GetLaneRole() LaneRole {
 	if x != nil {
-		return x.LaneRole
+		return x.xxx_hidden_LaneRole
 	}
 	return LaneRole_LANE_ROLE_CONTROL
 }
 
 func (x *Hello) GetLaneIndex() uint32 {
 	if x != nil {
-		return x.LaneIndex
+		return x.xxx_hidden_LaneIndex
 	}
 	return 0
 }
 
 func (x *Hello) GetCompression() CompressionCodec {
 	if x != nil {
-		return x.Compression
+		return x.xxx_hidden_Compression
 	}
 	return CompressionCodec_COMPRESSION_CODEC_NONE
 }
 
 func (x *Hello) GetMaxFrameSize() uint32 {
 	if x != nil {
-		return x.MaxFrameSize
+		return x.xxx_hidden_MaxFrameSize
 	}
 	return 0
 }
 
 func (x *Hello) GetMaxMessageSize() uint64 {
 	if x != nil {
-		return x.MaxMessageSize
+		return x.xxx_hidden_MaxMessageSize
 	}
 	return 0
 }
 
 func (x *Hello) GetInitialCredits() uint64 {
 	if x != nil {
-		return x.InitialCredits
+		return x.xxx_hidden_InitialCredits
 	}
 	return 0
 }
 
 func (x *Hello) GetMaxConcurrentLargeTransfers() uint32 {
 	if x != nil {
-		return x.MaxConcurrentLargeTransfers
+		return x.xxx_hidden_MaxConcurrentLargeTransfers
 	}
 	return 0
+}
+
+func (x *Hello) SetRevision(v uint32) {
+	x.xxx_hidden_Revision = v
+}
+
+func (x *Hello) SetSystemName(v string) {
+	x.xxx_hidden_SystemName = v
+}
+
+func (x *Hello) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *Hello) SetPort(v uint32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *Hello) SetLaneRole(v LaneRole) {
+	x.xxx_hidden_LaneRole = v
+}
+
+func (x *Hello) SetLaneIndex(v uint32) {
+	x.xxx_hidden_LaneIndex = v
+}
+
+func (x *Hello) SetCompression(v CompressionCodec) {
+	x.xxx_hidden_Compression = v
+}
+
+func (x *Hello) SetMaxFrameSize(v uint32) {
+	x.xxx_hidden_MaxFrameSize = v
+}
+
+func (x *Hello) SetMaxMessageSize(v uint64) {
+	x.xxx_hidden_MaxMessageSize = v
+}
+
+func (x *Hello) SetInitialCredits(v uint64) {
+	x.xxx_hidden_InitialCredits = v
+}
+
+func (x *Hello) SetMaxConcurrentLargeTransfers(v uint32) {
+	x.xxx_hidden_MaxConcurrentLargeTransfers = v
+}
+
+type Hello_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Capability revision. Cumulative: 1 = baseline DATA/REPLY/ERROR/PING/PONG,
+	// 2 = chunking, 3 = compression tables, 4 = credit-based flow control.
+	Revision uint32
+	// Actor system name of the sending node.
+	SystemName string
+	// Advertised host of the sending node.
+	Host string
+	// Advertised remoting port of the sending node.
+	Port uint32
+	// Role of this connection within the peer lane set.
+	LaneRole LaneRole
+	// Index within the role (meaningful for ordinary lanes).
+	LaneIndex uint32
+	// Proposed (dialer) or selected (acceptor) compression codec.
+	Compression CompressionCodec
+	// Largest frame payload the sender is willing to accept.
+	MaxFrameSize uint32
+	// Largest reassembled message the sender is willing to accept.
+	MaxMessageSize uint64
+	// Initial credit window in bytes proposed by the sender.
+	InitialCredits uint64
+	// Maximum concurrent chunk reassembly groups the sender will hold.
+	MaxConcurrentLargeTransfers uint32
+}
+
+func (b0 Hello_builder) Build() *Hello {
+	m0 := &Hello{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Revision = b.Revision
+	x.xxx_hidden_SystemName = b.SystemName
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_LaneRole = b.LaneRole
+	x.xxx_hidden_LaneIndex = b.LaneIndex
+	x.xxx_hidden_Compression = b.Compression
+	x.xxx_hidden_MaxFrameSize = b.MaxFrameSize
+	x.xxx_hidden_MaxMessageSize = b.MaxMessageSize
+	x.xxx_hidden_InitialCredits = b.InitialCredits
+	x.xxx_hidden_MaxConcurrentLargeTransfers = b.MaxConcurrentLargeTransfers
+	return m0
 }
 
 var File_internal_handshake_proto protoreflect.FileDescriptor
@@ -299,18 +361,6 @@ const file_internal_handshake_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_handshake_proto_rawDescOnce sync.Once
-	file_internal_handshake_proto_rawDescData []byte
-)
-
-func file_internal_handshake_proto_rawDescGZIP() []byte {
-	file_internal_handshake_proto_rawDescOnce.Do(func() {
-		file_internal_handshake_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_handshake_proto_rawDesc), len(file_internal_handshake_proto_rawDesc)))
-	})
-	return file_internal_handshake_proto_rawDescData
-}
 
 var file_internal_handshake_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_handshake_proto_msgTypes = make([]protoimpl.MessageInfo, 1)

@@ -148,8 +148,8 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 		return nil, nil, fmt.Errorf("tcp: hello local parameters are required")
 	}
 
-	localHello.LaneRole = laneSpec.Role
-	localHello.LaneIndex = laneSpec.Index
+	localHello.SetLaneRole(laneSpec.Role)
+	localHello.SetLaneIndex(laneSpec.Index)
 
 	framed, err := transport.Dial(ctx, addr, laneSpec)
 	if err != nil {

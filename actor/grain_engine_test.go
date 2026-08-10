@@ -325,13 +325,13 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, _, rem, identity := newActivationTestSystem(t, grain, "owner-remote", true)
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    "192.0.2.50",
 			Port:    16050,
-		}
+		}.Build()
 
-		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(nil)
+		rem.EXPECT().RemoteActivateGrain(ctx, owner.GetHost(), int(owner.GetPort()), mock.Anything).Return(nil)
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
@@ -342,14 +342,14 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, cl, rem, identity := newActivationTestSystem(t, grain, "owner-remote-error", true)
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    "192.0.2.51",
 			Port:    16051,
-		}
+		}.Build()
 		expectedErr := errors.New("remote activate failed")
 
-		rem.EXPECT().RemoteActivateGrain(ctx, owner.Host, int(owner.Port), mock.Anything).Return(expectedErr)
+		rem.EXPECT().RemoteActivateGrain(ctx, owner.GetHost(), int(owner.GetPort()), mock.Anything).Return(expectedErr)
 		cl.EXPECT().RemoveGrain(ctx, identity.String()).Return(nil).Once()
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
@@ -361,11 +361,11 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, _, rem, identity := newActivationTestSystem(t, grain, "owner-local", true)
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    sys.Host(),
 			Port:    int32(sys.Port()),
-		}
+		}.Build()
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.NoError(t, err)
@@ -485,11 +485,11 @@ func TestTryPeerActivation(t *testing.T) {
 		grain := NewMockGrain()
 		sys, cl, rem, identity := newActivationTestSystem(t, grain, "peer-owner-exists", true)
 		peer := &cluster.Peer{Host: "192.0.2.63", PeersPort: 15063, RemotingPort: 16063}
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    "192.0.2.64",
 			Port:    16064,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
@@ -545,11 +545,11 @@ func TestActivateGrainLocally(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-claim-mismatch", true)
-		remoteOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		remoteOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    "192.0.2.70",
 			Port:    17070,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(remoteOwner, nil).Once()
@@ -604,11 +604,11 @@ func TestActivateGrainLocally(t *testing.T) {
 		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-publish-error", true)
 		expectedErr := errors.New("dependency encode failure")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    sys.Host(),
 			Port:    int32(sys.Port()),
-		}
+		}.Build()
 
 		// the publish failure deactivates the grain, which removes its
 		// cluster record, so a failed activation leaves nothing behind
@@ -629,11 +629,11 @@ func TestActivateGrainLocally(t *testing.T) {
 		pid := newGrainPID(identity, grain, sys, newGrainConfig())
 		pid.activated.Store(true)
 		sys.grains.Set(identity.String(), pid)
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
 			Host:    sys.Host(),
 			Port:    int32(sys.Port()),
-		}
+		}.Build()
 
 		// the registry record is refreshed even when activation is skipped
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
@@ -648,7 +648,7 @@ func TestActivateGrainLocally(t *testing.T) {
 		grain := NewMockGrain()
 		sys, _, _, identity := newActivationTestSystem(t, grain, "local-barrier-timeout", false)
 		sys.grainBarrier = newGrainActivationBarrier(2, 10*time.Millisecond)
-		owner := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: identity.String()}}
+		owner := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build()}.Build()
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), owner)
 		require.ErrorIs(t, err, gerrors.ErrGrainActivationBarrierTimeout)
@@ -692,7 +692,7 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
-	require.Equal(t, "received message", resp.(*testpb.Reply).Content)
+	require.Equal(t, "received message", resp.(*testpb.Reply).GetContent())
 
 	// AskGrain activates the grain synchronously via ensureGrainProcess,
 	// so it should be available immediately. However, use Eventually to
@@ -820,7 +820,7 @@ func TestGrainOwnerMismatchError_ErrorUnknownOwner(t *testing.T) {
 }
 
 func TestGrainOwnerMismatchError_ErrorWithOwner(t *testing.T) {
-	owner := &internalpb.Grain{Host: "192.0.2.90", Port: 9090}
+	owner := internalpb.Grain_builder{Host: "192.0.2.90", Port: 9090}.Build()
 	err := (&grainOwnerMismatchError{owner: owner}).Error()
 	require.Equal(t, "grain is owned by 192.0.2.90:9090", err)
 }
@@ -830,7 +830,7 @@ func TestTryClaimGrain_AlreadyExistsButMissingOwner(t *testing.T) {
 	grain := NewMockGrain()
 	sys, cl, _, identity := newActivationTestSystem(t, grain, "missing-owner", false)
 
-	wire := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: identity.String()}}
+	wire := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build()}.Build()
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
@@ -846,7 +846,7 @@ func TestTryClaimGrain_AlreadyExistsOwnerLookupError(t *testing.T) {
 	grain := NewMockGrain()
 	sys, cl, _, identity := newActivationTestSystem(t, grain, "owner-lookup-error", false)
 
-	wire := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: identity.String()}}
+	wire := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build()}.Build()
 	expectedErr := errors.New("owner lookup failed")
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
@@ -1071,11 +1071,11 @@ func TestTellGrain(t *testing.T) {
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "tell-cluster-grain")
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind()}.Build(),
 			Host:    "192.0.2.1",
 			Port:    16000,
-		}
+		}.Build()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
 		rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 			Return(errors.New("connection refused")).Once()
@@ -1094,11 +1094,11 @@ func TestTellGrain(t *testing.T) {
 
 		identity := newGrainIdentity(NewMockGrain(), "tell-local-owner-grain")
 		// Owner endpoint matches the current node, so delivery must stay in-process.
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind()}.Build(),
 			Host:    node.Host,
 			Port:    int32(node.RemotingPort),
-		}
+		}.Build()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
@@ -1166,11 +1166,11 @@ func TestAskGrain(t *testing.T) {
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "ask-cluster-grain")
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind()}.Build(),
 			Host:    "192.0.2.1",
 			Port:    16000,
-		}
+		}.Build()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
 		rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
 			Return(nil, errors.New("connection refused")).Once()
@@ -1190,11 +1190,11 @@ func TestAskGrain(t *testing.T) {
 
 		identity := newGrainIdentity(NewMockGrain(), "ask-local-owner-grain")
 		// Owner endpoint matches the current node, so delivery must stay in-process.
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind()}.Build(),
 			Host:    node.Host,
 			Port:    int32(node.RemotingPort),
-		}
+		}.Build()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
@@ -1204,7 +1204,7 @@ func TestAskGrain(t *testing.T) {
 		resp, err := sys.AskGrain(ctx, identity, &testpb.TestReply{}, time.Second)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
-		require.Equal(t, "received message", resp.(*testpb.Reply).Content)
+		require.Equal(t, "received message", resp.(*testpb.Reply).GetContent())
 	})
 }
 
@@ -1233,7 +1233,7 @@ func TestSelectActivationPeer_LeastLoadActivation(t *testing.T) {
 func TestSelectActivationPeer_LeastLoadActivation_Success(t *testing.T) {
 	ctx := t.Context()
 	handler := func(_ context.Context, _ internalnet.Connection, req proto.Message) (proto.Message, error) {
-		return &internalpb.GetNodeMetricResponse{NodeAddress: "127.0.0.1:16000", Load: 5}, nil
+		return internalpb.GetNodeMetricResponse_builder{NodeAddress: "127.0.0.1:16000", Load: 5}.Build(), nil
 	}
 	ps, err := internalnet.NewRemotingServer("127.0.0.1:0", internalnet.WithProtoHandler("internalpb.GetNodeMetricRequest", handler))
 	require.NoError(t, err)
@@ -1306,11 +1306,11 @@ func TestSendToGrainOwner_TellMode(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9013, RemotingPort: 9113}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
-	owner := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: "grain|test", Kind: "TestGrain"},
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: "grain|test", Kind: "TestGrain"}.Build(),
 		Host:    "192.0.2.1",
 		Port:    16000,
-	}
+	}.Build()
 
 	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 		Return(errors.New("connection refused")).Once()
@@ -1408,11 +1408,11 @@ func TestSendToGrainOwner_AskMode(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9014, RemotingPort: 9114}
 	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
 
-	owner := &internalpb.Grain{
-		GrainId: &internalpb.GrainId{Value: "grain|test", Kind: "TestGrain"},
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: "grain|test", Kind: "TestGrain"}.Build(),
 		Host:    "192.0.2.1",
 		Port:    16000,
-	}
+	}.Build()
 
 	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
 		Return(nil, errors.New("connection refused")).Once()
@@ -2006,15 +2006,15 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 	departedNode := net.JoinHostPort("127.0.0.9", "16000")
 
 	grainOnDeparted := func(identity *GrainIdentity) *internalpb.Grain {
-		return &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		return internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  identity.Kind(),
 				Name:  identity.Name(),
 				Value: identity.String(),
-			},
+			}.Build(),
 			Host: "127.0.0.9",
 			Port: 16000,
-		}
+		}.Build()
 	}
 
 	t.Run("removes the directory entry when it still points at the departed node", func(t *testing.T) {
@@ -2032,11 +2032,11 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 		wire := grainOnDeparted(identity)
 
 		// the live entry now points at a surviving node
-		existing := &internalpb.Grain{
+		existing := internalpb.Grain_builder{
 			GrainId: wire.GetGrainId(),
 			Host:    "127.0.0.8",
 			Port:    16001,
-		}
+		}.Build()
 		cl.EXPECT().GetGrain(ctx, identity.String()).Return(existing, nil).Once()
 
 		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
@@ -2054,7 +2054,7 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 	t.Run("skips relocation-disabled grains without touching the cluster", func(t *testing.T) {
 		sys, _, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-disabled", false)
 		wire := grainOnDeparted(identity)
-		wire.DisableRelocation = true
+		wire.SetDisableRelocation(true)
 
 		// no GetGrain / RemoveGrain expectations: the method must return early
 		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
@@ -2204,7 +2204,7 @@ func (g *envelopeReplyingGrain) OnReceive(gctx *GrainContext) {
 
 	switch gctx.Message().(type) {
 	case *testpb.TestPing:
-		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, &testpb.Reply{Content: "in-turn"}, nil)
+		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, testpb.Reply_builder{Content: "in-turn"}.Build(), nil)
 	case *testpb.TestBye:
 		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, nil, errors.New("grain boom"))
 	}
@@ -2248,7 +2248,7 @@ func (g *envelopeDeferringGrain) OnReceive(gctx *GrainContext) {
 		g.mu.Unlock()
 
 		for _, correlationID := range pending {
-			_ = system.routeAsyncReply(context.Background(), nil, nil, correlationID, &testpb.Reply{Content: "deferred"}, nil)
+			_ = system.routeAsyncReply(context.Background(), nil, nil, correlationID, testpb.Reply_builder{Content: "deferred"}.Build(), nil)
 		}
 	}
 
@@ -2434,7 +2434,7 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 
 		require.NoError(t, sys.deliverAsyncEnvelope(ctx, identity, &commands.AsyncRequest{
 			CorrelationID: "fast",
-			Message:       &testpb.Reply{Content: "fast"},
+			Message:       testpb.Reply_builder{Content: "fast"}.Build(),
 		}))
 
 		require.Eventually(t, func() bool {
@@ -2479,11 +2479,11 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 		grain := &reentrantRecordingGrain{}
 		sys, cl, rem, identity := newActivationTestSystem(t, grain, "away", true)
 
-		owner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()},
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
 			Host:    "192.0.2.9",
 			Port:    16000,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
@@ -2638,7 +2638,7 @@ func TestNonReentrantAskSkipsPendingAsks(t *testing.T) {
 	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
 		entered <- struct{}{}
 		<-release
-		gctx.Response(&testpb.Reply{Content: "legacy"})
+		gctx.Response(testpb.Reply_builder{Content: "legacy"}.Build())
 	}}
 
 	identity, err := system.GrainIdentity(ctx, "legacy-ask-grain", func(context.Context) (Grain, error) {

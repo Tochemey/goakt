@@ -40,7 +40,7 @@ func TestDelivery(t *testing.T) {
 
 		response := &commands.AsyncResponse{
 			CorrelationID: "corr",
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		}
 		require.True(t, table.Complete(response))
 		require.Zero(t, table.Len())
