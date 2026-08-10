@@ -44,6 +44,21 @@ import (
 // RemoteBatchAsk call so a large batch cannot fan out unbounded goroutines.
 const maxBatchAskConcurrency = 64
 
+// tellBatchTypeName is the wire type name of a coalesced fire-and-forget
+// batch delivered over the duplex ordinary lane as one internal-proto DATA
+// frame. The remoting server routes it to the registered batch tell handler.
+const tellBatchTypeName = "internalpb.RemoteTellRequest"
+
+// tellBatchSplitMargin is the headroom reserved under the session's
+// negotiated max message size for the DATA-envelope framing wrapped around a
+// marshaled batch payload.
+const tellBatchSplitMargin = 4 * 1024
+
+// tellBatchPerMessageOverhead over-approximates the RemoteTellRequest field
+// tag and length prefix wrapped around one RemoteMessage entry when packing
+// an oversized batch into size-bounded sub-batches.
+const tellBatchPerMessageOverhead = 6
+
 // tellParams holds the wire-ready pieces of one fire-and-forget user
 // message before it is encoded as a duplex DATA envelope or wrapped in a
 // legacy RemoteTellRequest. Fields mirror [inet.DataEnvelope] so the duplex
@@ -492,16 +507,28 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 	return msg, nil
 }
 
-// sendBatchTellDuplex sends multiple tells on one duplex session when the peer
-// supports duplex; otherwise delegates to [sendBatchTellLegacy]. Each message
-// is a separate DATA frame on the ordinary lane. The session is closed on the
-// first transport error.
+// sendBatchTellDuplex delivers a batch of tells bound for one receiver. When
+// coalescing is enabled and the receiver is not a configured large-message
+// destination, the batch is enqueued in order onto the receiver's coalescer
+// shard so batch tells and coalesced singles share one FIFO fence. Otherwise
+// each message follows the routed per-message send (large lane included),
+// with the legacy unary batch as fallback for legacy peers.
 func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int, params []tellParams) error {
+	if len(params) == 0 {
+		return nil
+	}
+
+	if x.coalescing.enabled() && !x.isLargeReceiver(params[0].receiver) {
+		return x.submitBatchTellCoalesced(ctx, host, port, params)
+	}
+
 	if x.pinRequiresLegacy() {
-		return x.sendBatchTellLegacy(ctx, host, port, params)
+		_, err := x.flushTellBatchLegacy(ctx, host, port, batchTellRequest(params))
+		return err
 	}
 
 	peer := x.peerFor(host, port)
+
 	for i, param := range params {
 		if err := x.sendTellDuplex(ctx, peer, param); err != nil {
 			if errors.Is(err, errPreferLegacy) {
@@ -509,8 +536,10 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 				// before i were already delivered or admitted on duplex
 				// lanes; re-sending the whole batch would duplicate them,
 				// breaking at-most-once.
-				return x.sendBatchTellLegacy(ctx, host, port, params[i:])
+				_, ferr := x.flushTellBatchLegacy(ctx, host, port, batchTellRequest(params[i:]))
+				return ferr
 			}
+
 			return err
 		}
 	}
@@ -518,14 +547,43 @@ func (x *client) sendBatchTellDuplex(ctx context.Context, host string, port int,
 	return nil
 }
 
-// sendBatchTellLegacy batches all messages into one RemoteTellRequest and
-// sends it through the pooled legacy NetClient.
-func (x *client) sendBatchTellLegacy(ctx context.Context, host string, port int, params []tellParams) error {
-	p := x.peerFor(host, port)
-	p.beginLegacySend()
-	defer p.endLegacySend()
+// submitBatchTellCoalesced enqueues the batch in submission order onto the
+// receiver's coalescer shard, the same shard coalesced singles use, so
+// per-receiver FIFO holds across RemoteTell and RemoteBatchTell. Backpressure
+// and caller cancellation surface synchronously (a prefix of the batch may
+// already be enqueued); transport failures after admission dead-letter
+// through the client's TellFailureHandler.
+func (x *client) submitBatchTellCoalesced(ctx context.Context, host string, port int, params []tellParams) error {
+	c := x.getCoalescer(host, port, x.ordinaryLaneForReceiver(params[0].receiver))
+	if c == nil {
+		return gerrors.NewErrRemoteSendFailure(errors.New("no coalescer available for destination"))
+	}
 
+	for _, param := range params {
+		msg := &internalpb.RemoteMessage{
+			Sender:   param.sender,
+			Receiver: param.receiver,
+			Message:  param.payload,
+			Metadata: metadataMapFromBytes(param.metadata),
+		}
+
+		switch err := c.submit(ctx, msg); {
+		case err == nil:
+		case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
+			return errors.Join(gerrors.ErrRemoteSendBackpressure, err)
+		default:
+			return gerrors.NewErrRemoteSendFailure(err)
+		}
+	}
+
+	return nil
+}
+
+// batchTellRequest packs params into one RemoteTellRequest for the legacy
+// unary batch path.
+func batchTellRequest(params []tellParams) *internalpb.RemoteTellRequest {
 	msgs := make([]*internalpb.RemoteMessage, 0, len(params))
+
 	for _, param := range params {
 		msgs = append(msgs, &internalpb.RemoteMessage{
 			Sender:   param.sender,
@@ -535,13 +593,7 @@ func (x *client) sendBatchTellLegacy(ctx context.Context, host string, port int,
 		})
 	}
 
-	nc := x.NetClient(host, port)
-	resp, err := nc.SendProto(ctx, &internalpb.RemoteTellRequest{RemoteMessages: msgs})
-	if err != nil {
-		return err
-	}
-
-	return checkProtoError(resp)
+	return &internalpb.RemoteTellRequest{RemoteMessages: msgs}
 }
 
 // batchAskResult holds one goroutine outcome from [sendBatchAskDuplex].
@@ -914,4 +966,164 @@ func (x *client) buildUserTellParams(ctx context.Context, sender, receiver strin
 		typeName: typeName,
 		metadata: meta,
 	}, nil
+}
+
+// flushTellBatch delivers one coalesced batch to host:port, choosing the
+// duplex ordinary lane for duplex peers and the legacy unary path otherwise.
+// On error it returns the messages that were not delivered, so the caller's
+// failure fan-out covers each message exactly once even when the duplex
+// flush split the batch and delivered a prefix.
+func (x *client) flushTellBatch(ctx context.Context, host string, port int, laneIndex uint32, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+	if x.pinRequiresLegacy() {
+		return x.flushTellBatchLegacy(ctx, host, port, req)
+	}
+
+	peer := x.peerFor(host, port)
+	undelivered, err := x.flushTellBatchDuplex(ctx, peer, laneIndex, req)
+	if errors.Is(err, errPreferLegacy) {
+		return x.flushTellBatchLegacy(ctx, host, port, req)
+	}
+
+	return undelivered, err
+}
+
+// flushTellBatchDuplex encodes req as internal-proto DATA envelopes on the
+// given ordinary lane. A batch whose marshaled size would exceed the
+// session's negotiated max message size is split into size-bounded
+// sub-batches sent in order, so individually valid tells are never
+// dead-lettered for sharing a batch with others. Terminal transport failures
+// retire the lane so the next flush redials; the undelivered suffix is
+// returned for the caller's fan-out.
+func (x *client) flushTellBatchDuplex(ctx context.Context, peer *peer, laneIndex uint32, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+	// ensureLane reports errPreferLegacy for pinned or cached-legacy peers,
+	// which routes the batch to the legacy unary flush.
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_ORDINARY, index: laneIndex}
+	session, err := peer.ensureLane(ctx, key.role, key.index)
+	if err != nil {
+		return req.GetRemoteMessages(), err
+	}
+
+	// Pooled marshal (same pattern as sendControlDuplex): the envelope encode
+	// downstream copies the payload, so the buffer is released as soon as
+	// encoding is done instead of feeding one allocation per batch to the GC.
+	payload, err := inet.MarshalProtoAppend(req)
+	if err != nil {
+		return req.GetRemoteMessages(), err
+	}
+
+	msgs := req.GetRemoteMessages()
+	limit := tellBatchSplitLimit(session)
+
+	// Fast path: the whole batch fits one logical frame. This is the
+	// overwhelmingly common case; the split below re-marshals only oversized
+	// aggregates.
+	if len(msgs) <= 1 || limit == 0 || uint64(len(payload)) <= limit {
+		if err := x.sendMarshaledTellBatch(ctx, peer, key, session, payload); err != nil {
+			return msgs, err
+		}
+
+		return nil, nil
+	}
+
+	inet.ReleaseMarshalBuffer(payload)
+
+	// Greedy packing: each sub-batch takes messages in order until the next
+	// one would push it over the limit. A single message above the limit
+	// still ships alone and fails on its own merits, exactly as it would as
+	// a direct tell.
+	start := 0
+
+	for start < len(msgs) {
+		end := start
+		groupSize := uint64(0)
+
+		for end < len(msgs) {
+			size := uint64(proto.Size(msgs[end])) + tellBatchPerMessageOverhead
+
+			if end > start && groupSize+size > limit {
+				break
+			}
+
+			groupSize += size
+			end++
+		}
+
+		sub := &internalpb.RemoteTellRequest{RemoteMessages: msgs[start:end]}
+		payload, err := inet.MarshalProtoAppend(sub)
+		if err != nil {
+			return msgs[start:], err
+		}
+
+		if err := x.sendMarshaledTellBatch(ctx, peer, key, session, payload); err != nil {
+			return msgs[start:], err
+		}
+
+		start = end
+	}
+
+	return nil, nil
+}
+
+// tellBatchSplitLimit returns the largest marshaled batch payload flushed as
+// one logical frame on session, leaving envelope headroom under the
+// negotiated max message size. Zero means the session advertises no usable
+// ceiling; the batch is then sent unsplit and the transport enforces its own
+// cap.
+func tellBatchSplitLimit(session inet.DuplexSession) uint64 {
+	maxMessage := session.MaxMessageSize()
+	if maxMessage <= tellBatchSplitMargin {
+		return 0
+	}
+
+	return maxMessage - tellBatchSplitMargin
+}
+
+// sendMarshaledTellBatch wraps an already-marshaled RemoteTellRequest payload
+// in a DATA envelope and submits it on session, releasing the pooled marshal
+// buffer as soon as the envelope encode has copied it. Terminal transport
+// failures retire the lane so the next flush redials.
+func (x *client) sendMarshaledTellBatch(ctx context.Context, peer *peer, key laneKey, session inet.DuplexSession, payload []byte) error {
+	env := inet.DataEnvelope{
+		TypeName:     tellBatchTypeName,
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      payload,
+	}
+
+	encoded, err := encodeControlDataEnvelope(session, env)
+	inet.ReleaseMarshalBuffer(payload)
+	if err != nil {
+		return err
+	}
+
+	err = session.Tell(ctx, inet.Frame{
+		Type:    inet.FrameTypeData,
+		Lane:    session.Lane(),
+		Payload: encoded,
+	})
+	if err != nil && shouldRetireDuplexSession(err, inet.Frame{}) {
+		peer.retireLane(key, session)
+	}
+
+	return mapDuplexErr(err)
+}
+
+// flushTellBatchLegacy sends req through the pooled legacy unary client,
+// preserving the pre-duplex coalesced flush behavior. The legacy request is
+// all-or-nothing: on error the whole batch is undelivered.
+func (x *client) flushTellBatchLegacy(ctx context.Context, host string, port int, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+	p := x.peerFor(host, port)
+	p.beginLegacySend()
+	defer p.endLegacySend()
+
+	nc := x.NetClient(host, port)
+	resp, err := nc.SendProto(ctx, req)
+	if err != nil {
+		return req.GetRemoteMessages(), err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return req.GetRemoteMessages(), err
+	}
+
+	return nil, nil
 }

@@ -43,8 +43,13 @@ type RequestHandlerFunc func(conn Connection)
 // DuplexHandlerFunc handles a connection that sniffed as the duplex protocol
 // (first byte [ProtocolVersion]). It receives the raw [net.Conn] after TLS
 // with the sniffed byte prepended and before any legacy compression wrapper.
-// The handler owns the connection for the duration of the call.
-type DuplexHandlerFunc func(conn net.Conn)
+//
+// The handler owns the connection and its server accounting: it must call
+// release exactly once when the connection's service ends, so shutdown can
+// wait for live duplex connections. The handler may return before release is
+// called; service then continues on the connection's own transport goroutines
+// (detached mode) and the accept worker goes back to its pool.
+type DuplexHandlerFunc func(conn net.Conn, release func())
 
 // AcceptProtocol selects which remoting wire protocols the listener accepts.
 // It mirrors remote.ProtocolPin without importing the remote package.
@@ -495,10 +500,14 @@ func (s *TCPServer) serveConn(netConn net.Conn) {
 	s.connWaitGroup.Add(1)
 	s.activeConnections.Add(1)
 
-	defer func() {
+	// release retires this connection's server accounting exactly once. The
+	// legacy paths call it when serveConn returns; the duplex handler owns it
+	// (see [DuplexHandlerFunc]) so a detached duplex connection keeps shutdown
+	// waiting until its transport goroutines finish.
+	release := sync.OnceFunc(func() {
 		s.activeConnections.Add(-1)
 		s.connWaitGroup.Done()
-	}()
+	})
 
 	if s.tlsEnabled {
 		netConn = tls.Server(netConn, s.tlsConfig)
@@ -506,13 +515,12 @@ func (s *TCPServer) serveConn(netConn net.Conn) {
 
 	switch s.acceptProtocol {
 	case AcceptProtocolLegacy:
+		defer release()
 		s.serveLegacyConn(netConn)
-		return
 	case AcceptProtocolDuplex:
-		s.serveDuplexOnlyConn(netConn)
-		return
+		s.serveDuplexOnlyConn(netConn, release)
 	default:
-		s.serveAutoConn(netConn)
+		s.serveAutoConn(netConn, release)
 	}
 }
 
@@ -520,37 +528,44 @@ func (s *TCPServer) serveConn(netConn net.Conn) {
 // wrappers. [ProtocolVersion] routes to the duplex handler; anything else
 // replays into the legacy path. Legacy brotli has no magic byte and can
 // collide with [ProtocolVersion]; those deployments must pin legacy or duplex.
-func (s *TCPServer) serveAutoConn(netConn net.Conn) {
+// release retires the connection's server accounting; every terminal path
+// must reach it exactly once (the duplex handler owns it after handoff).
+func (s *TCPServer) serveAutoConn(netConn net.Conn, release func()) {
 	first, ok := s.sniffFirstByte(netConn)
 	if !ok {
+		release()
 		return
 	}
 
 	netConn = &prependConn{Conn: netConn, prefix: []byte{first}}
 
 	if first == ProtocolVersion {
-		s.invokeDuplexHandler(netConn)
+		s.invokeDuplexHandler(netConn, release)
 		return
 	}
 
+	defer release()
 	s.serveLegacyConn(netConn)
 }
 
 // serveDuplexOnlyConn accepts only duplex peers. Non-duplex first bytes close
-// the connection without entering the legacy path.
-func (s *TCPServer) serveDuplexOnlyConn(netConn net.Conn) {
+// the connection without entering the legacy path. release retires the
+// connection's server accounting; the duplex handler owns it after handoff.
+func (s *TCPServer) serveDuplexOnlyConn(netConn net.Conn, release func()) {
 	first, ok := s.sniffFirstByte(netConn)
 	if !ok {
+		release()
 		return
 	}
 
 	if first != ProtocolVersion {
 		_ = netConn.Close()
+		release()
 		return
 	}
 
 	netConn = &prependConn{Conn: netConn, prefix: []byte{first}}
-	s.invokeDuplexHandler(netConn)
+	s.invokeDuplexHandler(netConn, release)
 }
 
 // sniffFirstByte reads the protocol discriminator with an optional idle
@@ -574,15 +589,16 @@ func (s *TCPServer) sniffFirstByte(netConn net.Conn) (byte, bool) {
 }
 
 // invokeDuplexHandler routes a sniffed duplex connection to the registered
-// handler, or closes it when none is configured.
-func (s *TCPServer) invokeDuplexHandler(netConn net.Conn) {
+// handler, or closes it when none is configured. The handler takes ownership
+// of both the connection and release (see [DuplexHandlerFunc]).
+func (s *TCPServer) invokeDuplexHandler(netConn net.Conn, release func()) {
 	if s.duplexHandler == nil {
 		_ = netConn.Close()
+		release()
 		return
 	}
 
-	// Handler owns the connection for its duration, including Close.
-	s.duplexHandler(netConn)
+	s.duplexHandler(netConn, release)
 }
 
 // serveLegacyConn applies configured wrappers and runs the legacy request

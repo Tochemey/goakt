@@ -25,6 +25,7 @@ package remoteclient
 import (
 	"context"
 	"encoding/binary"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -345,4 +347,131 @@ func TestSendTellAndAskDuplex(t *testing.T) {
 	resp, err := r.sendAsk(context.Background(), host, port, askParams{tellParams: params}, ser)
 	require.NoError(t, err)
 	assert.True(t, proto.Equal(msg, resp.(*durationpb.Duration)))
+}
+
+// tellBatchRecorder collects every message the server receives in arrival
+// order. Coalesced flushes arrive as internal-proto RemoteTellRequest frames
+// dispatched through the ProtoHandler registry; each is flattened into the
+// shared list.
+type tellBatchRecorder struct {
+	mu       sync.Mutex
+	payloads [][]byte
+}
+
+func (x *tellBatchRecorder) handle(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
+	req, ok := msg.(*internalpb.RemoteTellRequest)
+	if !ok {
+		return &internalpb.RemoteTellResponse{}, nil
+	}
+
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	for _, remoteMessage := range req.GetRemoteMessages() {
+		payload := make([]byte, len(remoteMessage.GetMessage()))
+		copy(payload, remoteMessage.GetMessage())
+		x.payloads = append(x.payloads, payload)
+	}
+
+	return &internalpb.RemoteTellResponse{}, nil
+}
+
+func (x *tellBatchRecorder) snapshot() [][]byte {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	out := make([][]byte, len(x.payloads))
+	copy(out, x.payloads)
+	return out
+}
+
+// TestRemoteTellAndBatchTellShareFIFO pins the cross-API ordering guarantee:
+// batch tells ride the same coalescer shard as coalesced singles, so a
+// RemoteTell followed by a RemoteBatchTell followed by another RemoteTell
+// arrives at the receiver in exactly that order.
+func TestRemoteTellAndBatchTellShareFIFO(t *testing.T) {
+	recorder := &tellBatchRecorder{}
+	ps := startRemotingServer(t,
+		inet.WithProtoHandler("internalpb.RemoteTellRequest", recorder.handle),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithSendCoalescing(16),
+	).(*client)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	sequenced := func(i int) *durationpb.Duration { return durationpb.New(time.Duration(i) * time.Millisecond) }
+
+	require.NoError(t, r.RemoteTell(context.Background(), from, to, sequenced(1)))
+	require.NoError(t, r.RemoteBatchTell(context.Background(), from, to, []any{sequenced(2), sequenced(3)}))
+	require.NoError(t, r.RemoteTell(context.Background(), from, to, sequenced(4)))
+
+	require.Eventually(t, func() bool { return len(recorder.snapshot()) == 4 }, 3*time.Second, 5*time.Millisecond,
+		"all four tells must be delivered")
+
+	ser := remote.NewProtoSerializer()
+
+	for i, payload := range recorder.snapshot() {
+		expected, err := ser.Serialize(sequenced(i + 1))
+		require.NoError(t, err)
+		assert.Equal(t, expected, payload, "delivery order must match submission order at position %d", i)
+	}
+}
+
+// TestRemoteBatchTellSplitsOversizedFlush verifies that a coalesced batch
+// whose aggregate wire size exceeds the negotiated max message size is split
+// into size-bounded frames instead of being dead-lettered wholesale: every
+// individually valid message must arrive.
+func TestRemoteBatchTellSplitsOversizedFlush(t *testing.T) {
+	const maxMessage = 256 * 1024
+
+	recorder := &tellBatchRecorder{}
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerMaxMessageSize(maxMessage),
+		inet.WithProtoHandler("internalpb.RemoteTellRequest", recorder.handle),
+	)
+	host, port := serverHostPort(t, ps)
+
+	var deadLettered atomic.Int64
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+		WithClientMaxMessageSize(maxMessage),
+		WithSendCoalescing(64),
+		WithTellFailureHandler(func(_ string, messages []*internalpb.RemoteMessage, _ error) {
+			deadLettered.Add(int64(len(messages)))
+		}),
+	).(*client)
+	defer r.Close()
+
+	from := address.New("from", "sys", host, port)
+	to := address.New("to", "sys", host, port)
+
+	// 40 x 32KiB of raw payload is ~5x the negotiated ceiling; individually
+	// every message fits comfortably. RemoteMessage doubles as a convenient
+	// vendored proto carrier for bulk bytes.
+	const messages = 40
+	batch := make([]any, 0, messages)
+
+	for i := range messages {
+		payload := make([]byte, 32*1024)
+		for j := range payload {
+			payload[j] = byte(i)
+		}
+
+		batch = append(batch, &internalpb.RemoteMessage{Message: payload})
+	}
+
+	require.NoError(t, r.RemoteBatchTell(context.Background(), from, to, batch))
+
+	require.Eventually(t, func() bool { return len(recorder.snapshot()) == messages }, 5*time.Second, 10*time.Millisecond,
+		"an oversized aggregate must be split and fully delivered, got %d of %d (dead-lettered %d)",
+		len(recorder.snapshot()), messages, deadLettered.Load())
+	assert.Zero(t, deadLettered.Load(), "no individually valid message may be dead-lettered")
 }

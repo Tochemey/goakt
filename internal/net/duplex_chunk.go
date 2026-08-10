@@ -235,12 +235,23 @@ func (x *duplexConn) softRejectChunk(corr uint64, message string) {
 // readLoop handles an unchunked frame. CHUNK frames never touch pending
 // completion directly; only the logical REPLY/ERROR does.
 //
+// It runs on the read goroutine (readLoop -> handleInboundChunk), so a
+// handler-mode session must route through the same [duplexConn.deliverInbound]
+// tail as unchunked frames: pushing straight onto the inbound channel would
+// strand the frame, because handler mode has no [DuplexSession.Recv] consumer
+// and the transient drainer is only woken by deliverInbound.
+//
 // Delivery to inbound blocks exactly like the unchunked DATA path: a slow
 // consumer backpressures the reader instead of the connection being killed
 // over local queue depth, which would punish a compliant peer. The pinned
 // reassembly buffer is simply memory held while backpressuring, no different
 // from the reassembler holding it one step earlier.
 func (x *duplexConn) dispatchLogical(frame Frame) {
+	// Every CHUNK that built this frame was already credit-granted at its own
+	// disposition; mark the logical frame so downstream dispositions never
+	// grant it a second time.
+	frame.Flags |= frameFlagInternalReassembled
+
 	if frame.Type == FrameTypeReply || frame.Type == FrameTypeError {
 		if frame.Correlation != 0 {
 			if !x.pending.complete(frame.Correlation, frame) {
@@ -249,6 +260,11 @@ func (x *duplexConn) dispatchLogical(frame Frame) {
 
 			return
 		}
+	}
+
+	if x.inboundHandler != nil {
+		x.deliverInbound(frame)
+		return
 	}
 
 	select {

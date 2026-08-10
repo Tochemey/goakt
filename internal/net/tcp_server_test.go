@@ -966,7 +966,8 @@ func TestServeConnSniffRoutesFirstByte(t *testing.T) {
 
 			srv, err := NewTCPServer("127.0.0.1:0",
 				WithLoops(1),
-				WithDuplexHandler(func(conn net.Conn) {
+				WithDuplexHandler(func(conn net.Conn, release func()) {
+					defer release()
 					mu.Lock()
 					gotDuplex = true
 					mu.Unlock()
@@ -1067,7 +1068,8 @@ func TestServeConnAcceptProtocolLegacySkipsSniff(t *testing.T) {
 	srv, err := NewTCPServer("127.0.0.1:0",
 		WithLoops(1),
 		WithAcceptProtocol(AcceptProtocolLegacy),
-		WithDuplexHandler(func(conn net.Conn) {
+		WithDuplexHandler(func(conn net.Conn, release func()) {
+			defer release()
 			mu.Lock()
 			gotDuplex = true
 			mu.Unlock()
@@ -1120,7 +1122,8 @@ func TestServeConnAcceptProtocolDuplexRefusesLegacy(t *testing.T) {
 	srv, err := NewTCPServer("127.0.0.1:0",
 		WithLoops(1),
 		WithAcceptProtocol(AcceptProtocolDuplex),
-		WithDuplexHandler(func(conn net.Conn) {
+		WithDuplexHandler(func(conn net.Conn, release func()) {
+			defer release()
 			mu.Lock()
 			gotDuplex = true
 			mu.Unlock()

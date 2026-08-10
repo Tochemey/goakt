@@ -934,11 +934,11 @@ type client struct {
 	// the legacy coalescer and the duplex lane pump. See WithTellFailureHandler.
 	tellFailureHandler TellFailureHandler
 
-	// coalescers caches one coalescer per destination endpoint ("host:port").
-	// Populated lazily on first coalesced send to a new destination and
-	// torn down in Close. coalescersMu guards the creation path only; reads
-	// go through the lock-free map Get.
-	coalescers   *xsync.Map[string, *coalescer]
+	// coalescers caches one coalescer per (destination endpoint,
+	// ordinary-lane shard). Populated lazily on first coalesced send to a
+	// new shard and torn down in Close. coalescersMu guards the creation
+	// path only; reads go through the lock-free map Get.
+	coalescers   *xsync.Map[coalescerKey, *coalescer]
 	coalescersMu sync.Mutex
 
 	// protocolPin selects duplex-first, legacy-only, or duplex-only dialing.
@@ -993,7 +993,7 @@ func NewClient(opts ...ClientOption) Client {
 		keepAlive:                   15 * time.Second,         // 15s TCP keep-alive
 		compression:                 remote.NoCompression,     // No compression (matches server default in remote.Config)
 		clientCache:                 xsync.NewMap[string, *inet.Client](),
-		coalescers:                  xsync.NewMap[string, *coalescer](),
+		coalescers:                  xsync.NewMap[coalescerKey, *coalescer](),
 		protocolPin:                 remote.ProtocolPinAuto,
 		writeTimeout:                10 * time.Second,
 		readIdleTimeout:             10 * time.Second,
@@ -1825,8 +1825,10 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 	// per-message metadata when dispatching. That keeps trace spans and
 	// baggage correct even when many callers' messages share a batch.
 	// The payload outlives this call (it is flushed asynchronously), so it
-	// must not come from the payload pool.
-	if r.coalescing.enabled() && r.shouldUseCoalescer(to.Host(), to.Port()) {
+	// must not come from the payload pool. Large-message destinations bypass
+	// coalescing entirely: their tells take the routed path below so they
+	// ride the dedicated large lane instead of an ordinary-lane batch.
+	if r.coalescing.enabled() && !r.isLargeReceiver(to.String()) {
 		marshaled, err := serializer.Serialize(message)
 		if err != nil {
 			return gerrors.NewErrInvalidMessage(err)
@@ -1848,7 +1850,7 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 			Metadata: md,
 		}
 
-		c := r.getCoalescer(to.Host(), to.Port())
+		c := r.getCoalescer(to.Host(), to.Port(), r.ordinaryLaneForReceiver(msg.GetReceiver()))
 		if c == nil {
 			return gerrors.NewErrRemoteSendFailure(errors.New("no coalescer available for destination"))
 		}
@@ -1919,30 +1921,56 @@ func (r *client) injectMessageMetadata(ctx context.Context) (map[string]string, 
 	return md, nil
 }
 
-// getCoalescer returns the per-destination coalescer for (host, port), creating
-// it on first use. Lazy initialization uses the same double-checked pattern as
-// NetClient. Returns nil if coalescing is not enabled.
-func (r *client) getCoalescer(host string, port int) *coalescer {
+// isLargeReceiver reports whether receiver matches a configured
+// large-message destination pattern. Large receivers bypass tell coalescing
+// so their traffic rides the dedicated large lane through the routed send
+// path, preserving the head-of-line isolation that lane exists for.
+func (r *client) isLargeReceiver(receiver string) bool {
+	if len(r.largeMessageDestinations) == 0 {
+		return false
+	}
+
+	return matchesLargeDestination(hierarchicalPath(receiver), r.largeMessageDestinations)
+}
+
+// ordinaryLaneForReceiver assigns receiver to a stable ordinary-lane shard so
+// coalesced tells for one receiver always ride the same lane and per-pair
+// FIFO survives sharding. With one configured lane (the default) every
+// receiver maps to lane 0, preserving pre-sharding behavior exactly.
+func (r *client) ordinaryLaneForReceiver(receiver string) uint32 {
+	if r.ordinaryLanes <= 1 {
+		return 0
+	}
+
+	return fnv32a(receiver) % r.ordinaryLanes
+}
+
+// getCoalescer returns the coalescer shard for (host, port, laneIndex),
+// creating it on first use. One coalescer exists per destination lane shard,
+// so shards batch and flush concurrently on their own ordinary lanes. Lazy
+// initialization uses the same double-checked pattern as NetClient. Returns
+// nil if coalescing is not enabled.
+func (r *client) getCoalescer(host string, port int, laneIndex uint32) *coalescer {
 	if !r.coalescing.enabled() {
 		return nil
 	}
 
-	dest := net.JoinHostPort(host, strconv.Itoa(port))
-	if c, ok := r.coalescers.Get(dest); ok {
+	key := coalescerKey{host: host, port: port, lane: laneIndex}
+	if c, ok := r.coalescers.Get(key); ok {
 		return c
 	}
 
-	// Resolve the net client outside the coalescer creation lock: NetClient
-	// takes r.clientMu internally, so nesting would self-deadlock.
-	nc := r.NetClient(host, port)
 	r.coalescersMu.Lock()
 	defer r.coalescersMu.Unlock()
-	if c, ok := r.coalescers.Get(dest); ok {
+	if c, ok := r.coalescers.Get(key); ok {
 		return c
 	}
 
-	coalescer := newCoalescer(dest, nc, r.coalescing, r.tellFailureHandler)
-	r.coalescers.Set(dest, coalescer)
+	flush := func(ctx context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		return r.flushTellBatch(ctx, host, port, laneIndex, req)
+	}
+	coalescer := newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), r.coalescing, r.tellFailureHandler, flush)
+	r.coalescers.Set(key, coalescer)
 	return coalescer
 }
 
@@ -2074,10 +2102,14 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	return address.Parse(companionResp.GetAddress())
 }
 
-// RemoteBatchTell sends multiple asynchronous messages to the same remote actor
-// in a single RPC. Nil entries in messages are ignored.
+// RemoteBatchTell sends multiple asynchronous messages to the same remote
+// actor. Nil entries in messages are ignored.
 //
-// The call succeeds or fails as a whole at the transport layer; no per-message
+// Messages are handed to the transport in submission order and share
+// RemoteTell's fire-and-forget contract: backpressure and caller
+// cancellation surface synchronously (a prefix of the batch may already be
+// admitted when they do), while transport failures after admission
+// dead-letter through the configured TellFailureHandler. No per-message
 // acknowledgement is returned.
 func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
 	fromStr := from.String()
@@ -2492,7 +2524,7 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 func (r *client) Close() {
 	// Drain and stop all coalescers first so any pending batches are flushed
 	// through still-open pooled clients before those clients close.
-	r.coalescers.Range(func(_ string, c *coalescer) {
+	r.coalescers.Range(func(_ coalescerKey, c *coalescer) {
 		c.close()
 	})
 	r.coalescers.Reset()

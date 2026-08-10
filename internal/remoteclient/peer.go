@@ -196,17 +196,6 @@ func (x *peer) cachedProtocol() peerProtocol {
 	return x.cache.get()
 }
 
-// shouldUseCoalescer reports whether outbound tells may use the legacy
-// coalescer. Coalescing is legacy-only: duplex tells skip it. Returns true
-// when the pin forces legacy or the peer is already cached as legacy.
-func (x *client) shouldUseCoalescer(host string, port int) bool {
-	if x.protocolPin == remote.ProtocolPinLegacy {
-		return true
-	}
-
-	return x.peerFor(host, port).cachedProtocol() == peerProtocolLegacy
-}
-
 // pinRequiresLegacy reports whether the configured pin forces the legacy
 // unary SendProto path and skips duplex dial entirely.
 func (x *client) pinRequiresLegacy() bool {
@@ -284,8 +273,10 @@ func (x *peer) closeAllLanes() {
 	x.generation++
 
 	if !x.closed {
-		// Wake pump goroutines so queued admitted tells fan out as transport
-		// failures instead of vanishing with the discarded peer.
+		// Closing pumpStop unblocks admitters parked on a full admission
+		// window and flips live pump runners into fan-out mode, so queued
+		// admitted tells become transport failures instead of vanishing with
+		// the discarded peer.
 		close(x.pumpStop)
 	}
 	x.closed = true
@@ -324,6 +315,11 @@ func (x *peer) closeAllLanes() {
 // is installed (order-preserving switchover).
 func (x *peer) ensureLane(ctx context.Context, role internalpb.LaneRole, index uint32) (inet.DuplexSession, error) {
 	key := laneKey{role: role, index: index}
+
+	// retriedClosedSession bounds the redial performed when a fresh dial's
+	// session is found closed immediately after caching (see below).
+	retriedClosedSession := false
+
 	for {
 		x.mu.Lock()
 		if x.closed {
@@ -435,7 +431,25 @@ func (x *peer) ensureLane(ctx context.Context, role internalpb.LaneRole, index u
 		x.cache.set(peerProtocolDuplex)
 		delete(x.backoff, key)
 		x.mu.Unlock()
-		go x.monitorSession(key, session)
+
+		// The session's closed hook may have fired before the lane was cached
+		// (a death during the gap finds nothing to retire). Re-check so a dead
+		// session never stays cached with no event left to evict it, and hand
+		// the caller a fresh dial instead of a session whose first write is
+		// guaranteed to fail. One bounded retry: a peer whose sessions die
+		// instantly after every successful dial must surface the failure
+		// rather than spin this loop (successful dials record no backoff).
+		if session.IsClosed() {
+			x.retireLane(key, session)
+
+			if retriedClosedSession {
+				return nil, errLaneClosedDuringDial
+			}
+
+			retriedClosedSession = true
+			continue
+		}
+
 		return session, nil
 	}
 }
@@ -456,29 +470,43 @@ func (x *peer) releaseDialingLocked(key laneKey, wait chan types.Unit) {
 	}
 }
 
-// monitorSession drains non-correlated inbound frames for the life of a lane
-// and retires the peer's cached session when the connection dies or the peer
-// reports a connection-scoped ERROR. Without this drain, unsolicited frames
-// would fill the session's inbound buffer and stall its reader, and an idle
-// session death would only be discovered by the next caller.
-func (x *peer) monitorSession(key laneKey, session inet.DuplexSession) {
-	for {
-		frame, err := session.Recv(context.Background())
-		if err != nil {
-			x.retireLane(key, session)
-			return
-		}
+// handleLaneFrame consumes a non-correlated inbound frame on the lane's read
+// loop, replacing the dedicated per-lane monitor goroutine. A connection-scoped
+// ERROR retires the peer's cached session; PING/PONG never reach this handler
+// and remaining unsolicited frames are dropped.
+func (x *peer) handleLaneFrame(key laneKey, session inet.DuplexSession, frame inet.Frame) {
+	session.ReleasePayload(frame)
 
-		if frame.Type == inet.FrameTypeError && frame.Correlation == 0 {
-			session.ReleasePayload(frame)
-			x.retireLane(key, session)
-			return
-		}
-
-		// PING/PONG never reach Recv; connection-scoped ERROR is handled
-		// above. Remaining unsolicited frames are dropped.
-		session.ReleasePayload(frame)
+	if frame.Type == inet.FrameTypeError && frame.Correlation == 0 {
+		x.retireLaneAsync(key, session)
 	}
+}
+
+// handleLaneClosed retires the peer's cached session when a lane dies for any
+// reason (transport failure, peer disconnect, local close), replacing the
+// monitor goroutine's Recv-error path. It runs on the lane's read loop as it
+// exits, so an idle session death is discovered immediately, not by the next
+// caller.
+func (x *peer) handleLaneClosed(key laneKey, session inet.DuplexSession) {
+	x.retireLaneAsync(key, session)
+}
+
+// retireLaneAsync clears the peer's cached state for session when it is still
+// the current one and completes the close on a transient goroutine. It is the
+// read-loop-safe form of [peer.retireLane]: the lane hooks run on the
+// session's read loop, where a synchronous Close would deadlock because Close
+// waits for that same read loop to exit.
+func (x *peer) retireLaneAsync(key laneKey, session inet.DuplexSession) {
+	x.mu.Lock()
+
+	if x.laneLocked(key) == session {
+		x.setLaneLocked(key, nil)
+		x.clearCacheIfNoLanesLocked()
+	}
+
+	x.mu.Unlock()
+
+	go func() { _ = session.Close() }()
 }
 
 // retireLane closes session and clears the peer's cached state only when
@@ -514,7 +542,10 @@ func (x *peer) clearCacheIfNoLanesLocked() {
 	x.cache.clear()
 }
 
-// dialLane opens a requested duplex lane using the client's transport settings.
+// dialLane opens a requested duplex lane using the client's transport
+// settings. Lane lifecycle hooks ride the session's read loop: unsolicited
+// frames and lane death are handled by [peer.handleLaneFrame] and
+// [peer.handleLaneClosed] instead of a dedicated monitor goroutine.
 func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uint32) (inet.DuplexSession, error) {
 	x.mu.Lock()
 	dialCtx := x.dialCtx
@@ -545,6 +576,7 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 		MaxConcurrentLargeTransfers: x.client.maxConcurrentLargeTransfers,
 	}
 
+	key := laneKey{role: role, index: index}
 	session, _, err := inet.OpenDuplex(
 		ctx,
 		transport,
@@ -554,6 +586,12 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 		x.client.writeTimeout,
 		x.client.readIdleTimeout,
 		x.client.chunkSize,
+		inet.WithSessionInboundHandler(func(session inet.DuplexSession, frame inet.Frame) {
+			x.handleLaneFrame(key, session, frame)
+		}),
+		inet.WithSessionClosedHandler(func(session inet.DuplexSession) {
+			x.handleLaneClosed(key, session)
+		}),
 	)
 	return session, err
 }
@@ -687,7 +725,13 @@ func (x *peer) admitTell(ctx context.Context, key laneKey, params tellParams) er
 	owned := params
 	owned.payload = cloneBytes(params.payload)
 	owned.metadata = cloneBytes(params.metadata)
-	return x.enqueueOnPump(ctx, pump, owned)
+
+	if err := x.enqueueOnPump(ctx, pump, owned); err != nil {
+		return err
+	}
+
+	x.wakeTellPump(key, pump)
+	return nil
 }
 
 // admitTellOrFanOut admits a fire-and-forget tell to the lane pump. A full
@@ -712,7 +756,8 @@ func (x *peer) admitTellOrFanOut(ctx context.Context, key laneKey, params tellPa
 // ensureTellPump returns the lane pump for key, creating it if needed.
 // Rejects admission when the peer is torn down. pending is incremented under
 // mu so directTellSession cannot race a live-session fast path ahead of the
-// tell being enqueued (FIFO fence).
+// tell being enqueued (FIFO fence). No runner spawns here: admitTell wakes
+// the transient runner only after its tell is actually enqueued.
 func (x *peer) ensureTellPump(key laneKey) (*tellPump, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -725,7 +770,6 @@ func (x *peer) ensureTellPump(key laneKey) (*tellPump, error) {
 	if !ok {
 		pump = newTellPump()
 		x.pumps[key] = pump
-		go x.runTellPump(key, pump)
 	}
 
 	pump.pending.Add(1)
@@ -795,10 +839,6 @@ func (x *peer) tryEnqueueAdmit(pump *tellPump, item admittedTell) bool {
 
 	pump.queue = append(pump.queue, item)
 	pump.queuedBytes += item.cost
-	select {
-	case pump.notify <- types.Unit{}:
-	default:
-	}
 	return true
 }
 
@@ -814,28 +854,63 @@ func (x *peer) admitMaxBytes() int64 {
 	return int64(credits)
 }
 
-// runTellPump drains admitted tells for key until the peer is torn down.
-// Teardown fans out anything still queued as transport failures so admitted
-// messages are never lost silently.
+// wakeTellPump ensures a runner goroutine is draining key's pump, spawning a
+// transient one when none is running. It runs after every successful enqueue,
+// including one that raced peer teardown: the spawned runner then fans the
+// queue out as transport failures, so an admitted tell always has a runner
+// responsible for its fate.
+func (x *peer) wakeTellPump(key laneKey, pump *tellPump) {
+	pump.mu.Lock()
+
+	if pump.running {
+		pump.mu.Unlock()
+		return
+	}
+
+	pump.running = true
+	pump.mu.Unlock()
+
+	go x.runTellPump(key, pump)
+}
+
+// runTellPump drains admitted tells for key until the queue runs dry, then
+// exits; the next admission re-spawns it. One runner owns a pump at a time
+// (the running flag), preserving per-lane FIFO. Peer teardown fans out
+// anything still queued as transport failures so admitted messages are never
+// lost silently.
 func (x *peer) runTellPump(key laneKey, pump *tellPump) {
+	for {
+		x.drainPumpQueue(key, pump)
+
+		pump.mu.Lock()
+
+		if pump.liveLen() == 0 {
+			pump.running = false
+			pump.mu.Unlock()
+			return
+		}
+
+		pump.mu.Unlock()
+	}
+}
+
+// drainPumpQueue pops and delivers every tell currently queued. After peer
+// teardown it fans queued tells out as transport failures instead of
+// attempting delivery.
+func (x *peer) drainPumpQueue(key laneKey, pump *tellPump) {
 	for {
 		select {
 		case <-x.pumpStop:
 			x.drainPumpOnStop(pump)
 			return
-		case <-pump.notify:
-			x.drainPumpQueue(key, pump)
+		default:
 		}
-	}
-}
 
-// drainPumpQueue pops and delivers every tell currently queued.
-func (x *peer) drainPumpQueue(key laneKey, pump *tellPump) {
-	for {
 		item, ok := pump.popAdmit()
 		if !ok {
 			return
 		}
+
 		x.deliverAdmittedTell(key, pump, item.params)
 	}
 }
@@ -933,7 +1008,7 @@ func (x *peer) deliverAdmittedTell(key laneKey, pump *tellPump, params tellParam
 // out here. The pump owns params, so the message can be handed off directly.
 func (x *peer) deliverAdmittedTellLegacy(params tellParams) {
 	if x.client.coalescing.enabled() {
-		if c := x.client.getCoalescer(x.host, x.port); c != nil {
+		if c := x.client.getCoalescer(x.host, x.port, x.client.ordinaryLaneForReceiver(params.receiver)); c != nil {
 			// Coalescer submit only needs a cancelable ctx for queue wait;
 			// flush uses its own transport deadline.
 			if err := c.submit(context.Background(), tellRemoteMessage(params)); err != nil {

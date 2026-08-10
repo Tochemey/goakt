@@ -32,7 +32,7 @@ sequenceDiagram
   participant Duplex as duplexConn
   participant Server as handleDuplexConn
   participant WP as WorkerPool
-  participant Actor as mailbox_or_handler
+  participant Mailbox as mailbox_or_handler
 
   Caller->>PeerMgr: Tell_Ask_or_RPC
   alt cache_legacy_or_pin_legacy
@@ -44,12 +44,12 @@ sequenceDiagram
     Duplex->>Server: frame
     alt expectsReply
       Server->>WP: dispatch
-      WP->>Actor: ask_or_control
-      Actor-->>WP: result
+      WP->>Mailbox: ask_or_control
+      Mailbox-->>WP: result
       WP->>Duplex: Submit REPLY_or_ERROR
       Duplex-->>Caller: complete waiter
     else tell
-      Server->>Actor: inline mailbox enqueue
+      Server->>Mailbox: inline mailbox enqueue
     end
   end
 ```

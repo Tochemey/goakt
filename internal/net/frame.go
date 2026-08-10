@@ -58,6 +58,13 @@ const (
 	FrameFlagLastChunk    byte = 1 << 3
 	frameFlagReservedMask byte = 0xF0
 
+	// frameFlagInternalReassembled marks a logical frame materialized locally
+	// by chunk reassembly. It never appears on the wire (the decoder rejects
+	// reserved bits and reassembled frames are never re-encoded); the receive
+	// path uses it to skip wire-credit accounting, because every CHUNK frame
+	// that built the logical frame was already granted at its own disposition.
+	frameFlagInternalReassembled byte = 1 << 7
+
 	// Lane header values used for validation and diagnostics.
 	LaneControl  byte = 0x00
 	LaneOrdinary byte = 0x01 // ordinary lanes occupy 1..N (header byte = index+1)
@@ -184,6 +191,12 @@ func (x Frame) bodyLen() int {
 // HasMetadata reports whether the hasMetadata flag is set.
 func (x Frame) HasMetadata() bool {
 	return x.Flags&FrameFlagHasMetadata != 0
+}
+
+// Reassembled reports whether this frame was materialized locally by chunk
+// reassembly rather than read off the wire.
+func (x Frame) Reassembled() bool {
+	return x.Flags&frameFlagInternalReassembled != 0
 }
 
 // ExpectsReply reports whether the expectsReply flag is set.

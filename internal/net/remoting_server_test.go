@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -1362,4 +1363,28 @@ func TestRemotingServerHandleDuplexConnNegotiatesCompression(t *testing.T) {
 	pong, err := conn.ReadFrame()
 	require.NoError(t, err)
 	assert.Equal(t, FrameTypePong, pong.Type)
+}
+
+// TestInvokeDuplexTellReportsPanic verifies the dispatch surface learns about
+// a recovered tell-handler panic: that signal drives the repayment of credit
+// the handler claimed from its lease but never released.
+func TestInvokeDuplexTellReportsPanic(t *testing.T) {
+	var recovered atomic.Bool
+
+	panicky, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerDuplexTellHandler(func(context.Context, DataEnvelope) { panic("boom") }),
+		WithRemotingServerPanicHandler(func(_ protoreflect.FullName, _ any) { recovered.Store(true) }),
+	)
+	require.NoError(t, err)
+
+	env := DataEnvelope{SerializerID: SerializerIDPublicProto}
+	assert.True(t, panicky.invokeDuplexTell(context.Background(), env), "a recovered panic must be reported")
+	assert.True(t, recovered.Load(), "the panic handler must run")
+
+	calm, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerDuplexTellHandler(func(context.Context, DataEnvelope) {}),
+		WithRemotingServerPanicHandler(func(protoreflect.FullName, any) {}),
+	)
+	require.NoError(t, err)
+	assert.False(t, calm.invokeDuplexTell(context.Background(), env), "a clean handler must not report a panic")
 }

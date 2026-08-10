@@ -648,7 +648,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, controller.PreStart(nil))
 		controller.sawValidTraffic = true
 
-		stale := &consumerControllerTick{generation: controller.generation + 1}
+		stale := &consumerControllerTick{generation: controller.generation.Load() + 1}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, stale)
 		controller.handleTick(rctx, stale)
 		assert.True(t, controller.sawValidTraffic)
@@ -670,7 +670,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, err)
 		controller.buffer = []*commands.SequencedMessage{three}
 
-		tick := &consumerControllerTick{generation: controller.generation}
+		tick := &consumerControllerTick{generation: controller.generation.Load()}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, tick)
 		controller.handleTick(rctx, tick)
 

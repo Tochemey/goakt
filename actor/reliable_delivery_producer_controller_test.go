@@ -2180,7 +2180,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		pctx := newContext(ctx, "producerController", system)
 		err := controller.PreStart(pctx)
 		require.ErrorContains(t, err, "failed to load durable state")
-		assert.EqualValues(t, 1, controller.generation)
+		assert.EqualValues(t, 1, controller.generation.Load())
 	})
 
 	t.Run("With stale tick generation", func(t *testing.T) {
@@ -2189,7 +2189,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, controller.PreStart(nil))
 		controller.handshake = producerHandshakeCredit
 
-		stale := &producerControllerTick{generation: controller.generation + 1}
+		stale := &producerControllerTick{generation: controller.generation.Load() + 1}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, stale)
 		controller.handleTick(rctx, stale)
 		assert.Equal(t, producerHandshakeCredit, controller.handshake)

@@ -43,8 +43,32 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/remote"
 )
+
+// discardFlush is a no-op batch flush for coalescers whose delivery outcome
+// is irrelevant to the test.
+func discardFlush(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+	return nil, nil
+}
+
+// protoFlush adapts a legacy proto client into the coalescer's flushBatch
+// contract: on error the whole batch is undelivered.
+func protoFlush(nc *inet.Client) func(ctx context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+	return func(ctx context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		resp, err := nc.SendProto(ctx, req)
+		if err != nil {
+			return req.GetRemoteMessages(), err
+		}
+
+		if err := checkProtoError(resp); err != nil {
+			return req.GetRemoteMessages(), err
+		}
+
+		return nil, nil
+	}
+}
 
 // headerInjector is a minimal ContextPropagator test double that writes a
 // fixed set of headers on Inject. Extract is a no-op.
@@ -602,13 +626,44 @@ func TestCoalescing_DefaultTunables(t *testing.T) {
 	require.Eventually(t, func() bool { return tc.messages.Load() == 3 }, time.Second, 2*time.Millisecond)
 }
 
+// TestCoalescing_WriterExitsWhenIdle confirms the transient writer contract:
+// the writer goroutine exists only while messages are buffered or a flush is
+// in flight, exits once the buffer runs dry, and a later submit re-spawns it.
+func TestCoalescing_WriterExitsWhenIdle(t *testing.T) {
+	var flushed atomic.Int64
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil,
+		func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+			flushed.Add(1)
+			return nil, nil
+		})
+
+	c.mu.Lock()
+	idleAtBirth := !c.running
+	c.mu.Unlock()
+	assert.True(t, idleAtBirth, "a fresh coalescer must hold no writer goroutine")
+
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+	waitUntil(t, time.Second, func() bool { return flushed.Load() == 1 }, "first flush")
+	waitUntil(t, time.Second, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return !c.running
+	}, "writer exit after drain")
+
+	// A fresh submit must re-spawn the writer and flush again.
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+	waitUntil(t, time.Second, func() bool { return flushed.Load() == 2 }, "re-spawned flush")
+
+	c.close()
+}
+
 // TestCoalescing_SubmitAfterClose guards the submit path against races where
 // a new submit races with shutdown: the coalescer must refuse rather than
 // panic on a closed channel. We exercise it via the internal submit method
 // directly because the higher-level RemoteTell would rebuild a fresh
 // coalescer post-close.
 func TestCoalescing_SubmitAfterClose(t *testing.T) {
-	c := newCoalescer("127.0.0.1:1", nil, coalescingConfig{maxBatch: 4}, nil)
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, discardFlush)
 	c.close()
 	err := c.submit(context.Background(), &internalpb.RemoteMessage{})
 	assert.ErrorIs(t, err, errCoalescerClosed, "submit must refuse after close")
@@ -676,7 +731,7 @@ func newStuckCoalescer(t *testing.T, maxBatch int) (c *coalescer, release func()
 	t.Helper()
 	bs, host, port, srvStop := startBlockingServer(t)
 	nc := inet.NewClient(net.JoinHostPort(host, strconv.Itoa(port)))
-	c = newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), nc, coalescingConfig{maxBatch: maxBatch}, nil)
+	c = newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), coalescingConfig{maxBatch: maxBatch}, nil, protoFlush(nc))
 	release = bs.closeRelease
 	stop = func() {
 		// Release any parked handler first so the writer goroutine's
@@ -922,4 +977,197 @@ func TestInjectPerMessageMetadata_HeadersRoundtrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "1", md["A"])
 	assert.Equal(t, "2", md["B"])
+}
+
+// TestOrdinaryLaneShardAssignment pins the sharding invariants: one receiver
+// always maps to the same shard, the single-lane default maps everything to
+// shard zero, and the assignment agrees with routeUser's ordinary-lane hash
+// so coalesced and direct tells for one receiver ride the same lane.
+func TestOrdinaryLaneShardAssignment(t *testing.T) {
+	single := &client{ordinaryLanes: 1}
+	sharded := &client{ordinaryLanes: 4}
+
+	receivers := []string{
+		"goakt://sys@127.0.0.1:9000/pong-0",
+		"goakt://sys@127.0.0.1:9000/pong-1",
+		"goakt://sys@127.0.0.1:9000/pong-2",
+		"goakt://sys@127.0.0.1:9000/pong-3",
+	}
+
+	for _, receiver := range receivers {
+		assert.Zero(t, single.ordinaryLaneForReceiver(receiver), "single lane must always map to shard 0")
+
+		lane := sharded.ordinaryLaneForReceiver(receiver)
+		assert.Less(t, lane, uint32(4))
+		assert.Equal(t, lane, sharded.ordinaryLaneForReceiver(receiver), "shard assignment must be stable")
+
+		role, index := routeUser(receiver, sharded.ordinaryLanes, nil)
+		assert.Equal(t, internalpb.LaneRole_LANE_ROLE_ORDINARY, role)
+		assert.Equal(t, index, lane, "coalesced and direct tells must agree on the lane")
+	}
+}
+
+// TestIsLargeReceiver verifies the coalescing gate for configured
+// large-message destinations: matching receivers bypass coalescing so they
+// keep riding the dedicated large lane.
+func TestIsLargeReceiver(t *testing.T) {
+	r := &client{largeMessageDestinations: []string{"/blob*"}}
+
+	assert.True(t, r.isLargeReceiver("goakt://sys@127.0.0.1:9000/blob-store"))
+	assert.False(t, r.isLargeReceiver("goakt://sys@127.0.0.1:9000/pong-1"))
+
+	none := &client{}
+	assert.False(t, none.isLargeReceiver("goakt://sys@127.0.0.1:9000/blob-store"))
+}
+
+// TestGetCoalescerShardKeying verifies the (host, port, lane) cache identity:
+// the same triple returns the same shard, distinct lanes get distinct shards,
+// and the failure-handler destination stays the bare "host:port" endpoint
+// with no shard suffix.
+func TestGetCoalescerShardKeying(t *testing.T) {
+	r := &client{
+		coalescing: coalescingConfig{maxBatch: 4},
+		coalescers: xsync.NewMap[coalescerKey, *coalescer](),
+	}
+
+	lane0 := r.getCoalescer("127.0.0.1", 9000, 0)
+	require.NotNil(t, lane0)
+	assert.Same(t, lane0, r.getCoalescer("127.0.0.1", 9000, 0), "same triple must return the cached shard")
+
+	lane1 := r.getCoalescer("127.0.0.1", 9000, 1)
+	require.NotNil(t, lane1)
+	assert.NotSame(t, lane0, lane1, "distinct lanes must get distinct shards")
+
+	assert.Equal(t, "127.0.0.1:9000", lane0.dest, "handler destination must be the bare endpoint")
+	assert.Equal(t, "127.0.0.1:9000", lane1.dest, "handler destination must not carry shard information")
+
+	for _, c := range []*coalescer{lane0, lane1} {
+		c.close()
+	}
+}
+
+// TestCoalescerFansOutUndeliveredOnly verifies the exactly-once dead-letter
+// contract: when the flush reports a delivered prefix and an undelivered
+// suffix, the failure handler receives only the suffix.
+func TestCoalescerFansOutUndeliveredOnly(t *testing.T) {
+	var handed []*internalpb.RemoteMessage
+	handler := func(_ string, messages []*internalpb.RemoteMessage, _ error) {
+		handed = append(handed, messages...)
+	}
+
+	flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		// The first message "delivers"; the rest fail.
+		return req.GetRemoteMessages()[1:], errors.New("boom")
+	}
+
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 8}, handler, flush)
+
+	first := &internalpb.RemoteMessage{Receiver: "one"}
+	second := &internalpb.RemoteMessage{Receiver: "two"}
+	third := &internalpb.RemoteMessage{Receiver: "three"}
+
+	// Stuff the buffer directly so close()'s final drain flushes all three
+	// as one deterministic batch.
+	c.in <- first
+	c.in <- second
+	c.in <- third
+	c.close()
+
+	require.Len(t, handed, 2, "only the undelivered suffix may be fanned out")
+	assert.Same(t, second, handed[0])
+	assert.Same(t, third, handed[1])
+}
+
+// TestCoalescerCloseDrainsBacklog verifies that close flushes everything
+// buffered even when the backlog exceeds one batch: the shutdown drain must
+// loop until the channel is empty, not flush a single batch and exit.
+func TestCoalescerCloseDrainsBacklog(t *testing.T) {
+	var flushed atomic.Int64
+	flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		flushed.Add(int64(len(req.GetRemoteMessages())))
+		return nil, nil
+	}
+
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 2}, nil, flush)
+
+	// Seven messages against maxBatch 2: more than three batches must flush
+	// during close.
+	for range 7 {
+		c.in <- &internalpb.RemoteMessage{}
+	}
+
+	c.close()
+	assert.EqualValues(t, 7, flushed.Load(), "close must drain the whole backlog")
+}
+
+// TestCoalescing_WakeAfterCloseDrainsInline pins the shutdown rescue path: a
+// message whose enqueue lands after close's drain decision (no writer
+// running, done already closed) must be drained inline by the submitter's
+// wake instead of being stranded in the buffer with the caller told nil.
+func TestCoalescing_WakeAfterCloseDrainsInline(t *testing.T) {
+	var flushed atomic.Int64
+	flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		flushed.Add(int64(len(req.GetRemoteMessages())))
+		return nil, nil
+	}
+
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, flush)
+	c.close()
+
+	// Simulate the racing submit: the enqueue won the channel send before
+	// observing shutdown, so the message is buffered with no writer alive.
+	c.in <- &internalpb.RemoteMessage{}
+	c.wake()
+
+	assert.EqualValues(t, 1, flushed.Load(), "wake after close must drain the raced message inline")
+	assert.Empty(t, c.in, "the buffer must be empty after the inline rescue")
+}
+
+// TestCoalescing_SubmitCloseRaceNeverStrands hammers the submit/close race:
+// whenever submit reports acceptance, the message must be flushed or fanned
+// out to the failure handler, never left in the buffer after close returns.
+func TestCoalescing_SubmitCloseRaceNeverStrands(t *testing.T) {
+	for range 500 {
+		var flushed, fanned atomic.Int64
+
+		flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+			flushed.Add(int64(len(req.GetRemoteMessages())))
+			return nil, nil
+		}
+		failure := func(_ string, messages []*internalpb.RemoteMessage, _ error) {
+			fanned.Add(int64(len(messages)))
+		}
+
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, failure, flush)
+
+		var accepted atomic.Int64
+		start := make(chan struct{})
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		go func() {
+			defer wg.Done()
+
+			<-start
+
+			if err := c.submit(context.Background(), &internalpb.RemoteMessage{}); err == nil {
+				accepted.Add(1)
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+
+			<-start
+			c.close()
+		}()
+
+		close(start)
+		wg.Wait()
+
+		// The inline rescue completes before submit returns, and close waits
+		// out any writer, so the counters are final here.
+		require.EqualValues(t, accepted.Load(), flushed.Load()+fanned.Load(), "an accepted message must be flushed or fanned out, never stranded")
+	}
 }

@@ -206,3 +206,76 @@ func TestOpenDuplexAdoptsAckLaneFromBaselinePeer(t *testing.T) {
 	require.NoError(t, session.Close())
 	<-acceptDone
 }
+
+// TestOpenDuplexLivenessSurvivesHandshakeDeadline pins the regression where
+// OpenDuplex cleared the handshake deadline in a defer that ran after the
+// read loop had armed its first liveness deadline, erasing it: a peer that
+// went silent right after HELLO_ACK was never probed and never detected.
+// The acceptor here answers the handshake and then ignores everything, so
+// only the two-missed-PONG rule can close the session.
+func TestOpenDuplexLivenessSurvivesHandshakeDeadline(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+
+		conn, acceptErr := ln.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+
+		framed := newTCPFramedConn(conn, defaultMaxFrameSize)
+		frame, readErr := framed.ReadFrame()
+		if readErr != nil || frame.Type != FrameTypeHello {
+			return
+		}
+
+		remote := new(internalpb.Hello)
+		if unmarshalErr := proto.Unmarshal(frame.Payload, remote); unmarshalErr != nil {
+			return
+		}
+
+		ack, marshalErr := MarshalProtoAppend(remote)
+		if marshalErr != nil {
+			return
+		}
+
+		writeErr := framed.WriteFrames(encodeHelloFrame(FrameTypeHelloAck, frame.Lane, ack))
+		ReleaseMarshalBuffer(ack)
+		if writeErr != nil {
+			return
+		}
+
+		// Swallow every subsequent frame (PINGs included) without answering.
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+
+	// The ctx deadline is the regression trigger: it makes OpenDuplex arm
+	// and later clear the handshake socket deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, _, err := OpenDuplex(
+		ctx,
+		NewTCPTransport(),
+		ln.Addr().String(),
+		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
+		time.Second,
+		100*time.Millisecond,
+		DefaultChunkSize,
+	)
+	require.NoError(t, err)
+
+	require.Eventually(t, session.IsClosed, 3*time.Second, 20*time.Millisecond,
+		"silent peer was never failed by the liveness probe")
+
+	_ = session.Close()
+	require.NoError(t, ln.Close())
+	<-acceptDone
+}

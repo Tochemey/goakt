@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -2891,8 +2893,9 @@ func TestRemoteGrainEnvelopeDelivery(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
+	// The constructor already installs the response mailbox; re-assigning it
+	// here would race the live grain worker reading pid.responses.
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
 
 	envelope := &commands.AsyncRequest{
 		CorrelationID: "remote-req",
@@ -2945,8 +2948,9 @@ func TestRemoteEnvelopeAskDeferredAcrossNodes(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
+	// The constructor already installs the response mailbox; re-assigning it
+	// here would race the live grain worker reading pid.responses.
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
 
 	type askResult struct {
 		response any
@@ -3031,4 +3035,217 @@ func TestCopyDuplexPayloadRetainsIndependently(t *testing.T) {
 	require.Equal(t, byte('p'), got[0])
 	require.Nil(t, copyDuplexPayload(nil))
 	require.Empty(t, copyDuplexPayload([]byte{}))
+}
+
+// blockerActor parks on gate for every remote payload so its mailbox
+// accumulates inbound remote tells; received counts messages that made it
+// past the gate.
+type blockerActor struct {
+	gate     chan struct{}
+	received *atomic.Int64
+}
+
+// PreStart implements the Actor contract.
+func (x *blockerActor) PreStart(*Context) error { return nil }
+
+// PostStop implements the Actor contract.
+func (x *blockerActor) PostStop(*Context) error { return nil }
+
+// Receive parks on the gate for every remote payload, simulating a stalled
+// consumer, and counts the messages that get through once the gate opens.
+func (x *blockerActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *structpb.Value:
+		<-x.gate
+		x.received.Add(1)
+	default:
+	}
+}
+
+// TestRemoteTellStalledConsumerBackpressure is the end-to-end gate for
+// consumption-time credit grants: a stalled remote actor must exhaust the
+// sender's credit window (instead of absorbing messages at wire speed into
+// its unbounded mailbox), RemoteTell must surface backpressure, and once the
+// consumer resumes the window must recover because parked messages grant
+// their shares back as they leave the mailbox.
+func TestRemoteTellStalledConsumerBackpressure(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	ports := inet.Get(2)
+
+	// A small window makes the stall observable with a few hundred messages;
+	// coalesced batches (up to 256 x ~600B) stay well under it so every
+	// flushed frame remains admissible.
+	const window = 256 * 1024
+
+	newSystem := func(name string, port int) ActorSystem {
+		sys, err := NewActorSystem(name,
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithCreditWindow(window))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+		return sys
+	}
+
+	senderSys := newSystem("senderSys", ports[0])
+	receiverSys := newSystem("receiverSys", ports[1])
+	pause.For(500 * time.Millisecond)
+
+	gate := make(chan struct{})
+	received := new(atomic.Int64)
+	blocker, err := receiverSys.Spawn(ctx, "blocker", &blockerActor{gate: gate, received: received})
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	remoting := senderSys.(*actorSystem).remoting
+	from := address.New("driver", senderSys.Name(), host, ports[0])
+	to := blocker.getAddress()
+
+	padding := strings.Repeat("x", 512)
+	payload := func() *structpb.Value {
+		return structpb.NewStringValue(padding)
+	}
+
+	// Drive tells until the credit window and the outbound staging fill and
+	// RemoteTell surfaces backpressure. Without consumption-time grants the
+	// receiver grants at dispatch and this loop never observes an error.
+	var delivered int64
+	backpressured := false
+
+	for i := 0; i < 5000 && !backpressured; i++ {
+		callCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		err := remoting.RemoteTell(callCtx, from, to, payload())
+		cancel()
+
+		switch {
+		case err == nil:
+			delivered++
+		case errors.Is(err, gerrors.ErrRemoteSendBackpressure):
+			backpressured = true
+		default:
+			t.Fatalf("unexpected send error after %d deliveries: %v", delivered, err)
+		}
+	}
+
+	require.True(t, backpressured,
+		"a stalled consumer must backpressure senders once the credit window is exhausted (delivered %d, consumer saw %d)",
+		delivered, received.Load())
+
+	// Resume the consumer promptly (before the coalescer's flush timeout can
+	// dead-letter a parked batch): the mailbox drains, each departing message
+	// grants its share back, and every admitted tell must arrive.
+	close(gate)
+
+	require.Eventually(t, func() bool { return received.Load() == delivered }, 30*time.Second, 20*time.Millisecond,
+		"admitted tells must drain once the consumer resumes (received %d of %d)", received.Load(), delivered)
+
+	// The recovered window must admit fresh traffic.
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, remoting.RemoteTell(callCtx, from, to, payload()), "the window must recover after the backlog drains")
+
+	require.Eventually(t, func() bool { return received.Load() == delivered+1 }, 10*time.Second, 20*time.Millisecond)
+}
+
+// TestRemoteTellStoppingSystemReleasesHold pins the system-stopping refuse
+// path: a remote tell refused because the actor system is shutting down must
+// repay its credit share immediately instead of pinning the peer's window
+// until the receiving actor's own teardown runs.
+func TestRemoteTellStoppingSystemReleasesHold(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := inet.Get(1)[0]
+
+	sys, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, port)),
+		WithLogger(log.DiscardLogger),
+	)
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	pid, err := impl.Spawn(ctx, "receiver", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	impl.shuttingDown.Store(true)
+	t.Cleanup(func() { impl.shuttingDown.Store(false) })
+
+	hold := inet.DetachedCreditShare(64)
+	require.NoError(t, impl.handleRemoteTellHeld(ctx, nil, pid, new(testpb.TestSend), hold))
+	assert.True(t, hold.Released(), "a system-stopping refusal must repay the credit share immediately")
+}
+
+// TestRemoteTellLateTrackAfterStopRepaysHold pins the admission race: a
+// remote delivery that passed its liveness check can reach trackRemoteHold
+// after the actor's terminal teardown drained the hold registry, and nothing
+// ever walks the registry again. The teardown sets the closed state bit
+// before draining, so a late track must observe it and repay its own share.
+func TestRemoteTellLateTrackAfterStopRepaysHold(t *testing.T) {
+	ctx := context.Background()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	// First variant: the actor tracked a hold before its stop, so teardown
+	// walks an existing registry. The parked share is repaid by the stop and
+	// the late share by the tracker itself.
+	tracked, err := impl.Spawn(ctx, "tracked", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	parked := inet.DetachedCreditShare(64)
+	tracked.trackRemoteHold(parked)
+	require.NoError(t, tracked.Shutdown(ctx))
+	assert.True(t, parked.Released(), "terminal stop must repay a share parked before it")
+
+	late := inet.DetachedCreditShare(64)
+	tracked.trackRemoteHold(late)
+	assert.True(t, late.Released(), "a track after terminal teardown must repay its share immediately")
+
+	// Second variant: the actor never tracked a hold, so a late first track
+	// creates a fresh registry after teardown already ran. The closed bit
+	// makes the tracker drain the fresh registry itself.
+	fresh, err := impl.Spawn(ctx, "fresh", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+	require.NoError(t, fresh.Shutdown(ctx))
+
+	first := inet.DetachedCreditShare(64)
+	fresh.trackRemoteHold(first)
+	assert.True(t, first.Released(), "a first-ever track after terminal teardown must repay its share")
+}
+
+// TestRemoteTellTrackAfterRestartParksHold verifies the closed bit is scoped
+// to terminal teardown: a restart embeds the same reset, but once the actor
+// runs again a tracked share must park (stay unreleased) so the credit
+// window keeps bounding mailbox residency.
+func TestRemoteTellTrackAfterRestartParksHold(t *testing.T) {
+	ctx := context.Background()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	pid, err := impl.Spawn(ctx, "restarted", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	require.NoError(t, pid.Restart(ctx))
+	pause.For(100 * time.Millisecond)
+
+	hold := inet.DetachedCreditShare(64)
+	pid.trackRemoteHold(hold)
+	assert.False(t, hold.Released(), "a share tracked after restart must park until its message is consumed")
+
+	hold.Release()
+	require.NoError(t, pid.Shutdown(ctx))
 }

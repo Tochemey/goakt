@@ -2324,14 +2324,32 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 // it passes a non-nil from and resolveDispatch respects it verbatim.
 // Otherwise the sender carried on the wire RemoteMessage is materialized.
 func (x *actorSystem) handleRemoteTell(ctx context.Context, from *PID, to *PID, message any) error {
+	return x.handleRemoteTellHeld(ctx, from, to, message, nil)
+}
+
+// handleRemoteTellHeld dispatches a remote tell whose flow-control credit
+// share is hold (nil on paths without leasing). Ownership of hold transfers
+// to the delivered ReceiveContext only on a nil return: the context releases
+// it when the message leaves the mailbox. On error the caller keeps
+// ownership and must release.
+func (x *actorSystem) handleRemoteTellHeld(ctx context.Context, from *PID, to *PID, message any, hold *inet.CreditShare) error {
 	if from == nil {
 		from = x.NoSender()
 	}
+
 	decoded, resolvedFrom, err := resolveDispatch(to, from, message)
 	if err != nil {
 		return err
 	}
-	to.doReceive(toReceiveContext(ctx, resolvedFrom, to, decoded, true))
+
+	receiveCtx := toReceiveContext(ctx, resolvedFrom, to, decoded, true)
+
+	if hold != nil {
+		receiveCtx.remoteHold = hold
+		to.trackRemoteHold(hold)
+	}
+
+	to.doReceive(receiveCtx)
 	return nil
 }
 

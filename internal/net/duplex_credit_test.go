@@ -88,9 +88,7 @@ func TestCreditDeferredGrantFlushedByWriterDrain(t *testing.T) {
 	// Simulate a grant whose CREDIT admit failed on a full writer queue: the
 	// accumulator holds a full threshold and no further inbound windowed frame
 	// will arrive to retry it (the peer is parked waiting for this credit).
-	right.grantMu.Lock()
-	right.grantAccum = window
-	right.grantMu.Unlock()
+	right.grantAccum.Store(window)
 
 	// Any writer drain on the granting side must flush the deferred grant.
 	require.True(t, right.trySubmit(Frame{
@@ -274,14 +272,14 @@ func TestCreditGrantBatchingQuarterWindow(t *testing.T) {
 
 	threshold := window / 4
 	right.noteOwnedBytes(threshold - 1)
-	assert.Equal(t, threshold-1, right.grantAccum)
+	assert.Equal(t, threshold-1, right.grantAccum.Load())
 	assert.Equal(t, window, left.sendWindow.Load())
 
 	right.noteOwnedBytes(1)
 	require.Eventually(t, func() bool {
 		return left.sendWindow.Load() == window+threshold
 	}, time.Second, 5*time.Millisecond)
-	assert.Equal(t, int64(0), right.grantAccum)
+	assert.Equal(t, int64(0), right.grantAccum.Load())
 }
 
 func TestCreditChunkGrantsPerWireFrame(t *testing.T) {

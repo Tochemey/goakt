@@ -88,23 +88,24 @@ func admissionExemptFrameType(frameType byte) bool {
 // noteOwnedBytes records that the receiver has taken ownership of n wire
 // bytes and flushes a batched CREDIT grant when the accumulator crosses the
 // batching threshold. No-op when credits are disabled or n is non-positive.
+// The accumulate is one atomic add: this runs once per delivered frame on the
+// receive path, so it must not take a lock.
 func (x *duplexConn) noteOwnedBytes(n int64) {
 	if !x.creditEnabled || n <= 0 {
 		return
 	}
 
-	x.grantMu.Lock()
-	x.grantAccum += n
-	x.grantMu.Unlock()
-
+	x.grantAccum.Add(n)
 	x.flushGrants()
 }
 
 // flushGrants emits batched CREDIT frames while the accumulator holds at
 // least a quarter window. A grant that cannot be admitted (writer queue slot
-// full) stays in the accumulator; the write loop calls this again whenever it
-// frees queue slots, so a deferred grant cannot strand a parked peer waiting
-// for credit that no later inbound frame would ever flush.
+// full) is added back to the accumulator; the write loop calls this again
+// whenever it frees queue slots, so a deferred grant cannot strand a parked
+// peer waiting for credit that no later inbound frame would ever flush. The
+// claim is a CAS-to-zero: a concurrent add between load and swap simply
+// retries, and owned bytes are never lost or double-granted.
 func (x *duplexConn) flushGrants() {
 	if !x.creditEnabled {
 		return
@@ -116,29 +117,28 @@ func (x *duplexConn) flushGrants() {
 	}
 
 	for {
-		x.grantMu.Lock()
-		if x.grantAccum < threshold {
-			x.grantMu.Unlock()
+		grant := x.grantAccum.Load()
+		if grant < threshold {
 			return
 		}
 
-		grant := x.grantAccum
-		x.grantAccum = 0
-		x.grantMu.Unlock()
+		if !x.grantAccum.CompareAndSwap(grant, 0) {
+			continue
+		}
 
 		if !x.submitCreditFrame(grant) {
-			x.grantMu.Lock()
-			x.grantAccum += grant
-			x.grantMu.Unlock()
+			x.grantAccum.Add(grant)
 			return
 		}
 	}
 }
 
 // noteOwnedFrame records ownership of one windowed wire frame. Non-windowed
-// types are ignored so callers can invoke it at every terminal disposition.
+// types and reassembled logical frames (whose CHUNK frames were each granted
+// at their own disposition) are ignored so callers can invoke it at every
+// terminal disposition.
 func (x *duplexConn) noteOwnedFrame(frame Frame) {
-	if !windowedFrameType(frame.Type) {
+	if frame.Reassembled() || !windowedFrameType(frame.Type) {
 		return
 	}
 

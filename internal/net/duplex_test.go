@@ -24,14 +24,20 @@ package net
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 func TestDuplexPingAnsweredWithPong(t *testing.T) {
@@ -737,4 +743,304 @@ func TestLateCorrelatedReplyDoesNotStallReader(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return right.pending.len() == 0
 	}, time.Second, 5*time.Millisecond)
+}
+
+func TestDuplexInboundHandlerReceivesFramesOnReadLoop(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	frames := make(chan Frame, 4)
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024,
+		withDuplexInboundHandler(func(session DuplexSession, frame Frame) {
+			session.ReleasePayload(frame)
+			frames <- frame
+		}),
+	)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1024)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	require.NoError(t, right.Tell(ctx, Frame{
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
+		Payload: []byte("dispatched"),
+	}))
+
+	select {
+	case frame := <-frames:
+		assert.Equal(t, FrameTypeData, frame.Type)
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for inbound handler dispatch")
+	}
+
+	require.NoError(t, left.Close())
+	require.NoError(t, right.Close())
+}
+
+func TestDuplexClosedHandlerFiresOnLocalClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	closedSeen := make(chan bool, 1)
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024,
+		withDuplexClosedHandler(func(session DuplexSession) {
+			closedSeen <- session.IsClosed()
+		}),
+	)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1024)
+
+	require.NoError(t, left.Close())
+
+	select {
+	case wasClosed := <-closedSeen:
+		assert.True(t, wasClosed, "session must already be closed inside the handler")
+	case <-time.After(time.Second):
+		t.Fatal("closed handler did not fire on local close")
+	}
+
+	require.NoError(t, right.Close())
+}
+
+func TestDuplexClosedHandlerFiresOnPeerDeath(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	closedSeen := make(chan bool, 1)
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1024,
+		withDuplexClosedHandler(func(session DuplexSession) {
+			closedSeen <- session.IsClosed()
+		}),
+	)
+
+	// The peer vanishes without a duplex Close: the raw pipe end closes, the
+	// left read loop fails the transport, and the handler must still fire.
+	require.NoError(t, c2.Close())
+
+	select {
+	case wasClosed := <-closedSeen:
+		assert.True(t, wasClosed, "session must already be closed inside the handler")
+	case <-time.After(time.Second):
+		t.Fatal("closed handler did not fire on peer death")
+	}
+
+	require.NoError(t, left.Close())
+}
+
+// TestDuplexPipelinedDispatchOrderAndPark exercises the adaptive inbound
+// dispatch machinery directly: a burst of frames must all reach the handler
+// in arrival order (whether dispatched inline or through the queue and its
+// transient drainer), and once the connection goes quiet past the linger the
+// drainer must hand the queue back and exit.
+func TestDuplexPipelinedDispatchOrderAndPark(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	// Tell forces frame correlation to zero, so the arrival sequence rides
+	// in the payload instead.
+	const frames = 200
+	seen := make(chan uint64, frames)
+	slowFirst := make(chan struct{})
+	var dispatched atomic.Int64
+
+	left := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20,
+		withDuplexPipelinedInbound(),
+		withDuplexInboundHandler(func(session DuplexSession, frame Frame) {
+			// Stall the first dispatch so the read loop observes a busy
+			// consumer and shifts the rest of the burst onto the queue.
+			if dispatched.Add(1) == 1 {
+				<-slowFirst
+			}
+
+			seen <- binary.BigEndian.Uint64(frame.Payload)
+			session.ReleasePayload(frame)
+		}),
+	)
+	right := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), 1<<20)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	go func() {
+		for i := 1; i <= frames; i++ {
+			payload := make([]byte, 8)
+			binary.BigEndian.PutUint64(payload, uint64(i))
+
+			if err := right.Tell(ctx, Frame{
+				Type:    FrameTypeData,
+				Lane:    LaneControl,
+				Payload: payload,
+			}); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Give the burst time to pile up behind the stalled first dispatch, then
+	// release it and require every frame in exact arrival order.
+	pause.For(50 * time.Millisecond)
+	close(slowFirst)
+
+	for i := 1; i <= frames; i++ {
+		select {
+		case sequence := <-seen:
+			require.Equal(t, uint64(i), sequence, "dispatch order broke at frame %d", i)
+		case <-ctx.Done():
+			t.Fatalf("frame %d never dispatched", i)
+		}
+	}
+
+	// Quiet connection: the transient drainer must park within a few lingers.
+	require.Eventually(t, func() bool {
+		left.dispatchMu.Lock()
+		defer left.dispatchMu.Unlock()
+		return !left.dispatchRunning
+	}, time.Second, 5*time.Millisecond, "drainer did not exit after the connection went quiet")
+
+	require.NoError(t, left.Close())
+	require.NoError(t, right.Close())
+}
+
+// TestDuplexPipelinedDispatchJoinedBeforeClose pins the teardown contract:
+// Close must not return, and the closed handler must not retire accounting,
+// while a transient dispatch drainer is still delivering queued frames.
+func TestDuplexPipelinedDispatchJoinedBeforeClose(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	gate := make(chan types.Unit)
+	var handled atomic.Int32
+	var handledAtClose atomic.Int32
+	closedFired := make(chan types.Unit)
+
+	conn := newDuplexConn(
+		newTCPFramedConn(c1, defaultMaxFrameSize),
+		1024,
+		withDuplexInboundHandler(func(DuplexSession, Frame) {
+			if handled.Add(1) == 1 {
+				<-gate
+			}
+		}),
+		withDuplexPipelinedInbound(),
+		withDuplexClosedHandler(func(DuplexSession) {
+			handledAtClose.Store(handled.Load())
+			close(closedFired)
+		}),
+	)
+
+	// Queue two frames and hand them to a drainer, exactly as the read loop
+	// does under load; the drainer blocks in the handler on the first frame.
+	conn.inbound <- Frame{Type: FrameTypeData}
+	conn.inbound <- Frame{Type: FrameTypeData}
+	conn.wakeDispatcher()
+
+	closeDone := make(chan types.Unit)
+	go func() {
+		_ = conn.Close()
+		close(closeDone)
+	}()
+
+	select {
+	case <-closeDone:
+		t.Fatal("Close returned while pipelined dispatch was still delivering")
+	case <-closedFired:
+		t.Fatal("closed handler ran while pipelined dispatch was still delivering")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(gate)
+
+	select {
+	case <-closeDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not return after dispatch drained")
+	}
+
+	<-closedFired
+	assert.EqualValues(t, 2, handledAtClose.Load(), "every queued frame must be delivered before the closed handler retires accounting")
+}
+
+// TestDuplexReadLoopAbandonsResumedFrameOnLivenessExit pins the resumable
+// ReadFrame teardown: a partial frame parked by a read-deadline expiry holds
+// a pooled payload, and a liveness exit never calls ReadFrame again, so the
+// read loop must hand the buffer back on its way out.
+func TestDuplexReadLoopAbandonsResumedFrameOnLivenessExit(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	const interval = 20 * time.Millisecond
+	framed := newTCPFramedConn(c1, defaultMaxFrameSize)
+	closedFired := make(chan types.Unit)
+
+	conn := newDuplexConn(
+		framed,
+		1024,
+		withDuplexReadIdleTimeout(interval),
+		withDuplexClosedHandler(func(DuplexSession) { close(closedFired) }),
+	)
+
+	// The peer sends a partial DATA frame (header claims 64 bytes, only 8
+	// arrive) and then stays silent while draining the probes it never
+	// answers. net.Pipe writes complete only when the reader consumed the
+	// bytes, so once Write returns the read loop provably holds the frame's
+	// resume state.
+	header := Frame{Version: ProtocolVersion, Type: FrameTypeData, Lane: LaneControl, Length: 64}
+	wire := make([]byte, FrameHeaderSize+8)
+	require.NoError(t, encodeFrameHeader(wire[:FrameHeaderSize], header))
+
+	wrote := make(chan types.Unit)
+	go func() {
+		_, _ = c2.Write(wire)
+		close(wrote)
+		_, _ = io.Copy(io.Discard, c2)
+	}()
+
+	select {
+	case <-wrote:
+	case <-time.After(time.Second):
+		t.Fatal("the read loop never consumed the partial frame")
+	}
+
+	select {
+	case <-closedFired:
+	case <-time.After(2 * time.Second):
+		t.Fatal("liveness did not tear the connection down")
+	}
+
+	// The closed handler runs after the read loop's abandon (channel sync
+	// orders this read after it), so the resume state must be gone and the
+	// pooled payload back in the pool.
+	assert.False(t, framed.pendingActive, "the resumed frame must be abandoned on liveness exit")
+	assert.Nil(t, framed.pendingPayload, "the pooled payload must be handed back")
+	_ = conn.Close()
 }

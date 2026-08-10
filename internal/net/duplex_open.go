@@ -98,6 +98,32 @@ type DuplexSession interface {
 	Close() error
 }
 
+// SessionOption configures optional behavior of a session dialed by
+// [OpenDuplex]. Options apply before the session's loops start, so handlers
+// are visible to the read loop from its first frame.
+type SessionOption func(*duplexConn)
+
+// WithSessionInboundHandler routes non-correlated inbound frames (unsolicited
+// traffic and connection-scoped ERROR) to fn on the session's read loop
+// instead of queueing them for [DuplexSession.Recv]. fn owns each frame's
+// payload release and must not block beyond mailbox-enqueue work: the read
+// loop cannot make progress until it returns. For the same reason fn must not
+// call Close synchronously (Close waits for the read loop, which is inside
+// fn); Close from a spawned goroutine is safe. A session with an inbound
+// handler must not call Recv.
+func WithSessionInboundHandler(fn func(session DuplexSession, frame Frame)) SessionOption {
+	return SessionOption(withDuplexInboundHandler(fn))
+}
+
+// WithSessionClosedHandler registers fn to run exactly once, on the session's
+// read loop as it exits, on every teardown path (local Close, transport
+// failure, peer disconnect). The session is already closed when fn runs, so
+// fn must not call Close synchronously: Close waits for the read loop to
+// exit, which would deadlock. Close from a spawned goroutine is safe.
+func WithSessionClosedHandler(fn func(session DuplexSession)) SessionOption {
+	return SessionOption(withDuplexClosedHandler(fn))
+}
+
 // OpenDuplex dials addr with transport, completes HELLO/HELLO_ACK, applies the
 // negotiated whole-connection compression wrapper, and starts reader/writer
 // goroutines over the resulting [FramedConn].
@@ -113,7 +139,7 @@ type DuplexSession interface {
 //
 // On success the returned [HandshakeResult] holds local, remote, and effective
 // negotiated parameters. On failure the underlying connection is closed.
-func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, laneSpec LaneSpec, writeTimeout, readIdleTimeout time.Duration, chunkSize uint32) (DuplexSession, *HandshakeResult, error) {
+func OpenDuplex(ctx context.Context, transport Transport, addr string, localHello *internalpb.Hello, laneSpec LaneSpec, writeTimeout, readIdleTimeout time.Duration, chunkSize uint32, opts ...SessionOption) (DuplexSession, *HandshakeResult, error) {
 	if _, err := laneByte(laneSpec.Role, laneSpec.Index); err != nil {
 		return nil, nil, err
 	}
@@ -131,10 +157,13 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 	}
 
 	// Bound HELLO/HELLO_ACK by the caller's deadline so a silent peer cannot
-	// stall dial forever. Cleared before the duplex loops start.
+	// stall dial forever. Cleared explicitly before newDuplexConn starts the
+	// loops; a deferred clear would run after the read loop has armed its
+	// first liveness deadline and erase it, leaving a silent peer unprobed.
+	handshakeDeadline := false
 	if deadline, ok := ctx.Deadline(); ok {
+		handshakeDeadline = true
 		_ = framed.NetConn().SetDeadline(deadline)
-		defer func() { _ = framed.NetConn().SetDeadline(time.Time{}) }()
 	}
 
 	// Cancellation without a deadline (ClosePeer) must still unblock ReadFrame.
@@ -170,19 +199,36 @@ func OpenDuplex(ctx context.Context, transport Transport, addr string, localHell
 		replacer.ReplaceNetConn(wrapped)
 	}
 
+	// Negotiation is complete and the compression layer is final: batch all
+	// further frame reads through the fixed connection buffer.
+	if buffered, ok := framed.(interface{ EnableReadBuffering() }); ok {
+		buffered.EnableReadBuffering()
+	}
+
 	credits := int64(result.Effective.GetInitialCredits())
 	if credits <= 0 {
 		credits = int64(defaultInitialCredits)
 	}
 
-	conn := newDuplexConn(
-		framed,
-		credits,
+	connOpts := []duplexConnOption{
 		withDuplexWriteTimeout(writeTimeout),
 		withDuplexReadIdleTimeout(readIdleTimeout),
 		withDuplexLane(laneValue),
 		withDuplexChunkSize(chunkSize),
 		withDuplexNegotiated(result.Effective),
-	)
+	}
+
+	for _, opt := range opts {
+		connOpts = append(connOpts, duplexConnOption(opt))
+	}
+
+	// The handshake deadline must be gone before the read loop starts so its
+	// own liveness/reclaim deadline arming is the only owner of the socket
+	// deadline from here on.
+	if handshakeDeadline {
+		_ = framed.NetConn().SetDeadline(time.Time{})
+	}
+
+	conn := newDuplexConn(framed, credits, connOpts...)
 	return conn, result, nil
 }

@@ -146,6 +146,46 @@ func TestAdmitTellCopiesCallerBuffers(t *testing.T) {
 	assert.Equal(t, []byte("admitted-payload"), recorder.message(0).GetMessage())
 }
 
+// TestTellPumpRunnerExitsWhenIdle confirms the transient runner contract: the
+// pump goroutine exists only while tells are queued or in flight, hands its
+// role back once the queue runs dry, and a later admission re-spawns it.
+func TestTellPumpRunnerExitsWhenIdle(t *testing.T) {
+	recorder := &tellFailureRecorder{}
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithTellFailureHandler(recorder.handle),
+	).(*client)
+	defer c.Close()
+
+	deadPort := inet.Get(1)[0]
+	p := c.peerFor("127.0.0.1", deadPort)
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_ORDINARY, index: 0}
+	params := tellParams{
+		sender:   "goakt://testSys@127.0.0.1:1/sender",
+		receiver: "goakt://remote@127.0.0.1:1/ghost",
+		payload:  []byte("transient"),
+		serID:    1,
+		typeName: "t",
+	}
+
+	require.NoError(t, p.admitTell(context.Background(), key, params))
+	require.Eventually(t, func() bool { return recorder.count() == 1 }, 3*time.Second, 20*time.Millisecond)
+
+	p.mu.Lock()
+	pump, ok := p.pumps[key]
+	p.mu.Unlock()
+	require.True(t, ok)
+	require.Eventually(t, func() bool {
+		pump.mu.Lock()
+		defer pump.mu.Unlock()
+		return !pump.running
+	}, 3*time.Second, 20*time.Millisecond, "runner must exit once the queue runs dry")
+
+	// A later admission must re-spawn the runner and deliver (here: fan out).
+	require.NoError(t, p.admitTell(context.Background(), key, params))
+	require.Eventually(t, func() bool { return recorder.count() == 2 }, 3*time.Second, 20*time.Millisecond)
+}
+
 func TestAdmitTellBackpressureOnFullByteWindow(t *testing.T) {
 	const window = 64
 	c := NewClient(

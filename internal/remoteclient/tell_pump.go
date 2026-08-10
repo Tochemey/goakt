@@ -45,9 +45,12 @@ type admittedTell struct {
 // tellPump stages fire-and-forget tells admitted for one duplex lane and
 // drains them in admission order. Admission never requires a live session:
 // dialing, table-ref encoding, and the writer-queue submit all happen on the
-// peer's pump goroutine (see peer.go). The queue is byte-capped to the
-// client's initial credit window (same bound as the duplex writer queue) so
-// per-peer memory stays predictable. Transport failures fan out through the
+// peer's pump goroutine (see peer.go). The pump goroutine is transient: it is
+// spawned on demand by admission, exists only while tells are queued or a
+// delivery (including its dial) is in flight, and exits when the queue runs
+// dry, so an idle lane holds no pump goroutine. The queue is byte-capped to
+// the client's initial credit window (same bound as the duplex writer queue)
+// so per-peer memory stays predictable. Transport failures fan out through the
 // shared tell-failure handler (dead letters) instead of surfacing to callers.
 type tellPump struct {
 	mu sync.Mutex
@@ -57,21 +60,24 @@ type tellPump struct {
 	head int
 	// queuedBytes is the sum of admitCost across the live queue.
 	queuedBytes int64
+	// running is true while a pump goroutine owns the drain. Guarded by mu so
+	// an enqueue-then-wake can never leave a queued tell without a runner:
+	// either the live runner's dry check sees the tell, or wake observes
+	// running == false and spawns a fresh runner.
+	running bool
 	// pending counts admitted tells not yet delivered (queued or in flight).
 	// A nonzero count forces later same-lane tells through the queue so the
 	// synchronous fast path can never overtake earlier admitted tells.
 	pending atomic.Int64
-	// notify wakes the pump when work is enqueued (capacity 1).
-	notify chan types.Unit
 	// space wakes admitters blocked on the byte cap (capacity 1).
 	space chan types.Unit
 }
 
-// newTellPump constructs an idle lane pump with signaling channels.
+// newTellPump constructs an idle lane pump with its admission signal. No
+// goroutine starts here; the first admitted tell spawns the transient runner.
 func newTellPump() *tellPump {
 	return &tellPump{
-		notify: make(chan types.Unit, 1),
-		space:  make(chan types.Unit, 1),
+		space: make(chan types.Unit, 1),
 	}
 }
 

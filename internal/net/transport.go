@@ -23,6 +23,7 @@
 package net
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -31,6 +32,12 @@ import (
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
+
+// framedReadBufferSize is the fixed per-connection read buffer installed by
+// [tcpFramedConn.EnableReadBuffering] after negotiation. Sized so a fill
+// amortizes syscalls across many small frames while staying a bounded,
+// footprint-friendly per-connection cost.
+const framedReadBufferSize = 64 * 1024
 
 // LaneSpec describes which lane a dialed or accepted connection belongs to.
 type LaneSpec struct {
@@ -192,7 +199,22 @@ var tcpReadPool = NewFramePool()
 type tcpFramedConn struct {
 	conn         net.Conn
 	maxFrameSize uint32
-	readHdr      [FrameHeaderSize]byte
+	// br batches frame reads through one fixed buffer so a stream of small
+	// frames costs two syscalls per buffer fill instead of two per frame.
+	// Nil until [tcpFramedConn.EnableReadBuffering] runs after the handshake
+	// and compression wrap, so negotiation-phase reads can never buffer ahead
+	// of a connection-layer swap. Only the read goroutine touches it.
+	br      *bufio.Reader
+	readHdr [FrameHeaderSize]byte
+	// Partial-frame resume state, owned by the read goroutine. A read
+	// deadline armed for liveness probing can expire mid-frame; these fields
+	// retain the bytes already consumed so the next ReadFrame call resumes
+	// the same frame instead of misparsing the stream from its middle.
+	readHdrN       int
+	pendingFrame   Frame
+	pendingPayload []byte
+	pendingN       int
+	pendingActive  bool
 	// writeHdrs is a header arena for vectored writes: one 16-byte slot per
 	// frame of a writer batch, so multi-frame writes allocate nothing.
 	writeHdrs [duplexWriteBatchMax][FrameHeaderSize]byte
@@ -289,28 +311,116 @@ func (x *tcpFramedConn) WriteFrames(frames ...Frame) error {
 // ReadFrame reads one complete frame from the connection. Protocol-version
 // mismatches surface as [ErrUnsupportedProtocolVersion]; the protocol layer
 // owns emitting the in-band ERROR frame.
+//
+// ReadFrame is resumable across read-deadline expiries: when a deadline
+// armed for liveness probing fires mid-frame, the partial header or payload
+// progress is retained and the next call continues the same frame. A
+// terminal (non-timeout) error mid-payload returns the pending buffer to the
+// read pool and resets the resume state; the connection is being torn down
+// and nothing else will release that buffer.
 func (x *tcpFramedConn) ReadFrame() (Frame, error) {
-	if _, err := io.ReadFull(x.conn, x.readHdr[:]); err != nil {
-		return Frame{}, err
+	src := x.readSource()
+
+	if !x.pendingActive {
+		for x.readHdrN < FrameHeaderSize {
+			n, err := src.Read(x.readHdr[x.readHdrN:])
+			x.readHdrN += n
+			if err != nil {
+				return Frame{}, err
+			}
+		}
+
+		x.readHdrN = 0
+		frame, err := decodeFrameHeader(x.readHdr[:], x.maxFrameSize)
+		if err != nil {
+			return Frame{}, err
+		}
+
+		if frame.Length == 0 {
+			return frame, nil
+		}
+
+		x.pendingFrame = frame
+		x.pendingPayload = x.getReadPayload(frame.Type, int(frame.Length))
+		x.pendingN = 0
+		x.pendingActive = true
 	}
 
-	frame, err := decodeFrameHeader(x.readHdr[:], x.maxFrameSize)
-	if err != nil {
-		return Frame{}, err
+	for x.pendingN < len(x.pendingPayload) {
+		n, err := src.Read(x.pendingPayload[x.pendingN:])
+		x.pendingN += n
+
+		if err != nil {
+			if !isTimeoutError(err) {
+				x.releaseReadPayload(x.pendingPayload)
+				x.pendingFrame = Frame{}
+				x.pendingPayload = nil
+				x.pendingN = 0
+				x.pendingActive = false
+			}
+
+			return Frame{}, err
+		}
 	}
 
-	if frame.Length == 0 {
-		return frame, nil
-	}
-
-	payload := x.getReadPayload(frame.Type, int(frame.Length))
-	if _, err := io.ReadFull(x.conn, payload); err != nil {
-		x.releaseReadPayload(payload)
-		return Frame{}, err
-	}
-
-	frame.Payload = payload
+	frame := x.pendingFrame
+	frame.Payload = x.pendingPayload
+	x.pendingFrame = Frame{}
+	x.pendingPayload = nil
+	x.pendingN = 0
+	x.pendingActive = false
 	return frame, nil
+}
+
+// AbandonPendingRead returns a partially-read frame's pooled payload and
+// resets the resume state. The read-loop owner calls it on exit paths where
+// the last ReadFrame returned a resumable timeout but nothing will ever
+// resume the frame (liveness failure, idle reclaim); without it the pooled
+// buffer is abandoned to the garbage collector. Must be called only from the
+// goroutine that owns ReadFrame; a no-op when no resume state is held.
+func (x *tcpFramedConn) AbandonPendingRead() {
+	if !x.pendingActive {
+		return
+	}
+
+	x.releaseReadPayload(x.pendingPayload)
+	x.pendingFrame = Frame{}
+	x.pendingPayload = nil
+	x.pendingN = 0
+	x.pendingActive = false
+}
+
+// readSource returns the reader frame bytes come from: the buffered reader
+// once EnableReadBuffering has run, the bare connection before that.
+func (x *tcpFramedConn) readSource() io.Reader {
+	if x.br != nil {
+		return x.br
+	}
+
+	return x.conn
+}
+
+// BufferedReadBytes reports how many already-read bytes wait in the fixed
+// read buffer, zero before EnableReadBuffering. The duplex layer uses it as
+// its load signal: buffered bytes after a frame read mean frames are
+// arriving faster than they are consumed. Only the read goroutine may call
+// it (the buffer is single-owner).
+func (x *tcpFramedConn) BufferedReadBytes() int {
+	if x.br != nil {
+		return x.br.Buffered()
+	}
+
+	return 0
+}
+
+// EnableReadBuffering installs the fixed read buffer over the current
+// connection. Call it exactly once, after the handshake and any compression
+// wrap, from the goroutine that owns reads; buffering the negotiation phase
+// could read ahead of a [tcpFramedConn.ReplaceNetConn] layer swap.
+func (x *tcpFramedConn) EnableReadBuffering() {
+	if x.br == nil {
+		x.br = bufio.NewReaderSize(x.conn, framedReadBufferSize)
+	}
 }
 
 // poolsReadPayload reports whether frameType bodies are drawn from [tcpReadPool].
@@ -350,9 +460,15 @@ func (x *tcpFramedConn) Close() error {
 }
 
 // ReplaceNetConn swaps the underlying connection, used after the handshake
-// installs a negotiated compression wrapper.
+// installs a negotiated compression wrapper. A read buffer installed earlier
+// is rebuilt over the new connection; by the EnableReadBuffering contract it
+// holds no unread bytes at swap time.
 func (x *tcpFramedConn) ReplaceNetConn(conn net.Conn) {
 	x.conn = conn
+
+	if x.br != nil {
+		x.br = bufio.NewReaderSize(conn, framedReadBufferSize)
+	}
 }
 
 // encodeHelloFrame builds a HELLO or HELLO_ACK frame from msg.

@@ -140,6 +140,56 @@ func TestTCPFramedConnWriteReadPayload(t *testing.T) {
 	require.NoError(t, <-errCh)
 }
 
+func TestTCPFramedConnBufferedReads(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	left := newTCPFramedConn(c1, defaultMaxFrameSize)
+	right := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+	// First frame reads unbuffered (negotiation phase), the rest through the
+	// buffer enabled mid-stream, matching the post-handshake enable contract.
+	const frames = 5
+	payload := []byte("buffered-read")
+	errCh := make(chan error, 1)
+	go func() {
+		for i := range frames {
+			if err := left.WriteFrames(Frame{
+				Type:        FrameTypeData,
+				Lane:        LaneOrdinary,
+				Length:      uint32(len(payload)),
+				Payload:     payload,
+				Correlation: uint64(i + 1),
+			}); err != nil {
+				errCh <- err
+				return
+			}
+		}
+
+		errCh <- nil
+	}()
+
+	frame, err := right.ReadFrame()
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), frame.Correlation)
+	right.releaseReadPayload(frame.Payload)
+
+	right.EnableReadBuffering()
+
+	for i := 1; i < frames; i++ {
+		frame, err = right.ReadFrame()
+		require.NoError(t, err)
+		assert.Equal(t, uint64(i+1), frame.Correlation)
+		assert.Equal(t, payload, frame.Payload)
+		right.releaseReadPayload(frame.Payload)
+	}
+
+	require.NoError(t, <-errCh)
+}
+
 func TestTCPFramedConnReadPoolRelease(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() {
@@ -285,4 +335,152 @@ func TestEncodeHelloFrame(t *testing.T) {
 	assert.Equal(t, LaneControl, frame.Lane)
 	assert.Equal(t, uint32(3), frame.Length)
 	assert.Equal(t, payload, frame.Payload)
+}
+
+// TestFramedConnReadFrameResumesAcrossDeadline confirms ReadFrame retains
+// partial header and payload progress across read-deadline expiries: a
+// liveness deadline firing mid-frame must not corrupt the stream, because the
+// folded prober keeps reading the same connection after probing.
+func TestFramedConnReadFrameResumesAcrossDeadline(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	fc := newTCPFramedConn(server, defaultMaxFrameSize)
+
+	payload := []byte("resumable-payload")
+	frame := Frame{
+		Version: ProtocolVersion,
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
+		Length:  uint32(len(payload)),
+	}
+
+	wire := make([]byte, FrameHeaderSize+len(payload))
+	require.NoError(t, encodeFrameHeader(wire[:FrameHeaderSize], frame))
+	copy(wire[FrameHeaderSize:], payload)
+
+	// Feed the frame in three fragments: a partial header, the rest of the
+	// header plus a partial payload, then the payload tail. Between the
+	// fragments the reader's deadline expires, so ReadFrame must surface a
+	// timeout each time and resume without losing consumed bytes.
+	fragments := [][]byte{wire[:3], wire[3 : FrameHeaderSize+5], wire[FrameHeaderSize+5:]}
+	release := make(chan struct{})
+
+	go func() {
+		for _, fragment := range fragments {
+			<-release
+			_, _ = client.Write(fragment)
+		}
+	}()
+
+	deadline := func(d time.Duration) {
+		require.NoError(t, server.SetReadDeadline(time.Now().Add(d)))
+	}
+
+	timeouts := 0
+	release <- struct{}{}
+
+	for {
+		deadline(50 * time.Millisecond)
+		got, err := fc.ReadFrame()
+		if err == nil {
+			assert.Equal(t, FrameTypeData, got.Type)
+			assert.Equal(t, payload, got.Payload)
+			break
+		}
+
+		var netErr net.Error
+		require.ErrorAs(t, err, &netErr, "mid-frame errors must be deadline expiries")
+		require.True(t, netErr.Timeout())
+
+		timeouts++
+		require.LessOrEqual(t, timeouts, 10, "frame never completed")
+
+		select {
+		case release <- struct{}{}:
+		default:
+		}
+	}
+
+	assert.GreaterOrEqual(t, timeouts, 1, "test must exercise at least one mid-frame expiry")
+}
+
+// TestFramedConnTerminalErrorReleasesPendingPayload verifies that a terminal
+// (non-timeout) read error mid-payload returns the pending pooled buffer and
+// resets the resumable-read state, instead of abandoning the buffer to the
+// garbage collector on connection teardown.
+func TestFramedConnTerminalErrorReleasesPendingPayload(t *testing.T) {
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	right := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+	// Hand-write a header promising a 1000-byte DATA payload, deliver only a
+	// fragment, then close: the reader fails terminally mid-payload.
+	hdr := make([]byte, FrameHeaderSize)
+	require.NoError(t, encodeFrameHeader(hdr, Frame{
+		Version: ProtocolVersion,
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
+		Length:  1000,
+	}))
+
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		if _, err := c1.Write(hdr); err != nil {
+			return
+		}
+		_, _ = c1.Write(make([]byte, 10))
+		_ = c1.Close()
+	}()
+
+	_, err := right.ReadFrame()
+	require.Error(t, err)
+	<-writeDone
+
+	assert.False(t, right.pendingActive, "resume state must be reset after a terminal error")
+	assert.Nil(t, right.pendingPayload, "pending pooled payload must be released, not retained")
+}
+
+// TestFramedConnAbandonPendingRead verifies the resume-state release used by
+// the read loop's exit path: a mid-frame deadline expiry parks a pooled
+// payload, and AbandonPendingRead must hand it back and reset the state so
+// nothing is stranded when the connection never reads again.
+func TestFramedConnAbandonPendingRead(t *testing.T) {
+	client, server := net.Pipe()
+	t.Cleanup(func() {
+		_ = client.Close()
+		_ = server.Close()
+	})
+
+	fc := newTCPFramedConn(server, defaultMaxFrameSize)
+
+	header := Frame{Version: ProtocolVersion, Type: FrameTypeData, Lane: LaneControl, Length: 64}
+	wire := make([]byte, FrameHeaderSize+8)
+	require.NoError(t, encodeFrameHeader(wire[:FrameHeaderSize], header))
+
+	go func() { _, _ = client.Write(wire) }()
+
+	require.NoError(t, server.SetReadDeadline(time.Now().Add(50*time.Millisecond)))
+	_, err := fc.ReadFrame()
+
+	var netErr net.Error
+	require.ErrorAs(t, err, &netErr)
+	require.True(t, netErr.Timeout(), "a mid-payload deadline expiry must surface as a timeout")
+	require.True(t, fc.pendingActive, "the partial frame must be parked for resumption")
+	require.NotNil(t, fc.pendingPayload)
+
+	fc.AbandonPendingRead()
+	assert.False(t, fc.pendingActive, "the resume state must be reset")
+	assert.Nil(t, fc.pendingPayload, "the pooled payload must be handed back")
+	assert.Zero(t, fc.pendingN)
+
+	assert.NotPanics(t, fc.AbandonPendingRead, "a second abandon must be a no-op")
 }

@@ -34,6 +34,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/size"
 )
 
@@ -887,4 +888,148 @@ func TestDuplexChunkSizeClampedToNegotiatedFrameLimit(t *testing.T) {
 	defer func() { _ = unclamped.Close() }()
 
 	assert.Equal(t, uint32(16*1024), unclamped.ChunkSize())
+}
+
+// TestDuplexChunkedTellReachesInboundHandler pins the regression where a
+// reassembled chunked frame was pushed straight onto the Recv queue and
+// stranded on handler-mode sessions: server connections and client sessions
+// with an inbound handler have no Recv consumer, so the message hung until
+// unrelated traffic happened to wake a drainer.
+func TestDuplexChunkedTellReachesInboundHandler(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	hello := &internalpb.Hello{
+		Revision:                    CapabilityRevisionChunking,
+		MaxFrameSize:                defaultMaxFrameSize,
+		MaxMessageSize:              DefaultMaxMessageSize,
+		MaxConcurrentLargeTransfers: 4,
+	}
+
+	credits := int64(defaultInitialCredits)
+	sender := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
+		withDuplexChunkSize(1024),
+		withDuplexNegotiated(hello),
+	)
+
+	type delivered struct {
+		frameType byte
+		digest    [32]byte
+	}
+
+	got := make(chan delivered, 1)
+	receiver := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), credits,
+		withDuplexChunkSize(1024),
+		withDuplexNegotiated(hello),
+		withDuplexInboundHandler(func(session DuplexSession, frame Frame) {
+			// Digest before release: the payload buffer returns to the pool.
+			got <- delivered{frameType: frame.Type, digest: sha256.Sum256(frame.Payload)}
+			session.ReleasePayload(frame)
+		}),
+	)
+
+	defer func() {
+		_ = sender.Close()
+		_ = receiver.Close()
+	}()
+
+	payload := make([]byte, 64*1024)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	want := sha256.Sum256(payload)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	require.NoError(t, sender.Tell(ctx, Frame{
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
+		Payload: payload,
+	}))
+
+	select {
+	case frame := <-got:
+		assert.Equal(t, FrameTypeData, frame.frameType)
+		assert.Equal(t, want, frame.digest)
+	case <-ctx.Done():
+		t.Fatal("reassembled chunked frame never reached the inbound handler")
+	}
+}
+
+// TestDuplexChunkedTellReachesPipelinedHandler covers the same regression for
+// the server-side configuration: pipelined inbound dispatch, where the
+// reassembled frame must wake the transient drainer instead of sitting in the
+// queue until unrelated traffic arrives.
+func TestDuplexChunkedTellReachesPipelinedHandler(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	c1, c2 := net.Pipe()
+	t.Cleanup(func() {
+		_ = c1.Close()
+		_ = c2.Close()
+	})
+
+	hello := &internalpb.Hello{
+		Revision:                    CapabilityRevisionChunking,
+		MaxFrameSize:                defaultMaxFrameSize,
+		MaxMessageSize:              DefaultMaxMessageSize,
+		MaxConcurrentLargeTransfers: 4,
+	}
+
+	credits := int64(defaultInitialCredits)
+	sender := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), credits,
+		withDuplexChunkSize(1024),
+		withDuplexNegotiated(hello),
+	)
+
+	const messages = 3
+	digests := make(chan [32]byte, messages)
+	receiver := newDuplexConn(newTCPFramedConn(c2, defaultMaxFrameSize), credits,
+		withDuplexChunkSize(1024),
+		withDuplexNegotiated(hello),
+		withDuplexPipelinedInbound(),
+		withDuplexInboundHandler(func(session DuplexSession, frame Frame) {
+			digests <- sha256.Sum256(frame.Payload)
+			session.ReleasePayload(frame)
+		}),
+	)
+
+	defer func() {
+		_ = sender.Close()
+		_ = receiver.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Space the sends past the drainer linger so each chunked message must
+	// wake dispatch on its own rather than riding an already-hot drainer.
+	for i := range messages {
+		payload := make([]byte, 32*1024)
+		for j := range payload {
+			payload[j] = byte(i + j)
+		}
+		want := sha256.Sum256(payload)
+
+		require.NoError(t, sender.Tell(ctx, Frame{
+			Type:    FrameTypeData,
+			Lane:    LaneControl,
+			Payload: payload,
+		}))
+
+		select {
+		case digest := <-digests:
+			assert.Equal(t, want, digest, "message %d", i)
+		case <-ctx.Done():
+			t.Fatalf("chunked message %d never reached the pipelined handler", i)
+		}
+
+		pause.For(3 * duplexDispatchLinger)
+	}
 }

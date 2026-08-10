@@ -25,6 +25,7 @@ package net
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +36,25 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
+// duplexWriteBatchMax is the maximum number of frames the writer coalesces
+// into one vectored WriteFrames call per wakeup.
+const duplexWriteBatchMax = 32
+
+// duplexDispatchLinger is how long a dry pipelined-dispatch drainer parks for
+// the next frame before exiting. Request/response traffic keeps one hot
+// drainer and pays a channel wake instead of a goroutine spawn per frame; a
+// connection quiet past the linger holds no dispatch goroutine.
+const duplexDispatchLinger = 10 * time.Millisecond
+
+// duplexCloseDrainGrace is used when writeTimeout is unset so Close cannot
+// block forever on a peer that stopped reading.
+const duplexCloseDrainGrace = 5 * time.Second
+
+// duplexLivenessMissLimit is the number of consecutive admitted liveness
+// probes that may each pass a full idle interval unanswered before the
+// transport is failed (the classic two-missed-PONG rule).
+const duplexLivenessMissLimit = 2
+
 // ErrDuplexClosed is returned when submitting to or reading from a closed
 // duplex connection.
 var ErrDuplexClosed = errors.New("tcp: duplex connection is closed")
@@ -42,10 +62,6 @@ var ErrDuplexClosed = errors.New("tcp: duplex connection is closed")
 // ErrDuplexBackpressure is returned when the outbound queue cannot accept a
 // frame within the caller's deadline.
 var ErrDuplexBackpressure = errors.New("tcp: duplex outbound queue full")
-
-// duplexWriteBatchMax is the maximum number of frames the writer coalesces
-// into one vectored WriteFrames call per wakeup.
-const duplexWriteBatchMax = 32
 
 // duplexConn owns one reader goroutine, one writer goroutine, a byte-bounded
 // outbound queue, and a correlation pending table over a [FramedConn].
@@ -105,12 +121,51 @@ type duplexConn struct {
 	sendWindow atomic.Int64
 	// creditWake wakes a writer parked on an exhausted send window.
 	creditWake chan types.Unit
-	// grantMu protects grantAccum on the receiver grant path.
-	grantMu sync.Mutex
 	// grantAccum is owned wire bytes not yet flushed as a CREDIT frame.
-	grantAccum int64
+	// Atomic instead of mutex-guarded: the receive path records ownership
+	// once per frame, so the accumulator must cost one uncontended atomic
+	// add, not a lock acquisition, per delivered message.
+	grantAccum atomic.Int64
 	// lastInbound records the latest successfully read frame timestamp.
 	lastInbound atomic.Int64
+	// inboundHandler, when set before the loops start, consumes non-correlated
+	// application frames instead of queueing them for [duplexConn.Recv]. It
+	// owns each frame's payload release. Without pipelinedInbound it runs
+	// directly on the read loop and must not block beyond mailbox-enqueue
+	// work: the read loop cannot make progress until it returns. Sessions
+	// with a handler must not call Recv.
+	inboundHandler func(session DuplexSession, frame Frame)
+	// pipelinedInbound, when set with inboundHandler, keeps the read loop
+	// free of dispatch work: frames are queued on the inbound channel and a
+	// transient drainer goroutine invokes the handler in arrival order. The
+	// drainer exists only while frames are queued (an idle connection holds
+	// no dispatch goroutine), so under sustained load the socket is read
+	// concurrently with dispatch, restoring the throughput of a dedicated
+	// serve goroutine at zero steady-state goroutine cost.
+	pipelinedInbound bool
+	// dispatchMu guards dispatchRunning: either the live drainer's dry check
+	// sees a queued frame, or the read loop's wake observes running == false
+	// and spawns a fresh drainer, so no queued frame is ever left unowned.
+	dispatchMu sync.Mutex
+	// dispatchRunning is true while a transient drainer owns the inbound
+	// queue.
+	dispatchRunning bool
+	// dispatchWG tracks every transient drainer so the read loop can join
+	// pipelined dispatch on exit. Without the join, Close and the closed
+	// handler (which retires server-side accounting) could complete while a
+	// drainer is still delivering frames. Add happens only on the read
+	// goroutine (the sole drainer spawner), so it can never race the read
+	// loop's deferred Wait.
+	dispatchWG sync.WaitGroup
+	// buffered exposes the framed connection's read-buffer occupancy when
+	// the transport has one; nil otherwise. Pipelined dispatch reads it (on
+	// the read loop only) to decide between inline and queued delivery.
+	buffered interface{ BufferedReadBytes() int }
+	// closedHandler, when set before the loops start, runs exactly once on the
+	// read loop as it exits, on every teardown path (local Close, transport
+	// failure, peer disconnect). The session is already closed when it runs,
+	// so it must not call Close synchronously (Close waits for the read loop).
+	closedHandler func(session DuplexSession)
 
 	mu sync.Mutex
 	// space wakes Submit waiters when outbound capacity is released.
@@ -144,16 +199,11 @@ type duplexConn struct {
 	closeResult atomic.Pointer[error]
 	// writeWG / readWG track the writer and reader loops for ordered shutdown:
 	// drain writes, then close framed to unblock the reader.
-	writeWG    sync.WaitGroup
-	readWG     sync.WaitGroup
-	livenessWG sync.WaitGroup
-	writeErr   atomic.Pointer[error]
-	readErr    atomic.Pointer[error]
+	writeWG  sync.WaitGroup
+	readWG   sync.WaitGroup
+	writeErr atomic.Pointer[error]
+	readErr  atomic.Pointer[error]
 }
-
-// duplexCloseDrainGrace is used when writeTimeout is unset so Close cannot
-// block forever on a peer that stopped reading.
-const duplexCloseDrainGrace = 5 * time.Second
 
 // duplexConnOption configures a [duplexConn].
 type duplexConnOption func(*duplexConn)
@@ -241,6 +291,33 @@ func withDuplexSenderResolver(resolve func(path string) any) duplexConnOption {
 	}
 }
 
+// withDuplexInboundHandler routes non-correlated application frames to fn on
+// the read loop instead of the Recv queue. See [duplexConn.inboundHandler]
+// for the handler contract.
+func withDuplexInboundHandler(fn func(session DuplexSession, frame Frame)) duplexConnOption {
+	return func(x *duplexConn) {
+		x.inboundHandler = fn
+	}
+}
+
+// withDuplexPipelinedInbound decouples the inbound handler from the read
+// loop: frames queue on the inbound channel and a transient drainer invokes
+// the handler in arrival order. See [duplexConn.pipelinedInbound].
+func withDuplexPipelinedInbound() duplexConnOption {
+	return func(x *duplexConn) {
+		x.pipelinedInbound = true
+	}
+}
+
+// withDuplexClosedHandler registers fn to run exactly once as the read loop
+// exits on any teardown path. See [duplexConn.closedHandler] for the handler
+// contract.
+func withDuplexClosedHandler(fn func(session DuplexSession)) duplexConnOption {
+	return func(x *duplexConn) {
+		x.closedHandler = fn
+	}
+}
+
 // newDuplexConn starts reader and writer goroutines for framed.
 // maxOutBytes caps admitted outbound payload+header bytes; values <= 0
 // default to defaultMaxFrameSize.
@@ -258,6 +335,7 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 		pending:     newPendingTable(),
 		lane:        LaneControl,
 	}
+	x.buffered, _ = framed.(interface{ BufferedReadBytes() int })
 	x.space = sync.NewCond(&x.mu)
 	x.nextCorr.Store(1)
 
@@ -284,10 +362,6 @@ func newDuplexConn(framed FramedConn, maxOutBytes int64, opts ...duplexConnOptio
 	x.readWG.Add(1)
 	go x.writeLoop()
 	go x.readLoop()
-	if x.readIdleTimeout > 0 {
-		x.livenessWG.Add(1)
-		go x.livenessLoop()
-	}
 	return x
 }
 
@@ -493,7 +567,6 @@ func (x *duplexConn) Close() error {
 
 		closeErr := x.closeFramed()
 		x.readWG.Wait()
-		x.livenessWG.Wait()
 
 		if errPtr := x.writeErr.Load(); errPtr != nil {
 			closeErr = *errPtr
@@ -722,13 +795,68 @@ func (x *duplexConn) drainOutboundPending(pending []Frame) {
 func (x *duplexConn) readLoop() {
 	defer x.readWG.Done()
 
+	if x.closedHandler != nil {
+		// Runs before readWG.Done (LIFO): the session is fully closed on
+		// every exit path below, so the handler observes IsClosed() == true.
+		defer x.closedHandler(x)
+	}
+
+	// Join pipelined dispatch before the closed handler retires accounting
+	// and before readWG.Done releases Close: the detached-duplex contract is
+	// that both observe dispatch fully drained, not merely the socket loop
+	// gone. Every exit path below fires the close signal, so a live drainer
+	// always terminates; no handler on the drainer blocks on this loop, so
+	// the join cannot deadlock. Runs first in the defer chain (LIFO).
+	defer x.dispatchWG.Wait()
+
+	// A read deadline that fired mid-frame leaves ReadFrame's resume state
+	// holding a pooled payload; the timeout exit paths below (liveness miss
+	// limit, idle reclaim) never call ReadFrame again, so hand the buffer
+	// back here. This goroutine is the sole ReadFrame caller, so the resume
+	// state cannot be in use. Terminal read errors already cleaned up inside
+	// ReadFrame; the call is then a no-op.
+	if resumable, ok := x.framed.(interface{ AbandonPendingRead() }); ok {
+		defer resumable.AbandonPendingRead()
+	}
+
+	// Liveness state, folded from the retired dedicated prober: an expired
+	// read deadline on an idle connection emits the PING and re-arms; two
+	// admitted probes that each pass a full idle interval with no inbound
+	// traffic of any kind close the transport. A miss is counted only one
+	// interval after its probe was admitted, so a peer always gets a full
+	// interval to answer the second probe before the transport fails. Any
+	// inbound frame (including a PONG) resets the cycle.
+	var livenessMisses int
+	var probeOutstanding bool
+	idleAt := time.Now().Add(x.readIdleTimeout)
+
 	for {
-		if x.connIdleTimeout > 0 {
-			_ = x.framed.NetConn().SetReadDeadline(time.Now().Add(x.connIdleTimeout))
-		}
+		x.armReadDeadline(idleAt)
 
 		frame, err := x.framed.ReadFrame()
 		if err != nil {
+			if x.readIdleTimeout > 0 && isTimeoutError(err) && !x.reclaimExpired() {
+				if probeOutstanding {
+					livenessMisses++
+
+					if livenessMisses >= duplexLivenessMissLimit {
+						x.failTransport()
+						return
+					}
+				}
+
+				// Track admission only: a backpressure drop must not punish
+				// a peer that never received the PING.
+				probeOutstanding = x.trySubmit(Frame{
+					Version:     ProtocolVersion,
+					Type:        FrameTypePing,
+					Lane:        x.lane,
+					Correlation: x.nextCorrelation(),
+				})
+				idleAt = time.Now().Add(x.readIdleTimeout)
+				continue
+			}
+
 			if !x.closing.Load() {
 				x.readErr.Store(&err)
 			}
@@ -738,6 +866,9 @@ func (x *duplexConn) readLoop() {
 		}
 
 		x.lastInbound.Store(time.Now().UnixNano())
+		livenessMisses = 0
+		probeOutstanding = false
+		idleAt = time.Now().Add(x.readIdleTimeout)
 
 		if x.enforceLane && frame.Lane != x.lane {
 			x.releaseFramePayload(frame.Payload)
@@ -782,12 +913,207 @@ func (x *duplexConn) readLoop() {
 			}
 		}
 
+		if x.inboundHandler != nil {
+			x.deliverInbound(frame)
+			continue
+		}
+
 		select {
 		case <-x.closed:
 			return
 		case x.inbound <- frame:
 		}
 	}
+}
+
+// deliverInbound routes one frame to the inbound handler. Non-pipelined
+// sessions always dispatch inline on the read loop. Pipelined sessions
+// dispatch inline only while the connection is quiet (no queued frames, no
+// live drainer, and no further bytes already buffered), which keeps
+// request/response latency free of goroutine handoffs; once frames arrive
+// faster than dispatch consumes them, delivery shifts to the queue and its
+// transient drainer so socket reads proceed concurrently with dispatch.
+func (x *duplexConn) deliverInbound(frame Frame) {
+	if !x.pipelinedInbound {
+		x.inboundHandler(x, frame)
+		return
+	}
+
+	if x.framedBuffered() == 0 && x.canDispatchInline() {
+		x.inboundHandler(x, frame)
+		return
+	}
+
+	select {
+	case <-x.closed:
+		// Teardown while the queue is full: drop the frame like the
+		// pre-pipelining path did, returning its body to the read pool.
+		x.releaseFramePayload(frame.Payload)
+	case x.inbound <- frame:
+		x.wakeDispatcher()
+	}
+}
+
+// framedBuffered reports bytes already read into the framed connection's
+// buffer, the load signal for pipelined dispatch. Zero when the transport
+// carries no read buffer.
+func (x *duplexConn) framedBuffered() int {
+	if x.buffered == nil {
+		return 0
+	}
+
+	return x.buffered.BufferedReadBytes()
+}
+
+// canDispatchInline reports whether the read loop may bypass the queue
+// without reordering: nothing is queued and no drainer owns the queue. Only
+// the read loop enqueues and spawns drainers, so a true result cannot be
+// invalidated before the inline dispatch runs.
+func (x *duplexConn) canDispatchInline() bool {
+	x.dispatchMu.Lock()
+	defer x.dispatchMu.Unlock()
+	return !x.dispatchRunning && len(x.inbound) == 0
+}
+
+// wakeDispatcher ensures a transient drainer goroutine owns the inbound
+// queue, spawning one when none is running. Called by the read loop after
+// every pipelined enqueue.
+func (x *duplexConn) wakeDispatcher() {
+	x.dispatchMu.Lock()
+
+	if x.dispatchRunning {
+		x.dispatchMu.Unlock()
+		return
+	}
+
+	x.dispatchRunning = true
+	x.dispatchWG.Add(1)
+	x.dispatchMu.Unlock()
+
+	go x.dispatchLoop()
+}
+
+// dispatchLoop invokes the inbound handler for queued frames in arrival
+// order until the queue runs dry and the linger expires, then exits; the
+// read loop re-spawns it on the next enqueue. Exactly one drainer runs at a
+// time, so pipelined dispatch preserves per-connection frame order.
+func (x *duplexConn) dispatchLoop() {
+	defer x.dispatchWG.Done()
+
+	linger := time.NewTimer(duplexDispatchLinger)
+	defer linger.Stop()
+
+	for {
+		select {
+		case frame := <-x.inbound:
+			x.inboundHandler(x, frame)
+			continue
+		default:
+		}
+
+		// Dry: park briefly for the next frame before handing the queue
+		// back, so steady request/response traffic pays a channel wake
+		// instead of a goroutine spawn per frame.
+		if !linger.Stop() {
+			select {
+			case <-linger.C:
+			default:
+			}
+		}
+
+		linger.Reset(duplexDispatchLinger)
+
+		select {
+		case frame := <-x.inbound:
+			x.inboundHandler(x, frame)
+			continue
+		case <-x.closed:
+			x.drainInboundOnClose()
+			return
+		case <-linger.C:
+		}
+
+		x.dispatchMu.Lock()
+
+		if len(x.inbound) == 0 {
+			x.dispatchRunning = false
+			x.dispatchMu.Unlock()
+			return
+		}
+
+		x.dispatchMu.Unlock()
+	}
+}
+
+// drainInboundOnClose dispatches whatever the read loop queued before it
+// exited, then hands the queue back under the dispatch lock. Clearing
+// dispatchRunning before returning is what keeps the no-stranded-frame
+// invariant on teardown: the read loop may still enqueue frames it had
+// already buffered, and its wakeDispatcher must find the queue unowned so a
+// fresh drainer picks them up instead of the frame (and its pooled payload)
+// sitting in the queue forever.
+func (x *duplexConn) drainInboundOnClose() {
+	for {
+		select {
+		case frame := <-x.inbound:
+			x.inboundHandler(x, frame)
+			continue
+		default:
+		}
+
+		x.dispatchMu.Lock()
+
+		if len(x.inbound) == 0 {
+			x.dispatchRunning = false
+			x.dispatchMu.Unlock()
+			return
+		}
+
+		x.dispatchMu.Unlock()
+	}
+}
+
+// armReadDeadline arms the socket read deadline to the sooner of the next
+// liveness probe boundary (idleAt) and the connection reclaim boundary; no
+// deadline is set when both mechanisms are disabled. Called by the read loop
+// before every blocking read.
+func (x *duplexConn) armReadDeadline(idleAt time.Time) {
+	var deadline time.Time
+
+	if x.readIdleTimeout > 0 {
+		deadline = idleAt
+	}
+
+	if x.connIdleTimeout > 0 {
+		reclaimAt := time.Unix(0, x.lastInbound.Load()).Add(x.connIdleTimeout)
+		if deadline.IsZero() || reclaimAt.Before(deadline) {
+			deadline = reclaimAt
+		}
+	}
+
+	if deadline.IsZero() {
+		return
+	}
+
+	_ = x.framed.NetConn().SetReadDeadline(deadline)
+}
+
+// reclaimExpired reports whether the connection idle reclaim window has
+// passed with no inbound frame, which turns a read-deadline expiry into a
+// terminal error (server idle reclaim) instead of a liveness probe.
+func (x *duplexConn) reclaimExpired() bool {
+	if x.connIdleTimeout <= 0 {
+		return false
+	}
+
+	return time.Since(time.Unix(0, x.lastInbound.Load())) >= x.connIdleTimeout
+}
+
+// isTimeoutError reports whether err is a read-deadline expiry rather than a
+// terminal transport failure.
+func isTimeoutError(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // rejectWrongLane emits a best-effort connection-scoped ERROR then tears down
@@ -834,65 +1160,6 @@ func (x *duplexConn) drainAndCloseFramed() {
 	}
 
 	_ = x.closeFramed()
-}
-
-// livenessLoop probes a silent peer and closes the transport after two missed
-// PONGs: two admitted probes that each passed a full idle interval with no
-// inbound traffic of any kind. A miss is counted only one interval after its
-// probe was admitted, so a peer always gets a full interval to answer the
-// second probe before the transport fails.
-func (x *duplexConn) livenessLoop() {
-	defer x.livenessWG.Done()
-
-	timer := time.NewTimer(x.readIdleTimeout)
-	defer timer.Stop()
-
-	var misses int
-	var probeOutstanding bool
-	lastObserved := x.lastInbound.Load()
-
-	for {
-		select {
-		case <-x.closed:
-			return
-		case <-timer.C:
-			lastInbound := x.lastInbound.Load()
-			elapsed := time.Since(time.Unix(0, lastInbound))
-			if elapsed < x.readIdleTimeout {
-				timer.Reset(x.readIdleTimeout - elapsed)
-				continue
-			}
-
-			if lastInbound != lastObserved {
-				// Inbound traffic (including a PONG) proves the peer is
-				// alive; restart the idle window without probing.
-				misses = 0
-				probeOutstanding = false
-				lastObserved = lastInbound
-				timer.Reset(x.readIdleTimeout)
-				continue
-			}
-
-			if probeOutstanding {
-				misses++
-
-				if misses >= 2 {
-					x.failTransport()
-					return
-				}
-			}
-
-			// Track admission only: a backpressure drop must not punish a
-			// peer that never received the PING.
-			probeOutstanding = x.trySubmit(Frame{
-				Version:     ProtocolVersion,
-				Type:        FrameTypePing,
-				Lane:        x.lane,
-				Correlation: x.nextCorrelation(),
-			})
-			timer.Reset(x.readIdleTimeout)
-		}
-	}
 }
 
 // trySubmit admits frame only when capacity and the writer queue are

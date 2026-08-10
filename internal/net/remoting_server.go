@@ -539,14 +539,19 @@ func (x *RemotingServer) AcceptedConnections() int32 {
 }
 
 // handleDuplexConn accepts a sniffed duplex connection: it completes HELLO,
-// applies negotiated compression, and serves DATA/PING until the peer closes.
+// applies negotiated compression, wires DATA/PING service into the duplex
+// read loop, and returns; the accept worker goes back to its pool while the
+// connection's own transport goroutines serve it (detached mode, see
+// [DuplexHandlerFunc]).
 //
 // Fire-and-forget DATA is handled inline on the read loop; expectsReply DATA
 // is offloaded to the ask worker pool so a slow actor cannot stall the socket.
 // Unknown frame types and table-ref capability violations receive a
-// connection-scoped ERROR then close. Close drains admitted outbound frames
-// so that ERROR reaches the peer before teardown.
-func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
+// connection-scoped ERROR then close; teardown drains admitted outbound
+// frames so that ERROR reaches the peer. release retires the connection's
+// server accounting when the read loop exits, so shutdown still waits for
+// live duplex connections.
+func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	local := &internalpb.Hello{
@@ -563,16 +568,21 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	result, err := acceptHello(framed, local)
 	if err != nil {
 		_ = framed.Close()
+		release()
 		return
 	}
 
 	wrapped, err := wrapCompression(framed.NetConn(), result.Effective.GetCompression())
 	if err != nil {
 		_ = framed.Close()
+		release()
 		return
 	}
 
 	framed.ReplaceNetConn(wrapped)
+	// Negotiation is complete and the compression layer is final: batch all
+	// further frame reads through the fixed connection buffer.
+	framed.EnableReadBuffering()
 
 	credits := int64(result.Effective.GetInitialCredits())
 	if credits <= 0 {
@@ -581,8 +591,21 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 	lane, err := laneByte(result.Effective.GetLaneRole(), result.Effective.GetLaneIndex())
 	if err != nil {
 		_ = framed.Close()
+		release()
 		return
 	}
+
+	baseCtx := x.server.Context()
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
+	// The base-context watch is registered only after newDuplexConn returns
+	// (it needs the conn), while the closed handler can fire as soon as the
+	// loops start. The buffered channel hands the watch's stop function to
+	// the handler race-free: the handler blocks until registration completes,
+	// then stops the watch before retiring the connection's accounting.
+	watchReady := make(chan func() bool, 1)
 
 	conn := newDuplexConn(
 		framed,
@@ -594,59 +617,77 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn) {
 		withDuplexChunkSize(x.chunkSize),
 		withDuplexNegotiated(result.Effective),
 		withDuplexSenderResolver(x.senderResolver),
+		withDuplexInboundHandler(func(session DuplexSession, frame Frame) {
+			x.serveDuplexFrame(baseCtx, session.(*duplexConn), frame)
+		}),
+		// Pipelined: the acceptor reads the socket concurrently with frame
+		// dispatch (a transient drainer replaces the pre-fold serve
+		// goroutine), so a decode plus mailbox enqueue never stalls reads
+		// under sustained load.
+		withDuplexPipelinedInbound(),
+		withDuplexClosedHandler(func(DuplexSession) {
+			stop := <-watchReady
+			stop()
+			release()
+		}),
 	)
-	defer func() { _ = conn.Close() }()
 
-	baseCtx := x.server.Context()
-	if baseCtx == nil {
-		baseCtx = context.Background()
-	}
+	// The pre-fold serve loop exited when the server base context was
+	// cancelled; a detached read loop blocks on the socket instead, so watch
+	// the context and complete the close on the watcher's own goroutine.
+	watchReady <- context.AfterFunc(baseCtx, func() { _ = conn.Close() })
+}
 
-	for {
-		frame, err := conn.Recv(baseCtx)
-		if err != nil {
-			return
+// serveDuplexFrame dispatches one inbound frame on the connection's read
+// loop, replacing the dedicated per-connection serve goroutine. Lane identity
+// is enforced in duplexConn.readLoop for every frame, including PING/PONG
+// that never reach this handler. Connection-scoped failures admit an ERROR
+// and tear the transport down from the read loop (the reader never blocks on
+// its own exit).
+func (x *RemotingServer) serveDuplexFrame(ctx context.Context, conn *duplexConn, frame Frame) {
+	switch frame.Type {
+	case FrameTypeData:
+		if err := x.handleDuplexData(ctx, conn, frame); err != nil {
+			conn.drainAndCloseFramed()
 		}
-
-		// Lane identity is enforced in duplexConn.readLoop for every frame,
-		// including PING/PONG that never reach Recv.
-		switch frame.Type {
-		case FrameTypeData:
-			if err := x.handleDuplexData(baseCtx, conn, frame); err != nil {
-				return
-			}
-		default:
-			conn.ReleasePayload(frame)
-			_ = submitErrorFrame(baseCtx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
-			return
-		}
+	default:
+		conn.ReleasePayload(frame)
+		_ = submitErrorFrame(ctx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, "unsupported frame type")
+		conn.drainAndCloseFramed()
 	}
 }
 
 // invokeDuplexTell runs the registered duplex tell handler with optional panic
-// recovery so a misbehaving handler cannot crash the accept worker. When no
-// duplex tell handler is set, a registered RemoteTellRequest [ProtoHandler] is
-// used as a compatibility bridge for fixture servers.
-func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) {
+// recovery so a misbehaving handler cannot crash the accept worker. It reports
+// whether the handler panicked, so the caller can repay credit the handler
+// claimed from its lease but never released. When no duplex tell handler is
+// set, a registered RemoteTellRequest [ProtoHandler] is used as a
+// compatibility bridge for fixture servers.
+func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope) (panicked bool) {
+	if env.SerializerID == SerializerIDInternalProto {
+		return x.dispatchDuplexInternalTell(ctx, env)
+	}
+
 	if x.duplexTell != nil {
 		if x.panicHandler == nil {
 			x.duplexTell(ctx, env)
-			return
+			return false
 		}
 
 		defer func() {
 			if r := recover(); r != nil {
+				panicked = true
 				x.panicHandler(protoreflect.FullName(env.TypeName), r)
 			}
 		}()
 
 		x.duplexTell(ctx, env)
-		return
+		return false
 	}
 
 	handler, ok := x.handlers[remoteTellRequestName]
 	if !ok {
-		return
+		return false
 	}
 
 	req := &internalpb.RemoteTellRequest{
@@ -658,7 +699,39 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 		}},
 	}
 
-	_, _, _ = x.recover(ctx, handler, nil, req, remoteTellRequestName)
+	_, panicked, _ = x.recover(ctx, handler, nil, req, remoteTellRequestName)
+	return panicked
+}
+
+// dispatchDuplexInternalTell routes an internal-proto DATA frame without
+// expectsReply through the registered [ProtoHandler] for its wire type name,
+// mirroring the ask-side dispatch in dispatchDuplexControl: internal-proto
+// frames are control-plane messages and the handler registry is their single
+// dispatch surface. Fire-and-forget semantics apply: an unregistered type or
+// an unmarshalable payload is dropped (a broken frame has no reply channel),
+// and handler errors are resolved by the handler itself (unknown receivers
+// dead-letter server-side), so the error return is intentionally discarded.
+// It reports whether the handler panicked, so the caller can repay credit
+// the handler claimed from its lease but never released.
+func (x *RemotingServer) dispatchDuplexInternalTell(ctx context.Context, env DataEnvelope) bool {
+	name := protoreflect.FullName(env.TypeName)
+	handler, ok := x.handlers[name]
+	if !ok {
+		return false
+	}
+
+	msgType, err := FindMessageType(name)
+	if err != nil {
+		return false
+	}
+
+	msg := msgType.New().Interface()
+	if err := proto.Unmarshal(env.Payload, msg); err != nil {
+		return false
+	}
+
+	_, panicked, _ := x.recover(ctx, handler, nil, msg, name)
+	return panicked
 }
 
 // handleDuplexData decodes a DATA frame and either runs a tell inline on the
@@ -667,8 +740,10 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 // Table-ref decode failures are connection-scoped (ERROR then close). Other
 // decode failures are request-scoped ERROR and the connection stays up.
 // Each DATA frame that keeps the connection open is credit-granted exactly
-// once at its first terminal disposition (tell enqueue, ask handoff, or
-// request-scoped failure).
+// once: asks and request-scoped failures grant at their first terminal
+// disposition, while tells hand the grant to a [CreditLease] repaid as the
+// actor layer consumes the frame's messages (with a full grant at dispatch
+// return when no handler claims the lease).
 func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn, frame Frame) error {
 	env, err := conn.DecodeDataEnvelope(frame.Payload, frame.HasMetadata())
 	if err != nil {
@@ -704,9 +779,24 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 	}
 
 	if !frame.ExpectsReply() {
-		x.invokeDuplexTell(handlerCtx, env)
+		// The tell's credit grant rides a lease instead of being settled
+		// here: the actor-side handler claims it and repays the sender as
+		// the frame's messages are consumed, extending flow control across
+		// mailbox residency. A handler that does not claim the lease falls
+		// back to the full grant below, so the window can never leak.
+		lease := conn.newTellLease(frame)
+		panicked := x.invokeDuplexTell(WithCreditLease(handlerCtx, lease), env)
 		conn.ReleasePayload(frame)
-		conn.noteOwnedFrame(frame)
+
+		if panicked {
+			// A recovered handler panic can unwind between Split and the
+			// per-share releases; repay everything still outstanding so the
+			// sender's window survives the panic.
+			lease.releaseOutstanding()
+			return nil
+		}
+
+		lease.releaseUnclaimed()
 		return nil
 	}
 

@@ -177,6 +177,129 @@ func TestEnsureLaneDialsOrdinaryAndLarge(t *testing.T) {
 	assert.Same(t, large, p.large)
 }
 
+// TestLanesStayLazy is the regression gate for the goroutine budget plan:
+// lanes dial on first use only. A peer that has served only a control RPC
+// must hold no ordinary or large session, and ordinary traffic afterwards
+// must not dial the large lane.
+func TestLanesStayLazy(t *testing.T) {
+	ps := startRemotingServer(t,
+		inet.WithProtoHandler("internalpb.RemoteLookupRequest", legacyLookupHandler(t)),
+	)
+	host, port := serverHostPort(t, ps)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+
+	_, err := c.RemoteLookup(context.Background(), host, port, "actor")
+	require.NoError(t, err)
+
+	countLanes := func() (control, large bool, ordinary int) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+
+		for _, session := range p.ordinary {
+			if session != nil {
+				ordinary++
+			}
+		}
+
+		return p.control != nil, p.large != nil, ordinary
+	}
+
+	control, large, ordinary := countLanes()
+	assert.True(t, control, "control RPC must dial the control lane")
+	assert.False(t, large, "control RPC must not dial the large lane")
+	assert.Zero(t, ordinary, "control RPC must not dial ordinary lanes")
+
+	from := address.New("sender", "testSys", host, port)
+	to := address.New("ghost", "remote", host, port)
+	require.NoError(t, c.RemoteTell(context.Background(), from, to, durationpb.New(time.Second)))
+
+	require.Eventually(t, func() bool {
+		_, _, ordinary := countLanes()
+		return ordinary == 1
+	}, 3*time.Second, 20*time.Millisecond, "an ordinary tell must dial exactly one ordinary lane")
+
+	_, large, _ = countLanes()
+	assert.False(t, large, "ordinary traffic must not dial the large lane")
+}
+
+func TestHandleLaneFrameConnectionErrorRetiresLane(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65000)
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}
+	session := &stubDuplexSession{id: 1}
+
+	p.mu.Lock()
+	p.setLaneLocked(key, session)
+	p.cache.set(peerProtocolDuplex)
+	p.mu.Unlock()
+
+	// Correlated ERROR and ordinary frames must not retire the lane.
+	p.handleLaneFrame(key, session, inet.Frame{Type: inet.FrameTypeError, Correlation: 7})
+	p.handleLaneFrame(key, session, inet.Frame{Type: inet.FrameTypeData})
+
+	p.mu.Lock()
+	stillCached := p.laneLocked(key) == session
+	p.mu.Unlock()
+	assert.True(t, stillCached)
+	assert.Equal(t, peerProtocolDuplex, p.cachedProtocol())
+
+	// A connection-scoped ERROR (correlation zero) retires the cached lane
+	// and completes the close on a transient goroutine.
+	p.handleLaneFrame(key, session, inet.Frame{Type: inet.FrameTypeError})
+
+	assert.Eventually(t, func() bool { return session.closeCount.Load() > 0 }, time.Second, 10*time.Millisecond)
+
+	p.mu.Lock()
+	cleared := p.laneLocked(key) == nil
+	p.mu.Unlock()
+	assert.True(t, cleared)
+	assert.Equal(t, peerProtocolUnknown, p.cachedProtocol())
+}
+
+func TestLaneDeathRetiresCachedSession(t *testing.T) {
+	ps := startRemotingServer(t)
+	host, port := serverHostPort(t, ps)
+
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor(host, port)
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}
+	session, err := p.ensureLane(context.Background(), key.role, key.index)
+	require.NoError(t, err)
+
+	p.mu.Lock()
+	cached := p.laneLocked(key) == session
+	p.mu.Unlock()
+	require.True(t, cached)
+
+	// Killing the session fires the read-loop closed hook, which must evict
+	// the cached lane without any caller touching the peer.
+	require.NoError(t, session.Close())
+
+	assert.Eventually(t, func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		return p.laneLocked(key) == nil
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, peerProtocolUnknown, p.cachedProtocol())
+}
+
 func TestClosePeerClosesEveryLane(t *testing.T) {
 	ps := startRemotingServer(t)
 	host, port := serverHostPort(t, ps)
@@ -651,6 +774,8 @@ type stubDuplexSession struct {
 	// tellHook, when set, runs at the start of every Tell. Tests use it to
 	// hold a write open so later admissions queue behind an in-flight tell.
 	tellHook func()
+	// closeCount records Close invocations so retire paths can be asserted.
+	closeCount atomic.Int32
 }
 
 func (x *stubDuplexSession) Tell(context.Context, inet.Frame) error {
@@ -707,4 +832,7 @@ func (x *stubDuplexSession) DecodeReplyEnvelope([]byte, bool) (inet.ReplyEnvelop
 
 func (x *stubDuplexSession) ReleasePayload(inet.Frame) {}
 
-func (x *stubDuplexSession) Close() error { return nil }
+func (x *stubDuplexSession) Close() error {
+	x.closeCount.Add(1)
+	return nil
+}

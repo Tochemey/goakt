@@ -384,17 +384,31 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
+	// The duplex transport hands this batch a credit lease: each message
+	// repays its share of the frame's wire cost when it reaches a terminal
+	// state, so the sender's flow-control window tracks mailbox residency.
+	// On the legacy path (no lease) the shares are nil and releases no-op.
+	messages := request.GetRemoteMessages()
+	shares := inet.CreditLeaseFromContext(ctx).Split(len(messages))
+
 	// Per-message failures are routed to the local dead-letter actor and the
 	// loop continues. The client may have packed multiple independent tells
 	// into a single wire-level batch (see the outbound coalescer); failing
 	// the whole request on the first bad message would also fail every
 	// healthy sibling, which is not what any caller asked for.
-	for _, message := range request.GetRemoteMessages() {
+	for i, message := range messages {
+		var hold *inet.CreditShare
+		if shares != nil {
+			hold = &shares[i]
+		}
+
 		if message == nil {
 			logger.Error("remote tell: nil message in batch, skipping")
+			hold.Release()
 			continue
 		}
-		x.deliverRemoteTellMessage(ctx, message)
+
+		x.deliverRemoteTellMessage(ctx, message, hold)
 	}
 
 	return new(internalpb.RemoteTellResponse), nil
@@ -1850,9 +1864,17 @@ func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelop
 		return
 	}
 
+	// A direct duplex tell is one message per frame: the lease collapses to a
+	// single share released when the message reaches a terminal state.
+	var hold *inet.CreditShare
+	if shares := inet.CreditLeaseFromContext(ctx).Split(1); shares != nil {
+		hold = &shares[0]
+	}
+
 	payload, err := x.deserializeDuplexPayload(env)
 	if err != nil {
 		x.logger.Errorf("duplex remote tell: deserialize for %s: %v", env.Receiver, err)
+		hold.Release()
 		return
 	}
 
@@ -1861,7 +1883,7 @@ func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelop
 		from = x.newRemoteSenderPID(env.Sender)
 	}
 
-	x.deliverRemoteTellFrom(ctx, from, env.Receiver, payload)
+	x.deliverRemoteTellFrom(ctx, from, env.Receiver, payload, hold)
 }
 
 // duplexRemoteAsk handles an expectsReply duplex DATA envelope for a user
@@ -2055,15 +2077,27 @@ func envTypeNameFromFrame(data []byte) string {
 // deliverRemoteTellPayload dispatches an already-deserialized remote tell to a
 // local actor. Per-message failures (unknown actor, dead actor, mailbox
 // refused) are routed to the local dead-letter actor and never returned to
-// the wire caller — matching the legacy batch tell contract.
-func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, receiver string, payload any) {
-	x.deliverRemoteTellFrom(ctx, x.newRemoteSenderPID(sender), receiver, payload)
+// the wire caller — matching the legacy batch tell contract. hold is the
+// message's flow-control credit share (nil on the legacy path); ownership
+// passes down the chain.
+func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, receiver string, payload any, hold *inet.CreditShare) {
+	x.deliverRemoteTellFrom(ctx, x.newRemoteSenderPID(sender), receiver, payload, hold)
 }
 
 // deliverRemoteTellFrom is the shared duplex/legacy tell dispatch path when
 // the sender PID is already materialized (table-hit cache or fresh lookup).
-func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, receiver string, payload any) {
+// It owns hold, the message's flow-control credit share: every failure path
+// releases it here, and successful dispatch hands it to the ReceiveContext,
+// which releases it when the message leaves the mailbox.
+func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, receiver string, payload any, hold *inet.CreditShare) {
 	logger := x.logger
+
+	delivered := false
+	defer func() {
+		if !delivered {
+			hold.Release()
+		}
+	}()
 
 	parseForFailure := func(cause error) (*address.Address, bool) {
 		addr, parseErr := address.Parse(receiver)
@@ -2112,7 +2146,7 @@ func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, rece
 		return
 	}
 
-	if err := x.handleRemoteTell(ctx, from, pid, payload); err != nil {
+	if err := x.handleRemoteTellHeld(ctx, from, pid, payload, hold); err != nil {
 		addr, ok := parseForFailure(err)
 		if !ok {
 			return
@@ -2120,7 +2154,10 @@ func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, rece
 
 		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
 	}
+
+	delivered = true
 }
 
 // deliverRemoteTellMessage dispatches a single RemoteMessage from the
@@ -2128,8 +2165,10 @@ func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, rece
 // address, bad metadata, unknown actor, dead actor, mailbox refused) are
 // routed to the local dead-letter actor and logged; they never propagate
 // up to fail the whole batch, because the wire-level batch may pack
-// independent tells from many concurrent senders.
-func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage) {
+// independent tells from many concurrent senders. hold is the message's
+// flow-control credit share (nil on the legacy path): failure paths release
+// it here, successful dispatch passes ownership down the chain.
+func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage, hold *inet.CreditShare) {
 	logger := x.logger
 	receiver := message.GetReceiver()
 
@@ -2143,11 +2182,14 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 	payload, err := x.remoting.Serializer(nil).Deserialize(message.GetMessage())
 	if err != nil {
 		logger.Errorf("remote tell: deserialize payload for %s: %v", receiver, err)
+		hold.Release()
 		return
 	}
 
 	msgCtx, err := x.messageMetadata(ctx, message.GetMetadata())
 	if err != nil {
+		hold.Release()
+
 		addr, parseErr := address.Parse(receiver)
 		if parseErr != nil {
 			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, err, parseErr)
@@ -2160,7 +2202,7 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		return
 	}
 
-	x.deliverRemoteTellPayload(msgCtx, message.GetSender(), receiver, payload)
+	x.deliverRemoteTellPayload(msgCtx, message.GetSender(), receiver, payload, hold)
 }
 
 // newRemoteSenderPID materializes a remote sender identity from the wire

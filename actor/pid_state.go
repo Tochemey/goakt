@@ -42,6 +42,9 @@ type pidState uint32
 //   - relocationState: PID may be relocated to another node (cluster mode).
 //   - systemState:    PID is a system actor (guardian, topic actor, etc.).
 //   - remoteState:    PID is a lightweight handle for an actor on a remote node.
+//   - remoteHoldsClosedState: teardown has drained the remote hold registry;
+//     a credit share tracked after the drain must be repaid immediately
+//     because nothing will ever walk the registry again.
 const (
 	runningState pidState = 1 << iota
 	stoppingState
@@ -53,6 +56,7 @@ const (
 	relocationState
 	systemState
 	remoteState
+	remoteHoldsClosedState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {
