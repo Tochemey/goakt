@@ -1937,9 +1937,10 @@ func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelop
 }
 
 // duplexRemoteAsk handles an expectsReply duplex DATA envelope for a user
-// message. It looks up the local actor, waits for a reply within the ask
-// timeout (or the remaining context deadline, whichever is sooner), and
-// encodes the response as a REPLY envelope.
+// message. It looks up the local actor, waits for a reply within the caller's
+// wire-carried deadline when one is present (falling back to the system ask
+// timeout when the request carries none, matching the legacy handler and the
+// [WithAskTimeout] contract), and encodes the response as a REPLY envelope.
 //
 // Application failures are returned as a REPLY body carrying
 // [internalpb.Error] with a nil error so client checkProtoError semantics
@@ -1995,9 +1996,14 @@ func (x *actorSystem) duplexRemoteAsk(ctx context.Context, env inet.DataEnvelope
 		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)), nil
 	}
 
+	// The context deadline is the caller's wire-stamped ask deadline (applied
+	// from metadata by the transport and deadlineContext above). When present
+	// it governs the wait outright, above or below askTimeout, exactly as the
+	// legacy handler honors request.GetTimeout(); askTimeout is only the
+	// fallback for requests that carry no deadline.
 	timeout := x.askTimeout
 	if deadline, ok := ctx.Deadline(); ok {
-		if remaining := time.Until(deadline); remaining > 0 && remaining < timeout {
+		if remaining := time.Until(deadline); remaining > 0 {
 			timeout = remaining
 		}
 	}

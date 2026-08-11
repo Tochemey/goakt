@@ -1931,6 +1931,54 @@ func TestRemoteReinstateHandler(t *testing.T) {
 	})
 }
 
+// slowReplyActor answers a TestReply only after a fixed delay, long enough to
+// prove the ask server honors a caller deadline beyond the system askTimeout.
+type slowReplyActor struct {
+	delay time.Duration
+}
+
+func (x *slowReplyActor) PreStart(*Context) error { return nil }
+
+func (x *slowReplyActor) PostStop(*Context) error { return nil }
+
+func (x *slowReplyActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestReply); ok {
+		pause.For(x.delay)
+		ctx.Response(testpb.Reply_builder{Content: "slow reply"}.Build())
+	}
+}
+
+// TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout pins the
+// wire-deadline fix: a caller timeout longer than the server's askTimeout must
+// govern the duplex ask wait. Before the fix duplexRemoteAsk clamped the wait
+// to askTimeout, so a reply arriving after askTimeout but well within the
+// caller's budget surfaced as CODE_DEADLINE_EXCEEDED, while the legacy
+// handler honored the same request's timeout verbatim.
+func TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := inet.Get(1)[0]
+
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(300*time.Millisecond),
+		WithRemote(remote.NewConfig(host, port)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	pid, err := sys.Spawn(ctx, "slow-replier", &slowReplyActor{delay: 900 * time.Millisecond})
+	require.NoError(t, err)
+
+	remoting := remoteclient.NewClient()
+	t.Cleanup(func() { remoting.Close() })
+
+	reply, err := remoting.RemoteAsk(ctx, address.NoSender(), pathToAddress(pid.Path()), new(testpb.TestReply), 10*time.Second)
+	require.NoError(t, err, "a caller timeout above askTimeout must be honored on the duplex path")
+	require.NotNil(t, reply)
+}
+
 func TestRemoteAskGrainHandler(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9007

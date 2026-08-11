@@ -26,9 +26,11 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
@@ -186,6 +188,15 @@ func (x *RemotingServer) dispatchDuplexUserAskViaLegacy(ctx context.Context, han
 		var cancel context.CancelFunc
 		ctx, cancel = md.DeadlineContext(ctx)
 		defer cancel()
+
+		// Carry the caller's wire deadline on the legacy request too, so the
+		// bridged handler honors it as GetTimeout exactly as a native legacy
+		// ask would, instead of falling back to its own ask timeout.
+		if deadline, ok := ctx.Deadline(); ok {
+			if remaining := time.Until(deadline); remaining > 0 {
+				req.SetTimeout(durationpb.New(remaining))
+			}
+		}
 	}
 
 	resp, err := handler(ctx, nil, req)

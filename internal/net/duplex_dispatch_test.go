@@ -40,6 +40,54 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 )
 
+// TestDispatchDuplexUserAskViaLegacyCarriesCallerDeadline pins the bridge
+// half of the wire-deadline fix: the caller's metadata deadline must ride the
+// bridged RemoteAskRequest as Timeout so a legacy-only ask handler honors it,
+// instead of falling back to its own ask timeout. The second subtest pins the
+// fallback: no metadata, no timeout on the request.
+func TestDispatchDuplexUserAskViaLegacyCarriesCallerDeadline(t *testing.T) {
+	srv := &RemotingServer{}
+
+	t.Run("wire deadline becomes request timeout", func(t *testing.T) {
+		var got time.Duration
+		handler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			ask, ok := req.(*internalpb.RemoteAskRequest)
+			require.True(t, ok)
+			require.NotNil(t, ask.GetTimeout())
+			got = ask.GetTimeout().AsDuration()
+			return &internalpb.RemoteAskResponse{}, nil
+		}
+
+		md := NewMetadata()
+		md.SetDeadline(time.Now().Add(5 * time.Second))
+
+		reply, err := srv.dispatchDuplexUserAskViaLegacy(context.Background(), handler, DataEnvelope{
+			Sender:   "goakt://sys@127.0.0.1:9000/sender",
+			Receiver: "goakt://sys@127.0.0.1:9001/receiver",
+			Metadata: md.MarshalBinary(),
+		})
+		require.NoError(t, err)
+		assert.Equal(t, SerializerIDCustom, reply.SerializerID)
+		assert.Greater(t, got, 4*time.Second, "the bridged timeout must reflect the caller's remaining deadline")
+		assert.LessOrEqual(t, got, 5*time.Second)
+	})
+
+	t.Run("no metadata leaves timeout unset", func(t *testing.T) {
+		handler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
+			ask, ok := req.(*internalpb.RemoteAskRequest)
+			require.True(t, ok)
+			assert.Nil(t, ask.GetTimeout(), "without a wire deadline the handler's own ask timeout must apply")
+			return &internalpb.RemoteAskResponse{}, nil
+		}
+
+		_, err := srv.dispatchDuplexUserAskViaLegacy(context.Background(), handler, DataEnvelope{
+			Sender:   "goakt://sys@127.0.0.1:9000/sender",
+			Receiver: "goakt://sys@127.0.0.1:9001/receiver",
+		})
+		require.NoError(t, err)
+	})
+}
+
 func TestFrameTypeNameFromPayload(t *testing.T) {
 	name := "google.protobuf.Duration"
 	payload := make([]byte, 8+len(name)+2)
