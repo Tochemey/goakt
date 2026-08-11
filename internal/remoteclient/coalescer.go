@@ -28,6 +28,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 )
@@ -37,6 +39,10 @@ import (
 // context and timer it requires are per flush, amortized across the whole
 // batch.
 const coalescerFlushTimeout = 5 * time.Second
+
+// defaultCoalescerBufferedBytes keeps direct coalescer construction (primarily
+// tests) bounded when no client credit window is supplied.
+const defaultCoalescerBufferedBytes uint64 = 16 * 1024 * 1024
 
 // coalescerLinger is how long a dry writer parks for the next message before
 // exiting. Request/response traffic (a message every few microseconds to
@@ -63,7 +69,9 @@ type TellFailureHandler func(dest string, messages []*internalpb.RemoteMessage, 
 // Failure fan-out uses the client-level [TellFailureHandler], passed into
 // each coalescer at construction.
 type coalescingConfig struct {
-	maxBatch int
+	maxBatch         int
+	maxBufferedBytes uint64
+	flushTimeout     time.Duration
 }
 
 // enabled reports whether the configuration requests coalescing.
@@ -117,8 +125,21 @@ type coalescer struct {
 	mu      sync.Mutex
 	running bool
 	closed  bool
+	// bufferedBytes counts payloads owned by this coalescer, including the
+	// batch currently being flushed. Keeping in-flight bytes charged prevents
+	// a blocked transport from freeing the admission budget merely because
+	// the writer removed messages from the channel.
+	bufferedBytes uint64
 
-	maxBatch   int
+	maxBatch         int
+	maxBufferedBytes uint64
+	flushTimeout     time.Duration
+	// space is a coalesced wakeup, not a fair semaphore. A waiter may consume
+	// its one token and still find insufficient budget while a smaller waiter
+	// could fit; it intentionally does not relay the token. The next completed
+	// flush emits another wakeup, and once retained bytes reach zero whichever
+	// waiter wakes can always reserve, avoiding both deadlock and wake storms.
+	space      chan types.Unit
 	errHandler TellFailureHandler
 	// flushBatch delivers one drained batch to the destination, choosing the
 	// duplex or legacy transport per the peer's negotiated protocol. Injected
@@ -137,13 +158,26 @@ func newCoalescer(dest string, cfg coalescingConfig, failureHandler TellFailureH
 		maxBatch = 64
 	}
 
+	maxBufferedBytes := cfg.maxBufferedBytes
+	if maxBufferedBytes == 0 {
+		maxBufferedBytes = defaultCoalescerBufferedBytes
+	}
+
+	flushTimeout := cfg.flushTimeout
+	if flushTimeout <= 0 {
+		flushTimeout = coalescerFlushTimeout
+	}
+
 	return &coalescer{
-		dest:       dest,
-		in:         make(chan *internalpb.RemoteMessage, maxBatch*4),
-		done:       make(chan types.Unit),
-		maxBatch:   maxBatch,
-		errHandler: failureHandler,
-		flushBatch: flushBatch,
+		dest:             dest,
+		in:               make(chan *internalpb.RemoteMessage, maxBatch*4),
+		done:             make(chan types.Unit),
+		maxBatch:         maxBatch,
+		maxBufferedBytes: maxBufferedBytes,
+		flushTimeout:     flushTimeout,
+		space:            make(chan types.Unit, 1),
+		errHandler:       failureHandler,
+		flushBatch:       flushBatch,
 	}
 }
 
@@ -192,34 +226,74 @@ func (c *coalescer) wake() {
 //   - errCoalescerClosed if the coalescer is shut down while the caller is
 //     waiting (or before the call began).
 func (c *coalescer) submit(ctx context.Context, msg *internalpb.RemoteMessage) error {
-	// Pre-check shutdown so a submit after close returns immediately rather
-	// than racing with a context that has no deadline.
-	select {
-	case <-c.done:
-		return errCoalescerClosed
-	default:
+	cost := coalescedMessageBytes(msg)
+
+	for {
+		if c.reserveBytes(cost) {
+			select {
+			case c.in <- msg:
+				c.wake()
+				return nil
+			case <-ctx.Done():
+				c.releaseBytes(cost)
+				return ctx.Err()
+			case <-c.done:
+				c.releaseBytes(cost)
+				return errCoalescerClosed
+			}
+		}
+
+		select {
+		case <-c.space:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.done:
+			return errCoalescerClosed
+		}
+	}
+}
+
+// reserveBytes charges msg against the coalescer's retained-memory budget.
+// One message larger than the window is admitted only when the coalescer owns
+// no other bytes, so valid large messages still make progress without allowing
+// an unbounded train of oversized payloads to accumulate.
+func (c *coalescer) reserveBytes(cost uint64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return false
 	}
 
-	// Fast path: space immediately available. Keeps the happy path a single
-	// channel op, avoiding the cost of arming ctx.Done() / c.done selects.
-	select {
-	case c.in <- msg:
-		c.wake()
-		return nil
-	default:
+	if c.bufferedBytes == 0 ||
+		(c.bufferedBytes <= c.maxBufferedBytes && cost <= c.maxBufferedBytes-c.bufferedBytes) {
+		c.bufferedBytes += cost
+		return true
 	}
 
-	// Slow path: block on whichever of (space, ctx cancel, shutdown) fires
-	// first. This is the backpressure signal to the caller.
-	select {
-	case c.in <- msg:
-		c.wake()
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-c.done:
-		return errCoalescerClosed
+	return false
+}
+
+// releaseBytes returns retained-memory budget and wakes one blocked submitter.
+func (c *coalescer) releaseBytes(cost uint64) {
+	c.mu.Lock()
+	if cost >= c.bufferedBytes {
+		c.bufferedBytes = 0
+	} else {
+		c.bufferedBytes -= cost
 	}
+	c.mu.Unlock()
+
+	select {
+	case c.space <- types.Unit{}:
+	default:
+	}
+}
+
+// coalescedMessageBytes estimates the bytes retained by one queued message,
+// including its enclosing repeated-field tag and length prefix.
+func coalescedMessageBytes(msg *internalpb.RemoteMessage) uint64 {
+	return uint64(proto.Size(msg)) + tellBatchPerMessageOverhead
 }
 
 // close prevents new submissions, ensures a writer drains whatever is still
@@ -264,7 +338,7 @@ func (c *coalescer) sendBatch(batch []*internalpb.RemoteMessage) []*internalpb.R
 	req.SetRemoteMessages(batch)
 	// Per-message propagation metadata is already carried inside each
 	// RemoteMessage, so the batch context only needs a transport deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), coalescerFlushTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.flushTimeout)
 	undelivered, err := c.flushBatch(ctx, req)
 	cancel()
 
@@ -282,9 +356,12 @@ func (c *coalescer) sendBatch(batch []*internalpb.RemoteMessage) []*internalpb.R
 		c.errHandler(c.dest, handed, err)
 	}
 
+	var released uint64
 	for i := range batch {
+		released += coalescedMessageBytes(batch[i])
 		batch[i] = nil
 	}
+	c.releaseBytes(released)
 
 	return batch[:0]
 }

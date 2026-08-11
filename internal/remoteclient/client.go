@@ -716,12 +716,15 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 
 // WithSendCoalescing enables per-destination send coalescing for RemoteTell.
 // When enabled, RemoteTell enqueues the serialized message onto a bounded
-// per-destination ring and returns immediately; a single writer goroutine
+// per-destination queue and returns immediately; a single writer goroutine
 // per destination sends whatever is available as soon as it wakes up
 // (Nagle-style). Batching only occurs naturally while a previous send RPC
 // is in flight: messages enqueued during that window are drained into the
 // next batch, capped at maxBatch. A single message against an idle
 // destination is sent immediately — no artificial delay.
+// The queue is also capped in bytes by the client's configured initial-credit
+// window; bytes remain charged while a batch is in flight. A single message
+// larger than the window is admitted only when the queue owns no other bytes.
 //
 // Semantics (different from the synchronous default):
 //   - RemoteTell returns nil once the message is enqueued. It does NOT report
@@ -729,8 +732,8 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 //     failed batches (and duplex admission failures).
 //   - Messages to the same destination preserve submission order.
 //   - Cross-destination ordering is not guaranteed (it already isn't).
-//   - If the per-destination ring is full, RemoteTell falls back to a
-//     synchronous send for that message only.
+//   - If the queue reaches either its message or byte bound, RemoteTell blocks
+//     until space is released or its context expires.
 //   - On Close, pending batches are flushed best-effort.
 //
 // Context propagation is preserved: if WithClientContextPropagator is set,
@@ -738,10 +741,7 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 // stored on each RemoteMessage, so the server can apply distinct metadata
 // to every message in a coalesced batch. Per-call deadlines, however, are
 // not honored on the async path — the caller's context governs enqueue
-// only; batch flushes use a fixed transport deadline.
-//
-// A maxBatch <= 0 disables coalescing and restores the synchronous
-// RemoteTell path end-to-end.
+// only; batch flushes use the configured client write timeout.
 //
 // A maxBatch <= 0 disables coalescing and restores the synchronous default.
 func WithSendCoalescing(maxBatch int) ClientOption {
@@ -1955,7 +1955,10 @@ func (r *client) getCoalescer(host string, port int, laneIndex uint32) *coalesce
 	flush := func(ctx context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
 		return r.flushTellBatch(ctx, host, port, laneIndex, req)
 	}
-	coalescer := newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), r.coalescing, r.tellFailureHandler, flush)
+	cfg := r.coalescing
+	cfg.maxBufferedBytes = r.initialCredits
+	cfg.flushTimeout = r.writeTimeout
+	coalescer := newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), cfg, r.tellFailureHandler, flush)
 	r.coalescers.Set(key, coalescer)
 	return coalescer
 }

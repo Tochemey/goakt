@@ -830,6 +830,151 @@ func TestCoalescing_SubmitReturnsContextDeadline(t *testing.T) {
 	assert.Less(t, elapsed, 500*time.Millisecond, "submit must not wait well past the deadline")
 }
 
+// TestCoalescing_ByteBudgetIncludesInFlightBatch verifies that draining the
+// channel does not free retained-memory budget while the transport is blocked.
+// This prevents a slow peer from turning a count-bounded coalescer into
+// gigabytes of queued payloads.
+func TestCoalescing_ByteBudgetIncludesInFlightBatch(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	flush := func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return nil, nil
+	}
+
+	first := internalpb.RemoteMessage_builder{Message: make([]byte, 64)}.Build()
+	cost := coalescedMessageBytes(first)
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{
+		maxBatch:         4,
+		maxBufferedBytes: cost,
+	}, nil, flush)
+	t.Cleanup(c.close)
+
+	require.NoError(t, c.submit(context.Background(), first))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first batch did not enter the blocked flush")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	err := c.submit(ctx, internalpb.RemoteMessage_builder{Message: make([]byte, 64)}.Build())
+	assert.ErrorIs(t, err, context.DeadlineExceeded,
+		"in-flight bytes must keep a second payload outside the byte budget")
+
+	close(release)
+	require.Eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.bufferedBytes == 0
+	}, time.Second, time.Millisecond)
+}
+
+// TestCoalescing_ByteBudgetWakesParkedSubmit verifies the successful wakeup
+// path: completing an in-flight flush returns budget, wakes a parked submit,
+// and allows its message to be delivered.
+func TestCoalescing_ByteBudgetWakesParkedSubmit(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	delivered := make(chan *internalpb.RemoteMessage, 2)
+	var flushes atomic.Int64
+
+	flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		if flushes.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		for _, msg := range req.GetRemoteMessages() {
+			delivered <- msg
+		}
+		return nil, nil
+	}
+
+	first := internalpb.RemoteMessage_builder{Message: make([]byte, 64)}.Build()
+	second := internalpb.RemoteMessage_builder{Message: make([]byte, 64)}.Build()
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{
+		maxBatch:         4,
+		maxBufferedBytes: coalescedMessageBytes(first),
+	}, nil, flush)
+
+	var unblock sync.Once
+	defer func() {
+		unblock.Do(func() { close(release) })
+		c.close()
+	}()
+
+	require.NoError(t, c.submit(context.Background(), first))
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first batch did not enter the blocked flush")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	submitted := make(chan error, 1)
+	go func() {
+		submitted <- c.submit(ctx, second)
+	}()
+
+	select {
+	case err := <-submitted:
+		t.Fatalf("second submit returned before byte budget was released: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	unblock.Do(func() { close(release) })
+
+	select {
+	case err := <-submitted:
+		require.NoError(t, err, "parked submit must proceed after flush releases byte budget")
+	case <-time.After(time.Second):
+		t.Fatal("parked submit did not wake after flush released byte budget")
+	}
+
+	seen := make(map[*internalpb.RemoteMessage]bool, 2)
+	for range 2 {
+		select {
+		case msg := <-delivered:
+			seen[msg] = true
+		case <-time.After(time.Second):
+			t.Fatal("submitted message was not delivered after wakeup")
+		}
+	}
+	assert.True(t, seen[first])
+	assert.True(t, seen[second])
+}
+
+// TestCoalescing_ByteBudgetAllowsOneOversizedMessage ensures a configured
+// credit window remains a queue bound rather than a correctness ceiling.
+func TestCoalescing_ByteBudgetAllowsOneOversizedMessage(t *testing.T) {
+	flushed := make(chan struct{}, 1)
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{
+		maxBatch:         1,
+		maxBufferedBytes: 32,
+	}, nil, func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		flushed <- struct{}{}
+		return nil, nil
+	})
+	t.Cleanup(c.close)
+
+	msg := internalpb.RemoteMessage_builder{Message: make([]byte, 128)}.Build()
+	require.Greater(t, coalescedMessageBytes(msg), c.maxBufferedBytes)
+	require.NoError(t, c.submit(context.Background(), msg))
+
+	select {
+	case <-flushed:
+	case <-time.After(time.Second):
+		t.Fatal("oversized singleton did not flush")
+	}
+}
+
 // TestCoalescing_SubmitReturnsContextCanceled confirms that an explicit
 // ctx cancel unblocks a parked submit promptly.
 func TestCoalescing_SubmitReturnsContextCanceled(t *testing.T) {
@@ -1026,8 +1171,10 @@ func TestIsLargeReceiver(t *testing.T) {
 // with no shard suffix.
 func TestGetCoalescerShardKeying(t *testing.T) {
 	r := &client{
-		coalescing: coalescingConfig{maxBatch: 4},
-		coalescers: xsync.NewMap[coalescerKey, *coalescer](),
+		coalescing:     coalescingConfig{maxBatch: 4},
+		coalescers:     xsync.NewMap[coalescerKey, *coalescer](),
+		initialCredits: 4096,
+		writeTimeout:   3 * time.Second,
 	}
 
 	lane0 := r.getCoalescer("127.0.0.1", 9000, 0)
@@ -1040,6 +1187,8 @@ func TestGetCoalescerShardKeying(t *testing.T) {
 
 	assert.Equal(t, "127.0.0.1:9000", lane0.dest, "handler destination must be the bare endpoint")
 	assert.Equal(t, "127.0.0.1:9000", lane1.dest, "handler destination must not carry shard information")
+	assert.Equal(t, uint64(4096), lane0.maxBufferedBytes, "credit window must bound retained coalescer bytes")
+	assert.Equal(t, 3*time.Second, lane0.flushTimeout, "client write timeout must bound aggregate flushes")
 
 	for _, c := range []*coalescer{lane0, lane1} {
 		c.close()
