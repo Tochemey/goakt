@@ -100,9 +100,27 @@ func WithReadIdleTimeout(timeout time.Duration) Option {
 }
 
 // WithOrdinaryLanes sets the number of ordinary duplex lanes dialed per peer
-// for user tell/ask traffic. The default is [DefaultOrdinaryLanes] (1), which
-// preserves per-destination-node FIFO. Valid values are 1 through 254.
-// Raising the count trades ordering breadth for send parallelism.
+// for user tell/ask traffic.
+//
+// Each lane is its own duplex connection with its own writer queue and credit
+// window, dialed on first use. Receivers are pinned to a lane by a stable
+// hash of their canonical address, so one receiver always rides one lane and
+// per-receiver FIFO holds at any count. What changes with the count is the
+// breadth of ordering: at the default of 1 every receiver on a peer node
+// shares one connection, so ordering holds across all of them; at higher
+// counts different receivers may ride different lanes, and sends to them
+// proceed in parallel with independent credit windows. Traffic matched by
+// [WithLargeMessageDestinations] bypasses ordinary lanes entirely.
+//
+// The count is a local dialing-side choice, not negotiated: each lane
+// declares its role and index in its HELLO, and the accepting peer serves
+// whatever set arrives. Every dialed lane costs one connection with its own
+// credit window and buffers, so raising the count trades memory for
+// parallelism.
+//
+// Defaults to [DefaultOrdinaryLanes] (1). Valid values are 1 through 254,
+// the largest count whose lane indexes fit the frame header's lane byte;
+// [Config.Validate] rejects values outside that range.
 func WithOrdinaryLanes(n uint32) Option {
 	return OptionFunc(func(config *Config) {
 		config.ordinaryLanes = n
@@ -110,11 +128,28 @@ func WithOrdinaryLanes(n uint32) Option {
 }
 
 // WithLargeMessageDestinations sets hierarchical actor-path glob patterns that
-// route matching user tell/ask traffic onto the large lane. Patterns match the
-// path suffix after host:port (for example "orders/*"), not the full goakt://
-// URI. An empty list matches nothing. Matching is a performance and isolation
-// knob: oversized payloads to unlisted destinations still chunk in place on
-// their ordinary lane.
+// route matching user tell/ask traffic onto a dedicated large lane per peer.
+//
+// User traffic to a peer spreads over lanes, each its own duplex connection
+// with its own writer queue and credit window: one or more ordinary lanes
+// (see [WithOrdinaryLanes]) plus one large lane dialed on first use. Bulk
+// transfers riding the large lane therefore cannot head-of-line block the
+// small messages flowing beside them. That isolation is the whole effect:
+// matching is not size enforcement, and oversized payloads to unlisted
+// destinations still chunk in place on their ordinary lane, gated per
+// connection by [WithMaxConcurrentLargeTransfers].
+//
+// Patterns match the hierarchical path after host:port (for example
+// "orders/*"), never the full goakt:// URI; a leading slash is ignored on
+// both pattern and path. Matching follows [path.Match] semantics, where "*"
+// stops at "/": "orders/*" matches "orders/o1" but not "orders/o1/child". A
+// receiver matching any pattern routes to the large lane; all matching
+// receivers on a peer share it, and routing is stable per receiver, so
+// per-receiver FIFO is preserved.
+//
+// The list is a local routing knob on the dialing side, not negotiated with
+// peers. Defaults to empty, which matches nothing. [Config.Validate] rejects
+// empty and malformed patterns.
 func WithLargeMessageDestinations(patterns ...string) Option {
 	return OptionFunc(func(config *Config) {
 		if len(patterns) == 0 {
@@ -127,18 +162,51 @@ func WithLargeMessageDestinations(patterns ...string) Option {
 	})
 }
 
-// WithMaxConcurrentLargeTransfers sets the HELLO-advertised cap on concurrent
-// large-message transfers per duplex connection. The value is negotiated and
-// enforced by the chunk reassembler and the sender-side gate.
+// WithMaxConcurrentLargeTransfers sets the cap on concurrent chunked message
+// transfers per duplex connection.
+//
+// A message larger than [Config.ChunkSize] crosses the wire as a group of
+// CHUNK frames that the receiver holds in a reassembly buffer until complete,
+// so every open group can pin up to [Config.MaxMessageSize] bytes on the
+// receiving side. This cap bounds that exposure per connection. It is
+// enforced on both ends: a sender opening a group beyond the cap waits for a
+// slot (surfacing backpressure if its deadline expires first), and a receiver
+// soft-rejects an excess group with a request-scoped error rather than
+// tearing the connection down.
+//
+// Peers advertise the value in HELLO and the pairwise minimum takes effect on
+// each connection; a peer that omits it is treated as advertising
+// [DefaultMaxConcurrentLargeTransfers]. The cap applies per lane connection,
+// so a peer dialed with several lanes admits that many groups on each.
+//
+// Defaults to [DefaultMaxConcurrentLargeTransfers] (4). Must be at least 1;
+// [Config.Validate] rejects zero.
 func WithMaxConcurrentLargeTransfers(n uint32) Option {
 	return OptionFunc(func(config *Config) {
 		config.maxConcurrentLargeTransfers = n
 	})
 }
 
-// WithChunkSize sets the logical-frame size above which duplex senders emit
-// CHUNK frames. Valid values are 16 KiB through 4 MiB. The value is local and
-// not negotiated; peers with different chunk sizes still interoperate.
+// WithChunkSize sets the logical-frame size above which duplex senders split
+// a message into CHUNK frames.
+//
+// A message at or below the threshold travels as a single wire frame; a
+// larger one is split into CHUNK frames of at most this size and reassembled
+// by the peer. Each chunk is admitted and credited individually, so control
+// frames and other messages interleave between the chunks of a bulk transfer
+// instead of waiting behind it. Smaller chunks give finer interleaving and
+// smaller per-frame buffers; larger chunks spend less on per-frame overhead.
+// Messages above the threshold count against
+// [WithMaxConcurrentLargeTransfers]; when the peer predates chunking support,
+// a message must instead fit [Config.MaxFrameSize] or the send fails.
+//
+// The value is local and not negotiated: it governs what this side emits,
+// and peers with different chunk sizes still interoperate because the
+// receiver reassembles whatever sizes arrive.
+//
+// Defaults to [DefaultChunkSize] (256 KiB). Valid values are 16 KiB through
+// 4 MiB; [Config.Validate] also requires [Config.MaxFrameSize] and
+// [Config.CreditWindow] to be at least this size.
 func WithChunkSize(size uint32) Option {
 	return OptionFunc(func(config *Config) {
 		config.chunkSize = size
@@ -177,9 +245,26 @@ func WithCreditWindow(bytes uint64) Option {
 	})
 }
 
-// WithMaxFrameSize specifies the largest frame
-// this server is willing to read. A valid value is between
-// 16k and 16M, inclusive. If zero or otherwise invalid, an error will be thrown.
+// WithMaxFrameSize sets the largest single wire frame this node is willing
+// to read, in bytes.
+//
+// The framed reader rejects a frame announcing a larger length before
+// reading its body and closes the connection, so the cap bounds what one
+// inbound frame can make this node buffer. Peers advertise the value in
+// HELLO and each duplex connection settles on the pairwise minimum, floored
+// to the protocol minimum when a peer advertises less.
+//
+// The cap bounds one frame, not one message. On duplex connections a message
+// larger than the frame cap is split into CHUNK frames of at most
+// [Config.ChunkSize] each and reassembled by the peer, so message size is
+// governed by [WithMaxMessageSize] alone: a 100 MiB payload crosses a
+// connection with the default 16 MiB frame cap untouched once
+// [WithMaxMessageSize] allows it. Only the legacy protocol, which cannot
+// chunk, treats this value as the whole-message cap.
+//
+// Defaults to 16 MiB. Valid values are 16 KiB through 16 MiB inclusive;
+// [Config.Validate] also requires the value to be at least
+// [Config.ChunkSize] and at most [Config.MaxMessageSize].
 func WithMaxFrameSize(size uint32) Option {
 	return OptionFunc(func(config *Config) {
 		config.maxFrameSize = size
