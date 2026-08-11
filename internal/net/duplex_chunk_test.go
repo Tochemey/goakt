@@ -378,6 +378,79 @@ func TestDuplexChunkAbortFreesSlot(t *testing.T) {
 	assert.Equal(t, FrameTypeData, got.Type)
 }
 
+// TestDuplexChunkAbortSurvivesExpiredCallerContext pins the abort escalation
+// fix: a chunk group usually fails mid-stream because the caller's context
+// expired under backpressure, and an abort submitted with that same context
+// could never be admitted, so the old path failed the whole transport and
+// killed every unrelated in-flight request on the session. The abort must
+// instead wait on its own write budget and leave the session open.
+func TestDuplexChunkAbortSurvivesExpiredCallerContext(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	left, right := newChunkingPair(t, 1024, DefaultMaxMessageSize, 1)
+	defer func() {
+		_ = left.Close()
+		_ = right.Close()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	logical, err := encodeLogicalFrame(Frame{
+		Type:    FrameTypeData,
+		Lane:    LaneControl,
+		Payload: make([]byte, 3000),
+	})
+	require.NoError(t, err)
+
+	chunks, err := splitLogicalChunks(logical, 7, LaneControl, 1024, false)
+	require.NoError(t, err)
+	require.Greater(t, len(chunks), 1)
+
+	require.NoError(t, left.submitRaw(ctx, chunks[0]))
+	require.Eventually(t, func() bool {
+		right.reassembler.mu.Lock()
+		defer right.reassembler.mu.Unlock()
+		return len(right.reassembler.groups) == 1
+	}, time.Second, 5*time.Millisecond)
+
+	// Saturate the outbound byte budget: the exact state a mid-group
+	// backpressure failure leaves behind, where the abort frame cannot be
+	// admitted immediately.
+	left.mu.Lock()
+	saturation := left.maxOutBytes - left.outBytes
+	left.outBytes = left.maxOutBytes
+	left.mu.Unlock()
+
+	expired, expire := context.WithCancel(context.Background())
+	expire()
+
+	done := make(chan struct{})
+	go func() {
+		left.emitChunkAbort(expired, 7, 1)
+		close(done)
+	}()
+
+	// The abort must wait for capacity instead of failing the transport just
+	// because the caller's context is already canceled.
+	require.Never(t, left.IsClosed, 100*time.Millisecond, 10*time.Millisecond)
+
+	left.release(saturation)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("chunk abort did not complete after capacity freed")
+	}
+
+	require.False(t, left.IsClosed())
+	require.Eventually(t, func() bool {
+		right.reassembler.mu.Lock()
+		defer right.reassembler.mu.Unlock()
+		return len(right.reassembler.groups) == 0
+	}, time.Second, 5*time.Millisecond)
+}
+
 func TestDuplexChunkedTellOrdering(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

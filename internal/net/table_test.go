@@ -113,6 +113,28 @@ func TestSenderTableEmitFailureRollsBack(t *testing.T) {
 	assert.Equal(t, uint64(2), got)
 }
 
+// TestSenderTableEmitBackpressureFallsBackInline pins the transient-congestion
+// contract: a TABLE emit refused with ErrDuplexBackpressure must not fail the
+// message being encoded. register rolls the mapping back and returns (0, nil)
+// so the caller encodes an inline ref, and the next first-use retries the
+// registration with a fresh ID.
+func TestSenderTableEmitBackpressureFallsBackInline(t *testing.T) {
+	table := newSenderTable(4)
+
+	id, err := table.register("a", func(uint64) error { return ErrDuplexBackpressure })
+	require.NoError(t, err)
+	assert.Zero(t, id)
+
+	var got uint64
+	id, err = table.register("a", func(id uint64) error {
+		got = id
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), id)
+	assert.Equal(t, uint64(2), got)
+}
+
 func TestSenderTableConcurrentFirstUseSingleEmit(t *testing.T) {
 	table := newSenderTable(8)
 	var emits atomic.Int32

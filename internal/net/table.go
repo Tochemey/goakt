@@ -24,6 +24,7 @@ package net
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 )
@@ -126,8 +127,11 @@ func newSenderTable(capacity int) *senderTable {
 // the table mutex for a fresh assignment. It must not wait on byte capacity or
 // writer-queue backpressure (it may briefly wait on another mutex, as long as
 // lock order is always this table mutex first). A callback error rolls back
-// the mapping (nextID stays monotonic). Empty literals and a full table return
-// (0, nil) meaning the caller should encode an inline ref.
+// the mapping (nextID stays monotonic); [ErrDuplexBackpressure] additionally
+// degrades to (0, nil) so a transiently full writer costs one inline ref, not
+// the message being encoded, and a later message retries the registration.
+// Empty literals and a full table return (0, nil) meaning the caller should
+// encode an inline ref.
 func (x *senderTable) register(literal string, emit func(id uint64) error) (uint64, error) {
 	if literal == "" {
 		return 0, nil
@@ -150,6 +154,11 @@ func (x *senderTable) register(literal string, emit func(id uint64) error) (uint
 
 	if err := emit(id); err != nil {
 		delete(x.byLiteral, literal)
+
+		if errors.Is(err, ErrDuplexBackpressure) {
+			return 0, nil
+		}
+
 		return 0, err
 	}
 

@@ -342,6 +342,86 @@ func TestRetireLaneReleasesMutexBeforeClose(t *testing.T) {
 	assert.EqualValues(t, 1, session.closeCount.Load(), "retireLane must close the session exactly once")
 }
 
+// TestEnsureLaneReleasesMutexBeforeClosingStaleSession pins the dial-path twin
+// of the retireLane lock-ordering rule: ensureLane must not hold peer.mu while
+// closing a cached session it found already closed. Close waits for the
+// session's read loop to exit, and that read loop's closed handler retires the
+// lane through peer.mu (see retireLaneAsync); closing under the lock deadlocks
+// the dial path against the read loop it is waiting on, and every later send
+// to the peer wedges behind peer.mu. The stub's Close blocks until a separate
+// goroutine can take peer.mu, so a regression (close under the lock) makes
+// that acquisition never complete and this test times out.
+func TestEnsureLaneReleasesMutexBeforeClosingStaleSession(t *testing.T) {
+	c := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+	).(*client)
+	defer c.Close()
+
+	p := c.peerFor("127.0.0.1", 65001)
+	key := laneKey{role: internalpb.LaneRole_LANE_ROLE_CONTROL}
+
+	locked := make(chan struct{})
+	proceed := make(chan struct{})
+
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(proceed) }) }
+
+	session := &stubDuplexSession{id: 1, stale: true}
+	session.closeHook = func() {
+		// Stands in for the read loop's closed handler, which retires
+		// through peer.mu while Close waits for it: take the mutex and
+		// inspect the cached lane exactly as retireLaneAsync does. It can
+		// only run if ensureLane released the mutex before calling Close.
+		go func() {
+			p.mu.Lock()
+			_ = p.laneLocked(key)
+			p.mu.Unlock()
+			close(locked)
+		}()
+
+		<-proceed
+	}
+
+	p.mu.Lock()
+	p.setLaneLocked(key, session)
+	p.cache.set(peerProtocolDuplex)
+	p.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		// The redial after the stale session is cleared fails fast: nothing
+		// listens on the port. Only the lock ordering matters here.
+		_, _ = p.ensureLane(ctx, key.role, key.index)
+		close(done)
+	}()
+
+	select {
+	case <-locked:
+		unblock()
+	case <-time.After(2 * time.Second):
+		// Let the buggy dial finish so cleanup does not hang, then fail.
+		unblock()
+		t.Fatal("ensureLane held peer.mu while Close was in flight: the read loop's closed handler could not retire through peer.mu")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ensureLane did not return after the stale session was closed")
+	}
+
+	assert.EqualValues(t, 1, session.closeCount.Load(), "ensureLane must close the stale session exactly once")
+
+	p.mu.Lock()
+	replaced := p.laneLocked(key) != session
+	p.mu.Unlock()
+	assert.True(t, replaced, "ensureLane must clear the stale cached lane")
+}
+
 func TestLaneDeathRetiresCachedSession(t *testing.T) {
 	ps := startRemotingServer(t)
 	host, port := serverHostPort(t, ps)
@@ -853,6 +933,9 @@ type stubDuplexSession struct {
 	// closeHook, when set, runs inside Close before it returns. Tests use it
 	// to observe the caller's lock state while a close is in flight.
 	closeHook func()
+	// stale, when set, reports the session as already closed so lane-cache
+	// paths that probe IsClosed before reuse can be driven.
+	stale bool
 }
 
 func (x *stubDuplexSession) Tell(context.Context, inet.Frame) error {
@@ -871,7 +954,7 @@ func (x *stubDuplexSession) Recv(context.Context) (inet.Frame, error) {
 	return inet.Frame{}, errors.New("stub")
 }
 
-func (x *stubDuplexSession) IsClosed() bool { return false }
+func (x *stubDuplexSession) IsClosed() bool { return x.stale }
 
 func (x *stubDuplexSession) Lane() byte { return 0 }
 

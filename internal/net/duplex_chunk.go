@@ -148,11 +148,16 @@ func (x *duplexConn) releaseLarge() {
 }
 
 // emitChunkAbort best-effort frees a partial reassembly group on the peer.
-// When the abort frame cannot be admitted, the transport is failed so
-// connection loss discards the partial group.
+// The abort is submitted detached from the caller's cancellation: a mid-group
+// failure usually means that context is already expired, and an abort bound
+// to the deadline that caused the failure could never be admitted, escalating
+// a request-scoped timeout into a transport loss for every in-flight request
+// on the session. Detached, the abort waits on its own write budget; only
+// when it still cannot be admitted (a wedged writer or a closed session) is
+// the transport failed so connection loss discards the partial group.
 func (x *duplexConn) emitChunkAbort(ctx context.Context, corr uint64, index uint64) {
 	abort := abortChunkFrame(corr, x.lane, index)
-	if err := x.submitRaw(ctx, abort); err != nil {
+	if err := x.submitRaw(context.WithoutCancel(ctx), abort); err != nil {
 		x.failTransport()
 	}
 }

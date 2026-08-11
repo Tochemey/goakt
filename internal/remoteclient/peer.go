@@ -333,9 +333,18 @@ func (x *peer) ensureLane(ctx context.Context, role internalpb.LaneRole, index u
 				x.mu.Unlock()
 				return session, nil
 			}
-			_ = session.Close()
+
+			// Close outside the mutex, exactly as retireLane does: Close
+			// waits for the session's read loop to exit, and that read
+			// loop's closed handler retires the lane through peer.mu (see
+			// retireLaneAsync). Closing under the lock deadlocks the dial
+			// path against the read loop it is waiting on, wedging every
+			// later send to this peer behind peer.mu.
 			x.setLaneLocked(key, nil)
 			x.clearCacheIfNoLanesLocked()
+			x.mu.Unlock()
+			_ = session.Close()
+			continue
 		}
 
 		if x.client.pinRequiresLegacy() {

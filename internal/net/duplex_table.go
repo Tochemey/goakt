@@ -24,12 +24,13 @@ package net
 
 // PrepareRef registers literal in the session sender table when the negotiated
 // revision supports tables. It returns a table ID, or 0 when the caller must
-// encode an inline ref (revision below 3, empty literal, or table full).
-// Fresh assignments admit a TABLE frame via [duplexConn.admitFrame]: the call
-// may wait briefly on the connection mutex (lock order is sender-table mutex
-// then connection mutex) but never waits on byte capacity or a full writer
-// queue; those cases fail with [ErrDuplexBackpressure] or [ErrDuplexClosed]
-// and roll the mapping back.
+// encode an inline ref (revision below 3, empty literal, table full, or a
+// TABLE frame refused by transient writer backpressure; the rolled-back
+// registration is retried by a later message). Fresh assignments admit a
+// TABLE frame via [duplexConn.admitFrame]: the call may wait briefly on the
+// connection mutex (lock order is sender-table mutex then connection mutex)
+// but never waits on byte capacity or a full writer queue; a closed session
+// fails with [ErrDuplexClosed] and rolls the mapping back.
 func (x *duplexConn) PrepareRef(kind byte, literal string) (uint64, error) {
 	if x.revision < CapabilityRevisionTables || literal == "" {
 		return 0, nil
