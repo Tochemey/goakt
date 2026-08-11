@@ -399,6 +399,69 @@ func TestCreditStalledReceiverBackpressure(t *testing.T) {
 	right.noteOwnedFrame(frame)
 }
 
+// TestCreditParkedBacklogDrainsBeyondBatchCapOnOneGrant pins the write-loop
+// wake contract: credit wakes coalesce on a capacity-1 channel, and one wake
+// fills at most duplexWriteBatchMax frames per batch, so after writing a
+// batch the loop must keep draining parked frames that fit the current
+// window instead of parking again to wait for a wake that may never come.
+// Regression test for admitted tells stranding behind a recovered window.
+func TestCreditParkedBacklogDrainsBeyondBatchCapOnOneGrant(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	payload := []byte("wake")
+	cost := int64(FrameHeaderSize) + int64(len(payload))
+	backlog := duplexWriteBatchMax + 8
+	window := cost * int64(backlog)
+	left, right := newCreditsPair(t, window)
+	defer closeCreditsPair(t, left, right)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Exhaust the send window: the receiver takes ownership of every frame
+	// but grants nothing back, exactly like a stalled consumer.
+	for range backlog {
+		require.NoError(t, left.Tell(ctx, Frame{
+			Type:    FrameTypeData,
+			Payload: payload,
+		}))
+	}
+
+	for range backlog {
+		frame, err := right.Recv(ctx)
+		require.NoError(t, err)
+		right.ReleasePayload(frame)
+	}
+
+	require.Eventually(t, func() bool {
+		return left.sendWindow.Load() == 0
+	}, time.Second, 5*time.Millisecond)
+
+	// Park a backlog larger than one write batch: every frame is admitted
+	// (the queue byte cap equals the window) but none can be written.
+	for range backlog {
+		require.NoError(t, left.Tell(ctx, Frame{
+			Type:    FrameTypeData,
+			Payload: payload,
+		}))
+	}
+
+	require.Eventually(t, func() bool {
+		return left.outBytes == window
+	}, time.Second, 5*time.Millisecond)
+
+	// One grant covering the whole backlog produces a single coalesced wake.
+	// Every parked frame must still drain: the writer keeps going while the
+	// window fits the pending head instead of parking after the first batch.
+	right.noteOwnedBytes(window)
+
+	for i := range backlog {
+		frame, err := right.Recv(ctx)
+		require.NoError(t, err, "parked frame %d of %d never drained after the grant", i+1, backlog)
+		right.ReleasePayload(frame)
+	}
+}
+
 func TestCreditMessageLargerThanWindowCompletes(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

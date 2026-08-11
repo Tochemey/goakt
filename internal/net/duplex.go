@@ -671,6 +671,14 @@ func (x *duplexConn) writeLoop() {
 // It returns false when the connection is closed.
 func (x *duplexConn) waitOutbound(pending *[]Frame, batch *[]Frame, costs *[]int64) bool {
 	if x.creditEnabled && len(*pending) > 0 {
+		// A pending head that fits the current window must proceed without
+		// parking: the prior iteration may have stopped at the write-batch
+		// frame cap, and credit wakes coalesce (capacity-1 channel), so no
+		// further wake is guaranteed to arrive for the remaining backlog.
+		if x.canChargeWindow(frameWireCost((*pending)[0])) {
+			return true
+		}
+
 		select {
 		case <-x.closed:
 			return false
