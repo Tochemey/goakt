@@ -87,7 +87,7 @@ func TestAsk(t *testing.T) {
 
 		actual, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
-		expected := &testpb.Reply{Content: "received message"}
+		expected := testpb.Reply_builder{Content: "received message"}.Build()
 		assert.True(t, proto.Equal(expected, actual))
 
 		err = sys.Stop(ctx)
@@ -148,7 +148,7 @@ func TestAsk(t *testing.T) {
 		ctx := context.TODO()
 		addr := address.New("remote-actor", "sys", "127.0.0.1", 9000)
 		remotingMock := mocksremote.NewClient(t)
-		expected := &testpb.Reply{Content: "remote response"}
+		expected := testpb.Reply_builder{Content: "remote response"}.Build()
 		remotingMock.EXPECT().
 			RemoteAsk(
 				mock.Anything,
@@ -343,11 +343,11 @@ func TestAsk(t *testing.T) {
 		msgBytes, err := serializer.Serialize(new(testpb.TestSend))
 		require.NoError(t, err)
 
-		message := &internalpb.RemoteMessage{
+		message := internalpb.RemoteMessage_builder{
 			Sender:   "invalid-address",
 			Receiver: actorRef.Path().String(),
 			Message:  msgBytes,
-		}
+		}.Build()
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		// perform some assertions
 		require.Error(t, err)
@@ -378,17 +378,17 @@ func TestAsk(t *testing.T) {
 		serializer := as.remoting.Serializer(new(testpb.TestReply))
 		msgBytes, err := serializer.Serialize(new(testpb.TestReply))
 		require.NoError(t, err)
-		message := &internalpb.RemoteMessage{
+		message := internalpb.RemoteMessage_builder{
 			Sender:   "",
 			Receiver: actorRef.Path().String(),
 			Message:  msgBytes,
-		}
+		}.Build()
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		actual, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
-		assert.True(t, proto.Equal(&testpb.Reply{Content: "received message"}, actual))
+		assert.True(t, proto.Equal(testpb.Reply_builder{Content: "received message"}.Build(), actual))
 
 		require.NoError(t, sys.Stop(ctx))
 	})
@@ -413,17 +413,17 @@ func TestAsk(t *testing.T) {
 		msgBytes, err := serializer.Serialize(new(testpb.TestReply))
 		require.NoError(t, err)
 		validSenderAddr := "goakt://sys@127.0.0.1:9000/remote-sender"
-		message := &internalpb.RemoteMessage{
+		message := internalpb.RemoteMessage_builder{
 			Sender:   validSenderAddr,
 			Receiver: actorRef.Path().String(),
 			Message:  msgBytes,
-		}
+		}.Build()
 		reply, err := Ask(ctx, actorRef, message, replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
 		actual, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
-		assert.True(t, proto.Equal(&testpb.Reply{Content: "received message"}, actual))
+		assert.True(t, proto.Equal(testpb.Reply_builder{Content: "received message"}.Build(), actual))
 
 		require.NoError(t, sys.Stop(ctx))
 	})
@@ -465,7 +465,7 @@ func TestAsk(t *testing.T) {
 		for reply := range replies {
 			actual, ok := reply.(*testpb.Reply)
 			require.True(t, ok)
-			expected := &testpb.Reply{Content: "received message"}
+			expected := testpb.Reply_builder{Content: "received message"}.Build()
 			assert.True(t, proto.Equal(expected, actual))
 		}
 
@@ -772,11 +772,11 @@ func TestTell(t *testing.T) {
 		serializer := as.remoting.Serializer(new(testpb.TestSend))
 		msgBytes, err := serializer.Serialize(new(testpb.TestSend))
 		require.NoError(t, err)
-		message := &internalpb.RemoteMessage{
+		message := internalpb.RemoteMessage_builder{
 			Sender:   "goakt://sys@127.0.0.1:9000/sender",
 			Receiver: actorRef.Path().String(),
 			Message:  msgBytes,
-		}
+		}.Build()
 		err = Tell(ctx, actorRef, message)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -885,7 +885,7 @@ func TestUnwrapRemoteMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("deserialize failure returns ErrInvalidRemoteMessage", func(t *testing.T) {
-		msg := &internalpb.RemoteMessage{Message: []byte{0xDE, 0xAD}}
+		msg := internalpb.RemoteMessage_builder{Message: []byte{0xDE, 0xAD}}.Build()
 		payload, from, err := unwrapRemoteMessage(target, msg)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
@@ -897,7 +897,7 @@ func TestUnwrapRemoteMessage(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("empty sender yields target system NoSender", func(t *testing.T) {
-		msg := &internalpb.RemoteMessage{Message: validPayload}
+		msg := internalpb.RemoteMessage_builder{Message: validPayload}.Build()
 		payload, from, err := unwrapRemoteMessage(target, msg)
 		require.NoError(t, err)
 		assert.NotNil(t, payload)
@@ -905,7 +905,7 @@ func TestUnwrapRemoteMessage(t *testing.T) {
 	})
 
 	t.Run("unparseable sender returns ErrInvalidRemoteMessage", func(t *testing.T) {
-		msg := &internalpb.RemoteMessage{Message: validPayload, Sender: "not-a-valid-address"}
+		msg := internalpb.RemoteMessage_builder{Message: validPayload, Sender: "not-a-valid-address"}.Build()
 		payload, from, err := unwrapRemoteMessage(target, msg)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)
@@ -915,7 +915,7 @@ func TestUnwrapRemoteMessage(t *testing.T) {
 
 	t.Run("parseable sender yields a remote PID at the wire address", func(t *testing.T) {
 		wireSender := address.New("remote", "otherSys", "10.0.0.1", 9999)
-		msg := &internalpb.RemoteMessage{Message: validPayload, Sender: wireSender.String()}
+		msg := internalpb.RemoteMessage_builder{Message: validPayload, Sender: wireSender.String()}.Build()
 		payload, from, err := unwrapRemoteMessage(target, msg)
 		require.NoError(t, err)
 		assert.NotNil(t, payload)
@@ -955,7 +955,7 @@ func TestResolveDispatch(t *testing.T) {
 	validPayload, err := sys.(*actorSystem).remoting.Serializer(new(testpb.TestSend)).Serialize(new(testpb.TestSend))
 	require.NoError(t, err)
 	wireSender := address.New("remote", "otherSys", "10.0.0.1", 9999)
-	msg := &internalpb.RemoteMessage{Message: validPayload, Sender: wireSender.String()}
+	msg := internalpb.RemoteMessage_builder{Message: validPayload, Sender: wireSender.String()}.Build()
 
 	t.Run("RemoteMessage with NoSender caller falls back to wire sender", func(t *testing.T) {
 		payload, from, err := resolveDispatch(target, noSender, msg)
@@ -975,7 +975,7 @@ func TestResolveDispatch(t *testing.T) {
 	})
 
 	t.Run("unwrap error is propagated", func(t *testing.T) {
-		bad := &internalpb.RemoteMessage{Message: []byte{0x00, 0x01}}
+		bad := internalpb.RemoteMessage_builder{Message: []byte{0x00, 0x01}}.Build()
 		payload, from, err := resolveDispatch(target, noSender, bad)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrInvalidRemoteMessage)

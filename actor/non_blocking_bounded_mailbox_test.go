@@ -53,7 +53,7 @@ func TestNonBlockingBoundedMailbox(t *testing.T) {
 	t.Run("With FIFO ordering", func(t *testing.T) {
 		mailbox := NewNonBlockingBoundedMailbox(4)
 		for i := range 4 {
-			require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: int64(i)}}))
+			require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: int64(i)}.Build()}))
 		}
 
 		for i := range 4 {
@@ -150,8 +150,8 @@ const benchMailboxDepth = 128
 // benchMailboxPriorities is a small spread of priorities so the priority
 // mailboxes actually reorder their heap during the benchmark.
 var benchMailboxPriorities = []*testpb.TestMessage{
-	{Priority: 3}, {Priority: 1}, {Priority: 4}, {Priority: 1},
-	{Priority: 5}, {Priority: 9}, {Priority: 2}, {Priority: 6},
+	testpb.TestMessage_builder{Priority: 3}.Build(), testpb.TestMessage_builder{Priority: 1}.Build(), testpb.TestMessage_builder{Priority: 4}.Build(), testpb.TestMessage_builder{Priority: 1}.Build(),
+	testpb.TestMessage_builder{Priority: 5}.Build(), testpb.TestMessage_builder{Priority: 9}.Build(), testpb.TestMessage_builder{Priority: 2}.Build(), testpb.TestMessage_builder{Priority: 6}.Build(),
 }
 
 // benchmarkMailboxThroughput measures single-consumer enqueue and dequeue cost.

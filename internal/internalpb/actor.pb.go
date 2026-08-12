@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -64,11 +63,6 @@ func (x SupervisorStrategy) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use SupervisorStrategy.Descriptor instead.
-func (SupervisorStrategy) EnumDescriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{0}
-}
-
 // SupervisorDirective defines the action to apply when an actor fails.
 type SupervisorDirective int32
 
@@ -115,11 +109,6 @@ func (SupervisorDirective) Type() protoreflect.EnumType {
 
 func (x SupervisorDirective) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use SupervisorDirective.Descriptor instead.
-func (SupervisorDirective) EnumDescriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{1}
 }
 
 type State int32
@@ -175,20 +164,13 @@ func (x State) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use State.Descriptor instead.
-func (State) EnumDescriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{2}
-}
-
 // SupervisorDirectiveRule binds an error type to a directive.
 type SupervisorDirectiveRule struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Fully-qualified Go error type name (reflect.Type.String()).
-	ErrorType string `protobuf:"bytes,1,opt,name=error_type,json=errorType,proto3" json:"error_type,omitempty"`
-	// Specifies the directive to apply.
-	Directive     SupervisorDirective `protobuf:"varint,2,opt,name=directive,proto3,enum=internalpb.SupervisorDirective" json:"directive,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_ErrorType string                 `protobuf:"bytes,1,opt,name=error_type,json=errorType,proto3"`
+	xxx_hidden_Directive SupervisorDirective    `protobuf:"varint,2,opt,name=directive,proto3,enum=internalpb.SupervisorDirective"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SupervisorDirectiveRule) Reset() {
@@ -216,40 +198,58 @@ func (x *SupervisorDirectiveRule) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SupervisorDirectiveRule.ProtoReflect.Descriptor instead.
-func (*SupervisorDirectiveRule) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *SupervisorDirectiveRule) GetErrorType() string {
 	if x != nil {
-		return x.ErrorType
+		return x.xxx_hidden_ErrorType
 	}
 	return ""
 }
 
 func (x *SupervisorDirectiveRule) GetDirective() SupervisorDirective {
 	if x != nil {
-		return x.Directive
+		return x.xxx_hidden_Directive
 	}
 	return SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
 }
 
+func (x *SupervisorDirectiveRule) SetErrorType(v string) {
+	x.xxx_hidden_ErrorType = v
+}
+
+func (x *SupervisorDirectiveRule) SetDirective(v SupervisorDirective) {
+	x.xxx_hidden_Directive = v
+}
+
+type SupervisorDirectiveRule_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Fully-qualified Go error type name (reflect.Type.String()).
+	ErrorType string
+	// Specifies the directive to apply.
+	Directive SupervisorDirective
+}
+
+func (b0 SupervisorDirectiveRule_builder) Build() *SupervisorDirectiveRule {
+	m0 := &SupervisorDirectiveRule{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_ErrorType = b.ErrorType
+	x.xxx_hidden_Directive = b.Directive
+	return m0
+}
+
 // SupervisorSpec defines an explicit supervisor configuration for an actor.
 type SupervisorSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the supervisor strategy.
-	Strategy SupervisorStrategy `protobuf:"varint,1,opt,name=strategy,proto3,enum=internalpb.SupervisorStrategy" json:"strategy,omitempty"`
-	// Specifies the maximum number of retries.
-	MaxRetries uint32 `protobuf:"varint,2,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
-	// Specifies the restart timeout window.
-	Timeout *durationpb.Duration `protobuf:"bytes,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	// Specifies error-type specific directives.
-	Directives []*SupervisorDirectiveRule `protobuf:"bytes,4,rep,name=directives,proto3" json:"directives,omitempty"`
-	// Specifies the directive to apply for any error.
-	AnyErrorDirective *SupervisorDirective `protobuf:"varint,5,opt,name=any_error_directive,json=anyErrorDirective,proto3,enum=internalpb.SupervisorDirective,oneof" json:"any_error_directive,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                        protoimpl.MessageState      `protogen:"opaque.v1"`
+	xxx_hidden_Strategy          SupervisorStrategy          `protobuf:"varint,1,opt,name=strategy,proto3,enum=internalpb.SupervisorStrategy"`
+	xxx_hidden_MaxRetries        uint32                      `protobuf:"varint,2,opt,name=max_retries,json=maxRetries,proto3"`
+	xxx_hidden_Timeout           *durationpb.Duration        `protobuf:"bytes,3,opt,name=timeout,proto3"`
+	xxx_hidden_Directives        *[]*SupervisorDirectiveRule `protobuf:"bytes,4,rep,name=directives,proto3"`
+	xxx_hidden_AnyErrorDirective SupervisorDirective         `protobuf:"varint,5,opt,name=any_error_directive,json=anyErrorDirective,proto3,enum=internalpb.SupervisorDirective,oneof"`
+	XXX_raceDetectHookData       protoimpl.RaceDetectHookData
+	XXX_presence                 [1]uint32
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *SupervisorSpec) Reset() {
@@ -277,80 +277,140 @@ func (x *SupervisorSpec) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SupervisorSpec.ProtoReflect.Descriptor instead.
-func (*SupervisorSpec) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *SupervisorSpec) GetStrategy() SupervisorStrategy {
 	if x != nil {
-		return x.Strategy
+		return x.xxx_hidden_Strategy
 	}
 	return SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE
 }
 
 func (x *SupervisorSpec) GetMaxRetries() uint32 {
 	if x != nil {
-		return x.MaxRetries
+		return x.xxx_hidden_MaxRetries
 	}
 	return 0
 }
 
 func (x *SupervisorSpec) GetTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.Timeout
+		return x.xxx_hidden_Timeout
 	}
 	return nil
 }
 
 func (x *SupervisorSpec) GetDirectives() []*SupervisorDirectiveRule {
 	if x != nil {
-		return x.Directives
+		if x.xxx_hidden_Directives != nil {
+			return *x.xxx_hidden_Directives
+		}
 	}
 	return nil
 }
 
 func (x *SupervisorSpec) GetAnyErrorDirective() SupervisorDirective {
-	if x != nil && x.AnyErrorDirective != nil {
-		return *x.AnyErrorDirective
+	if x != nil {
+		if protoimpl.X.Present(&(x.XXX_presence[0]), 4) {
+			return x.xxx_hidden_AnyErrorDirective
+		}
 	}
 	return SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
 }
 
+func (x *SupervisorSpec) SetStrategy(v SupervisorStrategy) {
+	x.xxx_hidden_Strategy = v
+}
+
+func (x *SupervisorSpec) SetMaxRetries(v uint32) {
+	x.xxx_hidden_MaxRetries = v
+}
+
+func (x *SupervisorSpec) SetTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_Timeout = v
+}
+
+func (x *SupervisorSpec) SetDirectives(v []*SupervisorDirectiveRule) {
+	x.xxx_hidden_Directives = &v
+}
+
+func (x *SupervisorSpec) SetAnyErrorDirective(v SupervisorDirective) {
+	x.xxx_hidden_AnyErrorDirective = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 5)
+}
+
+func (x *SupervisorSpec) HasTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Timeout != nil
+}
+
+func (x *SupervisorSpec) HasAnyErrorDirective() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
+}
+
+func (x *SupervisorSpec) ClearTimeout() {
+	x.xxx_hidden_Timeout = nil
+}
+
+func (x *SupervisorSpec) ClearAnyErrorDirective() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
+	x.xxx_hidden_AnyErrorDirective = SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
+}
+
+type SupervisorSpec_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the supervisor strategy.
+	Strategy SupervisorStrategy
+	// Specifies the maximum number of retries.
+	MaxRetries uint32
+	// Specifies the restart timeout window.
+	Timeout *durationpb.Duration
+	// Specifies error-type specific directives.
+	Directives []*SupervisorDirectiveRule
+	// Specifies the directive to apply for any error.
+	AnyErrorDirective *SupervisorDirective
+}
+
+func (b0 SupervisorSpec_builder) Build() *SupervisorSpec {
+	m0 := &SupervisorSpec{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Strategy = b.Strategy
+	x.xxx_hidden_MaxRetries = b.MaxRetries
+	x.xxx_hidden_Timeout = b.Timeout
+	x.xxx_hidden_Directives = &b.Directives
+	if b.AnyErrorDirective != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 5)
+		x.xxx_hidden_AnyErrorDirective = *b.AnyErrorDirective
+	}
+	return m0
+}
+
 // Actor represents the actor information on the wire.
 type Actor struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address
-	Address string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	// Specifies the actor type
-	Type string `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	// Specifies if the actor is a singleton
-	Singleton *SingletonSpec `protobuf:"bytes,3,opt,name=singleton,proto3" json:"singleton,omitempty"`
-	// Specifies if the actor is disabled for relocation
-	Relocatable bool `protobuf:"varint,4,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	// Specifies the passivation strategy
-	PassivationStrategy *PassivationStrategy `protobuf:"bytes,5,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
-	// Specifies the dependencies
-	Dependencies []*Dependency `protobuf:"bytes,6,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	// States whether the actor will require a stash buffer
-	EnableStash bool `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
-	// Specifies the role the actor belongs to
-	Role *string `protobuf:"bytes,8,opt,name=role,proto3,oneof" json:"role,omitempty"`
-	// Specifies the supervisor configuration when explicitly set
-	Supervisor *SupervisorSpec `protobuf:"bytes,9,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
-	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
-	// Specifies the init timeout override when explicitly set.
-	// When unset, the hosting node's system-wide init timeout is used.
-	InitTimeout *durationpb.Duration `protobuf:"bytes,11,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
-	// Identifies this actor incarnation
-	IncarnationId string `protobuf:"bytes,12,opt,name=incarnation_id,json=incarnationId,proto3" json:"incarnation_id,omitempty"`
-	// Specifies the reliable-delivery configuration when explicitly set
-	ReliableDelivery *ReliableDeliveryConfig `protobuf:"bytes,13,opt,name=reliable_delivery,json=reliableDelivery,proto3" json:"reliable_delivery,omitempty"`
-	// Marks an endpoint-owned reliable-delivery controller record
-	ReliableCompanion *ReliableCompanionSpec `protobuf:"bytes,14,opt,name=reliable_companion,json=reliableCompanion,proto3" json:"reliable_companion,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                          protoimpl.MessageState  `protogen:"opaque.v1"`
+	xxx_hidden_Address             string                  `protobuf:"bytes,1,opt,name=address,proto3"`
+	xxx_hidden_Type                string                  `protobuf:"bytes,2,opt,name=type,proto3"`
+	xxx_hidden_Singleton           *SingletonSpec          `protobuf:"bytes,3,opt,name=singleton,proto3"`
+	xxx_hidden_Relocatable         bool                    `protobuf:"varint,4,opt,name=relocatable,proto3"`
+	xxx_hidden_PassivationStrategy *PassivationStrategy    `protobuf:"bytes,5,opt,name=passivation_strategy,json=passivationStrategy,proto3"`
+	xxx_hidden_Dependencies        *[]*Dependency          `protobuf:"bytes,6,rep,name=dependencies,proto3"`
+	xxx_hidden_EnableStash         bool                    `protobuf:"varint,7,opt,name=enable_stash,json=enableStash,proto3"`
+	xxx_hidden_Role                *string                 `protobuf:"bytes,8,opt,name=role,proto3,oneof"`
+	xxx_hidden_Supervisor          *SupervisorSpec         `protobuf:"bytes,9,opt,name=supervisor,proto3"`
+	xxx_hidden_Reentrancy          *ReentrancyConfig       `protobuf:"bytes,10,opt,name=reentrancy,proto3"`
+	xxx_hidden_InitTimeout         *durationpb.Duration    `protobuf:"bytes,11,opt,name=init_timeout,json=initTimeout,proto3"`
+	xxx_hidden_IncarnationId       string                  `protobuf:"bytes,12,opt,name=incarnation_id,json=incarnationId,proto3"`
+	xxx_hidden_ReliableDelivery    *ReliableDeliveryConfig `protobuf:"bytes,13,opt,name=reliable_delivery,json=reliableDelivery,proto3"`
+	xxx_hidden_ReliableCompanion   *ReliableCompanionSpec  `protobuf:"bytes,14,opt,name=reliable_companion,json=reliableCompanion,proto3"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *Actor) Reset() {
@@ -378,119 +438,320 @@ func (x *Actor) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Actor.ProtoReflect.Descriptor instead.
-func (*Actor) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *Actor) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
 }
 
 func (x *Actor) GetType() string {
 	if x != nil {
-		return x.Type
+		return x.xxx_hidden_Type
 	}
 	return ""
 }
 
 func (x *Actor) GetSingleton() *SingletonSpec {
 	if x != nil {
-		return x.Singleton
+		return x.xxx_hidden_Singleton
 	}
 	return nil
 }
 
 func (x *Actor) GetRelocatable() bool {
 	if x != nil {
-		return x.Relocatable
+		return x.xxx_hidden_Relocatable
 	}
 	return false
 }
 
 func (x *Actor) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivationStrategy
+		return x.xxx_hidden_PassivationStrategy
 	}
 	return nil
 }
 
 func (x *Actor) GetDependencies() []*Dependency {
 	if x != nil {
-		return x.Dependencies
+		if x.xxx_hidden_Dependencies != nil {
+			return *x.xxx_hidden_Dependencies
+		}
 	}
 	return nil
 }
 
 func (x *Actor) GetEnableStash() bool {
 	if x != nil {
-		return x.EnableStash
+		return x.xxx_hidden_EnableStash
 	}
 	return false
 }
 
 func (x *Actor) GetRole() string {
-	if x != nil && x.Role != nil {
-		return *x.Role
+	if x != nil {
+		if x.xxx_hidden_Role != nil {
+			return *x.xxx_hidden_Role
+		}
+		return ""
 	}
 	return ""
 }
 
 func (x *Actor) GetSupervisor() *SupervisorSpec {
 	if x != nil {
-		return x.Supervisor
+		return x.xxx_hidden_Supervisor
 	}
 	return nil
 }
 
 func (x *Actor) GetReentrancy() *ReentrancyConfig {
 	if x != nil {
-		return x.Reentrancy
+		return x.xxx_hidden_Reentrancy
 	}
 	return nil
 }
 
 func (x *Actor) GetInitTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.InitTimeout
+		return x.xxx_hidden_InitTimeout
 	}
 	return nil
 }
 
 func (x *Actor) GetIncarnationId() string {
 	if x != nil {
-		return x.IncarnationId
+		return x.xxx_hidden_IncarnationId
 	}
 	return ""
 }
 
 func (x *Actor) GetReliableDelivery() *ReliableDeliveryConfig {
 	if x != nil {
-		return x.ReliableDelivery
+		return x.xxx_hidden_ReliableDelivery
 	}
 	return nil
 }
 
 func (x *Actor) GetReliableCompanion() *ReliableCompanionSpec {
 	if x != nil {
-		return x.ReliableCompanion
+		return x.xxx_hidden_ReliableCompanion
 	}
 	return nil
 }
 
+func (x *Actor) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+func (x *Actor) SetType(v string) {
+	x.xxx_hidden_Type = v
+}
+
+func (x *Actor) SetSingleton(v *SingletonSpec) {
+	x.xxx_hidden_Singleton = v
+}
+
+func (x *Actor) SetRelocatable(v bool) {
+	x.xxx_hidden_Relocatable = v
+}
+
+func (x *Actor) SetPassivationStrategy(v *PassivationStrategy) {
+	x.xxx_hidden_PassivationStrategy = v
+}
+
+func (x *Actor) SetDependencies(v []*Dependency) {
+	x.xxx_hidden_Dependencies = &v
+}
+
+func (x *Actor) SetEnableStash(v bool) {
+	x.xxx_hidden_EnableStash = v
+}
+
+func (x *Actor) SetRole(v string) {
+	x.xxx_hidden_Role = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 14)
+}
+
+func (x *Actor) SetSupervisor(v *SupervisorSpec) {
+	x.xxx_hidden_Supervisor = v
+}
+
+func (x *Actor) SetReentrancy(v *ReentrancyConfig) {
+	x.xxx_hidden_Reentrancy = v
+}
+
+func (x *Actor) SetInitTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_InitTimeout = v
+}
+
+func (x *Actor) SetIncarnationId(v string) {
+	x.xxx_hidden_IncarnationId = v
+}
+
+func (x *Actor) SetReliableDelivery(v *ReliableDeliveryConfig) {
+	x.xxx_hidden_ReliableDelivery = v
+}
+
+func (x *Actor) SetReliableCompanion(v *ReliableCompanionSpec) {
+	x.xxx_hidden_ReliableCompanion = v
+}
+
+func (x *Actor) HasSingleton() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Singleton != nil
+}
+
+func (x *Actor) HasPassivationStrategy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PassivationStrategy != nil
+}
+
+func (x *Actor) HasRole() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 7)
+}
+
+func (x *Actor) HasSupervisor() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Supervisor != nil
+}
+
+func (x *Actor) HasReentrancy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Reentrancy != nil
+}
+
+func (x *Actor) HasInitTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_InitTimeout != nil
+}
+
+func (x *Actor) HasReliableDelivery() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ReliableDelivery != nil
+}
+
+func (x *Actor) HasReliableCompanion() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ReliableCompanion != nil
+}
+
+func (x *Actor) ClearSingleton() {
+	x.xxx_hidden_Singleton = nil
+}
+
+func (x *Actor) ClearPassivationStrategy() {
+	x.xxx_hidden_PassivationStrategy = nil
+}
+
+func (x *Actor) ClearRole() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 7)
+	x.xxx_hidden_Role = nil
+}
+
+func (x *Actor) ClearSupervisor() {
+	x.xxx_hidden_Supervisor = nil
+}
+
+func (x *Actor) ClearReentrancy() {
+	x.xxx_hidden_Reentrancy = nil
+}
+
+func (x *Actor) ClearInitTimeout() {
+	x.xxx_hidden_InitTimeout = nil
+}
+
+func (x *Actor) ClearReliableDelivery() {
+	x.xxx_hidden_ReliableDelivery = nil
+}
+
+func (x *Actor) ClearReliableCompanion() {
+	x.xxx_hidden_ReliableCompanion = nil
+}
+
+type Actor_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address
+	Address string
+	// Specifies the actor type
+	Type string
+	// Specifies if the actor is a singleton
+	Singleton *SingletonSpec
+	// Specifies if the actor is disabled for relocation
+	Relocatable bool
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy
+	// Specifies the dependencies
+	Dependencies []*Dependency
+	// States whether the actor will require a stash buffer
+	EnableStash bool
+	// Specifies the role the actor belongs to
+	Role *string
+	// Specifies the supervisor configuration when explicitly set
+	Supervisor *SupervisorSpec
+	// Specifies the reentrancy configuration when explicitly set
+	Reentrancy *ReentrancyConfig
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout *durationpb.Duration
+	// Identifies this actor incarnation
+	IncarnationId string
+	// Specifies the reliable-delivery configuration when explicitly set
+	ReliableDelivery *ReliableDeliveryConfig
+	// Marks an endpoint-owned reliable-delivery controller record
+	ReliableCompanion *ReliableCompanionSpec
+}
+
+func (b0 Actor_builder) Build() *Actor {
+	m0 := &Actor{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	x.xxx_hidden_Type = b.Type
+	x.xxx_hidden_Singleton = b.Singleton
+	x.xxx_hidden_Relocatable = b.Relocatable
+	x.xxx_hidden_PassivationStrategy = b.PassivationStrategy
+	x.xxx_hidden_Dependencies = &b.Dependencies
+	x.xxx_hidden_EnableStash = b.EnableStash
+	if b.Role != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 14)
+		x.xxx_hidden_Role = b.Role
+	}
+	x.xxx_hidden_Supervisor = b.Supervisor
+	x.xxx_hidden_Reentrancy = b.Reentrancy
+	x.xxx_hidden_InitTimeout = b.InitTimeout
+	x.xxx_hidden_IncarnationId = b.IncarnationId
+	x.xxx_hidden_ReliableDelivery = b.ReliableDelivery
+	x.xxx_hidden_ReliableCompanion = b.ReliableCompanion
+	return m0
+}
+
 type SingletonSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the spawn timeout for the singleton actor
-	SpawnTimeout *durationpb.Duration `protobuf:"bytes,1,opt,name=spawn_timeout,json=spawnTimeout,proto3" json:"spawn_timeout,omitempty"`
-	// Specifies the wait interval between spawn retries
-	WaitInterval *durationpb.Duration `protobuf:"bytes,2,opt,name=wait_interval,json=waitInterval,proto3" json:"wait_interval,omitempty"`
-	// Specifies the maximum number of spawn retries
-	MaxRetries    int32 `protobuf:"varint,3,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_SpawnTimeout *durationpb.Duration   `protobuf:"bytes,1,opt,name=spawn_timeout,json=spawnTimeout,proto3"`
+	xxx_hidden_WaitInterval *durationpb.Duration   `protobuf:"bytes,2,opt,name=wait_interval,json=waitInterval,proto3"`
+	xxx_hidden_MaxRetries   int32                  `protobuf:"varint,3,opt,name=max_retries,json=maxRetries,proto3"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *SingletonSpec) Reset() {
@@ -518,30 +779,80 @@ func (x *SingletonSpec) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SingletonSpec.ProtoReflect.Descriptor instead.
-func (*SingletonSpec) Descriptor() ([]byte, []int) {
-	return file_internal_actor_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *SingletonSpec) GetSpawnTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.SpawnTimeout
+		return x.xxx_hidden_SpawnTimeout
 	}
 	return nil
 }
 
 func (x *SingletonSpec) GetWaitInterval() *durationpb.Duration {
 	if x != nil {
-		return x.WaitInterval
+		return x.xxx_hidden_WaitInterval
 	}
 	return nil
 }
 
 func (x *SingletonSpec) GetMaxRetries() int32 {
 	if x != nil {
-		return x.MaxRetries
+		return x.xxx_hidden_MaxRetries
 	}
 	return 0
+}
+
+func (x *SingletonSpec) SetSpawnTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_SpawnTimeout = v
+}
+
+func (x *SingletonSpec) SetWaitInterval(v *durationpb.Duration) {
+	x.xxx_hidden_WaitInterval = v
+}
+
+func (x *SingletonSpec) SetMaxRetries(v int32) {
+	x.xxx_hidden_MaxRetries = v
+}
+
+func (x *SingletonSpec) HasSpawnTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_SpawnTimeout != nil
+}
+
+func (x *SingletonSpec) HasWaitInterval() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_WaitInterval != nil
+}
+
+func (x *SingletonSpec) ClearSpawnTimeout() {
+	x.xxx_hidden_SpawnTimeout = nil
+}
+
+func (x *SingletonSpec) ClearWaitInterval() {
+	x.xxx_hidden_WaitInterval = nil
+}
+
+type SingletonSpec_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the spawn timeout for the singleton actor
+	SpawnTimeout *durationpb.Duration
+	// Specifies the wait interval between spawn retries
+	WaitInterval *durationpb.Duration
+	// Specifies the maximum number of spawn retries
+	MaxRetries int32
+}
+
+func (b0 SingletonSpec_builder) Build() *SingletonSpec {
+	m0 := &SingletonSpec{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_SpawnTimeout = b.SpawnTimeout
+	x.xxx_hidden_WaitInterval = b.WaitInterval
+	x.xxx_hidden_MaxRetries = b.MaxRetries
+	return m0
 }
 
 var File_internal_actor_proto protoreflect.FileDescriptor
@@ -610,18 +921,6 @@ const file_internal_actor_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_actor_proto_rawDescOnce sync.Once
-	file_internal_actor_proto_rawDescData []byte
-)
-
-func file_internal_actor_proto_rawDescGZIP() []byte {
-	file_internal_actor_proto_rawDescOnce.Do(func() {
-		file_internal_actor_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_actor_proto_rawDesc), len(file_internal_actor_proto_rawDesc)))
-	})
-	return file_internal_actor_proto_rawDescData
-}
 
 var file_internal_actor_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_internal_actor_proto_msgTypes = make([]protoimpl.MessageInfo, 4)

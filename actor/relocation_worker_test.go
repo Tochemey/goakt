@@ -98,14 +98,14 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    9000,
 		RemotingPort: 8080,
 		Actors: map[string]*internalpb.Actor{
-			"a1": {Address: "actor-1"},
+			"a1": internalpb.Actor_builder{Address: "actor-1"}.Build(),
 		},
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -122,7 +122,7 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	worker.relocate(receiveCtx, peerState)
 
 	// the job is released and the snapshot removed even on abort
@@ -136,6 +136,67 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 	assert.Equal(t, "127.0.0.1:9000", events[0].Address())
 	assert.Equal(t, []string{"actor-1"}, events[0].Actors())
 	require.ErrorContains(t, events[0].Error(), expectedErr.Error())
+}
+
+// TestRelocationWorkerAbortsWhenSystemStopping closes the relocation-racing-
+// shutdown window. When the system is already tearing down as the worker begins
+// to relocate, the entry guard must release the relocation job and return
+// without touching the cluster, dialing peers, deleting peer state, or
+// publishing a RelocationFailed event. Both a strict cluster mock and a strict
+// remoting mock carry no expectations, so a regression that skips the guard and
+// fans work into a shutting-down system fails this test instead of racing.
+func TestRelocationWorkerAbortsWhenSystemStopping(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	remotingMock := mocksremote.NewClient(t)
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := internalpb.PeerState_builder{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Actors: map[string]*internalpb.Actor{
+			"a1": internalpb.Actor_builder{Address: "actor-1", Relocatable: true}.Build(),
+		},
+	}.Build()
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	// The system is already stopping when the worker starts to relocate.
+	sys.shuttingDown.Store(true)
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
+	worker.relocate(receiveCtx, peerState)
+
+	// The guard released the job without deleting peer state and without
+	// publishing a failure; the strict mocks assert no cluster or remote calls.
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight, "shutdown guard must release the relocation job")
+	require.False(t, store.deleteCalled, "shutdown guard must not delete peer state")
+	require.Empty(t, collectRelocationFailedEvents(consumer), "shutdown guard must not publish a relocation failure")
 }
 
 // TestRelocationWorkerPartialFailureListsExactlyFailedItems verifies per-item
@@ -164,19 +225,19 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 	sys.relocationEnabled.Store(true)
 	sys.registry.Register(new(MockActor))
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    9000,
 		RemotingPort: 8080,
 		Actors: map[string]*internalpb.Actor{
-			"bad": {Address: "invalid-address", Relocatable: true},
-			"skipped": {
+			"bad": internalpb.Actor_builder{Address: "invalid-address", Relocatable: true}.Build(),
+			"skipped": internalpb.Actor_builder{
 				Address:     address.New("skipped", "test", "127.0.0.1", 8080).String(),
 				Type:        types.Name(new(MockActor)),
 				Relocatable: false,
-			},
+			}.Build(),
 		},
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -193,7 +254,7 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	worker.relocate(receiveCtx, peerState)
 
 	// the rebalance completed: job released and snapshot removed
@@ -226,11 +287,11 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	// the lazy grain's directory entry still points at the departed node, so it
 	// is released rather than recreated
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(&internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+		Return(internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
 			Host:    "127.0.0.1",
 			Port:    8080,
-		}, nil).Once()
+		}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
 
 	store := &recordingPeerStateStore{}
@@ -238,14 +299,14 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    9000,
 		RemotingPort: 8080,
 		Grains: map[string]*internalpb.Grain{
-			"lazy": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}},
+			"lazy": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy", Value: "kind/lazy"}.Build()}.Build(),
 		},
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -262,7 +323,7 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	worker.relocate(receiveCtx, peerState)
 
 	_, inflight := sys.relocationJob("127.0.0.1:9000")
@@ -334,18 +395,18 @@ func TestRelocationRPCScaling(t *testing.T) {
 	wireActors := make(map[string]*internalpb.Actor, numActors)
 	for i := range numActors {
 		name := fmt.Sprintf("actor-%d", i)
-		wireActors[name] = &internalpb.Actor{
+		wireActors[name] = internalpb.Actor_builder{
 			Address:     address.New(name, sys.name, "127.0.0.1", 8080).String(),
 			Relocatable: true,
-		}
+		}.Build()
 	}
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    9000,
 		RemotingPort: 8080,
 		Actors:       wireActors,
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -362,7 +423,7 @@ func TestRelocationRPCScaling(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	worker.relocate(receiveCtx, peerState)
 
 	// 10,000 actors over 10 peers = 1,000 per share; at a batch size of 500
@@ -404,11 +465,11 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 	// exactly one grain is released locally (the leader's share); which of the
 	// two it is depends on map iteration order
 	clusterMock.EXPECT().GetGrain(mock.Anything, mock.Anything).
-		Return(&internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+		Return(internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
 			Host:    "127.0.0.1",
 			Port:    8080,
-		}, nil).Once()
+		}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, mock.Anything).Return(nil).Once()
 
 	// the other grain travels to the peer inside a RelocateBatch request
@@ -425,15 +486,15 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    9000,
 		RemotingPort: 8080,
 		Grains: map[string]*internalpb.Grain{
-			"lazy-1": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy-1", Value: "kind/lazy-1"}},
-			"lazy-2": {GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy-2", Value: "kind/lazy-2"}},
+			"lazy-1": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy-1", Value: "kind/lazy-1"}.Build()}.Build(),
+			"lazy-2": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy-2", Value: "kind/lazy-2"}.Build()}.Build(),
 		},
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -450,7 +511,7 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, worker.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	worker.relocate(receiveCtx, peerState)
 
 	// the peer received exactly one lazy grain
@@ -481,7 +542,7 @@ func TestRelocationWorkerReassignsShareOnPeerFailure(t *testing.T) {
 		{Host: "127.0.0.1", RemotingPort: 9001},
 		{Host: "127.0.0.2", RemotingPort: 9002},
 	}
-	requests := buildRelocateBatchRequests("127.0.0.1:8080", []*internalpb.Actor{{Address: "actor-1"}}, nil)
+	requests := buildRelocateBatchRequests("127.0.0.1:8080", []*internalpb.Actor{internalpb.Actor_builder{Address: "actor-1"}.Build()}, nil)
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -517,8 +578,8 @@ func TestRelocationWorkerSkipsSurvivorWithEmptyShare(t *testing.T) {
 		{Host: "127.0.0.4", RemotingPort: 9004},
 	}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080",
-		[]*internalpb.Actor{{Address: address.New("gpu-actor", "test", "127.0.0.1", 8080).String(), Role: &gpu}},
-		[]*internalpb.Grain{{GrainId: &internalpb.GrainId{Value: "grain-1"}, EagerRelocation: true}})
+		[]*internalpb.Actor{internalpb.Actor_builder{Address: address.New("gpu-actor", "test", "127.0.0.1", 8080).String(), Role: &gpu}.Build()},
+		[]*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build(), EagerRelocation: true}.Build()})
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -542,10 +603,10 @@ func TestRelocationWorkerShareFailsWithoutFallbackPeer(t *testing.T) {
 	worker := &relocationWorker{remoting: remotingMock, logger: log.DiscardLogger}
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080",
-		[]*internalpb.Actor{{Address: "actor-1"}},
+		[]*internalpb.Actor{internalpb.Actor_builder{Address: "actor-1"}.Build()},
 		[]*internalpb.Grain{
-			{GrainId: &internalpb.GrainId{Value: "grain-1"}, EagerRelocation: true},
-			{GrainId: &internalpb.GrainId{Value: "grain-lazy"}},
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build(), EagerRelocation: true}.Build(),
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-lazy"}.Build()}.Build(),
 		})
 	failures := &relocationFailures{}
 
@@ -587,20 +648,20 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	// the leader releases the undeliverable lazy grain's stale directory entry
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(&internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: "kind/lazy"},
+		Return(internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
 			Host:    "127.0.0.1",
 			Port:    8080,
-		}, nil).Once()
+		}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
 	// the eager grain's entry already points at another live node, so the
 	// leader-local dispatch skips reactivating it
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/eager").
-		Return(&internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: "kind/eager"},
+		Return(internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: "kind/eager"}.Build(),
 			Host:    "127.0.0.2",
 			Port:    9002,
-		}, nil).Once()
+		}.Build(), nil).Once()
 	sys.cluster = clusterMock
 
 	worker := &relocationWorker{
@@ -611,8 +672,8 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080", nil,
 		[]*internalpb.Grain{
-			{GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}},
-			{GrainId: &internalpb.GrainId{Kind: "kind", Name: "eager", Value: "kind/eager"}, EagerRelocation: true},
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy", Value: "kind/lazy"}.Build()}.Build(),
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "eager", Value: "kind/eager"}.Build(), EagerRelocation: true}.Build(),
 		})
 	failures := &relocationFailures{}
 
@@ -640,7 +701,7 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 	// the lazy release is retried before being reported as failed
 	clusterMock := mockscluster.NewCluster(t)
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "kind/lazy"}, Host: "127.0.0.1", Port: 8080}, nil).Times(relocationItemMaxAttempts)
+		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(), nil).Times(relocationItemMaxAttempts)
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(stdErrors.New("store down")).Times(relocationItemMaxAttempts)
 	sys.cluster = clusterMock
 
@@ -651,7 +712,7 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 	}
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080", nil,
-		[]*internalpb.Grain{{GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}}})
+		[]*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy", Value: "kind/lazy"}.Build()}.Build()})
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -667,14 +728,14 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 func TestRelocationWorkerMergesRemoteItemFailures(t *testing.T) {
 	ctx := context.Background()
 
-	remoteFailure := &internalpb.RelocationFailure{Id: "actor-9", Grain: false, Message: "spawn boom"}
+	remoteFailure := internalpb.RelocationFailure_builder{Id: "actor-9", Grain: false, Message: "spawn boom"}.Build()
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.1", 9001, mock.Anything).
-		Return(&internalpb.RelocateBatchResponse{Failures: []*internalpb.RelocationFailure{remoteFailure}}, nil).Once()
+		Return(internalpb.RelocateBatchResponse_builder{Failures: []*internalpb.RelocationFailure{remoteFailure}}.Build(), nil).Once()
 
 	worker := &relocationWorker{remoting: remotingMock, logger: log.DiscardLogger}
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
-	requests := buildRelocateBatchRequests("127.0.0.1:8080", []*internalpb.Actor{{Address: "actor-9"}}, nil)
+	requests := buildRelocateBatchRequests("127.0.0.1:8080", []*internalpb.Actor{internalpb.Actor_builder{Address: "actor-9"}.Build()}, nil)
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -718,9 +779,9 @@ func TestRelocationWorkerToleratesDeletePeerStateError(t *testing.T) {
 func TestBuildRelocateBatchRequestsChunksLargeShares(t *testing.T) {
 	actors := make([]*internalpb.Actor, defaultRelocationBatchSize+1)
 	for i := range actors {
-		actors[i] = &internalpb.Actor{Address: fmt.Sprintf("actor-%d", i)}
+		actors[i] = internalpb.Actor_builder{Address: fmt.Sprintf("actor-%d", i)}.Build()
 	}
-	grains := []*internalpb.Grain{{GrainId: &internalpb.GrainId{Value: "grain-1"}}}
+	grains := []*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build()}.Build()}
 
 	requests := buildRelocateBatchRequests("127.0.0.1:8080", actors, grains)
 
@@ -748,9 +809,9 @@ func TestReassignByRole(t *testing.T) {
 func testReassignByRoleSpreadsLoad(t *testing.T) {
 	actors := make([]*internalpb.Actor, 6)
 	for i := range actors {
-		actors[i] = &internalpb.Actor{Address: address.New(fmt.Sprintf("actor-%d", i), "test", "127.0.0.9", 7000).String()}
+		actors[i] = internalpb.Actor_builder{Address: address.New(fmt.Sprintf("actor-%d", i), "test", "127.0.0.9", 7000).String()}.Build()
 	}
-	requests := []*internalpb.RelocateBatchRequest{{DepartedNode: "127.0.0.9:7000", Actors: actors}}
+	requests := []*internalpb.RelocateBatchRequest{internalpb.RelocateBatchRequest_builder{DepartedNode: "127.0.0.9:7000", Actors: actors}.Build()}
 
 	survivors := []*cluster.Peer{
 		{Host: "10.0.0.1", RemotingPort: 1},
@@ -776,21 +837,21 @@ func testReassignByRoleDistribution(t *testing.T) {
 	blue := "blue"
 	missing := "missing"
 	requests := []*internalpb.RelocateBatchRequest{
-		{
+		internalpb.RelocateBatchRequest_builder{
 			DepartedNode: "127.0.0.9:7000",
 			Actors: []*internalpb.Actor{
-				{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()},
-				{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu},
-				{Address: address.New("blue-actor", "test", "127.0.0.9", 7000).String(), Role: &blue},
+				internalpb.Actor_builder{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()}.Build(),
+				internalpb.Actor_builder{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu}.Build(),
+				internalpb.Actor_builder{Address: address.New("blue-actor", "test", "127.0.0.9", 7000).String(), Role: &blue}.Build(),
 			},
-			Grains: []*internalpb.Grain{{GrainId: &internalpb.GrainId{Value: "grain-1"}}},
-		},
-		{
+			Grains: []*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build()}.Build()},
+		}.Build(),
+		internalpb.RelocateBatchRequest_builder{
 			DepartedNode: "127.0.0.9:7000",
 			Actors: []*internalpb.Actor{
-				{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing},
+				internalpb.Actor_builder{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing}.Build(),
 			},
-		},
+		}.Build(),
 	}
 
 	// survivor 0 advertises no role (hosts role-less), survivor 1 advertises gpu,
@@ -833,14 +894,14 @@ func testReassignByRoleLeaderFallback(t *testing.T) {
 	gpu := "gpu"
 	missing := "missing"
 	requests := []*internalpb.RelocateBatchRequest{
-		{
+		internalpb.RelocateBatchRequest_builder{
 			DepartedNode: "127.0.0.9:7000",
 			Actors: []*internalpb.Actor{
-				{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()},
-				{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu},
-				{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing},
+				internalpb.Actor_builder{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()}.Build(),
+				internalpb.Actor_builder{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu}.Build(),
+				internalpb.Actor_builder{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing}.Build(),
 			},
-		},
+		}.Build(),
 	}
 
 	// no survivor advertises gpu, but the leader does: the gpu actor must be
@@ -906,7 +967,7 @@ func TestReportAbortedRelocation(t *testing.T) {
 
 	// the lazy grain still points at the departed node, so it is released
 	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
-		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "k/lazy"}, Host: host, Port: remoting}, nil).Once()
+		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build(), Host: host, Port: remoting}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "k/lazy").Return(nil).Once()
 
 	stream := eventstream.New()
@@ -914,19 +975,19 @@ func TestReportAbortedRelocation(t *testing.T) {
 	stream.Subscribe(consumer, eventsTopic)
 	pid := &PID{actorSystem: system, logger: log.DiscardLogger, eventsStream: stream}
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         host,
 		PeersPort:    9000,
 		RemotingPort: remoting,
 		Actors: map[string]*internalpb.Actor{
-			"a1": {Address: "actor-1"},
+			"a1": internalpb.Actor_builder{Address: "actor-1"}.Build(),
 		},
 		Grains: map[string]*internalpb.Grain{
-			"eager":    {GrainId: &internalpb.GrainId{Value: "k/eager"}, EagerRelocation: true},
-			"lazy":     {GrainId: &internalpb.GrainId{Value: "k/lazy"}},
-			"disabled": {GrainId: &internalpb.GrainId{Value: "k/disabled"}, DisableRelocation: true},
+			"eager":    internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/eager"}.Build(), EagerRelocation: true}.Build(),
+			"lazy":     internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build()}.Build(),
+			"disabled": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/disabled"}.Build(), DisableRelocation: true}.Build(),
 		},
-	}
+	}.Build()
 
 	departed := address.FormatHostPort(host, remoting)
 	system.reportAbortedRelocation(context.Background(), pid, departed, peerState, 0, stdErrors.New("boom"))
@@ -950,15 +1011,15 @@ func TestReportAbortedRelocation(t *testing.T) {
 func TestDepartedNodeOf(t *testing.T) {
 	t.Run("returns the marker skipping empty leading entries", func(t *testing.T) {
 		requests := []*internalpb.RelocateBatchRequest{
-			{DepartedNode: ""},
-			{DepartedNode: "127.0.0.9:7000"},
+			internalpb.RelocateBatchRequest_builder{DepartedNode: ""}.Build(),
+			internalpb.RelocateBatchRequest_builder{DepartedNode: "127.0.0.9:7000"}.Build(),
 		}
 		assert.Equal(t, "127.0.0.9:7000", departedNodeOf(requests))
 	})
 
 	t.Run("returns empty when no request carries the marker", func(t *testing.T) {
 		assert.Equal(t, "", departedNodeOf(nil))
-		assert.Equal(t, "", departedNodeOf([]*internalpb.RelocateBatchRequest{{DepartedNode: ""}}))
+		assert.Equal(t, "", departedNodeOf([]*internalpb.RelocateBatchRequest{internalpb.RelocateBatchRequest_builder{DepartedNode: ""}.Build()}))
 	})
 }
 
@@ -1014,18 +1075,18 @@ func TestEnqueueRelocation(t *testing.T) {
 	}
 
 	actors := []*internalpb.Actor{
-		{Address: "good-actor"},
-		{Address: "bad-actor"},
+		internalpb.Actor_builder{Address: "good-actor"}.Build(),
+		internalpb.Actor_builder{Address: "bad-actor"}.Build(),
 		// a singleton with an unparseable address routes through the singleton
 		// path (recreateSingletonFromWire) and records a failure without needing
 		// a live cluster.
-		{Address: "bad-singleton", Singleton: &internalpb.SingletonSpec{}},
+		internalpb.Actor_builder{Address: "bad-singleton", Singleton: &internalpb.SingletonSpec{}}.Build(),
 	}
 	grains := []*internalpb.Grain{
-		{GrainId: &internalpb.GrainId{Value: "k/eager-ok"}, EagerRelocation: true},
-		{GrainId: &internalpb.GrainId{Value: "k/eager-bad"}, EagerRelocation: true},
-		{GrainId: &internalpb.GrainId{Value: "k/lazy-ok"}},
-		{GrainId: &internalpb.GrainId{Value: "k/lazy-bad"}},
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/eager-ok"}.Build(), EagerRelocation: true}.Build(),
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/eager-bad"}.Build(), EagerRelocation: true}.Build(),
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy-ok"}.Build()}.Build(),
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy-bad"}.Build()}.Build(),
 	}
 
 	failures := &relocationFailures{}
@@ -1064,7 +1125,7 @@ func TestRelocationWorkerShareFailsOnFallbackPeer(t *testing.T) {
 	// the undeliverable lazy grain still points at the departed node, so the
 	// leader releases its stale directory entry
 	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "kind/lazy"}, Host: "127.0.0.1", Port: 8080}, nil).Once()
+		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
 	sys.cluster = clusterMock
 
@@ -1078,8 +1139,8 @@ func TestRelocationWorkerShareFailsOnFallbackPeer(t *testing.T) {
 		{Host: "127.0.0.2", RemotingPort: 9002},
 	}
 	requests := buildRelocateBatchRequests("127.0.0.1:8080",
-		[]*internalpb.Actor{{Address: "actor-1"}},
-		[]*internalpb.Grain{{GrainId: &internalpb.GrainId{Kind: "kind", Name: "lazy", Value: "kind/lazy"}}})
+		[]*internalpb.Actor{internalpb.Actor_builder{Address: "actor-1"}.Build()},
+		[]*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy", Value: "kind/lazy"}.Build()}.Build()})
 	failures := &relocationFailures{}
 
 	worker.relocateShare(ctx, requests, peers[0], peers, failures)
@@ -1107,7 +1168,7 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 
 	// the lazy grain still points at the departed node, but its release fails
 	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
-		Return(&internalpb.Grain{GrainId: &internalpb.GrainId{Value: "k/lazy"}, Host: host, Port: remoting}, nil).Once()
+		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build(), Host: host, Port: remoting}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "k/lazy").Return(stdErrors.New("store down")).Once()
 
 	stream := eventstream.New()
@@ -1115,14 +1176,14 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 	stream.Subscribe(consumer, eventsTopic)
 	pid := &PID{actorSystem: system, logger: log.DiscardLogger, eventsStream: stream}
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         host,
 		PeersPort:    9000,
 		RemotingPort: remoting,
 		Grains: map[string]*internalpb.Grain{
-			"lazy": {GrainId: &internalpb.GrainId{Value: "k/lazy"}},
+			"lazy": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build()}.Build(),
 		},
-	}
+	}.Build()
 
 	departed := address.FormatHostPort(host, remoting)
 	system.reportAbortedRelocation(context.Background(), pid, departed, peerState, 0, stdErrors.New("boom"))
@@ -1138,12 +1199,12 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 // relocation target dispatches on each grain's eager_relocation flag).
 func TestRelocatableGrains(t *testing.T) {
 	grains := map[string]*internalpb.Grain{
-		"eager": {GrainId: &internalpb.GrainId{Value: "eager"}, EagerRelocation: true},
-		"lazy":  {GrainId: &internalpb.GrainId{Value: "lazy"}},
-		"disabled": {
-			GrainId:           &internalpb.GrainId{Value: "disabled"},
+		"eager": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "eager"}.Build(), EagerRelocation: true}.Build(),
+		"lazy":  internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "lazy"}.Build()}.Build(),
+		"disabled": internalpb.Grain_builder{
+			GrainId:           internalpb.GrainId_builder{Value: "disabled"}.Build(),
 			DisableRelocation: true,
-		},
+		}.Build(),
 	}
 
 	relocatable := relocatableGrains(grains)
@@ -1169,7 +1230,7 @@ func TestAllocateGrainsSlice(t *testing.T) {
 	t.Run("distributes remainder and first chunk to the leader", func(t *testing.T) {
 		grains := make([]*internalpb.Grain, 5)
 		for i := range grains {
-			grains[i] = &internalpb.Grain{GrainId: &internalpb.GrainId{Value: fmt.Sprintf("grain-%d", i)}}
+			grains[i] = internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: fmt.Sprintf("grain-%d", i)}.Build()}.Build()
 		}
 
 		// totalPeers = leader + 2 peers = 3; quotient 1, remainder 2
@@ -1186,12 +1247,12 @@ func TestAllocateGrainsSlice(t *testing.T) {
 func TestAllocateActorsRoleAware(t *testing.T) {
 	newActor := func(name, role string, singleton bool) *internalpb.Actor {
 		addr := address.New(name, "test", "127.0.0.9", 7000).String()
-		a := &internalpb.Actor{Address: addr, Relocatable: true}
+		a := internalpb.Actor_builder{Address: addr, Relocatable: true}.Build()
 		if role != "" {
-			a.Role = &role
+			a.SetRole(role)
 		}
 		if singleton {
-			a.Singleton = &internalpb.SingletonSpec{}
+			a.SetSingleton(&internalpb.SingletonSpec{})
 		}
 		return a
 	}
@@ -1206,7 +1267,7 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 			name := fmt.Sprintf("actor-%d", i)
 			actors[name] = newActor(name, "", false)
 		}
-		state := &internalpb.PeerState{Actors: actors}
+		state := internalpb.PeerState_builder{Actors: actors}.Build()
 
 		leader, peersShares, unplaceable := allocateActors(nil, peers, state, nil)
 
@@ -1231,9 +1292,9 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
 			{Host: "127.0.0.2", RemotingPort: 9002, Roles: []string{"api"}},
 		}
-		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+		state := internalpb.PeerState_builder{Actors: map[string]*internalpb.Actor{
 			"api-actor": newActor("api-actor", "api", false),
-		}}
+		}}.Build()
 
 		leader, peersShares, unplaceable := allocateActors([]string{"control"}, peers, state, nil)
 
@@ -1249,9 +1310,9 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 		peers := []*cluster.Peer{
 			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
 		}
-		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+		state := internalpb.PeerState_builder{Actors: map[string]*internalpb.Actor{
 			"control-actor": newActor("control-actor", "control", false),
-		}}
+		}}.Build()
 
 		leader, _, unplaceable := allocateActors([]string{"control"}, peers, state, nil)
 
@@ -1264,9 +1325,9 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 		peers := []*cluster.Peer{
 			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"worker"}},
 		}
-		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+		state := internalpb.PeerState_builder{Actors: map[string]*internalpb.Actor{
 			"gpu-actor": newActor("gpu-actor", "gpu", false),
-		}}
+		}}.Build()
 
 		leader, _, unplaceable := allocateActors([]string{"control"}, peers, state, nil)
 
@@ -1279,9 +1340,9 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 		peers := []*cluster.Peer{
 			{Host: "127.0.0.1", RemotingPort: 9001, Roles: []string{"api"}},
 		}
-		state := &internalpb.PeerState{Actors: map[string]*internalpb.Actor{
+		state := internalpb.PeerState_builder{Actors: map[string]*internalpb.Actor{
 			"singleton-actor": newActor("singleton-actor", "api", true),
-		}}
+		}}.Build()
 
 		leader, _, unplaceable := allocateActors(nil, peers, state, nil)
 
@@ -1297,7 +1358,7 @@ func TestAllocateActorsRoleAware(t *testing.T) {
 func TestAllocateActorsLoadAware(t *testing.T) {
 	newActor := func(name string) *internalpb.Actor {
 		addr := address.New(name, "test", "127.0.0.9", 7000).String()
-		return &internalpb.Actor{Address: addr, Relocatable: true}
+		return internalpb.Actor_builder{Address: addr, Relocatable: true}.Build()
 	}
 
 	peers := []*cluster.Peer{
@@ -1310,7 +1371,7 @@ func TestAllocateActorsLoadAware(t *testing.T) {
 		name := fmt.Sprintf("actor-%d", i)
 		actors[name] = newActor(name)
 	}
-	state := &internalpb.PeerState{Actors: actors}
+	state := internalpb.PeerState_builder{Actors: actors}.Build()
 
 	t.Run("seeded loads steer actors to the least-loaded targets", func(t *testing.T) {
 		// leader already hosts 10 actors, peers[0] hosts 5, peers[1] hosts 0.
@@ -1413,25 +1474,25 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 
 	system.registry.Register(new(MockActor))
 
-	singletonSpec := &internalpb.SingletonSpec{
+	singletonSpec := internalpb.SingletonSpec_builder{
 		SpawnTimeout: durationpb.New(3 * time.Second),
 		WaitInterval: durationpb.New(250 * time.Millisecond),
 		MaxRetries:   int32(4),
-	}
+	}.Build()
 	restart := internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART
-	props := &internalpb.Actor{
+	props := internalpb.Actor_builder{
 		Address: address.New("singleton", system.Name(), "127.0.0.1", 8080).String(),
 		Type:    types.Name(new(MockActor)),
-		Singleton: &internalpb.SingletonSpec{
-			SpawnTimeout: singletonSpec.SpawnTimeout,
-			WaitInterval: singletonSpec.WaitInterval,
-			MaxRetries:   singletonSpec.MaxRetries,
-		},
+		Singleton: internalpb.SingletonSpec_builder{
+			SpawnTimeout: singletonSpec.GetSpawnTimeout(),
+			WaitInterval: singletonSpec.GetWaitInterval(),
+			MaxRetries:   singletonSpec.GetMaxRetries(),
+		}.Build(),
 		Role: new("blue"),
-		Supervisor: &internalpb.SupervisorSpec{
+		Supervisor: internalpb.SupervisorSpec_builder{
 			AnyErrorDirective: &restart,
-		},
-	}
+		}.Build(),
+	}.Build()
 
 	departedNode := address.FormatHostPort("127.0.0.1", 8080)
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
@@ -1445,9 +1506,9 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	require.Equal(t, "singleton", spy.actorName)
 	require.Equal(t, props.GetType(), types.Name(spy.actor))
 	require.NotNil(t, spy.config)
-	require.Equal(t, singletonSpec.SpawnTimeout.AsDuration(), spy.config.spawnTimeout)
-	require.Equal(t, singletonSpec.WaitInterval.AsDuration(), spy.config.waitInterval)
-	require.Equal(t, int(singletonSpec.MaxRetries), spy.config.numberOfRetries)
+	require.Equal(t, singletonSpec.GetSpawnTimeout().AsDuration(), spy.config.spawnTimeout)
+	require.Equal(t, singletonSpec.GetWaitInterval().AsDuration(), spy.config.waitInterval)
+	require.Equal(t, int(singletonSpec.GetMaxRetries()), spy.config.numberOfRetries)
 	require.NotNil(t, spy.config.Role())
 	require.Equal(t, props.GetRole(), *spy.config.Role())
 
@@ -1473,18 +1534,18 @@ func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 
 	system.registry.Register(new(MockActor))
 
-	props := &internalpb.Actor{
+	props := internalpb.Actor_builder{
 		Address:   address.New("singleton", system.Name(), "127.0.0.9", 7000).String(),
 		Type:      types.Name(new(MockActor)),
 		Singleton: &internalpb.SingletonSpec{},
-	}
+	}.Build()
 
 	departedNode := address.FormatHostPort("127.0.0.9", 7000)
 	// the registry entry already points at a survivor, not the departed node
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").
-		Return(&internalpb.Actor{
+		Return(internalpb.Actor_builder{
 			Address: address.New("singleton", system.Name(), "127.0.0.2", 9002).String(),
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 	spy := &spawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)

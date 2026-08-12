@@ -206,7 +206,7 @@ func TestWorkPullingDeliveryEndToEnd(t *testing.T) {
 
 	for i := 1; i <= 6; i++ {
 		id := fmt.Sprintf("job-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	require.Eventually(t, func() bool {
@@ -242,7 +242,7 @@ func TestWorkPullingWorkerLossRequeues(t *testing.T) {
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: testpb.Reply_builder{Content: "job-1"}.Build()}))
 
 	require.Eventually(t, func() bool {
 		return len(awaitDeliveriesSnapshot(t, ctx, worker1)) >= 1
@@ -281,7 +281,7 @@ func TestWorkPullingSilenceReregistrationKeepsDelivering(t *testing.T) {
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(150*time.Millisecond), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: testpb.Reply_builder{Content: "job-1"}.Build()}))
 
 	require.Eventually(t, func() bool {
 		return len(distinctDeliveries(awaitDeliveriesSnapshot(t, ctx, worker))) >= 1
@@ -293,7 +293,7 @@ func TestWorkPullingSilenceReregistrationKeepsDelivering(t *testing.T) {
 	// reads as a bounds violation and the worker never receives work again
 	pause.For(time.Second)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-2", payload: &testpb.Reply{Content: "job-2"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-2", payload: testpb.Reply_builder{Content: "job-2"}.Build()}))
 
 	require.Eventually(t, func() bool {
 		for _, delivery := range distinctDeliveries(awaitDeliveriesSnapshot(t, ctx, worker)) {
@@ -344,7 +344,7 @@ func TestWorkPullingDeliveryConfirmation(t *testing.T) {
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: testpb.Reply_builder{Content: "job-1"}.Build()}))
 
 	require.Eventually(t, func() bool {
 		response, err := Ask(ctx, producer, &getConfirmations{}, time.Second)
@@ -790,7 +790,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 
 		request, err := newRequestNext(controller.sessionID, "tok-1", producer, host)
 		require.NoError(t, err)
-		produced, err := NewProduced(request, "m-1", &testpb.Reply{Content: "m-1"})
+		produced, err := NewProduced(request, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 		require.NoError(t, err)
 
 		// wrong sender
@@ -800,7 +800,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		// stale session
 		staleRequest, err := newRequestNext("other-session", "tok-1", producer, host)
 		require.NoError(t, err)
-		staleProduced, err := NewProduced(staleRequest, "m-1", &testpb.Reply{Content: "m-1"})
+		staleProduced, err := NewProduced(staleRequest, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 		require.NoError(t, err)
 		controller.handleProduced(rctxFor(producer, host, staleProduced), staleProduced)
 		assert.Equal(t, producerHandshakeIdle, controller.handshake)
@@ -829,7 +829,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 
 		request, err := newRequestNext(controller.sessionID, "tok-x", producer, host)
 		require.NoError(t, err)
-		produced, err := NewProduced(request, "m-x", &testpb.Reply{Content: "m-x"})
+		produced, err := NewProduced(request, "m-x", testpb.Reply_builder{Content: "m-x"}.Build())
 		require.NoError(t, err)
 		controller.handleProduced(rctxFor(producer, host, produced), produced)
 
@@ -848,7 +848,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 
 		request, err := newRequestNext(controller.sessionID, "tok-got", producer, host)
 		require.NoError(t, err)
-		produced, err := NewProduced(request, "m-x", &testpb.Reply{Content: "m-x"})
+		produced, err := NewProduced(request, "m-x", testpb.Reply_builder{Content: "m-x"}.Build())
 		require.NoError(t, err)
 		controller.handleProduced(rctxFor(producer, host, produced), produced)
 

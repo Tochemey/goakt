@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tochemey/goakt/v4/discovery"
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -272,13 +274,13 @@ func TestRemoteHandlersContextPropagation(t *testing.T) {
 
 	// Only handlers that use ctx downstream have context propagation; others are omitted.
 	cases := []handlerCase{
-		{"RemoteLookup", sys.remoteLookupHandler, &internalpb.RemoteLookupRequest{Host: host, Port: int32(port), Name: "actor1"}},
-		{"RemoteReSpawn", sys.remoteReSpawnHandler, &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "actor1"}},
-		{"RemoteStop", sys.remoteStopHandler, &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "actor1"}},
-		{"RemoteSpawn", sys.remoteSpawnHandler, &internalpb.RemoteSpawnRequest{Host: host, Port: int32(port), ActorName: "actor1", ActorType: "*actor.MockActor"}},
-		{"RemoteSpawnChild", sys.remoteSpawnChildHandler, &internalpb.RemoteSpawnChildRequest{Host: host, Port: int32(port), ActorName: "child", ActorType: "*actor.MockActor", Parent: "parent"}},
-		{"RemoteMetric", sys.remoteMetricHandler, &internalpb.RemoteMetricRequest{Host: host, Port: int32(port), Name: "actor1"}},
-		{"RemoteActivateGrain", sys.remoteActivateGrainHandler, &internalpb.RemoteActivateGrainRequest{Grain: &internalpb.Grain{Host: host, Port: int32(port), GrainId: &internalpb.GrainId{Value: "kind:name"}}}},
+		{"RemoteLookup", sys.remoteLookupHandler, internalpb.RemoteLookupRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()},
+		{"RemoteReSpawn", sys.remoteReSpawnHandler, internalpb.RemoteReSpawnRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()},
+		{"RemoteStop", sys.remoteStopHandler, internalpb.RemoteStopRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()},
+		{"RemoteSpawn", sys.remoteSpawnHandler, internalpb.RemoteSpawnRequest_builder{Host: host, Port: int32(port), ActorName: "actor1", ActorType: "*actor.MockActor"}.Build()},
+		{"RemoteSpawnChild", sys.remoteSpawnChildHandler, internalpb.RemoteSpawnChildRequest_builder{Host: host, Port: int32(port), ActorName: "child", ActorType: "*actor.MockActor", Parent: "parent"}.Build()},
+		{"RemoteMetric", sys.remoteMetricHandler, internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()},
+		{"RemoteActivateGrain", sys.remoteActivateGrainHandler, internalpb.RemoteActivateGrainRequest_builder{Grain: internalpb.Grain_builder{Host: host, Port: int32(port), GrainId: internalpb.GrainId_builder{Value: "kind:name"}.Build()}.Build()}.Build()},
 	}
 
 	for _, c := range cases {
@@ -316,7 +318,7 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteLookupRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteLookupRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteLookupHandler(ctxWithMD, nullConn, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -326,9 +328,9 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 	})
 }
 
-func TestProtoServerOptions(t *testing.T) {
+func TestRemotingServerOptions(t *testing.T) {
 	sys := newRemoteServerTestSystem("127.0.0.1", 9000)
-	opts := sys.protoServerOptions()
+	opts := sys.remotingServerOptions()
 	// There must be exactly as many options as registered handlers in the function body.
 	assert.NotEmpty(t, opts)
 }
@@ -357,7 +359,7 @@ func TestRemoteLookupHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteLookupRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteLookupRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteLookupHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -365,7 +367,7 @@ func TestRemoteLookupHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteLookupRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteLookupRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteLookupHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -373,7 +375,7 @@ func TestRemoteLookupHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteLookupRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteLookupRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteLookupHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -435,6 +437,54 @@ func TestNewRemoteSenderPID(t *testing.T) {
 	})
 }
 
+func TestDuplexRemoteTellSenderHandle(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9010
+	ctx := context.Background()
+
+	newEnv := func(t *testing.T, handle any) inet.DataEnvelope {
+		t.Helper()
+		payload, err := proto.Marshal(internalpb.Error_builder{Message: "hello"}.Build())
+		require.NoError(t, err)
+
+		return inet.DataEnvelope{
+			Sender:       address.New("sender", "testSys", host, port).String(),
+			Receiver:     fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port),
+			TypeName:     "internalpb.Error",
+			SerializerID: inet.SerializerIDInternalProto,
+			Payload:      payload,
+			SenderHandle: handle,
+		}
+	}
+
+	t.Run("table-hit handle skips per-message materialization", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		handle := newRemotePID(address.New("sender", "testSys", host, port), sys.remoting)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, handle))
+
+		// The fallback would have parsed and cached the sender address; the
+		// cached handle must bypass newRemoteSenderPID entirely.
+		assert.Equal(t, 0, sys.remoteSenderAddresses.Len())
+	})
+
+	t.Run("missing handle falls back to newRemoteSenderPID", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, nil))
+
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+	})
+
+	t.Run("non-PID handle falls back to newRemoteSenderPID", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+
+		sys.duplexRemoteTell(ctx, newEnv(t, "not-a-pid"))
+
+		assert.Equal(t, 1, sys.remoteSenderAddresses.Len())
+	})
+}
+
 func TestRemoteAskHandler(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9001
@@ -467,11 +517,11 @@ func TestRemoteAskHandler(t *testing.T) {
 
 	t.Run("message with unparseable receiver address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteAskRequest{
+		req := internalpb.RemoteAskRequest_builder{
 			RemoteMessages: []*internalpb.RemoteMessage{
-				{Receiver: "not-a-valid-address"},
+				internalpb.RemoteMessage_builder{Receiver: "not-a-valid-address"}.Build(),
 			},
-		}
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -480,9 +530,9 @@ func TestRemoteAskHandler(t *testing.T) {
 	t.Run("message with wrong host in address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		addr := fmt.Sprintf("goakt://testSys@10.0.0.1:%d/actor1", port)
-		req := &internalpb.RemoteAskRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteAskRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -491,9 +541,9 @@ func TestRemoteAskHandler(t *testing.T) {
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
-		req := &internalpb.RemoteAskRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteAskRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -501,9 +551,9 @@ func TestRemoteAskHandler(t *testing.T) {
 
 	t.Run("nil message in RemoteMessages returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteAskRequest{
+		req := internalpb.RemoteAskRequest_builder{
 			RemoteMessages: []*internalpb.RemoteMessage{nil},
-		}
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -512,9 +562,9 @@ func TestRemoteAskHandler(t *testing.T) {
 	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
-		req := &internalpb.RemoteAskRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteAskRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -528,9 +578,9 @@ func TestRemoteAskHandler(t *testing.T) {
 		// not-running branch (CODE_INTERNAL_ERROR) proves the retry resolved
 		// the actor; a raw-only lookup would return CODE_NOT_FOUND instead.
 		addr := fmt.Sprintf("goakt://testSys@%s:0%d/actor1", host, port)
-		req := &internalpb.RemoteAskRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteAskRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteAskHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
@@ -567,9 +617,9 @@ func TestRemoteTellHandler(t *testing.T) {
 
 	t.Run("unparseable receiver is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteTellRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: "bad-address"}},
-		}
+		req := internalpb.RemoteTellRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: "bad-address"}.Build()},
+		}.Build()
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -579,9 +629,9 @@ func TestRemoteTellHandler(t *testing.T) {
 	t.Run("actor not in tree is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
-		req := &internalpb.RemoteTellRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteTellRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -590,9 +640,9 @@ func TestRemoteTellHandler(t *testing.T) {
 
 	t.Run("nil entry in RemoteMessages is logged and skipped, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteTellRequest{
+		req := internalpb.RemoteTellRequest_builder{
 			RemoteMessages: []*internalpb.RemoteMessage{nil},
-		}
+		}.Build()
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -602,9 +652,9 @@ func TestRemoteTellHandler(t *testing.T) {
 	t.Run("node with nil pid is dead-lettered, batch still succeeds", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
 		addr := fmt.Sprintf("goakt://testSys@%s:%d/actor1", host, port)
-		req := &internalpb.RemoteTellRequest{
-			RemoteMessages: []*internalpb.RemoteMessage{{Receiver: addr}},
-		}
+		req := internalpb.RemoteTellRequest_builder{
+			RemoteMessages: []*internalpb.RemoteMessage{internalpb.RemoteMessage_builder{Receiver: addr}.Build()},
+		}.Build()
 		resp, err := sys.remoteTellHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -627,7 +677,7 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteReSpawnRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -635,7 +685,7 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReSpawnRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteReSpawnRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -643,7 +693,7 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}
+		req := internalpb.RemoteReSpawnRequest_builder{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}.Build()
 		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -651,7 +701,7 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteReSpawnRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -659,7 +709,7 @@ func TestRemoteReSpawnHandler(t *testing.T) {
 
 	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
-		req := &internalpb.RemoteReSpawnRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteReSpawnRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteReSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -681,7 +731,7 @@ func TestRemoteStopHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteStopRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -689,7 +739,7 @@ func TestRemoteStopHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStopRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteStopRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -697,7 +747,7 @@ func TestRemoteStopHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}
+		req := internalpb.RemoteStopRequest_builder{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}.Build()
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -705,7 +755,7 @@ func TestRemoteStopHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteStopRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -713,7 +763,7 @@ func TestRemoteStopHandler(t *testing.T) {
 
 	t.Run("node with nil pid returns CODE_NOT_FOUND (simulates deleteNode race)", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
-		req := &internalpb.RemoteStopRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteStopRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteStopHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -735,7 +785,7 @@ func TestRemoteSpawnHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteSpawnRequest{Host: host, Port: int32(port), ActorName: "actor1", ActorType: "SomeType"}
+		req := internalpb.RemoteSpawnRequest_builder{Host: host, Port: int32(port), ActorName: "actor1", ActorType: "SomeType"}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -743,7 +793,7 @@ func TestRemoteSpawnHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnRequest{Host: "10.0.0.1", Port: int32(port), ActorName: "actor1", ActorType: "SomeType"}
+		req := internalpb.RemoteSpawnRequest_builder{Host: "10.0.0.1", Port: int32(port), ActorName: "actor1", ActorType: "SomeType"}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -751,11 +801,11 @@ func TestRemoteSpawnHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnRequest{
+		req := internalpb.RemoteSpawnRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: reservedNamesPrefix + "guard",
 			ActorType: "SomeType",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -764,11 +814,11 @@ func TestRemoteSpawnHandler(t *testing.T) {
 	t.Run("unregistered actor type returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.reflection = newReflection(types.NewRegistry())
-		req := &internalpb.RemoteSpawnRequest{
+		req := internalpb.RemoteSpawnRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: "actor1",
 			ActorType: "UnregisteredType",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -783,12 +833,12 @@ func TestRemoteSpawnHandler(t *testing.T) {
 		sys.reflection = newReflection(registry)
 		sys.registry = registry
 
-		req := &internalpb.RemoteSpawnRequest{
+		req := internalpb.RemoteSpawnRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName:        "orders-producer",
 			ActorType:        types.Name(new(MockActor)),
 			ReliableDelivery: producerDeliveryConfig("orders-consumer").toProto(),
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -809,12 +859,12 @@ func TestRemoteSpawnHandler(t *testing.T) {
 		wire := producerDeliveryConfig("orders-consumer")
 		wire.producer.durableQueueID = "orders-queue"
 
-		req := &internalpb.RemoteSpawnRequest{
+		req := internalpb.RemoteSpawnRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName:        "orders-producer",
 			ActorType:        types.Name(new(MockActor)),
 			ReliableDelivery: wire.toProto(),
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -836,11 +886,11 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: "child", ActorType: "*actor.MockActor",
 			Parent: "parent",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -848,11 +898,11 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: "10.0.0.1", Port: int32(port),
 			ActorName: "child", ActorType: "*actor.MockActor",
 			Parent: "parent",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -860,12 +910,12 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 
 	t.Run("system actor name for child returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: reservedNamesPrefix + "guard",
 			ActorType: "*actor.MockActor",
 			Parent:    "parent",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -873,12 +923,12 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 
 	t.Run("system actor name for parent returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: "child",
 			ActorType: "*actor.MockActor",
 			Parent:    reservedNamesPrefix + "guard",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -886,11 +936,11 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 
 	t.Run("parent not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(port),
 			ActorName: "child", ActorType: "*actor.MockActor",
 			Parent: "missing",
-		}
+		}.Build()
 		resp, err := sys.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -911,12 +961,12 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(p),
 			ActorName: "child",
 			ActorType: "WrongKind",
 			Parent:    "parent",
-		}
+		}.Build()
 		resp, err := impl.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -937,12 +987,12 @@ func TestRemoteSpawnChildHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
-		req := &internalpb.RemoteSpawnChildRequest{
+		req := internalpb.RemoteSpawnChildRequest_builder{
 			Host: host, Port: int32(p),
 			ActorName: "child",
 			ActorType: parent.Kind(),
 			Parent:    "parent",
-		}
+		}.Build()
 		resp, err := impl.remoteSpawnChildHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		spawnResp, ok := resp.(*internalpb.RemoteSpawnChildResponse)
@@ -967,7 +1017,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemotePassivationStrategyRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -975,7 +1025,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemotePassivationStrategyRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -983,7 +1033,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemotePassivationStrategyRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1005,7 +1055,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
 		require.NoError(t, err)
 
-		req := &internalpb.RemotePassivationStrategyRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		psResp, ok := resp.(*internalpb.RemotePassivationStrategyResponse)
@@ -1032,7 +1082,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 			WithPassivationStrategy(passivation.NewLongLivedStrategy()))
 		require.NoError(t, err)
 
-		req := &internalpb.RemotePassivationStrategyRequest{Host: host, Port: int32(p), Name: "actor2"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(p), Name: "actor2"}.Build()
 		resp, err := impl.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		psResp, ok := resp.(*internalpb.RemotePassivationStrategyResponse)
@@ -1057,7 +1107,7 @@ func TestRemotePassivationStrategyHandler(t *testing.T) {
 			WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(int(maxMessages))))
 		require.NoError(t, err)
 
-		req := &internalpb.RemotePassivationStrategyRequest{Host: host, Port: int32(p), Name: "actor3"}
+		req := internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(p), Name: "actor3"}.Build()
 		resp, err := impl.remotePassivationStrategyHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		psResp, ok := resp.(*internalpb.RemotePassivationStrategyResponse)
@@ -1084,7 +1134,7 @@ func TestRemoteStateHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(port), Name: "actor1", State: internalpb.State_STATE_RUNNING}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(port), Name: "actor1", State: internalpb.State_STATE_RUNNING}.Build()
 		resp, err := sys.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1092,7 +1142,7 @@ func TestRemoteStateHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStateRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1", State: internalpb.State_STATE_RUNNING}
+		req := internalpb.RemoteStateRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1", State: internalpb.State_STATE_RUNNING}.Build()
 		resp, err := sys.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1100,7 +1150,7 @@ func TestRemoteStateHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(port), Name: "missing", State: internalpb.State_STATE_RUNNING}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(port), Name: "missing", State: internalpb.State_STATE_RUNNING}.Build()
 		resp, err := sys.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1120,7 +1170,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor1", State: internalpb.State_STATE_RUNNING}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor1", State: internalpb.State_STATE_RUNNING}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1142,7 +1192,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor2", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor2", State: internalpb.State_STATE_STOPPING}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor2", State: internalpb.State_STATE_STOPPING}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1164,7 +1214,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor3", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor3", State: internalpb.State_STATE_SUSPENDED}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor3", State: internalpb.State_STATE_SUSPENDED}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1186,7 +1236,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor4", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor4", State: internalpb.State_STATE_RELOCATABLE}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor4", State: internalpb.State_STATE_RELOCATABLE}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1208,7 +1258,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor5", NewMockActor(), WithRelocationDisabled())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor5", State: internalpb.State_STATE_RELOCATABLE}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor5", State: internalpb.State_STATE_RELOCATABLE}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1230,7 +1280,7 @@ func TestRemoteStateHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor6", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStateRequest{Host: host, Port: int32(p), Name: "actor6", State: internalpb.State_STATE_UNKNOWN}
+		req := internalpb.RemoteStateRequest_builder{Host: host, Port: int32(p), Name: "actor6", State: internalpb.State_STATE_UNKNOWN}.Build()
 		resp, err := impl.remoteStateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stateResp, ok := resp.(*internalpb.RemoteStateResponse)
@@ -1254,7 +1304,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteChildrenRequest{Host: host, Port: int32(port), Name: "parent"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(port), Name: "parent"}.Build()
 		resp, err := sys.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1262,7 +1312,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteChildrenRequest{Host: "10.0.0.1", Port: int32(port), Name: "parent"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "parent"}.Build()
 		resp, err := sys.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1270,7 +1320,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteChildrenRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1278,7 +1328,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteChildrenRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1298,7 +1348,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "parent", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteChildrenRequest{Host: host, Port: int32(p), Name: "parent"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(p), Name: "parent"}.Build()
 		resp, err := impl.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		childrenResp, ok := resp.(*internalpb.RemoteChildrenResponse)
@@ -1324,7 +1374,7 @@ func TestRemoteChildrenHandler(t *testing.T) {
 		_, err = parent.SpawnChild(ctx, "child2", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteChildrenRequest{Host: host, Port: int32(p), Name: "parent"}
+		req := internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(p), Name: "parent"}.Build()
 		resp, err := impl.remoteChildrenHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		childrenResp, ok := resp.(*internalpb.RemoteChildrenResponse)
@@ -1360,7 +1410,7 @@ func TestRemoteParentHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteParentRequest{Host: host, Port: int32(port), Name: "child"}
+		req := internalpb.RemoteParentRequest_builder{Host: host, Port: int32(port), Name: "child"}.Build()
 		resp, err := sys.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1368,7 +1418,7 @@ func TestRemoteParentHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteParentRequest{Host: "10.0.0.1", Port: int32(port), Name: "child"}
+		req := internalpb.RemoteParentRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "child"}.Build()
 		resp, err := sys.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1376,7 +1426,7 @@ func TestRemoteParentHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteParentRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteParentRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1384,7 +1434,7 @@ func TestRemoteParentHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteParentRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteParentRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1405,7 +1455,7 @@ func TestRemoteParentHandler(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, root.Parent())
 
-		req := &internalpb.RemoteParentRequest{Host: host, Port: int32(p), Name: "root"}
+		req := internalpb.RemoteParentRequest_builder{Host: host, Port: int32(p), Name: "root"}.Build()
 		resp, err := impl.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		parentResp, ok := resp.(*internalpb.RemoteParentResponse)
@@ -1430,7 +1480,7 @@ func TestRemoteParentHandler(t *testing.T) {
 		_, err = parent.SpawnChild(ctx, "child", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteParentRequest{Host: host, Port: int32(p), Name: "parent/child"}
+		req := internalpb.RemoteParentRequest_builder{Host: host, Port: int32(p), Name: "parent/child"}.Build()
 		resp, err := impl.remoteParentHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		parentResp, ok := resp.(*internalpb.RemoteParentResponse)
@@ -1455,7 +1505,7 @@ func TestRemoteKindHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteKindRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteKindRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteKindHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1463,7 +1513,7 @@ func TestRemoteKindHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteKindRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteKindRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteKindHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1471,7 +1521,7 @@ func TestRemoteKindHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteKindRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteKindRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteKindHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1479,7 +1529,7 @@ func TestRemoteKindHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteKindRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteKindRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteKindHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1499,7 +1549,7 @@ func TestRemoteKindHandler(t *testing.T) {
 		pid, err := impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteKindRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteKindRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteKindHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		kindResp, ok := resp.(*internalpb.RemoteKindResponse)
@@ -1523,7 +1573,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteDependenciesRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1531,7 +1581,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteDependenciesRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1539,7 +1589,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteDependenciesRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1547,7 +1597,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteDependenciesRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1567,7 +1617,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteDependenciesRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		depsResp, ok := resp.(*internalpb.RemoteDependenciesResponse)
@@ -1592,7 +1642,7 @@ func TestRemoteDependenciesHandler(t *testing.T) {
 		pid, err := impl.Spawn(ctx, "actor2", NewMockActor(), WithDependencies(dep))
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteDependenciesRequest{Host: host, Port: int32(p), Name: "actor2"}
+		req := internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(p), Name: "actor2"}.Build()
 		resp, err := impl.remoteDependenciesHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		depsResp, ok := resp.(*internalpb.RemoteDependenciesResponse)
@@ -1618,7 +1668,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteMetricRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1626,7 +1676,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteMetricRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteMetricRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1634,7 +1684,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteMetricRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1642,7 +1692,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteMetricRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1662,7 +1712,7 @@ func TestRemoteMetricHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteMetricRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		metricResp, ok := resp.(*internalpb.RemoteMetricResponse)
@@ -1690,7 +1740,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteRoleRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1698,7 +1748,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteRoleRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteRoleRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1706,7 +1756,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteRoleRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1714,7 +1764,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteRoleRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1734,7 +1784,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteRoleRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		roleResp, ok := resp.(*internalpb.RemoteRoleResponse)
@@ -1757,7 +1807,7 @@ func TestRemoteRoleHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor2", NewMockActor(), WithRole(role))
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteRoleRequest{Host: host, Port: int32(p), Name: "actor2"}
+		req := internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(p), Name: "actor2"}.Build()
 		resp, err := impl.remoteRoleHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		roleResp, ok := resp.(*internalpb.RemoteRoleResponse)
@@ -1781,7 +1831,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteStashSizeRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteStashSizeRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteStashSizeHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1789,7 +1839,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStashSizeRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteStashSizeRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteStashSizeHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1797,7 +1847,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteStashSizeRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteStashSizeRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteStashSizeHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1805,7 +1855,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 
 	t.Run("actor not running returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "stopped")
-		req := &internalpb.RemoteStashSizeRequest{Host: host, Port: int32(port), Name: "stopped"}
+		req := internalpb.RemoteStashSizeRequest_builder{Host: host, Port: int32(port), Name: "stopped"}.Build()
 		resp, err := sys.remoteStashSizeHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -1825,7 +1875,7 @@ func TestRemoteStashSizeHandler(t *testing.T) {
 		_, err = impl.Spawn(ctx, "actor1", NewMockActor())
 		require.NoError(t, err)
 
-		req := &internalpb.RemoteStashSizeRequest{Host: host, Port: int32(p), Name: "actor1"}
+		req := internalpb.RemoteStashSizeRequest_builder{Host: host, Port: int32(p), Name: "actor1"}.Build()
 		resp, err := impl.remoteStashSizeHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		stashResp, ok := resp.(*internalpb.RemoteStashSizeResponse)
@@ -1850,7 +1900,7 @@ func TestRemoteReinstateHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteReinstateRequest{Host: host, Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteReinstateRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteReinstateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1858,7 +1908,7 @@ func TestRemoteReinstateHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReinstateRequest{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}
+		req := internalpb.RemoteReinstateRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "actor1"}.Build()
 		resp, err := sys.remoteReinstateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1866,7 +1916,7 @@ func TestRemoteReinstateHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReinstateRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}
+		req := internalpb.RemoteReinstateRequest_builder{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard"}.Build()
 		resp, err := sys.remoteReinstateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1874,11 +1924,59 @@ func TestRemoteReinstateHandler(t *testing.T) {
 
 	t.Run("actor not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteReinstateRequest{Host: host, Port: int32(port), Name: "missing"}
+		req := internalpb.RemoteReinstateRequest_builder{Host: host, Port: int32(port), Name: "missing"}.Build()
 		resp, err := sys.remoteReinstateHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
 	})
+}
+
+// slowReplyActor answers a TestReply only after a fixed delay, long enough to
+// prove the ask server honors a caller deadline beyond the system askTimeout.
+type slowReplyActor struct {
+	delay time.Duration
+}
+
+func (x *slowReplyActor) PreStart(*Context) error { return nil }
+
+func (x *slowReplyActor) PostStop(*Context) error { return nil }
+
+func (x *slowReplyActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestReply); ok {
+		pause.For(x.delay)
+		ctx.Response(testpb.Reply_builder{Content: "slow reply"}.Build())
+	}
+}
+
+// TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout pins the
+// wire-deadline fix: a caller timeout longer than the server's askTimeout must
+// govern the duplex ask wait. Before the fix duplexRemoteAsk clamped the wait
+// to askTimeout, so a reply arriving after askTimeout but well within the
+// caller's budget surfaced as CODE_DEADLINE_EXCEEDED, while the legacy
+// handler honored the same request's timeout verbatim.
+func TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := inet.Get(1)[0]
+
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithAskTimeout(300*time.Millisecond),
+		WithRemote(remote.NewConfig(host, port)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	pid, err := sys.Spawn(ctx, "slow-replier", &slowReplyActor{delay: 900 * time.Millisecond})
+	require.NoError(t, err)
+
+	remoting := remoteclient.NewClient()
+	t.Cleanup(func() { remoting.Close() })
+
+	reply, err := remoting.RemoteAsk(ctx, address.NoSender(), pathToAddress(pid.Path()), new(testpb.TestReply), 10*time.Second)
+	require.NoError(t, err, "a caller timeout above askTimeout must be honored on the duplex path")
+	require.NotNil(t, reply)
 }
 
 func TestRemoteAskGrainHandler(t *testing.T) {
@@ -1896,9 +1994,9 @@ func TestRemoteAskGrainHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteAskGrainRequest{
-			Grain: &internalpb.Grain{Host: host, Port: int32(port)},
-		}
+		req := internalpb.RemoteAskGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: host, Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1906,9 +2004,9 @@ func TestRemoteAskGrainHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteAskGrainRequest{
-			Grain: &internalpb.Grain{Host: "10.0.0.1", Port: int32(port)},
-		}
+		req := internalpb.RemoteAskGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: "10.0.0.1", Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1930,9 +2028,9 @@ func TestRemoteTellGrainHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteTellGrainRequest{
-			Grain: &internalpb.Grain{Host: host, Port: int32(port)},
-		}
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: host, Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1940,9 +2038,9 @@ func TestRemoteTellGrainHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteTellGrainRequest{
-			Grain: &internalpb.Grain{Host: "10.0.0.1", Port: int32(port)},
-		}
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: "10.0.0.1", Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -1964,9 +2062,9 @@ func TestRemoteActivateGrainHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteActivateGrainRequest{
-			Grain: &internalpb.Grain{Host: host, Port: int32(port)},
-		}
+		req := internalpb.RemoteActivateGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: host, Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -1974,9 +2072,9 @@ func TestRemoteActivateGrainHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteActivateGrainRequest{
-			Grain: &internalpb.Grain{Host: "10.0.0.1", Port: int32(port)},
-		}
+		req := internalpb.RemoteActivateGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: "10.0.0.1", Port: int32(port)}.Build(),
+		}.Build()
 		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2027,7 +2125,7 @@ func TestGetNodeMetricHandler(t *testing.T) {
 
 	t.Run("cluster disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.GetNodeMetricRequest{NodeAddress: nodeAddr}
+		req := internalpb.GetNodeMetricRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := sys.getNodeMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2036,7 +2134,7 @@ func TestGetNodeMetricHandler(t *testing.T) {
 	t.Run("mismatched node address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.clusterEnabled.Store(true)
-		req := &internalpb.GetNodeMetricRequest{NodeAddress: "10.0.0.1:9999"}
+		req := internalpb.GetNodeMetricRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := sys.getNodeMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2045,7 +2143,7 @@ func TestGetNodeMetricHandler(t *testing.T) {
 	t.Run("success returns node metric response", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.clusterEnabled.Store(true)
-		req := &internalpb.GetNodeMetricRequest{NodeAddress: nodeAddr}
+		req := internalpb.GetNodeMetricRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := sys.getNodeMetricHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		metric, ok := resp.(*internalpb.GetNodeMetricResponse)
@@ -2070,7 +2168,7 @@ func TestGetKindsHandler(t *testing.T) {
 
 	t.Run("cluster disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.GetKindsRequest{NodeAddress: nodeAddr}
+		req := internalpb.GetKindsRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := sys.getKindsHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2080,7 +2178,7 @@ func TestGetKindsHandler(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.clusterEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig()
-		req := &internalpb.GetKindsRequest{NodeAddress: "10.0.0.1:9999"}
+		req := internalpb.GetKindsRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := sys.getKindsHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2093,7 +2191,7 @@ func TestGetKindsHandler(t *testing.T) {
 		cfg := NewClusterConfig()
 		cfg.kinds.Set("MockActor", NewMockActor())
 		sys.clusterConfig = cfg
-		req := &internalpb.GetKindsRequest{NodeAddress: nodeAddr}
+		req := internalpb.GetKindsRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := sys.getKindsHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		kindsResp, ok := resp.(*internalpb.GetKindsResponse)
@@ -2114,14 +2212,14 @@ func TestRemoteAskGrainHandlerDeserializationError(t *testing.T) {
 		mockClient := &testRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
-		req := &internalpb.RemoteAskGrainRequest{
-			Grain: &internalpb.Grain{
+		req := internalpb.RemoteAskGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
 				Host:    host,
 				Port:    int32(port),
-				GrainId: &internalpb.GrainId{Value: ""},
-			},
+				GrainId: internalpb.GrainId_builder{Value: ""}.Build(),
+			}.Build(),
 			Message: []byte("garbage"),
-		}
+		}.Build()
 		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2134,14 +2232,14 @@ func TestRemoteAskGrainHandlerDeserializationError(t *testing.T) {
 		mockClient := &testRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
-		req := &internalpb.RemoteAskGrainRequest{
-			Grain: &internalpb.Grain{
+		req := internalpb.RemoteAskGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
 				Host:    host,
 				Port:    int32(port),
-				GrainId: &internalpb.GrainId{Value: "invalid-no-separator"},
-			},
+				GrainId: internalpb.GrainId_builder{Value: "invalid-no-separator"}.Build(),
+			}.Build(),
 			Message: []byte("any"),
-		}
+		}.Build()
 		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2160,14 +2258,14 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 		mockClient := &testRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
-		req := &internalpb.RemoteTellGrainRequest{
-			Grain: &internalpb.Grain{
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
 				Host:    host,
 				Port:    int32(port),
-				GrainId: &internalpb.GrainId{Value: ""},
-			},
+				GrainId: internalpb.GrainId_builder{Value: ""}.Build(),
+			}.Build(),
 			Message: []byte("garbage"),
-		}
+		}.Build()
 		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2180,14 +2278,14 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 		mockClient := &testRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
-		req := &internalpb.RemoteTellGrainRequest{
-			Grain: &internalpb.Grain{
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
 				Host:    host,
 				Port:    int32(port),
-				GrainId: &internalpb.GrainId{Value: "invalid-no-separator"},
-			},
+				GrainId: internalpb.GrainId_builder{Value: "invalid-no-separator"}.Build(),
+			}.Build(),
 			Message: []byte("any"),
-		}
+		}.Build()
 		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2432,16 +2530,16 @@ func TestRemoteTellHandler_PerMessageMetadataError(t *testing.T) {
 	sys.remoteConfig = remote.NewConfig(host, port, remote.WithContextPropagator(failing))
 	sys.remotingEnabled.Store(true)
 
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			{
+			internalpb.RemoteMessage_builder{
 				Sender:   address.New("from", "testSys", host, port).String(),
 				Receiver: address.New("dst", "testSys", host, port).String(),
 				Message:  []byte{},
 				Metadata: map[string]string{"x-trace-id": "abc"},
-			},
+			}.Build(),
 		},
-	}
+	}.Build()
 	resp, err := sys.remoteTellHandler(context.Background(), nullConn, req)
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -2464,7 +2562,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2472,7 +2570,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteWatchRequest{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2480,7 +2578,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2488,7 +2586,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("unparseable watcher address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2496,7 +2594,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("watchee not in tree returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -2504,7 +2602,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("zombie node returns CODE_NOT_FOUND", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "watchee")
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -2512,7 +2610,7 @@ func TestRemoteWatchHandler(t *testing.T) {
 
 	t.Run("happy path records the watcher in the registry", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "watchee")
-		req := &internalpb.RemoteWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 
 		resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
@@ -2542,7 +2640,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 	t.Run("remoting disabled returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 		sys.remotingEnabled.Store(false)
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2550,7 +2648,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteUnWatchRequest{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: "10.0.0.1", Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2558,7 +2656,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 	t.Run("system actor name returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: reservedNamesPrefix + "guard", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
@@ -2566,7 +2664,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 	t.Run("unparseable watcher address returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: "not-an-address"}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -2574,7 +2672,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 	t.Run("watchee not in tree returns success (already gone)", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: "missing", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
@@ -2583,7 +2681,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 
 	t.Run("zombie node returns success", func(t *testing.T) {
 		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "watchee")
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
@@ -2595,7 +2693,7 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 		watcheeID := address.New("watchee", sys.Name(), host, port).String()
 		sys.remoteWatches.addWatcher(watcheeID, watcherAddr)
 
-		req := &internalpb.RemoteUnWatchRequest{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}
+		req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: "watchee", WatcherAddress: watcherAddr.String()}.Build()
 		resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		_, ok := resp.(*internalpb.RemoteUnWatchResponse)
@@ -2687,40 +2785,40 @@ func TestRelocateBatchHandler(t *testing.T) {
 
 		// entry pointing at a live third node: left alone, no removal, no failure
 		clusterMock.EXPECT().GetActor(mock.Anything, "moved").
-			Return(&internalpb.Actor{Address: address.New("moved", sys.Name(), "10.0.0.9", 7000).String()}, nil).Once()
+			Return(internalpb.Actor_builder{Address: address.New("moved", sys.Name(), "10.0.0.9", 7000).String()}.Build(), nil).Once()
 
 		// eager grain entry pointing at a live third node: left alone as well
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/moved-grain").
-			Return(&internalpb.Grain{Host: "10.0.0.9", Port: 7000, GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}}, nil).Once()
+			Return(internalpb.Grain_builder{Host: "10.0.0.9", Port: 7000, GrainId: internalpb.GrainId_builder{Value: "kind/moved-grain", Name: "moved-grain"}.Build()}.Build(), nil).Once()
 
 		// entry still pointing at the departed node: removed before the respawn
 		// (the respawn itself fails on this non-started test system, the record
 		// is restored, and the item is retried before being reported per item
 		// instead of failing the batch)
 		clusterMock.EXPECT().GetActor(mock.Anything, "stale").
-			Return(&internalpb.Actor{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}, nil).Times(relocationItemMaxAttempts)
+			Return(internalpb.Actor_builder{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}.Build(), nil).Times(relocationItemMaxAttempts)
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale").Return(nil).Times(relocationItemMaxAttempts)
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Times(relocationItemMaxAttempts)
 
-		request := &internalpb.RelocateBatchRequest{
+		request := internalpb.RelocateBatchRequest_builder{
 			DepartedNode: departedNode,
 			Actors: []*internalpb.Actor{
 				// unparsable address: reported per item
-				{Address: "invalid-address", Relocatable: true},
+				internalpb.Actor_builder{Address: "invalid-address", Relocatable: true}.Build(),
 				// system actor: skipped silently
-				{Address: address.New(reservedName(rebalancerType), sys.Name(), "127.0.0.1", 8080).String()},
+				internalpb.Actor_builder{Address: address.New(reservedName(rebalancerType), sys.Name(), "127.0.0.1", 8080).String()}.Build(),
 				// non-relocatable actor: skipped before any registry access (the
 				// strict cluster mock has no expectations for it)
-				{Address: address.New("pinned", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: false},
+				internalpb.Actor_builder{Address: address.New("pinned", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: false}.Build(),
 				// already relocated elsewhere: skipped silently
-				{Address: address.New("moved", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: true},
+				internalpb.Actor_builder{Address: address.New("moved", sys.Name(), "127.0.0.1", 8080).String(), Relocatable: true}.Build(),
 				// stale entry on the departed node: removed then respawned
-				{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String(), Type: types.Name(new(MockActor)), Relocatable: true},
+				internalpb.Actor_builder{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String(), Type: types.Name(new(MockActor)), Relocatable: true}.Build(),
 			},
 			Grains: []*internalpb.Grain{
-				{GrainId: &internalpb.GrainId{Value: "kind/moved-grain", Name: "moved-grain"}, EagerRelocation: true},
+				internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/moved-grain", Name: "moved-grain"}.Build(), EagerRelocation: true}.Build(),
 			},
-		}
+		}.Build()
 
 		resp, err := sys.relocateBatchHandler(ctx, nullConn, request)
 		require.NoError(t, err)
@@ -2750,7 +2848,7 @@ func TestRelocateBatchHandler(t *testing.T) {
 		// lazy grain entry still pointing at the departed node: released so the
 		// grain re-activates on next use; nothing is instantiated or activated
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-stale").
-			Return(&internalpb.Grain{Host: "127.0.0.1", Port: 8080, GrainId: &internalpb.GrainId{Value: "kind/lazy-stale", Name: "lazy-stale"}}, nil).Once()
+			Return(internalpb.Grain_builder{Host: "127.0.0.1", Port: 8080, GrainId: internalpb.GrainId_builder{Value: "kind/lazy-stale", Name: "lazy-stale"}.Build()}.Build(), nil).Once()
 		clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy-stale").Return(nil).Once()
 
 		// lazy grain whose directory release fails: the entry stays pinned to
@@ -2760,13 +2858,13 @@ func TestRelocateBatchHandler(t *testing.T) {
 		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-fail").
 			Return(nil, errors.New("registry unavailable")).Times(relocationItemMaxAttempts)
 
-		request := &internalpb.RelocateBatchRequest{
+		request := internalpb.RelocateBatchRequest_builder{
 			DepartedNode: departedNode,
 			Grains: []*internalpb.Grain{
-				{GrainId: &internalpb.GrainId{Value: "kind/lazy-stale", Name: "lazy-stale"}},
-				{GrainId: &internalpb.GrainId{Value: "kind/lazy-fail", Name: "lazy-fail"}},
+				internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy-stale", Name: "lazy-stale"}.Build()}.Build(),
+				internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy-fail", Name: "lazy-fail"}.Build()}.Build(),
 			},
-		}
+		}.Build()
 
 		resp, err := sys.relocateBatchHandler(ctx, nullConn, request)
 		require.NoError(t, err)
@@ -2843,13 +2941,14 @@ func TestRemoteGrainEnvelopeDelivery(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
+	// The constructor already installs the response mailbox; re-assigning it
+	// here would race the live grain worker reading pid.responses.
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
 
 	envelope := &commands.AsyncRequest{
 		CorrelationID: "remote-req",
 		ReplyTo:       &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: identity.String()},
-		Message:       &testpb.Reply{Content: "over-the-wire"},
+		Message:       testpb.Reply_builder{Content: "over-the-wire"}.Build(),
 	}
 
 	grainRequest := &remote.GrainRequest{Name: identity.Name(), Kind: identity.Kind()}
@@ -2897,8 +2996,9 @@ func TestRemoteEnvelopeAskDeferredAcrossNodes(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
+	// The constructor already installs the response mailbox; re-assigning it
+	// here would race the live grain worker reading pid.responses.
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
 
 	type askResult struct {
 		response any
@@ -2955,14 +3055,14 @@ func TestRemoteTellGrainHandlerEnvelopeFailure(t *testing.T) {
 	marshaled, err := (&commands.AsyncRequestSerializer{}).Serialize(envelope)
 	require.NoError(t, err)
 
-	req := &internalpb.RemoteTellGrainRequest{
-		Grain: &internalpb.Grain{
+	req := internalpb.RemoteTellGrainRequest_builder{
+		Grain: internalpb.Grain_builder{
 			Host:    "127.0.0.1",
 			Port:    int32(ports[0]),
-			GrainId: &internalpb.GrainId{Kind: identity.Kind(), Name: identity.Name(), Value: identity.String()},
-		},
+			GrainId: internalpb.GrainId_builder{Kind: identity.Kind(), Name: identity.Name(), Value: identity.String()}.Build(),
+		}.Build(),
 		Message: marshaled,
-	}
+	}.Build()
 
 	sys := system.(*actorSystem)
 	sys.shuttingDown.Store(true)
@@ -2972,4 +3072,228 @@ func TestRemoteTellGrainHandlerEnvelopeFailure(t *testing.T) {
 	require.NoError(t, err)
 	requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
 	require.Empty(t, grain.recorded())
+}
+
+func TestCopyDuplexPayloadRetainsIndependently(t *testing.T) {
+	src := []byte("pooled-custom")
+	got := copyDuplexPayload(src)
+	require.Equal(t, src, got)
+
+	src[0] = 'X'
+	require.Equal(t, byte('p'), got[0])
+	require.Nil(t, copyDuplexPayload(nil))
+	require.Empty(t, copyDuplexPayload([]byte{}))
+}
+
+// blockerActor parks on gate for every remote payload so its mailbox
+// accumulates inbound remote tells; received counts messages that made it
+// past the gate.
+type blockerActor struct {
+	gate     chan struct{}
+	received *atomic.Int64
+}
+
+// PreStart implements the Actor contract.
+func (x *blockerActor) PreStart(*Context) error { return nil }
+
+// PostStop implements the Actor contract.
+func (x *blockerActor) PostStop(*Context) error { return nil }
+
+// Receive parks on the gate for every remote payload, simulating a stalled
+// consumer, and counts the messages that get through once the gate opens.
+func (x *blockerActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *structpb.Value:
+		<-x.gate
+		x.received.Add(1)
+	default:
+	}
+}
+
+// TestRemoteTellStalledConsumerBackpressure is the end-to-end gate for
+// consumption-time credit grants: a stalled remote actor must exhaust the
+// sender's credit window (instead of absorbing messages at wire speed into
+// its unbounded mailbox), RemoteTell must surface backpressure, and once the
+// consumer resumes the window must recover because parked messages grant
+// their shares back as they leave the mailbox.
+func TestRemoteTellStalledConsumerBackpressure(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	ports := inet.Get(2)
+
+	// A small window makes the stall observable with a few hundred messages;
+	// coalesced batches (up to 256 x ~600B) stay well under it so every
+	// flushed frame remains admissible.
+	const window = 256 * 1024
+
+	newSystem := func(name string, port int) ActorSystem {
+		sys, err := NewActorSystem(name,
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port, remote.WithCreditWindow(window))),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+		return sys
+	}
+
+	senderSys := newSystem("senderSys", ports[0])
+	receiverSys := newSystem("receiverSys", ports[1])
+	pause.For(500 * time.Millisecond)
+
+	gate := make(chan struct{})
+	received := new(atomic.Int64)
+	blocker, err := receiverSys.Spawn(ctx, "blocker", &blockerActor{gate: gate, received: received})
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	remoting := senderSys.(*actorSystem).remoting
+	from := address.New("driver", senderSys.Name(), host, ports[0])
+	to := blocker.getAddress()
+
+	padding := strings.Repeat("x", 512)
+	payload := func() *structpb.Value {
+		return structpb.NewStringValue(padding)
+	}
+
+	// Drive tells until the credit window and the outbound staging fill and
+	// RemoteTell surfaces backpressure. Without consumption-time grants the
+	// receiver grants at dispatch and this loop never observes an error.
+	var delivered int64
+	backpressured := false
+
+	for i := 0; i < 5000 && !backpressured; i++ {
+		callCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		err := remoting.RemoteTell(callCtx, from, to, payload())
+		cancel()
+
+		switch {
+		case err == nil:
+			delivered++
+		case errors.Is(err, gerrors.ErrRemoteSendBackpressure):
+			backpressured = true
+		default:
+			t.Fatalf("unexpected send error after %d deliveries: %v", delivered, err)
+		}
+	}
+
+	require.True(t, backpressured,
+		"a stalled consumer must backpressure senders once the credit window is exhausted (delivered %d, consumer saw %d)",
+		delivered, received.Load())
+
+	// Resume the consumer promptly (before the coalescer's flush timeout can
+	// dead-letter a parked batch): the mailbox drains, each departing message
+	// grants its share back, and every admitted tell must arrive.
+	close(gate)
+
+	require.Eventually(t, func() bool { return received.Load() == delivered }, 30*time.Second, 20*time.Millisecond,
+		"admitted tells must drain once the consumer resumes (received %d of %d)", received.Load(), delivered)
+
+	// The recovered window must admit fresh traffic.
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, remoting.RemoteTell(callCtx, from, to, payload()), "the window must recover after the backlog drains")
+
+	require.Eventually(t, func() bool { return received.Load() == delivered+1 }, 10*time.Second, 20*time.Millisecond)
+}
+
+// TestRemoteTellStoppingSystemReleasesHold pins the system-stopping refuse
+// path: a remote tell refused because the actor system is shutting down must
+// repay its credit share immediately instead of pinning the peer's window
+// until the receiving actor's own teardown runs.
+func TestRemoteTellStoppingSystemReleasesHold(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	port := inet.Get(1)[0]
+
+	sys, err := NewActorSystem("testSys",
+		WithRemote(remote.NewConfig(host, port)),
+		WithLogger(log.DiscardLogger),
+	)
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	pid, err := impl.Spawn(ctx, "receiver", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	impl.shuttingDown.Store(true)
+	t.Cleanup(func() { impl.shuttingDown.Store(false) })
+
+	hold := inet.DetachedCreditShare(64)
+	require.NoError(t, impl.handleRemoteTellHeld(ctx, nil, pid, new(testpb.TestSend), hold))
+	assert.True(t, hold.Released(), "a system-stopping refusal must repay the credit share immediately")
+}
+
+// TestRemoteTellLateTrackAfterStopRepaysHold pins the admission race: a
+// remote delivery that passed its liveness check can reach trackRemoteHold
+// after the actor's terminal teardown drained the hold registry, and nothing
+// ever walks the registry again. The teardown sets the closed state bit
+// before draining, so a late track must observe it and repay its own share.
+func TestRemoteTellLateTrackAfterStopRepaysHold(t *testing.T) {
+	ctx := context.Background()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	// First variant: the actor tracked a hold before its stop, so teardown
+	// walks an existing registry. The parked share is repaid by the stop and
+	// the late share by the tracker itself.
+	tracked, err := impl.Spawn(ctx, "tracked", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	parked := inet.DetachedCreditShare(64)
+	tracked.trackRemoteHold(parked)
+	require.NoError(t, tracked.Shutdown(ctx))
+	assert.True(t, parked.Released(), "terminal stop must repay a share parked before it")
+
+	late := inet.DetachedCreditShare(64)
+	tracked.trackRemoteHold(late)
+	assert.True(t, late.Released(), "a track after terminal teardown must repay its share immediately")
+
+	// Second variant: the actor never tracked a hold, so a late first track
+	// creates a fresh registry after teardown already ran. The closed bit
+	// makes the tracker drain the fresh registry itself.
+	fresh, err := impl.Spawn(ctx, "fresh", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+	require.NoError(t, fresh.Shutdown(ctx))
+
+	first := inet.DetachedCreditShare(64)
+	fresh.trackRemoteHold(first)
+	assert.True(t, first.Released(), "a first-ever track after terminal teardown must repay its share")
+}
+
+// TestRemoteTellTrackAfterRestartParksHold verifies the closed bit is scoped
+// to terminal teardown: a restart embeds the same reset, but once the actor
+// runs again a tracked share must park (stay unreleased) so the credit
+// window keeps bounding mailbox residency.
+func TestRemoteTellTrackAfterRestartParksHold(t *testing.T) {
+	ctx := context.Background()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	pid, err := impl.Spawn(ctx, "restarted", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	require.NoError(t, pid.Restart(ctx))
+	pause.For(100 * time.Millisecond)
+
+	hold := inet.DetachedCreditShare(64)
+	pid.trackRemoteHold(hold)
+	assert.False(t, hold.Released(), "a share tracked after restart must park until its message is consumed")
+
+	hold.Release()
+	require.NoError(t, pid.Shutdown(ctx))
 }

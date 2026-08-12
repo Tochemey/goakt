@@ -154,7 +154,9 @@ func (a *ActorA) Receive(ctx *actor.ReceiveContext) {
 			}
 		})
 	case *testpb.TestGetCount:
-		ctx.Response(&testpb.TestCount{Value: 42})
+		testCount := &testpb.TestCount{}
+		testCount.SetValue(42)
+		ctx.Response(testCount)
 	default:
 		ctx.Unhandled()
 	}

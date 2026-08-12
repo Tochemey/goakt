@@ -740,7 +740,7 @@ func TestClient_SendProto(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
-		req := &testpb.Reply{Content: "hello proto"}
+		req := testpb.Reply_builder{Content: "hello proto"}.Build()
 
 		resp, err := client.SendProto(ctx, req)
 		require.NoError(t, err)
@@ -748,14 +748,14 @@ func TestClient_SendProto(t *testing.T) {
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "hello proto", reply.Content)
+		require.Equal(t, "hello proto", reply.GetContent())
 	})
 
 	t.Run("with deadline", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		req := &testpb.Reply{Content: "deadline test"}
+		req := testpb.Reply_builder{Content: "deadline test"}.Build()
 		resp, err := client.SendProto(ctx, req)
 		require.NoError(t, err)
 		require.NotNil(t, resp)
@@ -765,7 +765,7 @@ func TestClient_SendProto(t *testing.T) {
 		c := NewClient(addr)
 		require.NoError(t, c.Close())
 
-		_, err := c.SendProto(context.Background(), &testpb.Reply{Content: "x"})
+		_, err := c.SendProto(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
 }
@@ -780,7 +780,7 @@ func TestClient_SendProtoNoReply(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
-		err := client.SendProtoNoReply(ctx, &testpb.Reply{Content: "fire and forget"})
+		err := client.SendProtoNoReply(ctx, testpb.Reply_builder{Content: "fire and forget"}.Build())
 		require.NoError(t, err)
 	})
 
@@ -788,7 +788,7 @@ func TestClient_SendProtoNoReply(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		err := client.SendProtoNoReply(ctx, &testpb.Reply{Content: "deadline noreply"})
+		err := client.SendProtoNoReply(ctx, testpb.Reply_builder{Content: "deadline noreply"}.Build())
 		require.NoError(t, err)
 	})
 
@@ -796,7 +796,7 @@ func TestClient_SendProtoNoReply(t *testing.T) {
 		c := NewClient(addr)
 		require.NoError(t, c.Close())
 
-		err := c.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "x"})
+		err := c.SendProtoNoReply(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
 }
@@ -812,9 +812,9 @@ func TestClient_SendProtoMany(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		reqs := []proto.Message{
-			&testpb.Reply{Content: "msg1"},
-			&testpb.Reply{Content: "msg2"},
-			&testpb.Reply{Content: "msg3"},
+			testpb.Reply_builder{Content: "msg1"}.Build(),
+			testpb.Reply_builder{Content: "msg2"}.Build(),
+			testpb.Reply_builder{Content: "msg3"}.Build(),
 		}
 
 		resps, err := client.SendBatchProto(ctx, reqs)
@@ -824,7 +824,7 @@ func TestClient_SendProtoMany(t *testing.T) {
 		for i, resp := range resps {
 			reply, ok := resp.(*testpb.Reply)
 			require.True(t, ok)
-			require.Equal(t, reqs[i].(*testpb.Reply).Content, reply.Content)
+			require.Equal(t, reqs[i].(*testpb.Reply).GetContent(), reply.GetContent())
 		}
 	})
 
@@ -833,8 +833,8 @@ func TestClient_SendProtoMany(t *testing.T) {
 		defer cancel()
 
 		reqs := []proto.Message{
-			&testpb.Reply{Content: "d1"},
-			&testpb.Reply{Content: "d2"},
+			testpb.Reply_builder{Content: "d1"}.Build(),
+			testpb.Reply_builder{Content: "d2"}.Build(),
 		}
 
 		resps, err := client.SendBatchProto(ctx, reqs)
@@ -846,7 +846,7 @@ func TestClient_SendProtoMany(t *testing.T) {
 		c := NewClient(addr)
 		require.NoError(t, c.Close())
 
-		_, err := c.SendBatchProto(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+		_, err := c.SendBatchProto(context.Background(), []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
 }
@@ -862,9 +862,9 @@ func TestClient_SendProtoManyNoReply(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		ctx := context.Background()
 		reqs := []proto.Message{
-			&testpb.Reply{Content: "nr1"},
-			&testpb.Reply{Content: "nr2"},
-			&testpb.Reply{Content: "nr3"},
+			testpb.Reply_builder{Content: "nr1"}.Build(),
+			testpb.Reply_builder{Content: "nr2"}.Build(),
+			testpb.Reply_builder{Content: "nr3"}.Build(),
 		}
 
 		err := client.SendProtoManyNoReply(ctx, reqs)
@@ -875,7 +875,7 @@ func TestClient_SendProtoManyNoReply(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		reqs := []proto.Message{&testpb.Reply{Content: "dl"}}
+		reqs := []proto.Message{testpb.Reply_builder{Content: "dl"}.Build()}
 		err := client.SendProtoManyNoReply(ctx, reqs)
 		require.NoError(t, err)
 	})
@@ -884,7 +884,7 @@ func TestClient_SendProtoManyNoReply(t *testing.T) {
 		c := NewClient(addr)
 		require.NoError(t, c.Close())
 
-		err := c.SendProtoManyNoReply(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+		err := c.SendProtoManyNoReply(context.Background(), []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 		require.ErrorIs(t, err, ErrClientClosed)
 	})
 }
@@ -914,7 +914,7 @@ func TestClient_SendProto_ClosedConnWithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	_, err := client.SendProto(ctx, &testpb.Reply{Content: "x"})
+	_, err := client.SendProto(ctx, testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -927,7 +927,7 @@ func TestClient_SendProto_ClosedConnNoDeadline(t *testing.T) {
 	client.idle = append(client.idle, idleConn{conn: c1, since: time.Now().UnixNano()})
 	client.mu.Unlock()
 
-	_, err := client.SendProto(context.Background(), &testpb.Reply{Content: "x"})
+	_, err := client.SendProto(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -956,7 +956,7 @@ func TestClient_SendProto_ReadError(t *testing.T) {
 	client := NewClient(listener.Addr().String())
 	defer func() { _ = client.Close() }()
 
-	_, err = client.SendProto(context.Background(), &testpb.Reply{Content: "x"})
+	_, err = client.SendProto(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -984,7 +984,7 @@ func TestClient_SendProtoNoReply_ClosedConnWithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := client.SendProtoNoReply(ctx, &testpb.Reply{Content: "x"})
+	err := client.SendProtoNoReply(ctx, testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -997,7 +997,7 @@ func TestClient_SendProtoNoReply_ClosedConnNoDeadline(t *testing.T) {
 	client.idle = append(client.idle, idleConn{conn: c1, since: time.Now().UnixNano()})
 	client.mu.Unlock()
 
-	err := client.SendProtoNoReply(context.Background(), &testpb.Reply{Content: "x"})
+	err := client.SendProtoNoReply(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -1025,7 +1025,7 @@ func TestClient_SendProtoMany_ClosedConnWithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	_, err := client.SendBatchProto(ctx, []proto.Message{&testpb.Reply{Content: "x"}})
+	_, err := client.SendBatchProto(ctx, []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 	require.Error(t, err)
 }
 
@@ -1048,8 +1048,8 @@ func TestClient_SendProtoMany_ContextCancellation(t *testing.T) {
 
 	// With 2+ messages, after the first send the ctx.Done() check triggers.
 	reqs := []proto.Message{
-		&testpb.Reply{Content: "a"},
-		&testpb.Reply{Content: "b"},
+		testpb.Reply_builder{Content: "a"}.Build(),
+		testpb.Reply_builder{Content: "b"}.Build(),
 	}
 	// Might succeed (server fast enough) or fail (context cancelled).
 	// Either outcome is valid — we only verify no panic.
@@ -1080,7 +1080,7 @@ func TestClient_SendProtoManyNoReply_ClosedConnWithDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := client.SendProtoManyNoReply(ctx, []proto.Message{&testpb.Reply{Content: "x"}})
+	err := client.SendProtoManyNoReply(ctx, []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 	require.Error(t, err)
 }
 
@@ -1100,8 +1100,8 @@ func TestClient_SendProtoManyNoReply_ContextCancellation(t *testing.T) {
 	cancel()
 
 	reqs := []proto.Message{
-		&testpb.Reply{Content: "a"},
-		&testpb.Reply{Content: "b"},
+		testpb.Reply_builder{Content: "a"}.Build(),
+		testpb.Reply_builder{Content: "b"}.Build(),
 	}
 	// Might succeed or fail depending on timing — we only verify no panic.
 	_ = client.SendProtoManyNoReply(ctx, reqs) //nolint:errcheck // outcome is timing-dependent
@@ -1132,8 +1132,8 @@ func TestClient_SendProtoMany_ReadError(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	reqs := []proto.Message{
-		&testpb.Reply{Content: "a"},
-		&testpb.Reply{Content: "b"},
+		testpb.Reply_builder{Content: "a"}.Build(),
+		testpb.Reply_builder{Content: "b"}.Build(),
 	}
 	_, err = client.SendBatchProto(context.Background(), reqs)
 	require.Error(t, err)
@@ -1148,7 +1148,7 @@ func TestClient_SendProtoMany_WriteError(t *testing.T) {
 	client.idle = append(client.idle, idleConn{conn: c1, since: time.Now().UnixNano()})
 	client.mu.Unlock()
 
-	_, err := client.SendBatchProto(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+	_, err := client.SendBatchProto(context.Background(), []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 	require.Error(t, err)
 }
 
@@ -1161,7 +1161,7 @@ func TestClient_SendProtoManyNoReply_WriteError(t *testing.T) {
 	client.idle = append(client.idle, idleConn{conn: c1, since: time.Now().UnixNano()})
 	client.mu.Unlock()
 
-	err := client.SendProtoManyNoReply(context.Background(), []proto.Message{&testpb.Reply{Content: "x"}})
+	err := client.SendProtoManyNoReply(context.Background(), []proto.Message{testpb.Reply_builder{Content: "x"}.Build()})
 	require.Error(t, err)
 }
 
@@ -1197,7 +1197,7 @@ func TestClient_SendProto_UnmarshalError(t *testing.T) {
 	client := NewClient(listener.Addr().String())
 	defer func() { _ = client.Close() }()
 
-	_, err = client.SendProto(context.Background(), &testpb.Reply{Content: "x"})
+	_, err = client.SendProto(context.Background(), testpb.Reply_builder{Content: "x"}.Build())
 	require.Error(t, err)
 }
 
@@ -1295,7 +1295,7 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 
 		ctx := ContextWithMetadata(context.Background(), md)
 
-		resp, respMD, err := client.SendProtoWithMetadata(ctx, &testpb.Reply{Content: "hello"})
+		resp, respMD, err := client.SendProtoWithMetadata(ctx, testpb.Reply_builder{Content: "hello"}.Build())
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		require.NotNil(t, respMD)
@@ -1303,7 +1303,7 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 		// Verify response message.
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "hello", reply.Content)
+		require.Equal(t, "hello", reply.GetContent())
 
 		// Verify response metadata.
 		echo, ok := respMD.Get("echo")
@@ -1321,7 +1321,7 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 	})
 
 	t.Run("without metadata in context", func(t *testing.T) {
-		resp, respMD, err := client.SendProtoWithMetadata(context.Background(), &testpb.Reply{Content: "world"})
+		resp, respMD, err := client.SendProtoWithMetadata(context.Background(), testpb.Reply_builder{Content: "world"}.Build())
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 		require.NotNil(t, respMD)
@@ -1329,7 +1329,7 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 		// Verify response message.
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "world", reply.Content)
+		require.Equal(t, "world", reply.GetContent())
 
 		// Verify response metadata (should still have server-added metadata).
 		echo, ok := respMD.Get("echo")
@@ -1347,13 +1347,13 @@ func TestClient_SendProtoWithMetadata(t *testing.T) {
 
 		ctx := ContextWithMetadata(context.Background(), md)
 
-		resp, err := client.SendProto(ctx, &testpb.Reply{Content: "test"})
+		resp, err := client.SendProto(ctx, testpb.Reply_builder{Content: "test"}.Build())
 		require.NoError(t, err)
 		require.NotNil(t, resp)
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "test", reply.Content)
+		require.Equal(t, "test", reply.GetContent())
 	})
 }
 
@@ -1362,7 +1362,7 @@ func TestClient_MarshalWithContext(t *testing.T) {
 	client := NewClient("127.0.0.1:9999") // Address doesn't matter for this test.
 	defer func() { _ = client.Close() }()
 
-	msg := &testpb.Reply{Content: "test"}
+	msg := testpb.Reply_builder{Content: "test"}.Build()
 
 	t.Run("without metadata", func(t *testing.T) {
 		ctx := context.Background()
@@ -1407,7 +1407,7 @@ func TestClient_UnmarshalProtoResponse(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	serializer := NewProtoSerializer()
-	msg := &testpb.Reply{Content: "test"}
+	msg := testpb.Reply_builder{Content: "test"}.Build()
 
 	t.Run("non-metadata format", func(t *testing.T) {
 		frame, err := serializer.MarshalBinary(msg)
@@ -1420,7 +1420,7 @@ func TestClient_UnmarshalProtoResponse(t *testing.T) {
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "test", reply.Content)
+		require.Equal(t, "test", reply.GetContent())
 	})
 
 	t.Run("metadata format with metadata", func(t *testing.T) {
@@ -1438,7 +1438,7 @@ func TestClient_UnmarshalProtoResponse(t *testing.T) {
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "test", reply.Content)
+		require.Equal(t, "test", reply.GetContent())
 
 		v1, ok := respMD.Get("key1")
 		require.True(t, ok)
@@ -1460,7 +1460,7 @@ func TestClient_UnmarshalProtoResponse(t *testing.T) {
 
 		reply, ok := resp.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, "test", reply.Content)
+		require.Equal(t, "test", reply.GetContent())
 	})
 
 	t.Run("invalid frame", func(t *testing.T) {

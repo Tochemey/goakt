@@ -35,11 +35,35 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
+func TestMarshalProtoAppendRoundTrip(t *testing.T) {
+	msg := internalpb.Hello_builder{
+		Revision:     CapabilityRevisionTables,
+		SystemName:   "sys",
+		Host:         "127.0.0.1",
+		Port:         8080,
+		LaneRole:     internalpb.LaneRole_LANE_ROLE_CONTROL,
+		MaxFrameSize: defaultMaxFrameSize,
+	}.Build()
+
+	payload, err := MarshalProtoAppend(msg)
+	require.NoError(t, err)
+	require.NotEmpty(t, payload)
+
+	decoded := new(internalpb.Hello)
+	require.NoError(t, proto.Unmarshal(payload, decoded))
+	require.Equal(t, msg.GetSystemName(), decoded.GetSystemName())
+	require.Equal(t, msg.GetRevision(), decoded.GetRevision())
+
+	ReleaseMarshalBuffer(payload)
+	ReleaseMarshalBuffer(nil)
+}
+
 func TestProtoSerializer_MarshalUnmarshalBinary_Success(t *testing.T) {
-	orig := &testpb.Reply{Content: "hello world"}
+	orig := testpb.Reply_builder{Content: "hello world"}.Build()
 	serializer := NewProtoSerializer()
 
 	data, err := serializer.MarshalBinary(orig)
@@ -52,7 +76,7 @@ func TestProtoSerializer_MarshalUnmarshalBinary_Success(t *testing.T) {
 
 	reply, ok := actual.(*testpb.Reply)
 	require.True(t, ok)
-	require.Equal(t, orig.Content, reply.Content, "Expected message content to match")
+	require.Equal(t, orig.GetContent(), reply.GetContent(), "Expected message content to match")
 }
 
 func TestProtoSerializer_MarshalBinary_Errors(t *testing.T) {
@@ -235,7 +259,7 @@ func TestProtoSerializer_UnmarshalBinary_InvalidProtoPayload(t *testing.T) {
 }
 
 func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T) {
-	orig := &testpb.Reply{Content: "hello with metadata"}
+	orig := testpb.Reply_builder{Content: "hello with metadata"}.Build()
 	serializer := NewProtoSerializer()
 
 	t.Run("with metadata and deadline", func(t *testing.T) {
@@ -256,7 +280,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 
 		reply, ok := actual.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, orig.Content, reply.Content)
+		require.Equal(t, orig.GetContent(), reply.GetContent())
 
 		traceID, ok := mdOut.Get("trace-id")
 		require.True(t, ok)
@@ -283,7 +307,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 
 		reply, ok := actual.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, orig.Content, reply.Content)
+		require.Equal(t, orig.GetContent(), reply.GetContent())
 	})
 
 	t.Run("with empty metadata", func(t *testing.T) {
@@ -300,7 +324,7 @@ func TestProtoSerializer_MarshalUnmarshalBinaryWithMetadata_Success(t *testing.T
 
 		reply, ok := actual.(*testpb.Reply)
 		require.True(t, ok)
-		require.Equal(t, orig.Content, reply.Content)
+		require.Equal(t, orig.GetContent(), reply.GetContent())
 
 		// Empty metadata should have no headers.
 		_, ok = mdOut.Get("trace-id")

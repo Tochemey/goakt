@@ -54,7 +54,7 @@ var benchPayload [benchPayloadSize]byte
 
 // benchProtoReq is a small protobuf message reused across all proto
 // benchmark iterations. It is read-only and safe for concurrent use.
-var benchProtoReq = &testpb.Reply{Content: "bench"}
+var benchProtoReq = testpb.Reply_builder{Content: "bench"}.Build()
 
 func init() {
 	for i := range benchPayload {
@@ -86,18 +86,18 @@ func startBenchTCPServer(b *testing.B, handler RequestHandlerFunc) (*TCPServer, 
 	return srv, addr, done
 }
 
-// startBenchProtoServer creates, listens, and starts serving a ProtoServer
+// startBenchRemotingServer creates, listens, and starts serving a RemotingServer
 // with a single echo handler for testpb.Reply. It returns the server, the
 // listening address, and a channel that receives the Serve error on
 // shutdown.
-func startBenchProtoServer(b *testing.B) (*ProtoServer, string, <-chan error) {
+func startBenchRemotingServer(b *testing.B) (*RemotingServer, string, <-chan error) {
 	b.Helper()
 
 	echoHandler := func(_ context.Context, _ Connection, req proto.Message) (proto.Message, error) {
 		return req, nil
 	}
 
-	ps, err := NewProtoServer("127.0.0.1:0",
+	ps, err := NewRemotingServer("127.0.0.1:0",
 		WithProtoHandler("testpb.Reply", echoHandler),
 	)
 	if err != nil {
@@ -248,7 +248,7 @@ func BenchmarkTCPServer_KeepAlive(b *testing.B) {
 	<-done
 }
 
-// BenchmarkProtoServer_NoKeepAlive measures ProtoServer echo throughput with
+// BenchmarkRemotingServer_NoKeepAlive measures RemotingServer echo throughput with
 // 1000 concurrent clients and no connection reuse. Each benchmark iteration
 // is one complete protobuf round-trip: dial → marshal → write frame → read
 // frame → unmarshal → close. A fresh TCP connection is established and torn
@@ -256,9 +256,9 @@ func BenchmarkTCPServer_KeepAlive(b *testing.B) {
 //
 // Run:
 //
-//	go test ./internal/tcp/ -run ^$ -bench BenchmarkProtoServer_NoKeepAlive -benchtime 10s -count 1
-func BenchmarkProtoServer_NoKeepAlive(b *testing.B) {
-	ps, addr, done := startBenchProtoServer(b)
+//	go test ./internal/tcp/ -run ^$ -bench BenchmarkRemotingServer_NoKeepAlive -benchtime 10s -count 1
+func BenchmarkRemotingServer_NoKeepAlive(b *testing.B) {
+	ps, addr, done := startBenchRemotingServer(b)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -301,7 +301,7 @@ func BenchmarkProtoServer_NoKeepAlive(b *testing.B) {
 	<-done
 }
 
-// BenchmarkProtoServer_KeepAlive measures ProtoServer echo throughput with
+// BenchmarkRemotingServer_KeepAlive measures RemotingServer echo throughput with
 // 1000 persistent connections (keep-alive ON). A single [Client] with a
 // pool capacity of 1000 is shared across all goroutines. The first b.N
 // iterations establish connections (one per goroutine), after which all
@@ -310,9 +310,9 @@ func BenchmarkProtoServer_NoKeepAlive(b *testing.B) {
 //
 // Run:
 //
-//	go test ./internal/tcp/ -run ^$ -bench BenchmarkProtoServer_KeepAlive -benchtime 10s -count 1
-func BenchmarkProtoServer_KeepAlive(b *testing.B) {
-	ps, addr, done := startBenchProtoServer(b)
+//	go test ./internal/tcp/ -run ^$ -bench BenchmarkRemotingServer_KeepAlive -benchtime 10s -count 1
+func BenchmarkRemotingServer_KeepAlive(b *testing.B) {
+	ps, addr, done := startBenchRemotingServer(b)
 
 	// Single Client with pool capacity = benchConcurrency. Under full load
 	// each goroutine holds one connection, establishing exactly 1000

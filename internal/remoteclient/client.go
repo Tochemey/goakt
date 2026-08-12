@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -546,6 +547,10 @@ type Client interface {
 	// cancellation for that.
 	Close()
 
+	// ClosePeer closes every duplex lane for host:port. Future traffic dials a
+	// fresh lane set on demand.
+	ClosePeer(host string, port int)
+
 	// Compression returns the payload compression strategy configured on this
 	// client. This governs the content encoding used for both requests and responses.
 	Compression() remote.Compression
@@ -711,21 +716,24 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 
 // WithSendCoalescing enables per-destination send coalescing for RemoteTell.
 // When enabled, RemoteTell enqueues the serialized message onto a bounded
-// per-destination ring and returns immediately; a single writer goroutine
+// per-destination queue and returns immediately; a single writer goroutine
 // per destination sends whatever is available as soon as it wakes up
 // (Nagle-style). Batching only occurs naturally while a previous send RPC
 // is in flight: messages enqueued during that window are drained into the
 // next batch, capped at maxBatch. A single message against an idle
 // destination is sent immediately — no artificial delay.
+// The queue is also capped in bytes by the client's configured initial-credit
+// window; bytes remain charged while a batch is in flight. A single message
+// larger than the window is admitted only when the queue owns no other bytes.
 //
 // Semantics (different from the synchronous default):
 //   - RemoteTell returns nil once the message is enqueued. It does NOT report
-//     transport or server-side errors. Use WithCoalescingErrorHandler to
-//     observe failed batches.
+//     transport or server-side errors. Use WithTellFailureHandler to observe
+//     failed batches (and duplex admission failures).
 //   - Messages to the same destination preserve submission order.
 //   - Cross-destination ordering is not guaranteed (it already isn't).
-//   - If the per-destination ring is full, RemoteTell falls back to a
-//     synchronous send for that message only.
+//   - If the queue reaches either its message or byte bound, RemoteTell blocks
+//     until space is released or its context expires.
 //   - On Close, pending batches are flushed best-effort.
 //
 // Context propagation is preserved: if WithClientContextPropagator is set,
@@ -733,10 +741,7 @@ func WithClientSerializers(msg any, serializer remote.Serializer) ClientOption {
 // stored on each RemoteMessage, so the server can apply distinct metadata
 // to every message in a coalesced batch. Per-call deadlines, however, are
 // not honored on the async path — the caller's context governs enqueue
-// only; batch flushes use a fixed transport deadline.
-//
-// A maxBatch <= 0 disables coalescing and restores the synchronous
-// RemoteTell path end-to-end.
+// only; batch flushes use the configured client write timeout.
 //
 // A maxBatch <= 0 disables coalescing and restores the synchronous default.
 func WithSendCoalescing(maxBatch int) ClientOption {
@@ -745,15 +750,16 @@ func WithSendCoalescing(maxBatch int) ClientOption {
 	}
 }
 
-// WithCoalescingErrorHandler registers a callback invoked when a coalesced
-// batch fails to send. The handler receives the destination ("host:port"),
-// the messages in the failed batch, and the transport/server error. It runs
-// inline on the per-destination writer goroutine and must not block.
-//
-// Has no effect unless WithSendCoalescing is also set.
-func WithCoalescingErrorHandler(h CoalescingErrorHandler) ClientOption {
+// WithTellFailureHandler registers the shared fire-and-forget failure
+// callback: it is invoked when a coalesced legacy batch fails to send and
+// when a duplex-admitted tell fails on dial, encode, or write (see
+// tell_pump.go), so operators observe one failure model for undeliverable
+// tells. The handler receives the destination ("host:port"), the failed
+// messages, and the transport/server error. It runs inline on the
+// per-destination writer or lane-pump goroutine and must not block.
+func WithTellFailureHandler(h TellFailureHandler) ClientOption {
 	return func(r *client) {
-		r.coalescing.errHandler = h
+		r.tellFailureHandler = h
 	}
 }
 
@@ -765,6 +771,98 @@ func WithDependencyRegistry(registry types.Registry) ClientOption {
 		if registry != nil {
 			r.dependencyRegistry = registry
 		}
+	}
+}
+
+// WithClientProtocolPin selects the remoting wire protocol dialing policy:
+// [remote.ProtocolPinAuto] (duplex-first with legacy fallback and per-peer
+// cache), [remote.ProtocolPinLegacy] (unary SendProto only), or
+// [remote.ProtocolPinDuplex] (duplex only, no fallback). The default is auto.
+func WithClientProtocolPin(pin remote.ProtocolPin) ClientOption {
+	return func(x *client) {
+		x.protocolPin = pin
+	}
+}
+
+// WithClientWriteTimeout sets the bound applied to duplex [inet.DuplexSession]
+// submissions when the caller's context carries no deadline. Zero disables
+// the bound (Submit waits until capacity, cancel, or close).
+func WithClientWriteTimeout(d time.Duration) ClientOption {
+	return func(x *client) {
+		x.writeTimeout = d
+	}
+}
+
+// WithClientReadIdleTimeout sets the duplex PING/PONG liveness interval.
+func WithClientReadIdleTimeout(d time.Duration) ClientOption {
+	return func(x *client) {
+		x.readIdleTimeout = d
+	}
+}
+
+// WithClientOrdinaryLanes sets the number of lazily opened ordinary lanes.
+func WithClientOrdinaryLanes(n uint32) ClientOption {
+	return func(x *client) {
+		if n > 0 {
+			x.ordinaryLanes = n
+		}
+	}
+}
+
+// WithClientLargeMessageDestinations sets hierarchical-path patterns routed
+// to the isolated large lane.
+func WithClientLargeMessageDestinations(patterns []string) ClientOption {
+	return func(x *client) {
+		x.largeMessageDestinations = append([]string(nil), patterns...)
+	}
+}
+
+// WithClientMaxConcurrentLargeTransfers sets the HELLO-advertised cap on
+// concurrent large-message transfers. The value is negotiated and enforced
+// by the chunk reassembler and the sender-side gate.
+func WithClientMaxConcurrentLargeTransfers(n uint32) ClientOption {
+	return func(x *client) {
+		if n > 0 {
+			x.maxConcurrentLargeTransfers = n
+		}
+	}
+}
+
+// WithClientMaxFrameSize sets the HELLO max_frame_size advertised to peers
+// and the initial framed-connection limit before negotiation replaces it
+// with the pairwise minimum. It is also applied to the legacy unary client.
+func WithClientMaxFrameSize(maxSize uint32) ClientOption {
+	return func(x *client) {
+		x.maxFrameSize = maxSize
+	}
+}
+
+// WithClientChunkSize sets the local CHUNK send threshold. Zero keeps the
+// default (256 KiB). The value is not negotiated.
+func WithClientChunkSize(size uint32) ClientOption {
+	return func(x *client) {
+		if size > 0 {
+			x.chunkSize = size
+		}
+	}
+}
+
+// WithClientMaxMessageSize sets the HELLO-advertised cap on a reassembled
+// logical frame. Zero keeps the default (16 MiB).
+func WithClientMaxMessageSize(size uint64) ClientOption {
+	return func(x *client) {
+		if size > 0 {
+			x.maxMessageSize = size
+		}
+	}
+}
+
+// WithClientInitialCredits sets the client's flow-control window advertised in
+// HELLO (wire field initial_credits) and used as the duplex outbound admission
+// cap. Callers typically pass [remote.Config.CreditWindow].
+func WithClientInitialCredits(credits uint64) ClientOption {
+	return func(x *client) {
+		x.initialCredits = credits
 	}
 }
 
@@ -828,16 +926,38 @@ type client struct {
 	// coalescing configures optional per-destination send coalescing. When
 	// enabled, RemoteTell returns as soon as the message is enqueued for the
 	// per-destination writer goroutine, and transport errors are reported via
-	// the configured CoalescingErrorHandler instead of the RemoteTell return
+	// the configured TellFailureHandler instead of the RemoteTell return
 	// value. Disabled by default.
 	coalescing coalescingConfig
 
-	// coalescers caches one coalescer per destination endpoint ("host:port").
-	// Populated lazily on first coalesced send to a new destination and
-	// torn down in Close. coalescersMu guards the creation path only; reads
-	// go through the lock-free map Get.
-	coalescers   *xsync.Map[string, *coalescer]
+	// tellFailureHandler receives undeliverable fire-and-forget tells from
+	// the legacy coalescer and the duplex lane pump. See WithTellFailureHandler.
+	tellFailureHandler TellFailureHandler
+
+	// coalescers caches one coalescer per (destination endpoint,
+	// ordinary-lane shard). Populated lazily on first coalesced send to a
+	// new shard and torn down in Close. coalescersMu guards the creation
+	// path only; reads go through the lock-free map Get.
+	coalescers   *xsync.Map[coalescerKey, *coalescer]
 	coalescersMu sync.Mutex
+
+	// protocolPin selects duplex-first, legacy-only, or duplex-only dialing.
+	protocolPin remote.ProtocolPin
+
+	// Duplex transport limits advertised in HELLO and applied to OpenDuplex.
+	writeTimeout                time.Duration
+	readIdleTimeout             time.Duration
+	ordinaryLanes               uint32
+	largeMessageDestinations    []string
+	maxConcurrentLargeTransfers uint32
+	maxFrameSize                uint32
+	maxMessageSize              uint64
+	chunkSize                   uint32
+	initialCredits              uint64
+
+	// peers holds one long-lived duplex session and protocol cache per endpoint.
+	peers   *xsync.Map[string, *peer]
+	peersMu sync.Mutex
 
 	// payloadPool recycles the intermediate payload frames produced when
 	// serializing outbound messages on the synchronous send paths. The frame
@@ -867,13 +987,23 @@ var _ Client = (*client)(nil)
 func NewClient(opts ...ClientOption) Client {
 	r := &client{
 		// Performance defaults based on benchmarks
-		maxIdleConns: inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
-		idleTimeout:  30 * time.Second,         // 30s before eviction
-		dialTimeout:  5 * time.Second,          // 5s dial timeout
-		keepAlive:    15 * time.Second,         // 15s TCP keep-alive
-		compression:  remote.NoCompression,     // No compression (matches server default in remote.Config)
-		clientCache:  xsync.NewMap[string, *inet.Client](),
-		coalescers:   xsync.NewMap[string, *coalescer](),
+		maxIdleConns:                inet.DefaultMaxIdleConns, // pooled connections retained per endpoint
+		idleTimeout:                 30 * time.Second,         // 30s before eviction
+		dialTimeout:                 5 * time.Second,          // 5s dial timeout
+		keepAlive:                   15 * time.Second,         // 15s TCP keep-alive
+		compression:                 remote.NoCompression,     // No compression (matches server default in remote.Config)
+		clientCache:                 xsync.NewMap[string, *inet.Client](),
+		coalescers:                  xsync.NewMap[coalescerKey, *coalescer](),
+		protocolPin:                 remote.ProtocolPinAuto,
+		writeTimeout:                10 * time.Second,
+		readIdleTimeout:             10 * time.Second,
+		ordinaryLanes:               remote.DefaultOrdinaryLanes,
+		maxConcurrentLargeTransfers: remote.DefaultMaxConcurrentLargeTransfers,
+		maxFrameSize:                16 * size.MB,
+		maxMessageSize:              remote.DefaultMaxMessageSize,
+		chunkSize:                   remote.DefaultChunkSize,
+		initialCredits:              remote.DefaultCreditWindow,
+		peers:                       xsync.NewMap[string, *peer](),
 		// Pre-allocate with capacity for the default entry plus a few custom ones.
 		serializers: make([]ifaceEntry, 0, 4),
 		payloadPool: inet.NewFramePool(),
@@ -888,6 +1018,13 @@ func NewClient(opts ...ClientOption) Client {
 	// Apply options
 	for _, opt := range opts {
 		opt(r)
+	}
+
+	// Install one shared TLS session cache on the stored config so every
+	// per-dial clone (legacy and duplex) resumes sessions across dials
+	// instead of handshaking from scratch each time.
+	if r.tlsConfig != nil && r.tlsConfig.ClientSessionCache == nil {
+		r.tlsConfig.ClientSessionCache = tls.NewLRUClientSessionCache(32)
 	}
 
 	// Build the composite dispatcher once; it references the now-frozen
@@ -954,14 +1091,12 @@ func (r *client) RemoteChildren(ctx context.Context, host string, port int, name
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteChildrenRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteChildrenRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1011,14 +1146,12 @@ func (r *client) RemoteDependencies(ctx context.Context, host string, port int, 
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteDependenciesRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteDependenciesRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1068,14 +1201,12 @@ func (r *client) RemoteKind(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteKindRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteKindRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return "", err
 	}
@@ -1116,14 +1247,12 @@ func (r *client) RemoteMetric(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteMetricRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteMetricRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1164,14 +1293,12 @@ func (r *client) RemoteParent(ctx context.Context, host string, port int, name s
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteParentRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteParentRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1217,14 +1344,12 @@ func (r *client) RemotePassivationStrategy(ctx context.Context, host string, por
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemotePassivationStrategyRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemotePassivationStrategyRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1265,14 +1390,12 @@ func (r *client) RemoteRole(ctx context.Context, host string, port int, name str
 		return "", err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteRoleRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteRoleRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return "", err
 	}
@@ -1339,23 +1462,21 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 		initTimeout = durationpb.New(childRequest.InitTimeout)
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteSpawnChildRequest{
-		Host:                host,
-		Port:                port32,
-		ActorName:           childRequest.Name,
-		ActorType:           childRequest.Kind,
-		Parent:              childRequest.Parent,
-		Relocatable:         childRequest.Relocatable,
-		PassivationStrategy: codec.EncodePassivationStrategy(childRequest.PassivationStrategy),
-		Dependencies:        dependencies,
-		EnableStash:         childRequest.EnableStashing,
-		Reentrancy:          reentrancy,
-		Supervisor:          codec.EncodeSupervisor(childRequest.Supervisor),
-		InitTimeout:         initTimeout,
-	}
+	request := &internalpb.RemoteSpawnChildRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetActorName(childRequest.Name)
+	request.SetActorType(childRequest.Kind)
+	request.SetParent(childRequest.Parent)
+	request.SetRelocatable(childRequest.Relocatable)
+	request.SetPassivationStrategy(codec.EncodePassivationStrategy(childRequest.PassivationStrategy))
+	request.SetDependencies(dependencies)
+	request.SetEnableStash(childRequest.EnableStashing)
+	request.SetReentrancy(reentrancy)
+	request.SetSupervisor(codec.EncodeSupervisor(childRequest.Supervisor))
+	request.SetInitTimeout(initTimeout)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1401,14 +1522,12 @@ func (r *client) RemoteStashSize(ctx context.Context, host string, port int, nam
 		return 0, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteStashSizeRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteStashSizeRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return 0, err
 	}
@@ -1450,15 +1569,13 @@ func (r *client) RemoteState(ctx context.Context, host string, port int, name st
 		return false, err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteStateRequest{
-		Host:  host,
-		Port:  port32,
-		Name:  name,
-		State: codec.EncodeActorState(state),
-	}
+	request := &internalpb.RemoteStateRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetState(codec.EncodeActorState(state))
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return false, err
 	}
@@ -1501,15 +1618,11 @@ func (r *client) RemoteActivateGrain(ctx context.Context, host string, port int,
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteActivateGrainRequest{
-		Grain: grain,
-	}
+	request := &internalpb.RemoteActivateGrainRequest{}
+	request.SetGrain(grain)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -1540,9 +1653,7 @@ func (r *client) RelocateBatch(ctx context.Context, host string, port int, reque
 		return nil, err
 	}
 
-	client := r.NetClient(host, port)
-
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1602,17 +1713,13 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteAskGrainRequest{
-		Grain:          grain,
-		Message:        marshaled,
-		RequestTimeout: durationpb.New(timeout),
-	}
+	request := &internalpb.RemoteAskGrainRequest{}
+	request.SetGrain(grain)
+	request.SetMessage(marshaled)
+	request.SetRequestTimeout(durationpb.New(timeout))
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1670,16 +1777,12 @@ func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, gra
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteTellGrainRequest{
-		Grain:   grain,
-		Message: marshaled,
-	}
+	request := &internalpb.RemoteTellGrainRequest{}
+	request.SetGrain(grain)
+	request.SetMessage(marshaled)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -1709,8 +1812,10 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 	// per-message metadata when dispatching. That keeps trace spans and
 	// baggage correct even when many callers' messages share a batch.
 	// The payload outlives this call (it is flushed asynchronously), so it
-	// must not come from the payload pool.
-	if r.coalescing.enabled() {
+	// must not come from the payload pool. Large-message destinations bypass
+	// coalescing entirely: their tells take the routed path below so they
+	// ride the dedicated large lane instead of an ordinary-lane batch.
+	if r.coalescing.enabled() && !r.isLargeReceiver(to.String()) {
 		marshaled, err := serializer.Serialize(message)
 		if err != nil {
 			return gerrors.NewErrInvalidMessage(err)
@@ -1725,14 +1830,13 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 			return err
 		}
 
-		msg := &internalpb.RemoteMessage{
-			Sender:   from.String(),
-			Receiver: to.String(),
-			Message:  marshaled,
-			Metadata: md,
-		}
+		msg := &internalpb.RemoteMessage{}
+		msg.SetSender(from.String())
+		msg.SetReceiver(to.String())
+		msg.SetMessage(marshaled)
+		msg.SetMetadata(md)
 
-		c := r.getCoalescer(to.Host(), to.Port())
+		c := r.getCoalescer(to.Host(), to.Port(), r.ordinaryLaneForReceiver(msg.GetReceiver()))
 		if c == nil {
 			return gerrors.NewErrRemoteSendFailure(errors.New("no coalescer available for destination"))
 		}
@@ -1756,9 +1860,7 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		}
 	}
 
-	// Non-coalesced path (WithSendCoalescing not set). One RPC per call.
-	// The payload frame is pooled: the envelope references it only until
-	// SendProto has marshaled and written the wire request.
+	// Non-coalesced path: duplex tell or legacy RemoteTellRequest fallback.
 	marshaled, pooled, err := r.serializePayload(serializer, message)
 	if err != nil {
 		return gerrors.NewErrInvalidMessage(err)
@@ -1772,23 +1874,12 @@ func (r *client) RemoteTell(ctx context.Context, from, to *address.Address, mess
 		return err
 	}
 
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteTellRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  marshaled,
-			},
-		},
-	}
-
-	resp, err := client.SendProto(ctx, request)
+	params, err := r.buildUserTellParams(ctx, from.String(), to.String(), message, serializer, marshaled)
 	if err != nil {
 		return err
 	}
 
-	return checkProtoError(resp)
+	return r.sendTell(ctx, to.Host(), to.Port(), params)
 }
 
 // injectMessageMetadata snapshots the configured context propagator's
@@ -1816,30 +1907,59 @@ func (r *client) injectMessageMetadata(ctx context.Context) (map[string]string, 
 	return md, nil
 }
 
-// getCoalescer returns the per-destination coalescer for (host, port), creating
-// it on first use. Lazy initialization uses the same double-checked pattern as
-// NetClient. Returns nil if coalescing is not enabled.
-func (r *client) getCoalescer(host string, port int) *coalescer {
+// isLargeReceiver reports whether receiver matches a configured
+// large-message destination pattern. Large receivers bypass tell coalescing
+// so their traffic rides the dedicated large lane through the routed send
+// path, preserving the head-of-line isolation that lane exists for.
+func (r *client) isLargeReceiver(receiver string) bool {
+	if len(r.largeMessageDestinations) == 0 {
+		return false
+	}
+
+	return matchesLargeDestination(hierarchicalPath(receiver), r.largeMessageDestinations)
+}
+
+// ordinaryLaneForReceiver assigns receiver to a stable ordinary-lane shard so
+// coalesced tells for one receiver always ride the same lane and per-pair
+// FIFO survives sharding. With one configured lane (the default) every
+// receiver maps to lane 0, preserving pre-sharding behavior exactly.
+func (r *client) ordinaryLaneForReceiver(receiver string) uint32 {
+	if r.ordinaryLanes <= 1 {
+		return 0
+	}
+
+	return fnv32a(receiver) % r.ordinaryLanes
+}
+
+// getCoalescer returns the coalescer shard for (host, port, laneIndex),
+// creating it on first use. One coalescer exists per destination lane shard,
+// so shards batch and flush concurrently on their own ordinary lanes. Lazy
+// initialization uses the same double-checked pattern as NetClient. Returns
+// nil if coalescing is not enabled.
+func (r *client) getCoalescer(host string, port int, laneIndex uint32) *coalescer {
 	if !r.coalescing.enabled() {
 		return nil
 	}
 
-	dest := net.JoinHostPort(host, strconv.Itoa(port))
-	if c, ok := r.coalescers.Get(dest); ok {
+	key := coalescerKey{host: host, port: port, lane: laneIndex}
+	if c, ok := r.coalescers.Get(key); ok {
 		return c
 	}
 
-	// Resolve the net client outside the coalescer creation lock: NetClient
-	// takes r.clientMu internally, so nesting would self-deadlock.
-	nc := r.NetClient(host, port)
 	r.coalescersMu.Lock()
 	defer r.coalescersMu.Unlock()
-	if c, ok := r.coalescers.Get(dest); ok {
+	if c, ok := r.coalescers.Get(key); ok {
 		return c
 	}
 
-	coalescer := newCoalescer(dest, nc, r.coalescing)
-	r.coalescers.Set(dest, coalescer)
+	flush := func(ctx context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		return r.flushTellBatch(ctx, host, port, laneIndex, req)
+	}
+	cfg := r.coalescing
+	cfg.maxBufferedBytes = r.initialCredits
+	cfg.flushTimeout = r.writeTimeout
+	coalescer := newCoalescer(net.JoinHostPort(host, strconv.Itoa(port)), cfg, r.tellFailureHandler, flush)
+	r.coalescers.Set(key, coalescer)
 	return coalescer
 }
 
@@ -1862,8 +1982,6 @@ func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, messa
 		return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
 	}
 
-	// The payload frame is pooled: the envelope references it only until
-	// SendProto has marshaled and written the wire request.
 	marshaled, pooled, err := r.serializePayload(serializer, message)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
@@ -1872,49 +1990,17 @@ func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, messa
 		defer r.payloadPool.Put(marshaled)
 	}
 
-	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessages: []*internalpb.RemoteMessage{
-			{
-				Sender:   from.String(),
-				Receiver: to.String(),
-				Message:  marshaled,
-			},
-		},
-		Timeout: durationpb.New(timeout),
-	}
-
-	// Send request
-	resp, err := client.SendProto(ctx, request)
+	params, err := r.buildUserTellParams(ctx, from.String(), to.String(), message, serializer, marshaled)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := checkProtoError(resp); err != nil {
-		return nil, err
-	}
-
-	askResp, ok := resp.(*internalpb.RemoteAskResponse)
-	if !ok {
-		return nil, errors.New("invalid response type")
-	}
-
-	if len(askResp.Messages) == 0 {
-		return nil, nil
-	}
-
-	deserialized, err := serializer.Deserialize(askResp.Messages[0])
-	if err != nil {
-		return nil, gerrors.NewErrInvalidMessage(err)
-	}
-	return deserialized, nil
+	return r.sendAsk(ctx, to.Host(), to.Port(), askParams{tellParams: params, timeout: timeout}, serializer)
 }
 
 // RemoteLookup resolves the address of an actor hosted on a remote node. A
@@ -1932,17 +2018,13 @@ func (r *client) RemoteLookup(ctx context.Context, host string, port int, name s
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteLookupRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteLookupRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -1979,18 +2061,14 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.GetReliableCompanionRequest{
-		Host:         host,
-		Port:         port32,
-		EndpointName: endpointName,
-		Role:         role,
-	}
+	request := &internalpb.GetReliableCompanionRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetEndpointName(endpointName)
+	request.SetRole(role)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2011,133 +2089,107 @@ func (r *client) GetReliableCompanion(ctx context.Context, host string, port int
 	return address.Parse(companionResp.GetAddress())
 }
 
-// RemoteBatchTell sends multiple asynchronous messages to the same remote actor
-// in a single RPC. Nil entries in messages are ignored.
+// RemoteBatchTell sends multiple asynchronous messages to the same remote
+// actor. Nil entries in messages are ignored.
 //
-// The call succeeds or fails as a whole at the transport layer; no per-message
+// Messages are handed to the transport in submission order and share
+// RemoteTell's fire-and-forget contract: backpressure and caller
+// cancellation surface synchronously (a prefix of the batch may already be
+// admitted when they do), while transport failures after admission
+// dead-letter through the configured TellFailureHandler. No per-message
 // acknowledgement is returned.
 func (r *client) RemoteBatchTell(ctx context.Context, from, to *address.Address, messages []any) error {
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
 	toStr := to.String()
+	params := make([]tellParams, 0, len(messages))
+
 	for _, message := range messages {
-		if message != nil {
-			serializer := r.resolveSerializer(message)
-			if serializer == nil {
-				return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
-			}
-
-			packed, err := serializer.Serialize(message)
-			if err != nil {
-				return gerrors.NewErrInvalidMessage(err)
-			}
-
-			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   fromStr,
-				Receiver: toStr,
-				Message:  packed,
-			})
+		if message == nil {
+			continue
 		}
+
+		serializer := r.resolveSerializer(message)
+		if serializer == nil {
+			return gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+		}
+
+		packed, err := serializer.Serialize(message)
+		if err != nil {
+			return gerrors.NewErrInvalidMessage(err)
+		}
+
+		serID, typeName := serializerWireID(serializer, message, packed)
+		params = append(params, tellParams{
+			sender:   fromStr,
+			receiver: toStr,
+			payload:  packed,
+			serID:    serID,
+			typeName: typeName,
+		})
 	}
 
-	// Enrich context with metadata
 	ctx, err := r.enrichContext(ctx)
 	if err != nil {
 		return err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteTellRequest{
-		RemoteMessages: remoteMessages,
+	// One marshaled metadata blob serves the whole batch: every message
+	// shares ctx, so re-marshaling per message would only add allocations.
+	meta, _ := metadataWireFromContext(ctx)
+	for i := range params {
+		params[i].metadata = meta
 	}
 
-	// Send request
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return err
-	}
-
-	return checkProtoError(resp)
+	return r.sendBatchTellDuplex(ctx, to.Host(), to.Port(), params)
 }
 
 // RemoteBatchAsk delivers multiple request messages to a remote actor and
-// aggregates all responses received before the provided timeout elapses.
-//
-// The number and order of responses may not match the requests. If correlation
-// is required, include a correlation ID within your message payloads.
+// aggregates all responses. On the duplex path, responses are returned in
+// request order; on the legacy path, server collection order applies.
 func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, messages []any, timeout time.Duration) (responses []any, err error) {
-	// Bound the whole round trip client-side; a lost response then fails the
-	// call after timeout instead of hanging forever on the socket read.
 	ctx, cancel := askContext(ctx, timeout)
 	defer cancel()
 
-	remoteMessages := make([]*internalpb.RemoteMessage, 0, len(messages))
-	serializers := make([]remote.Serializer, 0, len(messages))
-	// Pre-compute address strings once; they are constant across the whole batch.
 	fromStr := from.String()
 	toStr := to.String()
+	params := make([]askParams, 0, len(messages))
+	serializers := make([]remote.Serializer, 0, len(messages))
 
 	for _, message := range messages {
-		if message != nil {
-			serializer := r.resolveSerializer(message)
-			if serializer == nil {
-				return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
-			}
-
-			packed, err := serializer.Serialize(message)
-			if err != nil {
-				return nil, gerrors.NewErrInvalidMessage(err)
-			}
-
-			serializers = append(serializers, serializer)
-			remoteMessages = append(remoteMessages, &internalpb.RemoteMessage{
-				Sender:   fromStr,
-				Receiver: toStr,
-				Message:  packed,
-			})
+		if message == nil {
+			continue
 		}
+
+		serializer := r.resolveSerializer(message)
+		if serializer == nil {
+			return nil, gerrors.NewErrInvalidMessage(fmt.Errorf("no serializer found for message type %T", message))
+		}
+
+		packed, err := serializer.Serialize(message)
+		if err != nil {
+			return nil, gerrors.NewErrInvalidMessage(err)
+		}
+
+		serID, typeName := serializerWireID(serializer, message, packed)
+		serializers = append(serializers, serializer)
+		params = append(params, askParams{
+			tellParams: tellParams{
+				sender:   fromStr,
+				receiver: toStr,
+				payload:  packed,
+				serID:    serID,
+				typeName: typeName,
+			},
+			timeout: timeout,
+		})
 	}
 
-	// Enrich context with metadata
 	ctx, err = r.enrichContext(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get pooled client
-	client := r.NetClient(to.Host(), to.Port())
-	request := &internalpb.RemoteAskRequest{
-		RemoteMessages: remoteMessages,
-		Timeout:        durationpb.New(timeout),
-	}
-
-	// Send request
-	resp, err := client.SendProto(ctx, request)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := checkProtoError(resp); err != nil {
-		return nil, err
-	}
-
-	askResp, ok := resp.(*internalpb.RemoteAskResponse)
-	if !ok {
-		return nil, errors.New("invalid response type")
-	}
-
-	responses = make([]any, 0, len(askResp.GetMessages()))
-	for index, message := range askResp.GetMessages() {
-		deserialized, err := serializers[index].Deserialize(message)
-		if err != nil {
-			return nil, gerrors.NewErrInvalidMessage(err)
-		}
-		responses = append(responses, deserialized)
-	}
-
-	return responses, nil
+	return r.sendBatchAskDuplex(ctx, to.Host(), to.Port(), params, serializers)
 }
 
 // RemoteSpawn creates an actor on a remote node using the provided spawn
@@ -2172,11 +2224,10 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 
 	var singletonSpec *internalpb.SingletonSpec
 	if spawnRequest.Singleton != nil {
-		singletonSpec = &internalpb.SingletonSpec{
-			SpawnTimeout: durationpb.New(spawnRequest.Singleton.SpawnTimeout),
-			WaitInterval: durationpb.New(spawnRequest.Singleton.WaitInterval),
-			MaxRetries:   spawnRequest.Singleton.MaxRetries,
-		}
+		singletonSpec = &internalpb.SingletonSpec{}
+		singletonSpec.SetSpawnTimeout(durationpb.New(spawnRequest.Singleton.SpawnTimeout))
+		singletonSpec.SetWaitInterval(durationpb.New(spawnRequest.Singleton.WaitInterval))
+		singletonSpec.SetMaxRetries(spawnRequest.Singleton.MaxRetries)
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
@@ -2194,28 +2245,26 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	if spawnRequest.InitTimeout > 0 {
 		initTimeout = durationpb.New(spawnRequest.InitTimeout)
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteSpawnRequest{
-		Host:                host,
-		Port:                port32,
-		ActorName:           spawnRequest.Name,
-		ActorType:           spawnRequest.Kind,
-		Singleton:           singletonSpec,
-		Relocatable:         spawnRequest.Relocatable,
-		PassivationStrategy: codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy),
-		Dependencies:        dependencies,
-		EnableStash:         spawnRequest.EnableStashing,
-		Role:                spawnRequest.Role,
-		Supervisor:          codec.EncodeSupervisor(spawnRequest.Supervisor),
-		Reentrancy:          reentrancy,
-		InitTimeout:         initTimeout,
-		ReliableDelivery:    encodeReliableDelivery(spawnRequest.ReliableDelivery),
+	request := &internalpb.RemoteSpawnRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetActorName(spawnRequest.Name)
+	request.SetActorType(spawnRequest.Kind)
+	request.SetSingleton(singletonSpec)
+	request.SetRelocatable(spawnRequest.Relocatable)
+	request.SetPassivationStrategy(codec.EncodePassivationStrategy(spawnRequest.PassivationStrategy))
+	request.SetDependencies(dependencies)
+	request.SetEnableStash(spawnRequest.EnableStashing)
+	if spawnRequest.Role != nil {
+		request.SetRole(*spawnRequest.Role)
 	}
+	request.SetSupervisor(codec.EncodeSupervisor(spawnRequest.Supervisor))
+	request.SetReentrancy(reentrancy)
+	request.SetInitTimeout(initTimeout)
+	request.SetReliableDelivery(encodeReliableDelivery(spawnRequest.ReliableDelivery))
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2245,35 +2294,32 @@ func encodeReliableDelivery(spec *remote.ReliableDeliverySpec) *internalpb.Relia
 			pattern = internalpb.ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_WORK_PULLING
 		}
 
-		producer := &internalpb.ReliableProducerConfig{
-			ConsumerName: spec.Producer.ConsumerName,
-			QueueRetry: &internalpb.QueueRetryConfig{
-				MaxAttempts:    uint32(spec.Producer.QueueRetryMaxAttempts), // nolint
-				InitialBackoff: durationpb.New(spec.Producer.QueueRetryInitialBackoff),
-			},
-			LocalRetryInterval:   durationpb.New(spec.Producer.LocalRetryInterval),
-			DeliveryConfirmation: spec.Producer.DeliveryConfirmation,
-			MaxChunkBytes:        spec.Producer.MaxChunkBytes,
-			Pattern:              pattern,
-		}
+		qrc := &internalpb.QueueRetryConfig{}
+		qrc.SetMaxAttempts(uint32(spec.Producer.QueueRetryMaxAttempts)) // nolint
+		qrc.SetInitialBackoff(durationpb.New(spec.Producer.QueueRetryInitialBackoff))
+		producer := &internalpb.ReliableProducerConfig{}
+		producer.SetConsumerName(spec.Producer.ConsumerName)
+		producer.SetQueueRetry(qrc)
+		producer.SetLocalRetryInterval(durationpb.New(spec.Producer.LocalRetryInterval))
+		producer.SetDeliveryConfirmation(spec.Producer.DeliveryConfirmation)
+		producer.SetMaxChunkBytes(spec.Producer.MaxChunkBytes)
+		producer.SetPattern(pattern)
 
 		if spec.Producer.DurableQueueID != types.EmptyString {
-			producer.DurableQueueId = new(spec.Producer.DurableQueueID)
+			producer.SetDurableQueueId(spec.Producer.DurableQueueID)
 		}
 
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
-		}
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetProducer(proto.ValueOrDefault(producer))
+		return rdc
 	case spec.Consumer != nil:
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
-				Consumer: &internalpb.ReliableConsumerConfig{
-					ProducerName:      spec.Consumer.ProducerName,
-					FlowControlWindow: uint32(spec.Consumer.FlowControlWindow), // nolint
-					ResendInterval:    durationpb.New(spec.Consumer.ResendInterval),
-				},
-			},
-		}
+		rcc := &internalpb.ReliableConsumerConfig{}
+		rcc.SetProducerName(spec.Consumer.ProducerName)
+		rcc.SetFlowControlWindow(uint32(spec.Consumer.FlowControlWindow)) // nolint
+		rcc.SetResendInterval(durationpb.New(spec.Consumer.ResendInterval))
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetConsumer(proto.ValueOrDefault(rcc))
+		return rdc
 	default:
 		return nil
 	}
@@ -2291,17 +2337,13 @@ func (r *client) RemoteReSpawn(ctx context.Context, host string, port int, name 
 	if err != nil {
 		return nil, err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteReSpawnRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteReSpawnRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return nil, err
 	}
@@ -2339,17 +2381,13 @@ func (r *client) RemoteStop(ctx context.Context, host string, port int, name str
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteStopRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteStopRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2376,15 +2414,13 @@ func (r *client) RemoteWatch(ctx context.Context, host string, port int, name st
 		return err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteWatchRequest{
-		Host:           host,
-		Port:           port32,
-		Name:           name,
-		WatcherAddress: watcher.String(),
-	}
+	request := &internalpb.RemoteWatchRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetWatcherAddress(watcher.String())
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2405,15 +2441,13 @@ func (r *client) RemoteUnWatch(ctx context.Context, host string, port int, name 
 		return err
 	}
 
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteUnWatchRequest{
-		Host:           host,
-		Port:           port32,
-		Name:           name,
-		WatcherAddress: watcher.String(),
-	}
+	request := &internalpb.RemoteUnWatchRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
+	request.SetWatcherAddress(watcher.String())
 
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2440,17 +2474,13 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 	if err != nil {
 		return err
 	}
-
-	// Get pooled client
-	client := r.NetClient(host, port)
-	request := &internalpb.RemoteReinstateRequest{
-		Host: host,
-		Port: port32,
-		Name: name,
-	}
+	request := &internalpb.RemoteReinstateRequest{}
+	request.SetHost(host)
+	request.SetPort(port32)
+	request.SetName(name)
 
 	// Send request
-	resp, err := client.SendProto(ctx, request)
+	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
 		return err
 	}
@@ -2473,10 +2503,15 @@ func (r *client) RemoteReinstate(ctx context.Context, host string, port int, nam
 func (r *client) Close() {
 	// Drain and stop all coalescers first so any pending batches are flushed
 	// through still-open pooled clients before those clients close.
-	r.coalescers.Range(func(_ string, c *coalescer) {
+	r.coalescers.Range(func(_ coalescerKey, c *coalescer) {
 		c.close()
 	})
 	r.coalescers.Reset()
+
+	r.peers.Range(func(_ string, p *peer) {
+		p.closeAllLanes()
+	})
+	r.peers.Reset()
 
 	// Close all pooled clients to release TCP connections and file descriptors
 	r.clientCache.Range(func(_ string, client *inet.Client) {
@@ -2485,6 +2520,15 @@ func (r *client) Close() {
 
 	// Clear the cache to release references
 	r.clientCache.Reset()
+}
+
+// ClosePeer closes cached lanes for an endpoint and removes the peer entry.
+func (r *client) ClosePeer(host string, port int) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	if p, ok := r.peers.Get(addr); ok {
+		p.closeAllLanes()
+		r.peers.Delete(addr)
+	}
 }
 
 // Compression returns the compression algorithm configured on the remoting
@@ -2547,6 +2591,7 @@ func (r *client) newNetClient(host string, port int) *inet.Client {
 		inet.WithIdleTimeout(r.idleTimeout),
 		inet.WithDialTimeout(r.dialTimeout),
 		inet.WithKeepAlive(r.keepAlive),
+		inet.WithMaxFrameSize(r.maxFrameSize),
 	}
 
 	// Add TLS with session caching for connection reuse
@@ -2737,22 +2782,21 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 		}
 	}
 
-	grain := &internalpb.Grain{
-		Host: host,
-		Port: port32,
-		GrainId: &internalpb.GrainId{
-			Kind:  grainRequest.Kind,
-			Name:  grainRequest.Name,
-			Value: fmt.Sprintf("%s%s%s", grainRequest.Kind, id.GrainIdentitySeparator, grainRequest.Name),
-		},
-		Dependencies:      dependencies,
-		ActivationRetries: int32(grainRequest.ActivationRetries),
-		ActivationTimeout: durationpb.New(grainRequest.ActivationTimeout),
-		MailboxCapacity:   new(grainRequest.MailboxCapacity),
-		DisableRelocation: grainRequest.DisableRelocation,
-		EagerRelocation:   grainRequest.EagerRelocation,
-		Reentrancy:        codec.EncodeReentrancy(grainRequest.Reentrancy),
-	}
+	grainID := &internalpb.GrainId{}
+	grainID.SetKind(grainRequest.Kind)
+	grainID.SetName(grainRequest.Name)
+	grainID.SetValue(fmt.Sprintf("%s%s%s", grainRequest.Kind, id.GrainIdentitySeparator, grainRequest.Name))
+	grain := &internalpb.Grain{}
+	grain.SetHost(host)
+	grain.SetPort(port32)
+	grain.SetGrainId(grainID)
+	grain.SetDependencies(dependencies)
+	grain.SetActivationRetries(int32(grainRequest.ActivationRetries))
+	grain.SetActivationTimeout(durationpb.New(grainRequest.ActivationTimeout))
+	grain.SetMailboxCapacity(grainRequest.MailboxCapacity)
+	grain.SetDisableRelocation(grainRequest.DisableRelocation)
+	grain.SetEagerRelocation(grainRequest.EagerRelocation)
+	grain.SetReentrancy(codec.EncodeReentrancy(grainRequest.Reentrancy))
 
 	return grain, nil
 }

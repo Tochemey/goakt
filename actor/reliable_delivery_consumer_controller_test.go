@@ -258,7 +258,7 @@ func (x *consumerControllerHarness) adopt(t *testing.T, sessionID string, nextSe
 func (x *consumerControllerHarness) sequenced(t *testing.T, sessionID string, seq int64) *commands.SequencedMessage {
 	t.Helper()
 
-	payload := &testpb.Reply{Content: fmt.Sprintf("message-%d", seq)}
+	payload := testpb.Reply_builder{Content: fmt.Sprintf("message-%d", seq)}.Build()
 	frame, err := x.system.getRemoting().Serializer(payload).Serialize(payload)
 	require.NoError(t, err)
 
@@ -281,7 +281,7 @@ func (x *consumerControllerHarness) chunk(t *testing.T, sessionID, messageID str
 func (x *consumerControllerHarness) encodeReply(t *testing.T, content string) []byte {
 	t.Helper()
 
-	payload := &testpb.Reply{Content: content}
+	payload := testpb.Reply_builder{Content: content}.Build()
 	frame, err := x.system.getRemoting().Serializer(payload).Serialize(payload)
 	require.NoError(t, err)
 	return frame
@@ -563,7 +563,7 @@ func TestConsumerControllerProtocolDrops(t *testing.T) {
 	})
 
 	t.Run("With unhandled message", func(t *testing.T) {
-		require.NoError(t, Tell(harness.ctx, harness.consumerController, &testpb.Reply{Content: "noise"}))
+		require.NoError(t, Tell(harness.ctx, harness.consumerController, testpb.Reply_builder{Content: "noise"}.Build()))
 		pause.For(150 * time.Millisecond)
 		assert.True(t, harness.consumerController.IsRunning())
 	})
@@ -648,7 +648,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, controller.PreStart(nil))
 		controller.sawValidTraffic = true
 
-		stale := &consumerControllerTick{generation: controller.generation + 1}
+		stale := &consumerControllerTick{generation: controller.generation.Load() + 1}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, stale)
 		controller.handleTick(rctx, stale)
 		assert.True(t, controller.sawValidTraffic)
@@ -670,7 +670,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, err)
 		controller.buffer = []*commands.SequencedMessage{three}
 
-		tick := &consumerControllerTick{generation: controller.generation}
+		tick := &consumerControllerTick{generation: controller.generation.Load()}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, tick)
 		controller.handleTick(rctx, tick)
 
@@ -819,7 +819,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		// PreStart requires a local consumer; swap afterwards so newDelivery rejects ownership
 		controller.consumer = newRemotePID(address.New("remote-consumer", "sys", "127.0.0.1", 1), nil)
 
-		payload := &testpb.Reply{Content: "x"}
+		payload := testpb.Reply_builder{Content: "x"}.Build()
 		frame, err := system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		msg, err := commands.NewSequencedMessage("s1", "id-1", 1, frame)

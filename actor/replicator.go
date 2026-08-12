@@ -169,12 +169,12 @@ func (r *replicatorActor) PreStart(ctx *Context) error {
 	crdtExt := ext.(*crdtConfigExtension)
 	r.config = crdtExt.Config()
 	r.dc = crdtExt.dc
-	r.originDCProto = &internalpb.DataCenter{
-		Name:   r.dc.Name,
-		Region: r.dc.Region,
-		Zone:   r.dc.Zone,
-		Labels: r.dc.Labels,
-	}
+	dc := &internalpb.DataCenter{}
+	dc.SetName(r.dc.Name)
+	dc.SetRegion(r.dc.Region)
+	dc.SetZone(r.dc.Zone)
+	dc.SetLabels(r.dc.Labels)
+	r.originDCProto = dc
 	r.store = make(map[string]crdt.ReplicatedData)
 	r.keyTypes = make(map[string]crdt.DataType)
 	r.subscriptions = make(map[string]types.Unit)
@@ -489,11 +489,10 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 	}
 
 	if hasType {
-		pb := &internalpb.CRDTTombstone{
-			Key:            codec.EncodeCRDTKey(keyID, dataType),
-			DeletedAtNanos: now.UnixNano(),
-			DeletedByNode:  r.nodeID,
-		}
+		pb := &internalpb.CRDTTombstone{}
+		pb.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+		pb.SetDeletedAtNanos(now.UnixNano())
+		pb.SetDeletedByNode(r.nodeID)
 
 		coordination := msg.WriteCoordination()
 		if coordination != 0 {
@@ -645,15 +644,16 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 				r.logger.Warnf("anti-entropy: failed to encode state for key=%s: %v", keyID, err)
 				continue
 			}
-			entries = append(entries, &internalpb.CRDTFullStateEntry{
-				Key:  codec.EncodeCRDTKey(keyID, dataType),
-				Data: pbData,
-			})
+			crdtfse := &internalpb.CRDTFullStateEntry{}
+			crdtfse.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+			crdtfse.SetData(pbData)
+			entries = append(entries, crdtfse)
 		}
 	}
 
 	if len(entries) > 0 && ctx.Sender() != nil {
-		fullState := &internalpb.CRDTFullState{Entries: entries}
+		fullState := &internalpb.CRDTFullState{}
+		fullState.SetEntries(entries)
 		ctx.Tell(ctx.Sender(), fullState)
 	}
 }
@@ -727,18 +727,16 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 	i := 0
 	for keyID := range r.store {
 		dataType := r.keyTypes[keyID]
-		keyBuf[i] = internalpb.CRDTKey{
-			Id:       keyID,
-			DataType: internalpb.CRDTDataType(dataType + 1),
-		}
-		entryBuf[i] = internalpb.CRDTDigestEntry{
-			Key:     &keyBuf[i],
-			Version: r.versions[keyID],
-		}
+		keyBuf[i].SetId(keyID)
+		keyBuf[i].SetDataType(internalpb.CRDTDataType(dataType + 1))
+		entryBuf[i].SetKey(&keyBuf[i])
+		entryBuf[i].SetVersion(r.versions[keyID])
 		entries = append(entries, &entryBuf[i])
 		i++
 	}
-	return &internalpb.CRDTDigest{Entries: entries}
+	crdtd := &internalpb.CRDTDigest{}
+	crdtd.SetEntries(entries)
+	return crdtd
 }
 
 // trackKey records that a CRDT key exists in the local store.
@@ -845,11 +843,11 @@ func (r *replicatorActor) buildSnapshotEntries() (map[string]*internalpb.CRDTSna
 		if err != nil {
 			return nil, fmt.Errorf("encode snapshot for key=%s: %w", keyID, err)
 		}
-		entries[keyID] = &internalpb.CRDTSnapshotEntry{
-			Key:     codec.EncodeCRDTKey(keyID, dataType),
-			Data:    pbData,
-			Version: version,
-		}
+		crdtse := &internalpb.CRDTSnapshotEntry{}
+		crdtse.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+		crdtse.SetData(pbData)
+		crdtse.SetVersion(version)
+		entries[keyID] = crdtse
 	}
 	return entries, nil
 }
@@ -874,11 +872,10 @@ func (r *replicatorActor) handleReadRequest(ctx *ReceiveContext, msg *internalpb
 		pbData = encoded
 	}
 
-	resp := &internalpb.CRDTReadResponse{
-		Key:      codec.EncodeCRDTKey(keyID, dataType),
-		Data:     pbData,
-		FromNode: r.nodeID,
-	}
+	resp := &internalpb.CRDTReadResponse{}
+	resp.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+	resp.SetData(pbData)
+	resp.SetFromNode(r.nodeID)
 
 	if ctx.Sender() != nil {
 		ctx.Response(resp)
@@ -940,10 +937,9 @@ func (r *replicatorActor) coordinatedRead(ctx *ReceiveContext, keyID string, loc
 	selected := r.selectPeers(peers, r.targetCount(len(peers), level))
 
 	dataType := r.keyTypes[keyID]
-	req := &internalpb.CRDTReadRequest{
-		Key:      codec.EncodeCRDTKey(keyID, dataType),
-		FromNode: r.nodeID,
-	}
+	req := &internalpb.CRDTReadRequest{}
+	req.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+	req.SetFromNode(r.nodeID)
 
 	actorName := reservedName(replicatorType)
 	from := pathToAddress(r.pid.Path())
@@ -1086,11 +1082,11 @@ func (r *replicatorActor) encodeDelta(d *crdtDelta) (*internalpb.CRDTDelta, erro
 	if err != nil {
 		return nil, err
 	}
-	return &internalpb.CRDTDelta{
-		Key:        codec.EncodeCRDTKey(d.KeyID, d.DataType),
-		OriginNode: d.Origin,
-		Data:       data,
-	}, nil
+	cRDTDelta := &internalpb.CRDTDelta{}
+	cRDTDelta.SetKey(codec.EncodeCRDTKey(d.KeyID, d.DataType))
+	cRDTDelta.SetOriginNode(d.Origin)
+	cRDTDelta.SetData(data)
+	return cRDTDelta, nil
 }
 
 // decodeDelta converts a protobuf CRDTDelta back to a crdtDelta.
@@ -1284,12 +1280,11 @@ func (r *replicatorActor) handleDataCenterFlush(ctx *ReceiveContext) {
 		return
 	}
 
-	batch := &internalpb.CRDTDeltaBatch{
-		Deltas:      r.pendingDeltas,
-		Tombstones:  r.pendingTombstones,
-		OriginDc:    r.originDCProto,
-		SentAtNanos: time.Now().UnixNano(),
-	}
+	batch := &internalpb.CRDTDeltaBatch{}
+	batch.SetDeltas(r.pendingDeltas)
+	batch.SetTombstones(r.pendingTombstones)
+	batch.SetOriginDc(r.originDCProto)
+	batch.SetSentAtNanos(time.Now().UnixNano())
 
 	r.pendingDeltas = r.pendingDeltas[:0]
 	r.pendingTombstones = r.pendingTombstones[:0]

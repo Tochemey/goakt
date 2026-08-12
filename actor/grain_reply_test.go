@@ -48,8 +48,8 @@ func TestGrainReplyCompletesOnce(t *testing.T) {
 	slot := system.pendingAsks.Register("corr")
 	reply := &GrainReply{system: system, correlationID: "corr"}
 
-	reply.Response(&testpb.Reply{Content: "first"})
-	reply.Response(&testpb.Reply{Content: "second"})
+	reply.Response(testpb.Reply_builder{Content: "first"}.Build())
+	reply.Response(testpb.Reply_builder{Content: "second"}.Build())
 	reply.Err(errors.New("late failure"))
 	reply.NoErr()
 

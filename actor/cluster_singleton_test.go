@@ -798,11 +798,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		}, nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
 		// The name is already bound to the singleton we wanted: idempotent success, no retry.
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -866,12 +866,12 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 			},
 		}, nil).Once()
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address: "singleton@test@127.0.0.1:0",
 			Type:    "actor.other",
 			// Singleton is nil: indicates this name is taken by a non-singleton (or unknown) actor.
 			Singleton: nil,
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -908,11 +908,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
 
 		// Attempt 2: the record propagated and shows it is the intended singleton -> success.
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -972,11 +972,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		system.locker.Unlock()
 
 		// The leader created the singleton; the delegating node confirms by name.
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		leader := &cluster.Peer{
 			Host:         "127.0.0.1",
@@ -1041,11 +1041,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
 		// The name-based disambiguation proves the existing actor is the singleton we
 		// wanted (idempotent success).
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1086,11 +1086,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		// This is the regression guard: a creation call must never leak ErrActorNotFound
 		// on the idempotent path just because a second read momentarily 404s.
 		const confirmedAddr = "goakt://test@127.0.0.1:9000/singleton"
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   confirmedAddr,
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		pid, err := system.SpawnSingleton(
 			ctx,
@@ -1129,11 +1129,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		// Confirmation succeeds (it is our singleton) but the record carries no address,
 		// which forces the by-name fallback resolution...
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 		// ...which momentarily 404s while the registry record propagates.
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
 
@@ -1174,11 +1174,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrEngineNotRunning).Once()
 
 		// Attempt 2: name exists, cluster metadata shows it is the intended singleton -> success.
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "goakt://test@127.0.0.1:0/singleton",
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1244,11 +1244,11 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(true, nil).Once()
 		// Existing actor is a singleton, but not the intended kind/role.
-		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(internalpb.Actor_builder{
 			Address:   "singleton@test@127.0.0.1:0",
 			Type:      "actor.other",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		_, err := system.SpawnSingleton(
 			ctx,
@@ -1670,11 +1670,11 @@ func TestResolveExistingSingleton(t *testing.T) {
 		system.locker.Unlock()
 
 		const resolvedAddr = "goakt://test@127.0.0.1:9000/fallback-singleton"
-		clusterMock.EXPECT().GetActor(mock.Anything, "fallback-singleton").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "fallback-singleton").Return(internalpb.Actor_builder{
 			Address:   resolvedAddr,
 			Type:      "actor.mockactor",
 			Singleton: &internalpb.SingletonSpec{},
-		}, nil).Once()
+		}.Build(), nil).Once()
 
 		got, err := system.resolveExistingSingleton(ctx, "fallback-singleton", "")
 		require.NoError(t, err)

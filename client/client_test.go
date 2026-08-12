@@ -204,7 +204,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
@@ -319,7 +319,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
@@ -415,7 +415,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
@@ -506,7 +506,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expectedReply, actualReply))
@@ -598,7 +598,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expectedReply, actualReply))
@@ -688,7 +688,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expectedReply, actualReply))
@@ -706,7 +706,7 @@ func TestClient(t *testing.T) {
 		reply, err = client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply = &testpb.Reply{Content: "received message"}
+		expectedReply = testpb.Reply_builder{Content: "received message"}.Build()
 		actualReply, ok = reply.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expectedReply, actualReply))
@@ -790,7 +790,7 @@ func TestClient(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expectedReply, actualReply))
@@ -1811,7 +1811,7 @@ func TestClientTLS(t *testing.T) {
 		reply, err := client.Ask(ctx, actorName, new(testpb.TestReply), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, reply)
-		expectedReply := &testpb.Reply{Content: "received message"}
+		expectedReply := testpb.Reply_builder{Content: "received message"}.Build()
 
 		actualReply, ok := reply.(*testpb.Reply)
 		require.True(t, ok)
@@ -1988,7 +1988,7 @@ func (x *testActor) Receive(ctx *actors.ReceiveContext) {
 	case *testpb.TestSend:
 	case *testpb.TestReply:
 		x.logger.Info("received a test reply message...")
-		ctx.Response(&testpb.Reply{Content: "received message"})
+		ctx.Response(testpb.Reply_builder{Content: "received message"}.Build())
 	default:
 		ctx.Unhandled()
 	}
@@ -2018,7 +2018,7 @@ func (m *MockGrain) OnReceive(ctx *actors.GrainContext) {
 	case *testpb.TestSend:
 		ctx.NoErr()
 	case *testpb.TestReply:
-		ctx.Response(&testpb.Reply{Content: "received message"})
+		ctx.Response(testpb.Reply_builder{Content: "received message"}.Build())
 	default:
 		ctx.Unhandled()
 	}

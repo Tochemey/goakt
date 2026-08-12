@@ -197,7 +197,7 @@ func TestMessageOrdering(t *testing.T) {
 	defer func() { _ = pid.Shutdown(ctx) }()
 
 	for i := range expected {
-		msg := &testpb.TestCount{Value: int32(i)}
+		msg := testpb.TestCount_builder{Value: int32(i)}.Build()
 		require.NoError(t, Tell(ctx, pid, msg))
 	}
 
@@ -4564,7 +4564,7 @@ func TestSendSync(t *testing.T) {
 		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, response)
-		expected := &testpb.Reply{Content: "received message"}
+		expected := testpb.Reply_builder{Content: "received message"}.Build()
 
 		actual, ok := response.(*testpb.Reply)
 		require.True(t, ok)
@@ -4638,7 +4638,7 @@ func TestSendSync(t *testing.T) {
 		response, err := sender.SendSync(ctx, receiver.Name(), new(testpb.TestReply), replyTimeout)
 		require.NoError(t, err)
 		require.NotNil(t, response)
-		expected := &testpb.Reply{Content: "received message"}
+		expected := testpb.Reply_builder{Content: "received message"}.Build()
 		actual, ok := response.(*testpb.Reply)
 		require.True(t, ok)
 		assert.True(t, proto.Equal(expected, actual))

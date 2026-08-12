@@ -424,8 +424,8 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 	}
 
 	// override the grain info with peer (host and remoting port)
-	grainInfo.Host = peer.Host
-	grainInfo.Port = int32(peer.RemotingPort)
+	grainInfo.SetHost(peer.Host)
+	grainInfo.SetPort(int32(peer.RemotingPort))
 
 	claimed, _, err := x.tryClaimGrain(ctx, grainInfo)
 	if err != nil {
@@ -1421,10 +1421,10 @@ func (x *actorSystem) recreateGrain(ctx context.Context, serializedGrain *intern
 
 func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *internalpb.Grain) (*grainPID, error) {
 	logger := x.logger
-	logger.Debugf("recreating grain=%s", serializedGrain.GrainId.GetValue())
+	logger.Debugf("recreating grain=%s", serializedGrain.GetGrainId().GetValue())
 
 	// make sure the grain is not a system grain
-	if isSystemName(serializedGrain.GrainId.GetValue()) {
+	if isSystemName(serializedGrain.GetGrainId().GetValue()) {
 		return nil, gerrors.NewErrReservedName(serializedGrain.GetGrainId().GetValue())
 	}
 
@@ -1461,7 +1461,7 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			WithGrainDependencies(dependencies...),
 		}
 
-		if serializedGrain.MailboxCapacity != nil {
+		if serializedGrain.HasMailboxCapacity() {
 			capacity := serializedGrain.GetMailboxCapacity()
 			options = append(options, WithGrainMailboxCapacity(capacity))
 		}
@@ -1595,7 +1595,8 @@ func (x *actorSystem) leastLoadedPeer(ctx context.Context, peers []*cluster.Peer
 		eg.Go(func() error {
 			client := x.remoting.NetClient(peer.Host, peer.RemotingPort)
 			addr := peer.RemotingAddress()
-			request := &internalpb.GetNodeMetricRequest{NodeAddress: addr}
+			request := &internalpb.GetNodeMetricRequest{}
+			request.SetNodeAddress(addr)
 
 			resp, err := client.SendProto(egCtx, request)
 			if err != nil {

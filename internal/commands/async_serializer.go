@@ -94,12 +94,12 @@ func (x *AsyncRequestSerializer) Serialize(message any) ([]byte, error) {
 		return nil, err
 	}
 
-	return frameAsyncEnvelope(asyncRequestMagic, &internalpb.AsyncRequest{
-		CorrelationId: request.CorrelationID,
-		ReplyTo:       replyTo,
-		ReplyKind:     kind,
-		Message:       payload,
-	})
+	ar := &internalpb.AsyncRequest{}
+	ar.SetCorrelationId(request.CorrelationID)
+	ar.SetReplyTo(replyTo)
+	ar.SetReplyKind(kind)
+	ar.SetMessage(payload)
+	return frameAsyncEnvelope(asyncRequestMagic, ar)
 }
 
 // Deserialize decodes a sentinel-framed internalpb.AsyncRequest back into an
@@ -141,17 +141,16 @@ func (x *AsyncResponseSerializer) Serialize(message any) ([]byte, error) {
 		return nil, errNotAsyncResponseFrame
 	}
 
-	wire := &internalpb.AsyncResponse{
-		CorrelationId: response.CorrelationID,
-		Error:         response.Error,
-	}
+	wire := &internalpb.AsyncResponse{}
+	wire.SetCorrelationId(response.CorrelationID)
+	wire.SetError(response.Error)
 
 	if response.Message != nil {
 		payload, err := marshalAsyncPayload(response.Message)
 		if err != nil {
 			return nil, err
 		}
-		wire.Message = payload
+		wire.SetMessage(payload)
 	}
 
 	return frameAsyncEnvelope(asyncResponseMagic, wire)

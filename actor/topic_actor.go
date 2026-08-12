@@ -32,6 +32,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
@@ -241,11 +242,10 @@ func (x *topicActor) sendToRemoteTopicActors(cctx context.Context, remotePeers [
 					return
 				}
 
-				toSend := &internalpb.TopicMessage{
-					Id:      messageID,
-					Topic:   topic,
-					Message: marshaled,
-				}
+				toSend := &internalpb.TopicMessage{}
+				toSend.SetId(messageID)
+				toSend.SetTopic(topic)
+				toSend.SetMessage(marshaled)
 
 				from := pathToAddress(x.pid.Path())
 				if err := x.remoting.RemoteTell(cctx, from, to, toSend); err != nil {
@@ -289,7 +289,9 @@ func (x *topicActor) localSubscriberCount(topic string) int32 {
 // handleGetTopicStats, which prevents query storms/loops.
 func (x *topicActor) handleTopicStatsRequest(ctx *ReceiveContext) {
 	if request, ok := ctx.Message().(*internalpb.TopicStatsRequest); ok {
-		ctx.Response(&internalpb.TopicStatsResponse{LocalSubscriberCount: x.localSubscriberCount(request.GetTopic())})
+		tsr := &internalpb.TopicStatsResponse{}
+		tsr.SetLocalSubscriberCount(x.localSubscriberCount(request.GetTopic()))
+		ctx.Response(tsr)
 	}
 }
 
@@ -318,7 +320,8 @@ func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 			return
 		}
 
-		remoteInstances, err := x.queryRemotePeerInstanceCount(cctx, buildRemotePeers(peers), query.topic)
+		from := pathToAddress(x.pid.Path())
+		remoteInstances, err := x.queryRemotePeerInstanceCount(cctx, from, x.actorSystem.getAskTimeout(), buildRemotePeers(peers), query.topic)
 		if err != nil {
 			ctx.Err(errors.NewInternalError(err))
 			return
@@ -333,14 +336,20 @@ func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 // queryRemotePeerInstanceCount asks every remote peer's topic actor for its
 // local subscriber count of topic and returns how many peers reported at
 // least one. A peer that cannot be looked up or fails to answer within the
-// system-wide ask timeout fails the query; the caller decides how to surface it.
-func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePeers []remotePeer, topic string) (int32, error) {
+// ask timeout fails the query; the caller decides how to surface it.
+//
+// from (this node's reply address) and askTimeout are passed in rather than
+// read off the actor here: they are owned by the actor's message-processing
+// goroutine (from derives from x.pid, set in handlePostStart), so reading them
+// in this fan-out, which the caller may run off the actor goroutine, would
+// race that goroutine. The sole production caller supplies them under the
+// actor loop; tests can drive the helper directly without touching actor state.
+func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, from *address.Address, askTimeout time.Duration, remotePeers []remotePeer, topic string) (int32, error) {
 	if len(remotePeers) == 0 {
 		return 0, nil
 	}
 
 	actorName := reservedName(topicActorType)
-	from := pathToAddress(x.pid.Path())
 
 	var numInstances atomic.Int32
 	eg, egCtx := errgroup.WithContext(cctx)
@@ -351,7 +360,9 @@ func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, remotePe
 				return fmt.Errorf("failed to lookup actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}
 
-			resp, err := x.remoting.RemoteAsk(egCtx, from, to, &internalpb.TopicStatsRequest{Topic: topic}, x.actorSystem.getAskTimeout())
+			tsr := &internalpb.TopicStatsRequest{}
+			tsr.SetTopic(topic)
+			resp, err := x.remoting.RemoteAsk(egCtx, from, to, tsr, askTimeout)
 			if err != nil {
 				return fmt.Errorf("failed to query topic actor %s on remote=[host=%s, port=%d]: %w", actorName, peer.host, peer.port, err)
 			}
@@ -434,7 +445,7 @@ func (x *topicActor) handlePostStart(ctx *ReceiveContext) {
 // If we already processed the message we discard it.
 func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 	if topicMessage, ok := ctx.Message().(*internalpb.TopicMessage); ok {
-		topic := topicMessage.Topic
+		topic := topicMessage.GetTopic()
 
 		serializer := x.remoting.Serializer(nil)
 		if serializer == nil {
@@ -442,7 +453,7 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 			return
 		}
 
-		message, err := serializer.Deserialize(topicMessage.Message)
+		message, err := serializer.Deserialize(topicMessage.GetMessage())
 		if err != nil {
 			x.logger.Warnf("failed to deserialize message: %s", err.Error())
 			return

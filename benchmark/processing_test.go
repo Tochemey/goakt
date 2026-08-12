@@ -39,7 +39,7 @@ import (
 
 type Actor struct{}
 
-var replyMessage = &testpb.Reply{Content: "reply"}
+var replyMessage = testpb.Reply_builder{Content: "reply"}.Build()
 var errRequestBenchFailed = errors.New("request benchmark failed")
 
 // payloadSizes is the sweep used by BenchmarkTellPayload. It spans from

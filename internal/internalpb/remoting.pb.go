@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -25,13 +24,11 @@ const (
 // RemoteAsk is used to send a message to an actor remotely and expect a response
 // immediately.
 type RemoteAskRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote message to send
-	RemoteMessages []*RemoteMessage `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3" json:"remote_messages,omitempty"`
-	// Specifies the timeout(how long to wait for a reply)
-	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_RemoteMessages *[]*RemoteMessage      `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3"`
+	xxx_hidden_Timeout        *durationpb.Duration   `protobuf:"bytes,2,opt,name=timeout,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RemoteAskRequest) Reset() {
@@ -59,32 +56,64 @@ func (x *RemoteAskRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteAskRequest.ProtoReflect.Descriptor instead.
-func (*RemoteAskRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *RemoteAskRequest) GetRemoteMessages() []*RemoteMessage {
 	if x != nil {
-		return x.RemoteMessages
+		if x.xxx_hidden_RemoteMessages != nil {
+			return *x.xxx_hidden_RemoteMessages
+		}
 	}
 	return nil
 }
 
 func (x *RemoteAskRequest) GetTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.Timeout
+		return x.xxx_hidden_Timeout
 	}
 	return nil
 }
 
+func (x *RemoteAskRequest) SetRemoteMessages(v []*RemoteMessage) {
+	x.xxx_hidden_RemoteMessages = &v
+}
+
+func (x *RemoteAskRequest) SetTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_Timeout = v
+}
+
+func (x *RemoteAskRequest) HasTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Timeout != nil
+}
+
+func (x *RemoteAskRequest) ClearTimeout() {
+	x.xxx_hidden_Timeout = nil
+}
+
+type RemoteAskRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote message to send
+	RemoteMessages []*RemoteMessage
+	// Specifies the timeout(how long to wait for a reply)
+	Timeout *durationpb.Duration
+}
+
+func (b0 RemoteAskRequest_builder) Build() *RemoteAskRequest {
+	m0 := &RemoteAskRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_RemoteMessages = &b.RemoteMessages
+	x.xxx_hidden_Timeout = b.Timeout
+	return m0
+}
+
 type RemoteAskResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the message to send to the actor
-	// Any proto message is allowed to be sent
-	Messages      [][]byte `protobuf:"bytes,1,rep,name=messages,proto3" json:"messages,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Messages [][]byte               `protobuf:"bytes,1,rep,name=messages,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RemoteAskResponse) Reset() {
@@ -112,25 +141,39 @@ func (x *RemoteAskResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteAskResponse.ProtoReflect.Descriptor instead.
-func (*RemoteAskResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *RemoteAskResponse) GetMessages() [][]byte {
 	if x != nil {
-		return x.Messages
+		return x.xxx_hidden_Messages
 	}
 	return nil
 }
 
+func (x *RemoteAskResponse) SetMessages(v [][]byte) {
+	x.xxx_hidden_Messages = v
+}
+
+type RemoteAskResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the message to send to the actor
+	// Any proto message is allowed to be sent
+	Messages [][]byte
+}
+
+func (b0 RemoteAskResponse_builder) Build() *RemoteAskResponse {
+	m0 := &RemoteAskResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Messages = b.Messages
+	return m0
+}
+
 // RemoteTell is used to send a message to an actor remotely
 type RemoteTellRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote message to send
-	RemoteMessages []*RemoteMessage `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3" json:"remote_messages,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_RemoteMessages *[]*RemoteMessage      `protobuf:"bytes,1,rep,name=remote_messages,json=remoteMessages,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RemoteTellRequest) Reset() {
@@ -158,20 +201,36 @@ func (x *RemoteTellRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteTellRequest.ProtoReflect.Descriptor instead.
-func (*RemoteTellRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *RemoteTellRequest) GetRemoteMessages() []*RemoteMessage {
 	if x != nil {
-		return x.RemoteMessages
+		if x.xxx_hidden_RemoteMessages != nil {
+			return *x.xxx_hidden_RemoteMessages
+		}
 	}
 	return nil
 }
 
+func (x *RemoteTellRequest) SetRemoteMessages(v []*RemoteMessage) {
+	x.xxx_hidden_RemoteMessages = &v
+}
+
+type RemoteTellRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote message to send
+	RemoteMessages []*RemoteMessage
+}
+
+func (b0 RemoteTellRequest_builder) Build() *RemoteTellRequest {
+	m0 := &RemoteTellRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_RemoteMessages = &b.RemoteMessages
+	return m0
+}
+
 type RemoteTellResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,22 +260,26 @@ func (x *RemoteTellResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteTellResponse.ProtoReflect.Descriptor instead.
-func (*RemoteTellResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{3}
+type RemoteTellResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteTellResponse_builder) Build() *RemoteTellResponse {
+	m0 := &RemoteTellResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // RemoteLookupRequest checks whether a given actor exists on a remote host
 type RemoteLookupRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteLookupRequest) Reset() {
@@ -244,38 +307,65 @@ func (x *RemoteLookupRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteLookupRequest.ProtoReflect.Descriptor instead.
-func (*RemoteLookupRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{4}
-}
-
 func (x *RemoteLookupRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteLookupRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteLookupRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteLookupRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteLookupRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteLookupRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteLookupRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteLookupRequest_builder) Build() *RemoteLookupRequest {
+	m0 := &RemoteLookupRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteLookupResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteLookupResponse) Reset() {
@@ -303,16 +393,30 @@ func (x *RemoteLookupResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteLookupResponse.ProtoReflect.Descriptor instead.
-func (*RemoteLookupResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{5}
-}
-
 func (x *RemoteLookupResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
+}
+
+func (x *RemoteLookupResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type RemoteLookupResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address
+	Address string
+}
+
+func (b0 RemoteLookupResponse_builder) Build() *RemoteLookupResponse {
+	m0 := &RemoteLookupResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
 }
 
 // GetReliableCompanionRequest resolves the live reliable-delivery controller
@@ -322,17 +426,13 @@ func (x *RemoteLookupResponse) GetAddress() string {
 // Remoting-only flows use this request to find their explicitly addressed
 // peer without a cluster registry.
 type GetReliableCompanionRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address of the serving node
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port of the serving node
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the user-visible name of the endpoint owning the companion
-	EndpointName string `protobuf:"bytes,3,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
-	// Specifies the controller role to resolve for the endpoint
-	Role          ReliableControllerRole `protobuf:"varint,4,opt,name=role,proto3,enum=internalpb.ReliableControllerRole" json:"role,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host         string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port         int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_EndpointName string                 `protobuf:"bytes,3,opt,name=endpoint_name,json=endpointName,proto3"`
+	xxx_hidden_Role         ReliableControllerRole `protobuf:"varint,4,opt,name=role,proto3,enum=internalpb.ReliableControllerRole"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *GetReliableCompanionRequest) Reset() {
@@ -360,45 +460,79 @@ func (x *GetReliableCompanionRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetReliableCompanionRequest.ProtoReflect.Descriptor instead.
-func (*GetReliableCompanionRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{6}
-}
-
 func (x *GetReliableCompanionRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *GetReliableCompanionRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *GetReliableCompanionRequest) GetEndpointName() string {
 	if x != nil {
-		return x.EndpointName
+		return x.xxx_hidden_EndpointName
 	}
 	return ""
 }
 
 func (x *GetReliableCompanionRequest) GetRole() ReliableControllerRole {
 	if x != nil {
-		return x.Role
+		return x.xxx_hidden_Role
 	}
 	return ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED
 }
 
+func (x *GetReliableCompanionRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *GetReliableCompanionRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *GetReliableCompanionRequest) SetEndpointName(v string) {
+	x.xxx_hidden_EndpointName = v
+}
+
+func (x *GetReliableCompanionRequest) SetRole(v ReliableControllerRole) {
+	x.xxx_hidden_Role = v
+}
+
+type GetReliableCompanionRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address of the serving node
+	Host string
+	// Specifies the remote port of the serving node
+	Port int32
+	// Specifies the user-visible name of the endpoint owning the companion
+	EndpointName string
+	// Specifies the controller role to resolve for the endpoint
+	Role ReliableControllerRole
+}
+
+func (b0 GetReliableCompanionRequest_builder) Build() *GetReliableCompanionRequest {
+	m0 := &GetReliableCompanionRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_EndpointName = b.EndpointName
+	x.xxx_hidden_Role = b.Role
+	return m0
+}
+
 type GetReliableCompanionResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the validated companion address
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetReliableCompanionResponse) Reset() {
@@ -426,36 +560,41 @@ func (x *GetReliableCompanionResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetReliableCompanionResponse.ProtoReflect.Descriptor instead.
-func (*GetReliableCompanionResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{7}
-}
-
 func (x *GetReliableCompanionResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
 }
 
+func (x *GetReliableCompanionResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type GetReliableCompanionResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the validated companion address
+	Address string
+}
+
+func (b0 GetReliableCompanionResponse_builder) Build() *GetReliableCompanionResponse {
+	m0 := &GetReliableCompanionResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
+}
+
 // RemoteMessage will be used by Actors to communicate remotely
 type RemoteMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the sender' address
-	Sender string `protobuf:"bytes,1,opt,name=sender,proto3" json:"sender,omitempty"`
-	// Specifies the actor address
-	Receiver string `protobuf:"bytes,2,opt,name=receiver,proto3" json:"receiver,omitempty"`
-	// Specifies the message to send to the actor
-	// Any proto message is allowed to be sent
-	Message []byte `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	// Per-message propagation metadata (trace headers, baggage, auth, etc.).
-	// When set, the server applies it via the configured ContextPropagator in
-	// preference to the request-level metadata. This enables coalesced batches
-	// that carry distinct per-call context for every message. Left empty by the
-	// synchronous RemoteTell path, which still propagates at the request level.
-	Metadata      map[string]string `protobuf:"bytes,4,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Sender   string                 `protobuf:"bytes,1,opt,name=sender,proto3"`
+	xxx_hidden_Receiver string                 `protobuf:"bytes,2,opt,name=receiver,proto3"`
+	xxx_hidden_Message  []byte                 `protobuf:"bytes,3,opt,name=message,proto3"`
+	xxx_hidden_Metadata map[string]string      `protobuf:"bytes,4,rep,name=metadata,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RemoteMessage) Reset() {
@@ -483,49 +622,89 @@ func (x *RemoteMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteMessage.ProtoReflect.Descriptor instead.
-func (*RemoteMessage) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{8}
-}
-
 func (x *RemoteMessage) GetSender() string {
 	if x != nil {
-		return x.Sender
+		return x.xxx_hidden_Sender
 	}
 	return ""
 }
 
 func (x *RemoteMessage) GetReceiver() string {
 	if x != nil {
-		return x.Receiver
+		return x.xxx_hidden_Receiver
 	}
 	return ""
 }
 
 func (x *RemoteMessage) GetMessage() []byte {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
 func (x *RemoteMessage) GetMetadata() map[string]string {
 	if x != nil {
-		return x.Metadata
+		return x.xxx_hidden_Metadata
 	}
 	return nil
 }
 
+func (x *RemoteMessage) SetSender(v string) {
+	x.xxx_hidden_Sender = v
+}
+
+func (x *RemoteMessage) SetReceiver(v string) {
+	x.xxx_hidden_Receiver = v
+}
+
+func (x *RemoteMessage) SetMessage(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Message = v
+}
+
+func (x *RemoteMessage) SetMetadata(v map[string]string) {
+	x.xxx_hidden_Metadata = v
+}
+
+type RemoteMessage_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the sender' address
+	Sender string
+	// Specifies the actor address
+	Receiver string
+	// Specifies the message to send to the actor
+	// Any proto message is allowed to be sent
+	Message []byte
+	// Per-message propagation metadata (trace headers, baggage, auth, etc.).
+	// When set, the server applies it via the configured ContextPropagator in
+	// preference to the request-level metadata. This enables coalesced batches
+	// that carry distinct per-call context for every message. Left empty by the
+	// synchronous RemoteTell path, which still propagates at the request level.
+	Metadata map[string]string
+}
+
+func (b0 RemoteMessage_builder) Build() *RemoteMessage {
+	m0 := &RemoteMessage{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Sender = b.Sender
+	x.xxx_hidden_Receiver = b.Receiver
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_Metadata = b.Metadata
+	return m0
+}
+
 type RemoteReSpawnRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteReSpawnRequest) Reset() {
@@ -553,38 +732,65 @@ func (x *RemoteReSpawnRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteReSpawnRequest.ProtoReflect.Descriptor instead.
-func (*RemoteReSpawnRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{9}
-}
-
 func (x *RemoteReSpawnRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteReSpawnRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteReSpawnRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteReSpawnRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteReSpawnRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteReSpawnRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteReSpawnRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteReSpawnRequest_builder) Build() *RemoteReSpawnRequest {
+	m0 := &RemoteReSpawnRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteReSpawnResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteReSpawnResponse) Reset() {
@@ -612,28 +818,39 @@ func (x *RemoteReSpawnResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteReSpawnResponse.ProtoReflect.Descriptor instead.
-func (*RemoteReSpawnResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{10}
-}
-
 func (x *RemoteReSpawnResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
 }
 
+func (x *RemoteReSpawnResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type RemoteReSpawnResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address
+	Address string
+}
+
+func (b0 RemoteReSpawnResponse_builder) Build() *RemoteReSpawnResponse {
+	m0 := &RemoteReSpawnResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
+}
+
 type RemoteStopRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteStopRequest) Reset() {
@@ -661,34 +878,62 @@ func (x *RemoteStopRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStopRequest.ProtoReflect.Descriptor instead.
-func (*RemoteStopRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{11}
-}
-
 func (x *RemoteStopRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteStopRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteStopRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteStopRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteStopRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteStopRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteStopRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteStopRequest_builder) Build() *RemoteStopRequest {
+	m0 := &RemoteStopRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteStopResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -718,24 +963,27 @@ func (x *RemoteStopResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStopResponse.ProtoReflect.Descriptor instead.
-func (*RemoteStopResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{12}
+type RemoteStopResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteStopResponse_builder) Build() *RemoteStopResponse {
+	m0 := &RemoteStopResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // RemoteWatchRequest registers a remote watcher for an actor on this node.
 type RemoteWatchRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address of the watchee
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port of the watchee
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the watchee actor name
-	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// Specifies the full address of the watcher to notify on termination
-	WatcherAddress string `protobuf:"bytes,4,opt,name=watcher_address,json=watcherAddress,proto3" json:"watcher_address,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host           string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port           int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name           string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	xxx_hidden_WatcherAddress string                 `protobuf:"bytes,4,opt,name=watcher_address,json=watcherAddress,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RemoteWatchRequest) Reset() {
@@ -763,41 +1011,76 @@ func (x *RemoteWatchRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteWatchRequest.ProtoReflect.Descriptor instead.
-func (*RemoteWatchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{13}
-}
-
 func (x *RemoteWatchRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteWatchRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteWatchRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *RemoteWatchRequest) GetWatcherAddress() string {
 	if x != nil {
-		return x.WatcherAddress
+		return x.xxx_hidden_WatcherAddress
 	}
 	return ""
 }
 
+func (x *RemoteWatchRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteWatchRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteWatchRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *RemoteWatchRequest) SetWatcherAddress(v string) {
+	x.xxx_hidden_WatcherAddress = v
+}
+
+type RemoteWatchRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address of the watchee
+	Host string
+	// Specifies the remote port of the watchee
+	Port int32
+	// Specifies the watchee actor name
+	Name string
+	// Specifies the full address of the watcher to notify on termination
+	WatcherAddress string
+}
+
+func (b0 RemoteWatchRequest_builder) Build() *RemoteWatchRequest {
+	m0 := &RemoteWatchRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_WatcherAddress = b.WatcherAddress
+	return m0
+}
+
 type RemoteWatchResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -827,24 +1110,27 @@ func (x *RemoteWatchResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteWatchResponse.ProtoReflect.Descriptor instead.
-func (*RemoteWatchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{14}
+type RemoteWatchResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteWatchResponse_builder) Build() *RemoteWatchResponse {
+	m0 := &RemoteWatchResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // RemoteUnWatchRequest cancels a previously registered remote watch.
 type RemoteUnWatchRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address of the watchee
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port of the watchee
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the watchee actor name
-	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// Specifies the full address of the watcher that previously watched the actor
-	WatcherAddress string `protobuf:"bytes,4,opt,name=watcher_address,json=watcherAddress,proto3" json:"watcher_address,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host           string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port           int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name           string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	xxx_hidden_WatcherAddress string                 `protobuf:"bytes,4,opt,name=watcher_address,json=watcherAddress,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RemoteUnWatchRequest) Reset() {
@@ -872,41 +1158,76 @@ func (x *RemoteUnWatchRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteUnWatchRequest.ProtoReflect.Descriptor instead.
-func (*RemoteUnWatchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{15}
-}
-
 func (x *RemoteUnWatchRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteUnWatchRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteUnWatchRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *RemoteUnWatchRequest) GetWatcherAddress() string {
 	if x != nil {
-		return x.WatcherAddress
+		return x.xxx_hidden_WatcherAddress
 	}
 	return ""
 }
 
+func (x *RemoteUnWatchRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteUnWatchRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteUnWatchRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *RemoteUnWatchRequest) SetWatcherAddress(v string) {
+	x.xxx_hidden_WatcherAddress = v
+}
+
+type RemoteUnWatchRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address of the watchee
+	Host string
+	// Specifies the remote port of the watchee
+	Port int32
+	// Specifies the watchee actor name
+	Name string
+	// Specifies the full address of the watcher that previously watched the actor
+	WatcherAddress string
+}
+
+func (b0 RemoteUnWatchRequest_builder) Build() *RemoteUnWatchRequest {
+	m0 := &RemoteUnWatchRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_WatcherAddress = b.WatcherAddress
+	return m0
+}
+
 type RemoteUnWatchResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -936,47 +1257,38 @@ func (x *RemoteUnWatchResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteUnWatchResponse.ProtoReflect.Descriptor instead.
-func (*RemoteUnWatchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{16}
+type RemoteUnWatchResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteUnWatchResponse_builder) Build() *RemoteUnWatchResponse {
+	m0 := &RemoteUnWatchResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 type RemoteSpawnRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name.
-	ActorName string `protobuf:"bytes,3,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
-	// Specifies the actor type
-	ActorType string `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
-	// Specifies if the actor is a singleton
-	Singleton *SingletonSpec `protobuf:"bytes,5,opt,name=singleton,proto3" json:"singleton,omitempty"`
-	// Specifies if the actor is relocatable
-	Relocatable bool `protobuf:"varint,6,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
-	// Specifies the passivation strategy
-	PassivationStrategy *PassivationStrategy `protobuf:"bytes,7,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
-	// Specifies the dependencies
-	Dependencies []*Dependency `protobuf:"bytes,8,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	// States whether the actor will require a stash buffer
-	EnableStash bool `protobuf:"varint,9,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
-	// Specifies the role the actor belongs to
-	Role *string `protobuf:"bytes,10,opt,name=role,proto3,oneof" json:"role,omitempty"`
-	// Specifies the supervisor configuration when explicitly set
-	Supervisor *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
-	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy *ReentrancyConfig `protobuf:"bytes,12,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
-	// Specifies the init timeout override when explicitly set.
-	// When unset, the hosting node's system-wide init timeout is used.
-	InitTimeout *durationpb.Duration `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
-	// Specifies the reliable-delivery endpoint settings when the actor is
-	// spawned as a reliable producer or consumer endpoint. The hosting node
-	// restores them as spawn options so remote placement behaves exactly like
-	// a local spawn, including controller companion creation.
-	ReliableDelivery *ReliableDeliveryConfig `protobuf:"bytes,14,opt,name=reliable_delivery,json=reliableDelivery,proto3" json:"reliable_delivery,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	state                          protoimpl.MessageState  `protogen:"opaque.v1"`
+	xxx_hidden_Host                string                  `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port                int32                   `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_ActorName           string                  `protobuf:"bytes,3,opt,name=actor_name,json=actorName,proto3"`
+	xxx_hidden_ActorType           string                  `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3"`
+	xxx_hidden_Singleton           *SingletonSpec          `protobuf:"bytes,5,opt,name=singleton,proto3"`
+	xxx_hidden_Relocatable         bool                    `protobuf:"varint,6,opt,name=relocatable,proto3"`
+	xxx_hidden_PassivationStrategy *PassivationStrategy    `protobuf:"bytes,7,opt,name=passivation_strategy,json=passivationStrategy,proto3"`
+	xxx_hidden_Dependencies        *[]*Dependency          `protobuf:"bytes,8,rep,name=dependencies,proto3"`
+	xxx_hidden_EnableStash         bool                    `protobuf:"varint,9,opt,name=enable_stash,json=enableStash,proto3"`
+	xxx_hidden_Role                *string                 `protobuf:"bytes,10,opt,name=role,proto3,oneof"`
+	xxx_hidden_Supervisor          *SupervisorSpec         `protobuf:"bytes,11,opt,name=supervisor,proto3"`
+	xxx_hidden_Reentrancy          *ReentrancyConfig       `protobuf:"bytes,12,opt,name=reentrancy,proto3"`
+	xxx_hidden_InitTimeout         *durationpb.Duration    `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3"`
+	xxx_hidden_ReliableDelivery    *ReliableDeliveryConfig `protobuf:"bytes,14,opt,name=reliable_delivery,json=reliableDelivery,proto3"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnRequest) Reset() {
@@ -1004,115 +1316,310 @@ func (x *RemoteSpawnRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteSpawnRequest.ProtoReflect.Descriptor instead.
-func (*RemoteSpawnRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{17}
-}
-
 func (x *RemoteSpawnRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteSpawnRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteSpawnRequest) GetActorName() string {
 	if x != nil {
-		return x.ActorName
+		return x.xxx_hidden_ActorName
 	}
 	return ""
 }
 
 func (x *RemoteSpawnRequest) GetActorType() string {
 	if x != nil {
-		return x.ActorType
+		return x.xxx_hidden_ActorType
 	}
 	return ""
 }
 
 func (x *RemoteSpawnRequest) GetSingleton() *SingletonSpec {
 	if x != nil {
-		return x.Singleton
+		return x.xxx_hidden_Singleton
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetRelocatable() bool {
 	if x != nil {
-		return x.Relocatable
+		return x.xxx_hidden_Relocatable
 	}
 	return false
 }
 
 func (x *RemoteSpawnRequest) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivationStrategy
+		return x.xxx_hidden_PassivationStrategy
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetDependencies() []*Dependency {
 	if x != nil {
-		return x.Dependencies
+		if x.xxx_hidden_Dependencies != nil {
+			return *x.xxx_hidden_Dependencies
+		}
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetEnableStash() bool {
 	if x != nil {
-		return x.EnableStash
+		return x.xxx_hidden_EnableStash
 	}
 	return false
 }
 
 func (x *RemoteSpawnRequest) GetRole() string {
-	if x != nil && x.Role != nil {
-		return *x.Role
+	if x != nil {
+		if x.xxx_hidden_Role != nil {
+			return *x.xxx_hidden_Role
+		}
+		return ""
 	}
 	return ""
 }
 
 func (x *RemoteSpawnRequest) GetSupervisor() *SupervisorSpec {
 	if x != nil {
-		return x.Supervisor
+		return x.xxx_hidden_Supervisor
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetReentrancy() *ReentrancyConfig {
 	if x != nil {
-		return x.Reentrancy
+		return x.xxx_hidden_Reentrancy
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetInitTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.InitTimeout
+		return x.xxx_hidden_InitTimeout
 	}
 	return nil
 }
 
 func (x *RemoteSpawnRequest) GetReliableDelivery() *ReliableDeliveryConfig {
 	if x != nil {
-		return x.ReliableDelivery
+		return x.xxx_hidden_ReliableDelivery
 	}
 	return nil
 }
 
+func (x *RemoteSpawnRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteSpawnRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteSpawnRequest) SetActorName(v string) {
+	x.xxx_hidden_ActorName = v
+}
+
+func (x *RemoteSpawnRequest) SetActorType(v string) {
+	x.xxx_hidden_ActorType = v
+}
+
+func (x *RemoteSpawnRequest) SetSingleton(v *SingletonSpec) {
+	x.xxx_hidden_Singleton = v
+}
+
+func (x *RemoteSpawnRequest) SetRelocatable(v bool) {
+	x.xxx_hidden_Relocatable = v
+}
+
+func (x *RemoteSpawnRequest) SetPassivationStrategy(v *PassivationStrategy) {
+	x.xxx_hidden_PassivationStrategy = v
+}
+
+func (x *RemoteSpawnRequest) SetDependencies(v []*Dependency) {
+	x.xxx_hidden_Dependencies = &v
+}
+
+func (x *RemoteSpawnRequest) SetEnableStash(v bool) {
+	x.xxx_hidden_EnableStash = v
+}
+
+func (x *RemoteSpawnRequest) SetRole(v string) {
+	x.xxx_hidden_Role = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 14)
+}
+
+func (x *RemoteSpawnRequest) SetSupervisor(v *SupervisorSpec) {
+	x.xxx_hidden_Supervisor = v
+}
+
+func (x *RemoteSpawnRequest) SetReentrancy(v *ReentrancyConfig) {
+	x.xxx_hidden_Reentrancy = v
+}
+
+func (x *RemoteSpawnRequest) SetInitTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_InitTimeout = v
+}
+
+func (x *RemoteSpawnRequest) SetReliableDelivery(v *ReliableDeliveryConfig) {
+	x.xxx_hidden_ReliableDelivery = v
+}
+
+func (x *RemoteSpawnRequest) HasSingleton() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Singleton != nil
+}
+
+func (x *RemoteSpawnRequest) HasPassivationStrategy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PassivationStrategy != nil
+}
+
+func (x *RemoteSpawnRequest) HasRole() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 9)
+}
+
+func (x *RemoteSpawnRequest) HasSupervisor() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Supervisor != nil
+}
+
+func (x *RemoteSpawnRequest) HasReentrancy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Reentrancy != nil
+}
+
+func (x *RemoteSpawnRequest) HasInitTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_InitTimeout != nil
+}
+
+func (x *RemoteSpawnRequest) HasReliableDelivery() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ReliableDelivery != nil
+}
+
+func (x *RemoteSpawnRequest) ClearSingleton() {
+	x.xxx_hidden_Singleton = nil
+}
+
+func (x *RemoteSpawnRequest) ClearPassivationStrategy() {
+	x.xxx_hidden_PassivationStrategy = nil
+}
+
+func (x *RemoteSpawnRequest) ClearRole() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 9)
+	x.xxx_hidden_Role = nil
+}
+
+func (x *RemoteSpawnRequest) ClearSupervisor() {
+	x.xxx_hidden_Supervisor = nil
+}
+
+func (x *RemoteSpawnRequest) ClearReentrancy() {
+	x.xxx_hidden_Reentrancy = nil
+}
+
+func (x *RemoteSpawnRequest) ClearInitTimeout() {
+	x.xxx_hidden_InitTimeout = nil
+}
+
+func (x *RemoteSpawnRequest) ClearReliableDelivery() {
+	x.xxx_hidden_ReliableDelivery = nil
+}
+
+type RemoteSpawnRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name.
+	ActorName string
+	// Specifies the actor type
+	ActorType string
+	// Specifies if the actor is a singleton
+	Singleton *SingletonSpec
+	// Specifies if the actor is relocatable
+	Relocatable bool
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy
+	// Specifies the dependencies
+	Dependencies []*Dependency
+	// States whether the actor will require a stash buffer
+	EnableStash bool
+	// Specifies the role the actor belongs to
+	Role *string
+	// Specifies the supervisor configuration when explicitly set
+	Supervisor *SupervisorSpec
+	// Specifies the reentrancy configuration when explicitly set
+	Reentrancy *ReentrancyConfig
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout *durationpb.Duration
+	// Specifies the reliable-delivery endpoint settings when the actor is
+	// spawned as a reliable producer or consumer endpoint. The hosting node
+	// restores them as spawn options so remote placement behaves exactly like
+	// a local spawn, including controller companion creation.
+	ReliableDelivery *ReliableDeliveryConfig
+}
+
+func (b0 RemoteSpawnRequest_builder) Build() *RemoteSpawnRequest {
+	m0 := &RemoteSpawnRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_ActorName = b.ActorName
+	x.xxx_hidden_ActorType = b.ActorType
+	x.xxx_hidden_Singleton = b.Singleton
+	x.xxx_hidden_Relocatable = b.Relocatable
+	x.xxx_hidden_PassivationStrategy = b.PassivationStrategy
+	x.xxx_hidden_Dependencies = &b.Dependencies
+	x.xxx_hidden_EnableStash = b.EnableStash
+	if b.Role != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 14)
+		x.xxx_hidden_Role = b.Role
+	}
+	x.xxx_hidden_Supervisor = b.Supervisor
+	x.xxx_hidden_Reentrancy = b.Reentrancy
+	x.xxx_hidden_InitTimeout = b.InitTimeout
+	x.xxx_hidden_ReliableDelivery = b.ReliableDelivery
+	return m0
+}
+
 type RemoteSpawnResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnResponse) Reset() {
@@ -1140,28 +1647,39 @@ func (x *RemoteSpawnResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteSpawnResponse.ProtoReflect.Descriptor instead.
-func (*RemoteSpawnResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{18}
-}
-
 func (x *RemoteSpawnResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
 }
 
+func (x *RemoteSpawnResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type RemoteSpawnResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address
+	Address string
+}
+
+func (b0 RemoteSpawnResponse_builder) Build() *RemoteSpawnResponse {
+	m0 := &RemoteSpawnResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
+}
+
 type RemoteReinstateRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteReinstateRequest) Reset() {
@@ -1189,34 +1707,62 @@ func (x *RemoteReinstateRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteReinstateRequest.ProtoReflect.Descriptor instead.
-func (*RemoteReinstateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{19}
-}
-
 func (x *RemoteReinstateRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteReinstateRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteReinstateRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteReinstateRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteReinstateRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteReinstateRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteReinstateRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteReinstateRequest_builder) Build() *RemoteReinstateRequest {
+	m0 := &RemoteReinstateRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteReinstateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1246,18 +1792,25 @@ func (x *RemoteReinstateResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteReinstateResponse.ProtoReflect.Descriptor instead.
-func (*RemoteReinstateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{20}
+type RemoteReinstateResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteReinstateResponse_builder) Build() *RemoteReinstateResponse {
+	m0 := &RemoteReinstateResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 type RemoteAskGrainRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Grain          *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3" json:"grain,omitempty"`
-	Message        []byte                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	RequestTimeout *durationpb.Duration   `protobuf:"bytes,3,opt,name=request_timeout,json=requestTimeout,proto3" json:"request_timeout,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Grain          *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3"`
+	xxx_hidden_Message        []byte                 `protobuf:"bytes,2,opt,name=message,proto3"`
+	xxx_hidden_RequestTimeout *durationpb.Duration   `protobuf:"bytes,3,opt,name=request_timeout,json=requestTimeout,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *RemoteAskGrainRequest) Reset() {
@@ -1285,37 +1838,87 @@ func (x *RemoteAskGrainRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteAskGrainRequest.ProtoReflect.Descriptor instead.
-func (*RemoteAskGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{21}
-}
-
 func (x *RemoteAskGrainRequest) GetGrain() *Grain {
 	if x != nil {
-		return x.Grain
+		return x.xxx_hidden_Grain
 	}
 	return nil
 }
 
 func (x *RemoteAskGrainRequest) GetMessage() []byte {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
 func (x *RemoteAskGrainRequest) GetRequestTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.RequestTimeout
+		return x.xxx_hidden_RequestTimeout
 	}
 	return nil
 }
 
+func (x *RemoteAskGrainRequest) SetGrain(v *Grain) {
+	x.xxx_hidden_Grain = v
+}
+
+func (x *RemoteAskGrainRequest) SetMessage(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Message = v
+}
+
+func (x *RemoteAskGrainRequest) SetRequestTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_RequestTimeout = v
+}
+
+func (x *RemoteAskGrainRequest) HasGrain() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Grain != nil
+}
+
+func (x *RemoteAskGrainRequest) HasRequestTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_RequestTimeout != nil
+}
+
+func (x *RemoteAskGrainRequest) ClearGrain() {
+	x.xxx_hidden_Grain = nil
+}
+
+func (x *RemoteAskGrainRequest) ClearRequestTimeout() {
+	x.xxx_hidden_RequestTimeout = nil
+}
+
+type RemoteAskGrainRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Grain          *Grain
+	Message        []byte
+	RequestTimeout *durationpb.Duration
+}
+
+func (b0 RemoteAskGrainRequest_builder) Build() *RemoteAskGrainRequest {
+	m0 := &RemoteAskGrainRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Grain = b.Grain
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_RequestTimeout = b.RequestTimeout
+	return m0
+}
+
 type RemoteAskGrainResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Message       []byte                 `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Message []byte                 `protobuf:"bytes,1,opt,name=message,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteAskGrainResponse) Reset() {
@@ -1343,24 +1946,40 @@ func (x *RemoteAskGrainResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteAskGrainResponse.ProtoReflect.Descriptor instead.
-func (*RemoteAskGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{22}
-}
-
 func (x *RemoteAskGrainResponse) GetMessage() []byte {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
+func (x *RemoteAskGrainResponse) SetMessage(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Message = v
+}
+
+type RemoteAskGrainResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Message []byte
+}
+
+func (b0 RemoteAskGrainResponse_builder) Build() *RemoteAskGrainResponse {
+	m0 := &RemoteAskGrainResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Message = b.Message
+	return m0
+}
+
 type RemoteTellGrainRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Grain         *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3" json:"grain,omitempty"`
-	Message       []byte                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Grain   *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3"`
+	xxx_hidden_Message []byte                 `protobuf:"bytes,2,opt,name=message,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteTellGrainRequest) Reset() {
@@ -1388,27 +2007,60 @@ func (x *RemoteTellGrainRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteTellGrainRequest.ProtoReflect.Descriptor instead.
-func (*RemoteTellGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{23}
-}
-
 func (x *RemoteTellGrainRequest) GetGrain() *Grain {
 	if x != nil {
-		return x.Grain
+		return x.xxx_hidden_Grain
 	}
 	return nil
 }
 
 func (x *RemoteTellGrainRequest) GetMessage() []byte {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
+func (x *RemoteTellGrainRequest) SetGrain(v *Grain) {
+	x.xxx_hidden_Grain = v
+}
+
+func (x *RemoteTellGrainRequest) SetMessage(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Message = v
+}
+
+func (x *RemoteTellGrainRequest) HasGrain() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Grain != nil
+}
+
+func (x *RemoteTellGrainRequest) ClearGrain() {
+	x.xxx_hidden_Grain = nil
+}
+
+type RemoteTellGrainRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Grain   *Grain
+	Message []byte
+}
+
+func (b0 RemoteTellGrainRequest_builder) Build() *RemoteTellGrainRequest {
+	m0 := &RemoteTellGrainRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Grain = b.Grain
+	x.xxx_hidden_Message = b.Message
+	return m0
+}
+
 type RemoteTellGrainResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1438,16 +2090,23 @@ func (x *RemoteTellGrainResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteTellGrainResponse.ProtoReflect.Descriptor instead.
-func (*RemoteTellGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{24}
+type RemoteTellGrainResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteTellGrainResponse_builder) Build() *RemoteTellGrainResponse {
+	m0 := &RemoteTellGrainResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 type RemoteActivateGrainRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Grain         *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3" json:"grain,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Grain *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RemoteActivateGrainRequest) Reset() {
@@ -1475,20 +2134,44 @@ func (x *RemoteActivateGrainRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteActivateGrainRequest.ProtoReflect.Descriptor instead.
-func (*RemoteActivateGrainRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{25}
-}
-
 func (x *RemoteActivateGrainRequest) GetGrain() *Grain {
 	if x != nil {
-		return x.Grain
+		return x.xxx_hidden_Grain
 	}
 	return nil
 }
 
+func (x *RemoteActivateGrainRequest) SetGrain(v *Grain) {
+	x.xxx_hidden_Grain = v
+}
+
+func (x *RemoteActivateGrainRequest) HasGrain() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Grain != nil
+}
+
+func (x *RemoteActivateGrainRequest) ClearGrain() {
+	x.xxx_hidden_Grain = nil
+}
+
+type RemoteActivateGrainRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Grain *Grain
+}
+
+func (b0 RemoteActivateGrainRequest_builder) Build() *RemoteActivateGrainRequest {
+	m0 := &RemoteActivateGrainRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Grain = b.Grain
+	return m0
+}
+
 type RemoteActivateGrainResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1518,17 +2201,23 @@ func (x *RemoteActivateGrainResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteActivateGrainResponse.ProtoReflect.Descriptor instead.
-func (*RemoteActivateGrainResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{26}
+type RemoteActivateGrainResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 RemoteActivateGrainResponse_builder) Build() *RemoteActivateGrainResponse {
+	m0 := &RemoteActivateGrainResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 type PersistPeerStateRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer state
-	PeerState     *PeerState `protobuf:"bytes,1,opt,name=peer_state,json=peerState,proto3" json:"peer_state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerState *PeerState             `protobuf:"bytes,1,opt,name=peer_state,json=peerState,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *PersistPeerStateRequest) Reset() {
@@ -1556,20 +2245,45 @@ func (x *PersistPeerStateRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PersistPeerStateRequest.ProtoReflect.Descriptor instead.
-func (*PersistPeerStateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{27}
-}
-
 func (x *PersistPeerStateRequest) GetPeerState() *PeerState {
 	if x != nil {
-		return x.PeerState
+		return x.xxx_hidden_PeerState
 	}
 	return nil
 }
 
+func (x *PersistPeerStateRequest) SetPeerState(v *PeerState) {
+	x.xxx_hidden_PeerState = v
+}
+
+func (x *PersistPeerStateRequest) HasPeerState() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PeerState != nil
+}
+
+func (x *PersistPeerStateRequest) ClearPeerState() {
+	x.xxx_hidden_PeerState = nil
+}
+
+type PersistPeerStateRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer state
+	PeerState *PeerState
+}
+
+func (b0 PersistPeerStateRequest_builder) Build() *PersistPeerStateRequest {
+	m0 := &PersistPeerStateRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerState = b.PeerState
+	return m0
+}
+
 type PersistPeerStateResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1599,21 +2313,25 @@ func (x *PersistPeerStateResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PersistPeerStateResponse.ProtoReflect.Descriptor instead.
-func (*PersistPeerStateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{28}
+type PersistPeerStateResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 PersistPeerStateResponse_builder) Build() *PersistPeerStateResponse {
+	m0 := &PersistPeerStateResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 type TopicMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the message unique id
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies the topic
-	Topic string `protobuf:"bytes,2,opt,name=topic,proto3" json:"topic,omitempty"`
-	// Specifies the message
-	Message       []byte `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id      string                 `protobuf:"bytes,1,opt,name=id,proto3"`
+	xxx_hidden_Topic   string                 `protobuf:"bytes,2,opt,name=topic,proto3"`
+	xxx_hidden_Message []byte                 `protobuf:"bytes,3,opt,name=message,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *TopicMessage) Reset() {
@@ -1641,41 +2359,71 @@ func (x *TopicMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TopicMessage.ProtoReflect.Descriptor instead.
-func (*TopicMessage) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{29}
-}
-
 func (x *TopicMessage) GetId() string {
 	if x != nil {
-		return x.Id
+		return x.xxx_hidden_Id
 	}
 	return ""
 }
 
 func (x *TopicMessage) GetTopic() string {
 	if x != nil {
-		return x.Topic
+		return x.xxx_hidden_Topic
 	}
 	return ""
 }
 
 func (x *TopicMessage) GetMessage() []byte {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
+}
+
+func (x *TopicMessage) SetId(v string) {
+	x.xxx_hidden_Id = v
+}
+
+func (x *TopicMessage) SetTopic(v string) {
+	x.xxx_hidden_Topic = v
+}
+
+func (x *TopicMessage) SetMessage(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Message = v
+}
+
+type TopicMessage_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the message unique id
+	Id string
+	// Specifies the topic
+	Topic string
+	// Specifies the message
+	Message []byte
+}
+
+func (b0 TopicMessage_builder) Build() *TopicMessage {
+	m0 := &TopicMessage{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_Topic = b.Topic
+	x.xxx_hidden_Message = b.Message
+	return m0
 }
 
 // TopicStatsRequest asks a peer TopicActor for its local subscriber count for
 // a given topic. Peers answer with their local view only; they do not fan
 // the request out any further.
 type TopicStatsRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the topic to inspect
-	Topic         string `protobuf:"bytes,1,opt,name=topic,proto3" json:"topic,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Topic string                 `protobuf:"bytes,1,opt,name=topic,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TopicStatsRequest) Reset() {
@@ -1703,26 +2451,39 @@ func (x *TopicStatsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TopicStatsRequest.ProtoReflect.Descriptor instead.
-func (*TopicStatsRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{30}
-}
-
 func (x *TopicStatsRequest) GetTopic() string {
 	if x != nil {
-		return x.Topic
+		return x.xxx_hidden_Topic
 	}
 	return ""
+}
+
+func (x *TopicStatsRequest) SetTopic(v string) {
+	x.xxx_hidden_Topic = v
+}
+
+type TopicStatsRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the topic to inspect
+	Topic string
+}
+
+func (b0 TopicStatsRequest_builder) Build() *TopicStatsRequest {
+	m0 := &TopicStatsRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Topic = b.Topic
+	return m0
 }
 
 // TopicStatsResponse returns a peer TopicActor's local subscriber count for
 // the topic named in the matching TopicStatsRequest.
 type TopicStatsResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the number of subscribers registered locally for the topic
-	LocalSubscriberCount int32 `protobuf:"varint,1,opt,name=local_subscriber_count,json=localSubscriberCount,proto3" json:"local_subscriber_count,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	state                           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_LocalSubscriberCount int32                  `protobuf:"varint,1,opt,name=local_subscriber_count,json=localSubscriberCount,proto3"`
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *TopicStatsResponse) Reset() {
@@ -1750,28 +2511,39 @@ func (x *TopicStatsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TopicStatsResponse.ProtoReflect.Descriptor instead.
-func (*TopicStatsResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{31}
-}
-
 func (x *TopicStatsResponse) GetLocalSubscriberCount() int32 {
 	if x != nil {
-		return x.LocalSubscriberCount
+		return x.xxx_hidden_LocalSubscriberCount
 	}
 	return 0
 }
 
+func (x *TopicStatsResponse) SetLocalSubscriberCount(v int32) {
+	x.xxx_hidden_LocalSubscriberCount = v
+}
+
+type TopicStatsResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the number of subscribers registered locally for the topic
+	LocalSubscriberCount int32
+}
+
+func (b0 TopicStatsResponse_builder) Build() *TopicStatsResponse {
+	m0 := &TopicStatsResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_LocalSubscriberCount = b.LocalSubscriberCount
+	return m0
+}
+
 type RemoteStashSizeRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteStashSizeRequest) Reset() {
@@ -1799,38 +2571,65 @@ func (x *RemoteStashSizeRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStashSizeRequest.ProtoReflect.Descriptor instead.
-func (*RemoteStashSizeRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{32}
-}
-
 func (x *RemoteStashSizeRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteStashSizeRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteStashSizeRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteStashSizeRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteStashSizeRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteStashSizeRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteStashSizeRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteStashSizeRequest_builder) Build() *RemoteStashSizeRequest {
+	m0 := &RemoteStashSizeRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteStashSizeResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the stash size
-	Size          uint64 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Size uint64                 `protobuf:"varint,1,opt,name=size,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteStashSizeResponse) Reset() {
@@ -1858,28 +2657,39 @@ func (x *RemoteStashSizeResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStashSizeResponse.ProtoReflect.Descriptor instead.
-func (*RemoteStashSizeResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{33}
-}
-
 func (x *RemoteStashSizeResponse) GetSize() uint64 {
 	if x != nil {
-		return x.Size
+		return x.xxx_hidden_Size
 	}
 	return 0
 }
 
+func (x *RemoteStashSizeResponse) SetSize(v uint64) {
+	x.xxx_hidden_Size = v
+}
+
+type RemoteStashSizeResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the stash size
+	Size uint64
+}
+
+func (b0 RemoteStashSizeResponse_builder) Build() *RemoteStashSizeResponse {
+	m0 := &RemoteStashSizeResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Size = b.Size
+	return m0
+}
+
 type RemoteRoleRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteRoleRequest) Reset() {
@@ -1907,38 +2717,65 @@ func (x *RemoteRoleRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteRoleRequest.ProtoReflect.Descriptor instead.
-func (*RemoteRoleRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{34}
-}
-
 func (x *RemoteRoleRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteRoleRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteRoleRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteRoleRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteRoleRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteRoleRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteRoleRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteRoleRequest_builder) Build() *RemoteRoleRequest {
+	m0 := &RemoteRoleRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteRoleResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the role
-	Role          string `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Role string                 `protobuf:"bytes,1,opt,name=role,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteRoleResponse) Reset() {
@@ -1966,28 +2803,39 @@ func (x *RemoteRoleResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteRoleResponse.ProtoReflect.Descriptor instead.
-func (*RemoteRoleResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{35}
-}
-
 func (x *RemoteRoleResponse) GetRole() string {
 	if x != nil {
-		return x.Role
+		return x.xxx_hidden_Role
 	}
 	return ""
 }
 
+func (x *RemoteRoleResponse) SetRole(v string) {
+	x.xxx_hidden_Role = v
+}
+
+type RemoteRoleResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the role
+	Role string
+}
+
+func (b0 RemoteRoleResponse_builder) Build() *RemoteRoleResponse {
+	m0 := &RemoteRoleResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Role = b.Role
+	return m0
+}
+
 type RemoteDependenciesRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteDependenciesRequest) Reset() {
@@ -2015,38 +2863,65 @@ func (x *RemoteDependenciesRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteDependenciesRequest.ProtoReflect.Descriptor instead.
-func (*RemoteDependenciesRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{36}
-}
-
 func (x *RemoteDependenciesRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteDependenciesRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteDependenciesRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteDependenciesRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteDependenciesRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteDependenciesRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteDependenciesRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteDependenciesRequest_builder) Build() *RemoteDependenciesRequest {
+	m0 := &RemoteDependenciesRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteDependenciesResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the dependencies
-	Dependencies  []*Dependency `protobuf:"bytes,1,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Dependencies *[]*Dependency         `protobuf:"bytes,1,rep,name=dependencies,proto3"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *RemoteDependenciesResponse) Reset() {
@@ -2074,28 +2949,41 @@ func (x *RemoteDependenciesResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteDependenciesResponse.ProtoReflect.Descriptor instead.
-func (*RemoteDependenciesResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{37}
-}
-
 func (x *RemoteDependenciesResponse) GetDependencies() []*Dependency {
 	if x != nil {
-		return x.Dependencies
+		if x.xxx_hidden_Dependencies != nil {
+			return *x.xxx_hidden_Dependencies
+		}
 	}
 	return nil
 }
 
+func (x *RemoteDependenciesResponse) SetDependencies(v []*Dependency) {
+	x.xxx_hidden_Dependencies = &v
+}
+
+type RemoteDependenciesResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the dependencies
+	Dependencies []*Dependency
+}
+
+func (b0 RemoteDependenciesResponse_builder) Build() *RemoteDependenciesResponse {
+	m0 := &RemoteDependenciesResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Dependencies = &b.Dependencies
+	return m0
+}
+
 type RemoteMetricRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteMetricRequest) Reset() {
@@ -2123,38 +3011,65 @@ func (x *RemoteMetricRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteMetricRequest.ProtoReflect.Descriptor instead.
-func (*RemoteMetricRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{38}
-}
-
 func (x *RemoteMetricRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteMetricRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteMetricRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteMetricRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteMetricRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteMetricRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteMetricRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteMetricRequest_builder) Build() *RemoteMetricRequest {
+	m0 := &RemoteMetricRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteMetricResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the metric
-	Metric        *Metric `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Metric *Metric                `protobuf:"bytes,1,opt,name=metric,proto3"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *RemoteMetricResponse) Reset() {
@@ -2182,28 +3097,50 @@ func (x *RemoteMetricResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteMetricResponse.ProtoReflect.Descriptor instead.
-func (*RemoteMetricResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{39}
-}
-
 func (x *RemoteMetricResponse) GetMetric() *Metric {
 	if x != nil {
-		return x.Metric
+		return x.xxx_hidden_Metric
 	}
 	return nil
 }
 
+func (x *RemoteMetricResponse) SetMetric(v *Metric) {
+	x.xxx_hidden_Metric = v
+}
+
+func (x *RemoteMetricResponse) HasMetric() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Metric != nil
+}
+
+func (x *RemoteMetricResponse) ClearMetric() {
+	x.xxx_hidden_Metric = nil
+}
+
+type RemoteMetricResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the metric
+	Metric *Metric
+}
+
+func (b0 RemoteMetricResponse_builder) Build() *RemoteMetricResponse {
+	m0 := &RemoteMetricResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Metric = b.Metric
+	return m0
+}
+
 type RemoteKindRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteKindRequest) Reset() {
@@ -2231,38 +3168,65 @@ func (x *RemoteKindRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteKindRequest.ProtoReflect.Descriptor instead.
-func (*RemoteKindRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{40}
-}
-
 func (x *RemoteKindRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteKindRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteKindRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteKindRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteKindRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteKindRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteKindRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteKindRequest_builder) Build() *RemoteKindRequest {
+	m0 := &RemoteKindRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteKindResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the kind
-	Kind          string `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Kind string                 `protobuf:"bytes,1,opt,name=kind,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteKindResponse) Reset() {
@@ -2290,28 +3254,39 @@ func (x *RemoteKindResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteKindResponse.ProtoReflect.Descriptor instead.
-func (*RemoteKindResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{41}
-}
-
 func (x *RemoteKindResponse) GetKind() string {
 	if x != nil {
-		return x.Kind
+		return x.xxx_hidden_Kind
 	}
 	return ""
 }
 
+func (x *RemoteKindResponse) SetKind(v string) {
+	x.xxx_hidden_Kind = v
+}
+
+type RemoteKindResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the kind
+	Kind string
+}
+
+func (b0 RemoteKindResponse_builder) Build() *RemoteKindResponse {
+	m0 := &RemoteKindResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Kind = b.Kind
+	return m0
+}
+
 type RemoteParentRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteParentRequest) Reset() {
@@ -2339,38 +3314,65 @@ func (x *RemoteParentRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteParentRequest.ProtoReflect.Descriptor instead.
-func (*RemoteParentRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{42}
-}
-
 func (x *RemoteParentRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteParentRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteParentRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteParentRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteParentRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteParentRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteParentRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteParentRequest_builder) Build() *RemoteParentRequest {
+	m0 := &RemoteParentRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteParentResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the parent
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteParentResponse) Reset() {
@@ -2398,28 +3400,39 @@ func (x *RemoteParentResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteParentResponse.ProtoReflect.Descriptor instead.
-func (*RemoteParentResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{43}
-}
-
 func (x *RemoteParentResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
 }
 
+func (x *RemoteParentResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type RemoteParentResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the parent
+	Address string
+}
+
+func (b0 RemoteParentResponse_builder) Build() *RemoteParentResponse {
+	m0 := &RemoteParentResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
+}
+
 type RemoteChildrenRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemoteChildrenRequest) Reset() {
@@ -2447,38 +3460,65 @@ func (x *RemoteChildrenRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteChildrenRequest.ProtoReflect.Descriptor instead.
-func (*RemoteChildrenRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{44}
-}
-
 func (x *RemoteChildrenRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteChildrenRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteChildrenRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemoteChildrenRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteChildrenRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteChildrenRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemoteChildrenRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemoteChildrenRequest_builder) Build() *RemoteChildrenRequest {
+	m0 := &RemoteChildrenRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemoteChildrenResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the children
-	Addresses     []string `protobuf:"bytes,1,rep,name=addresses,proto3" json:"addresses,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Addresses []string               `protobuf:"bytes,1,rep,name=addresses,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *RemoteChildrenResponse) Reset() {
@@ -2506,30 +3546,40 @@ func (x *RemoteChildrenResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteChildrenResponse.ProtoReflect.Descriptor instead.
-func (*RemoteChildrenResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{45}
-}
-
 func (x *RemoteChildrenResponse) GetAddresses() []string {
 	if x != nil {
-		return x.Addresses
+		return x.xxx_hidden_Addresses
 	}
 	return nil
 }
 
+func (x *RemoteChildrenResponse) SetAddresses(v []string) {
+	x.xxx_hidden_Addresses = v
+}
+
+type RemoteChildrenResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the children
+	Addresses []string
+}
+
+func (b0 RemoteChildrenResponse_builder) Build() *RemoteChildrenResponse {
+	m0 := &RemoteChildrenResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Addresses = b.Addresses
+	return m0
+}
+
 type RemoteStateRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// Specifies the state to check
-	State         State `protobuf:"varint,4,opt,name=state,proto3,enum=internalpb.State" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host  string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port  int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name  string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	xxx_hidden_State State                  `protobuf:"varint,4,opt,name=state,proto3,enum=internalpb.State"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RemoteStateRequest) Reset() {
@@ -2557,45 +3607,79 @@ func (x *RemoteStateRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStateRequest.ProtoReflect.Descriptor instead.
-func (*RemoteStateRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{46}
-}
-
 func (x *RemoteStateRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteStateRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteStateRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *RemoteStateRequest) GetState() State {
 	if x != nil {
-		return x.State
+		return x.xxx_hidden_State
 	}
 	return State_STATE_UNKNOWN
 }
 
+func (x *RemoteStateRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteStateRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteStateRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *RemoteStateRequest) SetState(v State) {
+	x.xxx_hidden_State = v
+}
+
+type RemoteStateRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+	// Specifies the state to check
+	State State
+}
+
+func (b0 RemoteStateRequest_builder) Build() *RemoteStateRequest {
+	m0 := &RemoteStateRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_State = b.State
+	return m0
+}
+
 type RemoteStateResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies whether the state is true or false
-	State         bool `protobuf:"varint,1,opt,name=state,proto3" json:"state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_State bool                   `protobuf:"varint,1,opt,name=state,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RemoteStateResponse) Reset() {
@@ -2623,28 +3707,39 @@ func (x *RemoteStateResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteStateResponse.ProtoReflect.Descriptor instead.
-func (*RemoteStateResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{47}
-}
-
 func (x *RemoteStateResponse) GetState() bool {
 	if x != nil {
-		return x.State
+		return x.xxx_hidden_State
 	}
 	return false
 }
 
+func (x *RemoteStateResponse) SetState(v bool) {
+	x.xxx_hidden_State = v
+}
+
+type RemoteStateResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies whether the state is true or false
+	State bool
+}
+
+func (b0 RemoteStateResponse_builder) Build() *RemoteStateResponse {
+	m0 := &RemoteStateResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_State = b.State
+	return m0
+}
+
 type RemotePassivationStrategyRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name
-	Name          string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RemotePassivationStrategyRequest) Reset() {
@@ -2672,38 +3767,65 @@ func (x *RemotePassivationStrategyRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemotePassivationStrategyRequest.ProtoReflect.Descriptor instead.
-func (*RemotePassivationStrategyRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{48}
-}
-
 func (x *RemotePassivationStrategyRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemotePassivationStrategyRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemotePassivationStrategyRequest) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
+func (x *RemotePassivationStrategyRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemotePassivationStrategyRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemotePassivationStrategyRequest) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+type RemotePassivationStrategyRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name
+	Name string
+}
+
+func (b0 RemotePassivationStrategyRequest_builder) Build() *RemotePassivationStrategyRequest {
+	m0 := &RemotePassivationStrategyRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	return m0
+}
+
 type RemotePassivationStrategyResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the passivation strategy
-	PassivationStrategy *PassivationStrategy `protobuf:"bytes,1,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PassivationStrategy *PassivationStrategy   `protobuf:"bytes,1,opt,name=passivation_strategy,json=passivationStrategy,proto3"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *RemotePassivationStrategyResponse) Reset() {
@@ -2731,47 +3853,59 @@ func (x *RemotePassivationStrategyResponse) ProtoReflect() protoreflect.Message 
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemotePassivationStrategyResponse.ProtoReflect.Descriptor instead.
-func (*RemotePassivationStrategyResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{49}
-}
-
 func (x *RemotePassivationStrategyResponse) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivationStrategy
+		return x.xxx_hidden_PassivationStrategy
 	}
 	return nil
 }
 
-type RemoteSpawnChildRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remote host address
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remote port
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the actor name.
-	ActorName string `protobuf:"bytes,3,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
-	// Specifies the actor type
-	ActorType string `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3" json:"actor_type,omitempty"`
-	// Specifies if the actor is relocatable
-	Relocatable bool `protobuf:"varint,5,opt,name=relocatable,proto3" json:"relocatable,omitempty"`
+func (x *RemotePassivationStrategyResponse) SetPassivationStrategy(v *PassivationStrategy) {
+	x.xxx_hidden_PassivationStrategy = v
+}
+
+func (x *RemotePassivationStrategyResponse) HasPassivationStrategy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PassivationStrategy != nil
+}
+
+func (x *RemotePassivationStrategyResponse) ClearPassivationStrategy() {
+	x.xxx_hidden_PassivationStrategy = nil
+}
+
+type RemotePassivationStrategyResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the passivation strategy
-	PassivationStrategy *PassivationStrategy `protobuf:"bytes,6,opt,name=passivation_strategy,json=passivationStrategy,proto3" json:"passivation_strategy,omitempty"`
-	// Specifies the dependencies
-	Dependencies []*Dependency `protobuf:"bytes,7,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	// States whether the actor will require a stash buffer
-	EnableStash bool `protobuf:"varint,8,opt,name=enable_stash,json=enableStash,proto3" json:"enable_stash,omitempty"`
-	// Specifies the reentrancy configuration when explicitly set
-	Reentrancy *ReentrancyConfig `protobuf:"bytes,9,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
-	// Specifies the parent actor name
-	Parent string `protobuf:"bytes,10,opt,name=parent,proto3" json:"parent,omitempty"`
-	// Specifies the supervisor configuration when explicitly set
-	Supervisor *SupervisorSpec `protobuf:"bytes,11,opt,name=supervisor,proto3" json:"supervisor,omitempty"`
-	// Specifies the init timeout override when explicitly set.
-	// When unset, the hosting node's system-wide init timeout is used.
-	InitTimeout   *durationpb.Duration `protobuf:"bytes,12,opt,name=init_timeout,json=initTimeout,proto3" json:"init_timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PassivationStrategy *PassivationStrategy
+}
+
+func (b0 RemotePassivationStrategyResponse_builder) Build() *RemotePassivationStrategyResponse {
+	m0 := &RemotePassivationStrategyResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PassivationStrategy = b.PassivationStrategy
+	return m0
+}
+
+type RemoteSpawnChildRequest struct {
+	state                          protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host                string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port                int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_ActorName           string                 `protobuf:"bytes,3,opt,name=actor_name,json=actorName,proto3"`
+	xxx_hidden_ActorType           string                 `protobuf:"bytes,4,opt,name=actor_type,json=actorType,proto3"`
+	xxx_hidden_Relocatable         bool                   `protobuf:"varint,5,opt,name=relocatable,proto3"`
+	xxx_hidden_PassivationStrategy *PassivationStrategy   `protobuf:"bytes,6,opt,name=passivation_strategy,json=passivationStrategy,proto3"`
+	xxx_hidden_Dependencies        *[]*Dependency         `protobuf:"bytes,7,rep,name=dependencies,proto3"`
+	xxx_hidden_EnableStash         bool                   `protobuf:"varint,8,opt,name=enable_stash,json=enableStash,proto3"`
+	xxx_hidden_Reentrancy          *ReentrancyConfig      `protobuf:"bytes,9,opt,name=reentrancy,proto3"`
+	xxx_hidden_Parent              string                 `protobuf:"bytes,10,opt,name=parent,proto3"`
+	xxx_hidden_Supervisor          *SupervisorSpec        `protobuf:"bytes,11,opt,name=supervisor,proto3"`
+	xxx_hidden_InitTimeout         *durationpb.Duration   `protobuf:"bytes,12,opt,name=init_timeout,json=initTimeout,proto3"`
+	unknownFields                  protoimpl.UnknownFields
+	sizeCache                      protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnChildRequest) Reset() {
@@ -2799,101 +3933,238 @@ func (x *RemoteSpawnChildRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteSpawnChildRequest.ProtoReflect.Descriptor instead.
-func (*RemoteSpawnChildRequest) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{50}
-}
-
 func (x *RemoteSpawnChildRequest) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *RemoteSpawnChildRequest) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *RemoteSpawnChildRequest) GetActorName() string {
 	if x != nil {
-		return x.ActorName
+		return x.xxx_hidden_ActorName
 	}
 	return ""
 }
 
 func (x *RemoteSpawnChildRequest) GetActorType() string {
 	if x != nil {
-		return x.ActorType
+		return x.xxx_hidden_ActorType
 	}
 	return ""
 }
 
 func (x *RemoteSpawnChildRequest) GetRelocatable() bool {
 	if x != nil {
-		return x.Relocatable
+		return x.xxx_hidden_Relocatable
 	}
 	return false
 }
 
 func (x *RemoteSpawnChildRequest) GetPassivationStrategy() *PassivationStrategy {
 	if x != nil {
-		return x.PassivationStrategy
+		return x.xxx_hidden_PassivationStrategy
 	}
 	return nil
 }
 
 func (x *RemoteSpawnChildRequest) GetDependencies() []*Dependency {
 	if x != nil {
-		return x.Dependencies
+		if x.xxx_hidden_Dependencies != nil {
+			return *x.xxx_hidden_Dependencies
+		}
 	}
 	return nil
 }
 
 func (x *RemoteSpawnChildRequest) GetEnableStash() bool {
 	if x != nil {
-		return x.EnableStash
+		return x.xxx_hidden_EnableStash
 	}
 	return false
 }
 
 func (x *RemoteSpawnChildRequest) GetReentrancy() *ReentrancyConfig {
 	if x != nil {
-		return x.Reentrancy
+		return x.xxx_hidden_Reentrancy
 	}
 	return nil
 }
 
 func (x *RemoteSpawnChildRequest) GetParent() string {
 	if x != nil {
-		return x.Parent
+		return x.xxx_hidden_Parent
 	}
 	return ""
 }
 
 func (x *RemoteSpawnChildRequest) GetSupervisor() *SupervisorSpec {
 	if x != nil {
-		return x.Supervisor
+		return x.xxx_hidden_Supervisor
 	}
 	return nil
 }
 
 func (x *RemoteSpawnChildRequest) GetInitTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.InitTimeout
+		return x.xxx_hidden_InitTimeout
 	}
 	return nil
 }
 
+func (x *RemoteSpawnChildRequest) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *RemoteSpawnChildRequest) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *RemoteSpawnChildRequest) SetActorName(v string) {
+	x.xxx_hidden_ActorName = v
+}
+
+func (x *RemoteSpawnChildRequest) SetActorType(v string) {
+	x.xxx_hidden_ActorType = v
+}
+
+func (x *RemoteSpawnChildRequest) SetRelocatable(v bool) {
+	x.xxx_hidden_Relocatable = v
+}
+
+func (x *RemoteSpawnChildRequest) SetPassivationStrategy(v *PassivationStrategy) {
+	x.xxx_hidden_PassivationStrategy = v
+}
+
+func (x *RemoteSpawnChildRequest) SetDependencies(v []*Dependency) {
+	x.xxx_hidden_Dependencies = &v
+}
+
+func (x *RemoteSpawnChildRequest) SetEnableStash(v bool) {
+	x.xxx_hidden_EnableStash = v
+}
+
+func (x *RemoteSpawnChildRequest) SetReentrancy(v *ReentrancyConfig) {
+	x.xxx_hidden_Reentrancy = v
+}
+
+func (x *RemoteSpawnChildRequest) SetParent(v string) {
+	x.xxx_hidden_Parent = v
+}
+
+func (x *RemoteSpawnChildRequest) SetSupervisor(v *SupervisorSpec) {
+	x.xxx_hidden_Supervisor = v
+}
+
+func (x *RemoteSpawnChildRequest) SetInitTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_InitTimeout = v
+}
+
+func (x *RemoteSpawnChildRequest) HasPassivationStrategy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PassivationStrategy != nil
+}
+
+func (x *RemoteSpawnChildRequest) HasReentrancy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Reentrancy != nil
+}
+
+func (x *RemoteSpawnChildRequest) HasSupervisor() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Supervisor != nil
+}
+
+func (x *RemoteSpawnChildRequest) HasInitTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_InitTimeout != nil
+}
+
+func (x *RemoteSpawnChildRequest) ClearPassivationStrategy() {
+	x.xxx_hidden_PassivationStrategy = nil
+}
+
+func (x *RemoteSpawnChildRequest) ClearReentrancy() {
+	x.xxx_hidden_Reentrancy = nil
+}
+
+func (x *RemoteSpawnChildRequest) ClearSupervisor() {
+	x.xxx_hidden_Supervisor = nil
+}
+
+func (x *RemoteSpawnChildRequest) ClearInitTimeout() {
+	x.xxx_hidden_InitTimeout = nil
+}
+
+type RemoteSpawnChildRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remote host address
+	Host string
+	// Specifies the remote port
+	Port int32
+	// Specifies the actor name.
+	ActorName string
+	// Specifies the actor type
+	ActorType string
+	// Specifies if the actor is relocatable
+	Relocatable bool
+	// Specifies the passivation strategy
+	PassivationStrategy *PassivationStrategy
+	// Specifies the dependencies
+	Dependencies []*Dependency
+	// States whether the actor will require a stash buffer
+	EnableStash bool
+	// Specifies the reentrancy configuration when explicitly set
+	Reentrancy *ReentrancyConfig
+	// Specifies the parent actor name
+	Parent string
+	// Specifies the supervisor configuration when explicitly set
+	Supervisor *SupervisorSpec
+	// Specifies the init timeout override when explicitly set.
+	// When unset, the hosting node's system-wide init timeout is used.
+	InitTimeout *durationpb.Duration
+}
+
+func (b0 RemoteSpawnChildRequest_builder) Build() *RemoteSpawnChildRequest {
+	m0 := &RemoteSpawnChildRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_ActorName = b.ActorName
+	x.xxx_hidden_ActorType = b.ActorType
+	x.xxx_hidden_Relocatable = b.Relocatable
+	x.xxx_hidden_PassivationStrategy = b.PassivationStrategy
+	x.xxx_hidden_Dependencies = &b.Dependencies
+	x.xxx_hidden_EnableStash = b.EnableStash
+	x.xxx_hidden_Reentrancy = b.Reentrancy
+	x.xxx_hidden_Parent = b.Parent
+	x.xxx_hidden_Supervisor = b.Supervisor
+	x.xxx_hidden_InitTimeout = b.InitTimeout
+	return m0
+}
+
 type RemoteSpawnChildResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address
-	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Address string                 `protobuf:"bytes,1,opt,name=address,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RemoteSpawnChildResponse) Reset() {
@@ -2921,16 +4192,30 @@ func (x *RemoteSpawnChildResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoteSpawnChildResponse.ProtoReflect.Descriptor instead.
-func (*RemoteSpawnChildResponse) Descriptor() ([]byte, []int) {
-	return file_internal_remoting_proto_rawDescGZIP(), []int{51}
-}
-
 func (x *RemoteSpawnChildResponse) GetAddress() string {
 	if x != nil {
-		return x.Address
+		return x.xxx_hidden_Address
 	}
 	return ""
+}
+
+func (x *RemoteSpawnChildResponse) SetAddress(v string) {
+	x.xxx_hidden_Address = v
+}
+
+type RemoteSpawnChildResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address
+	Address string
+}
+
+func (b0 RemoteSpawnChildResponse_builder) Build() *RemoteSpawnChildResponse {
+	m0 := &RemoteSpawnChildResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Address = b.Address
+	return m0
 }
 
 var File_internal_remoting_proto protoreflect.FileDescriptor
@@ -3127,18 +4412,6 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_remoting_proto_rawDescOnce sync.Once
-	file_internal_remoting_proto_rawDescData []byte
-)
-
-func file_internal_remoting_proto_rawDescGZIP() []byte {
-	file_internal_remoting_proto_rawDescOnce.Do(func() {
-		file_internal_remoting_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_remoting_proto_rawDesc), len(file_internal_remoting_proto_rawDesc)))
-	})
-	return file_internal_remoting_proto_rawDescData
-}
 
 var file_internal_remoting_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_internal_remoting_proto_goTypes = []any{

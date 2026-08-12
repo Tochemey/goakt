@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -71,11 +70,6 @@ func (x ReliableControllerRole) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ReliableControllerRole.Descriptor instead.
-func (ReliableControllerRole) EnumDescriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
-}
-
 // ReliableDeliveryPattern selects the producer-side delivery pattern.
 type ReliableDeliveryPattern int32
 
@@ -126,24 +120,16 @@ func (x ReliableDeliveryPattern) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ReliableDeliveryPattern.Descriptor instead.
-func (ReliableDeliveryPattern) EnumDescriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{1}
-}
-
 // ReliableCompanionSpec marks an actor record as the endpoint-owned
 // reliable-delivery controller of one endpoint incarnation and carries the
 // ownership fields that cluster resolution validates.
 type ReliableCompanionSpec struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies which controller role the companion runs.
-	Role ReliableControllerRole `protobuf:"varint,1,opt,name=role,proto3,enum=internalpb.ReliableControllerRole" json:"role,omitempty"`
-	// Names the user-visible endpoint that owns the companion.
-	EndpointName string `protobuf:"bytes,2,opt,name=endpoint_name,json=endpointName,proto3" json:"endpoint_name,omitempty"`
-	// Pins the companion to one endpoint incarnation.
-	EndpointIncarnationId string `protobuf:"bytes,3,opt,name=endpoint_incarnation_id,json=endpointIncarnationId,proto3" json:"endpoint_incarnation_id,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Role                  ReliableControllerRole `protobuf:"varint,1,opt,name=role,proto3,enum=internalpb.ReliableControllerRole"`
+	xxx_hidden_EndpointName          string                 `protobuf:"bytes,2,opt,name=endpoint_name,json=endpointName,proto3"`
+	xxx_hidden_EndpointIncarnationId string                 `protobuf:"bytes,3,opt,name=endpoint_incarnation_id,json=endpointIncarnationId,proto3"`
+	unknownFields                    protoimpl.UnknownFields
+	sizeCache                        protoimpl.SizeCache
 }
 
 func (x *ReliableCompanionSpec) Reset() {
@@ -171,42 +157,66 @@ func (x *ReliableCompanionSpec) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReliableCompanionSpec.ProtoReflect.Descriptor instead.
-func (*ReliableCompanionSpec) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *ReliableCompanionSpec) GetRole() ReliableControllerRole {
 	if x != nil {
-		return x.Role
+		return x.xxx_hidden_Role
 	}
 	return ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_UNSPECIFIED
 }
 
 func (x *ReliableCompanionSpec) GetEndpointName() string {
 	if x != nil {
-		return x.EndpointName
+		return x.xxx_hidden_EndpointName
 	}
 	return ""
 }
 
 func (x *ReliableCompanionSpec) GetEndpointIncarnationId() string {
 	if x != nil {
-		return x.EndpointIncarnationId
+		return x.xxx_hidden_EndpointIncarnationId
 	}
 	return ""
 }
 
+func (x *ReliableCompanionSpec) SetRole(v ReliableControllerRole) {
+	x.xxx_hidden_Role = v
+}
+
+func (x *ReliableCompanionSpec) SetEndpointName(v string) {
+	x.xxx_hidden_EndpointName = v
+}
+
+func (x *ReliableCompanionSpec) SetEndpointIncarnationId(v string) {
+	x.xxx_hidden_EndpointIncarnationId = v
+}
+
+type ReliableCompanionSpec_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies which controller role the companion runs.
+	Role ReliableControllerRole
+	// Names the user-visible endpoint that owns the companion.
+	EndpointName string
+	// Pins the companion to one endpoint incarnation.
+	EndpointIncarnationId string
+}
+
+func (b0 ReliableCompanionSpec_builder) Build() *ReliableCompanionSpec {
+	m0 := &ReliableCompanionSpec{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Role = b.Role
+	x.xxx_hidden_EndpointName = b.EndpointName
+	x.xxx_hidden_EndpointIncarnationId = b.EndpointIncarnationId
+	return m0
+}
+
 // ReliableDeliveryConfig defines one endpoint's reliable-delivery settings.
 type ReliableDeliveryConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Endpoint:
-	//
-	//	*ReliableDeliveryConfig_Producer
-	//	*ReliableDeliveryConfig_Consumer
-	Endpoint      isReliableDeliveryConfig_Endpoint `protobuf_oneof:"endpoint"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState            `protogen:"opaque.v1"`
+	xxx_hidden_Endpoint isReliableDeliveryConfig_Endpoint `protobuf_oneof:"endpoint"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *ReliableDeliveryConfig) Reset() {
@@ -234,21 +244,9 @@ func (x *ReliableDeliveryConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReliableDeliveryConfig.ProtoReflect.Descriptor instead.
-func (*ReliableDeliveryConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *ReliableDeliveryConfig) GetEndpoint() isReliableDeliveryConfig_Endpoint {
-	if x != nil {
-		return x.Endpoint
-	}
-	return nil
-}
-
 func (x *ReliableDeliveryConfig) GetProducer() *ReliableProducerConfig {
 	if x != nil {
-		if x, ok := x.Endpoint.(*ReliableDeliveryConfig_Producer); ok {
+		if x, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Producer); ok {
 			return x.Producer
 		}
 	}
@@ -257,53 +255,152 @@ func (x *ReliableDeliveryConfig) GetProducer() *ReliableProducerConfig {
 
 func (x *ReliableDeliveryConfig) GetConsumer() *ReliableConsumerConfig {
 	if x != nil {
-		if x, ok := x.Endpoint.(*ReliableDeliveryConfig_Consumer); ok {
+		if x, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Consumer); ok {
 			return x.Consumer
 		}
 	}
 	return nil
 }
 
+func (x *ReliableDeliveryConfig) SetProducer(v *ReliableProducerConfig) {
+	if v == nil {
+		x.xxx_hidden_Endpoint = nil
+		return
+	}
+	x.xxx_hidden_Endpoint = &reliableDeliveryConfig_Producer{v}
+}
+
+func (x *ReliableDeliveryConfig) SetConsumer(v *ReliableConsumerConfig) {
+	if v == nil {
+		x.xxx_hidden_Endpoint = nil
+		return
+	}
+	x.xxx_hidden_Endpoint = &reliableDeliveryConfig_Consumer{v}
+}
+
+func (x *ReliableDeliveryConfig) HasEndpoint() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Endpoint != nil
+}
+
+func (x *ReliableDeliveryConfig) HasProducer() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Producer)
+	return ok
+}
+
+func (x *ReliableDeliveryConfig) HasConsumer() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Consumer)
+	return ok
+}
+
+func (x *ReliableDeliveryConfig) ClearEndpoint() {
+	x.xxx_hidden_Endpoint = nil
+}
+
+func (x *ReliableDeliveryConfig) ClearProducer() {
+	if _, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Producer); ok {
+		x.xxx_hidden_Endpoint = nil
+	}
+}
+
+func (x *ReliableDeliveryConfig) ClearConsumer() {
+	if _, ok := x.xxx_hidden_Endpoint.(*reliableDeliveryConfig_Consumer); ok {
+		x.xxx_hidden_Endpoint = nil
+	}
+}
+
+const ReliableDeliveryConfig_Endpoint_not_set_case case_ReliableDeliveryConfig_Endpoint = 0
+const ReliableDeliveryConfig_Producer_case case_ReliableDeliveryConfig_Endpoint = 1
+const ReliableDeliveryConfig_Consumer_case case_ReliableDeliveryConfig_Endpoint = 2
+
+func (x *ReliableDeliveryConfig) WhichEndpoint() case_ReliableDeliveryConfig_Endpoint {
+	if x == nil {
+		return ReliableDeliveryConfig_Endpoint_not_set_case
+	}
+	switch x.xxx_hidden_Endpoint.(type) {
+	case *reliableDeliveryConfig_Producer:
+		return ReliableDeliveryConfig_Producer_case
+	case *reliableDeliveryConfig_Consumer:
+		return ReliableDeliveryConfig_Consumer_case
+	default:
+		return ReliableDeliveryConfig_Endpoint_not_set_case
+	}
+}
+
+type ReliableDeliveryConfig_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Fields of oneof xxx_hidden_Endpoint:
+	// Configures a producer endpoint and its controller.
+	Producer *ReliableProducerConfig
+	// Configures a consumer endpoint and its controller.
+	Consumer *ReliableConsumerConfig
+	// -- end of xxx_hidden_Endpoint
+}
+
+func (b0 ReliableDeliveryConfig_builder) Build() *ReliableDeliveryConfig {
+	m0 := &ReliableDeliveryConfig{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.Producer != nil {
+		x.xxx_hidden_Endpoint = &reliableDeliveryConfig_Producer{b.Producer}
+	}
+	if b.Consumer != nil {
+		x.xxx_hidden_Endpoint = &reliableDeliveryConfig_Consumer{b.Consumer}
+	}
+	return m0
+}
+
+type case_ReliableDeliveryConfig_Endpoint protoreflect.FieldNumber
+
+func (x case_ReliableDeliveryConfig_Endpoint) String() string {
+	md := file_internal_delivery_proto_msgTypes[1].Descriptor()
+	if x == 0 {
+		return "not set"
+	}
+	return protoimpl.X.MessageFieldStringOf(md, protoreflect.FieldNumber(x))
+}
+
 type isReliableDeliveryConfig_Endpoint interface {
 	isReliableDeliveryConfig_Endpoint()
 }
 
-type ReliableDeliveryConfig_Producer struct {
+type reliableDeliveryConfig_Producer struct {
 	// Configures a producer endpoint and its controller.
 	Producer *ReliableProducerConfig `protobuf:"bytes,1,opt,name=producer,proto3,oneof"`
 }
 
-type ReliableDeliveryConfig_Consumer struct {
+type reliableDeliveryConfig_Consumer struct {
 	// Configures a consumer endpoint and its controller.
 	Consumer *ReliableConsumerConfig `protobuf:"bytes,2,opt,name=consumer,proto3,oneof"`
 }
 
-func (*ReliableDeliveryConfig_Producer) isReliableDeliveryConfig_Endpoint() {}
+func (*reliableDeliveryConfig_Producer) isReliableDeliveryConfig_Endpoint() {}
 
-func (*ReliableDeliveryConfig_Consumer) isReliableDeliveryConfig_Endpoint() {}
+func (*reliableDeliveryConfig_Consumer) isReliableDeliveryConfig_Endpoint() {}
 
 // ReliableProducerConfig defines producer-side delivery settings.
 type ReliableProducerConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Names the consumer endpoint authorized to receive messages.
-	// Empty when pattern is work-pulling: workers are discovered by registration.
-	ConsumerName string `protobuf:"bytes,1,opt,name=consumer_name,json=consumerName,proto3" json:"consumer_name,omitempty"`
-	// Identifies the durable queue in the endpoint's user dependencies.
-	DurableQueueId *string `protobuf:"bytes,2,opt,name=durable_queue_id,json=durableQueueId,proto3,oneof" json:"durable_queue_id,omitempty"`
-	// Defines retries for durable queue operations.
-	QueueRetry *QueueRetryConfig `protobuf:"bytes,3,opt,name=queue_retry,json=queueRetry,proto3" json:"queue_retry,omitempty"`
-	// Defines how often unacknowledged local protocol messages are retried.
-	LocalRetryInterval *durationpb.Duration `protobuf:"bytes,4,opt,name=local_retry_interval,json=localRetryInterval,proto3" json:"local_retry_interval,omitempty"`
-	// Enables DeliveryConfirmed notifications toward the producer endpoint.
-	DeliveryConfirmation bool `protobuf:"varint,5,opt,name=delivery_confirmation,json=deliveryConfirmation,proto3" json:"delivery_confirmation,omitempty"`
-	// Splits payloads larger than this many bytes into sequenced chunks; zero
-	// disables chunking.
-	MaxChunkBytes uint32 `protobuf:"varint,6,opt,name=max_chunk_bytes,json=maxChunkBytes,proto3" json:"max_chunk_bytes,omitempty"`
-	// Selects point-to-point or work-pulling on the producer side. Unspecified
-	// is treated as point-to-point.
-	Pattern       ReliableDeliveryPattern `protobuf:"varint,7,opt,name=pattern,proto3,enum=internalpb.ReliableDeliveryPattern" json:"pattern,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                           protoimpl.MessageState  `protogen:"opaque.v1"`
+	xxx_hidden_ConsumerName         string                  `protobuf:"bytes,1,opt,name=consumer_name,json=consumerName,proto3"`
+	xxx_hidden_DurableQueueId       *string                 `protobuf:"bytes,2,opt,name=durable_queue_id,json=durableQueueId,proto3,oneof"`
+	xxx_hidden_QueueRetry           *QueueRetryConfig       `protobuf:"bytes,3,opt,name=queue_retry,json=queueRetry,proto3"`
+	xxx_hidden_LocalRetryInterval   *durationpb.Duration    `protobuf:"bytes,4,opt,name=local_retry_interval,json=localRetryInterval,proto3"`
+	xxx_hidden_DeliveryConfirmation bool                    `protobuf:"varint,5,opt,name=delivery_confirmation,json=deliveryConfirmation,proto3"`
+	xxx_hidden_MaxChunkBytes        uint32                  `protobuf:"varint,6,opt,name=max_chunk_bytes,json=maxChunkBytes,proto3"`
+	xxx_hidden_Pattern              ReliableDeliveryPattern `protobuf:"varint,7,opt,name=pattern,proto3,enum=internalpb.ReliableDeliveryPattern"`
+	XXX_raceDetectHookData          protoimpl.RaceDetectHookData
+	XXX_presence                    [1]uint32
+	unknownFields                   protoimpl.UnknownFields
+	sizeCache                       protoimpl.SizeCache
 }
 
 func (x *ReliableProducerConfig) Reset() {
@@ -331,71 +428,168 @@ func (x *ReliableProducerConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReliableProducerConfig.ProtoReflect.Descriptor instead.
-func (*ReliableProducerConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *ReliableProducerConfig) GetConsumerName() string {
 	if x != nil {
-		return x.ConsumerName
+		return x.xxx_hidden_ConsumerName
 	}
 	return ""
 }
 
 func (x *ReliableProducerConfig) GetDurableQueueId() string {
-	if x != nil && x.DurableQueueId != nil {
-		return *x.DurableQueueId
+	if x != nil {
+		if x.xxx_hidden_DurableQueueId != nil {
+			return *x.xxx_hidden_DurableQueueId
+		}
+		return ""
 	}
 	return ""
 }
 
 func (x *ReliableProducerConfig) GetQueueRetry() *QueueRetryConfig {
 	if x != nil {
-		return x.QueueRetry
+		return x.xxx_hidden_QueueRetry
 	}
 	return nil
 }
 
 func (x *ReliableProducerConfig) GetLocalRetryInterval() *durationpb.Duration {
 	if x != nil {
-		return x.LocalRetryInterval
+		return x.xxx_hidden_LocalRetryInterval
 	}
 	return nil
 }
 
 func (x *ReliableProducerConfig) GetDeliveryConfirmation() bool {
 	if x != nil {
-		return x.DeliveryConfirmation
+		return x.xxx_hidden_DeliveryConfirmation
 	}
 	return false
 }
 
 func (x *ReliableProducerConfig) GetMaxChunkBytes() uint32 {
 	if x != nil {
-		return x.MaxChunkBytes
+		return x.xxx_hidden_MaxChunkBytes
 	}
 	return 0
 }
 
 func (x *ReliableProducerConfig) GetPattern() ReliableDeliveryPattern {
 	if x != nil {
-		return x.Pattern
+		return x.xxx_hidden_Pattern
 	}
 	return ReliableDeliveryPattern_RELIABLE_DELIVERY_PATTERN_UNSPECIFIED
 }
 
+func (x *ReliableProducerConfig) SetConsumerName(v string) {
+	x.xxx_hidden_ConsumerName = v
+}
+
+func (x *ReliableProducerConfig) SetDurableQueueId(v string) {
+	x.xxx_hidden_DurableQueueId = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 1, 7)
+}
+
+func (x *ReliableProducerConfig) SetQueueRetry(v *QueueRetryConfig) {
+	x.xxx_hidden_QueueRetry = v
+}
+
+func (x *ReliableProducerConfig) SetLocalRetryInterval(v *durationpb.Duration) {
+	x.xxx_hidden_LocalRetryInterval = v
+}
+
+func (x *ReliableProducerConfig) SetDeliveryConfirmation(v bool) {
+	x.xxx_hidden_DeliveryConfirmation = v
+}
+
+func (x *ReliableProducerConfig) SetMaxChunkBytes(v uint32) {
+	x.xxx_hidden_MaxChunkBytes = v
+}
+
+func (x *ReliableProducerConfig) SetPattern(v ReliableDeliveryPattern) {
+	x.xxx_hidden_Pattern = v
+}
+
+func (x *ReliableProducerConfig) HasDurableQueueId() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 1)
+}
+
+func (x *ReliableProducerConfig) HasQueueRetry() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_QueueRetry != nil
+}
+
+func (x *ReliableProducerConfig) HasLocalRetryInterval() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_LocalRetryInterval != nil
+}
+
+func (x *ReliableProducerConfig) ClearDurableQueueId() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 1)
+	x.xxx_hidden_DurableQueueId = nil
+}
+
+func (x *ReliableProducerConfig) ClearQueueRetry() {
+	x.xxx_hidden_QueueRetry = nil
+}
+
+func (x *ReliableProducerConfig) ClearLocalRetryInterval() {
+	x.xxx_hidden_LocalRetryInterval = nil
+}
+
+type ReliableProducerConfig_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Names the consumer endpoint authorized to receive messages.
+	// Empty when pattern is work-pulling: workers are discovered by registration.
+	ConsumerName string
+	// Identifies the durable queue in the endpoint's user dependencies.
+	DurableQueueId *string
+	// Defines retries for durable queue operations.
+	QueueRetry *QueueRetryConfig
+	// Defines how often unacknowledged local protocol messages are retried.
+	LocalRetryInterval *durationpb.Duration
+	// Enables DeliveryConfirmed notifications toward the producer endpoint.
+	DeliveryConfirmation bool
+	// Splits payloads larger than this many bytes into sequenced chunks; zero
+	// disables chunking.
+	MaxChunkBytes uint32
+	// Selects point-to-point or work-pulling on the producer side. Unspecified
+	// is treated as point-to-point.
+	Pattern ReliableDeliveryPattern
+}
+
+func (b0 ReliableProducerConfig_builder) Build() *ReliableProducerConfig {
+	m0 := &ReliableProducerConfig{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_ConsumerName = b.ConsumerName
+	if b.DurableQueueId != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 1, 7)
+		x.xxx_hidden_DurableQueueId = b.DurableQueueId
+	}
+	x.xxx_hidden_QueueRetry = b.QueueRetry
+	x.xxx_hidden_LocalRetryInterval = b.LocalRetryInterval
+	x.xxx_hidden_DeliveryConfirmation = b.DeliveryConfirmation
+	x.xxx_hidden_MaxChunkBytes = b.MaxChunkBytes
+	x.xxx_hidden_Pattern = b.Pattern
+	return m0
+}
+
 // ReliableConsumerConfig defines consumer-side delivery settings.
 type ReliableConsumerConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Names the producer endpoint whose messages are accepted.
-	ProducerName string `protobuf:"bytes,1,opt,name=producer_name,json=producerName,proto3" json:"producer_name,omitempty"`
-	// Specifies the maximum demand granted in one request.
-	FlowControlWindow uint32 `protobuf:"varint,2,opt,name=flow_control_window,json=flowControlWindow,proto3" json:"flow_control_window,omitempty"`
-	// Defines how often registration, demand, and delivery are retried.
-	ResendInterval *durationpb.Duration `protobuf:"bytes,3,opt,name=resend_interval,json=resendInterval,proto3" json:"resend_interval,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_ProducerName      string                 `protobuf:"bytes,1,opt,name=producer_name,json=producerName,proto3"`
+	xxx_hidden_FlowControlWindow uint32                 `protobuf:"varint,2,opt,name=flow_control_window,json=flowControlWindow,proto3"`
+	xxx_hidden_ResendInterval    *durationpb.Duration   `protobuf:"bytes,3,opt,name=resend_interval,json=resendInterval,proto3"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *ReliableConsumerConfig) Reset() {
@@ -423,41 +617,78 @@ func (x *ReliableConsumerConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReliableConsumerConfig.ProtoReflect.Descriptor instead.
-func (*ReliableConsumerConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *ReliableConsumerConfig) GetProducerName() string {
 	if x != nil {
-		return x.ProducerName
+		return x.xxx_hidden_ProducerName
 	}
 	return ""
 }
 
 func (x *ReliableConsumerConfig) GetFlowControlWindow() uint32 {
 	if x != nil {
-		return x.FlowControlWindow
+		return x.xxx_hidden_FlowControlWindow
 	}
 	return 0
 }
 
 func (x *ReliableConsumerConfig) GetResendInterval() *durationpb.Duration {
 	if x != nil {
-		return x.ResendInterval
+		return x.xxx_hidden_ResendInterval
 	}
 	return nil
 }
 
+func (x *ReliableConsumerConfig) SetProducerName(v string) {
+	x.xxx_hidden_ProducerName = v
+}
+
+func (x *ReliableConsumerConfig) SetFlowControlWindow(v uint32) {
+	x.xxx_hidden_FlowControlWindow = v
+}
+
+func (x *ReliableConsumerConfig) SetResendInterval(v *durationpb.Duration) {
+	x.xxx_hidden_ResendInterval = v
+}
+
+func (x *ReliableConsumerConfig) HasResendInterval() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ResendInterval != nil
+}
+
+func (x *ReliableConsumerConfig) ClearResendInterval() {
+	x.xxx_hidden_ResendInterval = nil
+}
+
+type ReliableConsumerConfig_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Names the producer endpoint whose messages are accepted.
+	ProducerName string
+	// Specifies the maximum demand granted in one request.
+	FlowControlWindow uint32
+	// Defines how often registration, demand, and delivery are retried.
+	ResendInterval *durationpb.Duration
+}
+
+func (b0 ReliableConsumerConfig_builder) Build() *ReliableConsumerConfig {
+	m0 := &ReliableConsumerConfig{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_ProducerName = b.ProducerName
+	x.xxx_hidden_FlowControlWindow = b.FlowControlWindow
+	x.xxx_hidden_ResendInterval = b.ResendInterval
+	return m0
+}
+
 // QueueRetryConfig defines retries for durable queue operations.
 type QueueRetryConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the maximum number of attempts for one queue operation.
-	MaxAttempts uint32 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3" json:"max_attempts,omitempty"`
-	// Specifies the delay before the first retry.
-	InitialBackoff *durationpb.Duration `protobuf:"bytes,2,opt,name=initial_backoff,json=initialBackoff,proto3" json:"initial_backoff,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_MaxAttempts    uint32                 `protobuf:"varint,1,opt,name=max_attempts,json=maxAttempts,proto3"`
+	xxx_hidden_InitialBackoff *durationpb.Duration   `protobuf:"bytes,2,opt,name=initial_backoff,json=initialBackoff,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *QueueRetryConfig) Reset() {
@@ -485,32 +716,63 @@ func (x *QueueRetryConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use QueueRetryConfig.ProtoReflect.Descriptor instead.
-func (*QueueRetryConfig) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{4}
-}
-
 func (x *QueueRetryConfig) GetMaxAttempts() uint32 {
 	if x != nil {
-		return x.MaxAttempts
+		return x.xxx_hidden_MaxAttempts
 	}
 	return 0
 }
 
 func (x *QueueRetryConfig) GetInitialBackoff() *durationpb.Duration {
 	if x != nil {
-		return x.InitialBackoff
+		return x.xxx_hidden_InitialBackoff
 	}
 	return nil
 }
 
+func (x *QueueRetryConfig) SetMaxAttempts(v uint32) {
+	x.xxx_hidden_MaxAttempts = v
+}
+
+func (x *QueueRetryConfig) SetInitialBackoff(v *durationpb.Duration) {
+	x.xxx_hidden_InitialBackoff = v
+}
+
+func (x *QueueRetryConfig) HasInitialBackoff() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_InitialBackoff != nil
+}
+
+func (x *QueueRetryConfig) ClearInitialBackoff() {
+	x.xxx_hidden_InitialBackoff = nil
+}
+
+type QueueRetryConfig_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the maximum number of attempts for one queue operation.
+	MaxAttempts uint32
+	// Specifies the delay before the first retry.
+	InitialBackoff *durationpb.Duration
+}
+
+func (b0 QueueRetryConfig_builder) Build() *QueueRetryConfig {
+	m0 := &QueueRetryConfig{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_MaxAttempts = b.MaxAttempts
+	x.xxx_hidden_InitialBackoff = b.InitialBackoff
+	return m0
+}
+
 // ReliablePayload carries a self-describing serialized application message.
 type ReliablePayload struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Contains the serializer's self-describing message frame.
-	Data          []byte `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Data []byte                 `protobuf:"bytes,1,opt,name=data,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ReliablePayload) Reset() {
@@ -538,25 +800,41 @@ func (x *ReliablePayload) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReliablePayload.ProtoReflect.Descriptor instead.
-func (*ReliablePayload) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{5}
-}
-
 func (x *ReliablePayload) GetData() []byte {
 	if x != nil {
-		return x.Data
+		return x.xxx_hidden_Data
 	}
 	return nil
 }
 
+func (x *ReliablePayload) SetData(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Data = v
+}
+
+type ReliablePayload_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Contains the serializer's self-describing message frame.
+	Data []byte
+}
+
+func (b0 ReliablePayload_builder) Build() *ReliablePayload {
+	m0 := &ReliablePayload{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Data = b.Data
+	return m0
+}
+
 // RegisterConsumer asks a producer controller to establish a registration.
 type RegisterConsumer struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies this registration attempt.
-	Nonce         string `protobuf:"bytes,1,opt,name=nonce,proto3" json:"nonce,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Nonce string                 `protobuf:"bytes,1,opt,name=nonce,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *RegisterConsumer) Reset() {
@@ -584,29 +862,40 @@ func (x *RegisterConsumer) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RegisterConsumer.ProtoReflect.Descriptor instead.
-func (*RegisterConsumer) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{6}
-}
-
 func (x *RegisterConsumer) GetNonce() string {
 	if x != nil {
-		return x.Nonce
+		return x.xxx_hidden_Nonce
 	}
 	return ""
 }
 
+func (x *RegisterConsumer) SetNonce(v string) {
+	x.xxx_hidden_Nonce = v
+}
+
+type RegisterConsumer_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies this registration attempt.
+	Nonce string
+}
+
+func (b0 RegisterConsumer_builder) Build() *RegisterConsumer {
+	m0 := &RegisterConsumer{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Nonce = b.Nonce
+	return m0
+}
+
 // RegistrationAck accepts the latest consumer registration attempt.
 type RegistrationAck struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies the producer controller incarnation.
-	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// Specifies the first sequence the consumer should expect.
-	NextSeq int64 `protobuf:"varint,2,opt,name=next_seq,json=nextSeq,proto3" json:"next_seq,omitempty"`
-	// Echoes the registration attempt being accepted.
-	Nonce         string `protobuf:"bytes,3,opt,name=nonce,proto3" json:"nonce,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3"`
+	xxx_hidden_NextSeq   int64                  `protobuf:"varint,2,opt,name=next_seq,json=nextSeq,proto3"`
+	xxx_hidden_Nonce     string                 `protobuf:"bytes,3,opt,name=nonce,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *RegistrationAck) Reset() {
@@ -634,47 +923,70 @@ func (x *RegistrationAck) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RegistrationAck.ProtoReflect.Descriptor instead.
-func (*RegistrationAck) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{7}
-}
-
 func (x *RegistrationAck) GetSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.xxx_hidden_SessionId
 	}
 	return ""
 }
 
 func (x *RegistrationAck) GetNextSeq() int64 {
 	if x != nil {
-		return x.NextSeq
+		return x.xxx_hidden_NextSeq
 	}
 	return 0
 }
 
 func (x *RegistrationAck) GetNonce() string {
 	if x != nil {
-		return x.Nonce
+		return x.xxx_hidden_Nonce
 	}
 	return ""
 }
 
+func (x *RegistrationAck) SetSessionId(v string) {
+	x.xxx_hidden_SessionId = v
+}
+
+func (x *RegistrationAck) SetNextSeq(v int64) {
+	x.xxx_hidden_NextSeq = v
+}
+
+func (x *RegistrationAck) SetNonce(v string) {
+	x.xxx_hidden_Nonce = v
+}
+
+type RegistrationAck_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies the producer controller incarnation.
+	SessionId string
+	// Specifies the first sequence the consumer should expect.
+	NextSeq int64
+	// Echoes the registration attempt being accepted.
+	Nonce string
+}
+
+func (b0 RegistrationAck_builder) Build() *RegistrationAck {
+	m0 := &RegistrationAck{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_SessionId = b.SessionId
+	x.xxx_hidden_NextSeq = b.NextSeq
+	x.xxx_hidden_Nonce = b.Nonce
+	return m0
+}
+
 // Request grants demand and carries the latest confirmed sequence.
 type Request struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies the producer controller incarnation.
-	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// Identifies the accepted consumer registration.
-	RegistrationNonce string `protobuf:"bytes,2,opt,name=registration_nonce,json=registrationNonce,proto3" json:"registration_nonce,omitempty"`
-	// Specifies the highest sequence processed by the consumer.
-	ConfirmedSeq int64 `protobuf:"varint,3,opt,name=confirmed_seq,json=confirmedSeq,proto3" json:"confirmed_seq,omitempty"`
-	// Specifies the highest sequence the producer may send.
-	RequestUpToSeq int64 `protobuf:"varint,4,opt,name=request_up_to_seq,json=requestUpToSeq,proto3" json:"request_up_to_seq,omitempty"`
-	// Indicates that the request should also resend unconfirmed messages.
-	ViaTimeout    bool `protobuf:"varint,5,opt,name=via_timeout,json=viaTimeout,proto3" json:"via_timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_SessionId         string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3"`
+	xxx_hidden_RegistrationNonce string                 `protobuf:"bytes,2,opt,name=registration_nonce,json=registrationNonce,proto3"`
+	xxx_hidden_ConfirmedSeq      int64                  `protobuf:"varint,3,opt,name=confirmed_seq,json=confirmedSeq,proto3"`
+	xxx_hidden_RequestUpToSeq    int64                  `protobuf:"varint,4,opt,name=request_up_to_seq,json=requestUpToSeq,proto3"`
+	xxx_hidden_ViaTimeout        bool                   `protobuf:"varint,5,opt,name=via_timeout,json=viaTimeout,proto3"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *Request) Reset() {
@@ -702,57 +1014,96 @@ func (x *Request) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Request.ProtoReflect.Descriptor instead.
-func (*Request) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{8}
-}
-
 func (x *Request) GetSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.xxx_hidden_SessionId
 	}
 	return ""
 }
 
 func (x *Request) GetRegistrationNonce() string {
 	if x != nil {
-		return x.RegistrationNonce
+		return x.xxx_hidden_RegistrationNonce
 	}
 	return ""
 }
 
 func (x *Request) GetConfirmedSeq() int64 {
 	if x != nil {
-		return x.ConfirmedSeq
+		return x.xxx_hidden_ConfirmedSeq
 	}
 	return 0
 }
 
 func (x *Request) GetRequestUpToSeq() int64 {
 	if x != nil {
-		return x.RequestUpToSeq
+		return x.xxx_hidden_RequestUpToSeq
 	}
 	return 0
 }
 
 func (x *Request) GetViaTimeout() bool {
 	if x != nil {
-		return x.ViaTimeout
+		return x.xxx_hidden_ViaTimeout
 	}
 	return false
 }
 
+func (x *Request) SetSessionId(v string) {
+	x.xxx_hidden_SessionId = v
+}
+
+func (x *Request) SetRegistrationNonce(v string) {
+	x.xxx_hidden_RegistrationNonce = v
+}
+
+func (x *Request) SetConfirmedSeq(v int64) {
+	x.xxx_hidden_ConfirmedSeq = v
+}
+
+func (x *Request) SetRequestUpToSeq(v int64) {
+	x.xxx_hidden_RequestUpToSeq = v
+}
+
+func (x *Request) SetViaTimeout(v bool) {
+	x.xxx_hidden_ViaTimeout = v
+}
+
+type Request_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies the producer controller incarnation.
+	SessionId string
+	// Identifies the accepted consumer registration.
+	RegistrationNonce string
+	// Specifies the highest sequence processed by the consumer.
+	ConfirmedSeq int64
+	// Specifies the highest sequence the producer may send.
+	RequestUpToSeq int64
+	// Indicates that the request should also resend unconfirmed messages.
+	ViaTimeout bool
+}
+
+func (b0 Request_builder) Build() *Request {
+	m0 := &Request{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_SessionId = b.SessionId
+	x.xxx_hidden_RegistrationNonce = b.RegistrationNonce
+	x.xxx_hidden_ConfirmedSeq = b.ConfirmedSeq
+	x.xxx_hidden_RequestUpToSeq = b.RequestUpToSeq
+	x.xxx_hidden_ViaTimeout = b.ViaTimeout
+	return m0
+}
+
 // Ack advances the producer's confirmed sequence without granting demand.
 type Ack struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies the producer controller incarnation.
-	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// Identifies the accepted consumer registration.
-	RegistrationNonce string `protobuf:"bytes,2,opt,name=registration_nonce,json=registrationNonce,proto3" json:"registration_nonce,omitempty"`
-	// Specifies the highest sequence processed by the consumer.
-	ConfirmedSeq  int64 `protobuf:"varint,3,opt,name=confirmed_seq,json=confirmedSeq,proto3" json:"confirmed_seq,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_SessionId         string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3"`
+	xxx_hidden_RegistrationNonce string                 `protobuf:"bytes,2,opt,name=registration_nonce,json=registrationNonce,proto3"`
+	xxx_hidden_ConfirmedSeq      int64                  `protobuf:"varint,3,opt,name=confirmed_seq,json=confirmedSeq,proto3"`
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *Ack) Reset() {
@@ -780,42 +1131,68 @@ func (x *Ack) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Ack.ProtoReflect.Descriptor instead.
-func (*Ack) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{9}
-}
-
 func (x *Ack) GetSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.xxx_hidden_SessionId
 	}
 	return ""
 }
 
 func (x *Ack) GetRegistrationNonce() string {
 	if x != nil {
-		return x.RegistrationNonce
+		return x.xxx_hidden_RegistrationNonce
 	}
 	return ""
 }
 
 func (x *Ack) GetConfirmedSeq() int64 {
 	if x != nil {
-		return x.ConfirmedSeq
+		return x.xxx_hidden_ConfirmedSeq
 	}
 	return 0
+}
+
+func (x *Ack) SetSessionId(v string) {
+	x.xxx_hidden_SessionId = v
+}
+
+func (x *Ack) SetRegistrationNonce(v string) {
+	x.xxx_hidden_RegistrationNonce = v
+}
+
+func (x *Ack) SetConfirmedSeq(v int64) {
+	x.xxx_hidden_ConfirmedSeq = v
+}
+
+type Ack_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies the producer controller incarnation.
+	SessionId string
+	// Identifies the accepted consumer registration.
+	RegistrationNonce string
+	// Specifies the highest sequence processed by the consumer.
+	ConfirmedSeq int64
+}
+
+func (b0 Ack_builder) Build() *Ack {
+	m0 := &Ack{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_SessionId = b.SessionId
+	x.xxx_hidden_RegistrationNonce = b.RegistrationNonce
+	x.xxx_hidden_ConfirmedSeq = b.ConfirmedSeq
+	return m0
 }
 
 // ChunkInfo marks one part of a chunked payload. Its absence on a
 // SequencedMessage means the payload is a complete serialized message.
 type ChunkInfo struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Marks the first chunk of a chunked message.
-	First bool `protobuf:"varint,1,opt,name=first,proto3" json:"first,omitempty"`
-	// Marks the last chunk of a chunked message.
-	Last          bool `protobuf:"varint,2,opt,name=last,proto3" json:"last,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_First bool                   `protobuf:"varint,1,opt,name=first,proto3"`
+	xxx_hidden_Last  bool                   `protobuf:"varint,2,opt,name=last,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ChunkInfo) Reset() {
@@ -843,40 +1220,56 @@ func (x *ChunkInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ChunkInfo.ProtoReflect.Descriptor instead.
-func (*ChunkInfo) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{10}
-}
-
 func (x *ChunkInfo) GetFirst() bool {
 	if x != nil {
-		return x.First
+		return x.xxx_hidden_First
 	}
 	return false
 }
 
 func (x *ChunkInfo) GetLast() bool {
 	if x != nil {
-		return x.Last
+		return x.xxx_hidden_Last
 	}
 	return false
 }
 
+func (x *ChunkInfo) SetFirst(v bool) {
+	x.xxx_hidden_First = v
+}
+
+func (x *ChunkInfo) SetLast(v bool) {
+	x.xxx_hidden_Last = v
+}
+
+type ChunkInfo_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Marks the first chunk of a chunked message.
+	First bool
+	// Marks the last chunk of a chunked message.
+	Last bool
+}
+
+func (b0 ChunkInfo_builder) Build() *ChunkInfo {
+	m0 := &ChunkInfo{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_First = b.First
+	x.xxx_hidden_Last = b.Last
+	return m0
+}
+
 // SequencedMessage carries one serialized application message in stream order.
 type SequencedMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies the producer controller incarnation.
-	SessionId string `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	// Identifies the application message across retries and sessions.
-	MessageId string `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3" json:"message_id,omitempty"`
-	// Specifies the message's ordered position in the stream.
-	Seq int64 `protobuf:"varint,3,opt,name=seq,proto3" json:"seq,omitempty"`
-	// Contains the immutable serialized application message, or one chunk of it.
-	Payload *ReliablePayload `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
-	// Marks the payload as one chunk of a chunked message when present.
-	ChunkInfo     *ChunkInfo `protobuf:"bytes,5,opt,name=chunk_info,json=chunkInfo,proto3" json:"chunk_info,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_SessionId string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3"`
+	xxx_hidden_MessageId string                 `protobuf:"bytes,2,opt,name=message_id,json=messageId,proto3"`
+	xxx_hidden_Seq       int64                  `protobuf:"varint,3,opt,name=seq,proto3"`
+	xxx_hidden_Payload   *ReliablePayload       `protobuf:"bytes,4,opt,name=payload,proto3"`
+	xxx_hidden_ChunkInfo *ChunkInfo             `protobuf:"bytes,5,opt,name=chunk_info,json=chunkInfo,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *SequencedMessage) Reset() {
@@ -904,60 +1297,117 @@ func (x *SequencedMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SequencedMessage.ProtoReflect.Descriptor instead.
-func (*SequencedMessage) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{11}
-}
-
 func (x *SequencedMessage) GetSessionId() string {
 	if x != nil {
-		return x.SessionId
+		return x.xxx_hidden_SessionId
 	}
 	return ""
 }
 
 func (x *SequencedMessage) GetMessageId() string {
 	if x != nil {
-		return x.MessageId
+		return x.xxx_hidden_MessageId
 	}
 	return ""
 }
 
 func (x *SequencedMessage) GetSeq() int64 {
 	if x != nil {
-		return x.Seq
+		return x.xxx_hidden_Seq
 	}
 	return 0
 }
 
 func (x *SequencedMessage) GetPayload() *ReliablePayload {
 	if x != nil {
-		return x.Payload
+		return x.xxx_hidden_Payload
 	}
 	return nil
 }
 
 func (x *SequencedMessage) GetChunkInfo() *ChunkInfo {
 	if x != nil {
-		return x.ChunkInfo
+		return x.xxx_hidden_ChunkInfo
 	}
 	return nil
+}
+
+func (x *SequencedMessage) SetSessionId(v string) {
+	x.xxx_hidden_SessionId = v
+}
+
+func (x *SequencedMessage) SetMessageId(v string) {
+	x.xxx_hidden_MessageId = v
+}
+
+func (x *SequencedMessage) SetSeq(v int64) {
+	x.xxx_hidden_Seq = v
+}
+
+func (x *SequencedMessage) SetPayload(v *ReliablePayload) {
+	x.xxx_hidden_Payload = v
+}
+
+func (x *SequencedMessage) SetChunkInfo(v *ChunkInfo) {
+	x.xxx_hidden_ChunkInfo = v
+}
+
+func (x *SequencedMessage) HasPayload() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Payload != nil
+}
+
+func (x *SequencedMessage) HasChunkInfo() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ChunkInfo != nil
+}
+
+func (x *SequencedMessage) ClearPayload() {
+	x.xxx_hidden_Payload = nil
+}
+
+func (x *SequencedMessage) ClearChunkInfo() {
+	x.xxx_hidden_ChunkInfo = nil
+}
+
+type SequencedMessage_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Identifies the producer controller incarnation.
+	SessionId string
+	// Identifies the application message across retries and sessions.
+	MessageId string
+	// Specifies the message's ordered position in the stream.
+	Seq int64
+	// Contains the immutable serialized application message, or one chunk of it.
+	Payload *ReliablePayload
+	// Marks the payload as one chunk of a chunked message when present.
+	ChunkInfo *ChunkInfo
+}
+
+func (b0 SequencedMessage_builder) Build() *SequencedMessage {
+	m0 := &SequencedMessage{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_SessionId = b.SessionId
+	x.xxx_hidden_MessageId = b.MessageId
+	x.xxx_hidden_Seq = b.Seq
+	x.xxx_hidden_Payload = b.Payload
+	x.xxx_hidden_ChunkInfo = b.ChunkInfo
+	return m0
 }
 
 // DeliveryEnvelope identifies the reliable-delivery command in a custom
 // serializer frame.
 type DeliveryEnvelope struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Command:
-	//
-	//	*DeliveryEnvelope_RegisterConsumer
-	//	*DeliveryEnvelope_RegistrationAck
-	//	*DeliveryEnvelope_Request
-	//	*DeliveryEnvelope_Ack
-	//	*DeliveryEnvelope_SequencedMessage
-	Command       isDeliveryEnvelope_Command `protobuf_oneof:"command"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState     `protogen:"opaque.v1"`
+	xxx_hidden_Command isDeliveryEnvelope_Command `protobuf_oneof:"command"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DeliveryEnvelope) Reset() {
@@ -985,21 +1435,9 @@ func (x *DeliveryEnvelope) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeliveryEnvelope.ProtoReflect.Descriptor instead.
-func (*DeliveryEnvelope) Descriptor() ([]byte, []int) {
-	return file_internal_delivery_proto_rawDescGZIP(), []int{12}
-}
-
-func (x *DeliveryEnvelope) GetCommand() isDeliveryEnvelope_Command {
-	if x != nil {
-		return x.Command
-	}
-	return nil
-}
-
 func (x *DeliveryEnvelope) GetRegisterConsumer() *RegisterConsumer {
 	if x != nil {
-		if x, ok := x.Command.(*DeliveryEnvelope_RegisterConsumer); ok {
+		if x, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegisterConsumer); ok {
 			return x.RegisterConsumer
 		}
 	}
@@ -1008,7 +1446,7 @@ func (x *DeliveryEnvelope) GetRegisterConsumer() *RegisterConsumer {
 
 func (x *DeliveryEnvelope) GetRegistrationAck() *RegistrationAck {
 	if x != nil {
-		if x, ok := x.Command.(*DeliveryEnvelope_RegistrationAck); ok {
+		if x, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegistrationAck); ok {
 			return x.RegistrationAck
 		}
 	}
@@ -1017,7 +1455,7 @@ func (x *DeliveryEnvelope) GetRegistrationAck() *RegistrationAck {
 
 func (x *DeliveryEnvelope) GetRequest() *Request {
 	if x != nil {
-		if x, ok := x.Command.(*DeliveryEnvelope_Request); ok {
+		if x, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Request); ok {
 			return x.Request
 		}
 	}
@@ -1026,7 +1464,7 @@ func (x *DeliveryEnvelope) GetRequest() *Request {
 
 func (x *DeliveryEnvelope) GetAck() *Ack {
 	if x != nil {
-		if x, ok := x.Command.(*DeliveryEnvelope_Ack); ok {
+		if x, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Ack); ok {
 			return x.Ack
 		}
 	}
@@ -1035,51 +1473,248 @@ func (x *DeliveryEnvelope) GetAck() *Ack {
 
 func (x *DeliveryEnvelope) GetSequencedMessage() *SequencedMessage {
 	if x != nil {
-		if x, ok := x.Command.(*DeliveryEnvelope_SequencedMessage); ok {
+		if x, ok := x.xxx_hidden_Command.(*deliveryEnvelope_SequencedMessage); ok {
 			return x.SequencedMessage
 		}
 	}
 	return nil
 }
 
+func (x *DeliveryEnvelope) SetRegisterConsumer(v *RegisterConsumer) {
+	if v == nil {
+		x.xxx_hidden_Command = nil
+		return
+	}
+	x.xxx_hidden_Command = &deliveryEnvelope_RegisterConsumer{v}
+}
+
+func (x *DeliveryEnvelope) SetRegistrationAck(v *RegistrationAck) {
+	if v == nil {
+		x.xxx_hidden_Command = nil
+		return
+	}
+	x.xxx_hidden_Command = &deliveryEnvelope_RegistrationAck{v}
+}
+
+func (x *DeliveryEnvelope) SetRequest(v *Request) {
+	if v == nil {
+		x.xxx_hidden_Command = nil
+		return
+	}
+	x.xxx_hidden_Command = &deliveryEnvelope_Request{v}
+}
+
+func (x *DeliveryEnvelope) SetAck(v *Ack) {
+	if v == nil {
+		x.xxx_hidden_Command = nil
+		return
+	}
+	x.xxx_hidden_Command = &deliveryEnvelope_Ack{v}
+}
+
+func (x *DeliveryEnvelope) SetSequencedMessage(v *SequencedMessage) {
+	if v == nil {
+		x.xxx_hidden_Command = nil
+		return
+	}
+	x.xxx_hidden_Command = &deliveryEnvelope_SequencedMessage{v}
+}
+
+func (x *DeliveryEnvelope) HasCommand() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Command != nil
+}
+
+func (x *DeliveryEnvelope) HasRegisterConsumer() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegisterConsumer)
+	return ok
+}
+
+func (x *DeliveryEnvelope) HasRegistrationAck() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegistrationAck)
+	return ok
+}
+
+func (x *DeliveryEnvelope) HasRequest() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Request)
+	return ok
+}
+
+func (x *DeliveryEnvelope) HasAck() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Ack)
+	return ok
+}
+
+func (x *DeliveryEnvelope) HasSequencedMessage() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Command.(*deliveryEnvelope_SequencedMessage)
+	return ok
+}
+
+func (x *DeliveryEnvelope) ClearCommand() {
+	x.xxx_hidden_Command = nil
+}
+
+func (x *DeliveryEnvelope) ClearRegisterConsumer() {
+	if _, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegisterConsumer); ok {
+		x.xxx_hidden_Command = nil
+	}
+}
+
+func (x *DeliveryEnvelope) ClearRegistrationAck() {
+	if _, ok := x.xxx_hidden_Command.(*deliveryEnvelope_RegistrationAck); ok {
+		x.xxx_hidden_Command = nil
+	}
+}
+
+func (x *DeliveryEnvelope) ClearRequest() {
+	if _, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Request); ok {
+		x.xxx_hidden_Command = nil
+	}
+}
+
+func (x *DeliveryEnvelope) ClearAck() {
+	if _, ok := x.xxx_hidden_Command.(*deliveryEnvelope_Ack); ok {
+		x.xxx_hidden_Command = nil
+	}
+}
+
+func (x *DeliveryEnvelope) ClearSequencedMessage() {
+	if _, ok := x.xxx_hidden_Command.(*deliveryEnvelope_SequencedMessage); ok {
+		x.xxx_hidden_Command = nil
+	}
+}
+
+const DeliveryEnvelope_Command_not_set_case case_DeliveryEnvelope_Command = 0
+const DeliveryEnvelope_RegisterConsumer_case case_DeliveryEnvelope_Command = 1
+const DeliveryEnvelope_RegistrationAck_case case_DeliveryEnvelope_Command = 2
+const DeliveryEnvelope_Request_case case_DeliveryEnvelope_Command = 3
+const DeliveryEnvelope_Ack_case case_DeliveryEnvelope_Command = 4
+const DeliveryEnvelope_SequencedMessage_case case_DeliveryEnvelope_Command = 5
+
+func (x *DeliveryEnvelope) WhichCommand() case_DeliveryEnvelope_Command {
+	if x == nil {
+		return DeliveryEnvelope_Command_not_set_case
+	}
+	switch x.xxx_hidden_Command.(type) {
+	case *deliveryEnvelope_RegisterConsumer:
+		return DeliveryEnvelope_RegisterConsumer_case
+	case *deliveryEnvelope_RegistrationAck:
+		return DeliveryEnvelope_RegistrationAck_case
+	case *deliveryEnvelope_Request:
+		return DeliveryEnvelope_Request_case
+	case *deliveryEnvelope_Ack:
+		return DeliveryEnvelope_Ack_case
+	case *deliveryEnvelope_SequencedMessage:
+		return DeliveryEnvelope_SequencedMessage_case
+	default:
+		return DeliveryEnvelope_Command_not_set_case
+	}
+}
+
+type DeliveryEnvelope_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Fields of oneof xxx_hidden_Command:
+	// Carries a consumer registration attempt.
+	RegisterConsumer *RegisterConsumer
+	// Carries a producer registration response.
+	RegistrationAck *RegistrationAck
+	// Carries consumer demand and a confirmation watermark.
+	Request *Request
+	// Carries a confirmation watermark without additional demand.
+	Ack *Ack
+	// Carries one sequenced application message.
+	SequencedMessage *SequencedMessage
+	// -- end of xxx_hidden_Command
+}
+
+func (b0 DeliveryEnvelope_builder) Build() *DeliveryEnvelope {
+	m0 := &DeliveryEnvelope{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.RegisterConsumer != nil {
+		x.xxx_hidden_Command = &deliveryEnvelope_RegisterConsumer{b.RegisterConsumer}
+	}
+	if b.RegistrationAck != nil {
+		x.xxx_hidden_Command = &deliveryEnvelope_RegistrationAck{b.RegistrationAck}
+	}
+	if b.Request != nil {
+		x.xxx_hidden_Command = &deliveryEnvelope_Request{b.Request}
+	}
+	if b.Ack != nil {
+		x.xxx_hidden_Command = &deliveryEnvelope_Ack{b.Ack}
+	}
+	if b.SequencedMessage != nil {
+		x.xxx_hidden_Command = &deliveryEnvelope_SequencedMessage{b.SequencedMessage}
+	}
+	return m0
+}
+
+type case_DeliveryEnvelope_Command protoreflect.FieldNumber
+
+func (x case_DeliveryEnvelope_Command) String() string {
+	md := file_internal_delivery_proto_msgTypes[12].Descriptor()
+	if x == 0 {
+		return "not set"
+	}
+	return protoimpl.X.MessageFieldStringOf(md, protoreflect.FieldNumber(x))
+}
+
 type isDeliveryEnvelope_Command interface {
 	isDeliveryEnvelope_Command()
 }
 
-type DeliveryEnvelope_RegisterConsumer struct {
+type deliveryEnvelope_RegisterConsumer struct {
 	// Carries a consumer registration attempt.
 	RegisterConsumer *RegisterConsumer `protobuf:"bytes,1,opt,name=register_consumer,json=registerConsumer,proto3,oneof"`
 }
 
-type DeliveryEnvelope_RegistrationAck struct {
+type deliveryEnvelope_RegistrationAck struct {
 	// Carries a producer registration response.
 	RegistrationAck *RegistrationAck `protobuf:"bytes,2,opt,name=registration_ack,json=registrationAck,proto3,oneof"`
 }
 
-type DeliveryEnvelope_Request struct {
+type deliveryEnvelope_Request struct {
 	// Carries consumer demand and a confirmation watermark.
 	Request *Request `protobuf:"bytes,3,opt,name=request,proto3,oneof"`
 }
 
-type DeliveryEnvelope_Ack struct {
+type deliveryEnvelope_Ack struct {
 	// Carries a confirmation watermark without additional demand.
 	Ack *Ack `protobuf:"bytes,4,opt,name=ack,proto3,oneof"`
 }
 
-type DeliveryEnvelope_SequencedMessage struct {
+type deliveryEnvelope_SequencedMessage struct {
 	// Carries one sequenced application message.
 	SequencedMessage *SequencedMessage `protobuf:"bytes,5,opt,name=sequenced_message,json=sequencedMessage,proto3,oneof"`
 }
 
-func (*DeliveryEnvelope_RegisterConsumer) isDeliveryEnvelope_Command() {}
+func (*deliveryEnvelope_RegisterConsumer) isDeliveryEnvelope_Command() {}
 
-func (*DeliveryEnvelope_RegistrationAck) isDeliveryEnvelope_Command() {}
+func (*deliveryEnvelope_RegistrationAck) isDeliveryEnvelope_Command() {}
 
-func (*DeliveryEnvelope_Request) isDeliveryEnvelope_Command() {}
+func (*deliveryEnvelope_Request) isDeliveryEnvelope_Command() {}
 
-func (*DeliveryEnvelope_Ack) isDeliveryEnvelope_Command() {}
+func (*deliveryEnvelope_Ack) isDeliveryEnvelope_Command() {}
 
-func (*DeliveryEnvelope_SequencedMessage) isDeliveryEnvelope_Command() {}
+func (*deliveryEnvelope_SequencedMessage) isDeliveryEnvelope_Command() {}
 
 var File_internal_delivery_proto protoreflect.FileDescriptor
 
@@ -1167,18 +1802,6 @@ const file_internal_delivery_proto_rawDesc = "" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
 
-var (
-	file_internal_delivery_proto_rawDescOnce sync.Once
-	file_internal_delivery_proto_rawDescData []byte
-)
-
-func file_internal_delivery_proto_rawDescGZIP() []byte {
-	file_internal_delivery_proto_rawDescOnce.Do(func() {
-		file_internal_delivery_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_delivery_proto_rawDesc), len(file_internal_delivery_proto_rawDesc)))
-	})
-	return file_internal_delivery_proto_rawDescData
-}
-
 var file_internal_delivery_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_delivery_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_internal_delivery_proto_goTypes = []any{
@@ -1228,16 +1851,16 @@ func file_internal_delivery_proto_init() {
 		return
 	}
 	file_internal_delivery_proto_msgTypes[1].OneofWrappers = []any{
-		(*ReliableDeliveryConfig_Producer)(nil),
-		(*ReliableDeliveryConfig_Consumer)(nil),
+		(*reliableDeliveryConfig_Producer)(nil),
+		(*reliableDeliveryConfig_Consumer)(nil),
 	}
 	file_internal_delivery_proto_msgTypes[2].OneofWrappers = []any{}
 	file_internal_delivery_proto_msgTypes[12].OneofWrappers = []any{
-		(*DeliveryEnvelope_RegisterConsumer)(nil),
-		(*DeliveryEnvelope_RegistrationAck)(nil),
-		(*DeliveryEnvelope_Request)(nil),
-		(*DeliveryEnvelope_Ack)(nil),
-		(*DeliveryEnvelope_SequencedMessage)(nil),
+		(*deliveryEnvelope_RegisterConsumer)(nil),
+		(*deliveryEnvelope_RegistrationAck)(nil),
+		(*deliveryEnvelope_Request)(nil),
+		(*deliveryEnvelope_Ack)(nil),
+		(*deliveryEnvelope_SequencedMessage)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -54,11 +54,11 @@ func EncodeDependencies(dependencies ...extension.Dependency) ([]*internalpb.Dep
 			return nil, err
 		}
 
-		output = append(output, &internalpb.Dependency{
-			Id:       dependency.ID(),
-			TypeName: types.Name(dependency),
-			Bytea:    bytea,
-		})
+		dependency2 := &internalpb.Dependency{}
+		dependency2.SetId(dependency.ID())
+		dependency2.SetTypeName(types.Name(dependency))
+		dependency2.SetBytea(bytea)
+		output = append(output, dependency2)
 	}
 	return output, nil
 }
@@ -121,27 +121,21 @@ func decodeDependencyFromBytes(registry types.Registry, typeName string, bytea [
 func EncodePassivationStrategy(strategy passivation.Strategy) *internalpb.PassivationStrategy {
 	switch s := strategy.(type) {
 	case *passivation.TimeBasedStrategy:
-		return &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_TimeBased{
-				TimeBased: &internalpb.TimeBasedPassivation{
-					PassivateAfter: durationpb.New(s.Timeout()),
-				},
-			},
-		}
+		tbp := &internalpb.TimeBasedPassivation{}
+		tbp.SetPassivateAfter(durationpb.New(s.Timeout()))
+		ps := &internalpb.PassivationStrategy{}
+		ps.SetTimeBased(proto.ValueOrDefault(tbp))
+		return ps
 	case *passivation.MessagesCountBasedStrategy:
-		return &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_MessagesCountBased{
-				MessagesCountBased: &internalpb.MessagesCountBasedPassivation{
-					MaxMessages: int64(s.MaxMessages()),
-				},
-			},
-		}
+		mcbp := &internalpb.MessagesCountBasedPassivation{}
+		mcbp.SetMaxMessages(int64(s.MaxMessages()))
+		ps := &internalpb.PassivationStrategy{}
+		ps.SetMessagesCountBased(proto.ValueOrDefault(mcbp))
+		return ps
 	case *passivation.LongLivedStrategy:
-		return &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_LongLived{
-				LongLived: new(internalpb.LongLivedPassivation),
-			},
-		}
+		ps := &internalpb.PassivationStrategy{}
+		ps.SetLongLived(proto.ValueOrDefault(new(internalpb.LongLivedPassivation)))
+		return ps
 	default:
 		return nil
 	}
@@ -154,12 +148,12 @@ func DecodePassivationStrategy(proto *internalpb.PassivationStrategy) passivatio
 		return nil
 	}
 
-	switch s := proto.Strategy.(type) {
-	case *internalpb.PassivationStrategy_TimeBased:
-		return passivation.NewTimeBasedStrategy(s.TimeBased.GetPassivateAfter().AsDuration())
-	case *internalpb.PassivationStrategy_MessagesCountBased:
-		return passivation.NewMessageCountBasedStrategy(int(s.MessagesCountBased.GetMaxMessages()))
-	case *internalpb.PassivationStrategy_LongLived:
+	switch proto.WhichStrategy() {
+	case internalpb.PassivationStrategy_TimeBased_case:
+		return passivation.NewTimeBasedStrategy(proto.GetTimeBased().GetPassivateAfter().AsDuration())
+	case internalpb.PassivationStrategy_MessagesCountBased_case:
+		return passivation.NewMessageCountBasedStrategy(int(proto.GetMessagesCountBased().GetMaxMessages()))
+	case internalpb.PassivationStrategy_LongLived_case:
 		return passivation.NewLongLivedStrategy()
 	default:
 		return nil
@@ -172,15 +166,14 @@ func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorS
 		return nil
 	}
 
-	spec := &internalpb.SupervisorSpec{
-		Strategy:   encodeSupervisorStrategy(supervisor.Strategy()),
-		MaxRetries: supervisor.MaxRetries(),
-		Timeout:    durationpb.New(supervisor.Timeout()),
-	}
+	spec := &internalpb.SupervisorSpec{}
+	spec.SetStrategy(encodeSupervisorStrategy(supervisor.Strategy()))
+	spec.SetMaxRetries(supervisor.MaxRetries())
+	spec.SetTimeout(durationpb.New(supervisor.Timeout()))
 
 	if directive, ok := supervisor.AnyErrorDirective(); ok {
 		encoded := encodeSupervisorDirective(directive)
-		spec.AnyErrorDirective = &encoded
+		spec.SetAnyErrorDirective(encoded)
 		return spec
 	}
 
@@ -194,10 +187,10 @@ func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorS
 		if rule.ErrorType == "" {
 			continue
 		}
-		directives = append(directives, &internalpb.SupervisorDirectiveRule{
-			ErrorType: rule.ErrorType,
-			Directive: encodeSupervisorDirective(rule.Directive),
-		})
+		sdr := &internalpb.SupervisorDirectiveRule{}
+		sdr.SetErrorType(rule.ErrorType)
+		sdr.SetDirective(encodeSupervisorDirective(rule.Directive))
+		directives = append(directives, sdr)
 	}
 
 	if len(directives) == 0 {
@@ -207,7 +200,7 @@ func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorS
 	sort.Slice(directives, func(i, j int) bool {
 		return directives[i].GetErrorType() < directives[j].GetErrorType()
 	})
-	spec.Directives = directives
+	spec.SetDirectives(directives)
 	return spec
 }
 
@@ -230,7 +223,7 @@ func DecodeSupervisor(spec *internalpb.SupervisorSpec) *supervisor.Supervisor {
 		opts = append(opts, supervisor.WithRetry(spec.GetMaxRetries(), timeout))
 	}
 
-	if spec.AnyErrorDirective != nil {
+	if spec.HasAnyErrorDirective() {
 		opts = append(opts, supervisor.WithAnyErrorDirective(decodeSupervisorDirective(spec.GetAnyErrorDirective())))
 		return supervisor.NewSupervisor(opts...)
 	}
@@ -265,10 +258,10 @@ func EncodeReentrancy(reentrancy *reentrancy.Reentrancy) *internalpb.ReentrancyC
 	default:
 		limit = uint32(maxInFlight)
 	}
-	return &internalpb.ReentrancyConfig{
-		Mode:        toInternalReentrancyMode(reentrancy.Mode()),
-		MaxInFlight: limit,
-	}
+	rc := &internalpb.ReentrancyConfig{}
+	rc.SetMode(toInternalReentrancyMode(reentrancy.Mode()))
+	rc.SetMaxInFlight(limit)
+	return rc
 }
 
 // DecodeReentrancy decodes a protobuf representation of a Reentrancy configuration into its corresponding Reentrancy instance.
@@ -374,21 +367,20 @@ func toProto(record datacenter.DataCenterRecord) (*internalpb.DataCenterRecord, 
 		return nil, err
 	}
 
-	pbRecord := &internalpb.DataCenterRecord{
-		Id: record.ID,
-		DataCenter: &internalpb.DataCenter{
-			Name:   record.DataCenter.Name,
-			Region: record.DataCenter.Region,
-			Zone:   record.DataCenter.Zone,
-			Labels: record.DataCenter.Labels,
-		},
-		Endpoints: record.Endpoints,
-		State:     state,
-		Version:   record.Version,
-	}
+	dc := &internalpb.DataCenter{}
+	dc.SetName(record.DataCenter.Name)
+	dc.SetRegion(record.DataCenter.Region)
+	dc.SetZone(record.DataCenter.Zone)
+	dc.SetLabels(record.DataCenter.Labels)
+	pbRecord := &internalpb.DataCenterRecord{}
+	pbRecord.SetId(record.ID)
+	pbRecord.SetDataCenter(dc)
+	pbRecord.SetEndpoints(record.Endpoints)
+	pbRecord.SetState(state)
+	pbRecord.SetVersion(record.Version)
 
 	if !record.LeaseExpiry.IsZero() {
-		pbRecord.LeaseExpiry = timestamppb.New(record.LeaseExpiry)
+		pbRecord.SetLeaseExpiry(timestamppb.New(record.LeaseExpiry))
 	}
 
 	return pbRecord, nil
@@ -413,8 +405,8 @@ func fromProto(record *internalpb.DataCenterRecord) datacenter.DataCenterRecord 
 		Version:    record.GetVersion(),
 	}
 
-	if record.LeaseExpiry != nil {
-		mapped.LeaseExpiry = record.LeaseExpiry.AsTime()
+	if record.HasLeaseExpiry() {
+		mapped.LeaseExpiry = record.GetLeaseExpiry().AsTime()
 	}
 
 	return mapped
@@ -460,10 +452,10 @@ func EncodeActorState(state remote.ActorState) internalpb.State {
 
 // EncodeCRDTKey converts a CRDT key ID and data type to its protobuf representation.
 func EncodeCRDTKey(keyID string, dataType crdt.DataType) *internalpb.CRDTKey {
-	return &internalpb.CRDTKey{
-		Id:       keyID,
-		DataType: internalpb.CRDTDataType(dataType + 1), // +1 because proto enum 0 is UNSPECIFIED
-	}
+	cRDTKey := &internalpb.CRDTKey{}
+	cRDTKey.SetId(keyID)
+	cRDTKey.SetDataType(internalpb.CRDTDataType(dataType + 1)) // +1 because proto enum 0 is UNSPECIFIED
+	return cRDTKey
 }
 
 // DecodeCRDTKey extracts key ID and data type from a protobuf CRDTKey.
