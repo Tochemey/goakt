@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -31,10 +30,10 @@ const (
 //	This helps free up system resources by removing actors that haven't
 //	received messages for a defined time window.
 type TimeBasedPassivation struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	PassivateAfter *durationpb.Duration   `protobuf:"bytes,1,opt,name=passivate_after,json=passivateAfter,proto3" json:"passivate_after,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PassivateAfter *durationpb.Duration   `protobuf:"bytes,1,opt,name=passivate_after,json=passivateAfter,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *TimeBasedPassivation) Reset() {
@@ -62,16 +61,40 @@ func (x *TimeBasedPassivation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TimeBasedPassivation.ProtoReflect.Descriptor instead.
-func (*TimeBasedPassivation) Descriptor() ([]byte, []int) {
-	return file_internal_passivation_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *TimeBasedPassivation) GetPassivateAfter() *durationpb.Duration {
 	if x != nil {
-		return x.PassivateAfter
+		return x.xxx_hidden_PassivateAfter
 	}
 	return nil
+}
+
+func (x *TimeBasedPassivation) SetPassivateAfter(v *durationpb.Duration) {
+	x.xxx_hidden_PassivateAfter = v
+}
+
+func (x *TimeBasedPassivation) HasPassivateAfter() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PassivateAfter != nil
+}
+
+func (x *TimeBasedPassivation) ClearPassivateAfter() {
+	x.xxx_hidden_PassivateAfter = nil
+}
+
+type TimeBasedPassivation_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	PassivateAfter *durationpb.Duration
+}
+
+func (b0 TimeBasedPassivation_builder) Build() *TimeBasedPassivation {
+	m0 := &TimeBasedPassivation{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PassivateAfter = b.PassivateAfter
+	return m0
 }
 
 // MessagesCountBasedPassivation defines a strategy where an actor is passivated
@@ -83,10 +106,10 @@ func (x *TimeBasedPassivation) GetPassivateAfter() *durationpb.Duration {
 //	before it is considered for passivation. This can be useful in cases
 //	where actors have expensive memory or lifecycle costs.
 type MessagesCountBasedPassivation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	MaxMessages   int64                  `protobuf:"varint,1,opt,name=max_messages,json=maxMessages,proto3" json:"max_messages,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_MaxMessages int64                  `protobuf:"varint,1,opt,name=max_messages,json=maxMessages,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *MessagesCountBasedPassivation) Reset() {
@@ -114,16 +137,29 @@ func (x *MessagesCountBasedPassivation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MessagesCountBasedPassivation.ProtoReflect.Descriptor instead.
-func (*MessagesCountBasedPassivation) Descriptor() ([]byte, []int) {
-	return file_internal_passivation_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *MessagesCountBasedPassivation) GetMaxMessages() int64 {
 	if x != nil {
-		return x.MaxMessages
+		return x.xxx_hidden_MaxMessages
 	}
 	return 0
+}
+
+func (x *MessagesCountBasedPassivation) SetMaxMessages(v int64) {
+	x.xxx_hidden_MaxMessages = v
+}
+
+type MessagesCountBasedPassivation_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	MaxMessages int64
+}
+
+func (b0 MessagesCountBasedPassivation_builder) Build() *MessagesCountBasedPassivation {
+	m0 := &MessagesCountBasedPassivation{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_MaxMessages = b.MaxMessages
+	return m0
 }
 
 // LongLivedPassivation represents a strategy where the actor is long-lived
@@ -132,7 +168,7 @@ func (x *MessagesCountBasedPassivation) GetMaxMessages() int64 {
 // This is suitable for actors that are critical system components or
 // serve high-throughput workloads with consistent usage patterns.
 type LongLivedPassivation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,9 +198,16 @@ func (x *LongLivedPassivation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LongLivedPassivation.ProtoReflect.Descriptor instead.
-func (*LongLivedPassivation) Descriptor() ([]byte, []int) {
-	return file_internal_passivation_proto_rawDescGZIP(), []int{2}
+type LongLivedPassivation_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 LongLivedPassivation_builder) Build() *LongLivedPassivation {
+	m0 := &LongLivedPassivation{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // PassivationStrategy encapsulates all supported passivation strategies
@@ -175,15 +218,10 @@ func (*LongLivedPassivation) Descriptor() ([]byte, []int) {
 //   - messages_count_based: Uses message count threshold to trigger passivation.
 //   - long_lived: Disables automatic passivation entirely.
 type PassivationStrategy struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Types that are valid to be assigned to Strategy:
-	//
-	//	*PassivationStrategy_TimeBased
-	//	*PassivationStrategy_MessagesCountBased
-	//	*PassivationStrategy_LongLived
-	Strategy      isPassivationStrategy_Strategy `protobuf_oneof:"strategy"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState         `protogen:"opaque.v1"`
+	xxx_hidden_Strategy isPassivationStrategy_Strategy `protobuf_oneof:"strategy"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *PassivationStrategy) Reset() {
@@ -211,21 +249,9 @@ func (x *PassivationStrategy) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PassivationStrategy.ProtoReflect.Descriptor instead.
-func (*PassivationStrategy) Descriptor() ([]byte, []int) {
-	return file_internal_passivation_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *PassivationStrategy) GetStrategy() isPassivationStrategy_Strategy {
-	if x != nil {
-		return x.Strategy
-	}
-	return nil
-}
-
 func (x *PassivationStrategy) GetTimeBased() *TimeBasedPassivation {
 	if x != nil {
-		if x, ok := x.Strategy.(*PassivationStrategy_TimeBased); ok {
+		if x, ok := x.xxx_hidden_Strategy.(*passivationStrategy_TimeBased); ok {
 			return x.TimeBased
 		}
 	}
@@ -234,7 +260,7 @@ func (x *PassivationStrategy) GetTimeBased() *TimeBasedPassivation {
 
 func (x *PassivationStrategy) GetMessagesCountBased() *MessagesCountBasedPassivation {
 	if x != nil {
-		if x, ok := x.Strategy.(*PassivationStrategy_MessagesCountBased); ok {
+		if x, ok := x.xxx_hidden_Strategy.(*passivationStrategy_MessagesCountBased); ok {
 			return x.MessagesCountBased
 		}
 	}
@@ -243,34 +269,168 @@ func (x *PassivationStrategy) GetMessagesCountBased() *MessagesCountBasedPassiva
 
 func (x *PassivationStrategy) GetLongLived() *LongLivedPassivation {
 	if x != nil {
-		if x, ok := x.Strategy.(*PassivationStrategy_LongLived); ok {
+		if x, ok := x.xxx_hidden_Strategy.(*passivationStrategy_LongLived); ok {
 			return x.LongLived
 		}
 	}
 	return nil
 }
 
+func (x *PassivationStrategy) SetTimeBased(v *TimeBasedPassivation) {
+	if v == nil {
+		x.xxx_hidden_Strategy = nil
+		return
+	}
+	x.xxx_hidden_Strategy = &passivationStrategy_TimeBased{v}
+}
+
+func (x *PassivationStrategy) SetMessagesCountBased(v *MessagesCountBasedPassivation) {
+	if v == nil {
+		x.xxx_hidden_Strategy = nil
+		return
+	}
+	x.xxx_hidden_Strategy = &passivationStrategy_MessagesCountBased{v}
+}
+
+func (x *PassivationStrategy) SetLongLived(v *LongLivedPassivation) {
+	if v == nil {
+		x.xxx_hidden_Strategy = nil
+		return
+	}
+	x.xxx_hidden_Strategy = &passivationStrategy_LongLived{v}
+}
+
+func (x *PassivationStrategy) HasStrategy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Strategy != nil
+}
+
+func (x *PassivationStrategy) HasTimeBased() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Strategy.(*passivationStrategy_TimeBased)
+	return ok
+}
+
+func (x *PassivationStrategy) HasMessagesCountBased() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Strategy.(*passivationStrategy_MessagesCountBased)
+	return ok
+}
+
+func (x *PassivationStrategy) HasLongLived() bool {
+	if x == nil {
+		return false
+	}
+	_, ok := x.xxx_hidden_Strategy.(*passivationStrategy_LongLived)
+	return ok
+}
+
+func (x *PassivationStrategy) ClearStrategy() {
+	x.xxx_hidden_Strategy = nil
+}
+
+func (x *PassivationStrategy) ClearTimeBased() {
+	if _, ok := x.xxx_hidden_Strategy.(*passivationStrategy_TimeBased); ok {
+		x.xxx_hidden_Strategy = nil
+	}
+}
+
+func (x *PassivationStrategy) ClearMessagesCountBased() {
+	if _, ok := x.xxx_hidden_Strategy.(*passivationStrategy_MessagesCountBased); ok {
+		x.xxx_hidden_Strategy = nil
+	}
+}
+
+func (x *PassivationStrategy) ClearLongLived() {
+	if _, ok := x.xxx_hidden_Strategy.(*passivationStrategy_LongLived); ok {
+		x.xxx_hidden_Strategy = nil
+	}
+}
+
+const PassivationStrategy_Strategy_not_set_case case_PassivationStrategy_Strategy = 0
+const PassivationStrategy_TimeBased_case case_PassivationStrategy_Strategy = 1
+const PassivationStrategy_MessagesCountBased_case case_PassivationStrategy_Strategy = 2
+const PassivationStrategy_LongLived_case case_PassivationStrategy_Strategy = 3
+
+func (x *PassivationStrategy) WhichStrategy() case_PassivationStrategy_Strategy {
+	if x == nil {
+		return PassivationStrategy_Strategy_not_set_case
+	}
+	switch x.xxx_hidden_Strategy.(type) {
+	case *passivationStrategy_TimeBased:
+		return PassivationStrategy_TimeBased_case
+	case *passivationStrategy_MessagesCountBased:
+		return PassivationStrategy_MessagesCountBased_case
+	case *passivationStrategy_LongLived:
+		return PassivationStrategy_LongLived_case
+	default:
+		return PassivationStrategy_Strategy_not_set_case
+	}
+}
+
+type PassivationStrategy_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Fields of oneof xxx_hidden_Strategy:
+	TimeBased          *TimeBasedPassivation
+	MessagesCountBased *MessagesCountBasedPassivation
+	LongLived          *LongLivedPassivation
+	// -- end of xxx_hidden_Strategy
+}
+
+func (b0 PassivationStrategy_builder) Build() *PassivationStrategy {
+	m0 := &PassivationStrategy{}
+	b, x := &b0, m0
+	_, _ = b, x
+	if b.TimeBased != nil {
+		x.xxx_hidden_Strategy = &passivationStrategy_TimeBased{b.TimeBased}
+	}
+	if b.MessagesCountBased != nil {
+		x.xxx_hidden_Strategy = &passivationStrategy_MessagesCountBased{b.MessagesCountBased}
+	}
+	if b.LongLived != nil {
+		x.xxx_hidden_Strategy = &passivationStrategy_LongLived{b.LongLived}
+	}
+	return m0
+}
+
+type case_PassivationStrategy_Strategy protoreflect.FieldNumber
+
+func (x case_PassivationStrategy_Strategy) String() string {
+	md := file_internal_passivation_proto_msgTypes[3].Descriptor()
+	if x == 0 {
+		return "not set"
+	}
+	return protoimpl.X.MessageFieldStringOf(md, protoreflect.FieldNumber(x))
+}
+
 type isPassivationStrategy_Strategy interface {
 	isPassivationStrategy_Strategy()
 }
 
-type PassivationStrategy_TimeBased struct {
+type passivationStrategy_TimeBased struct {
 	TimeBased *TimeBasedPassivation `protobuf:"bytes,1,opt,name=time_based,json=timeBased,proto3,oneof"`
 }
 
-type PassivationStrategy_MessagesCountBased struct {
+type passivationStrategy_MessagesCountBased struct {
 	MessagesCountBased *MessagesCountBasedPassivation `protobuf:"bytes,2,opt,name=messages_count_based,json=messagesCountBased,proto3,oneof"`
 }
 
-type PassivationStrategy_LongLived struct {
+type passivationStrategy_LongLived struct {
 	LongLived *LongLivedPassivation `protobuf:"bytes,3,opt,name=long_lived,json=longLived,proto3,oneof"`
 }
 
-func (*PassivationStrategy_TimeBased) isPassivationStrategy_Strategy() {}
+func (*passivationStrategy_TimeBased) isPassivationStrategy_Strategy() {}
 
-func (*PassivationStrategy_MessagesCountBased) isPassivationStrategy_Strategy() {}
+func (*passivationStrategy_MessagesCountBased) isPassivationStrategy_Strategy() {}
 
-func (*PassivationStrategy_LongLived) isPassivationStrategy_Strategy() {}
+func (*passivationStrategy_LongLived) isPassivationStrategy_Strategy() {}
 
 var File_internal_passivation_proto protoreflect.FileDescriptor
 
@@ -295,18 +455,6 @@ const file_internal_passivation_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_passivation_proto_rawDescOnce sync.Once
-	file_internal_passivation_proto_rawDescData []byte
-)
-
-func file_internal_passivation_proto_rawDescGZIP() []byte {
-	file_internal_passivation_proto_rawDescOnce.Do(func() {
-		file_internal_passivation_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_passivation_proto_rawDesc), len(file_internal_passivation_proto_rawDesc)))
-	})
-	return file_internal_passivation_proto_rawDescData
-}
 
 var file_internal_passivation_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_internal_passivation_proto_goTypes = []any{
@@ -334,9 +482,9 @@ func file_internal_passivation_proto_init() {
 		return
 	}
 	file_internal_passivation_proto_msgTypes[3].OneofWrappers = []any{
-		(*PassivationStrategy_TimeBased)(nil),
-		(*PassivationStrategy_MessagesCountBased)(nil),
-		(*PassivationStrategy_LongLived)(nil),
+		(*passivationStrategy_TimeBased)(nil),
+		(*passivationStrategy_MessagesCountBased)(nil),
+		(*passivationStrategy_LongLived)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -44,11 +44,11 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		entry := &internalpb.CRDTSnapshotEntry{
+		entry := internalpb.CRDTSnapshotEntry_builder{
 			Key:     codec.EncodeCRDTKey("counter-1", crdt.GCounterType),
-			Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"node-1": 10}}}},
+			Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"node-1": 10}}.Build()}.Build(),
 			Version: 5,
-		}
+		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"counter-1": entry}
 
 		err = store.Save(entries)
@@ -68,14 +68,14 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		entry := &internalpb.CRDTSnapshotEntry{
+		entry := internalpb.CRDTSnapshotEntry_builder{
 			Key: codec.EncodeCRDTKey("pn-1", crdt.PNCounterType),
-			Data: &internalpb.CRDTData{Type: &internalpb.CRDTData_PnCounter{PnCounter: &internalpb.PNCounterData{
-				Increments: &internalpb.GCounterData{State: map[string]uint64{"node-1": 20}},
-				Decrements: &internalpb.GCounterData{State: map[string]uint64{"node-1": 5}},
-			}}},
+			Data: internalpb.CRDTData_builder{PnCounter: internalpb.PNCounterData_builder{
+				Increments: internalpb.GCounterData_builder{State: map[string]uint64{"node-1": 20}}.Build(),
+				Decrements: internalpb.GCounterData_builder{State: map[string]uint64{"node-1": 5}}.Build(),
+			}.Build()}.Build(),
 			Version: 3,
-		}
+		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"pn-1": entry}
 
 		err = store.Save(entries)
@@ -95,11 +95,11 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		entry := &internalpb.CRDTSnapshotEntry{
+		entry := internalpb.CRDTSnapshotEntry_builder{
 			Key:     codec.EncodeCRDTKey("flag-1", crdt.FlagType),
-			Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_Flag{Flag: &internalpb.FlagData{Enabled: true}}},
+			Data:    internalpb.CRDTData_builder{Flag: internalpb.FlagData_builder{Enabled: true}.Build()}.Build(),
 			Version: 1,
-		}
+		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"flag-1": entry}
 
 		err = store.Save(entries)
@@ -130,27 +130,27 @@ func TestStore(t *testing.T) {
 
 		// first save
 		entries1 := map[string]*internalpb.CRDTSnapshotEntry{
-			"a": {
+			"a": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("a", crdt.GCounterType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 1}}}},
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 1}}.Build()}.Build(),
 				Version: 1,
-			},
-			"b": {
+			}.Build(),
+			"b": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("b", crdt.GCounterType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 2}}}},
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 2}}.Build()}.Build(),
 				Version: 1,
-			},
+			}.Build(),
 		}
 		err = store.Save(entries1)
 		require.NoError(t, err)
 
 		// second save with different keys
 		entries2 := map[string]*internalpb.CRDTSnapshotEntry{
-			"c": {
+			"c": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("c", crdt.GCounterType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 3}}}},
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 3}}.Build()}.Build(),
 				Version: 2,
-			},
+			}.Build(),
 		}
 		err = store.Save(entries2)
 		require.NoError(t, err)
@@ -207,24 +207,24 @@ func TestStore(t *testing.T) {
 		defer store.Close()
 
 		entries := map[string]*internalpb.CRDTSnapshotEntry{
-			"gc": {
+			"gc": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("gc", crdt.GCounterType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 5}}}},
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 5}}.Build()}.Build(),
 				Version: 1,
-			},
-			"pn": {
+			}.Build(),
+			"pn": internalpb.CRDTSnapshotEntry_builder{
 				Key: codec.EncodeCRDTKey("pn", crdt.PNCounterType),
-				Data: &internalpb.CRDTData{Type: &internalpb.CRDTData_PnCounter{PnCounter: &internalpb.PNCounterData{
-					Increments: &internalpb.GCounterData{State: map[string]uint64{"n1": 10}},
-					Decrements: &internalpb.GCounterData{State: map[string]uint64{}},
-				}}},
+				Data: internalpb.CRDTData_builder{PnCounter: internalpb.PNCounterData_builder{
+					Increments: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 10}}.Build(),
+					Decrements: internalpb.GCounterData_builder{State: map[string]uint64{}}.Build(),
+				}.Build()}.Build(),
 				Version: 2,
-			},
-			"flag": {
+			}.Build(),
+			"flag": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("flag", crdt.FlagType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_Flag{Flag: &internalpb.FlagData{Enabled: true}}},
+				Data:    internalpb.CRDTData_builder{Flag: internalpb.FlagData_builder{Enabled: true}.Build()}.Build(),
 				Version: 3,
-			},
+			}.Build(),
 		}
 
 		err = store.Save(entries)
@@ -334,14 +334,14 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		entry := &internalpb.CRDTSnapshotEntry{
-			Key: &internalpb.CRDTKey{
+		entry := internalpb.CRDTSnapshotEntry_builder{
+			Key: internalpb.CRDTKey_builder{
 				Id:       "bad-key",
 				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-			},
+			}.Build(),
 			Data:    &internalpb.CRDTData{},
 			Version: 1,
-		}
+		}.Build()
 		raw, err := proto.Marshal(entry)
 		require.NoError(t, err)
 
@@ -362,14 +362,14 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 		defer store.Close()
 
-		entry := &internalpb.CRDTSnapshotEntry{
-			Key: &internalpb.CRDTKey{
+		entry := internalpb.CRDTSnapshotEntry_builder{
+			Key: internalpb.CRDTKey_builder{
 				Id:       "bad-data",
 				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_G_COUNTER,
-			},
+			}.Build(),
 			Data:    nil,
 			Version: 1,
-		}
+		}.Build()
 		raw, err := proto.Marshal(entry)
 		require.NoError(t, err)
 

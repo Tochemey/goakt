@@ -427,7 +427,7 @@ func TestGrainAsyncResponseCompletesRequest(t *testing.T) {
 		close(done)
 	})
 
-	reply := &testpb.Reply{Content: "pong"}
+	reply := testpb.Reply_builder{Content: "pong"}.Build()
 	require.NoError(t, pid.enqueueEnvelope(context.Background(), &commands.AsyncResponse{
 		CorrelationID: "corr-1",
 		Message:       reply,
@@ -528,9 +528,9 @@ func TestGrainStashPausesUserMailboxUntilCompletion(t *testing.T) {
 
 	// Buffer user messages behind the pause. Each receive schedules a turn,
 	// which must park without consuming the user mailbox.
-	first := &testpb.Reply{Content: "first"}
-	second := &testpb.Reply{Content: "second"}
-	third := &testpb.Reply{Content: "third"}
+	first := testpb.Reply_builder{Content: "first"}.Build()
+	second := testpb.Reply_builder{Content: "second"}.Build()
+	third := testpb.Reply_builder{Content: "third"}.Build()
 
 	for _, message := range []*testpb.Reply{first, second, third} {
 		gctx := getGrainContext().build(context.Background(), pid, sys, identity, message, grainTell)
@@ -545,7 +545,7 @@ func TestGrainStashPausesUserMailboxUntilCompletion(t *testing.T) {
 	// releases the buffered messages in exact arrival order.
 	require.NoError(t, pid.enqueueEnvelope(context.Background(), &commands.AsyncResponse{
 		CorrelationID: "blocking",
-		Message:       &testpb.Reply{Content: "done"},
+		Message:       testpb.Reply_builder{Content: "done"}.Build(),
 	}))
 
 	select {
@@ -572,7 +572,7 @@ func TestGrainAsyncErrorWakesPausedGrain(t *testing.T) {
 		close(done)
 	})
 
-	gctx := getGrainContext().build(context.Background(), pid, sys, identity, &testpb.Reply{Content: "waiting"}, grainTell)
+	gctx := getGrainContext().build(context.Background(), pid, sys, identity, testpb.Reply_builder{Content: "waiting"}.Build(), grainTell)
 	pid.receive(gctx)
 
 	pause.For(100 * time.Millisecond)
@@ -711,7 +711,7 @@ func TestGrainAsyncRequestDeliversInnerMessage(t *testing.T) {
 	_, pid, grain, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 	replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: "MockGrain/other"}
-	payload := &testpb.Reply{Content: "inner"}
+	payload := testpb.Reply_builder{Content: "inner"}.Build()
 
 	require.NoError(t, pid.enqueueEnvelope(context.Background(), &commands.AsyncRequest{
 		CorrelationID: "req-1",
@@ -931,8 +931,8 @@ func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
 	ctx := context.Background()
 	identity := &GrainIdentity{kind: "TestKind", name: "TestID"}
 
-	pid.receive(getGrainContext().build(ctx, pid, nil, identity, &testpb.Reply{Content: "first"}, grainTell))
-	pid.receive(getGrainContext().build(ctx, pid, nil, identity, &testpb.Reply{Content: "second"}, grainTell))
+	pid.receive(getGrainContext().build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "first"}.Build(), grainTell))
+	pid.receive(getGrainContext().build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "second"}.Build(), grainTell))
 
 	require.Eventually(t, func() bool {
 		return len(grain.recorded()) == 2

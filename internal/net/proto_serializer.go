@@ -417,3 +417,39 @@ func (x *ProtoSerializer) UnmarshalBinaryWithMetadata(data []byte) (proto.Messag
 
 	return msg, md, typeName, nil
 }
+
+// protoEncodePool supplies buffers for [MarshalProtoAppend]. It is separate
+// from the duplex read pool so encode and read recycle independently.
+var protoEncodePool = NewFramePool()
+
+// MarshalProtoAppend marshals msg into a buffer from the package encode pool
+// using [proto.MarshalOptions.MarshalAppend] with UseCachedSize. Callers must
+// [ReleaseMarshalBuffer] the returned slice when they no longer need it,
+// including when a later step fails after a successful marshal.
+func MarshalProtoAppend(msg proto.Message) ([]byte, error) {
+	if msg == nil {
+		return nil, ErrUnknownMessageType
+	}
+
+	opts := proto.MarshalOptions{UseCachedSize: true}
+	size := opts.Size(msg)
+	buf := protoEncodePool.Get(size)[:0]
+
+	out, err := opts.MarshalAppend(buf, msg)
+	if err != nil {
+		protoEncodePool.Put(out)
+		return nil, err
+	}
+
+	return out, nil
+}
+
+// ReleaseMarshalBuffer returns a buffer obtained from [MarshalProtoAppend] to
+// the encode pool. Safe on nil or non-pooled slices.
+func ReleaseMarshalBuffer(buf []byte) {
+	if buf == nil {
+		return
+	}
+
+	protoEncodePool.Put(buf)
+}

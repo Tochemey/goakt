@@ -37,12 +37,12 @@ func TestMemoryStore(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		RemotingPort: 2280,
 		PeersPort:    2281,
 		Actors:       nil,
-	}
+	}.Build()
 
 	require.NoError(t, store.PersistPeerState(ctx, peerState))
 
@@ -70,12 +70,12 @@ func TestMemoryStoreClose(t *testing.T) {
 	store := NewMemoryStore()
 	ctx := context.Background()
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		RemotingPort: 2280,
 		PeersPort:    2281,
 		Actors:       nil,
-	}
+	}.Build()
 
 	require.NoError(t, store.PersistPeerState(ctx, peerState))
 

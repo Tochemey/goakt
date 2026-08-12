@@ -127,11 +127,11 @@ func TestReflection(t *testing.T) {
 		require.NotNil(t, bytea)
 		require.NotEmpty(t, bytea)
 
-		pb := &internalpb.Dependency{
+		pb := internalpb.Dependency_builder{
 			Id:       dependency.ID(),
 			TypeName: typeName,
 			Bytea:    bytea,
-		}
+		}.Build()
 
 		dependencies, err := reflection.dependenciesFromProto(pb)
 		require.NoError(t, err)
@@ -148,11 +148,11 @@ func TestReflection(t *testing.T) {
 		reflection := newReflection(newRegistry)
 		typeName := types.Name(dependency)
 
-		pb := &internalpb.Dependency{
+		pb := internalpb.Dependency_builder{
 			Id:       dependency.ID(),
 			TypeName: typeName,
 			Bytea:    []byte("invalid"),
-		}
+		}.Build()
 
 		dependencies, err := reflection.dependenciesFromProto(pb)
 		require.Error(t, err)

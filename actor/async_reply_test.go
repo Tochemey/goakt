@@ -104,7 +104,7 @@ func TestRouteAsyncReplyToGrain(t *testing.T) {
 	})
 
 	replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToGrain, Grain: identity.String()}
-	require.NoError(t, sys.routeAsyncReply(ctx, nil, replyTo, "corr-grain", &testpb.Reply{Content: "grain-reply"}, nil))
+	require.NoError(t, sys.routeAsyncReply(ctx, nil, replyTo, "corr-grain", testpb.Reply_builder{Content: "grain-reply"}.Build(), nil))
 
 	select {
 	case <-done:
@@ -123,7 +123,7 @@ func TestRouteAsyncReplyToPendingAsk(t *testing.T) {
 		system := sys.(*actorSystem)
 
 		slot := system.pendingAsks.Register("corr")
-		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "corr", &testpb.Reply{Content: "ok"}, nil))
+		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "corr", testpb.Reply_builder{Content: "ok"}.Build(), nil))
 
 		response := <-slot
 		require.Equal(t, "corr", response.CorrelationID)
@@ -151,7 +151,7 @@ func TestRouteAsyncReplyToPendingAsk(t *testing.T) {
 		sys, ctx := newReentrancySystem(t)
 		system := sys.(*actorSystem)
 
-		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "missing", &testpb.Reply{Content: "ok"}, nil))
+		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "missing", testpb.Reply_builder{Content: "ok"}.Build(), nil))
 		require.Zero(t, system.pendingAsks.Len())
 	})
 }
@@ -175,7 +175,7 @@ func TestRouteAsyncReplyToActor(t *testing.T) {
 			}
 		})
 
-		require.NoError(t, system.routeAsyncReply(ctx, sender, replyTo, "corr-ok", &testpb.Reply{Content: "ok"}, nil))
+		require.NoError(t, system.routeAsyncReply(ctx, sender, replyTo, "corr-ok", testpb.Reply_builder{Content: "ok"}.Build(), nil))
 		select {
 		case msg := <-okCh:
 			reply, ok := msg.(*testpb.Reply)
@@ -213,7 +213,7 @@ func TestRouteAsyncReplyToActor(t *testing.T) {
 		sender := spawnReentrancyActor(t, sys, ctx, "remote-sender", func(*ReceiveContext) {})
 		replyTo := &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: address.New("remote", "remote-system", "127.0.0.1", 9002)}
 
-		err := system.routeAsyncReply(ctx, sender, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
+		err := system.routeAsyncReply(ctx, sender, replyTo, "corr", testpb.Reply_builder{Content: "ok"}.Build(), nil)
 		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 	})
 
@@ -226,7 +226,7 @@ func TestRouteAsyncReplyToActor(t *testing.T) {
 			Actor: address.New("ghost", sys.Name(), sys.Host(), sys.Port()),
 		}
 
-		err := system.routeAsyncReply(ctx, sender, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil)
+		err := system.routeAsyncReply(ctx, sender, replyTo, "corr", testpb.Reply_builder{Content: "ok"}.Build(), nil)
 		require.Error(t, err)
 	})
 }
@@ -260,7 +260,7 @@ func TestRouteAsyncReplyRemotingWithoutCluster(t *testing.T) {
 	// The router hands the response to remoting, which accepts it for delivery.
 	// Resolving the requester by name instead would refuse outright here: without
 	// a cluster there is no registry that can locate an actor on another node.
-	require.NoError(t, system.routeAsyncReply(ctx, sender, replyTo, "corr", &testpb.Reply{Content: "ok"}, nil))
+	require.NoError(t, system.routeAsyncReply(ctx, sender, replyTo, "corr", testpb.Reply_builder{Content: "ok"}.Build(), nil))
 }
 
 // TestResponseWithoutActorSystem covers the guard in ReceiveContext.Response

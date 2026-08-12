@@ -132,7 +132,7 @@ func TestReliableCompanionSpecWireRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 
 		tampered := spec.toProto()
-		tampered.Role = 0
+		tampered.SetRole(0)
 
 		restored, err := reliableCompanionSpecFromProto(tampered)
 		require.Error(t, err)
@@ -144,7 +144,7 @@ func TestReliableCompanionSpecWireRoundTrip(t *testing.T) {
 		require.NoError(t, err)
 
 		tampered := spec.toProto()
-		tampered.EndpointIncarnationId = "not-a-uuid"
+		tampered.SetEndpointIncarnationId("not-a-uuid")
 
 		restored, err := reliableCompanionSpecFromProto(tampered)
 		require.Error(t, err)
@@ -317,18 +317,18 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 	require.NoError(t, err)
 
 	endpointRecord := func(hostPort string) *internalpb.Actor {
-		return &internalpb.Actor{
+		return internalpb.Actor_builder{
 			Address:       "goakt://test-replication@" + hostPort + "/endpoint",
 			IncarnationId: incarnationID,
-		}
+		}.Build()
 	}
 
 	companionRecord := func(hostPort string, spec *internalpb.ReliableCompanionSpec) *internalpb.Actor {
-		return &internalpb.Actor{
+		return internalpb.Actor_builder{
 			Address:           "goakt://test-replication@" + hostPort + "/" + companionName,
 			IncarnationId:     incarnationID,
 			ReliableCompanion: spec,
-		}
+		}.Build()
 	}
 
 	t.Run("With no registry endpoint", func(t *testing.T) {
@@ -414,10 +414,10 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 	t.Run("With invalid registry address", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(internalpb.Actor_builder{
 			Address:       "not-an-address",
 			IncarnationId: incarnationID,
-		}, nil)
+		}.Build(), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
 		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
@@ -549,14 +549,12 @@ func TestReleaseDepartedReliableCompanion(t *testing.T) {
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, incarnationID)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, assert.AnError).Once()
 
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			IncarnationId: incarnationID,
-			ReliableDelivery: &internalpb.ReliableDeliveryConfig{
-				Endpoint: &internalpb.ReliableDeliveryConfig_Producer{
-					Producer: &internalpb.ReliableProducerConfig{ConsumerName: "consumer"},
-				},
-			},
-		}
+			ReliableDelivery: internalpb.ReliableDeliveryConfig_builder{
+				Producer: internalpb.ReliableProducerConfig_builder{ConsumerName: "consumer"}.Build(),
+			}.Build(),
+		}.Build()
 
 		system.releaseDepartedReliableCompanion(context.Background(), props, "10.0.0.1:9000")
 	})
@@ -569,14 +567,12 @@ func TestReleaseDepartedReliableCompanion(t *testing.T) {
 		companionName := reliableCompanionName(ReliableControllerRoleConsumer, incarnationID)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound).Once()
 
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			IncarnationId: incarnationID,
-			ReliableDelivery: &internalpb.ReliableDeliveryConfig{
-				Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{
-					Consumer: &internalpb.ReliableConsumerConfig{ProducerName: "producer"},
-				},
-			},
-		}
+			ReliableDelivery: internalpb.ReliableDeliveryConfig_builder{
+				Consumer: internalpb.ReliableConsumerConfig_builder{ProducerName: "producer"}.Build(),
+			}.Build(),
+		}.Build()
 
 		system.releaseDepartedReliableCompanion(context.Background(), props, "10.0.0.1:9000")
 	})
@@ -782,7 +778,7 @@ func TestReliableDeliveryEndToEnd(t *testing.T) {
 
 	for i := 1; i <= 3; i++ {
 		id := fmt.Sprintf("m-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 3)
@@ -811,7 +807,7 @@ func TestReliableDeliveryEndToEndDurable(t *testing.T) {
 
 	for i := 1; i <= 2; i++ {
 		id := fmt.Sprintf("m-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 2)
@@ -1177,7 +1173,7 @@ func (x *checkoutMock) Receive(ctx *ReceiveContext) {
 		// sender is the controller, never the business origin
 		ctx.Tell(x.producer, &produceSubmission{
 			messageID: msg.orderID,
-			payload:   &testpb.Reply{Content: ctx.Self().Name()},
+			payload:   testpb.Reply_builder{Content: ctx.Self().Name()}.Build(),
 		})
 	case *processedNotice:
 		x.notices = append(x.notices, msg.orderID)
@@ -1249,7 +1245,7 @@ func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
 	// the consumer endpoint does not exist yet, so delivery is impossible;
 	// the Ask still answers immediately because the producer reports local
 	// acceptance only
-	response, err := Ask(ctx, producer, &askSubmission{messageID: "m-1", payload: &testpb.Reply{Content: "m-1"}}, time.Second)
+	response, err := Ask(ctx, producer, &askSubmission{messageID: "m-1", payload: testpb.Reply_builder{Content: "m-1"}.Build()}, time.Second)
 	require.NoError(t, err)
 
 	accepted, ok := response.(*submissionAccepted)
@@ -1370,11 +1366,11 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 	sender := newRemotePID(address.New(companionName, "test-replication", "10.0.0.2", 9000), nil)
 
 	companionRecord := func(addr string, companion *internalpb.ReliableCompanionSpec) *internalpb.Actor {
-		return &internalpb.Actor{Address: addr, IncarnationId: incarnationID, ReliableCompanion: companion}
+		return internalpb.Actor_builder{Address: addr, IncarnationId: incarnationID, ReliableCompanion: companion}.Build()
 	}
 
 	endpointRecord := func(hostPort, incarnation string, delivery *internalpb.ReliableDeliveryConfig) *internalpb.Actor {
-		return &internalpb.Actor{Address: "goakt://test-replication@" + hostPort + "/remote-worker", IncarnationId: incarnation, ReliableDelivery: delivery}
+		return internalpb.Actor_builder{Address: "goakt://test-replication@" + hostPort + "/remote-worker", IncarnationId: incarnation, ReliableDelivery: delivery}.Build()
 	}
 
 	validCompanion := companionRecord("goakt://test-replication@"+remoteHostPort+"/"+companionName, spec.toProto())
@@ -1457,7 +1453,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
-		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(&internalpb.Actor{Address: "not-an-address", IncarnationId: incarnationID}, nil)
+		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(internalpb.Actor_builder{Address: "not-an-address", IncarnationId: incarnationID}.Build(), nil)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)

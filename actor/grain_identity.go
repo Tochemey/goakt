@@ -169,9 +169,9 @@ func toWireGrainID(identity *GrainIdentity) *internalpb.GrainId {
 		return nil
 	}
 
-	return &internalpb.GrainId{
-		Kind:  identity.Kind(),
-		Name:  identity.Name(),
-		Value: identity.String(),
-	}
+	grainID := &internalpb.GrainId{}
+	grainID.SetKind(identity.Kind())
+	grainID.SetName(identity.Name())
+	grainID.SetValue(identity.String())
+	return grainID
 }

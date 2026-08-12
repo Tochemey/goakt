@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -22,20 +21,14 @@ const (
 )
 
 type PeerState struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer host
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remoting port
-	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
-	// Specifies the remoting host
-	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
-	// Specifies the list of actors
-	// actorName -> Actor
-	Actors map[string]*Actor `protobuf:"bytes,4,rep,name=actors,proto3" json:"actors,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// grainId -> Grain
-	Grains        map[string]*Grain `protobuf:"bytes,5,rep,name=grains,proto3" json:"grains,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host         string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_RemotingPort int32                  `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3"`
+	xxx_hidden_PeersPort    int32                  `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3"`
+	xxx_hidden_Actors       map[string]*Actor      `protobuf:"bytes,4,rep,name=actors,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	xxx_hidden_Grains       map[string]*Grain      `protobuf:"bytes,5,rep,name=grains,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *PeerState) Reset() {
@@ -63,52 +56,94 @@ func (x *PeerState) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PeerState.ProtoReflect.Descriptor instead.
-func (*PeerState) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *PeerState) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *PeerState) GetRemotingPort() int32 {
 	if x != nil {
-		return x.RemotingPort
+		return x.xxx_hidden_RemotingPort
 	}
 	return 0
 }
 
 func (x *PeerState) GetPeersPort() int32 {
 	if x != nil {
-		return x.PeersPort
+		return x.xxx_hidden_PeersPort
 	}
 	return 0
 }
 
 func (x *PeerState) GetActors() map[string]*Actor {
 	if x != nil {
-		return x.Actors
+		return x.xxx_hidden_Actors
 	}
 	return nil
 }
 
 func (x *PeerState) GetGrains() map[string]*Grain {
 	if x != nil {
-		return x.Grains
+		return x.xxx_hidden_Grains
 	}
 	return nil
 }
 
+func (x *PeerState) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *PeerState) SetRemotingPort(v int32) {
+	x.xxx_hidden_RemotingPort = v
+}
+
+func (x *PeerState) SetPeersPort(v int32) {
+	x.xxx_hidden_PeersPort = v
+}
+
+func (x *PeerState) SetActors(v map[string]*Actor) {
+	x.xxx_hidden_Actors = v
+}
+
+func (x *PeerState) SetGrains(v map[string]*Grain) {
+	x.xxx_hidden_Grains = v
+}
+
+type PeerState_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer host
+	Host string
+	// Specifies the remoting port
+	RemotingPort int32
+	// Specifies the remoting host
+	PeersPort int32
+	// Specifies the list of actors
+	// actorName -> Actor
+	Actors map[string]*Actor
+	// grainId -> Grain
+	Grains map[string]*Grain
+}
+
+func (b0 PeerState_builder) Build() *PeerState {
+	m0 := &PeerState{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_RemotingPort = b.RemotingPort
+	x.xxx_hidden_PeersPort = b.PeersPort
+	x.xxx_hidden_Actors = b.Actors
+	x.xxx_hidden_Grains = b.Grains
+	return m0
+}
+
 type Rebalance struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer state
-	PeerState     *PeerState `protobuf:"bytes,1,opt,name=peer_state,json=peerState,proto3" json:"peer_state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerState *PeerState             `protobuf:"bytes,1,opt,name=peer_state,json=peerState,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *Rebalance) Reset() {
@@ -136,24 +171,48 @@ func (x *Rebalance) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Rebalance.ProtoReflect.Descriptor instead.
-func (*Rebalance) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *Rebalance) GetPeerState() *PeerState {
 	if x != nil {
-		return x.PeerState
+		return x.xxx_hidden_PeerState
 	}
 	return nil
 }
 
+func (x *Rebalance) SetPeerState(v *PeerState) {
+	x.xxx_hidden_PeerState = v
+}
+
+func (x *Rebalance) HasPeerState() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_PeerState != nil
+}
+
+func (x *Rebalance) ClearPeerState() {
+	x.xxx_hidden_PeerState = nil
+}
+
+type Rebalance_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer state
+	PeerState *PeerState
+}
+
+func (b0 Rebalance_builder) Build() *Rebalance {
+	m0 := &Rebalance{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerState = b.PeerState
+	return m0
+}
+
 type RebalanceComplete struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer address
-	PeerAddress   string `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerAddress string                 `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RebalanceComplete) Reset() {
@@ -181,36 +240,41 @@ func (x *RebalanceComplete) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RebalanceComplete.ProtoReflect.Descriptor instead.
-func (*RebalanceComplete) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *RebalanceComplete) GetPeerAddress() string {
 	if x != nil {
-		return x.PeerAddress
+		return x.xxx_hidden_PeerAddress
 	}
 	return ""
+}
+
+func (x *RebalanceComplete) SetPeerAddress(v string) {
+	x.xxx_hidden_PeerAddress = v
+}
+
+type RebalanceComplete_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer address
+	PeerAddress string
+}
+
+func (b0 RebalanceComplete_builder) Build() *RebalanceComplete {
+	m0 := &RebalanceComplete{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerAddress = b.PeerAddress
+	return m0
 }
 
 // RelocateBatchRequest carries one target peer's share of a departed node's
 // actors and grains, relocated in a single round trip.
 type RelocateBatchRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the remoting address (host:remoting_port) of the node that left
-	// the cluster. The target uses it to clean up stale registry entries that
-	// still point at the departed node before recreating the relocated actors
-	// and grains.
-	DepartedNode string `protobuf:"bytes,1,opt,name=departed_node,json=departedNode,proto3" json:"departed_node,omitempty"`
-	// Specifies the actors to recreate on the target node
-	Actors []*Actor `protobuf:"bytes,2,rep,name=actors,proto3" json:"actors,omitempty"`
-	// Specifies the grains to relocate on the target node. The target dispatches
-	// on each grain's eager_relocation flag: eager grains are reactivated
-	// upfront, lazy grains (the default) only have their directory entry
-	// released so they re-activate on next use.
-	Grains        []*Grain `protobuf:"bytes,3,rep,name=grains,proto3" json:"grains,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_DepartedNode string                 `protobuf:"bytes,1,opt,name=departed_node,json=departedNode,proto3"`
+	xxx_hidden_Actors       *[]*Actor              `protobuf:"bytes,2,rep,name=actors,proto3"`
+	xxx_hidden_Grains       *[]*Grain              `protobuf:"bytes,3,rep,name=grains,proto3"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *RelocateBatchRequest) Reset() {
@@ -238,40 +302,77 @@ func (x *RelocateBatchRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RelocateBatchRequest.ProtoReflect.Descriptor instead.
-func (*RelocateBatchRequest) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *RelocateBatchRequest) GetDepartedNode() string {
 	if x != nil {
-		return x.DepartedNode
+		return x.xxx_hidden_DepartedNode
 	}
 	return ""
 }
 
 func (x *RelocateBatchRequest) GetActors() []*Actor {
 	if x != nil {
-		return x.Actors
+		if x.xxx_hidden_Actors != nil {
+			return *x.xxx_hidden_Actors
+		}
 	}
 	return nil
 }
 
 func (x *RelocateBatchRequest) GetGrains() []*Grain {
 	if x != nil {
-		return x.Grains
+		if x.xxx_hidden_Grains != nil {
+			return *x.xxx_hidden_Grains
+		}
 	}
 	return nil
+}
+
+func (x *RelocateBatchRequest) SetDepartedNode(v string) {
+	x.xxx_hidden_DepartedNode = v
+}
+
+func (x *RelocateBatchRequest) SetActors(v []*Actor) {
+	x.xxx_hidden_Actors = &v
+}
+
+func (x *RelocateBatchRequest) SetGrains(v []*Grain) {
+	x.xxx_hidden_Grains = &v
+}
+
+type RelocateBatchRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the remoting address (host:remoting_port) of the node that left
+	// the cluster. The target uses it to clean up stale registry entries that
+	// still point at the departed node before recreating the relocated actors
+	// and grains.
+	DepartedNode string
+	// Specifies the actors to recreate on the target node
+	Actors []*Actor
+	// Specifies the grains to relocate on the target node. The target dispatches
+	// on each grain's eager_relocation flag: eager grains are reactivated
+	// upfront, lazy grains (the default) only have their directory entry
+	// released so they re-activate on next use.
+	Grains []*Grain
+}
+
+func (b0 RelocateBatchRequest_builder) Build() *RelocateBatchRequest {
+	m0 := &RelocateBatchRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_DepartedNode = b.DepartedNode
+	x.xxx_hidden_Actors = &b.Actors
+	x.xxx_hidden_Grains = &b.Grains
+	return m0
 }
 
 // RelocateBatchResponse reports per-item relocation failures.
 // An empty list means the whole batch was relocated successfully.
 type RelocateBatchResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the items that could not be relocated
-	Failures      []*RelocationFailure `protobuf:"bytes,1,rep,name=failures,proto3" json:"failures,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Failures *[]*RelocationFailure  `protobuf:"bytes,1,rep,name=failures,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RelocateBatchResponse) Reset() {
@@ -299,30 +400,43 @@ func (x *RelocateBatchResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RelocateBatchResponse.ProtoReflect.Descriptor instead.
-func (*RelocateBatchResponse) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{4}
-}
-
 func (x *RelocateBatchResponse) GetFailures() []*RelocationFailure {
 	if x != nil {
-		return x.Failures
+		if x.xxx_hidden_Failures != nil {
+			return *x.xxx_hidden_Failures
+		}
 	}
 	return nil
+}
+
+func (x *RelocateBatchResponse) SetFailures(v []*RelocationFailure) {
+	x.xxx_hidden_Failures = &v
+}
+
+type RelocateBatchResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the items that could not be relocated
+	Failures []*RelocationFailure
+}
+
+func (b0 RelocateBatchResponse_builder) Build() *RelocateBatchResponse {
+	m0 := &RelocateBatchResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Failures = &b.Failures
+	return m0
 }
 
 // RelocationFailure describes a single actor or grain that could not be
 // relocated as part of a RelocateBatchRequest.
 type RelocationFailure struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the actor address or the grain identity string
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies whether the failed item is a grain
-	Grain bool `protobuf:"varint,2,opt,name=grain,proto3" json:"grain,omitempty"`
-	// Specifies the failure reason
-	Message       string `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id      string                 `protobuf:"bytes,1,opt,name=id,proto3"`
+	xxx_hidden_Grain   bool                   `protobuf:"varint,2,opt,name=grain,proto3"`
+	xxx_hidden_Message string                 `protobuf:"bytes,3,opt,name=message,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *RelocationFailure) Reset() {
@@ -350,44 +464,68 @@ func (x *RelocationFailure) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RelocationFailure.ProtoReflect.Descriptor instead.
-func (*RelocationFailure) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{5}
-}
-
 func (x *RelocationFailure) GetId() string {
 	if x != nil {
-		return x.Id
+		return x.xxx_hidden_Id
 	}
 	return ""
 }
 
 func (x *RelocationFailure) GetGrain() bool {
 	if x != nil {
-		return x.Grain
+		return x.xxx_hidden_Grain
 	}
 	return false
 }
 
 func (x *RelocationFailure) GetMessage() string {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return ""
 }
 
+func (x *RelocationFailure) SetId(v string) {
+	x.xxx_hidden_Id = v
+}
+
+func (x *RelocationFailure) SetGrain(v bool) {
+	x.xxx_hidden_Grain = v
+}
+
+func (x *RelocationFailure) SetMessage(v string) {
+	x.xxx_hidden_Message = v
+}
+
+type RelocationFailure_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the actor address or the grain identity string
+	Id string
+	// Specifies whether the failed item is a grain
+	Grain bool
+	// Specifies the failure reason
+	Message string
+}
+
+func (b0 RelocationFailure_builder) Build() *RelocationFailure {
+	m0 := &RelocationFailure{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_Grain = b.Grain
+	x.xxx_hidden_Message = b.Message
+	return m0
+}
+
 type PersistPeerActor struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer host
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the remoting port
-	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
-	// Specifies the remoting host
-	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
-	// Specifies the actor
-	Actor         *Actor `protobuf:"bytes,4,opt,name=actor,proto3" json:"actor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host         string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_RemotingPort int32                  `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3"`
+	xxx_hidden_PeersPort    int32                  `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3"`
+	xxx_hidden_Actor        *Actor                 `protobuf:"bytes,4,opt,name=actor,proto3"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *PersistPeerActor) Reset() {
@@ -415,51 +553,93 @@ func (x *PersistPeerActor) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PersistPeerActor.ProtoReflect.Descriptor instead.
-func (*PersistPeerActor) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{6}
-}
-
 func (x *PersistPeerActor) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *PersistPeerActor) GetRemotingPort() int32 {
 	if x != nil {
-		return x.RemotingPort
+		return x.xxx_hidden_RemotingPort
 	}
 	return 0
 }
 
 func (x *PersistPeerActor) GetPeersPort() int32 {
 	if x != nil {
-		return x.PeersPort
+		return x.xxx_hidden_PeersPort
 	}
 	return 0
 }
 
 func (x *PersistPeerActor) GetActor() *Actor {
 	if x != nil {
-		return x.Actor
+		return x.xxx_hidden_Actor
 	}
 	return nil
 }
 
-type PersistPeerGrain struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *PersistPeerActor) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *PersistPeerActor) SetRemotingPort(v int32) {
+	x.xxx_hidden_RemotingPort = v
+}
+
+func (x *PersistPeerActor) SetPeersPort(v int32) {
+	x.xxx_hidden_PeersPort = v
+}
+
+func (x *PersistPeerActor) SetActor(v *Actor) {
+	x.xxx_hidden_Actor = v
+}
+
+func (x *PersistPeerActor) HasActor() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Actor != nil
+}
+
+func (x *PersistPeerActor) ClearActor() {
+	x.xxx_hidden_Actor = nil
+}
+
+type PersistPeerActor_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the peer host
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Host string
 	// Specifies the remoting port
-	RemotingPort int32 `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3" json:"remoting_port,omitempty"`
+	RemotingPort int32
 	// Specifies the remoting host
-	PeersPort int32 `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3" json:"peers_port,omitempty"`
-	// Specifies the grain
-	Grain         *Grain `protobuf:"bytes,4,opt,name=grain,proto3" json:"grain,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PeersPort int32
+	// Specifies the actor
+	Actor *Actor
+}
+
+func (b0 PersistPeerActor_builder) Build() *PersistPeerActor {
+	m0 := &PersistPeerActor{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_RemotingPort = b.RemotingPort
+	x.xxx_hidden_PeersPort = b.PeersPort
+	x.xxx_hidden_Actor = b.Actor
+	return m0
+}
+
+type PersistPeerGrain struct {
+	state                   protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host         string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_RemotingPort int32                  `protobuf:"varint,2,opt,name=remoting_port,json=remotingPort,proto3"`
+	xxx_hidden_PeersPort    int32                  `protobuf:"varint,3,opt,name=peers_port,json=peersPort,proto3"`
+	xxx_hidden_Grain        *Grain                 `protobuf:"bytes,4,opt,name=grain,proto3"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *PersistPeerGrain) Reset() {
@@ -487,48 +667,91 @@ func (x *PersistPeerGrain) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PersistPeerGrain.ProtoReflect.Descriptor instead.
-func (*PersistPeerGrain) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{7}
-}
-
 func (x *PersistPeerGrain) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *PersistPeerGrain) GetRemotingPort() int32 {
 	if x != nil {
-		return x.RemotingPort
+		return x.xxx_hidden_RemotingPort
 	}
 	return 0
 }
 
 func (x *PersistPeerGrain) GetPeersPort() int32 {
 	if x != nil {
-		return x.PeersPort
+		return x.xxx_hidden_PeersPort
 	}
 	return 0
 }
 
 func (x *PersistPeerGrain) GetGrain() *Grain {
 	if x != nil {
-		return x.Grain
+		return x.xxx_hidden_Grain
 	}
 	return nil
 }
 
+func (x *PersistPeerGrain) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *PersistPeerGrain) SetRemotingPort(v int32) {
+	x.xxx_hidden_RemotingPort = v
+}
+
+func (x *PersistPeerGrain) SetPeersPort(v int32) {
+	x.xxx_hidden_PeersPort = v
+}
+
+func (x *PersistPeerGrain) SetGrain(v *Grain) {
+	x.xxx_hidden_Grain = v
+}
+
+func (x *PersistPeerGrain) HasGrain() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Grain != nil
+}
+
+func (x *PersistPeerGrain) ClearGrain() {
+	x.xxx_hidden_Grain = nil
+}
+
+type PersistPeerGrain_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer host
+	Host string
+	// Specifies the remoting port
+	RemotingPort int32
+	// Specifies the remoting host
+	PeersPort int32
+	// Specifies the grain
+	Grain *Grain
+}
+
+func (b0 PersistPeerGrain_builder) Build() *PersistPeerGrain {
+	m0 := &PersistPeerGrain{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_RemotingPort = b.RemotingPort
+	x.xxx_hidden_PeersPort = b.PeersPort
+	x.xxx_hidden_Grain = b.Grain
+	return m0
+}
+
 type RemovePeerActor struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the peer address
-	PeerAddress string `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	// Specifies the remoting por
-	// Specifies the actor name
-	ActorName     string `protobuf:"bytes,2,opt,name=actor_name,json=actorName,proto3" json:"actor_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerAddress string                 `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3"`
+	xxx_hidden_ActorName   string                 `protobuf:"bytes,2,opt,name=actor_name,json=actorName,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RemovePeerActor) Reset() {
@@ -556,32 +779,53 @@ func (x *RemovePeerActor) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemovePeerActor.ProtoReflect.Descriptor instead.
-func (*RemovePeerActor) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{8}
-}
-
 func (x *RemovePeerActor) GetPeerAddress() string {
 	if x != nil {
-		return x.PeerAddress
+		return x.xxx_hidden_PeerAddress
 	}
 	return ""
 }
 
 func (x *RemovePeerActor) GetActorName() string {
 	if x != nil {
-		return x.ActorName
+		return x.xxx_hidden_ActorName
 	}
 	return ""
 }
 
-type RemovePeerGrain struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *RemovePeerActor) SetPeerAddress(v string) {
+	x.xxx_hidden_PeerAddress = v
+}
+
+func (x *RemovePeerActor) SetActorName(v string) {
+	x.xxx_hidden_ActorName = v
+}
+
+type RemovePeerActor_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the peer address
-	PeerAddress   string   `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	GrainId       *GrainId `protobuf:"bytes,2,opt,name=grain_id,json=grainId,proto3" json:"grain_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PeerAddress string
+	// Specifies the remoting por
+	// Specifies the actor name
+	ActorName string
+}
+
+func (b0 RemovePeerActor_builder) Build() *RemovePeerActor {
+	m0 := &RemovePeerActor{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerAddress = b.PeerAddress
+	x.xxx_hidden_ActorName = b.ActorName
+	return m0
+}
+
+type RemovePeerGrain struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerAddress string                 `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3"`
+	xxx_hidden_GrainId     *GrainId               `protobuf:"bytes,2,opt,name=grain_id,json=grainId,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *RemovePeerGrain) Reset() {
@@ -609,31 +853,61 @@ func (x *RemovePeerGrain) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemovePeerGrain.ProtoReflect.Descriptor instead.
-func (*RemovePeerGrain) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{9}
-}
-
 func (x *RemovePeerGrain) GetPeerAddress() string {
 	if x != nil {
-		return x.PeerAddress
+		return x.xxx_hidden_PeerAddress
 	}
 	return ""
 }
 
 func (x *RemovePeerGrain) GetGrainId() *GrainId {
 	if x != nil {
-		return x.GrainId
+		return x.xxx_hidden_GrainId
 	}
 	return nil
 }
 
-type GetPeerState struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *RemovePeerGrain) SetPeerAddress(v string) {
+	x.xxx_hidden_PeerAddress = v
+}
+
+func (x *RemovePeerGrain) SetGrainId(v *GrainId) {
+	x.xxx_hidden_GrainId = v
+}
+
+func (x *RemovePeerGrain) HasGrainId() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_GrainId != nil
+}
+
+func (x *RemovePeerGrain) ClearGrainId() {
+	x.xxx_hidden_GrainId = nil
+}
+
+type RemovePeerGrain_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the peer address
-	PeerAddress   string `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PeerAddress string
+	GrainId     *GrainId
+}
+
+func (b0 RemovePeerGrain_builder) Build() *RemovePeerGrain {
+	m0 := &RemovePeerGrain{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerAddress = b.PeerAddress
+	x.xxx_hidden_GrainId = b.GrainId
+	return m0
+}
+
+type GetPeerState struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerAddress string                 `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *GetPeerState) Reset() {
@@ -661,24 +935,37 @@ func (x *GetPeerState) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetPeerState.ProtoReflect.Descriptor instead.
-func (*GetPeerState) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{10}
-}
-
 func (x *GetPeerState) GetPeerAddress() string {
 	if x != nil {
-		return x.PeerAddress
+		return x.xxx_hidden_PeerAddress
 	}
 	return ""
 }
 
-type DeletePeerState struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
+func (x *GetPeerState) SetPeerAddress(v string) {
+	x.xxx_hidden_PeerAddress = v
+}
+
+type GetPeerState_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
 	// Specifies the peer address
-	PeerAddress   string `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3" json:"peer_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	PeerAddress string
+}
+
+func (b0 GetPeerState_builder) Build() *GetPeerState {
+	m0 := &GetPeerState{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerAddress = b.PeerAddress
+	return m0
+}
+
+type DeletePeerState struct {
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_PeerAddress string                 `protobuf:"bytes,1,opt,name=peer_address,json=peerAddress,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *DeletePeerState) Reset() {
@@ -706,16 +993,30 @@ func (x *DeletePeerState) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeletePeerState.ProtoReflect.Descriptor instead.
-func (*DeletePeerState) Descriptor() ([]byte, []int) {
-	return file_internal_peers_proto_rawDescGZIP(), []int{11}
-}
-
 func (x *DeletePeerState) GetPeerAddress() string {
 	if x != nil {
-		return x.PeerAddress
+		return x.xxx_hidden_PeerAddress
 	}
 	return ""
+}
+
+func (x *DeletePeerState) SetPeerAddress(v string) {
+	x.xxx_hidden_PeerAddress = v
+}
+
+type DeletePeerState_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the peer address
+	PeerAddress string
+}
+
+func (b0 DeletePeerState_builder) Build() *DeletePeerState {
+	m0 := &DeletePeerState{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_PeerAddress = b.PeerAddress
+	return m0
 }
 
 var File_internal_peers_proto protoreflect.FileDescriptor
@@ -780,18 +1081,6 @@ const file_internal_peers_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_peers_proto_rawDescOnce sync.Once
-	file_internal_peers_proto_rawDescData []byte
-)
-
-func file_internal_peers_proto_rawDescGZIP() []byte {
-	file_internal_peers_proto_rawDescOnce.Do(func() {
-		file_internal_peers_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_peers_proto_rawDesc), len(file_internal_peers_proto_rawDesc)))
-	})
-	return file_internal_peers_proto_rawDescData
-}
 
 var file_internal_peers_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_internal_peers_proto_goTypes = []any{

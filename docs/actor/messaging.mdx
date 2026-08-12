@@ -25,6 +25,22 @@ From v4.0.0, all message-passing APIs accept `any`. You can send:
 The framework handles serialization when the target is on another node. Locally, messages are passed by reference
 without serialization.
 
+### Keep messages pure
+
+Treat every message as a **pure data struct**: fields should carry only values the receiver needs to process the
+message (IDs, payloads, commands, query parameters). Prefer **immutable** messages—do not mutate a message after it
+has been sent, and do not share mutable references between actors through message fields.
+
+<Warning>
+Do **not** embed concurrency primitives in messages to collect a reply—especially `chan` fields, mutexes, wait
+groups, or callbacks. That couples the sender's goroutine to the actor's mailbox, breaks the actor model, and can
+cause races, deadlocks, or unpredictable behavior when messages are stashed, forwarded, retried, or sent remotely
+(channels and function values do not serialize).
+</Warning>
+
+When you need a response, use **Ask** and reply with `Response`, or send a separate reply message with **Tell**. See
+[Tell vs Ask](#tell-vs-ask) and [ReceiveContext messaging methods](#receivecontext-messaging-methods).
+
 ## Message ordering
 
 Messages between a specific sender-receiver pair are delivered in the order they were sent (FIFO). This follows from the
@@ -53,5 +69,6 @@ before sending.
 
 ## No shared state
 
-Actors never share memory. All communication is through immutable (or effectively immutable) messages. This eliminates
-whole classes of concurrency bugs and makes reasoning about behavior easier.
+Actors never share memory. All communication is through pure, preferably immutable message structs—not shared channels,
+mutable bags of state, or callbacks stuffed into the payload. That discipline eliminates whole classes of concurrency
+bugs and keeps behavior predictable under remoting, supervision, and mailbox scheduling.

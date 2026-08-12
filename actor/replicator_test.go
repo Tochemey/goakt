@@ -603,11 +603,11 @@ func TestReplicatorTombstones(t *testing.T) {
 		r.store["counter"] = crdt.NewPNCounter().Increment("node-1", 5)
 		r.versions["counter"] = 1
 
-		pbTombstone := &internalpb.CRDTTombstone{
+		pbTombstone := internalpb.CRDTTombstone_builder{
 			Key:            codec.EncodeCRDTKey("counter", crdt.PNCounterType),
 			DeletedAtNanos: time.Now().UnixNano(),
 			DeletedByNode:  "remote-node",
-		}
+		}.Build()
 		r.handleProtoTombstone(pbTombstone)
 
 		_, exists := r.store["counter"]
@@ -621,11 +621,11 @@ func TestReplicatorTombstones(t *testing.T) {
 		r.nodeID = "local-node"
 		r.store["counter"] = crdt.NewPNCounter().Increment("node-1", 5)
 
-		pbTombstone := &internalpb.CRDTTombstone{
+		pbTombstone := internalpb.CRDTTombstone_builder{
 			Key:            codec.EncodeCRDTKey("counter", crdt.PNCounterType),
 			DeletedAtNanos: time.Now().UnixNano(),
 			DeletedByNode:  "local-node",
-		}
+		}.Build()
 		r.handleProtoTombstone(pbTombstone)
 
 		_, exists := r.store["counter"]
@@ -1579,11 +1579,11 @@ func TestEncodeCRDTDeltaRoundTrip(t *testing.T) {
 	})
 
 	t.Run("decode bad data returns error", func(t *testing.T) {
-		pb := &internalpb.CRDTDelta{
+		pb := internalpb.CRDTDelta_builder{
 			Key:        codec.EncodeCRDTKey("key", crdt.GCounterType),
 			OriginNode: "node-1",
 			Data:       nil,
-		}
+		}.Build()
 		_, err := r.decodeDelta(pb)
 		require.Error(t, err)
 	})
@@ -1592,14 +1592,14 @@ func TestEncodeCRDTDeltaRoundTrip(t *testing.T) {
 		gcData, err := ddata.EncodeCRDT(crdt.NewGCounter().Increment("n1", 1), nil)
 		require.NoError(t, err)
 
-		pb := &internalpb.CRDTDelta{
-			Key: &internalpb.CRDTKey{
+		pb := internalpb.CRDTDelta_builder{
+			Key: internalpb.CRDTKey_builder{
 				Id:       "bad",
 				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-			},
+			}.Build(),
 			OriginNode: "node-1",
 			Data:       gcData,
-		}
+		}.Build()
 		_, err = r.decodeDelta(pb)
 		require.Error(t, err)
 	})
@@ -1653,11 +1653,11 @@ func TestReplicatorRestoreFromSnapshot(t *testing.T) {
 		require.NoError(t, err)
 
 		entries := map[string]*internalpb.CRDTSnapshotEntry{
-			"counter-1": {
+			"counter-1": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("counter-1", crdt.GCounterType),
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"node-1": 42}}}},
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"node-1": 42}}.Build()}.Build(),
 				Version: 5,
-			},
+			}.Build(),
 		}
 		require.NoError(t, store.Save(entries))
 		require.NoError(t, store.Close())
@@ -1795,11 +1795,11 @@ func TestReplicatorProtoDelta(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		badDelta := &internalpb.CRDTDelta{
+		badDelta := internalpb.CRDTDelta_builder{
 			Key:        codec.EncodeCRDTKey("key", crdt.GCounterType),
 			OriginNode: "peer",
 			Data:       nil,
-		}
+		}.Build()
 		err = Tell(ctx, repl, badDelta)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -1869,9 +1869,9 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 		}, time.Second)
 		require.NoError(t, err)
 
-		emptyDigest := &internalpb.CRDTDigest{
+		emptyDigest := internalpb.CRDTDigest_builder{
 			Entries: []*internalpb.CRDTDigestEntry{},
-		}
+		}.Build()
 		err = Tell(ctx, repl, emptyDigest)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -1900,14 +1900,14 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 		}, time.Second)
 		require.NoError(t, err)
 
-		digest := &internalpb.CRDTDigest{
+		digest := internalpb.CRDTDigest_builder{
 			Entries: []*internalpb.CRDTDigestEntry{
-				{
+				internalpb.CRDTDigestEntry_builder{
 					Key:     codec.EncodeCRDTKey("gc-1", crdt.GCounterType),
 					Version: 999,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, digest)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -1927,17 +1927,17 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		digest := &internalpb.CRDTDigest{
+		digest := internalpb.CRDTDigest_builder{
 			Entries: []*internalpb.CRDTDigestEntry{
-				{
-					Key: &internalpb.CRDTKey{
+				internalpb.CRDTDigestEntry_builder{
+					Key: internalpb.CRDTKey_builder{
 						Id:       "bad",
 						DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-					},
+					}.Build(),
 					Version: 1,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, digest)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -1961,14 +1961,14 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 		pbData, err := ddata.EncodeCRDT(gc, nil)
 		require.NoError(t, err)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{
+				internalpb.CRDTFullStateEntry_builder{
 					Key:  codec.EncodeCRDTKey("new-gc", crdt.GCounterType),
 					Data: pbData,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -2007,14 +2007,14 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 		pbData, err := ddata.EncodeCRDT(peerGC, nil)
 		require.NoError(t, err)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{
+				internalpb.CRDTFullStateEntry_builder{
 					Key:  codec.EncodeCRDTKey("merge-gc", crdt.GCounterType),
 					Data: pbData,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -2040,17 +2040,17 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{
-					Key: &internalpb.CRDTKey{
+				internalpb.CRDTFullStateEntry_builder{
+					Key: internalpb.CRDTKey_builder{
 						Id:       "bad",
 						DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-					},
+					}.Build(),
 					Data: nil,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -2070,14 +2070,14 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{
+				internalpb.CRDTFullStateEntry_builder{
 					Key:  codec.EncodeCRDTKey("gc-bad", crdt.GCounterType),
 					Data: nil,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -2114,14 +2114,14 @@ func TestReplicatorHandleDigestAndFullState(t *testing.T) {
 		pbData, err := ddata.EncodeCRDT(pn, nil)
 		require.NoError(t, err)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{
+				internalpb.CRDTFullStateEntry_builder{
 					Key:  codec.EncodeCRDTKey("to-delete", crdt.PNCounterType),
 					Data: pbData,
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -2155,10 +2155,10 @@ func TestReplicatorHandleReadRequest(t *testing.T) {
 		}, time.Second)
 		require.NoError(t, err)
 
-		req := &internalpb.CRDTReadRequest{
+		req := internalpb.CRDTReadRequest_builder{
 			Key:      codec.EncodeCRDTKey("gc-1", crdt.GCounterType),
 			FromNode: "peer-node",
-		}
+		}.Build()
 		resp, err := Ask(ctx, repl, req, time.Second)
 		require.NoError(t, err)
 		readResp, ok := resp.(*internalpb.CRDTReadResponse)
@@ -2182,10 +2182,10 @@ func TestReplicatorHandleReadRequest(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		req := &internalpb.CRDTReadRequest{
+		req := internalpb.CRDTReadRequest_builder{
 			Key:      codec.EncodeCRDTKey("nonexistent", crdt.GCounterType),
 			FromNode: "peer-node",
-		}
+		}.Build()
 		resp, err := Ask(ctx, repl, req, time.Second)
 		require.NoError(t, err)
 		readResp, ok := resp.(*internalpb.CRDTReadResponse)
@@ -2202,14 +2202,14 @@ func TestReplicatorProtoTombstoneWithBadKey(t *testing.T) {
 	r.nodeID = "local-node"
 	r.logger = log.DiscardLogger
 
-	pbTombstone := &internalpb.CRDTTombstone{
-		Key: &internalpb.CRDTKey{
+	pbTombstone := internalpb.CRDTTombstone_builder{
+		Key: internalpb.CRDTKey_builder{
 			Id:       "bad",
 			DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-		},
+		}.Build(),
 		DeletedAtNanos: time.Now().UnixNano(),
 		DeletedByNode:  "remote-node",
-	}
+	}.Build()
 	r.handleProtoTombstone(pbTombstone)
 	_, exists := r.tombstones["bad"]
 	assert.False(t, exists)
@@ -2395,15 +2395,15 @@ func TestReplicatorIncomingBatch(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Deltas: []*internalpb.CRDTDelta{pbDelta},
-			OriginDc: &internalpb.DataCenter{
+			OriginDc: internalpb.DataCenter_builder{
 				Name:   "dc-east",
 				Region: "us-east-1",
 				Zone:   "us-east-1a",
-			},
+			}.Build(),
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -2439,15 +2439,15 @@ func TestReplicatorIncomingBatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// same DC identity as the replicator
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Deltas: []*internalpb.CRDTDelta{pbDelta},
-			OriginDc: &internalpb.DataCenter{
+			OriginDc: internalpb.DataCenter_builder{
 				Name:   "dc-west",
 				Region: "us-west-2",
 				Zone:   "us-west-2a",
-			},
+			}.Build(),
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -2484,21 +2484,21 @@ func TestReplicatorIncomingBatch(t *testing.T) {
 		require.NoError(t, err)
 
 		// send a batch with a tombstone from remote DC
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Tombstones: []*internalpb.CRDTTombstone{
-				{
+				internalpb.CRDTTombstone_builder{
 					Key:            codec.EncodeCRDTKey("tombstone-counter", crdt.PNCounterType),
 					DeletedAtNanos: time.Now().UnixNano(),
 					DeletedByNode:  "remote-node",
-				},
+				}.Build(),
 			},
-			OriginDc: &internalpb.DataCenter{
+			OriginDc: internalpb.DataCenter_builder{
 				Name:   "dc-east",
 				Region: "us-east-1",
 				Zone:   "us-east-1a",
-			},
+			}.Build(),
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -2799,13 +2799,13 @@ func TestReplicatorHandleReadRequestBadKey(t *testing.T) {
 
 		repl := spawnTestReplicator(t, sys)
 
-		req := &internalpb.CRDTReadRequest{
-			Key: &internalpb.CRDTKey{
+		req := internalpb.CRDTReadRequest_builder{
+			Key: internalpb.CRDTKey_builder{
 				Id:       "bad",
 				DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-			},
+			}.Build(),
 			FromNode: "peer-node",
-		}
+		}.Build()
 		err = Tell(ctx, repl, req)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -3074,11 +3074,11 @@ func TestReplicatorIncomingBatchEdgeCases(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Deltas:      []*internalpb.CRDTDelta{pbDelta},
 			OriginDc:    nil, // nil origin DC
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -3103,16 +3103,16 @@ func TestReplicatorIncomingBatchEdgeCases(t *testing.T) {
 
 		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
 
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Deltas:     nil,
 			Tombstones: nil,
-			OriginDc: &internalpb.DataCenter{
+			OriginDc: internalpb.DataCenter_builder{
 				Name:   "dc-east",
 				Region: "us-east-1",
 				Zone:   "us-east-1a",
-			},
+			}.Build(),
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -3153,22 +3153,22 @@ func TestReplicatorIncomingBatchEdgeCases(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		batch := &internalpb.CRDTDeltaBatch{
+		batch := internalpb.CRDTDeltaBatch_builder{
 			Deltas: []*internalpb.CRDTDelta{pbDelta},
 			Tombstones: []*internalpb.CRDTTombstone{
-				{
+				internalpb.CRDTTombstone_builder{
 					Key:            codec.EncodeCRDTKey("mixed-batch-counter", crdt.PNCounterType),
 					DeletedAtNanos: time.Now().UnixNano(),
 					DeletedByNode:  "remote-node",
-				},
+				}.Build(),
 			},
-			OriginDc: &internalpb.DataCenter{
+			OriginDc: internalpb.DataCenter_builder{
 				Name:   "dc-east",
 				Region: "us-east-1",
 				Zone:   "us-east-1a",
-			},
+			}.Build(),
 			SentAtNanos: time.Now().UnixNano(),
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, batch)
 		require.NoError(t, err)
@@ -3296,14 +3296,14 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 		require.NoError(t, err)
 
 		entries := map[string]*internalpb.CRDTSnapshotEntry{
-			"bad-key": {
-				Key: &internalpb.CRDTKey{
+			"bad-key": internalpb.CRDTSnapshotEntry_builder{
+				Key: internalpb.CRDTKey_builder{
 					Id:       "bad-key",
 					DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-				},
-				Data:    &internalpb.CRDTData{Type: &internalpb.CRDTData_GCounter{GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 1}}}},
+				}.Build(),
+				Data:    internalpb.CRDTData_builder{GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 1}}.Build()}.Build(),
 				Version: 1,
-			},
+			}.Build(),
 		}
 		require.NoError(t, store.Save(entries))
 		require.NoError(t, store.Close())
@@ -3331,11 +3331,11 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 		require.NoError(t, err)
 
 		entries := map[string]*internalpb.CRDTSnapshotEntry{
-			"good-key": {
+			"good-key": internalpb.CRDTSnapshotEntry_builder{
 				Key:     codec.EncodeCRDTKey("good-key", crdt.GCounterType),
 				Data:    nil, // nil data causes decode error
 				Version: 1,
-			},
+			}.Build(),
 		}
 		require.NoError(t, store.Save(entries))
 		require.NoError(t, store.Close())
@@ -3378,14 +3378,14 @@ func TestReplicatorDigestWithBadEncode(t *testing.T) {
 		require.NoError(t, err)
 
 		// send a digest that includes the key with higher version (peer is ahead)
-		digest := &internalpb.CRDTDigest{
+		digest := internalpb.CRDTDigest_builder{
 			Entries: []*internalpb.CRDTDigestEntry{
-				{
+				internalpb.CRDTDigestEntry_builder{
 					Key:     codec.EncodeCRDTKey("valid-gc", crdt.GCounterType),
 					Version: 0, // peer is behind
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, digest)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -3442,12 +3442,12 @@ func TestReplicatorMultipleDataTypesInDigest(t *testing.T) {
 		setData, err := ddata.EncodeCRDT(crdt.NewORSet().Add("node-2", "elem-2"), serializer)
 		require.NoError(t, err)
 
-		fullState := &internalpb.CRDTFullState{
+		fullState := internalpb.CRDTFullState_builder{
 			Entries: []*internalpb.CRDTFullStateEntry{
-				{Key: codec.EncodeCRDTKey("multi-gc", crdt.GCounterType), Data: gcData},
-				{Key: codec.EncodeCRDTKey("multi-set", crdt.ORSetType), Data: setData},
+				internalpb.CRDTFullStateEntry_builder{Key: codec.EncodeCRDTKey("multi-gc", crdt.GCounterType), Data: gcData}.Build(),
+				internalpb.CRDTFullStateEntry_builder{Key: codec.EncodeCRDTKey("multi-set", crdt.ORSetType), Data: setData}.Build(),
 			},
-		}
+		}.Build()
 		err = Tell(ctx, repl, fullState)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -3654,14 +3654,14 @@ func TestReplicatorDigestWithPeerBehind(t *testing.T) {
 		require.NoError(t, err)
 
 		// digest where peer has key-a at version 0 (behind) and doesn't have key-b
-		digest := &internalpb.CRDTDigest{
+		digest := internalpb.CRDTDigest_builder{
 			Entries: []*internalpb.CRDTDigestEntry{
-				{
+				internalpb.CRDTDigestEntry_builder{
 					Key:     codec.EncodeCRDTKey("digest-a", crdt.GCounterType),
 					Version: 0, // peer is behind
-				},
+				}.Build(),
 			},
-		}
+		}.Build()
 
 		err = Tell(ctx, repl, digest)
 		require.NoError(t, err)
@@ -3868,10 +3868,10 @@ func TestReplicatorHandleReadRequestNoData(t *testing.T) {
 		repl := spawnTestReplicator(t, sys)
 
 		// send read request via Tell (no sender) — should not panic
-		req := &internalpb.CRDTReadRequest{
+		req := internalpb.CRDTReadRequest_builder{
 			Key:      codec.EncodeCRDTKey("absent-key", crdt.GCounterType),
 			FromNode: "peer-node",
-		}
+		}.Build()
 		err = Tell(ctx, repl, req)
 		require.NoError(t, err)
 		pause.For(500 * time.Millisecond)
@@ -4919,15 +4919,15 @@ func TestReplicatorIncomingBatchReplicationLag(t *testing.T) {
 	require.NoError(t, err)
 
 	sentAt := time.Now().Add(-100 * time.Millisecond)
-	batch := &internalpb.CRDTDeltaBatch{
+	batch := internalpb.CRDTDeltaBatch_builder{
 		Deltas: []*internalpb.CRDTDelta{pbDelta},
-		OriginDc: &internalpb.DataCenter{
+		OriginDc: internalpb.DataCenter_builder{
 			Name:   "dc-east",
 			Region: "us-east-1",
 			Zone:   "us-east-1a",
-		},
+		}.Build(),
 		SentAtNanos: sentAt.UnixNano(),
-	}
+	}.Build()
 
 	err = Tell(ctx, repl, batch)
 	require.NoError(t, err)
@@ -5425,10 +5425,10 @@ func BenchmarkReplicatorFullStateRoundTrip(b *testing.B) {
 				data := crdt.NewGCounter().Increment("node-1", uint64(i+1))
 				pbData, err := ddata.EncodeCRDT(data, nil)
 				require.NoError(b, err)
-				entries[i] = &internalpb.CRDTFullStateEntry{
+				entries[i] = internalpb.CRDTFullStateEntry_builder{
 					Key:  codec.EncodeCRDTKey(keyID, crdt.GCounterType),
 					Data: pbData,
-				}
+				}.Build()
 			}
 
 			b.ResetTimer()

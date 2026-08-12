@@ -86,7 +86,7 @@ go test -run=^$ -bench='Throughput$' -count=5 ./benchmark/
 go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchmem ./benchmark/
 ```
 
-### RemoteTellThroughput — TCP send across 10 systems for 10 s
+### RemoteTellThroughput — one shared client fans TCP tells over 10 systems for 10 s
 
 ```
 go test -run=^$ -bench=^BenchmarkRemoteTellThroughput$ -benchtime=1x ./benchmark/

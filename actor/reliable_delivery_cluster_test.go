@@ -88,7 +88,7 @@ func TestWorkPullingDurableClusterFlow(t *testing.T) {
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: &testpb.Reply{Content: "job-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "job-1", payload: testpb.Reply_builder{Content: "job-1"}.Build()}))
 
 	deliveries := awaitDeliveries(t, ctx, worker, 1)
 	require.Len(t, deliveries, 1)
@@ -118,7 +118,7 @@ func TestWorkPullingDeliveryClusterFlow(t *testing.T) {
 
 	for i := 1; i <= 4; i++ {
 		id := fmt.Sprintf("job-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	require.Eventually(t, func() bool {
@@ -150,7 +150,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	// an order submitted before the consumer exists stays queued: the
 	// producer controller drops registrations while the consumer endpoint is
 	// unresolvable, and the recurring tick recovers once it appears
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
 	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
@@ -158,7 +158,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 
 	for i := 2; i <= 3; i++ {
 		id := fmt.Sprintf("ord-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 3)
@@ -237,7 +237,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 
 	t.Run("With a stale companion incarnation", func(t *testing.T) {
 		tampered := proto.Clone(companionRecord).(*internalpb.Actor)
-		tampered.GetReliableCompanion().EndpointIncarnationId = uuid.NewString()
+		tampered.GetReliableCompanion().SetEndpointIncarnationId(uuid.NewString())
 		require.NoError(t, registry.PutActor(ctx, tampered))
 
 		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
@@ -257,7 +257,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 
 	t.Run("With the pair split across nodes", func(t *testing.T) {
 		tampered := proto.Clone(companionRecord).(*internalpb.Actor)
-		tampered.Address = address.New(companionName, node1.Name(), node3.Host(), node3.Port()).String()
+		tampered.SetAddress(address.New(companionName, node1.Name(), node3.Host(), node3.Port()).String())
 		require.NoError(t, registry.PutActor(ctx, tampered))
 
 		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
@@ -268,9 +268,9 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 
 	t.Run("With records pointing at this node without a local pair", func(t *testing.T) {
 		tamperedEndpoint := proto.Clone(endpointRecord).(*internalpb.Actor)
-		tamperedEndpoint.Address = address.New("orders-producer", node1.Name(), node2.Host(), node2.Port()).String()
+		tamperedEndpoint.SetAddress(address.New("orders-producer", node1.Name(), node2.Host(), node2.Port()).String())
 		tamperedCompanion := proto.Clone(companionRecord).(*internalpb.Actor)
-		tamperedCompanion.Address = address.New(companionName, node1.Name(), node2.Host(), node2.Port()).String()
+		tamperedCompanion.SetAddress(address.New(companionName, node1.Name(), node2.Host(), node2.Port()).String())
 		require.NoError(t, registry.PutActor(ctx, tamperedEndpoint))
 		require.NoError(t, registry.PutActor(ctx, tamperedCompanion))
 

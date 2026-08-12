@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -74,10 +75,10 @@ type coalescedFailure struct {
 // This is the standard way to return errors from proto TCP handlers to match the error
 // semantics of the existing ConnectRPC implementation.
 func toProtoError(code internalpb.Code, err error) *internalpb.Error {
-	return &internalpb.Error{
-		Code:    code,
-		Message: err.Error(),
-	}
+	error2 := &internalpb.Error{}
+	error2.SetCode(code)
+	error2.SetMessage(err.Error())
+	return error2
 }
 
 // spawnErrorToProto maps a spawn failure to the proto error returned to a remote
@@ -215,7 +216,9 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 
 			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 		}
-		return &internalpb.RemoteLookupResponse{Address: actor.GetAddress()}, nil
+		rlr := &internalpb.RemoteLookupResponse{}
+		rlr.SetAddress(actor.GetAddress())
+		return rlr, nil
 	}
 
 	addr := address.NewReference(actorName, x.Name(), request.GetHost(), int(request.GetPort()))
@@ -227,7 +230,9 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 	}
 
 	pid := pidNode.value()
-	return &internalpb.RemoteLookupResponse{Address: pid.ID()}, nil
+	rlr := &internalpb.RemoteLookupResponse{}
+	rlr.SetAddress(pid.ID())
+	return rlr, nil
 }
 
 // getReliableCompanionHandler handles GetReliableCompanion requests over the
@@ -262,7 +267,9 @@ func (x *actorSystem) getReliableCompanionHandler(_ context.Context, conn inet.C
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.GetReliableCompanionResponse{Address: companion.ID()}, nil
+	grcr := &internalpb.GetReliableCompanionResponse{}
+	grcr.SetAddress(companion.ID())
+	return grcr, nil
 }
 
 // remoteAskHandler handles RemoteAsk requests over the proto TCP transport.
@@ -359,7 +366,9 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		responses = append(responses, marshaled)
 	}
 
-	return &internalpb.RemoteAskResponse{Messages: responses}, nil
+	rar := &internalpb.RemoteAskResponse{}
+	rar.SetMessages(responses)
+	return rar, nil
 }
 
 // remoteTellHandler handles RemoteTell requests over the proto TCP transport.
@@ -383,17 +392,31 @@ func (x *actorSystem) remoteTellHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err), nil
 	}
 
+	// The duplex transport hands this batch a credit lease: each message
+	// repays its share of the frame's wire cost when it reaches a terminal
+	// state, so the sender's flow-control window tracks mailbox residency.
+	// On the legacy path (no lease) the shares are nil and releases no-op.
+	messages := request.GetRemoteMessages()
+	shares := inet.CreditLeaseFromContext(ctx).Split(len(messages))
+
 	// Per-message failures are routed to the local dead-letter actor and the
 	// loop continues. The client may have packed multiple independent tells
 	// into a single wire-level batch (see the outbound coalescer); failing
 	// the whole request on the first bad message would also fail every
 	// healthy sibling, which is not what any caller asked for.
-	for _, message := range request.GetRemoteMessages() {
+	for i, message := range messages {
+		var hold *inet.CreditShare
+		if shares != nil {
+			hold = &shares[i]
+		}
+
 		if message == nil {
 			logger.Error("remote tell: nil message in batch, skipping")
+			hold.Release()
 			continue
 		}
-		x.deliverRemoteTellMessage(ctx, message)
+
+		x.deliverRemoteTellMessage(ctx, message, hold)
 	}
 
 	return new(internalpb.RemoteTellResponse), nil
@@ -454,7 +477,9 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	return &internalpb.RemoteReSpawnResponse{Address: actorAddress.String()}, nil
+	rrsr := &internalpb.RemoteReSpawnResponse{}
+	rrsr.SetAddress(actorAddress.String())
+	return rrsr, nil
 }
 
 // remoteStopHandler handles RemoteStop requests over the proto TCP transport.
@@ -684,7 +709,9 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		}
 
 		logger.Debugf("actor=%s host=%s port=%d actor created successfully", request.GetActorName(), request.GetHost(), request.GetPort())
-		return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
+		rsr := &internalpb.RemoteSpawnResponse{}
+		rsr.SetAddress(pid.ID())
+		return rsr, nil
 	}
 
 	opts := []SpawnOption{
@@ -755,7 +782,9 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	logger.Debugf("actor=%s created on host=%s port=%d", request.GetActorName(), request.GetHost(), request.GetPort())
-	return &internalpb.RemoteSpawnResponse{Address: pid.ID()}, nil
+	rsr := &internalpb.RemoteSpawnResponse{}
+	rsr.SetAddress(pid.ID())
+	return rsr, nil
 }
 
 // remoteSpawnChildHandler handles RemoteSpawnChild requests over the proto TCP transport.
@@ -860,7 +889,9 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 	}
 
 	x.logger.Debugf("actor=%s parent=%s host=%s port=%d child actor created successfully", childName, parentName, host, port)
-	return &internalpb.RemoteSpawnChildResponse{Address: cid.ID()}, nil
+	rscr := &internalpb.RemoteSpawnChildResponse{}
+	rscr.SetAddress(cid.ID())
+	return rscr, nil
 }
 
 // remotePassivationStrategyHandler handles RemotePassivationStrategy requests over the proto TCP transport.
@@ -900,7 +931,9 @@ func (x *actorSystem) remotePassivationStrategyHandler(ctx context.Context, conn
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemotePassivationStrategyResponse{PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy())}, nil
+	rpsr := &internalpb.RemotePassivationStrategyResponse{}
+	rpsr.SetPassivationStrategy(codec.EncodePassivationStrategy(pid.PassivationStrategy()))
+	return rpsr, nil
 }
 
 // remoteStateHandler handles RemoteState requests over the proto TCP transport.
@@ -937,18 +970,30 @@ func (x *actorSystem) remoteStateHandler(ctx context.Context, conn inet.Connecti
 	pid := pidNode.value()
 	switch state {
 	case internalpb.State_STATE_RUNNING:
-		return &internalpb.RemoteStateResponse{State: pid.IsRunning()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsRunning())
+		return rsr, nil
 	case internalpb.State_STATE_STOPPING:
-		return &internalpb.RemoteStateResponse{State: pid.IsStopping()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsStopping())
+		return rsr, nil
 	case internalpb.State_STATE_SUSPENDED:
-		return &internalpb.RemoteStateResponse{State: pid.IsSuspended()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsSuspended())
+		return rsr, nil
 	case internalpb.State_STATE_RELOCATABLE:
-		return &internalpb.RemoteStateResponse{State: pid.IsRelocatable()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsRelocatable())
+		return rsr, nil
 	case internalpb.State_STATE_SINGLETON:
-		return &internalpb.RemoteStateResponse{State: pid.IsSingleton()}, nil
+		rsr := &internalpb.RemoteStateResponse{}
+		rsr.SetState(pid.IsSingleton())
+		return rsr, nil
 	}
 
-	return &internalpb.RemoteStateResponse{State: false}, nil
+	rsr := &internalpb.RemoteStateResponse{}
+	rsr.SetState(false)
+	return rsr, nil
 }
 
 // remoteChildrenHandler handles RemoteChildren requests over the proto TCP transport.
@@ -993,7 +1038,9 @@ func (x *actorSystem) remoteChildrenHandler(ctx context.Context, conn inet.Conne
 	for _, child := range children {
 		addresses = append(addresses, child.ID())
 	}
-	return &internalpb.RemoteChildrenResponse{Addresses: addresses}, nil
+	rcr := &internalpb.RemoteChildrenResponse{}
+	rcr.SetAddresses(addresses)
+	return rcr, nil
 }
 
 // remoteParentHandler handles RemoteParent requests over the proto TCP transport.
@@ -1033,7 +1080,9 @@ func (x *actorSystem) remoteParentHandler(ctx context.Context, conn inet.Connect
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteParentResponse{Address: pid.Parent().ID()}, nil
+	rpr := &internalpb.RemoteParentResponse{}
+	rpr.SetAddress(pid.Parent().ID())
+	return rpr, nil
 }
 
 // remoteKindHandler handles RemoteKind requests over the proto TCP transport.
@@ -1073,7 +1122,9 @@ func (x *actorSystem) remoteKindHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteKindResponse{Kind: pid.Kind()}, nil
+	rkr := &internalpb.RemoteKindResponse{}
+	rkr.SetKind(pid.Kind())
+	return rkr, nil
 }
 
 // remoteDependenciesHandler handles RemoteDependencies requests over the proto TCP transport.
@@ -1119,7 +1170,9 @@ func (x *actorSystem) remoteDependenciesHandler(ctx context.Context, conn inet.C
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
 
-	return &internalpb.RemoteDependenciesResponse{Dependencies: dependencies}, nil
+	rdr := &internalpb.RemoteDependenciesResponse{}
+	rdr.SetDependencies(dependencies)
+	return rdr, nil
 }
 
 // remoteMetricHandler handles RemoteMetric requests over the proto TCP transport.
@@ -1175,17 +1228,19 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 		return new(internalpb.RemoteMetricResponse), nil
 	}
 
-	return &internalpb.RemoteMetricResponse{Metric: &internalpb.Metric{
-		DeadlettersCount:        metric.DeadlettersCount(),
-		ChildrenCount:           metric.ChidrenCount(),
-		Uptime:                  metric.Uptime(),
-		LatestProcessedDuration: durationpb.New(metric.LatestProcessedDuration()),
-		RestartCount:            metric.RestartCount(),
-		ProcessedCount:          metric.ProcessedCount(),
-		StashSize:               metric.StashSize(),
-		FailureCount:            metric.FailureCount(),
-		ReinstateCount:          metric.ReinstateCount(),
-	}}, nil
+	metric2 := &internalpb.Metric{}
+	metric2.SetDeadlettersCount(metric.DeadlettersCount())
+	metric2.SetChildrenCount(metric.ChidrenCount())
+	metric2.SetUptime(metric.Uptime())
+	metric2.SetLatestProcessedDuration(durationpb.New(metric.LatestProcessedDuration()))
+	metric2.SetRestartCount(metric.RestartCount())
+	metric2.SetProcessedCount(metric.ProcessedCount())
+	metric2.SetStashSize(metric.StashSize())
+	metric2.SetFailureCount(metric.FailureCount())
+	metric2.SetReinstateCount(metric.ReinstateCount())
+	rmr := &internalpb.RemoteMetricResponse{}
+	rmr.SetMetric(metric2)
+	return rmr, nil
 }
 
 // remoteRoleHandler handles RemoteRole requests over the proto TCP transport.
@@ -1225,7 +1280,9 @@ func (x *actorSystem) remoteRoleHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteRoleResponse{Role: pointer.Deref(pid.Role(), "")}, nil
+	rrr := &internalpb.RemoteRoleResponse{}
+	rrr.SetRole(pointer.Deref(pid.Role(), ""))
+	return rrr, nil
 }
 
 // remoteStashSizeHandler handles RemoteStashSize requests over the proto TCP transport.
@@ -1265,7 +1322,9 @@ func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Conn
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	return &internalpb.RemoteStashSizeResponse{Size: pid.StashSize()}, nil
+	rssr := &internalpb.RemoteStashSizeResponse{}
+	rssr.SetSize(pid.StashSize())
+	return rssr, nil
 }
 
 // remoteReinstateHandler handles RemoteReinstate requests over the proto TCP transport.
@@ -1372,7 +1431,9 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 	if err != nil {
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
-	return &internalpb.RemoteAskGrainResponse{Message: response}, nil
+	ragr := &internalpb.RemoteAskGrainResponse{}
+	ragr.SetMessage(response)
+	return ragr, nil
 }
 
 // remoteTellGrainHandler handles RemoteTellGrain requests over the proto TCP transport.
@@ -1563,7 +1624,9 @@ func (x *actorSystem) relocateBatchHandler(ctx context.Context, _ inet.Connectio
 	enqueueRelocation(ctx, eg, x, logger, departedNode, request.GetActors(), request.GetGrains(), failures.record)
 	_ = eg.Wait()
 
-	return &internalpb.RelocateBatchResponse{Failures: failures.items()}, nil
+	rbr := &internalpb.RelocateBatchResponse{}
+	rbr.SetFailures(failures.items())
+	return rbr, nil
 }
 
 // getNodeMetricHandler handles GetNodeMetric requests over the proto TCP transport.
@@ -1583,10 +1646,10 @@ func (x *actorSystem) getNodeMetricHandler(_ context.Context, _ inet.Connection,
 	}
 
 	load := x.actorsCounter.Load() + uint64(x.grains.Len())
-	return &internalpb.GetNodeMetricResponse{
-		NodeAddress: x.remoteHostPort,
-		Load:        load,
-	}, nil
+	gnmr := &internalpb.GetNodeMetricResponse{}
+	gnmr.SetNodeAddress(x.remoteHostPort)
+	gnmr.SetLoad(load)
+	return gnmr, nil
 }
 
 // getKindsHandler handles GetKinds requests over the proto TCP transport.
@@ -1610,7 +1673,9 @@ func (x *actorSystem) getKindsHandler(_ context.Context, _ inet.Connection, req 
 		kinds[i] = types.Name(kind)
 	}
 
-	return &internalpb.GetKindsResponse{Kinds: kinds}, nil
+	gkr := &internalpb.GetKindsResponse{}
+	gkr.SetKinds(kinds)
+	return gkr, nil
 }
 
 // validateRemoteHost checks if the incoming request is for the correct host/port.
@@ -1625,15 +1690,15 @@ func (x *actorSystem) validateRemoteHost(host string, port int32) error {
 	return nil
 }
 
-// protoServerOptions returns ProtoServer options with all RemotingService and ClusterService
+// remotingServerOptions returns RemotingServer options with all RemotingService and ClusterService
 // handlers registered. This enables the actor system to handle remoting and cluster operations
 // over the proto TCP transport.
 // This enables the actor system to handle remoting operations over the proto TCP transport.
 //
-// The returned options should be passed to internalnet.NewProtoServer during actor system
+// The returned options should be passed to internalnet.NewRemotingServer during actor system
 // initialization to configure the proto TCP server with all necessary handlers.
-func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
-	return []inet.ProtoServerOption{
+func (x *actorSystem) remotingServerOptions() []inet.RemotingServerOption {
+	return []inet.RemotingServerOption{
 		inet.WithProtoHandler("internalpb.RemoteLookupRequest", x.remoteLookupHandler),
 		inet.WithProtoHandler("internalpb.GetReliableCompanionRequest", x.getReliableCompanionHandler),
 		inet.WithProtoHandler("internalpb.RemoteAskRequest", x.remoteAskHandler),
@@ -1664,12 +1729,25 @@ func (x *actorSystem) protoServerOptions() []inet.ProtoServerOption {
 	}
 }
 
+// acceptProtocolFromPin maps a remoting [remote.ProtocolPin] onto the listener
+// accept mode used by [inet.RemotingServer].
+func acceptProtocolFromPin(pin remote.ProtocolPin) inet.AcceptProtocol {
+	switch pin {
+	case remote.ProtocolPinLegacy:
+		return inet.AcceptProtocolLegacy
+	case remote.ProtocolPinDuplex:
+		return inet.AcceptProtocolDuplex
+	default:
+		return inet.AcceptProtocolAuto
+	}
+}
+
 // startRemoteServer initializes and starts the proto TCP server for handling remoting operations.
-// It creates a new ProtoServer instance configured with the remote config settings and registers
+// It creates a new RemotingServer instance configured with the remote config settings and registers
 // all RemotingService handlers.
 //
 // The server is started in a background goroutine and will serve incoming connections until
-// stopped via stopProtoServer.
+// stopped via stopRemotingServer.
 //
 // Returns an error if the server fails to initialize or listen on the configured address.
 func (x *actorSystem) startRemoteServer(ctx context.Context) error {
@@ -1685,25 +1763,52 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	x.remoteHostPort = hostPort
 
 	// Create proto server options based on the remote config.
-	serverOpts := x.protoServerOptions()
+	serverOpts := x.remotingServerOptions()
 
 	// Add max frame size from config if specified.
 	if x.remoteConfig.MaxFrameSize() > 0 {
-		serverOpts = append(serverOpts, inet.WithProtoServerMaxFrameSize(x.remoteConfig.MaxFrameSize()))
+		serverOpts = append(serverOpts, inet.WithRemotingServerMaxFrameSize(x.remoteConfig.MaxFrameSize()))
 	}
 
 	// Add idle timeout if configured.
 	if x.remoteConfig.IdleTimeout() > 0 {
-		serverOpts = append(serverOpts, inet.WithProtoServerIdleTimeout(x.remoteConfig.IdleTimeout()))
+		serverOpts = append(serverOpts, inet.WithRemotingServerIdleTimeout(x.remoteConfig.IdleTimeout()))
 	}
+	if x.remoteConfig.ReadIdleTimeout() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerReadIdleTimeout(x.remoteConfig.ReadIdleTimeout()))
+	}
+
+	serverOpts = append(serverOpts, inet.WithRemotingServerSystemName(x.Name()))
+	serverOpts = append(serverOpts, inet.WithRemotingServerAcceptProtocol(acceptProtocolFromPin(x.remoteConfig.ProtocolPin())))
+	serverOpts = append(serverOpts, inet.WithRemotingServerInitialCredits(x.remoteConfig.CreditWindow()))
+	if x.remoteConfig.WriteTimeout() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerWriteTimeout(x.remoteConfig.WriteTimeout()))
+	}
+
+	serverOpts = append(serverOpts, inet.WithRemotingServerMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()))
+	if x.remoteConfig.MaxMessageSize() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerMaxMessageSize(x.remoteConfig.MaxMessageSize()))
+	}
+
+	if x.remoteConfig.ChunkSize() > 0 {
+		serverOpts = append(serverOpts, inet.WithRemotingServerChunkSize(x.remoteConfig.ChunkSize()))
+	}
+
+	serverOpts = append(serverOpts,
+		inet.WithRemotingServerDuplexTellHandler(x.duplexRemoteTell),
+		inet.WithRemotingServerDuplexAskHandler(x.duplexRemoteAsk),
+		inet.WithRemotingServerSenderResolver(func(path string) any {
+			return x.newRemoteSenderPID(path)
+		}),
+	)
 
 	// Detach the server's base context from Start's cancelation/deadline: the server's
 	// lifetime is governed by Stop, and a bounded startup context (a DI OnStart hook, a
 	// startup timeout) expiring later must not poison every inbound handler context.
-	serverOpts = append(serverOpts, inet.WithProtoServerContext(context.WithoutCancel(ctx)))
+	serverOpts = append(serverOpts, inet.WithRemotingServerContext(context.WithoutCancel(ctx)))
 
 	// Add panic recovery so a misbehaving handler does not crash the connection.
-	serverOpts = append(serverOpts, inet.WithProtoServerPanicHandler(func(typeName protoreflect.FullName, recovered any) {
+	serverOpts = append(serverOpts, inet.WithRemotingServerPanicHandler(func(typeName protoreflect.FullName, recovered any) {
 		x.logger.Errorf("Remoting panic in handler for %s: %v", typeName, recovered)
 	}))
 
@@ -1711,59 +1816,59 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	switch x.remoteConfig.Compression() {
 	case remote.BrotliCompression:
 		wrapper := inet.NewBrotliConnWrapper()
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	case remote.ZstdCompression:
 		wrapper, err := inet.NewZstdConnWrapper()
 		if err != nil {
 			x.logger.Error(fmt.Errorf("failed to create Zstd compression wrapper: %w", err))
 			return err
 		}
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	case remote.GzipCompression:
 		wrapper, err := inet.NewGzipConnWrapper()
 		if err != nil {
 			x.logger.Error(fmt.Errorf("failed to create Gzip compression wrapper: %w", err))
 			return err
 		}
-		serverOpts = append(serverOpts, inet.WithProtoServerConnWrapper(wrapper))
+		serverOpts = append(serverOpts, inet.WithRemotingServerConnWrapper(wrapper))
 	}
 
 	// Add TLS configuration if enabled.
 	var useTLS bool
 	if x.tlsInfo != nil && x.tlsInfo.ServerConfig != nil {
-		serverOpts = append(serverOpts, inet.WithProtoServerTLSConfig(x.tlsInfo.ServerConfig))
+		serverOpts = append(serverOpts, inet.WithRemotingServerTLSConfig(x.tlsInfo.ServerConfig))
 		useTLS = true
 		x.logger.Info("TLS enabled for proto remote server")
 	}
 
 	// Create the proto server.
-	protoServer, err := inet.NewProtoServer(hostPort, serverOpts...)
+	remotingServer, err := inet.NewRemotingServer(hostPort, serverOpts...)
 	if err != nil {
 		x.logger.Error(fmt.Errorf("failed to create remote server: %w", err))
 		return err
 	}
 
 	// Store the server instance for later shutdown.
-	x.remoteServer = protoServer
+	x.remoteServer = remotingServer
 
 	// Start listening (with or without TLS).
 	if useTLS {
-		if err := protoServer.ListenTLS(); err != nil {
+		if err := remotingServer.ListenTLS(); err != nil {
 			x.logger.Error(fmt.Errorf("failed to listen on %s with TLS: %w", hostPort, err))
 			return err
 		}
 	} else {
-		if err := protoServer.Listen(); err != nil {
+		if err := remotingServer.Listen(); err != nil {
 			x.logger.Error(fmt.Errorf("failed to listen on %s: %w", hostPort, err))
 			return err
 		}
 	}
 
-	x.logger.Infof("Remote server listening on %s", protoServer.ListenAddr().String())
+	x.logger.Infof("Remote server listening on %s", remotingServer.ListenAddr().String())
 
 	// Start serving in a background goroutine.
 	go func() {
-		if err := protoServer.Serve(); err != nil {
+		if err := remotingServer.Serve(); err != nil {
 			x.logger.Error(fmt.Errorf("remote server failed: %w", err))
 			os.Exit(1)
 		}
@@ -1792,29 +1897,264 @@ func (x *actorSystem) stopRemoteServer(timeout time.Duration) error {
 	return nil
 }
 
-// deliverRemoteTellMessage dispatches a single RemoteMessage from the
-// inbound batch to its local target actor. Per-message failures (bad
-// address, bad metadata, unknown actor, dead actor, mailbox refused) are
-// routed to the local dead-letter actor and logged; they never propagate
-// up to fail the whole batch, because the wire-level batch may pack
-// independent tells from many concurrent senders.
-func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage) {
-	logger := x.logger
-	receiver := message.GetReceiver()
+// duplexRemoteTell handles a fire-and-forget duplex DATA envelope on the
+// acceptor read loop. It deserializes the payload, applies context
+// propagation, and enqueues to the local actor mailbox. Failures are
+// dead-lettered; the handler must not block beyond mailbox enqueue so the
+// duplex read loop can keep draining the socket.
+func (x *actorSystem) duplexRemoteTell(ctx context.Context, env inet.DataEnvelope) {
+	if !x.remotingEnabled.Load() {
+		return
+	}
 
-	// The wire receiver is already in canonical form — it was produced by
-	// Address.String() on the sender side, and Parse(s).String() == s for any
-	// well-formed input. So we
-	// look up the local actor by the raw string on the happy path and only
-	// materialize a *address.Address when a dead-letter or structured log
-	// actually needs one. This keeps inbound dispatch allocation-free for
-	// address parsing.
-	//
-	// parseForFailure is the cold-path helper: it materializes the structured
-	// receiver address so callers can publish a meaningful dead-letter entry
-	// (Sender/Receiver on Deadletter are *address.Address). When parsing
-	// fails the receiver was malformed at the wire — log and bail since we
-	// have no routing information for a dead-letter record.
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		x.logger.Errorf("duplex remote tell: context propagation failed: %v", err)
+		return
+	}
+
+	// A direct duplex tell is one message per frame: the lease collapses to a
+	// single share released when the message reaches a terminal state.
+	var hold *inet.CreditShare
+	if shares := inet.CreditLeaseFromContext(ctx).Split(1); shares != nil {
+		hold = &shares[0]
+	}
+
+	payload, err := x.deserializeDuplexPayload(env)
+	if err != nil {
+		x.logger.Errorf("duplex remote tell: deserialize for %s: %v", env.Receiver, err)
+		hold.Release()
+		return
+	}
+
+	from, ok := env.SenderHandle.(*PID)
+	if !ok || from == nil {
+		from = x.newRemoteSenderPID(env.Sender)
+	}
+
+	x.deliverRemoteTellFrom(ctx, from, env.Receiver, payload, hold)
+}
+
+// duplexRemoteAsk handles an expectsReply duplex DATA envelope for a user
+// message. It looks up the local actor, waits for a reply within the caller's
+// wire-carried deadline when one is present (falling back to the system ask
+// timeout when the request carries none, matching the legacy handler and the
+// [WithAskTimeout] contract), and encodes the response as a REPLY envelope.
+//
+// Application failures are returned as a REPLY body carrying
+// [internalpb.Error] with a nil error so client checkProtoError semantics
+// match the legacy RemoteAskRequest path. Transport-level failures return
+// a non-nil error and become request-scoped ERROR frames.
+func (x *actorSystem) duplexRemoteAsk(ctx context.Context, env inet.DataEnvelope) (inet.ReplyEnvelope, error) {
+	if !x.remotingEnabled.Load() {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled)), nil
+	}
+
+	var err error
+	ctx, err = x.extractContextWithPropagator(ctx)
+	if err != nil {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+	}
+
+	ctx, cancel := deadlineContext(ctx)
+	defer cancel()
+
+	payload, err := x.deserializeDuplexPayload(env)
+	if err != nil {
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+	}
+
+	receiver := env.Receiver
+	node, exist := x.actors.node(receiver)
+	if !exist {
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, parseErr)), nil
+		}
+
+		if err := x.validateRemoteHost(addr.Host(), int32(addr.Port())); err != nil {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
+		}
+
+		node, exist = x.actors.node(addr.String())
+		if !exist {
+			notFound := gerrors.NewErrAddressNotFound(receiver)
+			x.logger.Errorf("duplex remote ask: address=%s not found: %v", receiver, notFound)
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, notFound)), nil
+		}
+	}
+
+	pid := node.value()
+	if pid == nil {
+		err := gerrors.NewErrAddressNotFound(receiver)
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, err)), nil
+	}
+
+	if !pid.IsRunning() {
+		err := gerrors.NewErrRemoteSendFailure(gerrors.ErrDead)
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)), nil
+	}
+
+	// The context deadline is the caller's wire-stamped ask deadline (applied
+	// from metadata by the transport and deadlineContext above). When present
+	// it governs the wait outright, above or below askTimeout, exactly as the
+	// legacy handler honors request.GetTimeout(); askTimeout is only the
+	// fallback for requests that carry no deadline.
+	timeout := x.askTimeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			timeout = remaining
+		}
+	}
+
+	reply, err := x.handleRemoteAsk(ctx, pid, payload, timeout)
+	if err != nil {
+		err = gerrors.NewErrRemoteSendFailure(err)
+		x.logger.Errorf("duplex remote ask failed: %v", err)
+		if errors.Is(err, gerrors.ErrRequestTimeout) {
+			return duplexErrorReply(toProtoError(internalpb.Code_CODE_DEADLINE_EXCEEDED, err)), nil
+		}
+		return duplexErrorReply(toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)), nil
+	}
+
+	return x.encodeDuplexReply(reply)
+}
+
+// deserializeDuplexPayload decodes a duplex DATA envelope payload. Internal
+// proto (serializer ID 0) unmarshals via the type registry using TypeName;
+// all other IDs use the remoting composite serializer on the self-describing
+// frame in Payload.
+func (x *actorSystem) deserializeDuplexPayload(env inet.DataEnvelope) (any, error) {
+	switch env.SerializerID {
+	case inet.SerializerIDInternalProto:
+		msgType, err := inet.FindMessageType(protoreflect.FullName(env.TypeName))
+		if err != nil {
+			return nil, err
+		}
+
+		msg := msgType.New().Interface()
+		if err := proto.Unmarshal(env.Payload, msg); err != nil {
+			return nil, err
+		}
+		return msg, nil
+	case inet.SerializerIDCustom:
+		// Custom serializers may retain the input slice; copy out of the
+		// pooled frame body before Deserialize so ReleasePayload is safe.
+		return x.remoting.Serializer(nil).Deserialize(copyDuplexPayload(env.Payload))
+	default:
+		return x.remoting.Serializer(nil).Deserialize(env.Payload)
+	}
+}
+
+// copyDuplexPayload returns a heap copy of payload for serializers that may
+// retain their input. Empty payloads are returned unchanged.
+func copyDuplexPayload(payload []byte) []byte {
+	if len(payload) == 0 {
+		return payload
+	}
+
+	out := make([]byte, len(payload))
+	copy(out, payload)
+	return out
+}
+
+// encodeDuplexReply serializes a user ask response into a REPLY envelope,
+// mapping the resolved serializer to the duplex serializer ID and typeRef
+// rules (public proto / JSON / CBOR / custom).
+func (x *actorSystem) encodeDuplexReply(reply any) (inet.ReplyEnvelope, error) {
+	if reply == nil {
+		return inet.ReplyEnvelope{}, nil
+	}
+
+	serializer := x.remoting.Serializer(reply)
+	if serializer == nil {
+		return inet.ReplyEnvelope{}, fmt.Errorf("no serializer for reply type %T", reply)
+	}
+
+	payload, err := serializer.Serialize(reply)
+	if err != nil {
+		return inet.ReplyEnvelope{}, err
+	}
+
+	serID := byte(inet.SerializerIDCustom)
+	typeName := ""
+	switch serializer.(type) {
+	case *remote.ProtoSerializer:
+		serID = inet.SerializerIDPublicProto
+		if msg, ok := reply.(proto.Message); ok {
+			typeName = string(proto.MessageName(msg))
+		}
+	case *remote.JSONSerializer:
+		serID = inet.SerializerIDJSON
+		typeName = envTypeNameFromFrame(payload)
+	case *remote.CBORSerializer:
+		serID = inet.SerializerIDCBOR
+		typeName = envTypeNameFromFrame(payload)
+	}
+
+	return inet.ReplyEnvelope{
+		TypeName:     typeName,
+		SerializerID: serID,
+		Payload:      payload,
+	}, nil
+}
+
+// duplexErrorReply encodes an application-level [internalpb.Error] as a REPLY
+// body with serializer ID 0 so the client can run checkProtoError on the
+// decoded message instead of treating it as a transport ERROR frame.
+func duplexErrorReply(errMsg *internalpb.Error) inet.ReplyEnvelope {
+	payload, err := proto.Marshal(errMsg)
+	if err != nil {
+		return inet.ReplyEnvelope{}
+	}
+	return inet.ReplyEnvelope{
+		TypeName:     string(proto.MessageName(errMsg)),
+		SerializerID: inet.SerializerIDInternalProto,
+		Payload:      payload,
+	}
+}
+
+// envTypeNameFromFrame extracts the fully-qualified type name from a
+// self-describing serializer frame (totalLen | nameLen | name | bytes).
+// Returns empty string when the frame is truncated or inconsistent.
+func envTypeNameFromFrame(data []byte) string {
+	if len(data) < 8 {
+		return ""
+	}
+
+	nameLen := int(binary.BigEndian.Uint32(data[4:8]))
+	if nameLen <= 0 || 8+nameLen > len(data) {
+		return ""
+	}
+	return string(data[8 : 8+nameLen])
+}
+
+// deliverRemoteTellPayload dispatches an already-deserialized remote tell to a
+// local actor. Per-message failures (unknown actor, dead actor, mailbox
+// refused) are routed to the local dead-letter actor and never returned to
+// the wire caller — matching the legacy batch tell contract. hold is the
+// message's flow-control credit share (nil on the legacy path); ownership
+// passes down the chain.
+func (x *actorSystem) deliverRemoteTellPayload(ctx context.Context, sender, receiver string, payload any, hold *inet.CreditShare) {
+	x.deliverRemoteTellFrom(ctx, x.newRemoteSenderPID(sender), receiver, payload, hold)
+}
+
+// deliverRemoteTellFrom is the shared duplex/legacy tell dispatch path when
+// the sender PID is already materialized (table-hit cache or fresh lookup).
+// It owns hold, the message's flow-control credit share: every failure path
+// releases it here, and successful dispatch hands it to the ReceiveContext,
+// which releases it when the message leaves the mailbox.
+func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, receiver string, payload any, hold *inet.CreditShare) {
+	logger := x.logger
+
+	delivered := false
+	defer func() {
+		if !delivered {
+			hold.Release()
+		}
+	}()
+
 	parseForFailure := func(cause error) (*address.Address, bool) {
 		addr, parseErr := address.Parse(receiver)
 		if parseErr != nil {
@@ -1824,32 +2164,6 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		return addr, true
 	}
 
-	// Decode the payload exactly once. Both the dispatch path
-	// (handleRemoteTell) and every dead-letter publication downstream need
-	// the typed message; decoding here makes that single source of truth
-	// explicit and lets deadLetterRemoteMessage stay free of serializer
-	// concerns. A decode failure means we can neither dispatch nor produce
-	// a useful dead-letter entry (Deadletter.Message is the typed payload),
-	// so we log and skip.
-	payload, err := x.remoting.Serializer(nil).Deserialize(message.GetMessage())
-	if err != nil {
-		logger.Errorf("remote tell: deserialize payload for %s: %v", receiver, err)
-		return
-	}
-
-	msgCtx, err := x.messageMetadata(ctx, message.GetMetadata())
-	if err != nil {
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-
-		from := x.newRemoteSenderPID(message.GetSender())
-		logger.Errorf("remote tell: bad metadata for %s: %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-		return
-	}
-
 	node, exist := x.actors.node(receiver)
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(receiver)
@@ -1857,7 +2171,7 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		if !ok {
 			return
 		}
-		from := x.newRemoteSenderPID(message.GetSender())
+
 		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
@@ -1870,7 +2184,7 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		if !ok {
 			return
 		}
-		from := x.newRemoteSenderPID(message.GetSender())
+
 		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
@@ -1882,21 +2196,69 @@ func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *int
 		if !ok {
 			return
 		}
-		from := x.newRemoteSenderPID(message.GetSender())
+
 		logger.Errorf("remote tell: actor=%s not running: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
 	}
 
-	from := x.newRemoteSenderPID(message.GetSender())
-	if err := x.handleRemoteTell(msgCtx, from, pid, payload); err != nil {
+	if err := x.handleRemoteTellHeld(ctx, from, pid, payload, hold); err != nil {
 		addr, ok := parseForFailure(err)
 		if !ok {
 			return
 		}
+
 		logger.Errorf("remote tell: dispatch to %s failed: %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
 	}
+
+	delivered = true
+}
+
+// deliverRemoteTellMessage dispatches a single RemoteMessage from the
+// inbound batch to its local target actor. Per-message failures (bad
+// address, bad metadata, unknown actor, dead actor, mailbox refused) are
+// routed to the local dead-letter actor and logged; they never propagate
+// up to fail the whole batch, because the wire-level batch may pack
+// independent tells from many concurrent senders. hold is the message's
+// flow-control credit share (nil on the legacy path): failure paths release
+// it here, successful dispatch passes ownership down the chain.
+func (x *actorSystem) deliverRemoteTellMessage(ctx context.Context, message *internalpb.RemoteMessage, hold *inet.CreditShare) {
+	logger := x.logger
+	receiver := message.GetReceiver()
+
+	// Decode the payload exactly once. Both the dispatch path
+	// (handleRemoteTell) and every dead-letter publication downstream need
+	// the typed message; decoding here makes that single source of truth
+	// explicit and lets deadLetterRemoteMessage stay free of serializer
+	// concerns. A decode failure means we can neither dispatch nor produce
+	// a useful dead-letter entry (Deadletter.Message is the typed payload),
+	// so we log and skip.
+	payload, err := x.remoting.Serializer(nil).Deserialize(message.GetMessage())
+	if err != nil {
+		logger.Errorf("remote tell: deserialize payload for %s: %v", receiver, err)
+		hold.Release()
+		return
+	}
+
+	msgCtx, err := x.messageMetadata(ctx, message.GetMetadata())
+	if err != nil {
+		hold.Release()
+
+		addr, parseErr := address.Parse(receiver)
+		if parseErr != nil {
+			logger.Errorf("remote tell: unparseable receiver %q (underlying: %v): %v", receiver, err, parseErr)
+			return
+		}
+
+		from := x.newRemoteSenderPID(message.GetSender())
+		logger.Errorf("remote tell: bad metadata for %s: %v", addr.String(), err)
+		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
+		return
+	}
+
+	x.deliverRemoteTellPayload(msgCtx, message.GetSender(), receiver, payload, hold)
 }
 
 // newRemoteSenderPID materializes a remote sender identity from the wire
@@ -1991,13 +2353,14 @@ func (x *actorSystem) stopCoalescedFailureDrain() {
 	x.coalescedFailureQueue = nil
 }
 
-// enqueueCoalescedFailure is the CoalescingErrorHandler wired into the
-// outbound coalescer. It logs the whole-batch failure (operators still want
-// the "endpoint unreachable" signal with a destination) and hands the batch
-// off to the fan-out drain. Drops the handoff if the queue is full or the
-// system is shutting down.
+// enqueueCoalescedFailure is the TellFailureHandler wired into the outbound
+// remoting client. It logs the failure (operators still want the "endpoint
+// unreachable" signal with a destination) and hands the batch off to the
+// fan-out drain for both coalesced legacy flushes and duplex admission
+// failures. Drops the handoff if the queue is full or the system is shutting
+// down.
 func (x *actorSystem) enqueueCoalescedFailure(dest string, messages []*internalpb.RemoteMessage, cause error) {
-	x.logger.Warnf("coalesced remote tell to %s failed for %d message(s): %v", dest, len(messages), cause)
+	x.logger.Warnf("remote tell to %s failed for %d message(s): %v", dest, len(messages), cause)
 	if x.shuttingDown.Load() || x.coalescedFailureQueue == nil {
 		return
 	}

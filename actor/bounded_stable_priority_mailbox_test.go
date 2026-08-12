@@ -35,10 +35,10 @@ func TestBoundedStablePriorityMailbox(t *testing.T) {
 	t.Run("With FIFO ordering among equal priorities", func(t *testing.T) {
 		mailbox := NewBoundedStablePriorityMailbox(8, highestPriority)
 
-		low1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		low2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		high1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
-		high2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
+		low1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		low2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		high1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
+		high2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
 
 		require.NoError(t, mailbox.Enqueue(low1))
 		require.NoError(t, mailbox.Enqueue(high1))
@@ -54,13 +54,13 @@ func TestBoundedStablePriorityMailbox(t *testing.T) {
 
 	t.Run("With overflow returning ErrMailboxFull", func(t *testing.T) {
 		mailbox := NewBoundedStablePriorityMailbox(2, highestPriority)
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 1}}))
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 2}}))
-		require.ErrorIs(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 3}}), gerrors.ErrMailboxFull)
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}))
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 2}.Build()}))
+		require.ErrorIs(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 3}.Build()}), gerrors.ErrMailboxFull)
 		require.EqualValues(t, 2, mailbox.Len())
 
 		require.NotNil(t, mailbox.Dequeue())
-		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: &testpb.TestMessage{Priority: 3}}))
+		require.NoError(t, mailbox.Enqueue(&ReceiveContext{message: testpb.TestMessage_builder{Priority: 3}.Build()}))
 	})
 
 	t.Run("With empty mailbox returning nil", func(t *testing.T) {

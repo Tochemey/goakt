@@ -297,14 +297,14 @@ func TestRemoteTellHandlerPerMessageDeadlettering(t *testing.T) {
 	require.NoError(t, err)
 
 	senderAddr := address.New("client", "remote", host, port).String()
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			{Sender: senderAddr, Receiver: address.New("alice", sys.Name(), host, port).String(), Message: payload},
-			{Sender: senderAddr, Receiver: address.New("missing", sys.Name(), host, port).String(), Message: payload},
-			{Sender: senderAddr, Receiver: address.New("bob", sys.Name(), host, port).String(), Message: payload},
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("alice", sys.Name(), host, port).String(), Message: payload}.Build(),
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("missing", sys.Name(), host, port).String(), Message: payload}.Build(),
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("bob", sys.Name(), host, port).String(), Message: payload}.Build(),
 			nil,
 		},
-	}
+	}.Build()
 	resp, err := sys.(*actorSystem).remoteTellHandler(ctx, nil, req)
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -408,19 +408,19 @@ func TestRemoteTellHandlerMetadataErrorDeadlettered(t *testing.T) {
 	require.NoError(t, err)
 	senderAddr := address.New("client", "remote", host, port).String()
 
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
 			// alice — healthy, no metadata so messageMetadata returns early
-			{Sender: senderAddr, Receiver: address.New("alice", sys.Name(), host, port).String(), Message: payload},
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("alice", sys.Name(), host, port).String(), Message: payload}.Build(),
 			// bob — carries metadata that will trip the failing propagator
-			{
+			internalpb.RemoteMessage_builder{
 				Sender:   senderAddr,
 				Receiver: address.New("bob", sys.Name(), host, port).String(),
 				Message:  payload,
 				Metadata: map[string]string{"x-trace-id": "boom"},
-			},
+			}.Build(),
 		},
-	}
+	}.Build()
 	resp, err := sys.(*actorSystem).remoteTellHandler(ctx, nil, req)
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -472,11 +472,11 @@ func TestRemoteTellHandlerStoppedActorDeadlettered(t *testing.T) {
 	payload, err := sys.(*actorSystem).remoting.Serializer(new(testpb.TestSend)).Serialize(new(testpb.TestSend))
 	require.NoError(t, err)
 	senderAddr := address.New("client", "remote", host, port).String()
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			{Sender: senderAddr, Receiver: address.New("ephemeral", sys.Name(), host, port).String(), Message: payload},
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("ephemeral", sys.Name(), host, port).String(), Message: payload}.Build(),
 		},
-	}
+	}.Build()
 	resp, err := sys.(*actorSystem).remoteTellHandler(ctx, nil, req)
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)
@@ -572,11 +572,11 @@ func TestRemoteTellHandlerCorruptPayloadSkipped(t *testing.T) {
 	senderAddr := address.New("client", sys.Name(), host, port).String()
 	receiverAddr := address.New("void", sys.Name(), host, port).String()
 
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			{Sender: senderAddr, Receiver: receiverAddr, Message: []byte{0x00, 0xDE, 0xAD, 0xBE, 0xEF}},
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: receiverAddr, Message: []byte{0x00, 0xDE, 0xAD, 0xBE, 0xEF}}.Build(),
 		},
-	}
+	}.Build()
 
 	assert.NotPanics(t, func() {
 		resp, err := sys.(*actorSystem).remoteTellHandler(ctx, nil, req)
@@ -618,16 +618,16 @@ func TestCoalescedDrainCorruptPayloadSkipped(t *testing.T) {
 	require.NoError(t, err)
 
 	senderAddr := address.New("client", sys.Name(), host, port).String()
-	good := &internalpb.RemoteMessage{
+	good := internalpb.RemoteMessage_builder{
 		Sender:   senderAddr,
 		Receiver: address.New("good", "remote", host, port).String(),
 		Message:  goodPayload,
-	}
-	bad := &internalpb.RemoteMessage{
+	}.Build()
+	bad := internalpb.RemoteMessage_builder{
 		Sender:   senderAddr,
 		Receiver: address.New("bad", "remote", host, port).String(),
 		Message:  []byte{0x00, 0xDE, 0xAD, 0xBE, 0xEF},
-	}
+	}.Build()
 
 	assert.NotPanics(t, func() {
 		sys.(*actorSystem).enqueueCoalescedFailure("10.0.0.1:9999",
@@ -664,10 +664,10 @@ func TestEnqueueCoalescedFailureDroppedDuringShutdown(t *testing.T) {
 	// Simulate the middle of shutdown without actually closing everything.
 	impl.shuttingDown.Store(true)
 
-	msg := &internalpb.RemoteMessage{
+	msg := internalpb.RemoteMessage_builder{
 		Sender:   address.New("from", sys.Name(), host, port).String(),
 		Receiver: address.New("to", sys.Name(), host, port).String(),
-	}
+	}.Build()
 	assert.NotPanics(t, func() {
 		impl.enqueueCoalescedFailure("127.0.0.1:0", []*internalpb.RemoteMessage{msg}, errors.New("down"))
 	})
@@ -710,13 +710,13 @@ func TestRemoteTellHandlerAllValidNoDeadletters(t *testing.T) {
 	require.NoError(t, err)
 	senderAddr := address.New("client", "remote", host, port).String()
 
-	req := &internalpb.RemoteTellRequest{
+	req := internalpb.RemoteTellRequest_builder{
 		RemoteMessages: []*internalpb.RemoteMessage{
-			{Sender: senderAddr, Receiver: address.New("a", sys.Name(), host, port).String(), Message: payload},
-			{Sender: senderAddr, Receiver: address.New("b", sys.Name(), host, port).String(), Message: payload},
-			{Sender: senderAddr, Receiver: address.New("a", sys.Name(), host, port).String(), Message: payload},
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("a", sys.Name(), host, port).String(), Message: payload}.Build(),
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("b", sys.Name(), host, port).String(), Message: payload}.Build(),
+			internalpb.RemoteMessage_builder{Sender: senderAddr, Receiver: address.New("a", sys.Name(), host, port).String(), Message: payload}.Build(),
 		},
-	}
+	}.Build()
 	resp, err := sys.(*actorSystem).remoteTellHandler(ctx, nil, req)
 	require.NoError(t, err)
 	_, ok := resp.(*internalpb.RemoteTellResponse)

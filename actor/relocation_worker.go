@@ -741,17 +741,17 @@ func buildRelocateBatchRequests(departedNode string, actors []*internalpb.Actor,
 	requests := make([]*internalpb.RelocateBatchRequest, 0, total)
 
 	for _, batch := range actorBatches {
-		requests = append(requests, &internalpb.RelocateBatchRequest{
-			DepartedNode: departedNode,
-			Actors:       batch,
-		})
+		rbr := &internalpb.RelocateBatchRequest{}
+		rbr.SetDepartedNode(departedNode)
+		rbr.SetActors(batch)
+		requests = append(requests, rbr)
 	}
 
 	for _, batch := range grainBatches {
-		requests = append(requests, &internalpb.RelocateBatchRequest{
-			DepartedNode: departedNode,
-			Grains:       batch,
-		})
+		rbr := &internalpb.RelocateBatchRequest{}
+		rbr.SetDepartedNode(departedNode)
+		rbr.SetGrains(batch)
+		requests = append(requests, rbr)
 	}
 
 	return requests
@@ -802,7 +802,11 @@ type relocationFailures struct {
 // record adds a single item failure.
 func (r *relocationFailures) record(id string, grain bool, err error) {
 	r.mu.Lock()
-	r.failures = append(r.failures, &internalpb.RelocationFailure{Id: id, Grain: grain, Message: err.Error()})
+	rf := &internalpb.RelocationFailure{}
+	rf.SetId(id)
+	rf.SetGrain(grain)
+	rf.SetMessage(err.Error())
+	r.failures = append(r.failures, rf)
 	r.mu.Unlock()
 }
 

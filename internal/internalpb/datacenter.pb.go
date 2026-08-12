@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -78,11 +77,6 @@ func (x DataCenterState) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use DataCenterState.Descriptor instead.
-func (DataCenterState) EnumDescriptor() ([]byte, []int) {
-	return file_internal_datacenter_proto_rawDescGZIP(), []int{0}
-}
-
 // ControlPlaneEventType describes the kind of change for a watch event.
 type ControlPlaneEventType int32
 
@@ -131,24 +125,15 @@ func (x ControlPlaneEventType) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ControlPlaneEventType.Descriptor instead.
-func (ControlPlaneEventType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_datacenter_proto_rawDescGZIP(), []int{1}
-}
-
 // DataCenter defines metadata used for multi-DC routing and placement.
 type DataCenter struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Name is the datacenter identifier.
-	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	// Region optionally groups datacenters into a higher-level region.
-	Region string `protobuf:"bytes,2,opt,name=region,proto3" json:"region,omitempty"`
-	// Zone optionally specifies an availability zone.
-	Zone string `protobuf:"bytes,3,opt,name=zone,proto3" json:"zone,omitempty"`
-	// Labels provides routing metadata for placement and policy decisions.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Name   string                 `protobuf:"bytes,1,opt,name=name,proto3"`
+	xxx_hidden_Region string                 `protobuf:"bytes,2,opt,name=region,proto3"`
+	xxx_hidden_Zone   string                 `protobuf:"bytes,3,opt,name=zone,proto3"`
+	xxx_hidden_Labels map[string]string      `protobuf:"bytes,4,rep,name=labels,proto3" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *DataCenter) Reset() {
@@ -176,56 +161,85 @@ func (x *DataCenter) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DataCenter.ProtoReflect.Descriptor instead.
-func (*DataCenter) Descriptor() ([]byte, []int) {
-	return file_internal_datacenter_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *DataCenter) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *DataCenter) GetRegion() string {
 	if x != nil {
-		return x.Region
+		return x.xxx_hidden_Region
 	}
 	return ""
 }
 
 func (x *DataCenter) GetZone() string {
 	if x != nil {
-		return x.Zone
+		return x.xxx_hidden_Zone
 	}
 	return ""
 }
 
 func (x *DataCenter) GetLabels() map[string]string {
 	if x != nil {
-		return x.Labels
+		return x.xxx_hidden_Labels
 	}
 	return nil
 }
 
+func (x *DataCenter) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *DataCenter) SetRegion(v string) {
+	x.xxx_hidden_Region = v
+}
+
+func (x *DataCenter) SetZone(v string) {
+	x.xxx_hidden_Zone = v
+}
+
+func (x *DataCenter) SetLabels(v map[string]string) {
+	x.xxx_hidden_Labels = v
+}
+
+type DataCenter_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Name is the datacenter identifier.
+	Name string
+	// Region optionally groups datacenters into a higher-level region.
+	Region string
+	// Zone optionally specifies an availability zone.
+	Zone string
+	// Labels provides routing metadata for placement and policy decisions.
+	Labels map[string]string
+}
+
+func (b0 DataCenter_builder) Build() *DataCenter {
+	m0 := &DataCenter{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_Region = b.Region
+	x.xxx_hidden_Zone = b.Zone
+	x.xxx_hidden_Labels = b.Labels
+	return m0
+}
+
 // DataCenterRecord represents the control plane view of a datacenter.
 type DataCenterRecord struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Id is the stable, immutable identifier for the record.
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// DataCenter holds the datacenter metadata.
-	DataCenter *DataCenter `protobuf:"bytes,2,opt,name=data_center,json=dataCenter,proto3" json:"data_center,omitempty"`
-	// Endpoints is the list of advertised addresses for routing.
-	Endpoints []string `protobuf:"bytes,3,rep,name=endpoints,proto3" json:"endpoints,omitempty"`
-	// State reflects the record lifecycle state.
-	State DataCenterState `protobuf:"varint,4,opt,name=state,proto3,enum=internalpb.DataCenterState" json:"state,omitempty"`
-	// LeaseExpiry is the time when the record becomes inactive if not renewed.
-	LeaseExpiry *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=lease_expiry,json=leaseExpiry,proto3" json:"lease_expiry,omitempty"`
-	// Version is a monotonic revision for conflict-free updates.
-	Version       uint64 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id          string                 `protobuf:"bytes,1,opt,name=id,proto3"`
+	xxx_hidden_DataCenter  *DataCenter            `protobuf:"bytes,2,opt,name=data_center,json=dataCenter,proto3"`
+	xxx_hidden_Endpoints   []string               `protobuf:"bytes,3,rep,name=endpoints,proto3"`
+	xxx_hidden_State       DataCenterState        `protobuf:"varint,4,opt,name=state,proto3,enum=internalpb.DataCenterState"`
+	xxx_hidden_LeaseExpiry *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=lease_expiry,json=leaseExpiry,proto3"`
+	xxx_hidden_Version     uint64                 `protobuf:"varint,6,opt,name=version,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *DataCenterRecord) Reset() {
@@ -253,62 +267,131 @@ func (x *DataCenterRecord) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DataCenterRecord.ProtoReflect.Descriptor instead.
-func (*DataCenterRecord) Descriptor() ([]byte, []int) {
-	return file_internal_datacenter_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *DataCenterRecord) GetId() string {
 	if x != nil {
-		return x.Id
+		return x.xxx_hidden_Id
 	}
 	return ""
 }
 
 func (x *DataCenterRecord) GetDataCenter() *DataCenter {
 	if x != nil {
-		return x.DataCenter
+		return x.xxx_hidden_DataCenter
 	}
 	return nil
 }
 
 func (x *DataCenterRecord) GetEndpoints() []string {
 	if x != nil {
-		return x.Endpoints
+		return x.xxx_hidden_Endpoints
 	}
 	return nil
 }
 
 func (x *DataCenterRecord) GetState() DataCenterState {
 	if x != nil {
-		return x.State
+		return x.xxx_hidden_State
 	}
 	return DataCenterState_DATA_CENTER_STATE_UNSPECIFIED
 }
 
 func (x *DataCenterRecord) GetLeaseExpiry() *timestamppb.Timestamp {
 	if x != nil {
-		return x.LeaseExpiry
+		return x.xxx_hidden_LeaseExpiry
 	}
 	return nil
 }
 
 func (x *DataCenterRecord) GetVersion() uint64 {
 	if x != nil {
-		return x.Version
+		return x.xxx_hidden_Version
 	}
 	return 0
 }
 
+func (x *DataCenterRecord) SetId(v string) {
+	x.xxx_hidden_Id = v
+}
+
+func (x *DataCenterRecord) SetDataCenter(v *DataCenter) {
+	x.xxx_hidden_DataCenter = v
+}
+
+func (x *DataCenterRecord) SetEndpoints(v []string) {
+	x.xxx_hidden_Endpoints = v
+}
+
+func (x *DataCenterRecord) SetState(v DataCenterState) {
+	x.xxx_hidden_State = v
+}
+
+func (x *DataCenterRecord) SetLeaseExpiry(v *timestamppb.Timestamp) {
+	x.xxx_hidden_LeaseExpiry = v
+}
+
+func (x *DataCenterRecord) SetVersion(v uint64) {
+	x.xxx_hidden_Version = v
+}
+
+func (x *DataCenterRecord) HasDataCenter() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_DataCenter != nil
+}
+
+func (x *DataCenterRecord) HasLeaseExpiry() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_LeaseExpiry != nil
+}
+
+func (x *DataCenterRecord) ClearDataCenter() {
+	x.xxx_hidden_DataCenter = nil
+}
+
+func (x *DataCenterRecord) ClearLeaseExpiry() {
+	x.xxx_hidden_LeaseExpiry = nil
+}
+
+type DataCenterRecord_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Id is the stable, immutable identifier for the record.
+	Id string
+	// DataCenter holds the datacenter metadata.
+	DataCenter *DataCenter
+	// Endpoints is the list of advertised addresses for routing.
+	Endpoints []string
+	// State reflects the record lifecycle state.
+	State DataCenterState
+	// LeaseExpiry is the time when the record becomes inactive if not renewed.
+	LeaseExpiry *timestamppb.Timestamp
+	// Version is a monotonic revision for conflict-free updates.
+	Version uint64
+}
+
+func (b0 DataCenterRecord_builder) Build() *DataCenterRecord {
+	m0 := &DataCenterRecord{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_DataCenter = b.DataCenter
+	x.xxx_hidden_Endpoints = b.Endpoints
+	x.xxx_hidden_State = b.State
+	x.xxx_hidden_LeaseExpiry = b.LeaseExpiry
+	x.xxx_hidden_Version = b.Version
+	return m0
+}
+
 // ControlPlaneEvent represents a control plane change notification.
 type ControlPlaneEvent struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Type describes the change type.
-	Type ControlPlaneEventType `protobuf:"varint,1,opt,name=type,proto3,enum=internalpb.ControlPlaneEventType" json:"type,omitempty"`
-	// Record carries the updated record.
-	Record        *DataCenterRecord `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Type   ControlPlaneEventType  `protobuf:"varint,1,opt,name=type,proto3,enum=internalpb.ControlPlaneEventType"`
+	xxx_hidden_Record *DataCenterRecord      `protobuf:"bytes,2,opt,name=record,proto3"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ControlPlaneEvent) Reset() {
@@ -336,23 +419,55 @@ func (x *ControlPlaneEvent) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ControlPlaneEvent.ProtoReflect.Descriptor instead.
-func (*ControlPlaneEvent) Descriptor() ([]byte, []int) {
-	return file_internal_datacenter_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *ControlPlaneEvent) GetType() ControlPlaneEventType {
 	if x != nil {
-		return x.Type
+		return x.xxx_hidden_Type
 	}
 	return ControlPlaneEventType_CONTROL_PLANE_EVENT_TYPE_UNSPECIFIED
 }
 
 func (x *ControlPlaneEvent) GetRecord() *DataCenterRecord {
 	if x != nil {
-		return x.Record
+		return x.xxx_hidden_Record
 	}
 	return nil
+}
+
+func (x *ControlPlaneEvent) SetType(v ControlPlaneEventType) {
+	x.xxx_hidden_Type = v
+}
+
+func (x *ControlPlaneEvent) SetRecord(v *DataCenterRecord) {
+	x.xxx_hidden_Record = v
+}
+
+func (x *ControlPlaneEvent) HasRecord() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Record != nil
+}
+
+func (x *ControlPlaneEvent) ClearRecord() {
+	x.xxx_hidden_Record = nil
+}
+
+type ControlPlaneEvent_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Type describes the change type.
+	Type ControlPlaneEventType
+	// Record carries the updated record.
+	Record *DataCenterRecord
+}
+
+func (b0 ControlPlaneEvent_builder) Build() *ControlPlaneEvent {
+	m0 := &ControlPlaneEvent{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Type = b.Type
+	x.xxx_hidden_Record = b.Record
+	return m0
 }
 
 var File_internal_datacenter_proto protoreflect.FileDescriptor
@@ -395,18 +510,6 @@ const file_internal_datacenter_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_datacenter_proto_rawDescOnce sync.Once
-	file_internal_datacenter_proto_rawDescData []byte
-)
-
-func file_internal_datacenter_proto_rawDescGZIP() []byte {
-	file_internal_datacenter_proto_rawDescOnce.Do(func() {
-		file_internal_datacenter_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_datacenter_proto_rawDesc), len(file_internal_datacenter_proto_rawDesc)))
-	})
-	return file_internal_datacenter_proto_rawDescData
-}
 
 var file_internal_datacenter_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_datacenter_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
