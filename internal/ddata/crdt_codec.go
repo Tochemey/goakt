@@ -28,6 +28,7 @@ import (
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/remote"
+	"google.golang.org/protobuf/proto"
 )
 
 // EncodeCRDT converts a crdt.ReplicatedData to its protobuf representation.
@@ -36,63 +37,49 @@ import (
 func EncodeCRDT(data crdt.ReplicatedData, serializer remote.Serializer) (*internalpb.CRDTData, error) {
 	switch v := data.(type) {
 	case *crdt.GCounter:
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_GCounter{
-				GCounter: encodeGCounter(v),
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetGCounter(proto.ValueOrDefault(encodeGCounter(v)))
+		return cRDTData, nil
 	case *crdt.PNCounter:
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_PnCounter{
-				PnCounter: encodePNCounter(v),
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetPnCounter(proto.ValueOrDefault(encodePNCounter(v)))
+		return cRDTData, nil
 	case *crdt.Flag:
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_Flag{
-				Flag: encodeFlag(v),
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetFlag(proto.ValueOrDefault(encodeFlag(v)))
+		return cRDTData, nil
 	case *crdt.LWWRegister:
 		lwwData, err := encodeLWWRegister(v, serializer)
 		if err != nil {
 			return nil, err
 		}
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_LwwRegister{
-				LwwRegister: lwwData,
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetLwwRegister(proto.ValueOrDefault(lwwData))
+		return cRDTData, nil
 	case *crdt.ORSet:
 		orSetData, err := encodeORSet(v, serializer)
 		if err != nil {
 			return nil, err
 		}
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_OrSet{
-				OrSet: orSetData,
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetOrSet(proto.ValueOrDefault(orSetData))
+		return cRDTData, nil
 	case *crdt.MVRegister:
 		mvData, err := encodeMVRegister(v, serializer)
 		if err != nil {
 			return nil, err
 		}
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_MvRegister{
-				MvRegister: mvData,
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetMvRegister(proto.ValueOrDefault(mvData))
+		return cRDTData, nil
 	case *crdt.ORMap:
 		orMapData, err := encodeORMap(v, serializer)
 		if err != nil {
 			return nil, err
 		}
-		return &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_OrMap{
-				OrMap: orMapData,
-			},
-		}, nil
+		cRDTData := &internalpb.CRDTData{}
+		cRDTData.SetOrMap(proto.ValueOrDefault(orMapData))
+		return cRDTData, nil
 	default:
 		return nil, fmt.Errorf("unsupported CRDT type: %T", data)
 	}
@@ -104,30 +91,30 @@ func DecodeCRDT(pb *internalpb.CRDTData, serializer remote.Serializer) (crdt.Rep
 	if pb == nil {
 		return nil, fmt.Errorf("nil CRDTData")
 	}
-	switch v := pb.Type.(type) {
-	case *internalpb.CRDTData_GCounter:
-		return decodeGCounter(v.GCounter), nil
-	case *internalpb.CRDTData_PnCounter:
-		return decodePNCounter(v.PnCounter), nil
-	case *internalpb.CRDTData_Flag:
-		return decodeFlag(v.Flag), nil
-	case *internalpb.CRDTData_LwwRegister:
-		return decodeLWWRegister(v.LwwRegister, serializer)
-	case *internalpb.CRDTData_OrSet:
-		return decodeORSet(v.OrSet, serializer)
-	case *internalpb.CRDTData_MvRegister:
-		return decodeMVRegister(v.MvRegister, serializer)
-	case *internalpb.CRDTData_OrMap:
-		return decodeORMap(v.OrMap, serializer)
+	switch pb.WhichType() {
+	case internalpb.CRDTData_GCounter_case:
+		return decodeGCounter(pb.GetGCounter()), nil
+	case internalpb.CRDTData_PnCounter_case:
+		return decodePNCounter(pb.GetPnCounter()), nil
+	case internalpb.CRDTData_Flag_case:
+		return decodeFlag(pb.GetFlag()), nil
+	case internalpb.CRDTData_LwwRegister_case:
+		return decodeLWWRegister(pb.GetLwwRegister(), serializer)
+	case internalpb.CRDTData_OrSet_case:
+		return decodeORSet(pb.GetOrSet(), serializer)
+	case internalpb.CRDTData_MvRegister_case:
+		return decodeMVRegister(pb.GetMvRegister(), serializer)
+	case internalpb.CRDTData_OrMap_case:
+		return decodeORMap(pb.GetOrMap(), serializer)
 	default:
-		return nil, fmt.Errorf("unsupported CRDTData type: %T", pb.Type)
+		return nil, fmt.Errorf("unsupported CRDTData type: %v", pb.WhichType())
 	}
 }
 
 func encodeGCounter(c *crdt.GCounter) *internalpb.GCounterData {
-	return &internalpb.GCounterData{
-		State: c.State(),
-	}
+	gcd := &internalpb.GCounterData{}
+	gcd.SetState(c.State())
+	return gcd
 }
 
 func decodeGCounter(pb *internalpb.GCounterData) *crdt.GCounter {
@@ -136,10 +123,14 @@ func decodeGCounter(pb *internalpb.GCounterData) *crdt.GCounter {
 
 func encodePNCounter(c *crdt.PNCounter) *internalpb.PNCounterData {
 	inc, dec := c.State()
-	return &internalpb.PNCounterData{
-		Increments: &internalpb.GCounterData{State: inc},
-		Decrements: &internalpb.GCounterData{State: dec},
-	}
+	gcd := &internalpb.GCounterData{}
+	gcd.SetState(inc)
+	gcd2 := &internalpb.GCounterData{}
+	gcd2.SetState(dec)
+	pncd := &internalpb.PNCounterData{}
+	pncd.SetIncrements(gcd)
+	pncd.SetDecrements(gcd2)
+	return pncd
 }
 
 func decodePNCounter(pb *internalpb.PNCounterData) *crdt.PNCounter {
@@ -150,9 +141,9 @@ func decodePNCounter(pb *internalpb.PNCounterData) *crdt.PNCounter {
 }
 
 func encodeFlag(f *crdt.Flag) *internalpb.FlagData {
-	return &internalpb.FlagData{
-		Enabled: f.Enabled(),
-	}
+	flagData := &internalpb.FlagData{}
+	flagData.SetEnabled(f.Enabled())
+	return flagData
 }
 
 func decodeFlag(pb *internalpb.FlagData) *crdt.Flag {
@@ -167,11 +158,11 @@ func encodeLWWRegister(r *crdt.LWWRegister, serializer remote.Serializer) (*inte
 	if err != nil {
 		return nil, fmt.Errorf("encode LWWRegister value: %w", err)
 	}
-	return &internalpb.LWWRegisterData{
-		Value:          val,
-		TimestampNanos: r.Timestamp(),
-		NodeId:         r.NodeID(),
-	}, nil
+	lwwrd := &internalpb.LWWRegisterData{}
+	lwwrd.SetValue(val)
+	lwwrd.SetTimestampNanos(r.Timestamp())
+	lwwrd.SetNodeId(r.NodeID())
+	return lwwrd, nil
 }
 
 func decodeLWWRegister(pb *internalpb.LWWRegisterData, serializer remote.Serializer) (*crdt.LWWRegister, error) {
@@ -207,16 +198,16 @@ func encodeMVRegister(r *crdt.MVRegister, serializer remote.Serializer) (*intern
 		if err != nil {
 			return nil, fmt.Errorf("encode MVRegister entry: %w", err)
 		}
-		pbEntries = append(pbEntries, &internalpb.MVRegisterData_MVRegisterEntry{
-			Value:   val,
-			NodeId:  e.Dot.NodeID,
-			Counter: e.Dot.Counter,
-		})
+		mm := &internalpb.MVRegisterData_MVRegisterEntry{}
+		mm.SetValue(val)
+		mm.SetNodeId(e.Dot.NodeID)
+		mm.SetCounter(e.Dot.Counter)
+		pbEntries = append(pbEntries, mm)
 	}
-	return &internalpb.MVRegisterData{
-		Entries: pbEntries,
-		Clock:   clock,
-	}, nil
+	mvrd := &internalpb.MVRegisterData{}
+	mvrd.SetEntries(pbEntries)
+	mvrd.SetClock(clock)
+	return mvrd, nil
 }
 
 func decodeMVRegister(pb *internalpb.MVRegisterData, serializer remote.Serializer) (*crdt.MVRegister, error) {
@@ -255,16 +246,16 @@ func encodeORMap(m *crdt.ORMap, serializer remote.Serializer) (*internalpb.ORMap
 		if err != nil {
 			return nil, fmt.Errorf("failed to encode ORMap key=%v: %w", k, err)
 		}
-		pbEntries = append(pbEntries, &internalpb.ORMapData_ORMapEntry{
-			Key:   keyBytes,
-			Value: valData,
-		})
+		oo := &internalpb.ORMapData_ORMapEntry{}
+		oo.SetKey(keyBytes)
+		oo.SetValue(valData)
+		pbEntries = append(pbEntries, oo)
 	}
 
-	return &internalpb.ORMapData{
-		Entries: pbEntries,
-		KeySet:  keySet,
-	}, nil
+	oRMapData := &internalpb.ORMapData{}
+	oRMapData.SetEntries(pbEntries)
+	oRMapData.SetKeySet(keySet)
+	return oRMapData, nil
 }
 
 func decodeORMap(pb *internalpb.ORMapData, serializer remote.Serializer) (*crdt.ORMap, error) {
@@ -305,24 +296,24 @@ func encodeORSetEntries(entries []crdt.Entry, clock map[string]uint64, serialize
 	for _, e := range entries {
 		pbDots := make([]*internalpb.ORSetData_ORSetDot, len(e.Dots))
 		for i, d := range e.Dots {
-			pbDots[i] = &internalpb.ORSetData_ORSetDot{
-				NodeId:  d.NodeID,
-				Counter: d.Counter,
-			}
+			oo := &internalpb.ORSetData_ORSetDot{}
+			oo.SetNodeId(d.NodeID)
+			oo.SetCounter(d.Counter)
+			pbDots[i] = oo
 		}
 		elem, err := serializer.Serialize(e.Element)
 		if err != nil {
 			return nil, fmt.Errorf("encode ORSet element: %w", err)
 		}
-		pbEntries = append(pbEntries, &internalpb.ORSetData_ORSetEntry{
-			Element: elem,
-			Dots:    pbDots,
-		})
+		oo := &internalpb.ORSetData_ORSetEntry{}
+		oo.SetElement(elem)
+		oo.SetDots(pbDots)
+		pbEntries = append(pbEntries, oo)
 	}
-	return &internalpb.ORSetData{
-		Entries: pbEntries,
-		Clock:   clock,
-	}, nil
+	oRSetData := &internalpb.ORSetData{}
+	oRSetData.SetEntries(pbEntries)
+	oRSetData.SetClock(clock)
+	return oRSetData, nil
 }
 
 func decodeORSetEntries(pb *internalpb.ORSetData, serializer remote.Serializer) ([]crdt.Entry, error) {

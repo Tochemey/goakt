@@ -369,7 +369,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "test-address"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "test-address"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		remotingMock.EXPECT().
@@ -396,7 +396,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "test-address"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "test-address"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		// One fails, one succeeds
@@ -432,7 +432,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "found"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "found"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		remotingMock.EXPECT().
@@ -467,7 +467,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "found"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "found"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		// Only the active DC should be queried
@@ -493,7 +493,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "found"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "found"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		// Only valid endpoint should be queried
@@ -519,7 +519,7 @@ func TestAskGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		responseMsg := &internalpb.RemoteLookupResponse{Address: "found"}
+		responseMsg := internalpb.RemoteLookupResponse_builder{Address: "found"}.Build()
 		anyResp, _ := anypb.New(responseMsg)
 
 		remotingMock.EXPECT().

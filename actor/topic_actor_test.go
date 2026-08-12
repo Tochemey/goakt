@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -708,8 +709,12 @@ func TestTopicActor(t *testing.T) {
 		// a peer that cannot be reached fails the fan-out rather than being
 		// silently skipped. Query the peer helper directly with an address
 		// nothing is listening on to exercise that path deterministically.
+		// The reply address and ask timeout are supplied by the caller (not
+		// read off the actor), so this drives the helper without racing the
+		// actor's own goroutine.
 		ta := actorSystem.TopicActor().Actor().(*topicActor)
-		_, err := ta.queryRemotePeerInstanceCount(ctx, []remotePeer{{host: "127.0.0.1", port: 1}}, "test-topic")
+		from := address.NoSender()
+		_, err := ta.queryRemotePeerInstanceCount(ctx, from, time.Second, []remotePeer{{host: "127.0.0.1", port: 1}}, "test-topic")
 		require.Error(t, err)
 
 		require.NoError(t, actorSystem.Stop(ctx))

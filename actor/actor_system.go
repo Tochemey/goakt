@@ -932,7 +932,7 @@ type actorSystem struct {
 	remoting        remoteclient.Client
 
 	// Specifies the remoting server
-	remoteServer *inet.ProtoServer // Proto TCP server
+	remoteServer *inet.RemotingServer
 	remoteConfig *remote.Config
 
 	// coalescedFailureQueue receives whole-batch failures surfaced by the
@@ -2324,14 +2324,32 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 // it passes a non-nil from and resolveDispatch respects it verbatim.
 // Otherwise the sender carried on the wire RemoteMessage is materialized.
 func (x *actorSystem) handleRemoteTell(ctx context.Context, from *PID, to *PID, message any) error {
+	return x.handleRemoteTellHeld(ctx, from, to, message, nil)
+}
+
+// handleRemoteTellHeld dispatches a remote tell whose flow-control credit
+// share is hold (nil on paths without leasing). Ownership of hold transfers
+// to the delivered ReceiveContext only on a nil return: the context releases
+// it when the message leaves the mailbox. On error the caller keeps
+// ownership and must release.
+func (x *actorSystem) handleRemoteTellHeld(ctx context.Context, from *PID, to *PID, message any, hold *inet.CreditShare) error {
 	if from == nil {
 		from = x.NoSender()
 	}
+
 	decoded, resolvedFrom, err := resolveDispatch(to, from, message)
 	if err != nil {
 		return err
 	}
-	to.doReceive(toReceiveContext(ctx, resolvedFrom, to, decoded, true))
+
+	receiveCtx := toReceiveContext(ctx, resolvedFrom, to, decoded, true)
+
+	if hold != nil {
+		receiveCtx.remoteHold = hold
+		to.trackRemoteHold(hold)
+	}
+
+	to.doReceive(receiveCtx)
 	return nil
 }
 
@@ -2919,6 +2937,16 @@ func (x *actorSystem) setupRemoting() error {
 		remoteclient.WithClientDialTimeout(x.remoteConfig.DialTimeout()),
 		// set the keep alive interval for the remoting client
 		remoteclient.WithClientKeepAlive(x.remoteConfig.KeepAlive()),
+		remoteclient.WithClientProtocolPin(x.remoteConfig.ProtocolPin()),
+		remoteclient.WithClientWriteTimeout(x.remoteConfig.WriteTimeout()),
+		remoteclient.WithClientReadIdleTimeout(x.remoteConfig.ReadIdleTimeout()),
+		remoteclient.WithClientOrdinaryLanes(x.remoteConfig.OrdinaryLanes()),
+		remoteclient.WithClientLargeMessageDestinations(x.remoteConfig.LargeMessageDestinations()),
+		remoteclient.WithClientMaxConcurrentLargeTransfers(x.remoteConfig.MaxConcurrentLargeTransfers()),
+		remoteclient.WithClientMaxFrameSize(x.remoteConfig.MaxFrameSize()),
+		remoteclient.WithClientMaxMessageSize(x.remoteConfig.MaxMessageSize()),
+		remoteclient.WithClientChunkSize(x.remoteConfig.ChunkSize()),
+		remoteclient.WithClientInitialCredits(x.remoteConfig.CreditWindow()),
 		// Register built-in serializers for native actor message types.
 		// These are internal and not visible to application code.
 		remoteclient.WithClientSerializers(new(PoisonPill), &poisonPillSerializer{}),
@@ -2958,7 +2986,7 @@ func (x *actorSystem) setupRemoting() error {
 	x.startCoalescedFailureDrain()
 	opts = append(opts,
 		remoteclient.WithSendCoalescing(remoteSendCoalescingMaxBatch),
-		remoteclient.WithCoalescingErrorHandler(x.enqueueCoalescedFailure),
+		remoteclient.WithTellFailureHandler(x.enqueueCoalescedFailure),
 	)
 
 	x.remoting = remoteclient.NewClient(opts...)
@@ -3337,6 +3365,15 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	nodeLeft := event.Payload.(*cluster.NodeLeftEvent)
 	x.logger.Infof("node=%s detected node left event: node=%s", x.String(), nodeLeft.Address)
+	if x.remoting != nil {
+		if port, ok := x.peerRemotingPort(nodeLeft.Address); ok {
+			if hostPort, ok := address.HostPortOf(nodeLeft.Address); ok {
+				if host, _, err := net.SplitHostPort(hostPort); err == nil {
+					x.remoting.ClosePeer(host, port)
+				}
+			}
+		}
+	}
 
 	// The departed node is already gone from membership, so prune its cached
 	// remoting port once its departure has been fully handled. Doing so keeps
@@ -3428,7 +3465,9 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 
 		// dispatch to the relocator; its mailbox is the queue, so a burst of
 		// node departures never blocks the cluster events loop
-		if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+		rebalance := &internalpb.Rebalance{}
+		rebalance.SetPeerState(peerState)
+		if err := x.systemGuardian.Tell(ctx, x.relocator, rebalance); err != nil {
 			x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
 			x.endRelocation(nodeLeft.Address)
 		}
@@ -3546,7 +3585,9 @@ func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress 
 		return
 	}
 
-	if err := x.systemGuardian.Tell(ctx, x.relocator, &internalpb.Rebalance{PeerState: peerState}); err != nil {
+	rebalance := &internalpb.Rebalance{}
+	rebalance.SetPeerState(peerState)
+	if err := x.systemGuardian.Tell(ctx, x.relocator, rebalance); err != nil {
 		x.logger.Errorf("failed to send rebalance to relocator: %v (hint: check relocator state)", err)
 		x.endRelocation(peerAddress)
 	}
@@ -3678,13 +3719,13 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 			x.String(), peerAddress, host, remotingPort, len(wireActors), len(wireGrains))
 	}
 
-	return &internalpb.PeerState{
-		Host:         host,
-		PeersPort:    peersPort32,
-		RemotingPort: remotingPort32,
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}, true
+	peerState := &internalpb.PeerState{}
+	peerState.SetHost(host)
+	peerState.SetPeersPort(peersPort32)
+	peerState.SetRemotingPort(remotingPort32)
+	peerState.SetActors(wireActors)
+	peerState.SetGrains(wireGrains)
+	return peerState, true
 }
 
 // publishRelocationStarted emits a RelocationStarted event for a departed node
@@ -4717,13 +4758,12 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 		wireGrains[grain.getIdentity().String()] = wireGrain
 	}
 
-	peerState := &internalpb.PeerState{
-		Host:         x.Host(),
-		PeersPort:    int32(x.clusterNode.PeersPort), // nolint
-		RemotingPort: int32(x.Port()),                // nolint
-		Actors:       wireActors,
-		Grains:       wireGrains,
-	}
+	peerState := &internalpb.PeerState{}
+	peerState.SetHost(x.Host())
+	peerState.SetPeersPort(int32(x.clusterNode.PeersPort)) // nolint
+	peerState.SetRemotingPort(int32(x.Port()))             // nolint
+	peerState.SetActors(wireActors)
+	peerState.SetGrains(wireGrains)
 
 	return peerState, nil
 }
@@ -4783,9 +4823,8 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 		go func() {
 			// Get pooled proto TCP client
 			client := remoting.NetClient(peer.Host, peer.RemotingPort)
-			request := &internalpb.PersistPeerStateRequest{
-				PeerState: peerState,
-			}
+			request := &internalpb.PersistPeerStateRequest{}
+			request.SetPeerState(peerState)
 
 			// Send request using proto TCP
 			resp, err := client.SendProto(rpcCtx, request)

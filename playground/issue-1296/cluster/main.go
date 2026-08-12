@@ -134,7 +134,9 @@ func (x *OrderPublisher) flush(ctx *actor.ReceiveContext) {
 	}
 
 	order := x.pending[0]
-	produced, err := actor.NewProduced(x.grant, order.OrderID, &testpb.Reply{Content: order.OrderID})
+	reply := &testpb.Reply{}
+	reply.SetContent(order.OrderID)
+	produced, err := actor.NewProduced(x.grant, order.OrderID, reply)
 	if err != nil {
 		ctx.Err(err)
 		return

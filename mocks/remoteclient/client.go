@@ -78,6 +78,52 @@ func (_c *Client_Close_Call) RunAndReturn(run func()) *Client_Close_Call {
 	return _c
 }
 
+// ClosePeer provides a mock function for the type Client.
+func (_mock *Client) ClosePeer(host string, port int) {
+	_mock.Called(host, port)
+	return
+}
+
+// Client_ClosePeer_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ClosePeer'
+type Client_ClosePeer_Call struct {
+	*mock.Call
+}
+
+// ClosePeer is a helper method to define mock.On call
+//   - host string
+//   - port int
+func (_e *Client_Expecter) ClosePeer(host interface{}, port interface{}) *Client_ClosePeer_Call {
+	return &Client_ClosePeer_Call{Call: _e.mock.On("ClosePeer", host, port)}
+}
+
+func (_c *Client_ClosePeer_Call) Run(run func(host string, port int)) *Client_ClosePeer_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 string
+		if args[0] != nil {
+			arg0 = args[0].(string)
+		}
+		var arg1 int
+		if args[1] != nil {
+			arg1 = args[1].(int)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Client_ClosePeer_Call) Return() *Client_ClosePeer_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *Client_ClosePeer_Call) RunAndReturn(run func(host string, port int)) *Client_ClosePeer_Call {
+	_c.Run(run)
+	return _c
+}
+
 // Compression provides a mock function for the type Client
 func (_mock *Client) Compression() remote.Compression {
 	ret := _mock.Called()

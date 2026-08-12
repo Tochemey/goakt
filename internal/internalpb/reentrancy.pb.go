@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -71,11 +70,6 @@ func (x ReentrancyMode) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ReentrancyMode.Descriptor instead.
-func (ReentrancyMode) EnumDescriptor() ([]byte, []int) {
-	return file_internal_reentrancy_proto_rawDescGZIP(), []int{0}
-}
-
 // ReplyKind identifies the type of process awaiting the response.
 type ReplyKind int32
 
@@ -125,20 +119,13 @@ func (x ReplyKind) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use ReplyKind.Descriptor instead.
-func (ReplyKind) EnumDescriptor() ([]byte, []int) {
-	return file_internal_reentrancy_proto_rawDescGZIP(), []int{1}
-}
-
 // ReentrancyConfig captures the reentrancy settings for an actor.
 type ReentrancyConfig struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// mode defines the reentrancy behavior.
-	Mode ReentrancyMode `protobuf:"varint,1,opt,name=mode,proto3,enum=internalpb.ReentrancyMode" json:"mode,omitempty"`
-	// max_in_flight limits outstanding async requests. Zero means unlimited.
-	MaxInFlight   uint32 `protobuf:"varint,2,opt,name=max_in_flight,json=maxInFlight,proto3" json:"max_in_flight,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Mode        ReentrancyMode         `protobuf:"varint,1,opt,name=mode,proto3,enum=internalpb.ReentrancyMode"`
+	xxx_hidden_MaxInFlight uint32                 `protobuf:"varint,2,opt,name=max_in_flight,json=maxInFlight,proto3"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ReentrancyConfig) Reset() {
@@ -166,38 +153,55 @@ func (x *ReentrancyConfig) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ReentrancyConfig.ProtoReflect.Descriptor instead.
-func (*ReentrancyConfig) Descriptor() ([]byte, []int) {
-	return file_internal_reentrancy_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *ReentrancyConfig) GetMode() ReentrancyMode {
 	if x != nil {
-		return x.Mode
+		return x.xxx_hidden_Mode
 	}
 	return ReentrancyMode_REENTRANCY_MODE_OFF
 }
 
 func (x *ReentrancyConfig) GetMaxInFlight() uint32 {
 	if x != nil {
-		return x.MaxInFlight
+		return x.xxx_hidden_MaxInFlight
 	}
 	return 0
 }
 
+func (x *ReentrancyConfig) SetMode(v ReentrancyMode) {
+	x.xxx_hidden_Mode = v
+}
+
+func (x *ReentrancyConfig) SetMaxInFlight(v uint32) {
+	x.xxx_hidden_MaxInFlight = v
+}
+
+type ReentrancyConfig_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// mode defines the reentrancy behavior.
+	Mode ReentrancyMode
+	// max_in_flight limits outstanding async requests. Zero means unlimited.
+	MaxInFlight uint32
+}
+
+func (b0 ReentrancyConfig_builder) Build() *ReentrancyConfig {
+	m0 := &ReentrancyConfig{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Mode = b.Mode
+	x.xxx_hidden_MaxInFlight = b.MaxInFlight
+	return m0
+}
+
 // AsyncRequest wraps a user message with correlation and reply metadata.
 type AsyncRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// correlation_id links requests to responses.
-	CorrelationId string `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	// reply_to identifies the requester, interpreted according to reply_kind.
-	ReplyTo string `protobuf:"bytes,2,opt,name=reply_to,json=replyTo,proto3" json:"reply_to,omitempty"`
-	// message is the original user payload.
-	Message *anypb.Any `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	// reply_kind selects how reply_to is interpreted.
-	ReplyKind     ReplyKind `protobuf:"varint,4,opt,name=reply_kind,json=replyKind,proto3,enum=internalpb.ReplyKind" json:"reply_kind,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_CorrelationId string                 `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3"`
+	xxx_hidden_ReplyTo       string                 `protobuf:"bytes,2,opt,name=reply_to,json=replyTo,proto3"`
+	xxx_hidden_Message       *anypb.Any             `protobuf:"bytes,3,opt,name=message,proto3"`
+	xxx_hidden_ReplyKind     ReplyKind              `protobuf:"varint,4,opt,name=reply_kind,json=replyKind,proto3,enum=internalpb.ReplyKind"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *AsyncRequest) Reset() {
@@ -225,50 +229,93 @@ func (x *AsyncRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AsyncRequest.ProtoReflect.Descriptor instead.
-func (*AsyncRequest) Descriptor() ([]byte, []int) {
-	return file_internal_reentrancy_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *AsyncRequest) GetCorrelationId() string {
 	if x != nil {
-		return x.CorrelationId
+		return x.xxx_hidden_CorrelationId
 	}
 	return ""
 }
 
 func (x *AsyncRequest) GetReplyTo() string {
 	if x != nil {
-		return x.ReplyTo
+		return x.xxx_hidden_ReplyTo
 	}
 	return ""
 }
 
 func (x *AsyncRequest) GetMessage() *anypb.Any {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
 func (x *AsyncRequest) GetReplyKind() ReplyKind {
 	if x != nil {
-		return x.ReplyKind
+		return x.xxx_hidden_ReplyKind
 	}
 	return ReplyKind_REPLY_KIND_ACTOR
 }
 
+func (x *AsyncRequest) SetCorrelationId(v string) {
+	x.xxx_hidden_CorrelationId = v
+}
+
+func (x *AsyncRequest) SetReplyTo(v string) {
+	x.xxx_hidden_ReplyTo = v
+}
+
+func (x *AsyncRequest) SetMessage(v *anypb.Any) {
+	x.xxx_hidden_Message = v
+}
+
+func (x *AsyncRequest) SetReplyKind(v ReplyKind) {
+	x.xxx_hidden_ReplyKind = v
+}
+
+func (x *AsyncRequest) HasMessage() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Message != nil
+}
+
+func (x *AsyncRequest) ClearMessage() {
+	x.xxx_hidden_Message = nil
+}
+
+type AsyncRequest_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// correlation_id links requests to responses.
+	CorrelationId string
+	// reply_to identifies the requester, interpreted according to reply_kind.
+	ReplyTo string
+	// message is the original user payload.
+	Message *anypb.Any
+	// reply_kind selects how reply_to is interpreted.
+	ReplyKind ReplyKind
+}
+
+func (b0 AsyncRequest_builder) Build() *AsyncRequest {
+	m0 := &AsyncRequest{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_CorrelationId = b.CorrelationId
+	x.xxx_hidden_ReplyTo = b.ReplyTo
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_ReplyKind = b.ReplyKind
+	return m0
+}
+
 // AsyncResponse delivers a response or error for an AsyncRequest.
 type AsyncResponse struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// correlation_id matches the original AsyncRequest.
-	CorrelationId string `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	// message is the successful response payload.
-	Message *anypb.Any `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// error is set when the request fails or times out.
-	Error         string `protobuf:"bytes,3,opt,name=error,proto3" json:"error,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                    protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_CorrelationId string                 `protobuf:"bytes,1,opt,name=correlation_id,json=correlationId,proto3"`
+	xxx_hidden_Message       *anypb.Any             `protobuf:"bytes,2,opt,name=message,proto3"`
+	xxx_hidden_Error         string                 `protobuf:"bytes,3,opt,name=error,proto3"`
+	unknownFields            protoimpl.UnknownFields
+	sizeCache                protoimpl.SizeCache
 }
 
 func (x *AsyncResponse) Reset() {
@@ -296,30 +343,69 @@ func (x *AsyncResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AsyncResponse.ProtoReflect.Descriptor instead.
-func (*AsyncResponse) Descriptor() ([]byte, []int) {
-	return file_internal_reentrancy_proto_rawDescGZIP(), []int{2}
-}
-
 func (x *AsyncResponse) GetCorrelationId() string {
 	if x != nil {
-		return x.CorrelationId
+		return x.xxx_hidden_CorrelationId
 	}
 	return ""
 }
 
 func (x *AsyncResponse) GetMessage() *anypb.Any {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
 func (x *AsyncResponse) GetError() string {
 	if x != nil {
-		return x.Error
+		return x.xxx_hidden_Error
 	}
 	return ""
+}
+
+func (x *AsyncResponse) SetCorrelationId(v string) {
+	x.xxx_hidden_CorrelationId = v
+}
+
+func (x *AsyncResponse) SetMessage(v *anypb.Any) {
+	x.xxx_hidden_Message = v
+}
+
+func (x *AsyncResponse) SetError(v string) {
+	x.xxx_hidden_Error = v
+}
+
+func (x *AsyncResponse) HasMessage() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Message != nil
+}
+
+func (x *AsyncResponse) ClearMessage() {
+	x.xxx_hidden_Message = nil
+}
+
+type AsyncResponse_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// correlation_id matches the original AsyncRequest.
+	CorrelationId string
+	// message is the successful response payload.
+	Message *anypb.Any
+	// error is set when the request fails or times out.
+	Error string
+}
+
+func (b0 AsyncResponse_builder) Build() *AsyncResponse {
+	m0 := &AsyncResponse{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_CorrelationId = b.CorrelationId
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_Error = b.Error
+	return m0
 }
 
 var File_internal_reentrancy_proto protoreflect.FileDescriptor
@@ -353,18 +439,6 @@ const file_internal_reentrancy_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_reentrancy_proto_rawDescOnce sync.Once
-	file_internal_reentrancy_proto_rawDescData []byte
-)
-
-func file_internal_reentrancy_proto_rawDescGZIP() []byte {
-	file_internal_reentrancy_proto_rawDescOnce.Do(func() {
-		file_internal_reentrancy_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_reentrancy_proto_rawDesc), len(file_internal_reentrancy_proto_rawDesc)))
-	})
-	return file_internal_reentrancy_proto_rawDescData
-}
 
 var file_internal_reentrancy_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_reentrancy_proto_msgTypes = make([]protoimpl.MessageInfo, 3)

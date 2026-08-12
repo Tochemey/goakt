@@ -176,12 +176,11 @@ func (d *Discovery) Register() error {
 			d.logger.Debugf("received identification request from peer[name=%s, host=%s, port=%d]",
 				message.GetName(), message.GetHost(), message.GetPort())
 
-			response := &internalpb.NatsMessage{
-				Host:        d.config.Host,
-				Port:        int32(d.config.DiscoveryPort),
-				Name:        d.address,
-				MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE,
-			}
+			response := &internalpb.NatsMessage{}
+			response.SetHost(d.config.Host)
+			response.SetPort(int32(d.config.DiscoveryPort))
+			response.SetName(d.address)
+			response.SetMessageType(internalpb.NatsMessageType_NATS_MESSAGE_TYPE_RESPONSE)
 
 			bytea, _ := proto.Marshal(response)
 			if err := d.connection.Publish(msg.Reply, bytea); err != nil {
@@ -226,12 +225,11 @@ func (d *Discovery) deregisterLocked() error {
 	d.subscription = nil
 
 	if d.connection != nil {
-		message := &internalpb.NatsMessage{
-			Host:        d.config.Host,
-			Port:        int32(d.config.DiscoveryPort),
-			Name:        d.address,
-			MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER,
-		}
+		message := &internalpb.NatsMessage{}
+		message.SetHost(d.config.Host)
+		message.SetPort(int32(d.config.DiscoveryPort))
+		message.SetName(d.address)
+		message.SetMessageType(internalpb.NatsMessageType_NATS_MESSAGE_TYPE_DEREGISTER)
 
 		bytea, _ := proto.Marshal(message)
 		return d.connection.Publish(d.config.NatsSubject, bytea)
@@ -272,12 +270,11 @@ func (d *Discovery) DiscoverPeers() (peers []string, err error) {
 		}
 	}()
 
-	request := &internalpb.NatsMessage{
-		Host:        d.config.Host,
-		Port:        int32(d.config.DiscoveryPort),
-		Name:        d.address,
-		MessageType: internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST,
-	}
+	request := &internalpb.NatsMessage{}
+	request.SetHost(d.config.Host)
+	request.SetPort(int32(d.config.DiscoveryPort))
+	request.SetName(d.address)
+	request.SetMessageType(internalpb.NatsMessageType_NATS_MESSAGE_TYPE_REQUEST)
 
 	bytea, _ := proto.Marshal(request)
 	if err = conn.PublishRequest(d.config.NatsSubject, inbox, bytea); err != nil {

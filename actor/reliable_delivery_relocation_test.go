@@ -274,7 +274,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 
 	for i := 1; i <= 2; i++ {
 		id := fmt.Sprintf("job-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, worker, 2)
@@ -321,7 +321,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 	// delivery resumes across the relocation to the surviving worker. Per-worker
 	// sequences restart with the new producer session, so assert by MessageID
 	// rather than distinct sequence count.
-	require.NoError(t, Tell(ctx, relocated, &produceSubmission{messageID: "job-3", payload: &testpb.Reply{Content: "job-3"}}))
+	require.NoError(t, Tell(ctx, relocated, &produceSubmission{messageID: "job-3", payload: testpb.Reply_builder{Content: "job-3"}.Build()}))
 
 	require.Eventually(t, func() bool {
 		for _, delivery := range distinctDeliveries(awaitDeliveriesSnapshot(t, ctx, worker)) {
@@ -359,7 +359,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 
 	for i := 1; i <= 2; i++ {
 		id := fmt.Sprintf("ord-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 2)
@@ -408,7 +408,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 	}, 20*time.Second, 100*time.Millisecond, "the departed controller record must be withdrawn")
 
 	// delivery resumes across the relocation on the same flow
-	require.NoError(t, Tell(ctx, relocated, &produceSubmission{messageID: "ord-3", payload: &testpb.Reply{Content: "ord-3"}}))
+	require.NoError(t, Tell(ctx, relocated, &produceSubmission{messageID: "ord-3", payload: testpb.Reply_builder{Content: "ord-3"}.Build()}))
 
 	deliveries = awaitDeliveries(t, ctx, consumer, 3)
 	assert.Equal(t, "ord-3", deliveries[len(deliveries)-1].MessageID())
@@ -426,7 +426,7 @@ func TestReliableConsumerRelocation(t *testing.T) {
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 	deliveries := awaitDeliveries(t, ctx, consumer, 1)
 	require.Len(t, deliveries, 1)
 
@@ -437,7 +437,7 @@ func TestReliableConsumerRelocation(t *testing.T) {
 	relocated := awaitLocalEndpoint(t, []*actorSystem{node1, node3}, "orders-consumer")
 	require.NotNil(t, relocated.reliableDelivery)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: &testpb.Reply{Content: "ord-2"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: testpb.Reply_builder{Content: "ord-2"}.Build()}))
 
 	// the fresh consumer instance starts empty; the next delivery proves the
 	// relocated flow is live end to end

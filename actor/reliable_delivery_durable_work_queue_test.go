@@ -268,7 +268,7 @@ func TestWorkPullingDurableEndToEnd(t *testing.T) {
 
 	for i := 1; i <= 2; i++ {
 		id := fmt.Sprintf("job-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, worker, 2)
@@ -286,7 +286,7 @@ func TestWorkPullingDurableReloadRedispatches(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 	queue := &mockDurableWorkQueue{}
 
-	reply := &testpb.Reply{Content: "job-1"}
+	reply := testpb.Reply_builder{Content: "job-1"}.Build()
 	serializer := system.getRemoting().Serializer(reply)
 	require.NotNil(t, serializer)
 	frame, err := serializer.Serialize(reply)

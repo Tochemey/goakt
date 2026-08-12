@@ -238,13 +238,11 @@ func TestEncodeCRDTData_ORMap(t *testing.T) {
 	})
 
 	t.Run("nil key set in proto", func(t *testing.T) {
-		pb := &internalpb.CRDTData{
-			Type: &internalpb.CRDTData_OrMap{
-				OrMap: &internalpb.ORMapData{
-					KeySet: nil,
-				},
-			},
-		}
+		pb := internalpb.CRDTData_builder{
+			OrMap: internalpb.ORMapData_builder{
+				KeySet: nil,
+			}.Build(),
+		}.Build()
 		decoded, err := DecodeCRDT(pb, s)
 		require.NoError(t, err)
 		assert.Equal(t, 0, decoded.(*crdt.ORMap).Len())
@@ -275,13 +273,11 @@ func TestEncodeCRDTData_UnsupportedType(t *testing.T) {
 
 func TestDecodeCRDTData_LWWRegisterBadValue(t *testing.T) {
 	s := crdtTestSerializer()
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_LwwRegister{
-			LwwRegister: &internalpb.LWWRegisterData{
-				Value: []byte{0xff, 0xfe},
-			},
-		},
-	}
+	pb := internalpb.CRDTData_builder{
+		LwwRegister: internalpb.LWWRegisterData_builder{
+			Value: []byte{0xff, 0xfe},
+		}.Build(),
+	}.Build()
 	_, err := DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode LWWRegister value")
@@ -289,15 +285,13 @@ func TestDecodeCRDTData_LWWRegisterBadValue(t *testing.T) {
 
 func TestDecodeCRDTData_ORSetBadElement(t *testing.T) {
 	s := crdtTestSerializer()
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_OrSet{
-			OrSet: &internalpb.ORSetData{
-				Entries: []*internalpb.ORSetData_ORSetEntry{
-					{Element: []byte{0xff, 0xfe}},
-				},
+	pb := internalpb.CRDTData_builder{
+		OrSet: internalpb.ORSetData_builder{
+			Entries: []*internalpb.ORSetData_ORSetEntry{
+				internalpb.ORSetData_ORSetEntry_builder{Element: []byte{0xff, 0xfe}}.Build(),
 			},
-		},
-	}
+		}.Build(),
+	}.Build()
 	_, err := DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode ORSet element")
@@ -305,15 +299,13 @@ func TestDecodeCRDTData_ORSetBadElement(t *testing.T) {
 
 func TestDecodeCRDTData_MVRegisterBadEntry(t *testing.T) {
 	s := crdtTestSerializer()
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_MvRegister{
-			MvRegister: &internalpb.MVRegisterData{
-				Entries: []*internalpb.MVRegisterData_MVRegisterEntry{
-					{Value: []byte{0xff, 0xfe}, NodeId: "n1", Counter: 1},
-				},
+	pb := internalpb.CRDTData_builder{
+		MvRegister: internalpb.MVRegisterData_builder{
+			Entries: []*internalpb.MVRegisterData_MVRegisterEntry{
+				internalpb.MVRegisterData_MVRegisterEntry_builder{Value: []byte{0xff, 0xfe}, NodeId: "n1", Counter: 1}.Build(),
 			},
-		},
-	}
+		}.Build(),
+	}.Build()
 	_, err := DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode MVRegister entry")
@@ -321,20 +313,16 @@ func TestDecodeCRDTData_MVRegisterBadEntry(t *testing.T) {
 
 func TestDecodeCRDTData_ORMapBadKey(t *testing.T) {
 	s := crdtTestSerializer()
-	gcData := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_GCounter{
-			GCounter: &internalpb.GCounterData{State: map[string]uint64{"n1": 1}},
-		},
-	}
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_OrMap{
-			OrMap: &internalpb.ORMapData{
-				Entries: []*internalpb.ORMapData_ORMapEntry{
-					{Key: []byte{0xff, 0xfe}, Value: gcData},
-				},
+	gcData := internalpb.CRDTData_builder{
+		GCounter: internalpb.GCounterData_builder{State: map[string]uint64{"n1": 1}}.Build(),
+	}.Build()
+	pb := internalpb.CRDTData_builder{
+		OrMap: internalpb.ORMapData_builder{
+			Entries: []*internalpb.ORMapData_ORMapEntry{
+				internalpb.ORMapData_ORMapEntry_builder{Key: []byte{0xff, 0xfe}, Value: gcData}.Build(),
 			},
-		},
-	}
+		}.Build(),
+	}.Build()
 	_, err := DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode ORMap key")
@@ -345,15 +333,13 @@ func TestDecodeCRDTData_ORMapBadValue(t *testing.T) {
 	keyBytes, err := s.Serialize("mykey")
 	require.NoError(t, err)
 
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_OrMap{
-			OrMap: &internalpb.ORMapData{
-				Entries: []*internalpb.ORMapData_ORMapEntry{
-					{Key: keyBytes, Value: nil},
-				},
+	pb := internalpb.CRDTData_builder{
+		OrMap: internalpb.ORMapData_builder{
+			Entries: []*internalpb.ORMapData_ORMapEntry{
+				internalpb.ORMapData_ORMapEntry_builder{Key: keyBytes, Value: nil}.Build(),
 			},
-		},
-	}
+		}.Build(),
+	}.Build()
 	_, err = DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode ORMap value")
@@ -361,17 +347,15 @@ func TestDecodeCRDTData_ORMapBadValue(t *testing.T) {
 
 func TestDecodeCRDTData_ORMapBadKeySet(t *testing.T) {
 	s := crdtTestSerializer()
-	pb := &internalpb.CRDTData{
-		Type: &internalpb.CRDTData_OrMap{
-			OrMap: &internalpb.ORMapData{
-				KeySet: &internalpb.ORSetData{
-					Entries: []*internalpb.ORSetData_ORSetEntry{
-						{Element: []byte{0xff, 0xfe}},
-					},
+	pb := internalpb.CRDTData_builder{
+		OrMap: internalpb.ORMapData_builder{
+			KeySet: internalpb.ORSetData_builder{
+				Entries: []*internalpb.ORSetData_ORSetEntry{
+					internalpb.ORSetData_ORSetEntry_builder{Element: []byte{0xff, 0xfe}}.Build(),
 				},
-			},
-		},
-	}
+			}.Build(),
+		}.Build(),
+	}.Build()
 	_, err := DecodeCRDT(pb, s)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode ORMap key set")

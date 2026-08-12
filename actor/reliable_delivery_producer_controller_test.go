@@ -509,7 +509,7 @@ func (x *producerControllerHarness) sequencedEmissions() []*commands.SequencedMe
 // fresh credit and the storage acknowledgement of exactly this message.
 func (x *producerControllerHarness) produceOne(t *testing.T, messageID string) {
 	t.Helper()
-	x.produceOneWith(t, messageID, &testpb.Reply{Content: messageID})
+	x.produceOneWith(t, messageID, testpb.Reply_builder{Content: messageID}.Build())
 }
 
 // produceOneWith drives one full producer handshake handing over payload.
@@ -685,7 +685,7 @@ func TestProducerControllerDuplicateHandshake(t *testing.T) {
 	}, 3*time.Second, 10*time.Millisecond)
 
 	// a duplicate Produced is idempotent while the store is pending
-	produced, err := NewProduced(first, "m-1", &testpb.Reply{Content: "m-1"})
+	produced, err := NewProduced(first, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 	require.NoError(t, err)
 	harness.fromProducer(t, produced)
 	harness.fromProducer(t, produced)
@@ -899,7 +899,7 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -955,7 +955,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		expected := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1011,12 +1011,12 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 
 		// pin the frame length to exactly two chunks by measuring the
 		// serializer overhead for a probe of the target content size
-		probe := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize)}
+		probe := testpb.Reply_builder{Content: strings.Repeat("x", 2*MinReliableChunkSize)}.Build()
 		probeFrame, err := harness.system.getRemoting().Serializer(probe).Serialize(probe)
 		require.NoError(t, err)
 		overhead := len(probeFrame) - 2*MinReliableChunkSize
 
-		exact := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead)}
+		exact := testpb.Reply_builder{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead)}.Build()
 		exactFrame, err := harness.system.getRemoting().Serializer(exact).Serialize(exact)
 		require.NoError(t, err)
 		require.Len(t, exactFrame, 2*MinReliableChunkSize)
@@ -1032,7 +1032,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		}
 
 		// one byte more of content splits into a third, one-byte chunk
-		over := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead+1)}
+		over := testpb.Reply_builder{Content: strings.Repeat("x", 2*MinReliableChunkSize-overhead+1)}.Build()
 		harness.produceOneWith(t, "m-over", over)
 
 		require.Eventually(t, func() bool {
@@ -1080,7 +1080,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		harness.fromConsumerController(t, request)
 
 		credit := harness.freshRequestNext(t)
-		produced, err := NewProduced(credit, "m-oversized", &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)})
+		produced, err := NewProduced(credit, "m-oversized", testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build())
 		require.NoError(t, err)
 		harness.fromProducer(t, produced)
 
@@ -1095,7 +1095,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 2*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 2*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1145,7 +1145,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1190,7 +1190,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1245,7 +1245,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1282,7 +1282,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 			return len(harness.sequencedEmissions()) >= 2*chunks
 		}, 3*time.Second, 10*time.Millisecond)
 
-		oversized := &testpb.Reply{Content: strings.Repeat("y", 20*MinReliableChunkSize)}
+		oversized := testpb.Reply_builder{Content: strings.Repeat("y", 20*MinReliableChunkSize)}.Build()
 		overFrame, err := harness.system.getRemoting().Serializer(oversized).Serialize(oversized)
 		require.NoError(t, err)
 		require.Greater(t, (len(overFrame)+MinReliableChunkSize-1)/MinReliableChunkSize, chunks+1)
@@ -1311,7 +1311,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 	t.Run("With resubmission after StoreChunked reuses the first-write batch", func(t *testing.T) {
 		_, system := newCompanionTestSystem(t)
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1345,7 +1345,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 
 		// different bytes, same business MessageID: StoreChunked returns the
 		// original batch and Accept completes the interrupted handshake
-		harness.produceOneWith(t, "m-retry", &testpb.Reply{Content: strings.Repeat("y", 3*MinReliableChunkSize)})
+		harness.produceOneWith(t, "m-retry", testpb.Reply_builder{Content: strings.Repeat("y", 3*MinReliableChunkSize)}.Build())
 
 		require.Eventually(t, func() bool {
 			_, operations, _ := queue.snapshot()
@@ -1383,7 +1383,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1425,7 +1425,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		require.NoError(t, err)
 		harness.fromConsumerController(t, request)
 
-		harness.produceOneWith(t, "m-mixed", &testpb.Reply{Content: "small"})
+		harness.produceOneWith(t, "m-mixed", testpb.Reply_builder{Content: "small"}.Build())
 
 		require.Eventually(t, func() bool {
 			return len(harness.sequencedEmissions()) == 1
@@ -1434,7 +1434,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		// same MessageID re-encoded above the chunk threshold: the stored
 		// whole message stays authoritative, so no chunk batch is appended
 		// and the emission repeats the original shape
-		stored := harness.produceAgainWith(t, "m-mixed", &testpb.Reply{Content: strings.Repeat("y", 3*MinReliableChunkSize)})
+		stored := harness.produceAgainWith(t, "m-mixed", testpb.Reply_builder{Content: strings.Repeat("y", 3*MinReliableChunkSize)}.Build())
 		assert.EqualValues(t, 1, stored.Seq())
 
 		require.Eventually(t, func() bool {
@@ -1460,7 +1460,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1479,7 +1479,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		// same MessageID re-encoded below the chunk threshold: the stored
 		// batch stays authoritative and replays through StoreChunked, so the
 		// queue never holds a second whole-message encoding
-		stored := harness.produceAgainWith(t, "m-shrunk", &testpb.Reply{Content: "tiny"})
+		stored := harness.produceAgainWith(t, "m-shrunk", testpb.Reply_builder{Content: "tiny"}.Build())
 		assert.EqualValues(t, chunks, stored.Seq())
 
 		require.Eventually(t, func() bool {
@@ -1513,7 +1513,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1570,7 +1570,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
 
-		payload := &testpb.Reply{Content: strings.Repeat("x", 3*MinReliableChunkSize)}
+		payload := testpb.Reply_builder{Content: strings.Repeat("x", 3*MinReliableChunkSize)}.Build()
 		frame, err := harness.system.getRemoting().Serializer(payload).Serialize(payload)
 		require.NoError(t, err)
 		chunks := (len(frame) + MinReliableChunkSize - 1) / MinReliableChunkSize
@@ -1600,7 +1600,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 		// threshold: Store reports the chunked-batch owner and the controller
 		// recovers the original batch through the StoreChunked retry instead of
 		// appending a second copy of the message under fresh sequences
-		stored := harness.produceAgainWith(t, "m-below", &testpb.Reply{Content: "small"})
+		stored := harness.produceAgainWith(t, "m-below", testpb.Reply_builder{Content: "small"}.Build())
 		assert.EqualValues(t, chunks, stored.Seq())
 
 		require.Eventually(t, func() bool {
@@ -1689,7 +1689,7 @@ func TestProducerControllerTerminalFailures(t *testing.T) {
 
 		// the store fails, so only the credit half of the handshake runs
 		credit := harness.latestRequestNext(t)
-		produced, err := NewProduced(credit, "m-1", &testpb.Reply{Content: "m-1"})
+		produced, err := NewProduced(credit, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 		require.NoError(t, err)
 		harness.fromProducer(t, produced)
 
@@ -1806,7 +1806,7 @@ func TestProducerControllerConsumerControllerTerminated(t *testing.T) {
 	harness.fromConsumerController(t, request)
 
 	credit := harness.latestRequestNext(t)
-	produced, err := NewProduced(credit, "m-1", &testpb.Reply{Content: "m-1"})
+	produced, err := NewProduced(credit, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 	require.NoError(t, err)
 	harness.fromProducer(t, produced)
 	stored := harness.latestStored(t)
@@ -1858,7 +1858,7 @@ func TestProducerControllerProtocolDrops(t *testing.T) {
 	credit := harness.latestRequestNext(t)
 
 	t.Run("With Produced from unexpected sender", func(t *testing.T) {
-		produced, err := NewProduced(credit, "m-unexpected", &testpb.Reply{Content: "x"})
+		produced, err := NewProduced(credit, "m-unexpected", testpb.Reply_builder{Content: "x"}.Build())
 		require.NoError(t, err)
 		harness.fromConsumerController(t, produced)
 		pause.For(150 * time.Millisecond)
@@ -1870,7 +1870,7 @@ func TestProducerControllerProtocolDrops(t *testing.T) {
 			sessionID: "stale-session",
 			token:     credit.Token(),
 			messageID: "m-stale",
-			payload:   &testpb.Reply{Content: "x"},
+			payload:   testpb.Reply_builder{Content: "x"}.Build(),
 		})
 		pause.For(150 * time.Millisecond)
 		assert.True(t, harness.producerController.IsRunning())
@@ -1897,7 +1897,7 @@ func TestProducerControllerProtocolDrops(t *testing.T) {
 	})
 
 	t.Run("With unhandled message", func(t *testing.T) {
-		require.NoError(t, Tell(harness.ctx, harness.producerController, &testpb.Reply{Content: "noise"}))
+		require.NoError(t, Tell(harness.ctx, harness.producerController, testpb.Reply_builder{Content: "noise"}.Build()))
 		pause.For(150 * time.Millisecond)
 		assert.True(t, harness.producerController.IsRunning())
 	})
@@ -1931,7 +1931,7 @@ func TestProducerControllerContractViolations(t *testing.T) {
 			sessionID: sessionID,
 			token:     uuid.NewString(),
 			messageID: "m-1",
-			payload:   &testpb.Reply{Content: "m-1"},
+			payload:   testpb.Reply_builder{Content: "m-1"}.Build(),
 		})
 
 		failure := awaitFailure(t, subscriber)
@@ -1950,7 +1950,7 @@ func TestProducerControllerContractViolations(t *testing.T) {
 			sessionID: sessionID,
 			token:     uuid.NewString(),
 			messageID: "m-1",
-			payload:   &testpb.Reply{Content: "m-1"},
+			payload:   testpb.Reply_builder{Content: "m-1"}.Build(),
 		})
 
 		failure := awaitFailure(t, subscriber)
@@ -1993,7 +1993,7 @@ func TestProducerControllerContractViolations(t *testing.T) {
 		}, 3*time.Second, 10*time.Millisecond)
 
 		// a late duplicate of the accepted handshake is ignored
-		produced, err := NewProduced(credit, "m-1", &testpb.Reply{Content: "m-1"})
+		produced, err := NewProduced(credit, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 		require.NoError(t, err)
 		harness.fromProducer(t, produced)
 		pause.For(200 * time.Millisecond)
@@ -2052,7 +2052,7 @@ func TestProducerControllerDurableQueueFailures(t *testing.T) {
 		harness.fromConsumerController(t, request)
 
 		credit := harness.latestRequestNext(t)
-		produced, err := NewProduced(credit, "m-1", &testpb.Reply{Content: "m-1"})
+		produced, err := NewProduced(credit, "m-1", testpb.Reply_builder{Content: "m-1"}.Build())
 		require.NoError(t, err)
 		harness.fromProducer(t, produced)
 		stored := harness.latestStored(t)
@@ -2180,7 +2180,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		pctx := newContext(ctx, "producerController", system)
 		err := controller.PreStart(pctx)
 		require.ErrorContains(t, err, "failed to load durable state")
-		assert.EqualValues(t, 1, controller.generation)
+		assert.EqualValues(t, 1, controller.generation.Load())
 	})
 
 	t.Run("With stale tick generation", func(t *testing.T) {
@@ -2189,7 +2189,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		require.NoError(t, controller.PreStart(nil))
 		controller.handshake = producerHandshakeCredit
 
-		stale := &producerControllerTick{generation: controller.generation + 1}
+		stale := &producerControllerTick{generation: controller.generation.Load() + 1}
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, stale)
 		controller.handleTick(rctx, stale)
 		assert.Equal(t, producerHandshakeCredit, controller.handshake)

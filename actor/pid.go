@@ -54,6 +54,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
@@ -140,6 +141,12 @@ type PID struct {
 	// mailbox holds user messages in FIFO order, drained by runTurn up
 	// to the dispatcher's per-turn throughput budget.
 	mailbox Mailbox
+
+	// remoteHolds tracks the flow-control credit shares of resident remote
+	// messages independently of the mailbox implementation, so teardown can
+	// repay peers whatever the mailbox abandons. Lazily created on the first
+	// remote hold; local-only actors never allocate one.
+	remoteHolds atomic.Pointer[remoteHoldRegistry]
 
 	// systemMailbox is the priority queue for control-plane messages
 	// (PoisonPill, Panicking, Pause/ResumePassivation,
@@ -848,7 +855,7 @@ func (pid *PID) RestartCount() int {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return int(metric.RestartCount)
+			return int(metric.GetRestartCount())
 		}
 		return 0
 	}
@@ -870,7 +877,7 @@ func (pid *PID) ProcessedCount() int {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return int(metric.ProcessedCount)
+			return int(metric.GetProcessedCount())
 		}
 		return 0
 	}
@@ -887,7 +894,7 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 			pid.address.Host(),
 			pid.address.Port(),
 			pid.Name()); err == nil {
-			return metric.LatestProcessedDuration.AsDuration()
+			return metric.GetLatestProcessedDuration().AsDuration()
 		}
 		return 0
 	}
@@ -1888,6 +1895,42 @@ func (pid *PID) buildAsyncRequest(message any, correlationID string) (*commands.
 	}, nil
 }
 
+// trackRemoteHold registers a remote message's credit share in the actor's
+// hold registry, creating the registry on first use. Tracking must happen
+// before the message enters the mailbox so no window exists in which a
+// queued share is invisible to teardown.
+func (pid *PID) trackRemoteHold(share *inet.CreditShare) {
+	registry := pid.remoteHolds.Load()
+
+	if registry == nil {
+		fresh := newRemoteHoldRegistry()
+
+		if pid.remoteHolds.CompareAndSwap(nil, fresh) {
+			registry = fresh
+		} else {
+			// A concurrent first tracker won the race; hand the loser's
+			// sentinel back to the pool and use the winner's registry.
+			remoteHoldNodePool.Put((*remoteHoldNode)(fresh.head))
+			registry = pid.remoteHolds.Load()
+		}
+	}
+
+	registry.track(share)
+
+	if pid.isStateSet(remoteHoldsClosedState) {
+		// A terminal stop completed between the caller's liveness check and
+		// this track: the teardown drain has already walked the registry and
+		// nothing will ever walk it again. Observing the closed bit after
+		// the publish proves either the drain saw this entry or this
+		// producer must repay it itself; the drain is idempotent and
+		// serialized by consumerMu, so racing the teardown or another late
+		// tracker is safe. This also covers a first-ever track that created
+		// the registry after teardown: the fresh registry was never drained,
+		// so the producer drains it here.
+		registry.releaseAll()
+	}
+}
+
 // doReceive enqueues a message onto the actor's user or system mailbox
 // and schedules the actor onto the dispatcher if it is not already in
 // flight. This is the entry point for internal message delivery that
@@ -1898,6 +1941,10 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	if system := pid.actorSystem; system != nil && system.isStopping() {
 		if !isSystemMessage(msg) {
 			pid.handleReceivedError(receiveCtx, gerrors.ErrSystemShuttingDown)
+			// The refused context never enters the mailbox: repay its remote
+			// credit share now instead of pinning the peer's window until
+			// this actor's own teardown runs releaseAll.
+			receiveCtx.releaseRemoteHold()
 			return
 		}
 	}
@@ -1907,6 +1954,9 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	} else if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
 		pid.logger.Warn(err)
 		pid.handleReceivedError(receiveCtx, err)
+		// The refused context never enters the mailbox, so no dequeue or
+		// recycle will ever release its remote credit share.
+		receiveCtx.releaseRemoteHold()
 		return
 	}
 
@@ -1973,6 +2023,18 @@ func (pid *PID) finishOrReclaim() bool {
 // dispatchOne must not return the context here or the mailbox would
 // hand out an in-use head.
 func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
+	// The message has left the mailbox: grant back any remote credit share
+	// now, so flow control tracks mailbox residency rather than processing
+	// time, and let the hold registry retire spent tracking entries. Local
+	// messages skip both on a single nil check.
+	if received.remoteHold != nil {
+		received.releaseRemoteHold()
+
+		if registry := pid.remoteHolds.Load(); registry != nil {
+			registry.compact()
+		}
+	}
+
 	if pid.enableReentrancyStash(received) {
 		if err := pid.stash(received); err != nil {
 			pid.logger.Warn(err)
@@ -2388,6 +2450,10 @@ func (pid *PID) init(ctx context.Context) error {
 		return e
 	}
 
+	// Reopen remote hold tracking before the actor is announced as running:
+	// reset() closed it for the teardown drain embedded in a restart, and a
+	// live actor parks inbound remote credit again.
+	pid.setState(remoteHoldsClosedState, false)
 	pid.setState(runningState, true)
 	pid.logger.Debugf("actor=%s initialization successful", pid.Name())
 
@@ -2422,6 +2488,28 @@ func (pid *PID) reset() {
 	// passed to WithSupervisor and may be shared across actors. Wiping it here
 	// erased the directive rules of every actor spawned with the same instance
 	// and of the actor itself after a restart while running (#1269).
+	// Queued remote messages survive a restart (the default mailbox's Dispose
+	// is a no-op and nothing replaces it), but a terminal stop abandons them
+	// to the garbage collector, which would strand their credit shares and
+	// permanently shrink the peer connection's flow-control window. The hold
+	// registry tracks every share independently of the mailbox, so this
+	// grants them all back regardless of the mailbox implementation:
+	// messages that survive a restart later release as no-ops (idempotent),
+	// and a terminal stop repays the peers immediately.
+	//
+	// The closed bit must be set before the drain: a remote delivery that
+	// passed its liveness check before this teardown can still track its
+	// share afterwards, and nothing ever walks the registry again after a
+	// terminal stop. Atomics are sequentially consistent, so a track whose
+	// publish lands after the drain finished is guaranteed to observe the
+	// bit and repay its own share (see trackRemoteHold); init() clears the
+	// bit when a restart brings the actor back.
+	pid.setState(remoteHoldsClosedState, true)
+
+	if registry := pid.remoteHolds.Load(); registry != nil {
+		registry.releaseAll()
+	}
+
 	pid.mailbox.Dispose()
 	pid.setState(singletonState, false)
 	pid.setState(relocationState, true)
@@ -3268,11 +3356,10 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 
 	var singletonSpec *internalpb.SingletonSpec
 	if pid.IsSingleton() && pid.singletonSpec != nil {
-		singletonSpec = &internalpb.SingletonSpec{
-			SpawnTimeout: durationpb.New(pid.singletonSpec.SpawnTimeout),
-			WaitInterval: durationpb.New(pid.singletonSpec.WaitInterval),
-			MaxRetries:   pid.singletonSpec.MaxRetries,
-		}
+		singletonSpec = &internalpb.SingletonSpec{}
+		singletonSpec.SetSpawnTimeout(durationpb.New(pid.singletonSpec.SpawnTimeout))
+		singletonSpec.SetWaitInterval(durationpb.New(pid.singletonSpec.WaitInterval))
+		singletonSpec.SetMaxRetries(pid.singletonSpec.MaxRetries)
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
@@ -3288,22 +3375,24 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 		initTimeout = durationpb.New(*override)
 	}
 
-	return &internalpb.Actor{
-		Address:             pid.ID(),
-		Type:                types.Name(pid.Actor()),
-		Singleton:           singletonSpec,
-		Relocatable:         pid.IsRelocatable(),
-		PassivationStrategy: codec.EncodePassivationStrategy(pid.PassivationStrategy()),
-		Dependencies:        dependencies,
-		EnableStash:         pid.stashState != nil && pid.stashState.box != nil,
-		Role:                pid.Role(),
-		Supervisor:          supervisorSpec,
-		Reentrancy:          reentrancy,
-		InitTimeout:         initTimeout,
-		IncarnationId:       pid.IncarnationID(),
-		ReliableDelivery:    pid.reliableDelivery.toProto(),
-		ReliableCompanion:   pid.reliableCompanion.toProto(),
-	}, nil
+	actor := &internalpb.Actor{}
+	actor.SetAddress(pid.ID())
+	actor.SetType(types.Name(pid.Actor()))
+	actor.SetSingleton(singletonSpec)
+	actor.SetRelocatable(pid.IsRelocatable())
+	actor.SetPassivationStrategy(codec.EncodePassivationStrategy(pid.PassivationStrategy()))
+	actor.SetDependencies(dependencies)
+	actor.SetEnableStash(pid.stashState != nil && pid.stashState.box != nil)
+	if x := pid.Role(); x != nil {
+		actor.SetRole(*x)
+	}
+	actor.SetSupervisor(supervisorSpec)
+	actor.SetReentrancy(reentrancy)
+	actor.SetInitTimeout(initTimeout)
+	actor.SetIncarnationId(pid.IncarnationID())
+	actor.SetReliableDelivery(pid.reliableDelivery.toProto())
+	actor.SetReliableCompanion(pid.reliableCompanion.toProto())
+	return actor, nil
 }
 
 func (pid *PID) registerMetrics() error {

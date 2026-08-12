@@ -750,9 +750,9 @@ func TestGrain(t *testing.T) {
 
 		var message proto.Message
 		// prepare a message to send to the grain
-		message = &testpb.CreateAccount{
+		message = testpb.CreateAccount_builder{
 			AccountBalance: 500.00,
-		}
+		}.Build()
 		err = testSystem.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 
@@ -762,9 +762,9 @@ func TestGrain(t *testing.T) {
 		require.NotNil(t, gp)
 		require.True(t, gp.isActive())
 
-		message = &testpb.CreditAccount{
+		message = testpb.CreditAccount_builder{
 			Balance: 500.00,
-		}
+		}.Build()
 
 		response, err := testSystem.AskGrain(ctx, identity, message, time.Second)
 		require.NoError(t, err)
@@ -1082,7 +1082,7 @@ func TestRecreateGrain(t *testing.T) {
 		defer func() { _ = sys.Stop(ctx) }()
 
 		// Value starts with reserved prefix, triggers early reserved-name check
-		grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "GoAkt_reserved_value"}}
+		grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "GoAkt_reserved_value"}.Build()}.Build()
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrReservedName)
@@ -1098,7 +1098,7 @@ func TestRecreateGrain(t *testing.T) {
 		defer func() { _ = sys.Stop(ctx) }()
 
 		// Not reserved, but invalid identity format (no kind/name)
-		grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "invalid"}}
+		grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "invalid"}.Build()}.Build()
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
@@ -1114,15 +1114,15 @@ func TestRecreateGrain(t *testing.T) {
 		defer func() { _ = sys.Stop(ctx) }()
 
 		// Kind not present in registry -> reflection.NewGrain fails
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "actor.FakeGrain",
 				Name:  "g1",
 				Value: "actor.FakeGrain/g1",
-			},
+			}.Build(),
 			ActivationTimeout: durationpb.New(500 * time.Millisecond),
 			ActivationRetries: 1,
-		}
+		}.Build()
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.Error(t, err)
 		require.ErrorIs(t, err, gerrors.ErrGrainNotRegistered)
@@ -1144,15 +1144,15 @@ func TestRecreateGrain(t *testing.T) {
 		kind := types.Name(NewMockGrain()) // e.g., actor.mockgrain
 		// Use cased kind in Value as recreateGrain accepts any case
 		value := "actor.MockGrain/" + idName
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  kind,
 				Name:  idName,
 				Value: value,
-			},
+			}.Build(),
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
-		}
+		}.Build()
 
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.NoError(t, err)
@@ -1183,15 +1183,15 @@ func TestRecreateGrain(t *testing.T) {
 		pid := newGrainPID(identity, NewMockGrain(), sys, newGrainConfig())
 		sys.(*actorSystem).grains.Set(identity.String(), pid)
 
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  identity.Kind(),
 				Name:  identity.Name(),
 				Value: identity.String(),
-			},
+			}.Build(),
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
-		}
+		}.Build()
 
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.NoError(t, err)
@@ -1218,17 +1218,17 @@ func TestRecreateGrain(t *testing.T) {
 
 		idName := "G3"
 		value := "actor.MockGrain/" + idName
-		dep := &internalpb.Dependency{ // unknown type name -> reflection.NewDependency fails
+		dep := internalpb.Dependency_builder{ // unknown type name -> reflection.NewDependency fails
 			Id:       "dep1",
 			TypeName: "actor.UnknownDependency",
 			Bytea:    []byte("noop"),
-		}
-		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
+		}.Build()
+		grain := internalpb.Grain_builder{
+			GrainId:           internalpb.GrainId_builder{Kind: types.Name(NewMockGrain()), Name: idName, Value: value}.Build(),
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
-		}
+		}.Build()
 
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.Error(t, err)
@@ -1255,17 +1255,17 @@ func TestRecreateGrain(t *testing.T) {
 
 		idName := "G4"
 		value := "actor.MockGrain/" + idName
-		dep := &internalpb.Dependency{
+		dep := internalpb.Dependency_builder{
 			Id:       bad.ID(),
 			TypeName: types.Name(bad),
 			Bytea:    bytea,
-		}
-		grain := &internalpb.Grain{
-			GrainId:           &internalpb.GrainId{Kind: types.Name(NewMockGrain()), Name: idName, Value: value},
+		}.Build()
+		grain := internalpb.Grain_builder{
+			GrainId:           internalpb.GrainId_builder{Kind: types.Name(NewMockGrain()), Name: idName, Value: value}.Build(),
 			Dependencies:      []*internalpb.Dependency{dep},
 			ActivationTimeout: durationpb.New(1 * time.Second),
 			ActivationRetries: 1,
-		}
+		}.Build()
 
 		err = sys.(*actorSystem).recreateGrain(ctx, grain)
 		require.Error(t, err)
@@ -1382,11 +1382,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		grain := NewMockGrain()
 		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-owner-mismatch")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
-		remoteOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: id.String()},
+		remoteOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.10",
 			Port:    9001,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
@@ -1433,11 +1433,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		grain := NewMockGrain()
 		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-claim-mismatch")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
-		remoteOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: id.String()},
+		remoteOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.11",
 			Port:    9002,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
@@ -1479,11 +1479,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		expectedErr := errors.New("encode failed")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
 		seedInactiveGrainPID(sys, id, grain, config)
-		localOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: id.String()},
+		localOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    sys.Host(),
 			Port:    int32(sys.Port()),
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(ctx, id.String()).Return(localOwner, nil).Once()
@@ -1516,11 +1516,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-owner-mismatch")
-		remoteOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: id.String()},
+		remoteOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.12",
 			Port:    9003,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(ctx, id.String()).Return(remoteOwner, nil).Once()
@@ -1550,11 +1550,11 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
 		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-mismatch")
-		remoteOwner := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{Value: id.String()},
+		remoteOwner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.13",
 			Port:    9004,
-		}
+		}.Build()
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()

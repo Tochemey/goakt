@@ -687,9 +687,9 @@ func TestActorSystem(t *testing.T) {
 		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
 
 		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
-		}, nil)
+		}.Build(), nil)
 		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).Return(nil, nil)
 
 		pid, err := system.ReSpawn(ctx, actorName)
@@ -721,9 +721,9 @@ func TestActorSystem(t *testing.T) {
 		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
 
 		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
-		}, nil)
+		}.Build(), nil)
 		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).
 			Return(nil, assert.AnError)
 
@@ -898,9 +898,9 @@ func TestActorSystem(t *testing.T) {
 		system.actors = newTree()
 		system.locker.Unlock()
 
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: "invalid-address",
-		}, nil)
+		}.Build(), nil)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
 		pid, err := system.ActorOf(ctx, actorName)
@@ -1046,9 +1046,9 @@ func TestActorSystem(t *testing.T) {
 		system.actors = newTree()
 		system.locker.Unlock()
 
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: "invalid-address",
-		}, nil)
+		}.Build(), nil)
 
 		err := system.Kill(ctx, actorName)
 		require.Error(t, err)
@@ -1071,9 +1071,9 @@ func TestActorSystem(t *testing.T) {
 		system.locker.Unlock()
 
 		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
-		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(&internalpb.Actor{
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
-		}, nil)
+		}.Build(), nil)
 		remotingMock.EXPECT().RemoteStop(mock.Anything, remoteHost, remotePort, actorName).Return(nil)
 
 		err := system.Kill(ctx, actorName)
@@ -3048,7 +3048,9 @@ func TestRemotingRecover(t *testing.T) {
 		defer cancel()
 
 		to := address.New("receiver", "remote-sys", host, remotingPort)
-		err = remoting.RemoteTell(callCtx, address.NoSender(), to, new(testpb.TestSend))
+		// Use Ask: duplex fire-and-forget Tell returns after enqueue and cannot
+		// surface a later handler panic. Ask receives the request-scoped ERROR.
+		_, err = remoting.RemoteAsk(callCtx, address.NoSender(), to, new(testpb.TestReply), time.Second)
 		require.Error(t, err)
 	})
 }
@@ -3113,18 +3115,17 @@ func TestRemotingLookup(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		const actorName = "test"
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		addr, err := remoting.RemoteLookup(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
-		require.Nil(t, addr)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteLookupHandler(ctx, nullConn, internalpb.RemoteLookupRequest_builder{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		}.Build())
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -3257,21 +3258,17 @@ func TestRemotingReSpawn(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteReSpawnHandler(ctx, nullConn, internalpb.RemoteReSpawnRequest_builder{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		}.Build())
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		_, err = remoting.RemoteReSpawn(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -3710,21 +3707,17 @@ func TestRemotingStop(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteStopHandler(ctx, nullConn, internalpb.RemoteStopRequest_builder{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		}.Build())
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		err = remoting.RemoteStop(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -4357,7 +4350,7 @@ func TestPublishRelocationStarted(t *testing.T) {
 	require.NoError(t, err)
 
 	peerAddress := "127.0.0.1:3322"
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		PeersPort:    3322,
 		RemotingPort: 3323,
@@ -4368,7 +4361,7 @@ func TestPublishRelocationStarted(t *testing.T) {
 		Grains: map[string]*internalpb.Grain{
 			"grainKind/grain1": {},
 		},
-	}
+	}.Build()
 
 	sys.(*actorSystem).publishRelocationStarted(peerAddress, peerState, true)
 
@@ -4687,22 +4680,18 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		require.NoError(t, sys.Register(ctx, &exchanger{}))
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		request := &remote.SpawnRequest{
-			Name: uuid.NewString(),
-			Kind: "actor.exchanger",
-		}
-		_, err = remoting.RemoteSpawn(ctx, actualHost, actualPort, request)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteSpawnHandler(ctx, nullConn, internalpb.RemoteSpawnRequest_builder{
+			Host:      "10.0.0.1",
+			Port:      int32(as.Port()),
+			ActorName: uuid.NewString(),
+			ActorType: "actor.exchanger",
+		}.Build())
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -5576,21 +5565,17 @@ func TestRemotingReinstate(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		actor := NewMockActor()
-		const actorName = "test"
-		_, err = sys.Spawn(ctx, actorName, actor)
+		// Put the mismatch in the request body; do not mutate remoteHostPort
+		// while remoting workers may read it.
+		as := sys.(*actorSystem)
+		resp, err := as.remoteReinstateHandler(ctx, nullConn, internalpb.RemoteReinstateRequest_builder{
+			Host: "10.0.0.1",
+			Port: int32(as.Port()),
+			Name: "test",
+		}.Build())
 		require.NoError(t, err)
-
-		actualHost := sys.Host()
-		actualPort := int(sys.Port())
-		sys.(*actorSystem).remoteHostPort = net.JoinHostPort(actualHost, strconv.Itoa(actualPort+1))
-
-		remoting := remoteclient.NewClient()
-		t.Cleanup(remoting.Close)
-
-		err = remoting.RemoteReinstate(ctx, actualHost, actualPort, actorName)
-		require.Error(t, err)
-		assert.ErrorContains(t, err, gerrors.ErrInvalidHost.Error())
+		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrInvalidHost.Error())
 
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
@@ -6024,13 +6009,13 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
 		actors := []*internalpb.Actor{
-			{Address: "not-a-valid-address"},
-			{Address: address.New("other", "other-system", "127.0.0.1", 8080).String()},
-			{Address: address.New("other-host", system.name, "127.0.0.2", 8080).String()},
-			{Address: address.New("other-port", system.name, "127.0.0.1", 8081).String()},
-			{Address: address.New("GoAktSystemGuardian", system.name, "127.0.0.1", 8080).String()},
-			{Address: localAddr.String()},
-			{Address: staleAddr.String()},
+			internalpb.Actor_builder{Address: "not-a-valid-address"}.Build(),
+			internalpb.Actor_builder{Address: address.New("other", "other-system", "127.0.0.1", 8080).String()}.Build(),
+			internalpb.Actor_builder{Address: address.New("other-host", system.name, "127.0.0.2", 8080).String()}.Build(),
+			internalpb.Actor_builder{Address: address.New("other-port", system.name, "127.0.0.1", 8081).String()}.Build(),
+			internalpb.Actor_builder{Address: address.New("GoAktSystemGuardian", system.name, "127.0.0.1", 8080).String()}.Build(),
+			internalpb.Actor_builder{Address: localAddr.String()}.Build(),
+			internalpb.Actor_builder{Address: staleAddr.String()}.Build(),
 		}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
@@ -6045,7 +6030,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		system.actors = newTree()
 
 		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
-		actors := []*internalpb.Actor{{Address: staleAddr.String()}}
+		actors := []*internalpb.Actor{internalpb.Actor_builder{Address: staleAddr.String()}.Build()}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(assert.AnError).Once()
@@ -6061,11 +6046,11 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		system.actors = newTree()
 
 		staleAddr := address.New("stale-singleton", system.name, "127.0.0.1", 8080)
-		actors := []*internalpb.Actor{{
+		actors := []*internalpb.Actor{internalpb.Actor_builder{
 			Address:     staleAddr.String(),
 			Relocatable: true,
 			Singleton:   &internalpb.SingletonSpec{},
-		}}
+		}.Build()}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
@@ -6081,11 +6066,11 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		system.reflection = newReflection(system.registry)
 
 		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
-		record := &internalpb.Actor{
+		record := internalpb.Actor_builder{
 			Address:     staleAddr.String(),
 			Type:        "unregistered.Type",
 			Relocatable: true,
-		}
+		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
 		// the respawn path releases the entry, fails to instantiate the
@@ -6516,7 +6501,7 @@ func TestGetNodeMetric(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
-		request := &internalpb.GetNodeMetricRequest{NodeAddress: "127.0.0.1:8080"}
+		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6528,7 +6513,7 @@ func TestGetNodeMetric(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		request := &internalpb.GetNodeMetricRequest{NodeAddress: "10.0.0.1:9999"}
+		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6540,7 +6525,7 @@ func TestGetNodeMetric(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		request := &internalpb.GetKindsRequest{NodeAddress: "127.0.0.1:8080"}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6556,7 +6541,7 @@ func TestGetNodeMetric(t *testing.T) {
 		system.grains.Set("grain2", &grainPID{})
 
 		remoteAddr := fmt.Sprintf("%s:%d", system.remoteConfig.BindAddr(), system.remoteConfig.BindPort())
-		request := &internalpb.GetNodeMetricRequest{NodeAddress: remoteAddr}
+		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: remoteAddr}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 
@@ -6618,7 +6603,7 @@ func TestGetNodeMetric(t *testing.T) {
 		client := remoting.NetClient(host, remotingPort)
 
 		nodeAddr := fmt.Sprintf("%s:%d", host, remotingPort)
-		request := &internalpb.GetNodeMetricRequest{NodeAddress: nodeAddr}
+		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := client.SendProto(ctx, request)
 		require.NoError(t, err)
 
@@ -6639,7 +6624,7 @@ func TestGetKinds(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
-		request := &internalpb.GetKindsRequest{NodeAddress: "127.0.0.1:8080"}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6651,7 +6636,7 @@ func TestGetKinds(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		request := &internalpb.GetKindsRequest{NodeAddress: "10.0.0.1:9999"}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6663,7 +6648,7 @@ func TestGetKinds(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		request := &internalpb.GetNodeMetricRequest{NodeAddress: "127.0.0.1:8080"}
+		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6680,7 +6665,7 @@ func TestGetKinds(t *testing.T) {
 			WithMinimumPeersQuorum(1)
 
 		remoteAddr := fmt.Sprintf("%s:%d", system.remoteConfig.BindAddr(), system.remoteConfig.BindPort())
-		request := &internalpb.GetKindsRequest{NodeAddress: remoteAddr}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: remoteAddr}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 
@@ -6738,7 +6723,7 @@ func TestGetKinds(t *testing.T) {
 		client := remoting.NetClient(host, remotingPort)
 
 		nodeAddr := fmt.Sprintf("%s:%d", host, remotingPort)
-		request := &internalpb.GetKindsRequest{NodeAddress: nodeAddr}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: nodeAddr}.Build()
 		resp, err := client.SendProto(ctx, request)
 		require.NoError(t, err)
 
@@ -6760,9 +6745,9 @@ func TestPersistPeerState(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.remotingEnabled.Store(false)
 
-		request := &internalpb.PersistPeerStateRequest{
-			PeerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000},
-		}
+		request := internalpb.PersistPeerStateRequest_builder{
+			PeerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build(),
+		}.Build()
 		resp, err := system.persistPeerStateHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6776,9 +6761,9 @@ func TestPersistPeerState(t *testing.T) {
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(false)
 
-		request := &internalpb.PersistPeerStateRequest{
-			PeerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000},
-		}
+		request := internalpb.PersistPeerStateRequest_builder{
+			PeerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build(),
+		}.Build()
 		resp, err := system.persistPeerStateHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6791,7 +6776,7 @@ func TestPersistPeerState(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		system.remotingEnabled.Store(true)
 
-		request := &internalpb.GetKindsRequest{NodeAddress: "127.0.0.1:8080"}
+		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.persistPeerStateHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6804,9 +6789,9 @@ func TestPersistPeerState(t *testing.T) {
 		system.remotingEnabled.Store(true)
 		system.clusterStore = &recordingPeerStateStore{err: assert.AnError}
 
-		request := &internalpb.PersistPeerStateRequest{
-			PeerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000},
-		}
+		request := internalpb.PersistPeerStateRequest_builder{
+			PeerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build(),
+		}.Build()
 		resp, err := system.persistPeerStateHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 		errResp, ok := resp.(*internalpb.Error)
@@ -6820,8 +6805,8 @@ func TestPersistPeerState(t *testing.T) {
 		store := &recordingPeerStateStore{}
 		system.clusterStore = store
 
-		peerState := &internalpb.PeerState{Host: "10.0.0.1", PeersPort: 7070}
-		request := &internalpb.PersistPeerStateRequest{PeerState: peerState}
+		peerState := internalpb.PeerState_builder{Host: "10.0.0.1", PeersPort: 7070}.Build()
+		request := internalpb.PersistPeerStateRequest_builder{PeerState: peerState}.Build()
 		resp, err := system.persistPeerStateHandler(context.Background(), nil, request)
 		require.NoError(t, err)
 
@@ -6876,11 +6861,11 @@ func TestPersistPeerState(t *testing.T) {
 		remoting := remoteclient.NewClient()
 		client := remoting.NetClient(host, remotingPort)
 
-		peerState := &internalpb.PeerState{
+		peerState := internalpb.PeerState_builder{
 			Host:      "10.0.0.5",
 			PeersPort: 3000,
-		}
-		request := &internalpb.PersistPeerStateRequest{PeerState: peerState}
+		}.Build()
+		request := internalpb.PersistPeerStateRequest_builder{PeerState: peerState}.Build()
 		resp, err := client.SendProto(ctx, request)
 		require.NoError(t, err)
 
@@ -7401,10 +7386,10 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{}, nil)
 
 		system := MockReplicationTestSystem(clusterMock)
-		peerState := &internalpb.PeerState{
+		peerState := internalpb.PeerState_builder{
 			Host:      "127.0.0.1",
 			PeersPort: 9000,
-		}
+		}.Build()
 
 		err := system.persistPeerStateToPeers(ctx, peerState)
 		require.NoError(t, err)
@@ -7417,10 +7402,10 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr)
 
 		system := MockReplicationTestSystem(clusterMock)
-		peerState := &internalpb.PeerState{
+		peerState := internalpb.PeerState_builder{
 			Host:      "127.0.0.1",
 			PeersPort: 9000,
-		}
+		}.Build()
 
 		err := system.persistPeerStateToPeers(ctx, peerState)
 		require.Error(t, err)
@@ -7438,10 +7423,10 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
 
 		system := MockReplicationTestSystem(clusterMock)
-		peerState := &internalpb.PeerState{
+		peerState := internalpb.PeerState_builder{
 			Host:      "127.0.0.1",
 			PeersPort: 9000,
-		}
+		}.Build()
 
 		err := system.persistPeerStateToPeers(ctx, peerState)
 		// Should handle gracefully - either succeed with partial or return context error
@@ -7605,7 +7590,7 @@ func TestBeginEndRelocation(t *testing.T) {
 
 	sys := system.(*actorSystem)
 
-	peerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	peerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 	// a duplicate NodeLeft for an in-flight relocation is ignored
 	require.False(t, sys.beginRelocation("127.0.0.1:9000", peerState))
@@ -7645,18 +7630,18 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		// relocatable and system-name filters.
 		actors := []*internalpb.Actor{
 			// included: relocatable actor on the departed node
-			{Address: address.New("worker-1", system.name, departedHost, departedRemoting).String(), Relocatable: true},
+			internalpb.Actor_builder{Address: address.New("worker-1", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
 			// excluded: not relocatable
-			{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false},
+			internalpb.Actor_builder{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false}.Build(),
 			// excluded: system actor
-			{Address: address.New("GoAktSystemGuardian", system.name, departedHost, departedRemoting).String(), Relocatable: true},
+			internalpb.Actor_builder{Address: address.New("GoAktSystemGuardian", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
 		}
 
 		grains := []*internalpb.Grain{
 			// included: grain on the departed node
-			{GrainId: &internalpb.GrainId{Kind: "k", Name: "g1", Value: "k/g1"}, Host: departedHost, Port: departedRemoting},
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "k", Name: "g1", Value: "k/g1"}.Build(), Host: departedHost, Port: departedRemoting}.Build(),
 			// excluded: system grain
-			{GrainId: &internalpb.GrainId{Kind: "k", Name: "GoAktSystemGuardian", Value: "k/GoAktSystemGuardian"}, Host: departedHost, Port: departedRemoting},
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Kind: "k", Name: "GoAktSystemGuardian", Value: "k/GoAktSystemGuardian"}.Build(), Host: departedHost, Port: departedRemoting}.Build(),
 		}
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
@@ -7766,7 +7751,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 		actors := []*internalpb.Actor{
 			// relocatable but with an address that cannot be parsed: skipped
-			{Address: "not-an-address", Relocatable: true},
+			internalpb.Actor_builder{Address: "not-an-address", Relocatable: true}.Build(),
 		}
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
@@ -7881,7 +7866,7 @@ func TestRemoveActorIfIncarnation(t *testing.T) {
 
 	t.Run("With a matching incarnation", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		record := &internalpb.Actor{IncarnationId: "incarnation-1"}
+		record := internalpb.Actor_builder{IncarnationId: "incarnation-1"}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(nil)
 
@@ -7891,7 +7876,7 @@ func TestRemoveActorIfIncarnation(t *testing.T) {
 
 	t.Run("With a newer incarnation", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		record := &internalpb.Actor{IncarnationId: "incarnation-2"}
+		record := internalpb.Actor_builder{IncarnationId: "incarnation-2"}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
 
 		system := newSystem(t, clusterMock)
@@ -7916,7 +7901,7 @@ func TestRemoveActorIfIncarnation(t *testing.T) {
 
 	t.Run("With a removal failure", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		record := &internalpb.Actor{IncarnationId: "incarnation-1"}
+		record := internalpb.Actor_builder{IncarnationId: "incarnation-1"}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(assert.AnError)
 
@@ -7986,14 +7971,14 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		system.actors = newTree()
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString())
-		record := &internalpb.Actor{
+		record := internalpb.Actor_builder{
 			Address: address.New(companionName, system.name, "127.0.0.1", 8080).String(),
-			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+			ReliableCompanion: internalpb.ReliableCompanionSpec_builder{
 				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
 				EndpointName:          "orders-producer",
 				EndpointIncarnationId: uuid.NewString(),
-			},
-		}
+			}.Build(),
+		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
@@ -8015,14 +8000,14 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		system.actors.pids[node.id] = node
 		system.actors.names[node.name] = node
 
-		record := &internalpb.Actor{
+		record := internalpb.Actor_builder{
 			Address: companionAddr.String(),
-			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+			ReliableCompanion: internalpb.ReliableCompanionSpec_builder{
 				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
 				EndpointName:          "orders-producer",
 				EndpointIncarnationId: uuid.NewString(),
-			},
-		}
+			}.Build(),
+		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
 
@@ -8039,15 +8024,15 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		system.actors = newTree()
 
 		companionName := reliableCompanionName(ReliableControllerRoleConsumer, uuid.NewString())
-		record := &internalpb.Actor{
+		record := internalpb.Actor_builder{
 			Address:     address.New(companionName, system.name, "127.0.0.1", 8080).String(),
 			Relocatable: true,
-			ReliableCompanion: &internalpb.ReliableCompanionSpec{
+			ReliableCompanion: internalpb.ReliableCompanionSpec_builder{
 				Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_CONSUMER,
 				EndpointName:          "orders-consumer",
 				EndpointIncarnationId: uuid.NewString(),
-			},
-		}
+			}.Build(),
+		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
@@ -8067,25 +8052,25 @@ func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
 	peerAddress := "127.0.0.1:9100"
 	system.peerRemotingPorts.Set(peerAddress, 7777)
 
-	relocatable := &internalpb.Actor{
+	relocatable := internalpb.Actor_builder{
 		Address:     address.New("worker", system.name, "127.0.0.1", 7777).String(),
 		Relocatable: true,
-	}
-	pinned := &internalpb.Actor{
+	}.Build()
+	pinned := internalpb.Actor_builder{
 		Address: address.New("pinned", system.name, "127.0.0.1", 7777).String(),
-	}
-	reliable := &internalpb.Actor{
+	}.Build()
+	reliable := internalpb.Actor_builder{
 		Address:          address.New("orders-producer", system.name, "127.0.0.1", 7777).String(),
 		ReliableDelivery: producerDeliveryConfig("orders-consumer").toProto(),
-	}
-	companion := &internalpb.Actor{
+	}.Build()
+	companion := internalpb.Actor_builder{
 		Address: address.New(reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString()), system.name, "127.0.0.1", 7777).String(),
-		ReliableCompanion: &internalpb.ReliableCompanionSpec{
+		ReliableCompanion: internalpb.ReliableCompanionSpec_builder{
 			Role:                  internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER,
 			EndpointName:          "orders-producer",
 			EndpointIncarnationId: uuid.NewString(),
-		},
-	}
+		}.Build(),
+	}.Build()
 
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 7777, mock.Anything).
 		Return([]*internalpb.Actor{relocatable, pinned, reliable, companion}, nil).Once()

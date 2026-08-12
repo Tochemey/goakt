@@ -113,77 +113,66 @@ func (x *DeliverySerializer) Serialize(message any) ([]byte, error) {
 			return nil, err
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_RegisterConsumer{
-			RegisterConsumer: &internalpb.RegisterConsumer{
-				Nonce: command.nonce,
-			},
-		}
+		rc := &internalpb.RegisterConsumer{}
+		rc.SetNonce(command.nonce)
+		envelope.SetRegisterConsumer(proto.ValueOrDefault(rc))
 
 	case *RegistrationAck:
 		if err := command.validate(); err != nil {
 			return nil, err
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_RegistrationAck{
-			RegistrationAck: &internalpb.RegistrationAck{
-				SessionId: command.sessionID,
-				NextSeq:   command.nextSeq,
-				Nonce:     command.nonce,
-			},
-		}
+		ra := &internalpb.RegistrationAck{}
+		ra.SetSessionId(command.sessionID)
+		ra.SetNextSeq(command.nextSeq)
+		ra.SetNonce(command.nonce)
+		envelope.SetRegistrationAck(proto.ValueOrDefault(ra))
 
 	case *Request:
 		if err := command.validate(); err != nil {
 			return nil, err
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_Request{
-			Request: &internalpb.Request{
-				SessionId:         command.sessionID,
-				RegistrationNonce: command.registrationNonce,
-				ConfirmedSeq:      command.confirmedSeq,
-				RequestUpToSeq:    command.requestUpToSeq,
-				ViaTimeout:        command.viaTimeout,
-			},
-		}
+		request := &internalpb.Request{}
+		request.SetSessionId(command.sessionID)
+		request.SetRegistrationNonce(command.registrationNonce)
+		request.SetConfirmedSeq(command.confirmedSeq)
+		request.SetRequestUpToSeq(command.requestUpToSeq)
+		request.SetViaTimeout(command.viaTimeout)
+		envelope.SetRequest(proto.ValueOrDefault(request))
 
 	case *Ack:
 		if err := command.validate(); err != nil {
 			return nil, err
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_Ack{
-			Ack: &internalpb.Ack{
-				SessionId:         command.sessionID,
-				RegistrationNonce: command.registrationNonce,
-				ConfirmedSeq:      command.confirmedSeq,
-			},
-		}
+		ack := &internalpb.Ack{}
+		ack.SetSessionId(command.sessionID)
+		ack.SetRegistrationNonce(command.registrationNonce)
+		ack.SetConfirmedSeq(command.confirmedSeq)
+		envelope.SetAck(proto.ValueOrDefault(ack))
 
 	case *SequencedMessage:
 		if err := command.validate(); err != nil {
 			return nil, err
 		}
 
-		sequenced := &internalpb.SequencedMessage{
-			SessionId: command.sessionID,
-			MessageId: command.messageID,
-			Seq:       command.seq,
-			Payload: &internalpb.ReliablePayload{
-				Data: command.rawPayload(),
-			},
-		}
+		rp := &internalpb.ReliablePayload{}
+		rp.SetData(command.rawPayload())
+		sequenced := &internalpb.SequencedMessage{}
+		sequenced.SetSessionId(command.sessionID)
+		sequenced.SetMessageId(command.messageID)
+		sequenced.SetSeq(command.seq)
+		sequenced.SetPayload(rp)
 
 		if command.chunked {
-			sequenced.ChunkInfo = &internalpb.ChunkInfo{
-				First: command.firstChunk,
-				Last:  command.lastChunk,
-			}
+			chunkInfo := &internalpb.ChunkInfo{}
+			chunkInfo.SetFirst(command.firstChunk)
+			chunkInfo.SetLast(command.lastChunk)
+			sequenced.SetChunkInfo(chunkInfo)
 		}
 
-		envelope.Command = &internalpb.DeliveryEnvelope_SequencedMessage{
-			SequencedMessage: sequenced,
-		}
+		envelope.SetSequencedMessage(proto.ValueOrDefault(sequenced))
 
 	default:
 		return nil, errNotDeliveryFrame
@@ -204,25 +193,25 @@ func (x *DeliverySerializer) Deserialize(data []byte) (any, error) {
 		return nil, err
 	}
 
-	switch command := envelope.GetCommand().(type) {
-	case *internalpb.DeliveryEnvelope_RegisterConsumer:
-		message := command.RegisterConsumer
+	switch envelope.WhichCommand() {
+	case internalpb.DeliveryEnvelope_RegisterConsumer_case:
+		message := envelope.GetRegisterConsumer()
 		return NewRegisterConsumer(message.GetNonce())
 
-	case *internalpb.DeliveryEnvelope_RegistrationAck:
-		message := command.RegistrationAck
+	case internalpb.DeliveryEnvelope_RegistrationAck_case:
+		message := envelope.GetRegistrationAck()
 		return NewRegistrationAck(message.GetSessionId(), message.GetNextSeq(), message.GetNonce())
 
-	case *internalpb.DeliveryEnvelope_Request:
-		message := command.Request
+	case internalpb.DeliveryEnvelope_Request_case:
+		message := envelope.GetRequest()
 		return NewRequest(message.GetSessionId(), message.GetRegistrationNonce(), message.GetConfirmedSeq(), message.GetRequestUpToSeq(), message.GetViaTimeout())
 
-	case *internalpb.DeliveryEnvelope_Ack:
-		message := command.Ack
+	case internalpb.DeliveryEnvelope_Ack_case:
+		message := envelope.GetAck()
 		return NewAck(message.GetSessionId(), message.GetRegistrationNonce(), message.GetConfirmedSeq())
 
-	case *internalpb.DeliveryEnvelope_SequencedMessage:
-		message := command.SequencedMessage
+	case internalpb.DeliveryEnvelope_SequencedMessage_case:
+		message := envelope.GetSequencedMessage()
 		payload := message.GetPayload()
 
 		if payload == nil {

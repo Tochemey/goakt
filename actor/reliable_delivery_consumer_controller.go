@@ -28,6 +28,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -101,8 +102,10 @@ type consumerController struct {
 	lastGapRequest time.Time
 	// failed marks that the terminal failure event was already published.
 	failed bool
-	// generation fences the recurring timer across restarts.
-	generation uint64
+	// generation fences the recurring timer across restarts. Atomic because
+	// PostStop can run on a different goroutine than the PreStart that last
+	// incremented it (restart racing a forced stop).
+	generation atomic.Uint64
 }
 
 // enforce the Actor contract
@@ -155,14 +158,14 @@ func (x *consumerController) PreStart(*Context) error {
 	x.sawValidTraffic = false
 	x.lastGapRequest = time.Time{}
 	x.failed = false
-	x.generation++
+	x.generation.Add(1)
 	return nil
 }
 
 // PostStop cancels the recurring timer of this incarnation through its
 // derived reference, so no state shared with PostStart is read here.
 func (x *consumerController) PostStop(ctx *Context) error {
-	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation)); err != nil {
+	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation.Load())); err != nil {
 		ctx.ActorSystem().Logger().Debugf("consumer controller for endpoint=%s failed to cancel tick: %v", x.consumer.Name(), err)
 	}
 
@@ -196,8 +199,8 @@ func (x *consumerController) handlePostStart(ctx *ReceiveContext) {
 	ctx.Watch(x.consumer)
 	x.register(ctx)
 
-	reference := reliableTickReference(ctx.Self().Name(), x.generation)
-	tick := &consumerControllerTick{generation: x.generation}
+	reference := reliableTickReference(ctx.Self().Name(), x.generation.Load())
+	tick := &consumerControllerTick{generation: x.generation.Load()}
 
 	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.resendInterval, WithReference(reference)); err != nil {
 		// the tick is the controller's only recovery mechanism: without it
@@ -347,7 +350,7 @@ func (x *consumerController) handleConfirmed(ctx *ReceiveContext, confirmed *Con
 // and would loop forever. Exactly one rule per tick keeps recovery traffic
 // bounded by the tick cadence.
 func (x *consumerController) handleTick(ctx *ReceiveContext, tick *consumerControllerTick) {
-	if tick.generation != x.generation {
+	if tick.generation != x.generation.Load() {
 		return
 	}
 

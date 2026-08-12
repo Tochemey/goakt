@@ -31,6 +31,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/commands"
+	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 )
@@ -95,6 +96,13 @@ type ReceiveContext struct {
 	requestReplyTo *commands.AsyncReplyTo
 	self           *PID
 	err            error
+
+	// remoteHold, when non-nil, is the flow-control credit share held for
+	// this remote-originated message. It is released exactly once when the
+	// message reaches a terminal state: dequeued for dispatch, refused by a
+	// bounded mailbox, drained at actor teardown, or defensively on reset so
+	// a pooled context can never carry a live share.
+	remoteHold *inet.CreditShare
 }
 
 // Self returns the PID of the currently executing actor.
@@ -794,10 +802,23 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message an
 	return rctx
 }
 
+// releaseRemoteHold grants back this message's flow-control credit share, if
+// any. Nil-safe and idempotent (the share's own release is a swap-to-zero),
+// so every terminal path may call it defensively. Teardown coverage does not
+// depend on this method being reachable: the actor's remoteHoldRegistry
+// tracks every share independently of whichever mailbox holds the message.
+func (rctx *ReceiveContext) releaseRemoteHold() {
+	if rctx.remoteHold != nil {
+		rctx.remoteHold.Release()
+		rctx.remoteHold = nil
+	}
+}
+
 // reset clears all fields so the ReceiveContext can be safely reused by the runtime.
 //
 // This is an internal optimization to reduce allocations during message dispatch.
 func (rctx *ReceiveContext) reset() {
+	rctx.releaseRemoteHold()
 	rctx.ctx = nil
 	rctx.message = nil
 	rctx.self = nil

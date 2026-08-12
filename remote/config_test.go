@@ -49,6 +49,65 @@ func TestConfig(t *testing.T) {
 		assert.Exactly(t, DefaultMaxIdleConns, config.MaxIdleConns())
 		assert.Exactly(t, 5*time.Second, config.DialTimeout())
 		assert.Exactly(t, 15*time.Second, config.KeepAlive())
+		assert.EqualValues(t, DefaultOrdinaryLanes, config.OrdinaryLanes())
+		assert.EqualValues(t, DefaultMaxConcurrentLargeTransfers, config.MaxConcurrentLargeTransfers())
+		assert.EqualValues(t, DefaultChunkSize, config.ChunkSize())
+		assert.EqualValues(t, DefaultMaxMessageSize, config.MaxMessageSize())
+		assert.EqualValues(t, DefaultCreditWindow, config.CreditWindow())
+		assert.Nil(t, config.LargeMessageDestinations())
+	})
+	t.Run("With ordinary lanes and large destinations", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080,
+			WithOrdinaryLanes(4),
+			WithLargeMessageDestinations("orders/*", "*/bulk-ingest"),
+			WithMaxConcurrentLargeTransfers(8),
+			WithChunkSize(64*size.KB),
+			WithMaxMessageSize(32*size.MB),
+			WithCreditWindow(2*size.MB),
+		)
+		require.NoError(t, config.Validate())
+		assert.EqualValues(t, 4, config.OrdinaryLanes())
+		assert.Equal(t, []string{"orders/*", "*/bulk-ingest"}, config.LargeMessageDestinations())
+		assert.EqualValues(t, 8, config.MaxConcurrentLargeTransfers())
+		assert.EqualValues(t, 64*size.KB, config.ChunkSize())
+		assert.EqualValues(t, 32*size.MB, config.MaxMessageSize())
+		assert.EqualValues(t, 2*size.MB, config.CreditWindow())
+	})
+	t.Run("With creditWindow below chunkSize", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithCreditWindow(8*size.KB))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "creditWindow must be at least chunkSize")
+	})
+	t.Run("With invalid chunk size", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithChunkSize(8*size.KB))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "chunkSize must be between 16KB and 4MB")
+	})
+	t.Run("With maxMessageSize below maxFrameSize", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithMaxMessageSize(1024))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "maxMessageSize must be greater than or equal to maxFrameSize")
+	})
+	t.Run("With invalid ordinary lanes", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithOrdinaryLanes(0))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "ordinaryLanes must be between 1 and 254")
+	})
+	t.Run("With readIdleTimeout not less than idleTimeout", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(1200*time.Second))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.EqualError(t, err, "readIdleTimeout must be less than idleTimeout when both are set")
+	})
+	t.Run("With invalid large destination pattern", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithLargeMessageDestinations("["))
+		err := config.Validate()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid largeMessageDestinations pattern")
 	})
 	t.Run("With config", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithReadIdleTimeout(10*time.Second), WithWriteTimeout(10*time.Second))
@@ -74,7 +133,7 @@ func TestConfig(t *testing.T) {
 	})
 	t.Run("With_default_serializer_resolves_proto_message", func(t *testing.T) {
 		config := DefaultConfig()
-		msg := &testpb.Reply{Content: "hello"}
+		msg := testpb.Reply_builder{Content: "hello"}.Build()
 		s := config.Serializer(msg)
 		require.NotNil(t, s, "expected default ProtoSerializer for proto.Message")
 		_, ok := s.(*ProtoSerializer)

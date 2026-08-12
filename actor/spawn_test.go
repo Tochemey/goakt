@@ -423,7 +423,7 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -439,7 +439,7 @@ func TestSpawn(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a message to the actor
-		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+		require.NoError(t, Tell(ctx, actorRef, testpb.Reply_builder{Content: "test spawn from func"}.Build()))
 
 		newInstance, err := newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
 		require.NoError(t, err)
@@ -468,7 +468,7 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -528,7 +528,7 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -543,7 +543,7 @@ func TestSpawn(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a message to the actor
-		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+		require.NoError(t, Tell(ctx, actorRef, testpb.Reply_builder{Content: "test spawn from func"}.Build()))
 
 		t.Cleanup(
 			func() {
@@ -599,7 +599,7 @@ func TestSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -615,7 +615,7 @@ func TestSpawn(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a message to the actor
-		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+		require.NoError(t, Tell(ctx, actorRef, testpb.Reply_builder{Content: "test spawn from func"}.Build()))
 
 		actorRef, err = newActorSystem.SpawnNamedFromFunc(ctx, actorName, receiveFn)
 		require.Error(t, err)
@@ -640,7 +640,7 @@ func TestSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -671,7 +671,7 @@ func TestSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		receiveFn := func(ctx context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -690,7 +690,7 @@ func TestSpawn(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a message to the actor
-		require.NoError(t, Tell(ctx, actorRef, &testpb.Reply{Content: "test spawn from func"}))
+		require.NoError(t, Tell(ctx, actorRef, testpb.Reply_builder{Content: "test spawn from func"}.Build()))
 
 		t.Cleanup(
 			func() {
@@ -759,7 +759,7 @@ func TestSpawn(t *testing.T) {
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
 		receiveFn := func(_ context.Context, message any) error {
-			expected := &testpb.Reply{Content: "test spawn from func"}
+			expected := testpb.Reply_builder{Content: "test spawn from func"}.Build()
 			actual, ok := message.(*testpb.Reply)
 			require.True(t, ok)
 			assert.True(t, proto.Equal(expected, actual))
@@ -1777,12 +1777,12 @@ func TestWireSpawnOptionsInitTimeout(t *testing.T) {
 	x := sys.(*actorSystem)
 
 	t.Run("replays an explicit override", func(t *testing.T) {
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			Address:     address.New("relocated", "testSys", "127.0.0.1", 0).String(),
 			Type:        types.Name(NewMockActor()),
 			Relocatable: true,
 			InitTimeout: durationpb.New(4 * time.Second),
-		}
+		}.Build()
 
 		opts, err := x.wireSpawnOptions(props)
 		require.NoError(t, err)
@@ -1793,11 +1793,11 @@ func TestWireSpawnOptionsInitTimeout(t *testing.T) {
 	})
 
 	t.Run("leaves the timeout unset when the record carries none", func(t *testing.T) {
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			Address:     address.New("relocated-default", "testSys", "127.0.0.1", 0).String(),
 			Type:        types.Name(NewMockActor()),
 			Relocatable: true,
-		}
+		}.Build()
 
 		opts, err := x.wireSpawnOptions(props)
 		require.NoError(t, err)
@@ -2137,11 +2137,11 @@ func TestRecreateActorFromWireRestoresRecordOnFailure(t *testing.T) {
 	system.reflection = newReflection(system.registry)
 
 	departedNode := "127.0.0.1:8080"
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
 		Type:        "unregistered.Type",
 		Relocatable: true,
-	}
+	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
@@ -2162,11 +2162,11 @@ func TestRecreateActorFromWireRestoreFailureKeepsRespawnError(t *testing.T) {
 	system.reflection = newReflection(system.registry)
 
 	departedNode := "127.0.0.1:8080"
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
 		Type:        "unregistered.Type",
 		Relocatable: true,
-	}
+	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
@@ -2188,14 +2188,14 @@ func TestRecreateActorFromWireRestoresRecordOnSpawnOptionsFailure(t *testing.T) 
 	system.reflection = newReflection(system.registry)
 
 	departedNode := "127.0.0.1:8080"
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:     address.New("phoenix", system.name, "127.0.0.1", 8080).String(),
 		Type:        types.Name(new(MockActor)),
 		Relocatable: true,
 		Dependencies: []*internalpb.Dependency{
-			{TypeName: "unregistered.Dependency"},
+			internalpb.Dependency_builder{TypeName: "unregistered.Dependency"}.Build(),
 		},
-	}
+	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
@@ -2612,13 +2612,13 @@ func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 		wire := producerDeliveryConfig("orders-consumer")
 		wire.producer.durableQueueID = queue.ID()
 
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
 			Type:             types.Name(new(MockActor)),
 			Relocatable:      true,
 			Dependencies:     dependencies,
 			ReliableDelivery: wire.toProto(),
-		}
+		}.Build()
 
 		opts, err := system.wireSpawnOptions(props)
 		require.NoError(t, err)
@@ -2644,13 +2644,13 @@ func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 		wire := producerDeliveryConfig("orders-consumer")
 		wire.producer.durableQueueID = queue.ID()
 
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
 			Type:             types.Name(new(MockActor)),
 			Relocatable:      true,
 			Dependencies:     dependencies,
 			ReliableDelivery: wire.toProto(),
-		}
+		}.Build()
 
 		_, err = system.wireSpawnOptions(props)
 		require.Error(t, err)
@@ -2665,12 +2665,12 @@ func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 		wire := producerDeliveryConfig("orders-consumer")
 		wire.producer.durableQueueID = "orders-queue"
 
-		props := &internalpb.Actor{
+		props := internalpb.Actor_builder{
 			Address:          address.New("orders-producer", system.name, "127.0.0.1", 8080).String(),
 			Type:             types.Name(new(MockActor)),
 			Relocatable:      true,
 			ReliableDelivery: wire.toProto(),
-		}
+		}.Build()
 
 		_, err := system.wireSpawnOptions(props)
 		require.ErrorContains(t, err, "missing from the endpoint dependencies")
@@ -2721,19 +2721,19 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 	wire := producerDeliveryConfig("orders-consumer")
 	wire.producer.durableQueueID = queue.ID()
 
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:          address.New("orders-producer", actorSystem.name, "127.0.0.1", 7777).String(),
 		Type:             types.Name(&reliableProducerMock{}),
 		Relocatable:      true,
 		IncarnationId:    oldIncarnation,
 		Dependencies:     dependencies,
 		ReliableDelivery: wire.toProto(),
-	}
+	}.Build()
 
-	companionRecord := &internalpb.Actor{
+	companionRecord := internalpb.Actor_builder{
 		Address:       address.New(oldCompanion, actorSystem.name, "127.0.0.1", 7777).String(),
 		IncarnationId: uuid.NewString(),
-	}
+	}.Build()
 
 	// the endpoint and departed companion records are released before the respawn
 	clusterMock.EXPECT().GetActor(mock.Anything, "orders-producer").Return(record, nil).Once()
@@ -2775,17 +2775,17 @@ func TestRecreateActorFromWireNonRelocatableReliableEndpoint(t *testing.T) {
 	incarnation := uuid.NewString()
 	companionName := reliableCompanionName(ReliableControllerRoleConsumer, incarnation)
 
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:          address.New("orders-consumer", system.name, "127.0.0.1", 7777).String(),
 		Type:             types.Name(new(MockActor)),
 		Relocatable:      false,
 		IncarnationId:    incarnation,
 		ReliableDelivery: consumerDeliveryConfig("orders-producer").toProto(),
-	}
+	}.Build()
 
-	companionRecord := &internalpb.Actor{
+	companionRecord := internalpb.Actor_builder{
 		Address: address.New(companionName, system.name, "127.0.0.1", 7777).String(),
-	}
+	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "orders-consumer").Return(record, nil).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-consumer").Return(nil).Once()
@@ -2806,11 +2806,11 @@ func TestRecreateActorFromWireNonRelocatableOrdinaryActorUntouched(t *testing.T)
 	clusterMock := mockcluster.NewCluster(t)
 	system := MockReplicationTestSystem(clusterMock)
 
-	record := &internalpb.Actor{
+	record := internalpb.Actor_builder{
 		Address:     address.New("worker", system.name, "127.0.0.1", 7777).String(),
 		Type:        types.Name(new(MockActor)),
 		Relocatable: false,
-	}
+	}.Build()
 
 	require.NoError(t, system.recreateActorFromWire(context.Background(), record, "127.0.0.1:7777"))
 	clusterMock.AssertExpectations(t)
@@ -2893,7 +2893,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		err := system.recreateActorFromWire(context.Background(), &internalpb.Actor{Address: "not-an-address"}, "10.0.0.2:9000")
+		err := system.recreateActorFromWire(context.Background(), internalpb.Actor_builder{Address: "not-an-address"}.Build(), "10.0.0.2:9000")
 		require.Error(t, err)
 	})
 
@@ -2901,7 +2901,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		record := &internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/GoAktSystemHelper"}
+		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/GoAktSystemHelper"}.Build()
 		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
 	})
 
@@ -2909,7 +2909,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		record := &internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/lonely", Singleton: &internalpb.SingletonSpec{}}
+		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/lonely", Singleton: &internalpb.SingletonSpec{}}.Build()
 		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
 	})
 
@@ -2917,12 +2917,12 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
 
-		record := &internalpb.Actor{
+		record := internalpb.Actor_builder{
 			Address:          "goakt://test-replication@10.0.0.2:9000/orders",
 			IncarnationId:    uuid.NewString(),
 			Relocatable:      false,
 			ReliableDelivery: producerDeliveryConfig("consumer").toProto(),
-		}
+		}.Build()
 
 		// the endpoint release fails and is logged; the companion release still
 		// runs and the relocation returns cleanly because the endpoint is lost
@@ -2940,7 +2940,7 @@ func TestReleaseDepartedEntryBranches(t *testing.T) {
 	t.Run("With the record owned by another node", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, "keeper").Return(&internalpb.Actor{Address: "goakt://test-replication@10.0.0.9:9000/keeper"}, nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "keeper").Return(internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.9:9000/keeper"}.Build(), nil).Once()
 
 		proceed, err := system.releaseDepartedEntry(context.Background(), "keeper", "10.0.0.2:9000")
 		require.NoError(t, err)
@@ -2950,7 +2950,7 @@ func TestReleaseDepartedEntryBranches(t *testing.T) {
 	t.Run("With a remove failure", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := MockReplicationTestSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(&internalpb.Actor{Address: "goakt://test-replication@10.0.0.2:9000/goner"}, nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/goner"}.Build(), nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "goner").Return(errors.New("registry down")).Once()
 
 		proceed, err := system.releaseDepartedEntry(context.Background(), "goner", "10.0.0.2:9000")

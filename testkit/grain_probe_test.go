@@ -101,7 +101,7 @@ func TestGrainProbe(t *testing.T) {
 		probe := testkit.NewGrainProbe(ctx)
 		// send a message to the grain to be tested
 		duration := time.Second
-		probe.SendSync(id, &testpb.TestWait{Duration: uint64(duration)}, duration+time.Second)
+		probe.SendSync(id, testpb.TestWait_builder{Duration: uint64(duration)}.Build(), duration+time.Second)
 
 		// here we expect response from the grain
 		probe.ExpectResponseWithin(2*time.Second, msg)
@@ -258,7 +258,7 @@ func (g *grain) OnReceive(ctx *actor.GrainContext) {
 		// delay for a while before sending the reply
 		wg := sync.WaitGroup{}
 		wg.Go(func() {
-			pause.For(time.Duration(x.Duration))
+			pause.For(time.Duration(x.GetDuration()))
 		})
 		// block until timer is up
 		wg.Wait()

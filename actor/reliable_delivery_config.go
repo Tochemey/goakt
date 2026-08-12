@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/remote"
+	"google.golang.org/protobuf/proto"
 )
 
 // reliableDeliveryConfig describes one endpoint's reliable-delivery settings.
@@ -364,47 +365,45 @@ func (x *reliableDeliveryConfig) toProto() *internalpb.ReliableDeliveryConfig {
 	case x == nil:
 		return nil
 	case x.producer != nil:
-		producer := &internalpb.ReliableProducerConfig{
-			ConsumerName:         x.producer.consumerName,
-			DeliveryConfirmation: x.producer.deliveryConfirmation,
-			MaxChunkBytes:        x.producer.maxChunkBytes,
-			Pattern:              reliableDeliveryPatternToProto(x.producer.workPulling),
-		}
+		producer := &internalpb.ReliableProducerConfig{}
+		producer.SetConsumerName(x.producer.consumerName)
+		producer.SetDeliveryConfirmation(x.producer.deliveryConfirmation)
+		producer.SetMaxChunkBytes(x.producer.maxChunkBytes)
+		producer.SetPattern(reliableDeliveryPatternToProto(x.producer.workPulling))
 
 		if x.producer.durableQueueID != types.EmptyString {
-			producer.DurableQueueId = new(x.producer.durableQueueID)
+			producer.SetDurableQueueId(x.producer.durableQueueID)
 		}
 
 		if x.producer.queueRetry != nil {
-			producer.QueueRetry = &internalpb.QueueRetryConfig{
-				MaxAttempts: uint32(x.producer.queueRetry.maxAttempts),
-			}
+			qrc := &internalpb.QueueRetryConfig{}
+			qrc.SetMaxAttempts(uint32(x.producer.queueRetry.maxAttempts))
+			producer.SetQueueRetry(qrc)
 
 			if x.producer.queueRetry.initialBackoff > 0 {
-				producer.QueueRetry.InitialBackoff = durationpb.New(x.producer.queueRetry.initialBackoff)
+				producer.GetQueueRetry().SetInitialBackoff(durationpb.New(x.producer.queueRetry.initialBackoff))
 			}
 		}
 
 		if x.producer.retryInterval > 0 {
-			producer.LocalRetryInterval = durationpb.New(x.producer.retryInterval)
+			producer.SetLocalRetryInterval(durationpb.New(x.producer.retryInterval))
 		}
 
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Producer{Producer: producer},
-		}
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetProducer(proto.ValueOrDefault(producer))
+		return rdc
 	case x.consumer != nil:
-		consumer := &internalpb.ReliableConsumerConfig{
-			ProducerName:      x.consumer.producerName,
-			FlowControlWindow: uint32(x.consumer.flowControlWindow),
-		}
+		consumer := &internalpb.ReliableConsumerConfig{}
+		consumer.SetProducerName(x.consumer.producerName)
+		consumer.SetFlowControlWindow(uint32(x.consumer.flowControlWindow))
 
 		if x.consumer.resendInterval > 0 {
-			consumer.ResendInterval = durationpb.New(x.consumer.resendInterval)
+			consumer.SetResendInterval(durationpb.New(x.consumer.resendInterval))
 		}
 
-		return &internalpb.ReliableDeliveryConfig{
-			Endpoint: &internalpb.ReliableDeliveryConfig_Consumer{Consumer: consumer},
-		}
+		rdc := &internalpb.ReliableDeliveryConfig{}
+		rdc.SetConsumer(proto.ValueOrDefault(consumer))
+		return rdc
 	default:
 		return nil
 	}
@@ -455,24 +454,24 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 		return nil, nil
 	}
 
-	switch endpoint := config.GetEndpoint().(type) {
-	case *internalpb.ReliableDeliveryConfig_Producer:
+	switch config.WhichEndpoint() {
+	case internalpb.ReliableDeliveryConfig_Producer_case:
 		producer := &reliableProducerConfig{
-			consumerName:         endpoint.Producer.GetConsumerName(),
-			workPulling:          reliableDeliveryPatternFromProto(endpoint.Producer.GetPattern()),
-			durableQueueID:       endpoint.Producer.GetDurableQueueId(),
-			deliveryConfirmation: endpoint.Producer.GetDeliveryConfirmation(),
-			maxChunkBytes:        endpoint.Producer.GetMaxChunkBytes(),
+			consumerName:         config.GetProducer().GetConsumerName(),
+			workPulling:          reliableDeliveryPatternFromProto(config.GetProducer().GetPattern()),
+			durableQueueID:       config.GetProducer().GetDurableQueueId(),
+			deliveryConfirmation: config.GetProducer().GetDeliveryConfirmation(),
+			maxChunkBytes:        config.GetProducer().GetMaxChunkBytes(),
 		}
 
-		localRetryInterval, err := durationFromProto("local retry interval", endpoint.Producer.GetLocalRetryInterval())
+		localRetryInterval, err := durationFromProto("local retry interval", config.GetProducer().GetLocalRetryInterval())
 		if err != nil {
 			return nil, err
 		}
 
 		producer.retryInterval = localRetryInterval
 
-		if retry := endpoint.Producer.GetQueueRetry(); retry != nil {
+		if retry := config.GetProducer().GetQueueRetry(); retry != nil {
 			initialBackoff, err := durationFromProto("queue retry initial backoff", retry.GetInitialBackoff())
 			if err != nil {
 				return nil, err
@@ -485,16 +484,16 @@ func reliableDeliveryConfigFromProto(config *internalpb.ReliableDeliveryConfig) 
 		}
 
 		return &reliableDeliveryConfig{producer: producer}, nil
-	case *internalpb.ReliableDeliveryConfig_Consumer:
-		resendInterval, err := durationFromProto("resend interval", endpoint.Consumer.GetResendInterval())
+	case internalpb.ReliableDeliveryConfig_Consumer_case:
+		resendInterval, err := durationFromProto("resend interval", config.GetConsumer().GetResendInterval())
 		if err != nil {
 			return nil, err
 		}
 
 		return &reliableDeliveryConfig{
 			consumer: &reliableConsumerConfig{
-				producerName:      endpoint.Consumer.GetProducerName(),
-				flowControlWindow: int(endpoint.Consumer.GetFlowControlWindow()),
+				producerName:      config.GetConsumer().GetProducerName(),
+				flowControlWindow: int(config.GetConsumer().GetFlowControlWindow()),
 				resendInterval:    resendInterval,
 			},
 		}, nil

@@ -235,7 +235,9 @@ func main() {
 
 	for i := 1; i <= 5; i++ {
 		orderID := fmt.Sprintf("ord-%d", i)
-		must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: orderID, Payload: &testpb.Reply{Content: orderID}}))
+		reply := &testpb.Reply{}
+		reply.SetContent(orderID)
+		must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: orderID, Payload: reply}))
 	}
 
 	must(await("five processed orders", func() bool {
@@ -268,14 +270,18 @@ func main() {
 	fmt.Printf("[event] reliable delivery failed: endpoint=%s role=%s cause=%v\n", failure.EndpointName(), failure.ControllerRole(), failure.Err())
 
 	// orders submitted during the outage wait in the publisher's queue
-	must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: "ord-7", Payload: &testpb.Reply{Content: "ord-7"}}))
+	reply := &testpb.Reply{}
+	reply.SetContent("ord-7")
+	must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: "ord-7", Payload: reply}))
 
 	fmt.Println("== act 3: ReSpawn recreates the controller and the flow resumes ==")
 
 	_, err = system.ReSpawn(ctx, publisherName)
 	must(err)
 
-	must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: "ord-8", Payload: &testpb.Reply{Content: "ord-8"}}))
+	reply2 := &testpb.Reply{}
+	reply2.SetContent("ord-8")
+	must(actor.Tell(ctx, publisher, &PublishOrder{OrderID: "ord-8", Payload: reply2}))
 
 	must(await("the queued and new orders after recovery", func() bool {
 		return len(processedOrders(ctx, processor)) == 7

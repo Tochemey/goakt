@@ -299,7 +299,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
 		err = gctx.PipeToGrain(identity, func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.NoError(t, err)
 
@@ -350,7 +350,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
 		err = gctx.PipeToGrain(identity, func() (any, error) {
 			time.Sleep(150 * time.Millisecond)
-			return &testpb.Reply{Content: "late"}, nil
+			return testpb.Reply_builder{Content: "late"}.Build(), nil
 		}, WithTimeout(50*time.Millisecond))
 		require.NoError(t, err)
 
@@ -375,7 +375,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		cb := breaker.NewCircuitBreaker(breaker.WithMinRequests(1))
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
 		err = gctx.PipeToGrain(identity, func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		}, WithCircuitBreaker(cb))
 		require.NoError(t, err)
 
@@ -399,7 +399,7 @@ func TestGrainContextPipeToGrainInvalidInput(t *testing.T) {
 
 	t.Run("nil identity", func(t *testing.T) {
 		err := gctx.PipeToGrain(nil, func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 	})
@@ -407,7 +407,7 @@ func TestGrainContextPipeToGrainInvalidInput(t *testing.T) {
 	t.Run("invalid identity", func(t *testing.T) {
 		invalid := &GrainIdentity{kind: "bad", name: ""}
 		err := gctx.PipeToGrain(invalid, func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 	})
@@ -424,7 +424,7 @@ func TestGrainContextPipeToActor(t *testing.T) {
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
 		err = gctx.PipeToActor("pipe-target-actor", func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.NoError(t, err)
 
@@ -461,7 +461,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys, self: identity}
 		err = gctx.PipeToSelf(func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.NoError(t, err)
 
@@ -478,7 +478,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 	t.Run("nil self", func(t *testing.T) {
 		gctx := &GrainContext{ctx: context.Background()}
 		err := gctx.PipeToSelf(func() (any, error) {
-			return &testpb.Reply{Content: "ok"}, nil
+			return testpb.Reply_builder{Content: "ok"}.Build(), nil
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
 	})
@@ -506,7 +506,7 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 		completion := &grainTaskCompletion{
 			Target: &GrainIdentity{kind: "grain", name: "id"},
 			Task: func() (any, error) {
-				return &testpb.Reply{Content: "ok"}, nil
+				return testpb.Reply_builder{Content: "ok"}.Build(), nil
 			},
 		}
 
@@ -665,7 +665,7 @@ func TestGrainEnvelopeReplyModes(t *testing.T) {
 	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestPing:
-			gctx.Response(&testpb.Reply{Content: "pong"})
+			gctx.Response(testpb.Reply_builder{Content: "pong"}.Build())
 		case *testpb.TestBye:
 			gctx.Err(errors.New("handler failed"))
 		case *testpb.TestSend:
@@ -706,8 +706,8 @@ func TestGrainEnvelopeReplyIsOneShot(t *testing.T) {
 	system := newRequestTestSystem(t)
 
 	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
-		gctx.Response(&testpb.Reply{Content: "first"})
-		gctx.Response(&testpb.Reply{Content: "second"})
+		gctx.Response(testpb.Reply_builder{Content: "first"}.Build())
+		gctx.Response(testpb.Reply_builder{Content: "second"}.Build())
 		gctx.Err(errors.New("late failure"))
 	}}
 	identity := activateReentrantGrain(t, system, grain, "oneShotGrain")
@@ -784,7 +784,7 @@ func TestGrainDeferResponse(t *testing.T) {
 				mu.Unlock()
 
 				for _, reply := range replies {
-					reply.Response(&testpb.Reply{Content: "deferred"})
+					reply.Response(testpb.Reply_builder{Content: "deferred"}.Build())
 				}
 				gctx.NoErr()
 			}
@@ -823,11 +823,11 @@ func TestGrainDeferResponse(t *testing.T) {
 			reply := gctx.DeferResponse()
 
 			// Ownership moved to the handle: none of these must reach the caller.
-			gctx.Response(&testpb.Reply{Content: "wrong"})
+			gctx.Response(testpb.Reply_builder{Content: "wrong"}.Build())
 			gctx.Err(errors.New("wrong"))
 			gctx.NoErr()
 
-			reply.Response(&testpb.Reply{Content: "right"})
+			reply.Response(testpb.Reply_builder{Content: "right"}.Build())
 		}}
 		identity := activateReentrantGrain(t, system, grain, "deferOwnerGrain")
 
@@ -844,8 +844,8 @@ func TestGrainDeferResponse(t *testing.T) {
 
 		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
 			reply := gctx.DeferResponse()
-			reply.Response(&testpb.Reply{Content: "first"})
-			reply.Response(&testpb.Reply{Content: "second"})
+			reply.Response(testpb.Reply_builder{Content: "first"}.Build())
+			reply.Response(testpb.Reply_builder{Content: "second"}.Build())
 			reply.Err(errors.New("late failure"))
 		}}
 		identity := activateReentrantGrain(t, system, grain, "deferOnceGrain")
@@ -885,7 +885,7 @@ func TestGrainRequestGrain(t *testing.T) {
 		ctx := context.Background()
 
 		target := &scriptedGrain{receive: func(gctx *GrainContext) {
-			gctx.Response(&testpb.TestCount{Value: 42})
+			gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		}}
 		targetID := activateReentrantGrain(t, system, target, "target-grain")
 
@@ -1157,7 +1157,7 @@ func TestGrainDeferResponseFromContinuation(t *testing.T) {
 	ctx := context.Background()
 
 	target := &scriptedGrain{receive: func(gctx *GrainContext) {
-		gctx.Response(&testpb.TestCount{Value: 42})
+		gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 	}}
 	targetID := activateReentrantGrain(t, system, target, "answer-grain")
 
@@ -1191,7 +1191,7 @@ func TestGrainRequestActor(t *testing.T) {
 		_, err := system.Spawn(ctx, "responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
 			switch rctx.Message().(type) {
 			case *testpb.TestPing:
-				rctx.Response(&testpb.TestCount{Value: 7})
+				rctx.Response(testpb.TestCount_builder{Value: 7}.Build())
 			default:
 				rctx.Unhandled()
 			}
@@ -1269,7 +1269,7 @@ func TestGrainSendAsyncReplyDeliveryFailureIsSwallowed(t *testing.T) {
 	system := newRequestTestSystem(t)
 
 	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
-		gctx.Response(&testpb.Reply{Content: "unroutable"})
+		gctx.Response(testpb.Reply_builder{Content: "unroutable"}.Build())
 	}}
 	identity := activateReentrantGrain(t, system, grain, "unroutableReplier")
 
@@ -1354,7 +1354,7 @@ func TestGrainEnableReentrancyAtRuntime(t *testing.T) {
 	ctx := context.Background()
 
 	target := &scriptedGrain{receive: func(gctx *GrainContext) {
-		gctx.Response(&testpb.TestCount{Value: 42})
+		gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 	}}
 	targetID := activateReentrantGrain(t, system, target, "toggle-target")
 
@@ -1385,7 +1385,7 @@ func TestGrainEnableReentrancyAtRuntime(t *testing.T) {
 			gctx.NoErr()
 		case *testpb.TestReply:
 			correlations <- gctx.CorrelationID()
-			gctx.Response(&testpb.Reply{Content: "probe"})
+			gctx.Response(testpb.Reply_builder{Content: "probe"}.Build())
 		}
 	}}
 
@@ -1454,7 +1454,7 @@ func TestGrainEnableReentrancyUnderConcurrentAsks(t *testing.T) {
 
 		// Response is dual-mode: it serves the channel path and the envelope
 		// path alike, so both ask generations complete.
-		gctx.Response(&testpb.Reply{Content: "ok"})
+		gctx.Response(testpb.Reply_builder{Content: "ok"}.Build())
 	}}
 
 	identity, err := system.GrainIdentity(ctx, "racing-grain", func(context.Context) (Grain, error) {
@@ -1546,7 +1546,7 @@ func TestGrainRequestCycle(t *testing.T) {
 			})
 			gctx.NoErr()
 		case *testpb.TestGetCount:
-			gctx.Response(&testpb.TestCount{Value: 42})
+			gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		}
 	}}
 	identityA = activateReentrantGrain(t, system, grainA, "cycle-a")
@@ -1585,7 +1585,7 @@ func TestGrainSelfRequest(t *testing.T) {
 			})
 			gctx.NoErr()
 		case *testpb.TestGetCount:
-			gctx.Response(&testpb.TestCount{Value: 7})
+			gctx.Response(testpb.TestCount_builder{Value: 7}.Build())
 		}
 	}}
 	identity := activateReentrantGrain(t, system, grain, "self-request-grain")
@@ -1721,7 +1721,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 
 		// The genuine reply lands after the timeout already completed the
 		// state: it must drop as an unknown correlation.
-		reply.Response(&testpb.Reply{Content: "late"})
+		reply.Response(testpb.Reply_builder{Content: "late"}.Build())
 		pause.For(200 * time.Millisecond)
 
 		pid, ok := system.grains.Get(callerID.String())
@@ -1778,7 +1778,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		}
 
 		// The genuine reply after the cancellation must drop without effect.
-		reply.Response(&testpb.Reply{Content: "late"})
+		reply.Response(testpb.Reply_builder{Content: "late"}.Build())
 		pause.For(200 * time.Millisecond)
 
 		pid, ok := system.grains.Get(callerID.String())

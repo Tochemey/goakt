@@ -37,9 +37,9 @@ func TestCodec(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		// create an instance of wire actor
 		addr := address.New("account-1", "system", "127.0.0.1", 2345)
-		actor := &internalpb.Actor{
+		actor := internalpb.Actor_builder{
 			Address: addr.String(),
-		}
+		}.Build()
 
 		// encode the actor
 		actual, err := encode(actor)
@@ -57,11 +57,11 @@ func TestCodec(t *testing.T) {
 		assert.Nil(t, decoded)
 	})
 	t.Run("With Grain encoding", func(t *testing.T) {
-		grain := &internalpb.Grain{
+		grain := internalpb.Grain_builder{
 			GrainId: &internalpb.GrainId{},
 			Host:    "127.0.0.1",
 			Port:    2345,
-		}
+		}.Build()
 		// encode the grain
 		actual, err := encodeGrain(grain)
 		require.NoError(t, err)
@@ -69,11 +69,11 @@ func TestCodec(t *testing.T) {
 	})
 
 	t.Run("With Grain decoding", func(t *testing.T) {
-		grain := &internalpb.Grain{
+		grain := internalpb.Grain_builder{
 			GrainId: &internalpb.GrainId{},
 			Host:    "127.0.0.1",
 			Port:    2345,
-		}
+		}.Build()
 		// encode the grain
 		actual, err := encodeGrain(grain)
 		require.NoError(t, err)

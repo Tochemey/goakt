@@ -115,8 +115,8 @@ func TestIdentity(t *testing.T) {
 		identity := newGrainIdentity(grain, name)
 		wireID := toWireGrainID(identity)
 		require.NotNil(t, wireID)
-		require.Equal(t, identity.Kind(), wireID.Kind)
-		require.Equal(t, identity.Name(), wireID.Name)
-		require.Equal(t, identity.String(), wireID.Value)
+		require.Equal(t, identity.Kind(), wireID.GetKind())
+		require.Equal(t, identity.Name(), wireID.GetName())
+		require.Equal(t, identity.String(), wireID.GetValue())
 	})
 }

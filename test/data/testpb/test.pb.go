@@ -16,7 +16,6 @@ import (
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -29,7 +28,7 @@ const (
 
 // TestReply is a simple acknowledgement payload with no fields.
 type TestReply struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -59,14 +58,21 @@ func (x *TestReply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestReply.ProtoReflect.Descriptor instead.
-func (*TestReply) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{0}
+type TestReply_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestReply_builder) Build() *TestReply {
+	m0 := &TestReply{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestPanic instructs an actor to panic; used to test supervision strategies.
 type TestPanic struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -96,14 +102,21 @@ func (x *TestPanic) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestPanic.ProtoReflect.Descriptor instead.
-func (*TestPanic) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{1}
+type TestPanic_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestPanic_builder) Build() *TestPanic {
+	m0 := &TestPanic{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestPanicError instructs an actor to panic with an error value.
 type TestPanicError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -133,14 +146,21 @@ func (x *TestPanicError) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestPanicError.ProtoReflect.Descriptor instead.
-func (*TestPanicError) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{2}
+type TestPanicError_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestPanicError_builder) Build() *TestPanicError {
+	m0 := &TestPanicError{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestTimeout is used to simulate a request that will time out (no response).
 type TestTimeout struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -170,18 +190,24 @@ func (x *TestTimeout) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestTimeout.ProtoReflect.Descriptor instead.
-func (*TestTimeout) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{3}
+type TestTimeout_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestTimeout_builder) Build() *TestTimeout {
+	m0 := &TestTimeout{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // Reply carries a small text response used in request/response tests.
 type Reply struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// content is the plain\-text payload of the reply.
-	Content       string `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Content string                 `protobuf:"bytes,1,opt,name=content,proto3"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Reply) Reset() {
@@ -209,21 +235,35 @@ func (x *Reply) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Reply.ProtoReflect.Descriptor instead.
-func (*Reply) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{4}
-}
-
 func (x *Reply) GetContent() string {
 	if x != nil {
-		return x.Content
+		return x.xxx_hidden_Content
 	}
 	return ""
 }
 
+func (x *Reply) SetContent(v string) {
+	x.xxx_hidden_Content = v
+}
+
+type Reply_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// content is the plain\-text payload of the reply.
+	Content string
+}
+
+func (b0 Reply_builder) Build() *Reply {
+	m0 := &Reply{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Content = b.Content
+	return m0
+}
+
 // TestSend triggers a local send scenario in tests.
 type TestSend struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -253,14 +293,21 @@ func (x *TestSend) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestSend.ProtoReflect.Descriptor instead.
-func (*TestSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{5}
+type TestSend_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestSend_builder) Build() *TestSend {
+	m0 := &TestSend{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestRemoteSend triggers a remote send scenario (inter\-node) in tests.
 type TestRemoteSend struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -290,20 +337,25 @@ func (x *TestRemoteSend) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestRemoteSend.ProtoReflect.Descriptor instead.
-func (*TestRemoteSend) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{6}
+type TestRemoteSend_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestRemoteSend_builder) Build() *TestRemoteSend {
+	m0 := &TestRemoteSend{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // Account represents a snapshot of an account aggregate used in tests.
 type Account struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id is the unique identifier of the account.
-	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// account_balance is the current balance of the account.
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountId      string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3"`
+	xxx_hidden_AccountBalance float64                `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *Account) Reset() {
@@ -331,32 +383,52 @@ func (x *Account) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Account.ProtoReflect.Descriptor instead.
-func (*Account) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{7}
-}
-
 func (x *Account) GetAccountId() string {
 	if x != nil {
-		return x.AccountId
+		return x.xxx_hidden_AccountId
 	}
 	return ""
 }
 
 func (x *Account) GetAccountBalance() float64 {
 	if x != nil {
-		return x.AccountBalance
+		return x.xxx_hidden_AccountBalance
 	}
 	return 0
 }
 
+func (x *Account) SetAccountId(v string) {
+	x.xxx_hidden_AccountId = v
+}
+
+func (x *Account) SetAccountBalance(v float64) {
+	x.xxx_hidden_AccountBalance = v
+}
+
+type Account_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_id is the unique identifier of the account.
+	AccountId string
+	// account_balance is the current balance of the account.
+	AccountBalance float64
+}
+
+func (b0 Account_builder) Build() *Account {
+	m0 := &Account{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountId = b.AccountId
+	x.xxx_hidden_AccountBalance = b.AccountBalance
+	return m0
+}
+
 // CreateAccount is a command to create a new test account.
 type CreateAccount struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_balance is the initial balance of the account.
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountBalance float64                `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *CreateAccount) Reset() {
@@ -384,27 +456,39 @@ func (x *CreateAccount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateAccount.ProtoReflect.Descriptor instead.
-func (*CreateAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{8}
-}
-
 func (x *CreateAccount) GetAccountBalance() float64 {
 	if x != nil {
-		return x.AccountBalance
+		return x.xxx_hidden_AccountBalance
 	}
 	return 0
 }
 
+func (x *CreateAccount) SetAccountBalance(v float64) {
+	x.xxx_hidden_AccountBalance = v
+}
+
+type CreateAccount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_balance is the initial balance of the account.
+	AccountBalance float64
+}
+
+func (b0 CreateAccount_builder) Build() *CreateAccount {
+	m0 := &CreateAccount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountBalance = b.AccountBalance
+	return m0
+}
+
 // CreditAccount is a command to credit an existing account.
 type CreditAccount struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id identifies the target account.
-	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// balance is the amount to add to the account.
-	Balance       float64 `protobuf:"fixed64,2,opt,name=balance,proto3" json:"balance,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountId string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3"`
+	xxx_hidden_Balance   float64                `protobuf:"fixed64,2,opt,name=balance,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *CreditAccount) Reset() {
@@ -432,34 +516,53 @@ func (x *CreditAccount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreditAccount.ProtoReflect.Descriptor instead.
-func (*CreditAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{9}
-}
-
 func (x *CreditAccount) GetAccountId() string {
 	if x != nil {
-		return x.AccountId
+		return x.xxx_hidden_AccountId
 	}
 	return ""
 }
 
 func (x *CreditAccount) GetBalance() float64 {
 	if x != nil {
-		return x.Balance
+		return x.xxx_hidden_Balance
 	}
 	return 0
 }
 
+func (x *CreditAccount) SetAccountId(v string) {
+	x.xxx_hidden_AccountId = v
+}
+
+func (x *CreditAccount) SetBalance(v float64) {
+	x.xxx_hidden_Balance = v
+}
+
+type CreditAccount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_id identifies the target account.
+	AccountId string
+	// balance is the amount to add to the account.
+	Balance float64
+}
+
+func (b0 CreditAccount_builder) Build() *CreditAccount {
+	m0 := &CreditAccount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountId = b.AccountId
+	x.xxx_hidden_Balance = b.Balance
+	return m0
+}
+
 // AccountCreated is an event emitted after an account is created.
 type AccountCreated struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id is the identifier of the created account.
-	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// account_balance is the starting balance.
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountId      string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3"`
+	xxx_hidden_AccountBalance float64                `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *AccountCreated) Reset() {
@@ -487,34 +590,53 @@ func (x *AccountCreated) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AccountCreated.ProtoReflect.Descriptor instead.
-func (*AccountCreated) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{10}
-}
-
 func (x *AccountCreated) GetAccountId() string {
 	if x != nil {
-		return x.AccountId
+		return x.xxx_hidden_AccountId
 	}
 	return ""
 }
 
 func (x *AccountCreated) GetAccountBalance() float64 {
 	if x != nil {
-		return x.AccountBalance
+		return x.xxx_hidden_AccountBalance
 	}
 	return 0
 }
 
+func (x *AccountCreated) SetAccountId(v string) {
+	x.xxx_hidden_AccountId = v
+}
+
+func (x *AccountCreated) SetAccountBalance(v float64) {
+	x.xxx_hidden_AccountBalance = v
+}
+
+type AccountCreated_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_id is the identifier of the created account.
+	AccountId string
+	// account_balance is the starting balance.
+	AccountBalance float64
+}
+
+func (b0 AccountCreated_builder) Build() *AccountCreated {
+	m0 := &AccountCreated{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountId = b.AccountId
+	x.xxx_hidden_AccountBalance = b.AccountBalance
+	return m0
+}
+
 // AccountCredited is an event emitted after a successful credit.
 type AccountCredited struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id is the identifier of the credited account.
-	AccountId string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	// account_balance is the resulting account balance after credit.
-	AccountBalance float64 `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3" json:"account_balance,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountId      string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3"`
+	xxx_hidden_AccountBalance float64                `protobuf:"fixed64,2,opt,name=account_balance,json=accountBalance,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *AccountCredited) Reset() {
@@ -542,28 +664,49 @@ func (x *AccountCredited) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AccountCredited.ProtoReflect.Descriptor instead.
-func (*AccountCredited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{11}
-}
-
 func (x *AccountCredited) GetAccountId() string {
 	if x != nil {
-		return x.AccountId
+		return x.xxx_hidden_AccountId
 	}
 	return ""
 }
 
 func (x *AccountCredited) GetAccountBalance() float64 {
 	if x != nil {
-		return x.AccountBalance
+		return x.xxx_hidden_AccountBalance
 	}
 	return 0
 }
 
+func (x *AccountCredited) SetAccountId(v string) {
+	x.xxx_hidden_AccountId = v
+}
+
+func (x *AccountCredited) SetAccountBalance(v float64) {
+	x.xxx_hidden_AccountBalance = v
+}
+
+type AccountCredited_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_id is the identifier of the credited account.
+	AccountId string
+	// account_balance is the resulting account balance after credit.
+	AccountBalance float64
+}
+
+func (b0 AccountCredited_builder) Build() *AccountCredited {
+	m0 := &AccountCredited{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountId = b.AccountId
+	x.xxx_hidden_AccountBalance = b.AccountBalance
+	return m0
+}
+
 // DebitAccount is a command used in tests to exercise debit flows.
 type DebitAccount struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -593,14 +736,21 @@ func (x *DebitAccount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DebitAccount.ProtoReflect.Descriptor instead.
-func (*DebitAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{12}
+type DebitAccount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 DebitAccount_builder) Build() *DebitAccount {
+	m0 := &DebitAccount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // AccountDebited is an event emitted after a successful debit in tests.
 type AccountDebited struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -630,18 +780,24 @@ func (x *AccountDebited) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use AccountDebited.ProtoReflect.Descriptor instead.
-func (*AccountDebited) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{13}
+type AccountDebited_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 AccountDebited_builder) Build() *AccountDebited {
+	m0 := &AccountDebited{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // GetAccount is a query to fetch the current state of an account.
 type GetAccount struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// account_id identifies the account to retrieve.
-	AccountId     string `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_AccountId string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *GetAccount) Reset() {
@@ -669,21 +825,35 @@ func (x *GetAccount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetAccount.ProtoReflect.Descriptor instead.
-func (*GetAccount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{14}
-}
-
 func (x *GetAccount) GetAccountId() string {
 	if x != nil {
-		return x.AccountId
+		return x.xxx_hidden_AccountId
 	}
 	return ""
 }
 
+func (x *GetAccount) SetAccountId(v string) {
+	x.xxx_hidden_AccountId = v
+}
+
+type GetAccount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// account_id identifies the account to retrieve.
+	AccountId string
+}
+
+func (b0 GetAccount_builder) Build() *GetAccount {
+	m0 := &GetAccount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_AccountId = b.AccountId
+	return m0
+}
+
 // TestLogin requests a login flow in tests.
 type TestLogin struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -713,14 +883,21 @@ func (x *TestLogin) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestLogin.ProtoReflect.Descriptor instead.
-func (*TestLogin) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{15}
+type TestLogin_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestLogin_builder) Build() *TestLogin {
+	m0 := &TestLogin{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestLoginSuccess indicates a successful login in tests.
 type TestLoginSuccess struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -750,14 +927,21 @@ func (x *TestLoginSuccess) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestLoginSuccess.ProtoReflect.Descriptor instead.
-func (*TestLoginSuccess) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{16}
+type TestLoginSuccess_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestLoginSuccess_builder) Build() *TestLoginSuccess {
+	m0 := &TestLoginSuccess{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestReadiness asks an actor to report readiness.
 type TestReadiness struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -787,14 +971,21 @@ func (x *TestReadiness) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestReadiness.ProtoReflect.Descriptor instead.
-func (*TestReadiness) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{17}
+type TestReadiness_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestReadiness_builder) Build() *TestReadiness {
+	m0 := &TestReadiness{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestReady indicates an actor has reached a ready state.
 type TestReady struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -824,14 +1015,21 @@ func (x *TestReady) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestReady.ProtoReflect.Descriptor instead.
-func (*TestReady) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{18}
+type TestReady_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestReady_builder) Build() *TestReady {
+	m0 := &TestReady{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestBye is a termination/cleanup signal used in tests.
 type TestBye struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -861,14 +1059,21 @@ func (x *TestBye) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestBye.ProtoReflect.Descriptor instead.
-func (*TestBye) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{19}
+type TestBye_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestBye_builder) Build() *TestBye {
+	m0 := &TestBye{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestStash asks the actor to stash the current message.
 type TestStash struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -898,14 +1103,21 @@ func (x *TestStash) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestStash.ProtoReflect.Descriptor instead.
-func (*TestStash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{20}
+type TestStash_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestStash_builder) Build() *TestStash {
+	m0 := &TestStash{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestUnstash asks the actor to unstash a single message.
 type TestUnstash struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -935,14 +1147,21 @@ func (x *TestUnstash) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestUnstash.ProtoReflect.Descriptor instead.
-func (*TestUnstash) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{21}
+type TestUnstash_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestUnstash_builder) Build() *TestUnstash {
+	m0 := &TestUnstash{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestUnstashAll asks the actor to unstash all stashed messages.
 type TestUnstashAll struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -972,14 +1191,21 @@ func (x *TestUnstashAll) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestUnstashAll.ProtoReflect.Descriptor instead.
-func (*TestUnstashAll) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{22}
+type TestUnstashAll_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestUnstashAll_builder) Build() *TestUnstashAll {
+	m0 := &TestUnstashAll{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestPing is a heartbeat request in tests.
 type TestPing struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1009,14 +1235,21 @@ func (x *TestPing) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestPing.ProtoReflect.Descriptor instead.
-func (*TestPing) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{23}
+type TestPing_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestPing_builder) Build() *TestPing {
+	m0 := &TestPing{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestPong is the heartbeat response in tests.
 type TestPong struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1046,18 +1279,24 @@ func (x *TestPong) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestPong.ProtoReflect.Descriptor instead.
-func (*TestPong) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{24}
+type TestPong_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestPong_builder) Build() *TestPong {
+	m0 := &TestPong{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestWait instructs an actor to wait before responding; used to test timeouts.
 type TestWait struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// duration is the delay before responding (test\-defined time unit).
-	Duration      uint64 `protobuf:"varint,1,opt,name=duration,proto3" json:"duration,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Duration uint64                 `protobuf:"varint,1,opt,name=duration,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TestWait) Reset() {
@@ -1085,25 +1324,38 @@ func (x *TestWait) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestWait.ProtoReflect.Descriptor instead.
-func (*TestWait) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{25}
-}
-
 func (x *TestWait) GetDuration() uint64 {
 	if x != nil {
-		return x.Duration
+		return x.xxx_hidden_Duration
 	}
 	return 0
 }
 
+func (x *TestWait) SetDuration(v uint64) {
+	x.xxx_hidden_Duration = v
+}
+
+type TestWait_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// duration is the delay before responding (test\-defined time unit).
+	Duration uint64
+}
+
+func (b0 TestWait_builder) Build() *TestWait {
+	m0 := &TestWait{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Duration = b.Duration
+	return m0
+}
+
 // TestRunTask asks an actor to run a background task and complete later.
 type TestRunTask struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// duration is the simulated task runtime (test\-defined time unit).
-	Duration      uint64 `protobuf:"varint,1,opt,name=duration,proto3" json:"duration,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Duration uint64                 `protobuf:"varint,1,opt,name=duration,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TestRunTask) Reset() {
@@ -1131,21 +1383,35 @@ func (x *TestRunTask) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestRunTask.ProtoReflect.Descriptor instead.
-func (*TestRunTask) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{26}
-}
-
 func (x *TestRunTask) GetDuration() uint64 {
 	if x != nil {
-		return x.Duration
+		return x.xxx_hidden_Duration
 	}
 	return 0
 }
 
+func (x *TestRunTask) SetDuration(v uint64) {
+	x.xxx_hidden_Duration = v
+}
+
+type TestRunTask_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// duration is the simulated task runtime (test\-defined time unit).
+	Duration uint64
+}
+
+func (b0 TestRunTask_builder) Build() *TestRunTask {
+	m0 := &TestRunTask{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Duration = b.Duration
+	return m0
+}
+
 // TaskComplete notifies that a previously started task has finished.
 type TaskComplete struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1175,18 +1441,24 @@ func (x *TaskComplete) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TaskComplete.ProtoReflect.Descriptor instead.
-func (*TaskComplete) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{27}
+type TaskComplete_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TaskComplete_builder) Build() *TaskComplete {
+	m0 := &TaskComplete{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestLog asks an actor to log a line of text (useful for tracing tests).
 type TestLog struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// text is the message to be logged.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Text string                 `protobuf:"bytes,1,opt,name=text,proto3"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TestLog) Reset() {
@@ -1214,21 +1486,35 @@ func (x *TestLog) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestLog.ProtoReflect.Descriptor instead.
-func (*TestLog) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{28}
-}
-
 func (x *TestLog) GetText() string {
 	if x != nil {
-		return x.Text
+		return x.xxx_hidden_Text
 	}
 	return ""
 }
 
+func (x *TestLog) SetText(v string) {
+	x.xxx_hidden_Text = v
+}
+
+type TestLog_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// text is the message to be logged.
+	Text string
+}
+
+func (b0 TestLog_builder) Build() *TestLog {
+	m0 := &TestLog{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Text = b.Text
+	return m0
+}
+
 // TestGetCount queries an actor for its current counter value.
 type TestGetCount struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1258,18 +1544,24 @@ func (x *TestGetCount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestGetCount.ProtoReflect.Descriptor instead.
-func (*TestGetCount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{29}
+type TestGetCount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestGetCount_builder) Build() *TestGetCount {
+	m0 := &TestGetCount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestCount carries the counter value returned by an actor.
 type TestCount struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// value is the current counter value.
-	Value         int32 `protobuf:"varint,1,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Value int32                  `protobuf:"varint,1,opt,name=value,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TestCount) Reset() {
@@ -1297,21 +1589,35 @@ func (x *TestCount) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestCount.ProtoReflect.Descriptor instead.
-func (*TestCount) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{30}
-}
-
 func (x *TestCount) GetValue() int32 {
 	if x != nil {
-		return x.Value
+		return x.xxx_hidden_Value
 	}
 	return 0
 }
 
+func (x *TestCount) SetValue(v int32) {
+	x.xxx_hidden_Value = v
+}
+
+type TestCount_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// value is the current counter value.
+	Value int32
+}
+
+func (b0 TestCount_builder) Build() *TestCount {
+	m0 := &TestCount{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Value = b.Value
+	return m0
+}
+
 // TestRemoteForward signals the actor to forward a message across nodes.
 type TestRemoteForward struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1341,14 +1647,21 @@ func (x *TestRemoteForward) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestRemoteForward.ProtoReflect.Descriptor instead.
-func (*TestRemoteForward) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{31}
+type TestRemoteForward_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestRemoteForward_builder) Build() *TestRemoteForward {
+	m0 := &TestRemoteForward{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestClusterForward signals the actor to forward via a cluster\-aware route.
 type TestClusterForward struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1378,22 +1691,25 @@ func (x *TestClusterForward) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestClusterForward.ProtoReflect.Descriptor instead.
-func (*TestClusterForward) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{32}
+type TestClusterForward_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestClusterForward_builder) Build() *TestClusterForward {
+	m0 := &TestClusterForward{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // TestMessage wraps an arbitrary payload with an optional priority hint.
 type TestMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// message is an arbitrary payload packed as google.protobuf.Any.
-	// The embedded type_url and value should be set by the sender.
-	Message *anypb.Any `protobuf:"bytes,1,opt,name=message,proto3" json:"message,omitempty"`
-	// priority is an optional delivery/processing hint used in tests.
-	// Higher values typically indicate higher precedence; 0 means default.
-	Priority      int64 `protobuf:"varint,2,opt,name=priority,proto3" json:"priority,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Message  *anypb.Any             `protobuf:"bytes,1,opt,name=message,proto3"`
+	xxx_hidden_Priority int64                  `protobuf:"varint,2,opt,name=priority,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *TestMessage) Reset() {
@@ -1421,32 +1737,66 @@ func (x *TestMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestMessage.ProtoReflect.Descriptor instead.
-func (*TestMessage) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{33}
-}
-
 func (x *TestMessage) GetMessage() *anypb.Any {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return nil
 }
 
 func (x *TestMessage) GetPriority() int64 {
 	if x != nil {
-		return x.Priority
+		return x.xxx_hidden_Priority
 	}
 	return 0
 }
 
+func (x *TestMessage) SetMessage(v *anypb.Any) {
+	x.xxx_hidden_Message = v
+}
+
+func (x *TestMessage) SetPriority(v int64) {
+	x.xxx_hidden_Priority = v
+}
+
+func (x *TestMessage) HasMessage() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Message != nil
+}
+
+func (x *TestMessage) ClearMessage() {
+	x.xxx_hidden_Message = nil
+}
+
+type TestMessage_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// message is an arbitrary payload packed as google.protobuf.Any.
+	// The embedded type_url and value should be set by the sender.
+	Message *anypb.Any
+	// priority is an optional delivery/processing hint used in tests.
+	// Higher values typically indicate higher precedence; 0 means default.
+	Priority int64
+}
+
+func (b0 TestMessage_builder) Build() *TestMessage {
+	m0 := &TestMessage{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_Priority = b.Priority
+	return m0
+}
+
 type TestSum struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	A             int64                  `protobuf:"varint,1,opt,name=a,proto3" json:"a,omitempty"`
-	B             int64                  `protobuf:"varint,2,opt,name=b,proto3" json:"b,omitempty"`
-	Delay         *durationpb.Duration   `protobuf:"bytes,3,opt,name=delay,proto3,oneof" json:"delay,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_A     int64                  `protobuf:"varint,1,opt,name=a,proto3"`
+	xxx_hidden_B     int64                  `protobuf:"varint,2,opt,name=b,proto3"`
+	xxx_hidden_Delay *durationpb.Duration   `protobuf:"bytes,3,opt,name=delay,proto3,oneof"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TestSum) Reset() {
@@ -1474,37 +1824,73 @@ func (x *TestSum) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestSum.ProtoReflect.Descriptor instead.
-func (*TestSum) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{34}
-}
-
 func (x *TestSum) GetA() int64 {
 	if x != nil {
-		return x.A
+		return x.xxx_hidden_A
 	}
 	return 0
 }
 
 func (x *TestSum) GetB() int64 {
 	if x != nil {
-		return x.B
+		return x.xxx_hidden_B
 	}
 	return 0
 }
 
 func (x *TestSum) GetDelay() *durationpb.Duration {
 	if x != nil {
-		return x.Delay
+		return x.xxx_hidden_Delay
 	}
 	return nil
 }
 
+func (x *TestSum) SetA(v int64) {
+	x.xxx_hidden_A = v
+}
+
+func (x *TestSum) SetB(v int64) {
+	x.xxx_hidden_B = v
+}
+
+func (x *TestSum) SetDelay(v *durationpb.Duration) {
+	x.xxx_hidden_Delay = v
+}
+
+func (x *TestSum) HasDelay() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Delay != nil
+}
+
+func (x *TestSum) ClearDelay() {
+	x.xxx_hidden_Delay = nil
+}
+
+type TestSum_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	A     int64
+	B     int64
+	Delay *durationpb.Duration
+}
+
+func (b0 TestSum_builder) Build() *TestSum {
+	m0 := &TestSum{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_A = b.A
+	x.xxx_hidden_B = b.B
+	x.xxx_hidden_Delay = b.Delay
+	return m0
+}
+
 type TestSumResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Result        int64                  `protobuf:"varint,1,opt,name=result,proto3" json:"result,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Result int64                  `protobuf:"varint,1,opt,name=result,proto3"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *TestSumResult) Reset() {
@@ -1532,20 +1918,33 @@ func (x *TestSumResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestSumResult.ProtoReflect.Descriptor instead.
-func (*TestSumResult) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{35}
-}
-
 func (x *TestSumResult) GetResult() int64 {
 	if x != nil {
-		return x.Result
+		return x.xxx_hidden_Result
 	}
 	return 0
 }
 
+func (x *TestSumResult) SetResult(v int64) {
+	x.xxx_hidden_Result = v
+}
+
+type TestSumResult_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Result int64
+}
+
+func (b0 TestSumResult_builder) Build() *TestSumResult {
+	m0 := &TestSumResult{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Result = b.Result
+	return m0
+}
+
 type TestGetSumResult struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1575,9 +1974,16 @@ func (x *TestGetSumResult) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestGetSumResult.ProtoReflect.Descriptor instead.
-func (*TestGetSumResult) Descriptor() ([]byte, []int) {
-	return file_test_test_proto_rawDescGZIP(), []int{36}
+type TestGetSumResult_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 TestGetSumResult_builder) Build() *TestGetSumResult {
+	m0 := &TestGetSumResult{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 var File_test_test_proto protoreflect.FileDescriptor
@@ -1655,18 +2061,6 @@ const file_test_test_proto_rawDesc = "" +
 	"\x10TestGetSumResultB\x80\x01\n" +
 	"\n" +
 	"com.testpbB\tTestProtoH\x02P\x01Z-github.com/tochemey/goakt/v4/test/data;testpb\xa2\x02\x03TXX\xaa\x02\x06Testpb\xca\x02\x06Testpb\xe2\x02\x12Testpb\\GPBMetadata\xea\x02\x06Testpbb\x06proto3"
-
-var (
-	file_test_test_proto_rawDescOnce sync.Once
-	file_test_test_proto_rawDescData []byte
-)
-
-func file_test_test_proto_rawDescGZIP() []byte {
-	file_test_test_proto_rawDescOnce.Do(func() {
-		file_test_test_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_test_test_proto_rawDesc), len(file_test_test_proto_rawDesc)))
-	})
-	return file_test_test_proto_rawDescData
-}
 
 var file_test_test_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_test_test_proto_goTypes = []any{

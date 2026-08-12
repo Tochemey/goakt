@@ -68,7 +68,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -85,7 +85,7 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
-		expected := &testpb.TestCount{Value: 2}
+		expected := testpb.TestCount_builder{Value: 2}.Build()
 
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
@@ -143,7 +143,7 @@ func TestRouter(t *testing.T) {
 		require.NoError(t, workerTwoRef.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -180,7 +180,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -192,7 +192,7 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		expected := &testpb.TestCount{Value: 2}
+		expected := testpb.TestCount_builder{Value: 2}.Build()
 
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
@@ -245,7 +245,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -292,7 +292,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -304,7 +304,7 @@ func TestRouter(t *testing.T) {
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		expected := &testpb.TestCount{Value: 2}
+		expected := testpb.TestCount_builder{Value: 2}.Build()
 
 		reply, err := Ask(ctx, workerOneRef, new(testpb.TestGetCount), time.Minute)
 		require.NoError(t, err)
@@ -343,11 +343,11 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		summation := &testpb.TestSum{A: 10, B: 20}
+		summation := testpb.TestSum_builder{A: 10, B: 20}.Build()
 		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
-		expected := &testpb.TestSumResult{Result: 30}
+		expected := testpb.TestSumResult_builder{Result: 30}.Build()
 		require.Eventually(t, func() bool {
 			reply, err := Ask(ctx, summationActor, new(testpb.TestGetSumResult), time.Second)
 			if err != nil {
@@ -391,12 +391,12 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		summation := &testpb.TestSum{A: 10, B: 20}
+		summation := testpb.TestSum_builder{A: 10, B: 20}.Build()
 		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
 		pause.For(3 * time.Second)
-		expected := &testpb.TestSumResult{Result: 30}
+		expected := testpb.TestSumResult_builder{Result: 30}.Build()
 
 		reply, err := Ask(ctx, summationActor, new(testpb.TestGetSumResult), time.Second)
 		require.NoError(t, err)
@@ -435,7 +435,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		summation := &testpb.TestSum{A: 10, B: 20}
+		summation := testpb.TestSum_builder{A: 10, B: 20}.Build()
 		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
@@ -471,7 +471,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		summation := &testpb.TestSum{A: 5, B: 7}
+		summation := testpb.TestSum_builder{A: 5, B: 7}.Build()
 		err = summationActor.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
@@ -508,7 +508,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		summation := &testpb.TestSum{A: 10, B: 20, Delay: durationpb.New(3 * time.Second)}
+		summation := testpb.TestSum_builder{A: 10, B: 20, Delay: durationpb.New(3 * time.Second)}.Build()
 		err = pid.Tell(ctx, router, NewBroadcast(summation))
 		require.NoError(t, err)
 
@@ -545,7 +545,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = pid.Tell(ctx, router, NewBroadcast(&testpb.TestSum{A: 1, B: 2}))
+		err = pid.Tell(ctx, router, NewBroadcast(testpb.TestSum_builder{A: 1, B: 2}.Build()))
 		require.NoError(t, err)
 
 		require.True(t, probe.WaitForFailure(5*time.Second), "expected status failure due to exhausted deadline")
@@ -646,7 +646,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -688,7 +688,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -730,7 +730,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(2 * time.Second)
@@ -772,7 +772,7 @@ func TestRouter(t *testing.T) {
 		pause.For(time.Second)
 
 		// send a broadcast message to the router
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "msg"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build()))
 		require.NoError(t, err)
 
 		waitForRouteeCount(t, ctx, router, 0)
@@ -866,7 +866,7 @@ func TestRouter(t *testing.T) {
 
 		// send the same key multiple times
 		for range 10 {
-			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "sticky-key"}))
+			err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "sticky-key"}.Build()))
 			require.NoError(t, err)
 		}
 
@@ -930,7 +930,7 @@ func TestRouter(t *testing.T) {
 
 		// send 100 distinct keys to ensure distribution across routees
 		for i := range 100 {
-			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: fmt.Sprintf("key-%d", i)}))
+			err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: fmt.Sprintf("key-%d", i)}.Build()))
 			require.NoError(t, err)
 		}
 
@@ -980,7 +980,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "something"}))
+		err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "something"}.Build()))
 		require.NoError(t, err)
 
 		pause.For(time.Second)
@@ -1057,7 +1057,7 @@ func TestRouter(t *testing.T) {
 
 		// send messages with a key before scaling
 		for range 5 {
-			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "scale-key"}))
+			err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "scale-key"}.Build()))
 			require.NoError(t, err)
 		}
 
@@ -1071,7 +1071,7 @@ func TestRouter(t *testing.T) {
 
 		// send more messages with the same key - should still route consistently
 		for range 5 {
-			err = Tell(ctx, router, NewBroadcast(&testpb.TestLog{Text: "scale-key"}))
+			err = Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "scale-key"}.Build()))
 			require.NoError(t, err)
 		}
 

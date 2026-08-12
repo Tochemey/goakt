@@ -27,6 +27,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"runtime"
 	"sync"
@@ -38,6 +39,37 @@ import (
 // The implementation owns the [Connection] for the duration of the call;
 // once it returns the connection is closed automatically.
 type RequestHandlerFunc func(conn Connection)
+
+// DuplexHandlerFunc handles a connection that sniffed as the duplex protocol
+// (first byte [ProtocolVersion]). It receives the raw [net.Conn] after TLS
+// with the sniffed byte prepended and before any legacy compression wrapper.
+//
+// The handler owns the connection and its server accounting: it must call
+// release exactly once when the connection's service ends, so shutdown can
+// wait for live duplex connections. The handler may return before release is
+// called; service then continues on the connection's own transport goroutines
+// (detached mode) and the accept worker goes back to its pool.
+type DuplexHandlerFunc func(conn net.Conn, release func())
+
+// AcceptProtocol selects which remoting wire protocols the listener accepts.
+// It mirrors remote.ProtocolPin without importing the remote package.
+type AcceptProtocol int
+
+const (
+	// AcceptProtocolAuto classifies inbound connections by the first byte
+	// after TLS: duplex when the peer speaks [ProtocolVersion], otherwise
+	// legacy.
+	AcceptProtocolAuto AcceptProtocol = iota
+
+	// AcceptProtocolLegacy skips the duplex sniff and always serves the
+	// legacy unary path. Required when legacy brotli peers can emit a first
+	// byte that collides with [ProtocolVersion].
+	AcceptProtocolLegacy
+
+	// AcceptProtocolDuplex accepts only the multiplexed duplex protocol.
+	// Non-duplex first bytes close the connection.
+	AcceptProtocolDuplex
+)
 
 // ConnectionCreatorFunc returns a fresh [Connection] value used to service an
 // incoming TCP connection. The default creates a plain [*TCPConn].
@@ -65,6 +97,9 @@ type TCPServer struct {
 	tlsConfig         *tls.Config
 	listenConfig      *ListenConfig
 	connWrappers      []ConnWrapper
+	duplexHandler     DuplexHandlerFunc
+	acceptProtocol    AcceptProtocol
+	idleTimeout       time.Duration
 	connWaitGroup     sync.WaitGroup
 	connStructPool    sync.Pool
 	wp                *WorkerPool[net.Conn]
@@ -204,10 +239,30 @@ func WithAllowThreadLocking(allow bool) ServerOption {
 }
 
 // WithConnWrapper appends a [ConnWrapper] (e.g. compression) to the
-// server's wrapping pipeline, applied after TLS. Multiple wrappers
-// are applied in the order they were added.
+// server's wrapping pipeline, applied after TLS on the legacy path only.
+// Multiple wrappers are applied in the order they were added. Duplex
+// connections negotiate compression after HELLO instead.
 func WithConnWrapper(w ConnWrapper) ServerOption {
 	return func(s *TCPServer) { s.connWrappers = append(s.connWrappers, w) }
+}
+
+// WithDuplexHandler registers the handler for connections whose first byte
+// after TLS is [ProtocolVersion]. When unset, such connections are closed.
+func WithDuplexHandler(f DuplexHandlerFunc) ServerOption {
+	return func(s *TCPServer) { s.duplexHandler = f }
+}
+
+// WithAcceptProtocol selects which wire protocols the listener accepts.
+// The default is [AcceptProtocolAuto].
+func WithAcceptProtocol(protocol AcceptProtocol) ServerOption {
+	return func(s *TCPServer) { s.acceptProtocol = protocol }
+}
+
+// WithServerIdleTimeout arms a read deadline for the protocol sniff and is
+// available to duplex handlers that share the server configuration. Zero
+// (the default) means no sniff deadline.
+func WithServerIdleTimeout(d time.Duration) ServerOption {
+	return func(s *TCPServer) { s.idleTimeout = d }
 }
 
 // WithMaxAcceptConnections sets the maximum number of connections the
@@ -445,33 +500,133 @@ func (s *TCPServer) serveConn(netConn net.Conn) {
 	s.connWaitGroup.Add(1)
 	s.activeConnections.Add(1)
 
-	conn := s.connStructPool.Get().(Connection)
+	// release retires this connection's server accounting exactly once. The
+	// legacy paths call it when serveConn returns; the duplex handler owns it
+	// (see [DuplexHandlerFunc]) so a detached duplex connection keeps shutdown
+	// waiting until its transport goroutines finish.
+	release := sync.OnceFunc(func() {
+		s.activeConnections.Add(-1)
+		s.connWaitGroup.Done()
+	})
 
 	if s.tlsEnabled {
 		netConn = tls.Server(netConn, s.tlsConfig)
 	}
 
+	switch s.acceptProtocol {
+	case AcceptProtocolLegacy:
+		defer release()
+		s.serveLegacyConn(netConn)
+	case AcceptProtocolDuplex:
+		s.serveDuplexOnlyConn(netConn, release)
+	default:
+		s.serveAutoConn(netConn, release)
+	}
+}
+
+// serveAutoConn peeks one byte after TLS and before legacy compression
+// wrappers. [ProtocolVersion] routes to the duplex handler; anything else
+// replays into the legacy path. Legacy brotli has no magic byte and can
+// collide with [ProtocolVersion]; those deployments must pin legacy or duplex.
+// release retires the connection's server accounting; every terminal path
+// must reach it exactly once (the duplex handler owns it after handoff).
+func (s *TCPServer) serveAutoConn(netConn net.Conn, release func()) {
+	first, ok := s.sniffFirstByte(netConn)
+	if !ok {
+		release()
+		return
+	}
+
+	netConn = &prependConn{Conn: netConn, prefix: []byte{first}}
+
+	if first == ProtocolVersion {
+		s.invokeDuplexHandler(netConn, release)
+		return
+	}
+
+	defer release()
+	s.serveLegacyConn(netConn)
+}
+
+// serveDuplexOnlyConn accepts only duplex peers. Non-duplex first bytes close
+// the connection without entering the legacy path. release retires the
+// connection's server accounting; the duplex handler owns it after handoff.
+func (s *TCPServer) serveDuplexOnlyConn(netConn net.Conn, release func()) {
+	first, ok := s.sniffFirstByte(netConn)
+	if !ok {
+		release()
+		return
+	}
+
+	if first != ProtocolVersion {
+		_ = netConn.Close()
+		release()
+		return
+	}
+
+	netConn = &prependConn{Conn: netConn, prefix: []byte{first}}
+	s.invokeDuplexHandler(netConn, release)
+}
+
+// sniffFirstByte reads the protocol discriminator with an optional idle
+// deadline, then clears the deadline so the chosen path can set its own.
+func (s *TCPServer) sniffFirstByte(netConn net.Conn) (byte, bool) {
+	// Bound the first-byte read so a peer that connects and never speaks
+	// cannot pin the accept path. The handshake window applies even when no
+	// idle timeout is configured (the default); a shorter idle timeout, if
+	// set, wins. Cleared after the byte arrives so it never leaks into the
+	// connection's steady-state deadlines.
+	deadline := time.Now().Add(acceptHandshakeTimeout)
+	if s.idleTimeout > 0 {
+		if idle := time.Now().Add(s.idleTimeout); idle.Before(deadline) {
+			deadline = idle
+		}
+	}
+	_ = netConn.SetReadDeadline(deadline)
+
+	var first [1]byte
+	if _, err := io.ReadFull(netConn, first[:]); err != nil {
+		_ = netConn.Close()
+		return 0, false
+	}
+
+	_ = netConn.SetReadDeadline(time.Time{})
+	return first[0], true
+}
+
+// invokeDuplexHandler routes a sniffed duplex connection to the registered
+// handler, or closes it when none is configured. The handler takes ownership
+// of both the connection and release (see [DuplexHandlerFunc]).
+func (s *TCPServer) invokeDuplexHandler(netConn net.Conn, release func()) {
+	if s.duplexHandler == nil {
+		_ = netConn.Close()
+		release()
+		return
+	}
+
+	s.duplexHandler(netConn, release)
+}
+
+// serveLegacyConn applies configured wrappers and runs the legacy request
+// handler. The connection bytes must already include any sniffed prefix.
+func (s *TCPServer) serveLegacyConn(netConn net.Conn) {
 	for _, w := range s.connWrappers {
 		wrapped, err := w.Wrap(netConn)
 		if err != nil {
 			// Close error intentionally ignored — wrapper setup already failed.
 			_ = netConn.Close()
-			s.activeConnections.Add(-1)
-			s.connWaitGroup.Done()
 			return
 		}
 		netConn = wrapped
 	}
 
+	conn := s.connStructPool.Get().(Connection)
 	conn.Reset(netConn)
 	conn.Start()
 	s.requestHandler(conn)
 	// Close error intentionally ignored — request handling is complete.
 	_ = conn.Close()
-
 	s.connStructPool.Put(conn)
-	s.activeConnections.Add(-1)
-	s.connWaitGroup.Done()
 }
 
 func (s *TCPServer) awaitConnections() error {
@@ -538,10 +693,21 @@ func (conn *TCPConn) NetConn() net.Conn {
 }
 
 // GetNetTCPConn returns the underlying [*net.TCPConn], or nil if the
-// connection has been wrapped by TLS or a [ConnWrapper].
+// connection has been wrapped by TLS or a [ConnWrapper]. The dual-protocol
+// sniff's [prependConn] is unwrapped because it is a transparent byte-stream
+// adapter, not a protocol layer.
 func (conn *TCPConn) GetNetTCPConn() *net.TCPConn {
-	c, _ := conn.Conn.(*net.TCPConn)
-	return c
+	c := conn.Conn
+	for {
+		switch v := c.(type) {
+		case *net.TCPConn:
+			return v
+		case *prependConn:
+			c = v.Conn
+		default:
+			return nil
+		}
+	}
 }
 
 // SetServer associates this connection with its parent [TCPServer].
