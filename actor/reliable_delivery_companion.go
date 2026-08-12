@@ -158,9 +158,9 @@ func (x *actorSystem) resolveLocalReliableCompanion(endpointName string, role Re
 		return nil, fmt.Errorf("%w: endpoint=%s is not running", errReliableCompanionUnavailable, endpointName)
 	}
 
-	companionNode, ok := x.actors.nodeByName(reliableCompanionName(role, endpoint.IncarnationID()))
+	companionNode, ok := x.actors.nodeByName(reliableCompanionName(role, endpoint.incarnationID()))
 	if !ok {
-		return nil, fmt.Errorf("%w: endpoint=%s has no %s controller for incarnation=%s", errReliableCompanionUnavailable, endpointName, role, endpoint.IncarnationID())
+		return nil, fmt.Errorf("%w: endpoint=%s has no %s controller for incarnation=%s", errReliableCompanionUnavailable, endpointName, role, endpoint.incarnationID())
 	}
 
 	companion := companionNode.value()
@@ -307,7 +307,7 @@ func reliableCompanionSupervisor() *supervisor.Supervisor {
 func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID) error {
 	role := endpoint.reliableDelivery.role()
 
-	name := reliableCompanionName(role, endpoint.IncarnationID())
+	name := reliableCompanionName(role, endpoint.incarnationID())
 	if node, ok := x.actors.nodeByName(name); ok {
 		if companion := node.value(); companion != nil && companion.IsRunning() {
 			return nil
@@ -316,7 +316,7 @@ func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID
 		return fmt.Errorf("%s controller for endpoint=%s is still terminating", role, endpoint.Name())
 	}
 
-	spec, err := newReliableCompanionSpec(role, endpoint.Name(), endpoint.IncarnationID())
+	spec, err := newReliableCompanionSpec(role, endpoint.Name(), endpoint.incarnationID())
 	if err != nil {
 		return err
 	}
@@ -346,13 +346,13 @@ func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) 
 	}
 
 	ctx = context.WithoutCancel(ctx)
-	name := reliableCompanionName(endpoint.reliableDelivery.role(), endpoint.IncarnationID())
+	name := reliableCompanionName(endpoint.reliableDelivery.role(), endpoint.incarnationID())
 
 	if err := x.getCluster().RemoveActor(ctx, name); err != nil {
 		x.logger.Errorf("failed to remove registry record for reliable controller of endpoint=%s during rollback: %v", endpoint.Name(), err)
 	}
 
-	x.removeActorIfIncarnation(ctx, endpoint.Name(), endpoint.IncarnationID())
+	x.removeActorIfIncarnation(ctx, endpoint.Name(), endpoint.incarnationID())
 }
 
 // releaseDepartedReliableCompanion removes the registry record of the
@@ -516,8 +516,8 @@ func validateReliableCompanion(endpoint, companion *PID, role ReliableController
 		return fmt.Errorf("%w: companion=%s runs role=%s, want role=%s", errReliableCompanionUnavailable, companion.Name(), spec.role, role)
 	case spec.endpointName != endpoint.Name():
 		return fmt.Errorf("%w: companion=%s is owned by endpoint=%s, want endpoint=%s", errReliableCompanionUnavailable, companion.Name(), spec.endpointName, endpoint.Name())
-	case spec.endpointIncarnationID != endpoint.IncarnationID():
-		return fmt.Errorf("%w: companion=%s is bound to incarnation=%s, want incarnation=%s", errReliableCompanionUnavailable, companion.Name(), spec.endpointIncarnationID, endpoint.IncarnationID())
+	case spec.endpointIncarnationID != endpoint.incarnationID():
+		return fmt.Errorf("%w: companion=%s is bound to incarnation=%s, want incarnation=%s", errReliableCompanionUnavailable, companion.Name(), spec.endpointIncarnationID, endpoint.incarnationID())
 	case !companion.IsRunning():
 		return fmt.Errorf("%w: companion=%s is not running", errReliableCompanionUnavailable, companion.Name())
 	default:

@@ -31,8 +31,6 @@ type Path interface {
 	Host() string
 	// HostPort returns the host:port combination as a string.
 	HostPort() string
-	// IncarnationID returns the identifier of this actor incarnation.
-	IncarnationID() string
 	// Port returns the port number of the actor system node where the actor resides.
 	Port() int
 	// Name returns the name of the actor.
@@ -45,6 +43,8 @@ type Path interface {
 	System() string
 	// Equals reports whether this path is equal to the given path.
 	Equals(other Path) bool
+
+	incarnationID() string
 }
 
 type path struct {
@@ -52,7 +52,7 @@ type path struct {
 	port           int
 	name           string
 	system         string
-	incarnationID  string
+	incarnation    string
 	parent         Path
 	cachedStr      string
 	cachedHostPort string
@@ -79,11 +79,11 @@ func (x *path) HostPort() string {
 	return x.cachedHostPort
 }
 
-func (x *path) IncarnationID() string {
+func (x *path) incarnationID() string {
 	if x == nil {
 		return ""
 	}
-	return x.incarnationID
+	return x.incarnation
 }
 
 func (x *path) Name() string {
@@ -134,7 +134,7 @@ func newPath(addr *address.Address) Path {
 		port:           addr.Port(),
 		name:           addr.Name(),
 		system:         addr.System(),
-		incarnationID:  addr.IncarnationID(),
+		incarnation:    addr.IncarnationID(),
 		parent:         parent,
 		cachedStr:      addr.String(),
 		cachedHostPort: addr.HostPort(),
@@ -159,7 +159,7 @@ func pathToAddress(path Path) *address.Address {
 		return address.NoSender()
 	}
 
-	if incarnationID := path.IncarnationID(); incarnationID != "" {
+	if incarnationID := path.incarnationID(); incarnationID != "" {
 		if addr, err := address.ParseWithIncarnationID(path.String(), incarnationID); err == nil {
 			return addr
 		}

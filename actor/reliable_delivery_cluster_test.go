@@ -175,7 +175,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	}
 
 	// an uninvolved node resolves both companions as remote PIDs
-	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
 	resolved, err := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 	assert.True(t, resolved.IsRemote())
@@ -213,7 +213,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
-	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
 	registry := node2.getCluster()
 
 	var endpointRecord, companionRecord *internalpb.Actor

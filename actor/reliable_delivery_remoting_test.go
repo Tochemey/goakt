@@ -149,7 +149,7 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 		companion, err := system.resolveLocalReliableCompanion("orders-producer", ReliableControllerRoleProducer)
 		require.NoError(t, err)
 		assert.Equal(t, companion.ID(), companionResp.GetAddress())
-		assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID()), companion.Name())
+		assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID()), companion.Name())
 	})
 
 	t.Run("unknown endpoint returns NOT_FOUND", func(t *testing.T) {
@@ -165,7 +165,7 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 	})
 
 	t.Run("companion name probed directly returns NOT_FOUND", func(t *testing.T) {
-		name := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+		name := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
 		resp, err := system.getReliableCompanionHandler(ctx, nullConn, request(name, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER))
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
@@ -194,7 +194,7 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 	t.Run("client round trip resolves and misses", func(t *testing.T) {
 		addr, err := system.getRemoting().GetReliableCompanion(ctx, "127.0.0.1", port, "orders-producer", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
 		require.NoError(t, err)
-		assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID()), addr.Name())
+		assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID()), addr.Name())
 
 		missing, err := system.getRemoting().GetReliableCompanion(ctx, "127.0.0.1", port, "missing", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
 		require.NoError(t, err)

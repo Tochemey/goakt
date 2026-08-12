@@ -269,7 +269,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	oldIncarnation := producer.IncarnationID()
+	oldIncarnation := producer.incarnationID()
 	oldCompanion := reliableCompanionName(ReliableControllerRoleProducer, oldIncarnation)
 
 	for i := 1; i <= 2; i++ {
@@ -295,7 +295,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 	require.NotNil(t, relocated.reliableDelivery)
 	require.True(t, relocated.reliableDelivery.producer.workPulling)
 	require.NotNil(t, relocated.durableWorkQueue)
-	assert.NotEqual(t, oldIncarnation, relocated.IncarnationID())
+	assert.NotEqual(t, oldIncarnation, relocated.incarnationID())
 
 	// the relocated controller reloaded the durable work queue under a new
 	// epoch, fencing any writer of the departed activation
@@ -310,7 +310,7 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		companion, cerr := node3.resolveReliableCompanion(ctx, "jobs-producer", ReliableControllerRoleProducer, nil)
-		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.IncarnationID())
+		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.incarnationID())
 	}, 20*time.Second, 100*time.Millisecond)
 
 	require.Eventually(t, func() bool {
@@ -354,7 +354,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	oldIncarnation := producer.IncarnationID()
+	oldIncarnation := producer.incarnationID()
 	oldCompanion := reliableCompanionName(ReliableControllerRoleProducer, oldIncarnation)
 
 	for i := 1; i <= 2; i++ {
@@ -382,7 +382,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 	relocated := awaitLocalEndpoint(t, []*actorSystem{node2, node3}, "orders-producer")
 	require.NotNil(t, relocated.reliableDelivery)
 	require.NotNil(t, relocated.durableQueue)
-	assert.NotEqual(t, oldIncarnation, relocated.IncarnationID())
+	assert.NotEqual(t, oldIncarnation, relocated.incarnationID())
 
 	// the relocated controller reloaded the durable state under a new epoch,
 	// fencing any writer of the departed activation
@@ -399,7 +399,7 @@ func TestReliableProducerRelocation(t *testing.T) {
 	// departed activation's records are gone cluster-wide
 	require.Eventually(t, func() bool {
 		companion, cerr := node3.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
-		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.IncarnationID())
+		return cerr == nil && companion.Name() == reliableCompanionName(ReliableControllerRoleProducer, relocated.incarnationID())
 	}, 20*time.Second, 100*time.Millisecond)
 
 	require.Eventually(t, func() bool {
@@ -459,7 +459,7 @@ func TestReliableRelocationMissingQueueTypeRestoresRecord(t *testing.T) {
 	require.NoError(t, err)
 
 	departedNode := address.FormatHostPort(node1.Host(), node1.Port())
-	incarnation := producer.IncarnationID()
+	incarnation := producer.incarnationID()
 
 	stopNode(0)
 
@@ -488,7 +488,7 @@ func TestReliableNonRelocatableEndpointRecordsWithdrawnOnShutdown(t *testing.T) 
 		AsReliableConsumer("orders-producer"), WithRelocationDisabled())
 	require.NoError(t, err)
 
-	companionName := reliableCompanionName(ReliableControllerRoleConsumer, consumer.IncarnationID())
+	companionName := reliableCompanionName(ReliableControllerRoleConsumer, consumer.incarnationID())
 
 	// both records are resolvable cluster-wide while the endpoint lives
 	require.Eventually(t, func() bool {

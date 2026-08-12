@@ -485,14 +485,6 @@ func (pid *PID) ID() string {
 	return ""
 }
 
-// IncarnationID returns the identifier of this actor incarnation.
-func (pid *PID) IncarnationID() string {
-	if path := pid.Path(); path != nil {
-		return path.IncarnationID()
-	}
-	return ""
-}
-
 // Name returns the actor name.
 func (pid *PID) Name() string {
 	if path := pid.Path(); path != nil {
@@ -3389,7 +3381,7 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	actor.SetSupervisor(supervisorSpec)
 	actor.SetReentrancy(reentrancy)
 	actor.SetInitTimeout(initTimeout)
-	actor.SetIncarnationId(pid.IncarnationID())
+	actor.SetIncarnationId(pid.incarnationID())
 	actor.SetReliableDelivery(pid.reliableDelivery.toProto())
 	actor.SetReliableCompanion(pid.reliableCompanion.toProto())
 	return actor, nil
@@ -3630,6 +3622,13 @@ func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
 
 	pidOptions = append(pidOptions, withPassivationStrategy(config.passivationStrategy))
 	return pidOptions
+}
+
+func (pid *PID) incarnationID() string {
+	if path := pid.Path(); path != nil {
+		return path.incarnationID()
+	}
+	return ""
 }
 
 func buildRestartSubtree(root *PID, tree *tree) *restartNode {

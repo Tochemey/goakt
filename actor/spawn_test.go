@@ -2754,11 +2754,11 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 	require.NotNil(t, endpoint.reliableDelivery)
 	assert.Equal(t, "orders-consumer", endpoint.reliableDelivery.producer.consumerName)
 	require.NotNil(t, endpoint.durableQueue)
-	assert.NotEqual(t, oldIncarnation, endpoint.IncarnationID())
+	assert.NotEqual(t, oldIncarnation, endpoint.incarnationID())
 
 	companion, err := actorSystem.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
-	assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID()), companion.Name())
+	assert.Equal(t, reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID()), companion.Name())
 
 	clusterMock.AssertExpectations(t)
 }

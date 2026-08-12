@@ -139,10 +139,10 @@ func newConsumerControllerHarness(t *testing.T, window int, resendInterval time.
 	producer, err := system.Spawn(ctx, "producer", NewMockActor())
 	require.NoError(t, err)
 
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.IncarnationID())
+	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.incarnationID())
 	require.NoError(t, err)
 
-	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
 	producerControllerStandIn, err := system.Spawn(ctx, producerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 
@@ -619,10 +619,10 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	producer, err := system.Spawn(ctx, "producer", NewMockActor())
 	require.NoError(t, err)
 
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.IncarnationID())
+	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.incarnationID())
 	require.NoError(t, err)
 
-	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.IncarnationID())
+	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
 	producerControllerStandIn, err := system.Spawn(ctx, producerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 

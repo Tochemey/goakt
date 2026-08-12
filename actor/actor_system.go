@@ -4238,7 +4238,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 			// removal is disabled while the system stops. Withdraw its record
 			// here or it outlives the node in the registry.
 			if pid.reliableDelivery != nil {
-				companionName := reliableCompanionName(pid.reliableDelivery.role(), pid.IncarnationID())
+				companionName := reliableCompanionName(pid.reliableDelivery.role(), pid.incarnationID())
 				if err := x.cluster.RemoveActor(ctx, companionName); err != nil {
 					x.logger.Errorf("failed to remove reliable controller=%s of endpoint=%s from cluster: %v (hint: check cluster connectivity)", companionName, actorName, err)
 					return err

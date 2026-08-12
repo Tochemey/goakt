@@ -159,10 +159,10 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.IncarnationID())
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.incarnationID())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		companion, err := system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
@@ -205,7 +205,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem())
 		require.NoError(t, err)
 
@@ -220,10 +220,10 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", endpoint.IncarnationID())
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", endpoint.incarnationID())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
@@ -238,10 +238,10 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "other", endpoint.IncarnationID())
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "other", endpoint.incarnationID())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
@@ -259,7 +259,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", uuid.NewString())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
@@ -274,7 +274,7 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.IncarnationID())
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.incarnationID())
 		require.NoError(t, err)
 
 		companion, err := system.Spawn(ctx, "companionStandIn", NewMockActor(), asReliableCompanion(spec))
@@ -291,10 +291,10 @@ func TestResolveReliableCompanion(t *testing.T) {
 		endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 		require.NoError(t, err)
 
-		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.IncarnationID())
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", endpoint.incarnationID())
 		require.NoError(t, err)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
@@ -520,7 +520,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		endpoint := newStoppedEndpoint(system)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
 
@@ -532,7 +532,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 		endpoint := newStoppedEndpoint(system)
 
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
 
@@ -584,10 +584,10 @@ func TestReliableCompanionHiddenFromPublicAPIs(t *testing.T) {
 	endpoint, err := system.Spawn(ctx, "endpoint", NewMockActor())
 	require.NoError(t, err)
 
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", endpoint.IncarnationID())
+	spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", endpoint.incarnationID())
 	require.NoError(t, err)
 
-	companionName := reliableCompanionName(ReliableControllerRoleConsumer, endpoint.IncarnationID())
+	companionName := reliableCompanionName(ReliableControllerRoleConsumer, endpoint.incarnationID())
 	_, err = system.Spawn(ctx, companionName, NewMockActor(), asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 
@@ -1019,7 +1019,7 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 	serialized, err := endpoint.toSerialize()
 	require.NoError(t, err)
 
-	assert.Equal(t, endpoint.IncarnationID(), serialized.GetIncarnationId())
+	assert.Equal(t, endpoint.incarnationID(), serialized.GetIncarnationId())
 	assert.Equal(t, "consumer", serialized.GetReliableDelivery().GetProducer().GetConsumerName())
 	assert.True(t, serialized.GetRelocatable())
 
@@ -1035,7 +1035,7 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 	require.NotNil(t, spec)
 	assert.Equal(t, internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER, spec.GetRole())
 	assert.Equal(t, "endpoint", spec.GetEndpointName())
-	assert.Equal(t, endpoint.IncarnationID(), spec.GetEndpointIncarnationId())
+	assert.Equal(t, endpoint.incarnationID(), spec.GetEndpointIncarnationId())
 	assert.False(t, companionSerialized.GetRelocatable())
 
 	plain, err := system.Spawn(ctx, "plain", NewMockActor())
@@ -1045,7 +1045,7 @@ func TestToSerializeCarriesReliableDelivery(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, plainSerialized.GetReliableDelivery())
 	assert.Nil(t, plainSerialized.GetReliableCompanion())
-	assert.Equal(t, plain.IncarnationID(), plainSerialized.GetIncarnationId())
+	assert.Equal(t, plain.incarnationID(), plainSerialized.GetIncarnationId())
 }
 
 func TestReliableEndpointRemoteSpawn(t *testing.T) {

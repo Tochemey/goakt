@@ -7926,7 +7926,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 
 		endpoint := newEndpointPID(system, "orders-producer")
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
@@ -7940,7 +7940,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 
 		endpoint := newEndpointPID(system, "orders-producer")
-		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.IncarnationID())
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
