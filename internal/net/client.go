@@ -36,7 +36,7 @@ import (
 )
 
 // defaultMaxFrameSize is the default maximum allowed size for a single proto frame (16 MiB).
-// This can be overridden per-client using [WithMaxFrameSize] or per-server using [WithProtoServerMaxFrameSize].
+// This can be overridden per-client using [WithMaxFrameSize] or per-server using [WithRemotingServerMaxFrameSize].
 const defaultMaxFrameSize uint32 = 16 << 20
 
 // DefaultMaxIdleConns is the default number of idle connections retained in
@@ -189,6 +189,11 @@ func WithMaxFrameSize(size uint32) ClientOption {
 		}
 		c.maxFrameSize = size
 	}
+}
+
+// MaxFrameSize returns the configured maximum proto frame size.
+func (c *Client) MaxFrameSize() uint32 {
+	return c.maxFrameSize
 }
 
 // Get returns a pooled connection or dials a new one. Stale idle

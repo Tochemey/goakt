@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package internalpb;
+
+option go_package = "github.com/tochemey/goakt/v4/internal/internalpb;internalpb";
+
+// LaneRole identifies the role of a duplex connection within the per-peer
+// lane set negotiated at HELLO time.
+enum LaneRole {
+  LANE_ROLE_CONTROL = 0;
+  LANE_ROLE_ORDINARY = 1;
+  LANE_ROLE_LARGE = 2;
+}
+
+// CompressionCodec is the whole-connection compression wrapper negotiated
+// during the duplex handshake. Both peers wrap the connection only after
+// HELLO/HELLO_ACK completes.
+enum CompressionCodec {
+  COMPRESSION_CODEC_NONE = 0;
+  COMPRESSION_CODEC_GZIP = 1;
+  COMPRESSION_CODEC_ZSTD = 2;
+  COMPRESSION_CODEC_BROTLI = 3;
+}
+
+// Hello is the payload of HELLO and HELLO_ACK frames on the duplex protocol.
+// Effective limits are the pairwise minimum of the dialer and acceptor values.
+message Hello {
+  // Capability revision. Cumulative: 1 = baseline DATA/REPLY/ERROR/PING/PONG,
+  // 2 = chunking, 3 = compression tables, 4 = credit-based flow control.
+  uint32 revision = 1;
+  // Actor system name of the sending node.
+  string system_name = 2;
+  // Advertised host of the sending node.
+  string host = 3;
+  // Advertised remoting port of the sending node.
+  uint32 port = 4;
+  // Role of this connection within the peer lane set.
+  LaneRole lane_role = 5;
+  // Index within the role (meaningful for ordinary lanes).
+  uint32 lane_index = 6;
+  // Proposed (dialer) or selected (acceptor) compression codec.
+  CompressionCodec compression = 7;
+  // Largest frame payload the sender is willing to accept.
+  uint32 max_frame_size = 8;
+  // Largest reassembled message the sender is willing to accept.
+  uint64 max_message_size = 9;
+  // Initial credit window in bytes proposed by the sender.
+  uint64 initial_credits = 10;
+  // Maximum concurrent chunk reassembly groups the sender will hold.
+  uint32 max_concurrent_large_transfers = 11;
+}

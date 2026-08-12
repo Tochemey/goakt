@@ -131,12 +131,12 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	request := func(endpointName string, role internalpb.ReliableControllerRole) *internalpb.GetReliableCompanionRequest {
-		return &internalpb.GetReliableCompanionRequest{
+		return internalpb.GetReliableCompanionRequest_builder{
 			Host:         "127.0.0.1",
 			Port:         int32(port),
 			EndpointName: endpointName,
 			Role:         role,
-		}
+		}.Build()
 	}
 
 	t.Run("resolves the validated companion of a local endpoint", func(t *testing.T) {
@@ -179,7 +179,7 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 
 	t.Run("mismatched host returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		req := request("orders-producer", internalpb.ReliableControllerRole_RELIABLE_CONTROLLER_ROLE_PRODUCER)
-		req.Host = "10.0.0.9"
+		req.SetHost("10.0.0.9")
 		resp, err := system.getReliableCompanionHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -219,7 +219,7 @@ func TestReliableDeliveryRemotingOnlyFlow(t *testing.T) {
 	// an order submitted before the consumer exists stays queued: peer
 	// resolution fails transiently and the recurring tick recovers once the
 	// consumer endpoint appears on the addressed node
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
 	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
 		AsReliableConsumer("orders-producer",
@@ -229,7 +229,7 @@ func TestReliableDeliveryRemotingOnlyFlow(t *testing.T) {
 
 	for i := 2; i <= 3; i++ {
 		id := fmt.Sprintf("ord-%d", i)
-		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: &testpb.Reply{Content: id}}))
+		require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: id, payload: testpb.Reply_builder{Content: id}.Build()}))
 	}
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 3)
@@ -279,7 +279,7 @@ func TestReliableDeliveryRemotingOnlyConsumerRestartResync(t *testing.T) {
 	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, consumerOptions...)
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 1)
 	require.Len(t, deliveries, 1)
@@ -293,7 +293,7 @@ func TestReliableDeliveryRemotingOnlyConsumerRestartResync(t *testing.T) {
 	restarted, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, consumerOptions...)
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: &testpb.Reply{Content: "ord-2"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: testpb.Reply_builder{Content: "ord-2"}.Build()}))
 
 	redelivered := awaitDeliveries(t, ctx, restarted, 1)
 	require.Len(t, redelivered, 1)
@@ -326,7 +326,7 @@ func TestReliableDeliveryRemotingOnlyUnreachablePeerRetries(t *testing.T) {
 			WithReliableRemoteConsumer("127.0.0.1", consumerPort)))
 	require.NoError(t, err)
 
-	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: &testpb.Reply{Content: "ord-1"}}))
+	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 1)
 	require.Len(t, deliveries, 1)

@@ -65,11 +65,11 @@ func (x *reliableCompanionSpec) toProto() *internalpb.ReliableCompanionSpec {
 		return nil
 	}
 
-	return &internalpb.ReliableCompanionSpec{
-		Role:                  x.role.toProto(),
-		EndpointName:          x.endpointName,
-		EndpointIncarnationId: x.endpointIncarnationID,
-	}
+	rcs := &internalpb.ReliableCompanionSpec{}
+	rcs.SetRole(x.role.toProto())
+	rcs.SetEndpointName(x.endpointName)
+	rcs.SetEndpointIncarnationId(x.endpointIncarnationID)
+	return rcs
 }
 
 // reliableCompanionSpecFromProto validates and restores runtime-companion

@@ -49,11 +49,11 @@ func TestBoltDBStoreLifecycle(t *testing.T) {
 	require.True(t, ok)
 
 	ctx := context.Background()
-	peer := &internalpb.PeerState{
+	peer := internalpb.PeerState_builder{
 		Host:         "127.0.0.1",
 		RemotingPort: 6000,
 		PeersPort:    7000,
-	}
+	}.Build()
 
 	require.NoError(t, store.PersistPeerState(ctx, peer))
 
@@ -99,7 +99,7 @@ func TestBoltDBStoreContextCancellation(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
-	peer := &internalpb.PeerState{Host: "127.0.0.2", PeersPort: 7100}
+	peer := internalpb.PeerState_builder{Host: "127.0.0.2", PeersPort: 7100}.Build()
 	peerAddr := peerKey(peer)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -119,7 +119,7 @@ func TestBoltDBStoreOperationsAfterClose(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
-	peer := &internalpb.PeerState{Host: "127.0.0.3", PeersPort: 7200}
+	peer := internalpb.PeerState_builder{Host: "127.0.0.3", PeersPort: 7200}.Build()
 	peerAddr := peerKey(peer)
 
 	require.ErrorIs(t, store.PersistPeerState(context.Background(), peer), errBoltStoreClosed)
@@ -143,7 +143,7 @@ func TestBoltDBStoreMissingBucket(t *testing.T) {
 		return tx.DeleteBucket(impl.bucket)
 	}))
 
-	peer := &internalpb.PeerState{Host: "127.0.0.4", PeersPort: 7300}
+	peer := internalpb.PeerState_builder{Host: "127.0.0.4", PeersPort: 7300}.Build()
 	peerAddr := peerKey(peer)
 
 	require.Error(t, store.PersistPeerState(context.Background(), peer))

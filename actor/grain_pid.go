@@ -1136,7 +1136,7 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 	// reentrancy enabled or retuned at runtime survives eager relocation and
 	// remote activation.
 	if reentrant := pid.reentrancy.Load(); reentrant != nil {
-		wire.Reentrancy = reentrant.toProto()
+		wire.SetReentrancy(reentrant.toProto())
 	}
 
 	return wire, nil
@@ -1153,20 +1153,20 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 		return nil, err
 	}
 
-	return &internalpb.Grain{
-		GrainId: &internalpb.GrainId{
-			Kind:  identity.Kind(),
-			Name:  identity.Name(),
-			Value: identity.String(),
-		},
-		Host:              host,
-		Port:              int32(port),
-		Dependencies:      dependencies,
-		ActivationTimeout: durationpb.New(config.initTimeout.Load()),
-		ActivationRetries: config.initMaxRetries.Load(),
-		MailboxCapacity:   new(config.capacity),
-		DisableRelocation: config.disableRelocation,
-		EagerRelocation:   config.eagerRelocation,
-		Reentrancy:        codec.EncodeReentrancy(config.reentrancy),
-	}, nil
+	grainID := &internalpb.GrainId{}
+	grainID.SetKind(identity.Kind())
+	grainID.SetName(identity.Name())
+	grainID.SetValue(identity.String())
+	grain := &internalpb.Grain{}
+	grain.SetGrainId(grainID)
+	grain.SetHost(host)
+	grain.SetPort(int32(port))
+	grain.SetDependencies(dependencies)
+	grain.SetActivationTimeout(durationpb.New(config.initTimeout.Load()))
+	grain.SetActivationRetries(config.initMaxRetries.Load())
+	grain.SetMailboxCapacity(config.capacity)
+	grain.SetDisableRelocation(config.disableRelocation)
+	grain.SetEagerRelocation(config.eagerRelocation)
+	grain.SetReentrancy(codec.EncodeReentrancy(config.reentrancy))
+	return grain, nil
 }

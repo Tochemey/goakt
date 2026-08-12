@@ -37,14 +37,14 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 			require.True(t, ok)
 			p2, ok := msg2.(*testpb.TestMessage)
 			require.True(t, ok)
-			return p1.Priority > p2.Priority
+			return p1.GetPriority() > p2.GetPriority()
 		}
 
 		// create an instance of the mailbox
 		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
-		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
-		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}
+		msg1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		msg2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
+		msg3 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 2}.Build()}
 
 		require.NoError(t, mailbox.Enqueue(msg1))
 		require.NoError(t, mailbox.Enqueue(msg2))
@@ -76,14 +76,14 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 			require.True(t, ok)
 			p2, ok := msg2.(*testpb.TestMessage)
 			require.True(t, ok)
-			return p1.Priority <= p2.Priority
+			return p1.GetPriority() <= p2.GetPriority()
 		}
 
 		// create an instance of the mailbox
 		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
-		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
-		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}
+		msg1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		msg2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
+		msg3 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 2}.Build()}
 
 		require.NoError(t, mailbox.Enqueue(msg1))
 		require.NoError(t, mailbox.Enqueue(msg2))
@@ -114,14 +114,14 @@ func TestUnboundedPriorityMailBox(t *testing.T) {
 			require.True(t, ok)
 			p2, ok := msg2.(*testpb.TestMessage)
 			require.True(t, ok)
-			return p1.Priority <= p2.Priority
+			return p1.GetPriority() <= p2.GetPriority()
 		}
 
 		// create an instance of the mailbox
 		mailbox := NewUnboundedPriorityMailBox(priorityFunc)
-		msg1 := &ReceiveContext{message: &testpb.TestMessage{Priority: 1}}
-		msg2 := &ReceiveContext{message: &testpb.TestMessage{Priority: 5}}
-		msg3 := &ReceiveContext{message: &testpb.TestMessage{Priority: 2}}
+		msg1 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 1}.Build()}
+		msg2 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 5}.Build()}
+		msg3 := &ReceiveContext{message: testpb.TestMessage_builder{Priority: 2}.Build()}
 
 		require.NoError(t, mailbox.Enqueue(msg1))
 		require.NoError(t, mailbox.Enqueue(msg2))

@@ -76,7 +76,7 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	assert.False(t, cluster.IsLeader(ctx))
 
 	addr := address.New("actor", "system", "127.0.0.1", 0)
-	actor := &internalpb.Actor{Address: addr.String()}
+	actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 	require.ErrorIs(t, cluster.PutActor(ctx, actor), ErrEngineNotRunning)
 
 	_, err := cluster.GetActor(ctx, "actor")
@@ -92,7 +92,7 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Nil(t, actors)
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	require.ErrorIs(t, cluster.PutGrain(ctx, grain), ErrEngineNotRunning)
 
 	_, err = cluster.GetGrain(ctx, grain.GetGrainId().GetValue())
@@ -415,7 +415,7 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{Address: addr.String()}
+		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
@@ -505,7 +505,7 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{Address: addr.String()}
+		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 
 		// writes succeed with no backup member available
 		err = cluster.PutActor(ctx, actor)
@@ -567,7 +567,7 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{Address: addr.String()}
+		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
@@ -694,15 +694,15 @@ func TestSingleNode(t *testing.T) {
 
 		// create an grain
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: host,
 			Port: int32(remotingPort),
-		}
+		}.Build()
 
 		// replicate the grain in the Node
 		err = cluster.PutGrain(ctx, grain)
@@ -779,15 +779,15 @@ func TestSingleNode(t *testing.T) {
 
 		// create an grain
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: host,
 			Port: int32(remotingPort),
-		}
+		}.Build()
 
 		// replicate the grain in the Node
 		err = cluster.PutGrain(ctx, grain)
@@ -848,15 +848,15 @@ func TestSingleNode(t *testing.T) {
 
 		// create an grain
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: host,
 			Port: int32(remotingPort),
-		}
+		}.Build()
 
 		// replicate the grain in the Node
 		err := cluster.PutGrain(ctx, grain)
@@ -1131,7 +1131,7 @@ func TestSingleNode(t *testing.T) {
 
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{Address: addr.String()}
+		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -1182,15 +1182,15 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: host,
 			Port: int32(remotingPort),
-		}
+		}.Build()
 		err = cluster.PutGrain(ctx, grain)
 		require.NoError(t, err)
 
@@ -1241,15 +1241,15 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: host,
 			Port: int32(remotingPort),
-		}
+		}.Build()
 		err = cl.PutGrain(ctx, grain)
 		require.NoError(t, err)
 
@@ -1345,7 +1345,7 @@ func TestSingleNode(t *testing.T) {
 
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := &internalpb.Actor{Address: addr.String()}
+		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
 		err = cl.PutActor(ctx, actor)
 		require.NoError(t, err)
 
@@ -1473,10 +1473,10 @@ func TestMultipleNodes(t *testing.T) {
 		remotingPort := node2Imp.node.RemotingPort
 		host := node2Imp.node.Host
 		addr := address.New(actorName, "testSystem", host, remotingPort)
-		actor := &internalpb.Actor{
+		actor := internalpb.Actor_builder{
 			Address: addr.String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 
 		// put an actor
 		err = node2.PutActor(ctx, actor)
@@ -1486,15 +1486,15 @@ func TestMultipleNodes(t *testing.T) {
 		pause.For(time.Second)
 
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: node2.(*cluster).node.Host,
 			Port: int32(node2.(*cluster).node.RemotingPort),
-		}
+		}.Build()
 
 		// replicate the grain in the Node
 		err = node2.PutGrain(ctx, grain)
@@ -1525,10 +1525,10 @@ func TestMultipleNodes(t *testing.T) {
 		// put another actor
 		actorName2 := uuid.NewString()
 		node1Imp := node1.(*cluster)
-		actor2 := &internalpb.Actor{
+		actor2 := internalpb.Actor_builder{
 			Address: address.New(actorName2, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)
 
@@ -1611,10 +1611,10 @@ func TestMultipleNodes(t *testing.T) {
 		// receives real fragments during its initial sync
 		node1Imp := node1.(*cluster)
 		actorName := uuid.NewString()
-		actor := &internalpb.Actor{
+		actor := internalpb.Actor_builder{
 			Address: address.New(actorName, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 		require.NoError(t, node1.PutActor(ctx, actor))
 
 		// the second node joins the running cluster
@@ -1633,10 +1633,10 @@ func TestMultipleNodes(t *testing.T) {
 		// writes on the joiner are visible from the first node
 		node2Imp := node2.(*cluster)
 		actorName2 := uuid.NewString()
-		actor2 := &internalpb.Actor{
+		actor2 := internalpb.Actor_builder{
 			Address: address.New(actorName2, "testSystem", node2Imp.node.Host, node2Imp.node.RemotingPort).String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 		require.NoError(t, node2.PutActor(ctx, actor2))
 
 		actual, err = node1.GetActor(ctx, actorName2)
@@ -1732,25 +1732,25 @@ func TestMultipleNodes(t *testing.T) {
 		remotingPort := node2Imp.node.RemotingPort
 		host := node2Imp.node.Host
 		addr := address.New(actorName, "testSystem", host, remotingPort)
-		actor := &internalpb.Actor{
+		actor := internalpb.Actor_builder{
 			Address: addr.String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 
 		// put an actor
 		err = node2.PutActor(ctx, actor)
 		require.NoError(t, err)
 
 		identity := "grainKind/grainName"
-		grain := &internalpb.Grain{
-			GrainId: &internalpb.GrainId{
+		grain := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
 				Name:  "grainName",
 				Value: identity,
-			},
+			}.Build(),
 			Host: node2.(*cluster).node.Host,
 			Port: int32(node2.(*cluster).node.RemotingPort),
-		}
+		}.Build()
 
 		// replicate the grain in the Node
 		err = node2.PutGrain(ctx, grain)
@@ -1784,10 +1784,10 @@ func TestMultipleNodes(t *testing.T) {
 		// put another actor
 		actorName2 := uuid.NewString()
 		node1Imp := node1.(*cluster)
-		actor2 := &internalpb.Actor{
+		actor2 := internalpb.Actor_builder{
 			Address: address.New(actorName2, "testSystem", node1Imp.node.Host, node1Imp.node.RemotingPort).String(),
 			Type:    "actorKind",
-		}
+		}.Build()
 		err = node1.PutActor(ctx, actor2)
 		require.NoError(t, err)
 
@@ -2149,13 +2149,13 @@ func TestPutGrainReturnsErrorWhenIDValueEmpty(t *testing.T) {
 		running: atomic.NewBool(true),
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: ""}.Build()}.Build()
 	err := cl.PutGrain(context.Background(), grain)
 	require.EqualError(t, err, "grain id value is empty")
 }
 
 func TestPutGrainIfAbsentReturnsErrorWhenClusterNil(t *testing.T) {
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), nil, grain)
 	require.EqualError(t, err, "cluster is nil")
 }
@@ -2174,7 +2174,7 @@ func TestPutGrainIfAbsentReturnsErrorWhenIDValueEmpty(t *testing.T) {
 		running: atomic.NewBool(true),
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: ""}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), cl, grain)
 	require.EqualError(t, err, "grain id value is empty")
 }
@@ -2184,7 +2184,7 @@ func TestPutGrainIfAbsentReturnsErrorWhenNotRunning(t *testing.T) {
 		running: atomic.NewBool(false),
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), cl, grain)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 }
@@ -2196,7 +2196,7 @@ func TestPutGrainIfAbsentReturnsAlreadyExists(t *testing.T) {
 		writeTimeout: time.Second,
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), cl, grain)
 	require.ErrorIs(t, err, ErrGrainAlreadyExists)
 }
@@ -2209,7 +2209,7 @@ func TestPutGrainIfAbsentPropagatesDMapError(t *testing.T) {
 		writeTimeout: time.Second,
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), cl, grain)
 	require.ErrorIs(t, err, expectedErr)
 }
@@ -2228,7 +2228,7 @@ func TestPutGrainIfAbsentSucceeds(t *testing.T) {
 		},
 	}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	err := PutGrainIfAbsent(context.Background(), cl, grain)
 	require.NoError(t, err)
 	require.True(t, called)
@@ -2236,7 +2236,7 @@ func TestPutGrainIfAbsentSucceeds(t *testing.T) {
 
 func TestPutGrainIfAbsentFallbackPropagatesGrainExistsError(t *testing.T) {
 	ctx := context.Background()
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	expectedErr := errors.New("grain exists lookup failed")
 	cl := &MockCluster{
 		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
@@ -2253,7 +2253,7 @@ func TestPutGrainIfAbsentFallbackPropagatesGrainExistsError(t *testing.T) {
 
 func TestPutGrainIfAbsentFallbackReturnsAlreadyExists(t *testing.T) {
 	ctx := context.Background()
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	cl := &MockCluster{
 		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
 			require.Equal(t, grain.GetGrainId().GetValue(), identity)
@@ -2269,7 +2269,7 @@ func TestPutGrainIfAbsentFallbackReturnsAlreadyExists(t *testing.T) {
 
 func TestPutGrainIfAbsentFallbackPropagatesPutGrainError(t *testing.T) {
 	ctx := context.Background()
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	expectedErr := errors.New("put grain failed")
 	cl := &MockCluster{
 		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
@@ -2290,7 +2290,7 @@ func TestPutGrainIfAbsentFallbackPropagatesPutGrainError(t *testing.T) {
 
 func TestPutGrainIfAbsentFallbackCallsPutGrain(t *testing.T) {
 	ctx := context.Background()
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: "grain-id"}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-id"}.Build()}.Build()
 	cl := &MockCluster{
 		grainExistsFn: func(ctx context.Context, identity string) (bool, error) {
 			require.Equal(t, grain.GetGrainId().GetValue(), identity)
@@ -2354,7 +2354,7 @@ func TestNextRoundRobinValueReturnsErrorForInvalidKey(t *testing.T) {
 }
 
 func TestPutActorIfAbsent(t *testing.T) {
-	record := &internalpb.Actor{Address: address.New("endpoint", "testSystem", "127.0.0.1", 9000).String()}
+	record := internalpb.Actor_builder{Address: address.New("endpoint", "testSystem", "127.0.0.1", 9000).String()}.Build()
 
 	t.Run("With an absent record", func(t *testing.T) {
 		cl := &cluster{
@@ -2498,7 +2498,7 @@ func TestCountActorsByHostTalliesPerHost(t *testing.T) {
 	encoded := make(map[string][]byte, 3)
 	for _, addr := range []*address.Address{first, second, third} {
 		key := composeKey(namespaceActors, addr.String())
-		value, err := encode(&internalpb.Actor{Address: addr.String()})
+		value, err := encode(internalpb.Actor_builder{Address: addr.String()}.Build())
 		require.NoError(t, err)
 		encoded[key] = value
 	}
@@ -2588,7 +2588,7 @@ func TestActorsByHostReturnsOnlyMatchingHost(t *testing.T) {
 	encoded := make(map[string][]byte, 3)
 	for _, addr := range []*address.Address{match1, match2, other} {
 		key := composeKey(namespaceActors, addr.String())
-		value, err := encode(&internalpb.Actor{Address: addr.String()})
+		value, err := encode(internalpb.Actor_builder{Address: addr.String()}.Build())
 		require.NoError(t, err)
 		encoded[key] = value
 	}
@@ -2624,9 +2624,9 @@ func TestActorsByHostReturnsOnlyMatchingHost(t *testing.T) {
 // nolint
 func TestGrainsByHostReturnsOnlyMatchingHost(t *testing.T) {
 	grains := []*internalpb.Grain{
-		{GrainId: &internalpb.GrainId{Value: "k/g1"}, Host: "127.0.0.1", Port: 8080},
-		{GrainId: &internalpb.GrainId{Value: "k/g2"}, Host: "127.0.0.2", Port: 9002},
-		{GrainId: &internalpb.GrainId{Value: "k/g3"}, Host: "127.0.0.1", Port: 8080},
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/g1"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(),
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/g2"}.Build(), Host: "127.0.0.2", Port: 9002}.Build(),
+		internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/g3"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(),
 	}
 
 	encoded := make(map[string][]byte, len(grains))
@@ -4006,11 +4006,11 @@ func TestCountActorsByHostSkipsMalformedAddress(t *testing.T) {
 	// must be skipped rather than counted under a bogus key or failing the scan
 	good := address.New("a", "system", "127.0.0.1", 8080)
 	goodKey := composeKey(namespaceActors, good.String())
-	goodValue, err := encode(&internalpb.Actor{Address: good.String()})
+	goodValue, err := encode(internalpb.Actor_builder{Address: good.String()}.Build())
 	require.NoError(t, err)
 
 	badKey := composeKey(namespaceActors, "malformed")
-	badValue, err := encode(&internalpb.Actor{Address: "not-a-valid-address"})
+	badValue, err := encode(internalpb.Actor_builder{Address: "not-a-valid-address"}.Build())
 	require.NoError(t, err)
 
 	values := map[string][]byte{goodKey: goodValue, badKey: badValue}
@@ -4262,7 +4262,7 @@ func TestEmitNodeJoinedLockedDeduplicates(t *testing.T) {
 func TestPutGrainIfAbsentInternalRejectsEmptyIDValue(t *testing.T) {
 	cl := &cluster{running: atomic.NewBool(true)}
 
-	grain := &internalpb.Grain{GrainId: &internalpb.GrainId{Value: ""}}
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: ""}.Build()}.Build()
 	err := cl.putGrainIfAbsent(context.Background(), grain)
 	require.EqualError(t, err, "grain id value is empty")
 }

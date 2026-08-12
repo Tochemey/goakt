@@ -58,7 +58,7 @@ func invalidUTF8String() string {
 }
 
 func TestAsyncEnvelopeFrameIdentity(t *testing.T) {
-	payload := &testpb.Reply{Content: "ok"}
+	payload := testpb.Reply_builder{Content: "ok"}.Build()
 
 	t.Run("request frame is not a proto registry frame", func(t *testing.T) {
 		data, err := new(AsyncRequestSerializer).Serialize(&AsyncRequest{
@@ -88,7 +88,7 @@ func TestAsyncRequestSerializerRoundTrip(t *testing.T) {
 		data, err := serializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr-actor",
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToActor, Actor: addr},
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.NoError(t, err)
 
@@ -113,7 +113,7 @@ func TestAsyncRequestSerializerRoundTrip(t *testing.T) {
 		data, err := serializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr-grain",
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToGrain, Grain: identity},
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.NoError(t, err)
 
@@ -130,7 +130,7 @@ func TestAsyncRequestSerializerRoundTrip(t *testing.T) {
 	t.Run("client reply target", func(t *testing.T) {
 		data, err := serializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr-client",
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.NoError(t, err)
 
@@ -150,7 +150,7 @@ func TestAsyncResponseSerializerRoundTrip(t *testing.T) {
 	t.Run("message response", func(t *testing.T) {
 		data, err := serializer.Serialize(&AsyncResponse{
 			CorrelationID: "corr",
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.NoError(t, err)
 
@@ -233,13 +233,13 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 		_, err := requestSerializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr",
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToActor, Actor: address.New("actor", "sys", "127.0.0.1", 9000)},
-			Message:       &testpb.Reply{Content: invalidUTF8String()},
+			Message:       testpb.Reply_builder{Content: invalidUTF8String()}.Build(),
 		})
 		require.Error(t, err)
 
 		_, err = responseSerializer.Serialize(&AsyncResponse{
 			CorrelationID: "corr",
-			Message:       &testpb.Reply{Content: invalidUTF8String()},
+			Message:       testpb.Reply_builder{Content: invalidUTF8String()}.Build(),
 		})
 		require.Error(t, err)
 	})
@@ -248,28 +248,28 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 		_, err := requestSerializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr",
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToActor},
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 
 		_, err = requestSerializer.Serialize(&AsyncRequest{
 			CorrelationID: "corr",
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToGrain},
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.ErrorIs(t, err, gerrors.ErrInvalidMessage)
 	})
 
 	t.Run("malformed reply target fails at the node boundary", func(t *testing.T) {
-		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		payload, err := anypb.New(testpb.Reply_builder{Content: "ok"}.Build())
 		require.NoError(t, err)
 
-		frame, err := frameAsyncEnvelope(asyncRequestMagic, &internalpb.AsyncRequest{
+		frame, err := frameAsyncEnvelope(asyncRequestMagic, internalpb.AsyncRequest_builder{
 			CorrelationId: "corr",
 			ReplyTo:       "not-an-address",
 			ReplyKind:     internalpb.ReplyKind_REPLY_KIND_ACTOR,
 			Message:       payload,
-		})
+		}.Build())
 		require.NoError(t, err)
 
 		_, err = requestSerializer.Deserialize(frame)
@@ -277,15 +277,15 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 	})
 
 	t.Run("malformed grain identity fails at the node boundary", func(t *testing.T) {
-		payload, err := anypb.New(&testpb.Reply{Content: "ok"})
+		payload, err := anypb.New(testpb.Reply_builder{Content: "ok"}.Build())
 		require.NoError(t, err)
 
-		frame, err := frameAsyncEnvelope(asyncRequestMagic, &internalpb.AsyncRequest{
+		frame, err := frameAsyncEnvelope(asyncRequestMagic, internalpb.AsyncRequest_builder{
 			CorrelationId: "corr",
 			ReplyTo:       "missing-separator",
 			ReplyKind:     internalpb.ReplyKind_REPLY_KIND_GRAIN,
 			Message:       payload,
-		})
+		}.Build())
 		require.NoError(t, err)
 
 		_, err = requestSerializer.Deserialize(frame)
@@ -306,7 +306,7 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 		_, err := requestSerializer.Serialize(&AsyncRequest{
 			CorrelationID: invalidUTF8String(),
 			ReplyTo:       &AsyncReplyTo{Kind: ReplyToActor, Actor: address.New("actor", "sys", "127.0.0.1", 9000)},
-			Message:       &testpb.Reply{Content: "ok"},
+			Message:       testpb.Reply_builder{Content: "ok"}.Build(),
 		})
 		require.Error(t, err)
 
@@ -331,10 +331,10 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 	})
 
 	t.Run("request frame without a payload is rejected", func(t *testing.T) {
-		frame, err := frameAsyncEnvelope(asyncRequestMagic, &internalpb.AsyncRequest{
+		frame, err := frameAsyncEnvelope(asyncRequestMagic, internalpb.AsyncRequest_builder{
 			CorrelationId: "corr",
 			ReplyKind:     internalpb.ReplyKind_REPLY_KIND_CLIENT,
-		})
+		}.Build())
 		require.NoError(t, err)
 
 		_, err = requestSerializer.Deserialize(frame)
@@ -342,10 +342,10 @@ func TestAsyncEnvelopeSerializerErrors(t *testing.T) {
 	})
 
 	t.Run("undecodable payload is rejected", func(t *testing.T) {
-		frame, err := frameAsyncEnvelope(asyncResponseMagic, &internalpb.AsyncResponse{
+		frame, err := frameAsyncEnvelope(asyncResponseMagic, internalpb.AsyncResponse_builder{
 			CorrelationId: "corr",
 			Message:       &anypb.Any{TypeUrl: "type.googleapis.com/nope.Nope", Value: []byte("bad")},
-		})
+		}.Build())
 		require.NoError(t, err)
 
 		_, err = responseSerializer.Deserialize(frame)

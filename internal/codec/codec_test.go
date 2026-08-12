@@ -65,13 +65,11 @@ func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	t.Run("TimeBasedStrategy", func(t *testing.T) {
 		duration := time.Second
 		strategy := passivation.NewTimeBasedStrategy(duration)
-		expected := &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_TimeBased{
-				TimeBased: &internalpb.TimeBasedPassivation{
-					PassivateAfter: durationpb.New(duration),
-				},
-			},
-		}
+		expected := internalpb.PassivationStrategy_builder{
+			TimeBased: internalpb.TimeBasedPassivation_builder{
+				PassivateAfter: durationpb.New(duration),
+			}.Build(),
+		}.Build()
 		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
 
@@ -82,13 +80,11 @@ func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	t.Run("MessagesCountBasedStrategy", func(t *testing.T) {
 		maxMessages := 10
 		strategy := passivation.NewMessageCountBasedStrategy(maxMessages)
-		expected := &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_MessagesCountBased{
-				MessagesCountBased: &internalpb.MessagesCountBasedPassivation{
-					MaxMessages: int64(maxMessages),
-				},
-			},
-		}
+		expected := internalpb.PassivationStrategy_builder{
+			MessagesCountBased: internalpb.MessagesCountBasedPassivation_builder{
+				MaxMessages: int64(maxMessages),
+			}.Build(),
+		}.Build()
 		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
 		unmarshalled := DecodePassivationStrategy(result)
@@ -97,11 +93,9 @@ func TestEncodeDecodePassivationStrategy(t *testing.T) {
 	})
 	t.Run("LongLivedStrategy", func(t *testing.T) {
 		strategy := passivation.NewLongLivedStrategy()
-		expected := &internalpb.PassivationStrategy{
-			Strategy: &internalpb.PassivationStrategy_LongLived{
-				LongLived: new(internalpb.LongLivedPassivation),
-			},
-		}
+		expected := internalpb.PassivationStrategy_builder{
+			LongLived: proto.ValueOrDefault(new(internalpb.LongLivedPassivation)),
+		}.Build()
 		result := EncodePassivationStrategy(strategy)
 		require.Equal(t, prototext.Format(expected), prototext.Format(result))
 		unmarshalled := DecodePassivationStrategy(result)
@@ -221,37 +215,37 @@ func TestDecodeReentrancy(t *testing.T) {
 	}{
 		{
 			name: "allow all",
-			value: &internalpb.ReentrancyConfig{
+			value: internalpb.ReentrancyConfig_builder{
 				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_ALLOW_ALL,
 				MaxInFlight: 5,
-			},
+			}.Build(),
 			wantMode:  reentrancy.AllowAll,
 			wantLimit: 5,
 		},
 		{
 			name: "stash non reentrant",
-			value: &internalpb.ReentrancyConfig{
+			value: internalpb.ReentrancyConfig_builder{
 				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_STASH_NON_REENTRANT,
 				MaxInFlight: 2,
-			},
+			}.Build(),
 			wantMode:  reentrancy.StashNonReentrant,
 			wantLimit: 2,
 		},
 		{
 			name: "off",
-			value: &internalpb.ReentrancyConfig{
+			value: internalpb.ReentrancyConfig_builder{
 				Mode:        internalpb.ReentrancyMode_REENTRANCY_MODE_OFF,
 				MaxInFlight: 0,
-			},
+			}.Build(),
 			wantMode:  reentrancy.Off,
 			wantLimit: 0,
 		},
 		{
 			name: "unknown defaults to off",
-			value: &internalpb.ReentrancyConfig{
+			value: internalpb.ReentrancyConfig_builder{
 				Mode:        internalpb.ReentrancyMode(99),
 				MaxInFlight: 3,
-			},
+			}.Build(),
 			wantMode:  reentrancy.Off,
 			wantLimit: 3,
 		},
@@ -279,7 +273,7 @@ func TestEncodeDependencies(t *testing.T) {
 
 		dependencies := []extension.Dependency{mockDependency}
 		expected := []*internalpb.Dependency{
-			{Id: "dep1", TypeName: types.Name(mockDependency), Bytea: []byte("mock data")},
+			internalpb.Dependency_builder{Id: "dep1", TypeName: types.Name(mockDependency), Bytea: []byte("mock data")}.Build(),
 		}
 		result, err := EncodeDependencies(dependencies...)
 		require.NoError(t, err)
@@ -327,7 +321,7 @@ func TestEncodeSupervisorAnyError(t *testing.T) {
 
 	spec := EncodeSupervisor(sup)
 	require.NotNil(t, spec)
-	require.NotNil(t, spec.AnyErrorDirective)
+	require.NotNil(t, proto.ValueOrNil(spec.HasAnyErrorDirective(), spec.GetAnyErrorDirective))
 	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME, spec.GetAnyErrorDirective())
 	require.Len(t, spec.GetDirectives(), 0)
 
@@ -348,7 +342,7 @@ func TestEncodeNilDirectives(t *testing.T) {
 	spec := EncodeSupervisor(&supervisor.Supervisor{})
 	require.NotNil(t, spec)
 	require.Len(t, spec.GetDirectives(), 0)
-	require.Nil(t, spec.AnyErrorDirective)
+	require.Nil(t, proto.ValueOrNil(spec.HasAnyErrorDirective(), spec.GetAnyErrorDirective))
 }
 
 func TestEncodeEmptyDirectives(t *testing.T) {
@@ -358,7 +352,7 @@ func TestEncodeEmptyDirectives(t *testing.T) {
 	spec := EncodeSupervisor(sup)
 	require.NotNil(t, spec)
 	require.Len(t, spec.GetDirectives(), 0)
-	require.Nil(t, spec.AnyErrorDirective)
+	require.Nil(t, proto.ValueOrNil(spec.HasAnyErrorDirective(), spec.GetAnyErrorDirective))
 }
 
 func TestEncodeSortsDirectives(t *testing.T) {
@@ -382,7 +376,7 @@ func TestEncodeSupervisorSkipsEmptyErrorType(t *testing.T) {
 	spec := EncodeSupervisor(sup)
 	require.NotNil(t, spec)
 	require.Len(t, spec.GetDirectives(), 0)
-	require.Nil(t, spec.AnyErrorDirective)
+	require.Nil(t, proto.ValueOrNil(spec.HasAnyErrorDirective(), spec.GetAnyErrorDirective))
 }
 
 func TestEncodeSupervisorDirectiveVariants(t *testing.T) {
@@ -405,20 +399,20 @@ func TestDecodeNilSpec(t *testing.T) {
 
 func TestDecodeSkipsInvalidRules(t *testing.T) {
 	errType := errorType(&decodeDirectiveError{})
-	spec := &internalpb.SupervisorSpec{
+	spec := internalpb.SupervisorSpec_builder{
 		Strategy: internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE,
 		Directives: []*internalpb.SupervisorDirectiveRule{
 			nil,
-			{
+			internalpb.SupervisorDirectiveRule_builder{
 				ErrorType: "",
 				Directive: internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART,
-			},
-			{
+			}.Build(),
+			internalpb.SupervisorDirectiveRule_builder{
 				ErrorType: errType,
 				Directive: internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_ESCALATE,
-			},
+			}.Build(),
 		},
-	}
+	}.Build()
 
 	decoded := DecodeSupervisor(spec)
 	require.NotNil(t, decoded)
@@ -432,10 +426,10 @@ func TestDecodeSkipsInvalidRules(t *testing.T) {
 }
 
 func TestDecodeWithMaxRetriesOnly(t *testing.T) {
-	spec := &internalpb.SupervisorSpec{
+	spec := internalpb.SupervisorSpec_builder{
 		Strategy:   internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE,
 		MaxRetries: 5,
-	}
+	}.Build()
 
 	decoded := DecodeSupervisor(spec)
 	require.NotNil(t, decoded)
@@ -559,12 +553,12 @@ func TestDecodeDataCenterRecordInvalidPayload(t *testing.T) {
 }
 
 func TestDecodeDataCenterRecordMissingFields(t *testing.T) {
-	pbRecord := &internalpb.DataCenterRecord{
+	pbRecord := internalpb.DataCenterRecord_builder{
 		Id:        "dc-missing",
 		Endpoints: []string{"127.0.0.1:8080"},
 		Version:   7,
 		State:     internalpb.DataCenterState_DATA_CENTER_STATE_UNSPECIFIED,
-	}
+	}.Build()
 	payload, err := proto.Marshal(pbRecord)
 	require.NoError(t, err)
 
@@ -615,20 +609,20 @@ func TestEncodeCRDTKey(t *testing.T) {
 	})
 
 	t.Run("UNSPECIFIED data type returns error", func(t *testing.T) {
-		pb := &internalpb.CRDTKey{
+		pb := internalpb.CRDTKey_builder{
 			Id:       "bad-key",
 			DataType: internalpb.CRDTDataType_CRDT_DATA_TYPE_UNSPECIFIED,
-		}
+		}.Build()
 		_, _, err := DecodeCRDTKey(pb)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unspecified CRDT data type")
 	})
 
 	t.Run("unknown enum value returns error", func(t *testing.T) {
-		pb := &internalpb.CRDTKey{
+		pb := internalpb.CRDTKey_builder{
 			Id:       "future-key",
 			DataType: 99,
-		}
+		}.Build()
 		_, _, err := DecodeCRDTKey(pb)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unknown CRDT data type")
@@ -688,11 +682,11 @@ func TestDecodeDependencies(t *testing.T) {
 
 	t.Run("unknown type returns error", func(t *testing.T) {
 		reg := types.NewRegistry()
-		dep := &internalpb.Dependency{
+		dep := internalpb.Dependency_builder{
 			Id:       "unknown",
 			TypeName: "codec.nonExistentType",
 			Bytea:    []byte("data"),
-		}
+		}.Build()
 		_, err := DecodeDependencies(reg, dep)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "not registered")
@@ -715,11 +709,11 @@ func TestDecodeDependencies(t *testing.T) {
 		reg := types.NewRegistry()
 		reg.Register(&notADependency{})
 
-		dep := &internalpb.Dependency{
+		dep := internalpb.Dependency_builder{
 			Id:       "bad",
 			TypeName: types.Name(&notADependency{}),
 			Bytea:    []byte("data"),
-		}
+		}.Build()
 		_, err := DecodeDependencies(reg, dep)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "does not implement")

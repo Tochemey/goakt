@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -62,14 +61,9 @@ func (x Strategy) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use Strategy.Descriptor instead.
-func (Strategy) EnumDescriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
-}
-
 // StopDirective defines the supervisor stop directive
 type StopDirective struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -99,15 +93,22 @@ func (x *StopDirective) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StopDirective.ProtoReflect.Descriptor instead.
-func (*StopDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{0}
+type StopDirective_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 StopDirective_builder) Build() *StopDirective {
+	m0 := &StopDirective{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // ResumeDirective defines the supervisor resume directive
 // This ignores the failure and processes the next message, instead
 type ResumeDirective struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -137,15 +138,22 @@ func (x *ResumeDirective) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ResumeDirective.ProtoReflect.Descriptor instead.
-func (*ResumeDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{1}
+type ResumeDirective_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 ResumeDirective_builder) Build() *ResumeDirective {
+	m0 := &ResumeDirective{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // EscalateDirective defines the supervisor escalation directive
 // It escalates the failure to the next parent in the hierarchy, thereby failing itself
 type EscalateDirective struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state         protoimpl.MessageState `protogen:"opaque.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,21 +183,25 @@ func (x *EscalateDirective) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use EscalateDirective.ProtoReflect.Descriptor instead.
-func (*EscalateDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{2}
+type EscalateDirective_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+}
+
+func (b0 EscalateDirective_builder) Build() *EscalateDirective {
+	m0 := &EscalateDirective{}
+	b, x := &b0, m0
+	_, _ = b, x
+	return m0
 }
 
 // RestartDirective defines supervisor restart directive
 type RestartDirective struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the maximum number of retries;
-	// When reaching this number, the faulty actor is stopped
-	MaxRetries uint32 `protobuf:"varint,1,opt,name=max_retries,json=maxRetries,proto3" json:"max_retries,omitempty"`
-	// Specifies the time range to restart the faulty actor
-	Timeout       int64 `protobuf:"varint,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_MaxRetries uint32                 `protobuf:"varint,1,opt,name=max_retries,json=maxRetries,proto3"`
+	xxx_hidden_Timeout    int64                  `protobuf:"varint,2,opt,name=timeout,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *RestartDirective) Reset() {
@@ -217,23 +229,45 @@ func (x *RestartDirective) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RestartDirective.ProtoReflect.Descriptor instead.
-func (*RestartDirective) Descriptor() ([]byte, []int) {
-	return file_internal_supervision_proto_rawDescGZIP(), []int{3}
-}
-
 func (x *RestartDirective) GetMaxRetries() uint32 {
 	if x != nil {
-		return x.MaxRetries
+		return x.xxx_hidden_MaxRetries
 	}
 	return 0
 }
 
 func (x *RestartDirective) GetTimeout() int64 {
 	if x != nil {
-		return x.Timeout
+		return x.xxx_hidden_Timeout
 	}
 	return 0
+}
+
+func (x *RestartDirective) SetMaxRetries(v uint32) {
+	x.xxx_hidden_MaxRetries = v
+}
+
+func (x *RestartDirective) SetTimeout(v int64) {
+	x.xxx_hidden_Timeout = v
+}
+
+type RestartDirective_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the maximum number of retries;
+	// When reaching this number, the faulty actor is stopped
+	MaxRetries uint32
+	// Specifies the time range to restart the faulty actor
+	Timeout int64
+}
+
+func (b0 RestartDirective_builder) Build() *RestartDirective {
+	m0 := &RestartDirective{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_MaxRetries = b.MaxRetries
+	x.xxx_hidden_Timeout = b.Timeout
+	return m0
 }
 
 var File_internal_supervision_proto protoreflect.FileDescriptor
@@ -256,18 +290,6 @@ const file_internal_supervision_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_supervision_proto_rawDescOnce sync.Once
-	file_internal_supervision_proto_rawDescData []byte
-)
-
-func file_internal_supervision_proto_rawDescGZIP() []byte {
-	file_internal_supervision_proto_rawDescOnce.Do(func() {
-		file_internal_supervision_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_supervision_proto_rawDesc), len(file_internal_supervision_proto_rawDesc)))
-	})
-	return file_internal_supervision_proto_rawDescData
-}
 
 var file_internal_supervision_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_supervision_proto_msgTypes = make([]protoimpl.MessageInfo, 4)

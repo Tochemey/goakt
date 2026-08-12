@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -90,19 +89,14 @@ func (x Code) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use Code.Descriptor instead.
-func (Code) EnumDescriptor() ([]byte, []int) {
-	return file_internal_network_proto_rawDescGZIP(), []int{0}
-}
-
 type Error struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          Code                   `protobuf:"varint,1,opt,name=code,proto3,enum=internalpb.Code" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	StackTrace    string                 `protobuf:"bytes,3,opt,name=stack_trace,json=stackTrace,proto3" json:"stack_trace,omitempty"`
-	Details       *anypb.Any             `protobuf:"bytes,4,opt,name=details,proto3" json:"details,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Code       Code                   `protobuf:"varint,1,opt,name=code,proto3,enum=internalpb.Code"`
+	xxx_hidden_Message    string                 `protobuf:"bytes,2,opt,name=message,proto3"`
+	xxx_hidden_StackTrace string                 `protobuf:"bytes,3,opt,name=stack_trace,json=stackTrace,proto3"`
+	xxx_hidden_Details    *anypb.Any             `protobuf:"bytes,4,opt,name=details,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *Error) Reset() {
@@ -130,37 +124,79 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Error.ProtoReflect.Descriptor instead.
-func (*Error) Descriptor() ([]byte, []int) {
-	return file_internal_network_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *Error) GetCode() Code {
 	if x != nil {
-		return x.Code
+		return x.xxx_hidden_Code
 	}
 	return Code_CODE_INTERNAL
 }
 
 func (x *Error) GetMessage() string {
 	if x != nil {
-		return x.Message
+		return x.xxx_hidden_Message
 	}
 	return ""
 }
 
 func (x *Error) GetStackTrace() string {
 	if x != nil {
-		return x.StackTrace
+		return x.xxx_hidden_StackTrace
 	}
 	return ""
 }
 
 func (x *Error) GetDetails() *anypb.Any {
 	if x != nil {
-		return x.Details
+		return x.xxx_hidden_Details
 	}
 	return nil
+}
+
+func (x *Error) SetCode(v Code) {
+	x.xxx_hidden_Code = v
+}
+
+func (x *Error) SetMessage(v string) {
+	x.xxx_hidden_Message = v
+}
+
+func (x *Error) SetStackTrace(v string) {
+	x.xxx_hidden_StackTrace = v
+}
+
+func (x *Error) SetDetails(v *anypb.Any) {
+	x.xxx_hidden_Details = v
+}
+
+func (x *Error) HasDetails() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Details != nil
+}
+
+func (x *Error) ClearDetails() {
+	x.xxx_hidden_Details = nil
+}
+
+type Error_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Code       Code
+	Message    string
+	StackTrace string
+	Details    *anypb.Any
+}
+
+func (b0 Error_builder) Build() *Error {
+	m0 := &Error{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Code = b.Code
+	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_StackTrace = b.StackTrace
+	x.xxx_hidden_Details = b.Details
+	return m0
 }
 
 var File_internal_network_proto protoreflect.FileDescriptor
@@ -192,18 +228,6 @@ const file_internal_network_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_network_proto_rawDescOnce sync.Once
-	file_internal_network_proto_rawDescData []byte
-)
-
-func file_internal_network_proto_rawDescGZIP() []byte {
-	file_internal_network_proto_rawDescOnce.Do(func() {
-		file_internal_network_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_network_proto_rawDesc), len(file_internal_network_proto_rawDesc)))
-	})
-	return file_internal_network_proto_rawDescData
-}
 
 var file_internal_network_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_network_proto_msgTypes = make([]protoimpl.MessageInfo, 1)

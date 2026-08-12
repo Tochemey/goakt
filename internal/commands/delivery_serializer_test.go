@@ -135,15 +135,13 @@ func TestReliableDeliverySerializerErrors(t *testing.T) {
 	})
 
 	t.Run("missing sequenced payload", func(t *testing.T) {
-		envelope := &internalpb.DeliveryEnvelope{
-			Command: &internalpb.DeliveryEnvelope_SequencedMessage{
-				SequencedMessage: &internalpb.SequencedMessage{
-					SessionId: "session-1",
-					MessageId: "message-1",
-					Seq:       1,
-				},
-			},
-		}
+		envelope := internalpb.DeliveryEnvelope_builder{
+			SequencedMessage: internalpb.SequencedMessage_builder{
+				SessionId: "session-1",
+				MessageId: "message-1",
+				Seq:       1,
+			}.Build(),
+		}.Build()
 
 		data, err := proto.MarshalOptions{}.MarshalAppend(deliveryFrameMagic[:], envelope)
 		require.NoError(t, err)
@@ -170,7 +168,7 @@ func TestReliableDeliverySerializerErrors(t *testing.T) {
 func TestReliablePayloadCodecRoundTrips(t *testing.T) {
 	t.Run("protobuf", func(t *testing.T) {
 		config := remote.DefaultConfig()
-		payload := &testpb.Reply{Content: "protobuf"}
+		payload := testpb.Reply_builder{Content: "protobuf"}.Build()
 		assertReliablePayloadRoundTrip(t, config, payload)
 	})
 
@@ -372,7 +370,7 @@ func BenchmarkReliablePayloadCodec(b *testing.B) {
 
 	for _, size := range []int{1 << 10, 64 << 10, 1 << 20} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
-			message := &testpb.Reply{Content: string(make([]byte, size))}
+			message := testpb.Reply_builder{Content: string(make([]byte, size))}.Build()
 			b.ReportAllocs()
 			b.SetBytes(int64(size))
 			b.ResetTimer()

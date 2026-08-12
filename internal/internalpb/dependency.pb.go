@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -26,15 +25,12 @@ const (
 // This message is used to capture all the necessary metadata and initialization
 // details required to recreate a dependency instance during the actor's lifecycle.
 type Dependency struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the dependency ID
-	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Specifies the dependency type name
-	TypeName string `protobuf:"bytes,2,opt,name=type_name,json=typeName,proto3" json:"type_name,omitempty"`
-	// The serialized binary data representing the Dependency's value.
-	Bytea         []byte `protobuf:"bytes,3,opt,name=bytea,proto3" json:"bytea,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Id       string                 `protobuf:"bytes,1,opt,name=id,proto3"`
+	xxx_hidden_TypeName string                 `protobuf:"bytes,2,opt,name=type_name,json=typeName,proto3"`
+	xxx_hidden_Bytea    []byte                 `protobuf:"bytes,3,opt,name=bytea,proto3"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Dependency) Reset() {
@@ -62,30 +58,61 @@ func (x *Dependency) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Dependency.ProtoReflect.Descriptor instead.
-func (*Dependency) Descriptor() ([]byte, []int) {
-	return file_internal_dependency_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *Dependency) GetId() string {
 	if x != nil {
-		return x.Id
+		return x.xxx_hidden_Id
 	}
 	return ""
 }
 
 func (x *Dependency) GetTypeName() string {
 	if x != nil {
-		return x.TypeName
+		return x.xxx_hidden_TypeName
 	}
 	return ""
 }
 
 func (x *Dependency) GetBytea() []byte {
 	if x != nil {
-		return x.Bytea
+		return x.xxx_hidden_Bytea
 	}
 	return nil
+}
+
+func (x *Dependency) SetId(v string) {
+	x.xxx_hidden_Id = v
+}
+
+func (x *Dependency) SetTypeName(v string) {
+	x.xxx_hidden_TypeName = v
+}
+
+func (x *Dependency) SetBytea(v []byte) {
+	if v == nil {
+		v = []byte{}
+	}
+	x.xxx_hidden_Bytea = v
+}
+
+type Dependency_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the dependency ID
+	Id string
+	// Specifies the dependency type name
+	TypeName string
+	// The serialized binary data representing the Dependency's value.
+	Bytea []byte
+}
+
+func (b0 Dependency_builder) Build() *Dependency {
+	m0 := &Dependency{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Id = b.Id
+	x.xxx_hidden_TypeName = b.TypeName
+	x.xxx_hidden_Bytea = b.Bytea
+	return m0
 }
 
 var File_internal_dependency_proto protoreflect.FileDescriptor
@@ -103,18 +130,6 @@ const file_internal_dependency_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_dependency_proto_rawDescOnce sync.Once
-	file_internal_dependency_proto_rawDescData []byte
-)
-
-func file_internal_dependency_proto_rawDescGZIP() []byte {
-	file_internal_dependency_proto_rawDescOnce.Do(func() {
-		file_internal_dependency_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_dependency_proto_rawDesc), len(file_internal_dependency_proto_rawDesc)))
-	})
-	return file_internal_dependency_proto_rawDescData
-}
 
 var file_internal_dependency_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_internal_dependency_proto_goTypes = []any{

@@ -10,7 +10,6 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -69,25 +68,16 @@ func (x NatsMessageType) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use NatsMessageType.Descriptor instead.
-func (NatsMessageType) EnumDescriptor() ([]byte, []int) {
-	return file_internal_nats_proto_rawDescGZIP(), []int{0}
-}
-
 // NatsMessage defines the NATs message
 // used by the discovery provider
 type NatsMessage struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Specifies the host name of the client node
-	Host string `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
-	// Specifies the port of the client node
-	Port int32 `protobuf:"varint,2,opt,name=port,proto3" json:"port,omitempty"`
-	// Specifies the client name
-	Name string `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	// Specifies the message type
-	MessageType   NatsMessageType `protobuf:"varint,4,opt,name=message_type,json=messageType,proto3,enum=internalpb.NatsMessageType" json:"message_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Host        string                 `protobuf:"bytes,1,opt,name=host,proto3"`
+	xxx_hidden_Port        int32                  `protobuf:"varint,2,opt,name=port,proto3"`
+	xxx_hidden_Name        string                 `protobuf:"bytes,3,opt,name=name,proto3"`
+	xxx_hidden_MessageType NatsMessageType        `protobuf:"varint,4,opt,name=message_type,json=messageType,proto3,enum=internalpb.NatsMessageType"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *NatsMessage) Reset() {
@@ -115,37 +105,72 @@ func (x *NatsMessage) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use NatsMessage.ProtoReflect.Descriptor instead.
-func (*NatsMessage) Descriptor() ([]byte, []int) {
-	return file_internal_nats_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *NatsMessage) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *NatsMessage) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *NatsMessage) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *NatsMessage) GetMessageType() NatsMessageType {
 	if x != nil {
-		return x.MessageType
+		return x.xxx_hidden_MessageType
 	}
 	return NatsMessageType_NATS_MESSAGE_TYPE_REGISTER
+}
+
+func (x *NatsMessage) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *NatsMessage) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *NatsMessage) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *NatsMessage) SetMessageType(v NatsMessageType) {
+	x.xxx_hidden_MessageType = v
+}
+
+type NatsMessage_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	// Specifies the host name of the client node
+	Host string
+	// Specifies the port of the client node
+	Port int32
+	// Specifies the client name
+	Name string
+	// Specifies the message type
+	MessageType NatsMessageType
+}
+
+func (b0 NatsMessage_builder) Build() *NatsMessage {
+	m0 := &NatsMessage{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_MessageType = b.MessageType
+	return m0
 }
 
 var File_internal_nats_proto protoreflect.FileDescriptor
@@ -168,18 +193,6 @@ const file_internal_nats_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_nats_proto_rawDescOnce sync.Once
-	file_internal_nats_proto_rawDescData []byte
-)
-
-func file_internal_nats_proto_rawDescGZIP() []byte {
-	file_internal_nats_proto_rawDescOnce.Do(func() {
-		file_internal_nats_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_nats_proto_rawDesc), len(file_internal_nats_proto_rawDesc)))
-	})
-	return file_internal_nats_proto_rawDescData
-}
 
 var file_internal_nats_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_internal_nats_proto_msgTypes = make([]protoimpl.MessageInfo, 1)

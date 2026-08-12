@@ -389,7 +389,7 @@ The low-level network transport used by remoting.
 
 | File              | Purpose                                                                                             |
 |-------------------|-----------------------------------------------------------------------------------------------------|
-| `proto_server.go` | Frame server that reads length-prefixed protobuf frames and dispatches them to registered handlers. |
+| `remoting_server.go` | Remoting acceptor: dual-protocol sniff, duplex HELLO/lanes, and legacy length-prefixed protobuf dispatch. |
 | `tcp_server.go`   | Generic TCP accept/serve loop that the proto server builds on.                                      |
 | `client.go`       | TCP client with connection pooling.                                                                 |
 | `compress.go`     | Pluggable compression (gzip, brotli, zstd).                                                         |
@@ -493,7 +493,7 @@ actor.Tell(to *PID, msg)
                           message joins the next batch (drained non-blockingly
                           when the previous RPC returns, up to maxBatch)
                     └─ write batched RemoteTellRequest to pooled TCP connection
-                         └─ target node's proto_server receives frame
+                         └─ target node's remoting_server receives frame
                          └─ dispatch to actorSystem.handleRemoteTell
                          └─ per-message ContextPropagator.Extract restores ctx
                          └─ look up local PID by address

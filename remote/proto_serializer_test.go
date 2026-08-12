@@ -33,7 +33,7 @@ import (
 )
 
 func TestProtoSerializer_SerializeDeserialize_Success(t *testing.T) {
-	orig := &testpb.Reply{Content: "hello world"}
+	orig := testpb.Reply_builder{Content: "hello world"}.Build()
 	serializer := NewProtoSerializer()
 
 	data, err := serializer.Serialize(orig)
@@ -46,7 +46,7 @@ func TestProtoSerializer_SerializeDeserialize_Success(t *testing.T) {
 
 	reply, ok := actual.(*testpb.Reply)
 	require.True(t, ok, "expected *testpb.Reply from type assertion")
-	require.Equal(t, orig.Content, reply.Content)
+	require.Equal(t, orig.GetContent(), reply.GetContent())
 }
 
 func TestProtoSerializer_Serialize_Errors(t *testing.T) {

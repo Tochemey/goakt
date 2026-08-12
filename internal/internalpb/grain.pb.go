@@ -11,7 +11,6 @@ import (
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	reflect "reflect"
-	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -23,12 +22,12 @@ const (
 )
 
 type GrainId struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Value         string                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Kind  string                 `protobuf:"bytes,1,opt,name=kind,proto3"`
+	xxx_hidden_Name  string                 `protobuf:"bytes,2,opt,name=name,proto3"`
+	xxx_hidden_Value string                 `protobuf:"bytes,3,opt,name=value,proto3"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *GrainId) Reset() {
@@ -56,53 +55,74 @@ func (x *GrainId) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GrainId.ProtoReflect.Descriptor instead.
-func (*GrainId) Descriptor() ([]byte, []int) {
-	return file_internal_grain_proto_rawDescGZIP(), []int{0}
-}
-
 func (x *GrainId) GetKind() string {
 	if x != nil {
-		return x.Kind
+		return x.xxx_hidden_Kind
 	}
 	return ""
 }
 
 func (x *GrainId) GetName() string {
 	if x != nil {
-		return x.Name
+		return x.xxx_hidden_Name
 	}
 	return ""
 }
 
 func (x *GrainId) GetValue() string {
 	if x != nil {
-		return x.Value
+		return x.xxx_hidden_Value
 	}
 	return ""
 }
 
+func (x *GrainId) SetKind(v string) {
+	x.xxx_hidden_Kind = v
+}
+
+func (x *GrainId) SetName(v string) {
+	x.xxx_hidden_Name = v
+}
+
+func (x *GrainId) SetValue(v string) {
+	x.xxx_hidden_Value = v
+}
+
+type GrainId_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	Kind  string
+	Name  string
+	Value string
+}
+
+func (b0 GrainId_builder) Build() *GrainId {
+	m0 := &GrainId{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_Kind = b.Kind
+	x.xxx_hidden_Name = b.Name
+	x.xxx_hidden_Value = b.Value
+	return m0
+}
+
 // Grain represents the virtual actor information on the wire.
 type Grain struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	GrainId           *GrainId               `protobuf:"bytes,1,opt,name=grain_id,json=grainId,proto3" json:"grain_id,omitempty"`
-	Host              string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
-	Port              int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	Dependencies      []*Dependency          `protobuf:"bytes,4,rep,name=dependencies,proto3" json:"dependencies,omitempty"`
-	ActivationTimeout *durationpb.Duration   `protobuf:"bytes,5,opt,name=activation_timeout,json=activationTimeout,proto3" json:"activation_timeout,omitempty"`
-	ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3" json:"activation_retries,omitempty"`
-	MailboxCapacity   *int64                 `protobuf:"varint,7,opt,name=mailbox_capacity,json=mailboxCapacity,proto3,oneof" json:"mailbox_capacity,omitempty"`
-	DisableRelocation bool                   `protobuf:"varint,8,opt,name=disable_relocation,json=disableRelocation,proto3" json:"disable_relocation,omitempty"`
-	// eager_relocation opts the grain into upfront reactivation on another node
-	// when its host departs the cluster. When false (default) the grain relocates
-	// lazily: its directory entry is cleaned and it re-activates on next use.
-	EagerRelocation bool `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3" json:"eager_relocation,omitempty"`
-	// reentrancy carries the grain's async request policy so that eager
-	// relocation and remote activation reconstruct it. Absent when the grain has
-	// no policy.
-	Reentrancy    *ReentrancyConfig `protobuf:"bytes,10,opt,name=reentrancy,proto3" json:"reentrancy,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                        protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_GrainId           *GrainId               `protobuf:"bytes,1,opt,name=grain_id,json=grainId,proto3"`
+	xxx_hidden_Host              string                 `protobuf:"bytes,2,opt,name=host,proto3"`
+	xxx_hidden_Port              int32                  `protobuf:"varint,3,opt,name=port,proto3"`
+	xxx_hidden_Dependencies      *[]*Dependency         `protobuf:"bytes,4,rep,name=dependencies,proto3"`
+	xxx_hidden_ActivationTimeout *durationpb.Duration   `protobuf:"bytes,5,opt,name=activation_timeout,json=activationTimeout,proto3"`
+	xxx_hidden_ActivationRetries int32                  `protobuf:"varint,6,opt,name=activation_retries,json=activationRetries,proto3"`
+	xxx_hidden_MailboxCapacity   int64                  `protobuf:"varint,7,opt,name=mailbox_capacity,json=mailboxCapacity,proto3,oneof"`
+	xxx_hidden_DisableRelocation bool                   `protobuf:"varint,8,opt,name=disable_relocation,json=disableRelocation,proto3"`
+	xxx_hidden_EagerRelocation   bool                   `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3"`
+	xxx_hidden_Reentrancy        *ReentrancyConfig      `protobuf:"bytes,10,opt,name=reentrancy,proto3"`
+	XXX_raceDetectHookData       protoimpl.RaceDetectHookData
+	XXX_presence                 [1]uint32
+	unknownFields                protoimpl.UnknownFields
+	sizeCache                    protoimpl.SizeCache
 }
 
 func (x *Grain) Reset() {
@@ -130,79 +150,203 @@ func (x *Grain) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use Grain.ProtoReflect.Descriptor instead.
-func (*Grain) Descriptor() ([]byte, []int) {
-	return file_internal_grain_proto_rawDescGZIP(), []int{1}
-}
-
 func (x *Grain) GetGrainId() *GrainId {
 	if x != nil {
-		return x.GrainId
+		return x.xxx_hidden_GrainId
 	}
 	return nil
 }
 
 func (x *Grain) GetHost() string {
 	if x != nil {
-		return x.Host
+		return x.xxx_hidden_Host
 	}
 	return ""
 }
 
 func (x *Grain) GetPort() int32 {
 	if x != nil {
-		return x.Port
+		return x.xxx_hidden_Port
 	}
 	return 0
 }
 
 func (x *Grain) GetDependencies() []*Dependency {
 	if x != nil {
-		return x.Dependencies
+		if x.xxx_hidden_Dependencies != nil {
+			return *x.xxx_hidden_Dependencies
+		}
 	}
 	return nil
 }
 
 func (x *Grain) GetActivationTimeout() *durationpb.Duration {
 	if x != nil {
-		return x.ActivationTimeout
+		return x.xxx_hidden_ActivationTimeout
 	}
 	return nil
 }
 
 func (x *Grain) GetActivationRetries() int32 {
 	if x != nil {
-		return x.ActivationRetries
+		return x.xxx_hidden_ActivationRetries
 	}
 	return 0
 }
 
 func (x *Grain) GetMailboxCapacity() int64 {
-	if x != nil && x.MailboxCapacity != nil {
-		return *x.MailboxCapacity
+	if x != nil {
+		return x.xxx_hidden_MailboxCapacity
 	}
 	return 0
 }
 
 func (x *Grain) GetDisableRelocation() bool {
 	if x != nil {
-		return x.DisableRelocation
+		return x.xxx_hidden_DisableRelocation
 	}
 	return false
 }
 
 func (x *Grain) GetEagerRelocation() bool {
 	if x != nil {
-		return x.EagerRelocation
+		return x.xxx_hidden_EagerRelocation
 	}
 	return false
 }
 
 func (x *Grain) GetReentrancy() *ReentrancyConfig {
 	if x != nil {
-		return x.Reentrancy
+		return x.xxx_hidden_Reentrancy
 	}
 	return nil
+}
+
+func (x *Grain) SetGrainId(v *GrainId) {
+	x.xxx_hidden_GrainId = v
+}
+
+func (x *Grain) SetHost(v string) {
+	x.xxx_hidden_Host = v
+}
+
+func (x *Grain) SetPort(v int32) {
+	x.xxx_hidden_Port = v
+}
+
+func (x *Grain) SetDependencies(v []*Dependency) {
+	x.xxx_hidden_Dependencies = &v
+}
+
+func (x *Grain) SetActivationTimeout(v *durationpb.Duration) {
+	x.xxx_hidden_ActivationTimeout = v
+}
+
+func (x *Grain) SetActivationRetries(v int32) {
+	x.xxx_hidden_ActivationRetries = v
+}
+
+func (x *Grain) SetMailboxCapacity(v int64) {
+	x.xxx_hidden_MailboxCapacity = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 10)
+}
+
+func (x *Grain) SetDisableRelocation(v bool) {
+	x.xxx_hidden_DisableRelocation = v
+}
+
+func (x *Grain) SetEagerRelocation(v bool) {
+	x.xxx_hidden_EagerRelocation = v
+}
+
+func (x *Grain) SetReentrancy(v *ReentrancyConfig) {
+	x.xxx_hidden_Reentrancy = v
+}
+
+func (x *Grain) HasGrainId() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_GrainId != nil
+}
+
+func (x *Grain) HasActivationTimeout() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_ActivationTimeout != nil
+}
+
+func (x *Grain) HasMailboxCapacity() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 6)
+}
+
+func (x *Grain) HasReentrancy() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_Reentrancy != nil
+}
+
+func (x *Grain) ClearGrainId() {
+	x.xxx_hidden_GrainId = nil
+}
+
+func (x *Grain) ClearActivationTimeout() {
+	x.xxx_hidden_ActivationTimeout = nil
+}
+
+func (x *Grain) ClearMailboxCapacity() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 6)
+	x.xxx_hidden_MailboxCapacity = 0
+}
+
+func (x *Grain) ClearReentrancy() {
+	x.xxx_hidden_Reentrancy = nil
+}
+
+type Grain_builder struct {
+	_ [0]func() // Prevents comparability and use of unkeyed literals for the builder.
+
+	GrainId           *GrainId
+	Host              string
+	Port              int32
+	Dependencies      []*Dependency
+	ActivationTimeout *durationpb.Duration
+	ActivationRetries int32
+	MailboxCapacity   *int64
+	DisableRelocation bool
+	// eager_relocation opts the grain into upfront reactivation on another node
+	// when its host departs the cluster. When false (default) the grain relocates
+	// lazily: its directory entry is cleaned and it re-activates on next use.
+	EagerRelocation bool
+	// reentrancy carries the grain's async request policy so that eager
+	// relocation and remote activation reconstruct it. Absent when the grain has
+	// no policy.
+	Reentrancy *ReentrancyConfig
+}
+
+func (b0 Grain_builder) Build() *Grain {
+	m0 := &Grain{}
+	b, x := &b0, m0
+	_, _ = b, x
+	x.xxx_hidden_GrainId = b.GrainId
+	x.xxx_hidden_Host = b.Host
+	x.xxx_hidden_Port = b.Port
+	x.xxx_hidden_Dependencies = &b.Dependencies
+	x.xxx_hidden_ActivationTimeout = b.ActivationTimeout
+	x.xxx_hidden_ActivationRetries = b.ActivationRetries
+	if b.MailboxCapacity != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 10)
+		x.xxx_hidden_MailboxCapacity = *b.MailboxCapacity
+	}
+	x.xxx_hidden_DisableRelocation = b.DisableRelocation
+	x.xxx_hidden_EagerRelocation = b.EagerRelocation
+	x.xxx_hidden_Reentrancy = b.Reentrancy
+	return m0
 }
 
 var File_internal_grain_proto protoreflect.FileDescriptor
@@ -235,18 +379,6 @@ const file_internal_grain_proto_rawDesc = "" +
 	"Internalpb\xca\x02\n" +
 	"Internalpb\xe2\x02\x16Internalpb\\GPBMetadata\xea\x02\n" +
 	"Internalpbb\x06proto3"
-
-var (
-	file_internal_grain_proto_rawDescOnce sync.Once
-	file_internal_grain_proto_rawDescData []byte
-)
-
-func file_internal_grain_proto_rawDescGZIP() []byte {
-	file_internal_grain_proto_rawDescOnce.Do(func() {
-		file_internal_grain_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_internal_grain_proto_rawDesc), len(file_internal_grain_proto_rawDesc)))
-	})
-	return file_internal_grain_proto_rawDescData
-}
 
 var file_internal_grain_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_internal_grain_proto_goTypes = []any{

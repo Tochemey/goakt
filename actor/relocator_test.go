@@ -66,10 +66,10 @@ func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
 	}
 
 	actors := map[string]*internalpb.Actor{
-		"a1": {Address: "actor-1"},
+		"a1": internalpb.Actor_builder{Address: "actor-1"}.Build(),
 	}
 	grains := map[string]*internalpb.Grain{
-		"g1": {GrainId: &internalpb.GrainId{Value: "grain-1"}},
+		"g1": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build()}.Build(),
 	}
 
 	publishRelocationFailed(pid, "127.0.0.1:9000", actors, grains, stdErrors.New("boom"))
@@ -100,11 +100,11 @@ func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 	store := &recordingPeerStateStore{deleteErr: stdErrors.New("store down")}
 	sys.clusterStore = store
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:      "127.0.0.1",
 		PeersPort: 9000,
-		Actors:    map[string]*internalpb.Actor{"a1": {Address: "actor-1"}},
-	}
+		Actors:    map[string]*internalpb.Actor{"a1": internalpb.Actor_builder{Address: "actor-1"}.Build()},
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	manager := &relocator{
@@ -112,7 +112,7 @@ func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 		logger: log.DiscardLogger,
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: peerState})
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
 	manager.abortRelocation(receiveCtx, "127.0.0.1:9000", peerState, stdErrors.New("boom"))
 
 	require.True(t, store.deleteCalled)
@@ -125,7 +125,7 @@ func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 func TestRelocatorPublishRelocationFailedWithoutEventStream(t *testing.T) {
 	require.NotPanics(t, func() {
 		publishRelocationFailed(&PID{}, "127.0.0.1:9000",
-			map[string]*internalpb.Actor{"a1": {Address: "actor-1"}}, nil, stdErrors.New("boom"))
+			map[string]*internalpb.Actor{"a1": internalpb.Actor_builder{Address: "actor-1"}.Build()}, nil, stdErrors.New("boom"))
 	})
 }
 
@@ -146,16 +146,16 @@ func TestRelocatorTerminatedAbortsInflightJob(t *testing.T) {
 	store := &recordingPeerStateStore{}
 	sys.clusterStore = store
 
-	peerState := &internalpb.PeerState{
+	peerState := internalpb.PeerState_builder{
 		Host:      "127.0.0.1",
 		PeersPort: 9000,
 		Actors: map[string]*internalpb.Actor{
-			"a1": {Address: "actor-1"},
+			"a1": internalpb.Actor_builder{Address: "actor-1"}.Build(),
 		},
 		Grains: map[string]*internalpb.Grain{
-			"g1": {GrainId: &internalpb.GrainId{Value: "grain-1"}, EagerRelocation: true},
+			"g1": internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build(), EagerRelocation: true}.Build(),
 		},
-	}
+	}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	stream := eventstream.New()
@@ -226,7 +226,7 @@ func TestRelocatorTerminatedAfterNormalCompletionIsNoOp(t *testing.T) {
 			eventsStream: stream,
 		},
 		logger:  log.DiscardLogger,
-		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}}},
+		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()}},
 	}
 
 	// no beginRelocation: the worker already released the job before stopping
@@ -283,8 +283,8 @@ func TestRelocatorStaleTerminatedDoesNotAbortNewerJob(t *testing.T) {
 	store := &recordingPeerStateStore{}
 	sys.clusterStore = store
 
-	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
-	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	oldPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
+	newPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
 
 	stream := eventstream.New()
@@ -340,8 +340,8 @@ func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
 	store := &recordingPeerStateStore{}
 	sys.clusterStore = store
 
-	oldPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
-	newPeerState := &internalpb.PeerState{Host: "127.0.0.1", PeersPort: 9000}
+	oldPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
+	newPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", newPeerState))
 
 	workerName := reservedName(relocationWorkerType) + "-1"
@@ -351,7 +351,7 @@ func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
 		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
 	}
 
-	receiveCtx := newReceiveContext(ctx, nil, manager.pid, &internalpb.Rebalance{PeerState: newPeerState})
+	receiveCtx := newReceiveContext(ctx, nil, manager.pid, internalpb.Rebalance_builder{PeerState: newPeerState}.Build())
 	manager.Receive(receiveCtx)
 
 	// the rebalance was processed: the failed spawn aborted the relocation,
@@ -1287,9 +1287,9 @@ func TestRelocationWithExtension(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		command := &testpb.CreateAccount{
+		command := testpb.CreateAccount_builder{
 			AccountBalance: 500.00,
-		}
+		}.Build()
 		_, err = Ask(ctx, pid, command, time.Minute)
 		require.NoError(t, err)
 	}
@@ -1302,9 +1302,9 @@ func TestRelocationWithExtension(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		command := &testpb.CreateAccount{
+		command := testpb.CreateAccount_builder{
 			AccountBalance: 600.00,
-		}
+		}.Build()
 		_, err = Ask(ctx, pid, command, time.Minute)
 		require.NoError(t, err)
 	}
@@ -1317,9 +1317,9 @@ func TestRelocationWithExtension(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		command := &testpb.CreateAccount{
+		command := testpb.CreateAccount_builder{
 			AccountBalance: 700.00,
-		}
+		}.Build()
 		_, err = Ask(ctx, pid, command, time.Minute)
 		require.NoError(t, err)
 	}
@@ -1733,9 +1733,9 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		require.NotNil(t, identity)
 		require.NoError(t, err)
 
-		message := &testpb.CreateAccount{
+		message := testpb.CreateAccount_builder{
 			AccountBalance: 500.00,
-		}
+		}.Build()
 		err = node1.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
@@ -1748,9 +1748,9 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
-		message := &testpb.CreateAccount{
+		message := testpb.CreateAccount_builder{
 			AccountBalance: 500.00,
-		}
+		}.Build()
 		err = node2.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
@@ -1763,9 +1763,9 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
-		message := &testpb.CreateAccount{
+		message := testpb.CreateAccount_builder{
 			AccountBalance: 500.00,
-		}
+		}.Build()
 		err = node3.TellGrain(ctx, identity, message)
 		require.NoError(t, err)
 	}
@@ -1816,7 +1816,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
-		response, err := gc.node.AskGrain(ctx, identity, &testpb.CreditAccount{Balance: 500.00}, time.Minute)
+		response, err := gc.node.AskGrain(ctx, identity, testpb.CreditAccount_builder{Balance: 500.00}.Build(), time.Minute)
 		require.NoError(t, err)
 		require.NotNil(t, response)
 		actual := response.(*testpb.Account)
