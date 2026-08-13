@@ -204,6 +204,12 @@ type PID struct {
 	// this actor.
 	schedState dispatchState
 
+	// ctxShard selects the context-pool shard used for messages delivered
+	// to this actor. Assigned round-robin at construction so concurrently
+	// active actors draw from distinct pool shards instead of contending
+	// on one.
+	ctxShard uint32
+
 	// dispatcher is cached from the actor system at construction time so
 	// the hot-path doReceive can schedule this actor without an interface
 	// assertion on every message.
@@ -280,6 +286,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		path:                  newPath(address),
 	}
 
+	pid.ctxShard = nextContextShard()
 	pid.initMaxRetries.Store(DefaultInitMaxRetries)
 	pid.latestReceiveDuration.Store(0)
 	pid.processedCount.Store(0)
@@ -1135,7 +1142,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 		return nil, gerrors.ErrInvalidTimeout
 	}
 
-	receiveContext := getContext()
+	receiveContext := getContext(to.ctxShard)
 	receiveContext.build(ctx, pid, to, message, false)
 	responseCh := receiveContext.response
 
@@ -1146,21 +1153,18 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 	case result := <-responseCh:
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
 		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return nil, err
 	}
 }
@@ -1178,7 +1182,7 @@ func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
 		return gerrors.ErrDead
 	}
 
-	receiveContext := getContext()
+	receiveContext := getContext(to.ctxShard)
 	receiveContext.build(ctx, pid, to, message, true)
 
 	to.doReceive(receiveContext)
@@ -2263,7 +2267,7 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 		Error:         err.Error(),
 	}
 
-	receiveContext := getContext()
+	receiveContext := getContext(pid.ctxShard)
 	receiveContext.build(ctx, pid, pid, response, true)
 	pid.doReceive(receiveContext)
 	return nil
@@ -3234,7 +3238,7 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 
 // fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
 func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
-	receiveContext := getContext()
+	receiveContext := getContext(pid.ctxShard)
 	noSender := pid.ActorSystem().NoSender()
 	receiveContext.build(ctx, noSender, pid, message, true)
 	pid.doReceive(receiveContext)

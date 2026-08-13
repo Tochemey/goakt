@@ -103,6 +103,12 @@ type ReceiveContext struct {
 	// bounded mailbox, drained at actor teardown, or defensively on reset so
 	// a pooled context can never carry a live share.
 	remoteHold *inet.CreditShare
+
+	// poolShard is the context-pool shard this object belongs to, stamped
+	// once at allocation. Recycling always returns the object to its home
+	// shard, keeping every shard's population closed. Deliberately left
+	// out of reset() so the stamp survives reuse.
+	poolShard uint32
 }
 
 // Self returns the PID of the currently executing actor.
@@ -583,7 +589,7 @@ func (rctx *ReceiveContext) Forward(to *PID) {
 		return
 	}
 
-	receiveContext := getContext()
+	receiveContext := getContext(to.ctxShard)
 	receiveContext.build(ctx, sender, to, message, true)
 	to.doReceive(receiveContext)
 }

@@ -171,7 +171,7 @@ func benchmarkMailboxThroughput(b *testing.B, mb Mailbox) {
 		}
 
 		for j := range n {
-			ctx := getContext()
+			ctx := getContext(0)
 			ctx.message = benchMailboxPriorities[j%len(benchMailboxPriorities)]
 			_ = mb.Enqueue(ctx)
 		}

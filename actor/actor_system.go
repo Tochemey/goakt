@@ -2298,21 +2298,18 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 	case response = <-responseCh:
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return
 	}
 }

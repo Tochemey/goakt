@@ -851,7 +851,7 @@ func TestProcessStashErrorPath(t *testing.T) {
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	pid.reentrancy.Load().blockingCount.Store(1)
 
-	receiveCtx := getContext()
+	receiveCtx := getContext(0)
 	receiveCtx.build(context.Background(), pid, pid, new(testpb.TestSend), true)
 	pid.doReceive(receiveCtx)
 

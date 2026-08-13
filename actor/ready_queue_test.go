@@ -111,6 +111,17 @@ func TestLocalQueueStealHalfDstFull(t *testing.T) {
 	require.Equal(t, localQueueCap, dst.length())
 }
 
+func TestLocalQueueStealHalfSameQueue(t *testing.T) {
+	q := &localQueue{}
+	require.Nil(t, q.stealHalf(q))
+}
+
+func TestLocalQueuePopFrontStaleAtomicSize(t *testing.T) {
+	q := &localQueue{}
+	q.sizeAtomic.Store(1)
+	require.Nil(t, q.popFront())
+}
+
 func TestReadyQueuePushTake(t *testing.T) {
 	rq := newReadyQueue(2)
 	a, b := newFake(1), newFake(2)
@@ -197,6 +208,35 @@ func TestReadyQueueParkAndWake(t *testing.T) {
 	require.Same(t, a, got.Load().(*fakeSchedulable))
 }
 
+func TestReadyQueueNilHandoffRescans(t *testing.T) {
+	rq := newReadyQueue(2)
+	var got atomic.Value
+	done := make(chan struct{})
+
+	go func() {
+		s, ok := rq.take(0)
+		require.True(t, ok)
+		got.Store(s)
+		close(done)
+	}()
+
+	waitParked(t, rq, 1)
+
+	// Queue an item without waking anyone, then wake the parked worker
+	// with a nil handoff: it must re-run its take loop and find the
+	// queued item. This is the wake path push uses when an item lands in
+	// the global queue while a worker is publishing its idle flag.
+	rq.parkMu.Lock()
+	a := newFake(7)
+	rq.global.push(a)
+	rq.globalCount.Store(int32(rq.global.size))
+	rq.parkMu.Unlock()
+
+	require.True(t, rq.claimIdleWorker(nil))
+	<-done
+	require.Same(t, a, got.Load().(*fakeSchedulable))
+}
+
 func TestReadyQueueCloseWakesParkedWorkers(t *testing.T) {
 	rq := newReadyQueue(3)
 	var wg sync.WaitGroup
@@ -216,6 +256,30 @@ func TestReadyQueueCloseBeforeTake(t *testing.T) {
 	rq.close()
 	_, ok := rq.take(0)
 	require.False(t, ok)
+}
+
+func TestReadyQueueClaimIdleWorkerWithoutPublishedFlag(t *testing.T) {
+	rq := newReadyQueue(1)
+	rq.idleCount.Store(1)
+	require.False(t, rq.claimIdleWorker(newFake(1)))
+}
+
+func TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing(t *testing.T) {
+	rq := newReadyQueue(1)
+	item := newFake(1)
+	rq.push(item)
+
+	got, ok := rq.parkAndTake(0)
+	require.True(t, ok)
+	require.Nil(t, got)
+	require.Same(t, item, rq.popGlobal().(*fakeSchedulable))
+}
+
+func TestReadyQueueCloseIsIdempotent(t *testing.T) {
+	rq := newReadyQueue(1)
+	rq.close()
+	rq.close()
+	require.True(t, rq.closed.Load())
 }
 
 func TestReadyQueueTakeDrainsGlobalAfterPark(t *testing.T) {
@@ -269,6 +333,57 @@ func TestReadyQueueMultiProducerConsumer(t *testing.T) {
 
 	rq.close()
 	consumers.Wait()
+}
+
+func TestReadyQueueClosePushRace(t *testing.T) {
+	// Stress the close-vs-push protocol: producers keep pushing while
+	// workers park and wake, and close fires mid-storm. The assertions
+	// are termination ones: every worker exits, no producer blocks, and
+	// the race detector sees no unsynchronized state. Items in flight at
+	// close time may be dropped; that matches shutdown semantics.
+	const workers = 4
+	const producers = 4
+
+	for range 50 {
+		rq := newReadyQueue(workers)
+
+		var consumers sync.WaitGroup
+		for i := range workers {
+			consumers.Go(func() {
+				for {
+					if _, ok := rq.take(i); !ok {
+						return
+					}
+				}
+			})
+		}
+
+		stop := make(chan struct{})
+		var pushers sync.WaitGroup
+		for range producers {
+			pushers.Go(func() {
+				for j := 0; ; j++ {
+					select {
+					case <-stop:
+						return
+					default:
+						rq.push(newFake(j))
+					}
+				}
+			})
+		}
+
+		rq.close()
+		close(stop)
+		pushers.Wait()
+		consumers.Wait()
+	}
+}
+
+func TestGlobalQueueGrowFromEmpty(t *testing.T) {
+	var q globalQueue
+	q.grow()
+	require.Equal(t, globalQueueInitialCap, len(q.buf))
 }
 
 func waitParked(t *testing.T, rq *readyQueue, n int) {
