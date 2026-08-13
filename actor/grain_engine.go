@@ -202,6 +202,13 @@ func staticGrainProvider(grain Grain) grainProvider {
 // activateGrain resolves the grain owner and activates the grain remotely or
 // locally. It is the shared orchestration behind GrainIdentity and GrainOf.
 func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity, provider grainProvider, config *grainConfig) (*GrainIdentity, error) {
+	// Fast path: see remoteTellGrain. A locally active grain is owned here,
+	// so skip the per-call registry reads and write.
+	if process, ok := x.grains.Get(identity.String()); ok &&
+		process.isActive() && x.registry.Exists(process.getGrain()) {
+		return identity, nil
+	}
+
 	x.logger.Debugf("activating grain=%s", identity.String())
 	owner, err := x.resolveGrainOwner(ctx, identity)
 	if err != nil {

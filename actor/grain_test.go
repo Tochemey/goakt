@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
+	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	mocks "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -355,6 +356,7 @@ func TestGrain(t *testing.T) {
 			cluster:       clmock,
 			clusterConfig: NewClusterConfig(),
 			logger:        log.DiscardLogger,
+			grains:        xsync.NewMap[string, *grainPID](),
 		}
 		testSystem.started.Store(true)
 		testSystem.shuttingDown.Store(false)

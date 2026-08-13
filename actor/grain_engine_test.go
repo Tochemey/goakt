@@ -655,6 +655,157 @@ func TestActivateGrainLocally(t *testing.T) {
 	})
 }
 
+func TestActivateGrainLocalActiveFastPath(t *testing.T) {
+	t.Run("locally active grain skips the cluster registry", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "fast-path-active", true)
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+		pid.activated.Store(true)
+		sys.grains.Set(identity.String(), pid)
+
+		// no cluster expectations: any registry call fails the test
+		got, err := sys.GrainIdentity(ctx, identity.Name(), func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.True(t, identity.Equal(got))
+	})
+
+	t.Run("deregistered active grain is registered again", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "fast-path-deregistered", true)
+		sys.clusterEnabled.Store(false)
+
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+		pid.activated.Store(true)
+		sys.grains.Set(identity.String(), pid)
+		require.NoError(t, sys.DeregisterGrainKind(ctx, grain))
+		require.False(t, sys.registry.Exists(grain))
+
+		got, err := sys.GrainIdentity(ctx, identity.Name(), func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.True(t, identity.Equal(got))
+		require.True(t, sys.registry.Exists(grain))
+	})
+
+	t.Run("repeat GrainOf resolves without registry traffic", func(t *testing.T) {
+		ctx := t.Context()
+		name := "fast-path-grainof"
+		identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
+		localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14040, RemotingPort: 8100}
+
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+
+		// the slow path runs exactly once; any repeat run would exceed these counts
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{localPeer}, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+		})).Return(nil).Twice()
+
+		grainOfCounterActivations.Store(0)
+
+		first, err := GrainOf[*grainOfCounterGrain](ctx, sys, name)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+
+		// the issue's repro: resolving the same identity in a loop from the
+		// same node must produce no further registry traffic
+		for range 10 {
+			got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name)
+			require.NoError(t, err)
+			require.True(t, first.Equal(got))
+		}
+
+		require.EqualValues(t, 1, grainOfCounterActivations.Load())
+	})
+
+	t.Run("deactivated grain reactivates through the slow path", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "fast-path-reactivate", true)
+
+		// a deactivated local entry with no cluster record, as left behind by
+		// an idle deactivation
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+		sys.grains.Set(identity.String(), pid)
+
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{{Host: sys.clusterNode.Host, PeersPort: sys.clusterNode.PeersPort, RemotingPort: sys.clusterNode.RemotingPort}}, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+		})).Return(nil).Twice()
+
+		got, err := sys.activateGrain(ctx, identity, staticGrainProvider(grain), newGrainConfig())
+		require.NoError(t, err)
+		require.True(t, identity.Equal(got))
+		require.True(t, pid.isActive())
+	})
+
+	t.Run("inactive local grain falls through to ownership resolution", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "fast-path-inactive", true)
+
+		// a deactivated local entry, as left behind by a relocation handoff
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+		sys.grains.Set(identity.String(), pid)
+
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    "192.0.2.80",
+			Port:    16080,
+		}.Build()
+
+		// the registry stays authoritative for a grain that is not live here
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().RemoteActivateGrain(ctx, owner.GetHost(), int(owner.GetPort()), mock.MatchedBy(func(req *remote.GrainRequest) bool {
+			return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
+		})).Return(nil).Once()
+
+		got, err := sys.activateGrain(ctx, identity, staticGrainProvider(grain), newGrainConfig())
+		require.NoError(t, err)
+		require.True(t, identity.Equal(got))
+	})
+
+	t.Run("deregistered kind falls through and re-registers", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "fast-path-deregistered-cluster", true)
+
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+		pid.activated.Store(true)
+		sys.grains.Set(identity.String(), pid)
+		sys.registry.Deregister(grain)
+
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    sys.Host(),
+			Port:    int32(sys.Port()),
+		}.Build()
+
+		// the slow path runs: ownership is re-confirmed and the record republished
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+		got, err := sys.GrainIdentity(ctx, identity.Name(), func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+		require.True(t, identity.Equal(got))
+		require.True(t, sys.registry.Exists(grain))
+	})
+}
+
 func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)

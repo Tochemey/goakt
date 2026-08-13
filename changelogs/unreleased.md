@@ -31,6 +31,7 @@
 - 🧵 Receive-context recycling now uses sharded pools, reducing contention and steady-state memory use.
 - ⚡ Dispatcher wake-ups now use direct worker handoff, removing a shared condition-variable bottleneck.
 - 💬 `Ask` uses per-request reply channels, removing global channel-pool contention and timeout reuse hazards.
+- ⚡ `GrainOf` and `GrainIdentity` now resolve an already active local grain without cluster registry reads or writes, matching the fast path `TellGrain` and `AskGrain` use ([#1307](https://github.com/Tochemey/goakt/issues/1307)).
 
 ## 🧪 Tests & Benchmarks
 
