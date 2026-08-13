@@ -2,43 +2,38 @@
 
 ## ✨ Features
 
-- **Multiplexed remoting protocol** ([#1301](https://github.com/Tochemey/goakt/issues/1301)). Replaces the unary write-then-read connection hold with persistent duplex TCP lanes per peer (control, ordinary, large), correlation-driven asks, chunked large messages, path/type compression tables, and credit-based flow control. The public actor API (`Tell`, `Ask`, batches) and `remote.Serializer` contract are unchanged; delivery at the transport stays at-most-once.
-  - **Dual-protocol rollout.** One listener serves duplex and legacy peers by sniffing the first byte after TLS. Dial prefers duplex and falls back to legacy on EOF or reset before `HELLO_ACK`; a peer marked legacy is re-probed for duplex after 30 seconds. `remote.WithProtocolPin` selects `auto` (default), `legacy`, or `duplex`; pin away from `auto` for homogeneous clusters or legacy brotli (no magic byte, can collide with the duplex discriminator).
-  - **Lanes and deadlines.** Control traffic is isolated from user flood; user tells/asks hash onto `WithOrdinaryLanes` (default 1) for per-target FIFO; `WithLargeMessageDestinations` is an isolation knob (oversized messages to unlisted paths still chunk in place). `WithWriteTimeout` and `WithReadIdleTimeout` are enforced on the duplex path; the legacy unary path uses the idle timeout instead. `WithMaxFrameSize` is negotiated (pairwise minimum) and enforced on both client and server.
-  - **Large messages.** Frames above `WithChunkSize` (default 256 KiB, local) split into `CHUNK` frames up to the negotiated `WithMaxMessageSize`; concurrent reassembly is capped by the negotiated `WithMaxConcurrentLargeTransfers` (default 4). Oversize and cap violations return in-band errors without killing the connection when the peer supports chunking.
-  - **Flow control.** `WithCreditWindow` (default 16 MiB) is the HELLO credit budget and outbound admission cap; end-to-end send-window enforcement requires capability revision ≥ 4. Slow receivers park the sender and surface `errors.ErrRemoteSendBackpressure` instead of unbounded buffering; fire-and-forget is not dropped for flow control.
-  - **Hot path.** Steady-state envelopes use per-connection table refs; duplex DATA/REPLY bodies are pooled through receive. The send coalescer remains for legacy peers only and is removed with the legacy path in a later major.
+### 🌐 Multiplexed remoting
 
-- **Point-to-point reliable delivery** ([#1296](https://github.com/Tochemey/goakt/issues/1296), [#1300](https://github.com/Tochemey/goakt/issues/1300)). Confirmed, ordered, flow-controlled delivery from one producer actor to one consumer actor, locally or across nodes; default `Tell` is unchanged. Enabled with one spawn option per side, `AsReliableProducer(consumerName)` and `AsReliableConsumer(producerName)`; the actor system runs an internal controller next to each endpoint for sequencing, demand, resends, sessions, and restart deduplication, invisible to every actor-management API.
-  - The endpoints stay ordinary actors: the producer answers `RequestNext` with `Produced` and acknowledges `Stored` with `StoredAck`; the consumer replies `Confirmed` after processing each `Delivery`. `IsAuthorizedFor` on these messages rejects spoofed controller traffic.
-  - Guarantees: effectively-once, in order on the fault-free path; loss, restart, or relocation redelivers, so processing must be idempotent keyed by `MessageID`. Reliability starts at the producer's handoff to its controller; ingress stays at-most-once.
-  - Flow control is consumer-driven. Tuning: `WithReliableFlowControlWindow` (default 50, max 10,000) and `WithReliableResendInterval` (2s) on the consumer; `WithReliableRetryInterval` (500ms), `WithReliableDurableQueue`, and `WithReliableQueueRetry` (3 attempts, 100ms) on the producer. Finite passivation is rejected.
-  - `WithReliableDeliveryConfirmation` sends the producer a `DeliveryConfirmed` for every message the consumer confirms. Best effort and repeated after redelivery: handle it idempotently by `MessageID`.
-  - `WithReliableChunking(maxChunkBytes)` splits oversized payloads into sequenced chunks reassembled before `Delivery`, so one large message cannot exceed the remoting frame cap. Size in [`MinReliableChunkSize`, `MaxReliableChunkSize`]; a message must fit in one flow-control window of chunks. With a durable queue, chunks store atomically through `StoreChunked` under the reserved `GoAktChunk:` prefix (forbidden for application `MessageID`s), and a resubmission recovers the stored shape even when the re-encode crosses the chunk threshold.
-  - `DurableProducerQueue` adds producer-crash survival: `Load` acquires epoch-fenced writership, `Store` and `StoreChunked` are first-write-wins per business `MessageID`, `Accept` and `Confirm` advance the durable state. New sentinels: `ErrQueueFenced`, `ErrQueueConflict`, `ErrQueueChunkedBatch`, `ErrReliableStore`, `ErrReliableAccept`, `ErrReliableConfirm`. A durable flow costs roughly two backend round trips per message.
-  - Payloads ride the remoting serializer dispatch even on one node: protobuf needs no setup; other types register through `remote.WithSerializables`. An unregistered payload fails the flow terminally.
-  - Cross-node flows run in cluster mode (relocation supported, queue types registered on every eligible node, registry replica count of at least 2) or remoting-only mode with explicit peer addresses (`WithReliableRemoteConsumer` on the producer, `WithReliableRemoteProducer` on the consumer; requires remoting, rejects clustering, no relocation: `ErrReliablePeerRemotingRequired`, `ErrReliablePeerClusterConflict`). Remote placement of a reliable endpoint always requires clustering (`ErrReliableClusterRequired`).
-  - Terminal failures publish one `ReliableDeliveryFailed` event (endpoint name, controller role, stage) while the endpoint stays alive; `ReSpawn` recreates the controller.
-- **Work-pulling reliable delivery** ([#1300](https://github.com/Tochemey/goakt/issues/1300)). `AsReliableWorkPullingProducer` and `AsReliableWorkPullingWorker` distribute a job stream from one producer across a dynamic set of uniform workers: a sibling mode of point-to-point on the same controller machinery and handshake.
-  - Per-message at-least-once with `MessageID` deduplication, no ordering across workers. Dispatch is round-robin among workers with free demand; a lost worker's unconfirmed messages requeue under their original `MessageID` for surviving workers, so workers must process idempotently.
-  - Workers register dynamically. A worker set spanning nodes requires cluster mode; the remoting-only peer addresses of point-to-point are not supported.
-  - `WithReliableDeliveryConfirmation` reports each worker confirmation with the producer-visible `Stored` sequence. `WithReliableChunking` and `WithReliableDurableQueue` are rejected: durability uses `WithReliableDurableWorkQueue` (`DurableWorkQueue` with per-`MessageID` `ConfirmMessage`), and reloaded unconfirmed jobs re-dispatch to current workers.
+- 🚦 Added a duplex remoting protocol with dedicated control, ordinary, and large-message lanes ([#1301](https://github.com/Tochemey/goakt/issues/1301)).
+- 🔄 Added protocol negotiation with legacy fallback, configurable lane counts, deadlines, frame limits, chunked large messages, and credit-based flow control.
+- 🔒 Existing actor APIs (`Tell`, `Ask`, and batches) remain unchanged.
 
-## ⚠️ Behavior Changes
+### 📬 Reliable delivery
 
-- **Remote fire-and-forget semantics are unified on the duplex path** ([#1301](https://github.com/Tochemey/goakt/issues/1301)). Enqueue success returns `nil`; transport failures dead-letter with an event; a full outbound queue blocks until the caller's deadline (or `WithWriteTimeout` when none) then returns `errors.ErrRemoteSendBackpressure`. This matches default coalesced behavior; only the non-coalesced synchronous-error path changes. Ordering is per sender–target pair FIFO; at the default single ordinary lane, control may overtake user traffic and configured large destinations ride their own lane.
+- ✅ Added confirmed, ordered, flow-controlled point-to-point delivery for local and remote actors ([#1296](https://github.com/Tochemey/goakt/issues/1296), [#1300](https://github.com/Tochemey/goakt/issues/1300)).
+- 🧰 Added work-pulling delivery for distributing jobs across dynamic worker groups.
+- 🛡️ Added delivery confirmations, retries, deduplication, chunking, durable queues, and cluster/remoting deployment options.
 
-## ⚡ Performance
+## 🔧 Changes
 
-- **Local messaging now scales with cores.** Three process-global chokepoints on the local `Tell` and `Ask` paths were removed, so aggregate throughput across independent actors now grows with the number of sender/receiver pairs instead of flatlining. On an 8-core Apple M1, aggregate fire-and-forget across `GOMAXPROCS` pairs went from 9.3M to 25M msg/s and aggregate request/reply from 1.0M to 3.1M req/s; the same tree reached 54-62M msg/s on a 32-vCPU GCP instance with no scaling wall in sight. Single-pair `Tell` improved from 7.8M to roughly 12M msg/s; sequential `Ask` latency is unchanged.
-  - **Sharded receive-context pool.** `ReceiveContext` recycling moved from one process-wide pooled channel, which every local send in the process contended on (about 80% of CPU cycles under multi-pair load), to a sharded array-based MPMC pool. Each PID is assigned a home shard round-robin at spawn and its contexts recycle to that shard; when a shard is full the context is simply dropped to the GC, so the pool can never block a send. `Tell` stays at zero allocations per message in steady state and the pool's fixed footprint shrinks from about 1 MiB to about 130 KiB.
-  - **Direct-handoff worker wake-up.** Waking an idle dispatcher worker no longer goes through a shared mutex and condition variable, which made concurrent askers slower in aggregate than a single one. Producers now claim a parked worker via per-worker cache-line-padded idle flags and hand the runnable actor over a capacity-1 channel; a publish-then-recheck protocol closes the lost-wakeup window without any lock on the fast path.
-  - **Per-request reply channels.** `Ask` replies use a fresh buffered channel per request instead of a global channel pool. This removes the last shared lock on the ask path and a reuse hazard where a reply arriving after the asker timed out could land in a channel already recycled to another request; the cost is two small allocations per request.
+### 📤 Remote fire-and-forget
 
-- **Benchmark suite: scaling and tail-latency coverage.** New benchmarks separate the shapes that matter: `TellSinglePair` measures uncontended per-message dispatch cost, `TellPairwise` and `AskPairwise` measure aggregate throughput across one sender/receiver pair per processor (a flat curve here exposes a process-wide bottleneck), and `AskTailLatencyUnderLoad` reports p50/p90/p99/p99.9/max round-trip latency for a probe pair while flooding pairs saturate the dispatcher. `benchmark/doc.md` explains how to run each one and which number to cite for which claim.
+- ✅ Enqueue success is now reported consistently on the duplex path.
+- 📨 Transport failures are dead-lettered, while outbound congestion returns `errors.ErrRemoteSendBackpressure` after the configured deadline.
+- 🔢 Message ordering is preserved per sender–target pair.
+
+## ⚙️ Improvements & Refactors
+
+- 📈 Local `Tell` and `Ask` now scale across independent actor pairs instead of contending on process-wide bottlenecks.
+- 🧵 Receive-context recycling now uses sharded pools, reducing contention and steady-state memory use.
+- ⚡ Dispatcher wake-ups now use direct worker handoff, removing a shared condition-variable bottleneck.
+- 💬 `Ask` uses per-request reply channels, removing global channel-pool contention and timeout reuse hazards.
+
+## 🧪 Tests & Benchmarks
+
+- 📊 Added benchmarks for pairwise throughput and tail latency.
 
 ## 📚 Documentation
 
-- Remoting docs under `docs/advanced/remoting.mdx` cover the new configuration knobs (`WithProtocolPin`, lanes, chunking, credit window, large-message destinations) and duplex send semantics. See also <https://docs.goakt.dev>.
-- [architecture/RELIABLE_DELIVERY.md](architecture/RELIABLE_DELIVERY.md) documents the internals of both reliable delivery modes for contributors. User guides live on the reliable-delivery pages of <https://docs.goakt.dev>, and runnable single-node and cluster samples sit in `playground/issue-1296`.
-
+- 📘 Updated the remoting documentation with duplex protocol, lane, chunking, credit-window, and send-semantics configuration.
+- 🏗️ Added contributor architecture documentation for reliable delivery.
