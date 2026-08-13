@@ -1,12 +1,37 @@
 ## How to run the benchmarks
 
-Run from the repository root. See `BENCHMARKS.md` for what each one
-measures and how to cite the numbers.
+Run from the repository root.
 
 ### Tell — async send, parallel
 
+All producers race on a single receiver, so the reported rate is bounded by
+that one consumer's drain rate. Use the pair benchmarks below for send-path
+contention and aggregate scaling.
+
 ```
 go test -run=^$ -bench=^BenchmarkTell$ -count=10 ./benchmark/
+```
+
+### TellSinglePair — async send, one producer to one receiver
+
+One goroutine tells one actor, timed until the receiver has processed every
+message. The enqueue side is contention-free, so this isolates the
+per-message dispatch cost. Cite this as the single-actor throughput number.
+
+```
+go test -run=^$ -bench=^BenchmarkTellSinglePair$ -count=10 ./benchmark/
+```
+
+### TellPairwise — async send across GOMAXPROCS sender/receiver pairs
+
+Every producer goroutine tells its own private receiver; the reported
+messages/sec aggregates all pairs. Aggregate throughput should approach
+pair-count times the TellSinglePair rate; a flat curve indicates a
+process-wide bottleneck on the send path. Cite this as the multi-actor
+(aggregate) throughput number.
+
+```
+go test -run=^$ -bench=^BenchmarkTellPairwise$ -count=10 ./benchmark/
 ```
 
 ### TellPayload — async send swept by payload size (0 B … 64 KiB)
@@ -40,8 +65,24 @@ go test -run=^$ -bench=^BenchmarkRequest$ -count=10 ./benchmark/
 
 ### Ask — sync request/reply, sequential
 
+One asker and one receiver doing sequential round trips: the single-pair
+request/reply number. A sequential round trip is floored by the cost of two
+goroutine handoffs, so cite this as latency-bound throughput.
+
 ```
 go test -run=^$ -bench=^BenchmarkAsk$ -count=10 ./benchmark/
+```
+
+### AskPairwise — sync request/reply across GOMAXPROCS asker/receiver pairs
+
+Every asker goroutine does sequential round trips against its own private
+receiver; the reported messages/sec aggregates all pairs. Aggregate
+throughput should approach pair-count times the Ask rate; a flat curve
+indicates a process-wide bottleneck on the ask path. Cite this as the
+multi-actor (aggregate) request/reply number.
+
+```
+go test -run=^$ -bench=^BenchmarkAskPairwise$ -count=10 ./benchmark/
 ```
 
 ### SendAsync — async send by name, parallel

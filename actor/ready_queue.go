@@ -88,10 +88,35 @@ type globalQueue struct {
 	size int
 }
 
+// idleFlag is a per-worker parked marker padded to its own cache line
+// so park/claim CAS traffic on one worker does not invalidate its
+// siblings' lines. flag is 1 while the worker is parked and claimable,
+// 0 otherwise; transitions are CAS-guarded so at most one claimant wins
+// a parked worker.
+type idleFlag struct {
+	flag atomic.Int32
+	_    [60]byte
+}
+
 // readyQueue is the dispatcher's aggregate ready queue: one local ring
-// per worker plus a shared global ring guarded by parkMu. The park
-// condition variable shares parkMu so push operations can wake exactly
-// one sleeping worker without dropping signals.
+// per worker plus a shared global ring guarded by parkMu.
+//
+// Worker wake-up uses per-worker direct handoff instead of a shared
+// condition variable. A parked worker publishes itself in its idleFlag;
+// a producer claims exactly one parked worker with a CAS on that flag
+// and passes the schedulable straight through the worker's handoff
+// channel, bypassing the global queue and its mutex entirely. The
+// previous design funneled every idle-to-busy transition through
+// parkMu plus a cond signal, which serialized all producers and all
+// waking workers on one mutex: under a pairwise request/reply load,
+// aggregate throughput fell below the single-pair rate.
+//
+// Lost-wakeup safety relies on a store/load protocol on two atomics: a
+// producer publishes work (globalCount) before scanning idle flags,
+// and a parking worker publishes its flag before re-checking
+// globalCount. Sequential consistency of the atomics guarantees at
+// least one side observes the other, so work cannot be enqueued while
+// a worker parks unnoticed.
 type readyQueue struct {
 	// locals is the per-worker local ring, indexed by worker id.
 	locals []*localQueue
@@ -99,51 +124,102 @@ type readyQueue struct {
 	// reads are lock-free so producers and would-be parkers can sample
 	// queue depth without taking the mutex on the hot path.
 	globalCount atomic.Int32
-	// parkMu guards global, parked, closed and is the cond's locker.
+	// idleCount counts workers whose idleFlag is set. Producers skip the
+	// claim scan entirely when it is zero, which is the dominant case
+	// under saturation.
+	idleCount atomic.Int32
+	// idleFlags holds one claimable parked marker per worker.
+	idleFlags []idleFlag
+	// handoff carries a claimed worker's next schedulable. Each channel
+	// has capacity 1 and the claim CAS guarantees at most one in-flight
+	// send per claim, so a producer's send never blocks. A nil send
+	// tells the woken worker to re-run its take loop instead of running
+	// an item directly.
+	handoff []chan schedulable
+	// parkMu guards global.
 	parkMu sync.Mutex
-	// cond is signalled on push and broadcast on close.
-	cond *sync.Cond
 	// global is the shared overflow queue.
 	global globalQueue
-	// parked counts workers currently waiting on cond. Producers skip
-	// the signal call when this is zero to avoid an unnecessary syscall.
-	parked int
-	// closed becomes true after close has been called; new parkers exit
+	// closed reports that close has been called; parking workers exit
 	// instead of waiting.
-	closed bool
+	closed atomic.Bool
 }
 
 // newReadyQueue constructs a readyQueue with workerCount per-worker
 // local rings. workerCount must be at least 1.
 func newReadyQueue(workerCount int) *readyQueue {
 	rq := &readyQueue{
-		locals: make([]*localQueue, workerCount),
-		global: globalQueue{buf: make([]schedulable, globalQueueInitialCap)},
+		locals:    make([]*localQueue, workerCount),
+		global:    globalQueue{buf: make([]schedulable, globalQueueInitialCap)},
+		idleFlags: make([]idleFlag, workerCount),
+		handoff:   make([]chan schedulable, workerCount),
 	}
+
 	for i := range rq.locals {
 		rq.locals[i] = &localQueue{}
+		rq.handoff[i] = make(chan schedulable, 1)
 	}
-	rq.cond = sync.NewCond(&rq.parkMu)
+
 	return rq
 }
 
-// push appends s to the global queue and wakes one parked worker if
-// any. Used by external producers (the actor enqueue path) that have
-// no worker affinity.
+// push routes s to a parked worker when one is available, handing the
+// item straight through the worker's handoff channel without touching
+// the global queue. Otherwise s is appended to the global queue, and a
+// worker that began parking during the append is woken with a nil
+// handoff so it re-scans the queues. Used by external producers (the
+// actor enqueue path) that have no worker affinity.
 func (rq *readyQueue) push(s schedulable) {
+	if rq.claimIdleWorker(s) {
+		return
+	}
+
 	rq.parkMu.Lock()
 	rq.global.push(s)
 	rq.globalCount.Store(int32(rq.global.size))
-	if rq.parked > 0 {
-		rq.cond.Signal()
-	}
 	rq.parkMu.Unlock()
+
+	// A worker may have set its idle flag after the claim scan above and
+	// before the globalCount store became visible to it. The store/load
+	// protocol makes that worker visible to this second scan; waking it
+	// with nil closes the lost-wakeup window.
+	if rq.idleCount.Load() > 0 {
+		rq.claimIdleWorker(nil)
+	}
+}
+
+// claimIdleWorker claims one parked worker via its idleFlag CAS and
+// sends s (which may be nil, meaning "re-scan the queues") through its
+// handoff channel. Returns false when no parked worker was claimable.
+//
+// The scan deliberately starts at worker 0 every time: it concentrates
+// wake-ups on the lowest-indexed parked workers, which keeps their
+// caches warm and lets high-indexed workers sleep undisturbed. The cost
+// is that worker 0's flag line is the hottest CAS target; at pool sizes
+// near GOMAXPROCS that contention is negligible, and rotating the start
+// index would trade cache affinity for it. Revisit if profiles on
+// high-core-count hosts show this scan contending.
+func (rq *readyQueue) claimIdleWorker(s schedulable) bool {
+	if rq.idleCount.Load() == 0 {
+		return false
+	}
+
+	for i := range rq.idleFlags {
+		flag := &rq.idleFlags[i].flag
+		if flag.Load() == 1 && flag.CompareAndSwap(1, 0) {
+			rq.idleCount.Add(-1)
+			rq.handoff[i] <- s
+			return true
+		}
+	}
+
+	return false
 }
 
 // pushLocal appends s to worker workerID's local ring, spilling to the
 // global queue when the local ring is full. The owner is the only
 // consumer of its own local ring, so a successful local push needs no
-// cond signal.
+// wake-up.
 func (rq *readyQueue) pushLocal(workerID int, s schedulable) {
 	if rq.locals[workerID].pushBack(s) {
 		return
@@ -172,7 +248,7 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 			return s, true
 		}
 
-		s, ok := rq.parkAndTake()
+		s, ok := rq.parkAndTake(workerID)
 		if !ok {
 			return nil, false
 		}
@@ -231,43 +307,63 @@ func (rq *readyQueue) trySteal(workerID int) schedulable {
 	return nil
 }
 
-// parkAndTake waits on the condition variable until woken by push or
-// close, and returns the head of the global queue in the same critical
-// section that observed it. This fuses park + popGlobal so a signalled
-// worker does not unlock parkMu only to re-acquire it one call later.
+// parkAndTake parks workerID until a producer hands it work, the
+// global queue turns out to be non-empty after the park was published,
+// or the queue is closed.
 //
 // Returns (nil, false) when the queue is closed and the worker should
-// exit. Returns (s, true) with a non-nil item on a successful wake-up,
-// or (nil, true) when the queue was non-empty on entry (caller retries
-// the take loop).
-func (rq *readyQueue) parkAndTake() (schedulable, bool) {
-	rq.parkMu.Lock()
-	for {
-		if rq.closed {
-			rq.parkMu.Unlock()
-			return nil, false
-		}
-
-		if rq.global.size > 0 {
-			s := rq.global.pop()
-			rq.globalCount.Store(int32(rq.global.size))
-			rq.parkMu.Unlock()
-			return s, true
-		}
-
-		rq.parked++
-		rq.cond.Wait()
-		rq.parked--
+// exit. Returns (s, true) with a non-nil item on a direct handoff, or
+// (nil, true) when the caller should retry the take loop.
+func (rq *readyQueue) parkAndTake(workerID int) (schedulable, bool) {
+	if rq.closed.Load() {
+		return nil, false
 	}
+
+	flag := &rq.idleFlags[workerID].flag
+	flag.Store(1)
+	rq.idleCount.Add(1)
+
+	// Publish-then-check: the flag store above is ordered before these
+	// loads, so a producer that pushed to the global queue without
+	// seeing this worker's flag is observed here, and vice versa.
+	if rq.globalCount.Load() > 0 || rq.closed.Load() {
+		if flag.CompareAndSwap(1, 0) {
+			rq.idleCount.Add(-1)
+			return nil, !rq.closed.Load()
+		}
+
+		// A producer won the flag CAS: its handoff is in flight and must
+		// be consumed to keep the channel empty for the next claim.
+		s := <-rq.handoff[workerID]
+		return s, true
+	}
+
+	// A bare channel receive keeps the park path cheap; close wakes
+	// parked workers by claiming their flags and sending nil, so no
+	// second wake channel (and no two-way select) is needed. A nil
+	// handoff sends the caller back around the take loop, where the
+	// closed state is observed.
+	s := <-rq.handoff[workerID]
+	return s, true
 }
 
-// close marks the queue closed and broadcasts to wake every parked
-// worker so they can observe the closed state and exit.
+// close marks the queue closed, then claims and wakes every parked
+// worker with a nil handoff so it re-runs its take loop and observes
+// the closed state. A worker that begins parking after the claim scan
+// sees the closed flag in its own publish-then-check and exits without
+// waiting. Idempotent.
 func (rq *readyQueue) close() {
-	rq.parkMu.Lock()
-	rq.closed = true
-	rq.cond.Broadcast()
-	rq.parkMu.Unlock()
+	if !rq.closed.CompareAndSwap(false, true) {
+		return
+	}
+
+	for i := range rq.idleFlags {
+		flag := &rq.idleFlags[i].flag
+		if flag.Load() == 1 && flag.CompareAndSwap(1, 0) {
+			rq.idleCount.Add(-1)
+			rq.handoff[i] <- nil
+		}
+	}
 }
 
 // globalLen returns the current global queue depth. Test-only accessor.
@@ -279,9 +375,7 @@ func (rq *readyQueue) globalLen() int {
 
 // parkedCount returns the number of workers currently parked. Test-only.
 func (rq *readyQueue) parkedCount() int {
-	rq.parkMu.Lock()
-	defer rq.parkMu.Unlock()
-	return rq.parked
+	return int(rq.idleCount.Load())
 }
 
 // pushBack enqueues s at the tail. Returns false if the queue is full.

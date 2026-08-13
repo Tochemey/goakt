@@ -74,21 +74,18 @@ func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (resp
 	case response = <-responseCh:
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
 		receiveContext.responseClosed.Store(true)
-		putResponseChannel(responseCh)
 		return
 	}
 }
@@ -157,7 +154,7 @@ func BatchAsk(ctx context.Context, to *PID, timeout time.Duration, messages ...a
 // first so a single helper owns the serializer + sender-address resolution
 // path (see handleRemoteTell, handleRemoteAsk).
 func toReceiveContext(ctx context.Context, from, to *PID, message any, async bool) *ReceiveContext {
-	rc := getContext()
+	rc := getContext(to.ctxShard)
 	rc.build(ctx, from, to, message, async)
 	return rc
 }

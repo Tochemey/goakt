@@ -23,110 +23,31 @@
 package actor
 
 import (
-	"sync/atomic"
-
 	"github.com/tochemey/goakt/v4/internal/timer"
 )
 
-// contextPoolSize controls the bounded channel-based pool for
-// ReceiveContext. The channel pool out-performs sync.Pool on the
-// Tell hot path: ReceiveContexts produced by sender goroutines are
-// consumed on the worker goroutine, a producer/consumer split that
-// turns sync.Pool's per-P cache into constant cross-P stealing. A
-// shared channel removes the steal but introduces a mutex; sized
-// large enough that producers find items waiting in steady state and
-// consumers do not drop when releasing.
-const contextPoolSize = 8192
-
-// contextCh is a channel-based bounded pool for ReceiveContext objects.
-// Pre-warmed at package init so the first burst of Tell calls finds
-// items waiting and does not fall through to mallocgc on every send.
-var contextCh = func() chan *ReceiveContext {
-	ch := make(chan *ReceiveContext, contextPoolSize)
-	for range contextPoolSize {
-		ch <- new(ReceiveContext)
-	}
-	return ch
-}()
-
-// responseCh is a channel-based bounded pool for response channels.
-var responseCh = make(chan chan any, contextPoolSize)
+// channelPoolSize controls the bounded pool for the error channels used
+// by the request paths.
+const channelPoolSize = 8192
 
 // errorCh is a channel-based bounded pool for error channels.
-var errorCh = make(chan chan error, contextPoolSize)
+var errorCh = make(chan chan error, channelPoolSize)
 
 var timers = timer.NewPool()
 
 // emptyAnyCh is a pre-closed channel returned by BatchAsk for empty message slices.
 var emptyAnyCh = func() chan any { ch := make(chan any); close(ch); return ch }()
 
-// getContext retrieves a ReceiveContext from the channel pool, falling
-// back to a fresh allocation on momentary contention/empty.
-func getContext() *ReceiveContext {
-	select {
-	case ctx := <-contextCh:
-		return ctx
-	default:
-		return new(ReceiveContext)
-	}
-}
-
-// recycleContext resets ctx and returns it to the pool so a subsequent Tell
-// reuses it instead of allocating. Mailboxes that do not use the intrusive
-// sentinel scheme of UnboundedMailbox call this once the consumer has finished
-// with a context (one dequeue after it was handed out, by which point the
-// dispatcher has processed it). A full pool drops the context for GC. The next
-// link is cleared so a context reused by a priority intake starts unlinked.
-func recycleContext(ctx *ReceiveContext) {
-	ctx.reset()
-	atomic.StorePointer(&ctx.next, nil)
-
-	select {
-	case contextCh <- ctx:
-	default:
-	}
-}
-
-// cloneContext returns a fresh ReceiveContext populated with src's
-// message-scoped fields. Required when a context must enter a second
-// mailbox: a ReceiveContext can be linked into only one mailbox at a
-// time via its intrusive `next` field, so callers enqueue the clone
-// and let the original complete its current lifecycle.
-func cloneContext(src *ReceiveContext) *ReceiveContext {
-	dst := getContext()
-	dst.ctx = src.ctx
-	dst.message = src.message
-	dst.sender = src.sender
-	dst.self = src.self
-	dst.response = src.response
-	dst.requestID = src.requestID
-	dst.requestReplyTo = src.requestReplyTo
-	dst.err = src.err
-	return dst
-}
-
-// getResponseChannel returns a buffered (capacity 1) reply channel from
-// the pool, allocating a fresh one on miss. Callers obtain the channel
-// before issuing an Ask and return it via putResponseChannel after the
-// reply is consumed (or the caller gives up).
+// getResponseChannel returns a fresh buffered (capacity 1) reply
+// channel for one synchronous request. Reply channels are deliberately
+// not pooled: a process-wide pool serializes every concurrent Ask on
+// one channel lock, and a reply racing the asker's timeout could land
+// in the channel after the drain that precedes pooling, handing the
+// next borrower a stale response. A per-request channel scales with
+// concurrency and makes a late reply land in an unreachable channel
+// instead.
 func getResponseChannel() chan any {
-	select {
-	case ch := <-responseCh:
-		return ch
-	default:
-		return make(chan any, 1)
-	}
-}
-
-// putResponseChannel returns ch to the pool after draining any stale
-// reply that may have arrived from an actor that responded after the
-// caller's deadline expired. A full pool drops the excess for GC.
-func putResponseChannel(ch chan any) {
-	drainAnyChannel(ch)
-	select {
-	case responseCh <- ch:
-	default:
-	}
+	return make(chan any, 1)
 }
 
 // getErrorChannel returns a buffered (capacity 1) error channel from
@@ -148,18 +69,6 @@ func putErrorChannel(ch chan error) {
 	select {
 	case errorCh <- ch:
 	default:
-	}
-}
-
-// drainAnyChannel non-blockingly empties ch so it can be returned to a
-// pool in a clean state.
-func drainAnyChannel(ch chan any) {
-	for {
-		select {
-		case <-ch:
-		default:
-			return
-		}
 	}
 }
 

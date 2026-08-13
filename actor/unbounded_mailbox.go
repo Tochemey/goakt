@@ -105,10 +105,7 @@ func (m *UnboundedMailbox) Dequeue() *ReceiveContext {
 	// that with an atomic store.
 	head.reset()
 	atomic.StorePointer(&head.next, nil)
-	select {
-	case contextCh <- head:
-	default:
-	}
+	contextPool.put(head)
 
 	return next
 }

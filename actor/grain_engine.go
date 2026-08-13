@@ -683,12 +683,10 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		select {
 		case res := <-responseCh:
 			timers.Put(timer)
-			putResponseChannel(responseCh)
 			putErrorChannel(errCh)
 			return res, nil
 		case err := <-errCh:
 			timers.Put(timer)
-			putResponseChannel(responseCh)
 			putErrorChannel(errCh)
 			return nil, err
 		case <-ctx.Done():
