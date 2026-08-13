@@ -111,6 +111,17 @@ func TestLocalQueueStealHalfDstFull(t *testing.T) {
 	require.Equal(t, localQueueCap, dst.length())
 }
 
+func TestLocalQueueStealHalfSameQueue(t *testing.T) {
+	q := &localQueue{}
+	require.Nil(t, q.stealHalf(q))
+}
+
+func TestLocalQueuePopFrontStaleAtomicSize(t *testing.T) {
+	q := &localQueue{}
+	q.sizeAtomic.Store(1)
+	require.Nil(t, q.popFront())
+}
+
 func TestReadyQueuePushTake(t *testing.T) {
 	rq := newReadyQueue(2)
 	a, b := newFake(1), newFake(2)
@@ -247,6 +258,30 @@ func TestReadyQueueCloseBeforeTake(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestReadyQueueClaimIdleWorkerWithoutPublishedFlag(t *testing.T) {
+	rq := newReadyQueue(1)
+	rq.idleCount.Store(1)
+	require.False(t, rq.claimIdleWorker(newFake(1)))
+}
+
+func TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing(t *testing.T) {
+	rq := newReadyQueue(1)
+	item := newFake(1)
+	rq.push(item)
+
+	got, ok := rq.parkAndTake(0)
+	require.True(t, ok)
+	require.Nil(t, got)
+	require.Same(t, item, rq.popGlobal().(*fakeSchedulable))
+}
+
+func TestReadyQueueCloseIsIdempotent(t *testing.T) {
+	rq := newReadyQueue(1)
+	rq.close()
+	rq.close()
+	require.True(t, rq.closed.Load())
+}
+
 func TestReadyQueueTakeDrainsGlobalAfterPark(t *testing.T) {
 	// Cover the "queue non-empty at park time" branch: push happens between
 	// the lock-free scan and the park check. We force this by pushing directly
@@ -343,6 +378,12 @@ func TestReadyQueueClosePushRace(t *testing.T) {
 		pushers.Wait()
 		consumers.Wait()
 	}
+}
+
+func TestGlobalQueueGrowFromEmpty(t *testing.T) {
+	var q globalQueue
+	q.grow()
+	require.Equal(t, globalQueueInitialCap, len(q.buf))
 }
 
 func waitParked(t *testing.T, rq *readyQueue, n int) {

@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -166,4 +167,23 @@ func TestNextContextShard_CoversAllShards(t *testing.T) {
 	}
 
 	assert.Len(t, seen, int(contextShardCount))
+}
+
+func TestContextPool_ContextHelpers(t *testing.T) {
+	ctx := getContext(6)
+	ctx.ctx = context.Background()
+	ctx.message = "message"
+	ctx.requestID = "request"
+
+	clone := cloneContext(ctx)
+	require.NotNil(t, clone)
+	assert.Equal(t, ctx.ctx, clone.ctx)
+	assert.Equal(t, ctx.message, clone.message)
+	assert.Equal(t, ctx.requestID, clone.requestID)
+	assert.Equal(t, ctx.poolShard, clone.poolShard)
+
+	recycleContext(ctx)
+	assert.Nil(t, ctx.ctx)
+	assert.Nil(t, ctx.message)
+	assert.Empty(t, ctx.requestID)
 }
