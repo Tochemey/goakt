@@ -137,6 +137,37 @@ func TestGrainPIDShouldAutoPassivate(t *testing.T) {
 	require.False(t, pid.shouldAutoPassivate())
 }
 
+func TestGrainPIDMarkActivityCoalescesTouch(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+
+	pid := &grainPID{
+		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
+		passivationManager: manager,
+		logger:             log.DiscardLogger,
+	}
+
+	base := time.Now()
+
+	// The first activity always touches: the coalescing window is empty.
+	pid.markActivity(base)
+	require.Equal(t, base.UnixNano(), pid.lastPassivationTouch.Load())
+	require.Equal(t, base.UnixNano(), pid.latestReceiveTimeNano.Load())
+
+	// Activity inside the interval skips the manager Touch but still
+	// records the receive timestamp.
+	inside := base.Add(time.Duration(passivationTouchInterval) / 2)
+	pid.markActivity(inside)
+	require.Equal(t, base.UnixNano(), pid.lastPassivationTouch.Load())
+	require.Equal(t, inside.UnixNano(), pid.latestReceiveTimeNano.Load())
+
+	// Activity one full interval later touches again.
+	outside := base.Add(time.Duration(passivationTouchInterval))
+	pid.markActivity(outside)
+	require.Equal(t, outside.UnixNano(), pid.lastPassivationTouch.Load())
+	require.Equal(t, outside.UnixNano(), pid.latestReceiveTimeNano.Load())
+}
+
 func TestGrainPIDActivateReturnsPanicErrorOnActivatePanic(t *testing.T) {
 	config := newGrainConfig()
 	pid := &grainPID{
@@ -266,7 +297,7 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
 
-	grainContext := getGrainContext().build(
+	grainContext := getGrainContext(0).build(
 		context.Background(),
 		pid,
 		nil,
@@ -533,7 +564,7 @@ func TestGrainStashPausesUserMailboxUntilCompletion(t *testing.T) {
 	third := testpb.Reply_builder{Content: "third"}.Build()
 
 	for _, message := range []*testpb.Reply{first, second, third} {
-		gctx := getGrainContext().build(context.Background(), pid, sys, identity, message, grainTell)
+		gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, message, grainTell)
 		pid.receive(gctx)
 	}
 
@@ -572,7 +603,7 @@ func TestGrainAsyncErrorWakesPausedGrain(t *testing.T) {
 		close(done)
 	})
 
-	gctx := getGrainContext().build(context.Background(), pid, sys, identity, testpb.Reply_builder{Content: "waiting"}.Build(), grainTell)
+	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, testpb.Reply_builder{Content: "waiting"}.Build(), grainTell)
 	pid.receive(gctx)
 
 	pause.For(100 * time.Millisecond)
@@ -607,7 +638,7 @@ func TestGrainPoisonPillDuringPauseCancelsInFlight(t *testing.T) {
 	})
 
 	// The pill waits in the user mailbox behind the pause.
-	gctx := getGrainContext().build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
+	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
 	pid.receive(gctx)
 
 	pause.For(100 * time.Millisecond)
@@ -647,7 +678,7 @@ func TestGrainPoisonPillTearsDownInFlightInline(t *testing.T) {
 	})
 	state.startTimeout(time.Minute)
 
-	gctx := getGrainContext().build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
+	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
 	pid.receive(gctx)
 
 	select {
@@ -931,8 +962,8 @@ func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
 	ctx := context.Background()
 	identity := &GrainIdentity{kind: "TestKind", name: "TestID"}
 
-	pid.receive(getGrainContext().build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "first"}.Build(), grainTell))
-	pid.receive(getGrainContext().build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "second"}.Build(), grainTell))
+	pid.receive(getGrainContext(0).build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "first"}.Build(), grainTell))
+	pid.receive(getGrainContext(0).build(ctx, pid, nil, identity, testpb.Reply_builder{Content: "second"}.Build(), grainTell))
 
 	require.Eventually(t, func() bool {
 		return len(grain.recorded()) == 2
@@ -959,7 +990,7 @@ func TestGrainRecoveryWrapsPlainErrorPanic(t *testing.T) {
 		logger:   log.DiscardLogger,
 	}
 
-	grainContext := getGrainContext().build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
+	grainContext := getGrainContext(0).build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
 	t.Cleanup(func() {
 		releaseGrainContext(grainContext)
 	})
@@ -975,13 +1006,39 @@ func TestGrainRecoveryWrapsPlainErrorPanic(t *testing.T) {
 	require.Contains(t, err.Error(), "plain failure")
 }
 
+func TestGrainRecoveryDeliversPanicToAskCaller(t *testing.T) {
+	pid := &grainPID{
+		identity: &GrainIdentity{kind: "Kind", name: "Name"},
+		logger:   log.DiscardLogger,
+	}
+
+	// An ask context has no err channel: the panic must reach the caller
+	// through the reply channel instead of being swallowed as channel-less.
+	grainContext := getGrainContext(0).build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainAsk)
+	t.Cleanup(func() {
+		releaseGrainContext(grainContext)
+	})
+
+	func() {
+		defer pid.recovery(grainContext)
+		panic(errors.New("ask failure"))
+	}()
+
+	reply, ok := (<-grainContext.response).(grainReplyError)
+	require.True(t, ok)
+
+	var panicErr *gerrors.PanicError
+	require.ErrorAs(t, reply.err, &panicErr)
+	require.Contains(t, reply.err.Error(), "ask failure")
+}
+
 func TestGrainRecoveryKeepsPanicErrorIdentity(t *testing.T) {
 	pid := &grainPID{
 		identity: &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:   log.DiscardLogger,
 	}
 
-	grainContext := getGrainContext().build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
+	grainContext := getGrainContext(0).build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
 	t.Cleanup(func() {
 		releaseGrainContext(grainContext)
 	})
@@ -1004,7 +1061,7 @@ func TestGrainPoisonPillTeardownContainsPanickingContinuation(t *testing.T) {
 		panic("continuation exploded during teardown")
 	})
 
-	gctx := getGrainContext().build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
+	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
 	pid.receive(gctx)
 
 	// The panic is contained: the pill still deactivates the grain.
@@ -1255,7 +1312,7 @@ func TestGrainPassivationPillThenPoisonPillDeactivatesOnce(t *testing.T) {
 	pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
 	require.True(t, pid.passivationTry("idle"))
 
-	gctx := getGrainContext().build(ctx, pid, system, identity, new(PoisonPill), grainTell)
+	gctx := getGrainContext(0).build(ctx, pid, system, identity, new(PoisonPill), grainTell)
 	pid.receive(gctx)
 
 	select {
@@ -1513,7 +1570,7 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 	// behind the message about to start a request.
 	pid.enqueueInFlightCancellations()
 
-	pill := getGrainContext().build(ctx, pid, system, identity, new(PoisonPill), grainTell)
+	pill := getGrainContext(0).build(ctx, pid, system, identity, new(PoisonPill), grainTell)
 	pid.receive(pill)
 	close(release)
 

@@ -109,6 +109,22 @@ go test -run=^$ -bench=^BenchmarkGrainAsk$ -count=10 ./benchmark/
 go test -run=^$ -bench=^BenchmarkGrainTellFanOut$ -count=10 ./benchmark/
 ```
 
+### GrainTellPairwise — tell across GOMAXPROCS producer/grain pairs
+
+Every producer goroutine tells its own private grain; the reported messages/sec aggregates all pairs. Each TellGrain blocks for the processed acknowledgment, so per-pair throughput is round-trip bound; a flat curve relative to GrainTell indicates a process-wide bottleneck shared across grains. Cite this as the multi-grain (aggregate) throughput number.
+
+```
+go test -run=^$ -bench=^BenchmarkGrainTellPairwise$ -count=10 ./benchmark/
+```
+
+### GrainAskPairwise — sync ask across GOMAXPROCS asker/grain pairs
+
+Every asker goroutine does sequential AskGrain round trips against its own private grain; the reported messages/sec aggregates all pairs. Aggregate throughput should approach pair-count times the GrainAsk rate. Cite this as the multi-grain (aggregate) request/reply number.
+
+```
+go test -run=^$ -bench=^BenchmarkGrainAskPairwise$ -count=10 ./benchmark/
+```
+
 ### Throughput-budget sweeps — `WithThroughputBudget` ∈ {8, 32, 64, 128, 256}
 
 ```

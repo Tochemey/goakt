@@ -51,30 +51,12 @@ const (
 	grainEnvelope
 )
 
-// grainContextCh is a channel-based bounded pool for GrainContext objects.
-// Unlike sync.Pool, items survive GC cycles, eliminating the cross-P
-// thrashing and GC-clearing cycle that dominates allocation overhead.
-var grainContextCh = make(chan *GrainContext, 512)
-
-// getGrainContext retrieves a GrainContext from the channel-based pool.
-// Falls back to heap allocation if the pool is empty.
-func getGrainContext() *GrainContext {
-	select {
-	case ctx := <-grainContextCh:
-		return ctx
-	default:
-		return new(GrainContext)
-	}
-}
-
-// releaseGrainContext returns a GrainContext to the channel-based pool.
-// If the pool is full, the context is dropped for GC collection.
-func releaseGrainContext(ctx *GrainContext) {
-	ctx.reset()
-	select {
-	case grainContextCh <- ctx:
-	default:
-	}
+// grainReplyError wraps a handler-reported failure for transport on the ask
+// reply channel. Successes and failures share that single channel; the
+// wrapper keeps a failure distinguishable from a response payload that
+// happens to implement error.
+type grainReplyError struct {
+	err error
 }
 
 // GrainContext provides contextual information and operations
@@ -121,6 +103,12 @@ type GrainContext struct {
 	// Both are turn-owned and need no synchronization.
 	replyDeferred bool
 	replySent     bool
+
+	// poolShard is the home shard of this context in grainContextPool:
+	// recycling always returns it to that ring. Stamped by the pool on
+	// first allocation and preserved across reset so a context keeps its
+	// home for its whole lifetime.
+	poolShard uint32
 }
 
 // Context returns the underlying context associated with the GrainContext.
@@ -194,6 +182,11 @@ func (gctx *GrainContext) Err(err error) {
 		return
 	}
 
+	if gctx.synchronous {
+		gctx.sendReply(grainReplyError{err: err})
+		return
+	}
+
 	if gctx.err == nil {
 		return
 	}
@@ -228,22 +221,8 @@ func (gctx *GrainContext) NoErr() {
 	}
 
 	if gctx.synchronous {
-		// For Ask-based replies, guard against late responses after the caller timed out.
-		// This prevents pooled response channels from receiving stale replies that could
-		// be consumed by a later Ask call.
-		if !gctx.responseClosed.CompareAndSwap(false, true) {
-			return
-		}
-		// Signal success by sending nil on the response channel only.
-		// We must NOT also send on gctx.err because the caller (localSend)
-		// picks a single channel from its select and then drains+pools the
-		// other. If the scheduler preempts us between the two sends, the
-		// second value lands on a channel that is already back in the pool,
-		// poisoning the next caller with a stale nil.
-		select {
-		case gctx.response <- nil:
-		default:
-		}
+		// Ask path: success without a payload is a nil reply.
+		gctx.sendReply(nil)
 		return
 	}
 
@@ -261,15 +240,20 @@ func (gctx *GrainContext) Response(resp any) {
 		return
 	}
 
-	// For Ask-based replies, guard against late responses after the caller timed out.
-	// This prevents pooled response channels from receiving stale replies that could
-	// be consumed by a later Ask call.
+	gctx.sendReply(resp)
+}
+
+// sendReply delivers value on the ask reply channel exactly once. The
+// responseClosed CAS guards against late replies after the caller timed out:
+// a stale reply is dropped here instead of landing in a channel a later ask
+// could observe. The non-blocking send tolerates a caller that is gone.
+func (gctx *GrainContext) sendReply(value any) {
 	if !gctx.responseClosed.CompareAndSwap(false, true) {
 		return
 	}
 
 	select {
-	case gctx.response <- resp:
+	case gctx.response <- value:
 	default:
 	}
 }
@@ -303,6 +287,11 @@ func (gctx *GrainContext) Unhandled() {
 
 	if gctx.requestID != "" {
 		gctx.sendAsyncReply(nil, failure)
+		return
+	}
+
+	if gctx.synchronous {
+		gctx.sendReply(grainReplyError{err: failure})
 		return
 	}
 
@@ -901,10 +890,12 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 
 	switch mode {
 	case grainAsk:
-		gctx.err = getErrorChannel()
+		// Ask replies, success and failure alike, travel on the single
+		// response channel (see sendReply); no error channel is attached.
+		gctx.err = nil
 		gctx.response = getResponseChannel()
 	case grainTell:
-		gctx.err = getErrorChannel()
+		gctx.err = getGrainErrorChannel(gctx.poolShard)
 		gctx.response = nil
 	default:
 		gctx.err = nil

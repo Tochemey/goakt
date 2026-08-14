@@ -676,9 +676,8 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	}
 
 	// Build and send the grainContext
-	grainContext := getGrainContext()
+	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(ctx, pid, x, id, message, mode)
-	errCh := grainContext.err
 
 	timer := timers.Get(timeout)
 
@@ -690,17 +689,18 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		select {
 		case res := <-responseCh:
 			timers.Put(timer)
-			putErrorChannel(errCh)
+
+			// Failures reported by the handler ride the same reply channel,
+			// wrapped so an error-typed response payload is not mistaken
+			// for a failure.
+			if failure, ok := res.(grainReplyError); ok {
+				return nil, failure.err
+			}
 			return res, nil
-		case err := <-errCh:
-			timers.Put(timer)
-			putErrorChannel(errCh)
-			return nil, err
 		case <-ctx.Done():
-			// The grain goroutine may still be processing and could send
-			// on the channels later. Mark response as closed so
-			// Response()/NoErr() CAS guards prevent late sends, and do
-			// NOT return channels to the pool -- let them be GC'd.
+			// The grain goroutine may still be processing and could reply
+			// later. Mark response as closed so the sendReply CAS guard
+			// prevents late sends.
 			grainContext.responseClosed.Store(true)
 			timers.Put(timer)
 			return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
@@ -711,12 +711,16 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 		}
 	}
 
-	// Asynchronous (Tell) case
+	// Asynchronous (Tell) case. The ack channel goes home to the shard it
+	// was fetched from; poolShard is written once at allocation, so reading
+	// it after the mailbox handoff is race-free.
+	errCh := grainContext.err
+	shard := grainContext.poolShard
 	pid.receive(grainContext)
 	select {
 	case err := <-errCh:
 		timers.Put(timer)
-		putErrorChannel(errCh)
+		putGrainErrorChannel(shard, errCh)
 		return nil, err
 	case <-timer.C:
 		// The grain goroutine may still be processing and could send on

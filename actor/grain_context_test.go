@@ -43,7 +43,7 @@ import (
 
 // nolint
 func TestReleaseGrainContextResetsFields(t *testing.T) {
-	ctx := getGrainContext()
+	ctx := getGrainContext(0)
 
 	identity := &GrainIdentity{kind: "TestKind", name: "id"}
 	ctx.self = identity
@@ -62,8 +62,78 @@ func TestReleaseGrainContextResetsFields(t *testing.T) {
 
 	// Return the context to the pool to keep the pool populated for other tests.
 	// releaseGrainContext already returned it, but we re-acquire and release to ensure clean state.
-	acquired := getGrainContext()
+	acquired := getGrainContext(0)
 	releaseGrainContext(acquired)
+}
+
+func TestGrainContextAskReplyRouting(t *testing.T) {
+	identity := &GrainIdentity{kind: "TestKind", name: "id"}
+	newAskContext := func() *GrainContext {
+		return new(GrainContext).build(context.Background(), nil, nil, identity, new(testpb.TestReply), grainAsk)
+	}
+
+	t.Run("Response delivers the payload", func(t *testing.T) {
+		gctx := newAskContext()
+		gctx.Response("payload")
+		require.Equal(t, "payload", <-gctx.response)
+	})
+
+	t.Run("NoErr delivers a nil reply", func(t *testing.T) {
+		gctx := newAskContext()
+		gctx.NoErr()
+		require.Nil(t, <-gctx.response)
+	})
+
+	t.Run("Err delivers the wrapped failure", func(t *testing.T) {
+		gctx := newAskContext()
+		failure := errors.New("handler failure")
+		gctx.Err(failure)
+
+		reply, ok := (<-gctx.response).(grainReplyError)
+		require.True(t, ok)
+		require.Equal(t, failure, reply.err)
+	})
+
+	t.Run("Unhandled delivers ErrUnhandledMessage", func(t *testing.T) {
+		gctx := newAskContext()
+		gctx.Unhandled()
+
+		reply, ok := (<-gctx.response).(grainReplyError)
+		require.True(t, ok)
+		require.ErrorIs(t, reply.err, gerrors.ErrUnhanledMessage)
+	})
+
+	t.Run("error-typed payload stays a payload", func(t *testing.T) {
+		gctx := newAskContext()
+		payload := errors.New("payload that implements error")
+		gctx.Response(payload)
+
+		reply := <-gctx.response
+		_, wrapped := reply.(grainReplyError)
+		require.False(t, wrapped)
+		require.Equal(t, payload, reply)
+	})
+
+	t.Run("only the first reply wins", func(t *testing.T) {
+		gctx := newAskContext()
+		gctx.Response("first")
+		gctx.Err(errors.New("late failure"))
+
+		require.Equal(t, "first", <-gctx.response)
+		require.Empty(t, gctx.response)
+	})
+
+	t.Run("late reply after timeout is suppressed", func(t *testing.T) {
+		gctx := newAskContext()
+
+		// The caller timed out: localSend closes the reply window.
+		gctx.responseClosed.Store(true)
+
+		gctx.Err(errors.New("late failure"))
+		gctx.Response("late payload")
+		gctx.NoErr()
+		require.Empty(t, gctx.response)
+	})
 }
 
 func TestGrainContext(t *testing.T) {
@@ -1252,7 +1322,7 @@ func TestGrainRequestActor(t *testing.T) {
 func TestGrainChannelLessReplyMethodsAreNoOps(t *testing.T) {
 	// A response envelope context has no channels and no request ID: every
 	// reply method must be a safe no-op instead of blocking the worker.
-	gctx := getGrainContext().build(context.Background(), nil, nil, &GrainIdentity{kind: "Kind", name: "name"}, new(testpb.TestSend), grainEnvelope)
+	gctx := getGrainContext(0).build(context.Background(), nil, nil, &GrainIdentity{kind: "Kind", name: "name"}, new(testpb.TestSend), grainEnvelope)
 	t.Cleanup(func() {
 		releaseGrainContext(gctx)
 	})

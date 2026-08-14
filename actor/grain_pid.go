@@ -72,6 +72,13 @@ type grainPID struct {
 	latestReceiveTimeNano atomic.Int64
 	processedCount        atomic.Int64
 
+	// lastPassivationTouch is the UnixNano of the last passivation Touch
+	// call, used to coalesce Touch to at most once per
+	// passivationTouchInterval. Without it every message takes the shared
+	// passivation manager's mutex, which profiling showed serializes
+	// otherwise independent grains on the drain path.
+	lastPassivationTouch atomic.Int64
+
 	// the actor system
 	actorSystem ActorSystem
 
@@ -89,6 +96,12 @@ type grainPID struct {
 	// that drive runTurn directly.
 	dispatcher *dispatcher
 	remoting   remoteclient.Client
+
+	// ctxShard is this grain's home shard in grainContextPool. Every
+	// GrainContext built for this grain is taken from and returned to that
+	// shard, so unrelated grains never contend on pool state. Assigned
+	// round-robin at construction.
+	ctxShard uint32
 
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
@@ -140,6 +153,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		config:                config,
 		passivationManager:    actorSystem.passivationManager(),
 		deactivated:           make(chan types.Unit),
+		ctxShard:              nextGrainContextShard(),
 	}
 
 	pid.activated.Store(false)
@@ -370,6 +384,7 @@ func (pid *grainPID) runTurn(w *worker) {
 		return
 	}
 
+	now := time.Now()
 	budget := w.dispatcher.throughput
 	for range budget {
 		grainContext := pid.dequeueResponse()
@@ -384,7 +399,7 @@ func (pid *grainPID) runTurn(w *worker) {
 			}
 			continue
 		}
-		pid.dispatchOne(grainContext)
+		pid.dispatchOne(grainContext, now)
 	}
 	pid.schedState.YieldToScheduled()
 	w.reschedule(pid)
@@ -435,28 +450,33 @@ func (pid *grainPID) hasPendingWork() bool {
 // Release is owned by grainMailbox.Dequeue, which reclaims the
 // previous sentinel; dispatchOne must not return the context here or
 // the mailbox would hand out an in-use head.
-func (pid *grainPID) dispatchOne(grainContext *GrainContext) {
+//
+// now is the turn's shared timestamp, computed once per turn by runTurn:
+// activity stamping does not need per-message precision, and time.Now on
+// every message showed up in the drain-path profile.
+func (pid *grainPID) dispatchOne(grainContext *GrainContext, now time.Time) {
 	switch grainContext.Message().(type) {
 	case *PoisonPill:
 		pid.handlePoisonPill(grainContext)
 	case *grainTimerTick:
-		pid.handleTimerTick(grainContext)
+		pid.handleTimerTick(grainContext, now)
 	case grainPassivationPill:
 		pid.handlePassivationPill()
 	case *commands.AsyncRequest:
-		pid.handleAsyncRequest(grainContext)
+		pid.handleAsyncRequest(grainContext, now)
 	case *commands.AsyncResponse:
-		pid.handleAsyncResponse(grainContext)
+		pid.handleAsyncResponse(grainContext, now)
 	default:
-		pid.handleGrainContext(grainContext)
+		pid.handleGrainContext(grainContext, now)
 	}
 }
 
 // handleAsyncRequest unwraps an async request envelope and dispatches the
 // inner message through the normal receive flow. The correlation ID and the
 // reply target ride on the context so the reply can be routed from that
-// metadata; nothing is signalled through the context itself.
-func (pid *grainPID) handleAsyncRequest(grainContext *GrainContext) {
+// metadata; nothing is signalled through the context itself. now is the
+// turn's shared activity timestamp.
+func (pid *grainPID) handleAsyncRequest(grainContext *GrainContext, now time.Time) {
 	request := grainContext.Message().(*commands.AsyncRequest)
 
 	if request.CorrelationID == "" || request.Message == nil || (request.ReplyTo != nil && !request.ReplyTo.Valid()) {
@@ -469,19 +489,19 @@ func (pid *grainPID) handleAsyncRequest(grainContext *GrainContext) {
 	grainContext.requestID = request.CorrelationID
 	grainContext.requestReplyTo = request.ReplyTo
 	grainContext.message = request.Message
-	pid.handleGrainContext(grainContext)
+	pid.handleGrainContext(grainContext, now)
 }
 
 // handleAsyncResponse completes the in-flight request matching the response's
 // correlation ID and runs its continuation inline: the turn is the grain's
 // processing thread, so single-threaded access to grain state holds. An
 // unknown correlation ID is a normal race with timeout or cancellation and is
-// dropped quietly.
-func (pid *grainPID) handleAsyncResponse(grainContext *GrainContext) {
+// dropped quietly. now is the turn's shared activity timestamp.
+func (pid *grainPID) handleAsyncResponse(grainContext *GrainContext, now time.Time) {
 	defer pid.recovery(grainContext)
 
 	response := grainContext.Message().(*commands.AsyncResponse)
-	pid.markActivity(time.Now())
+	pid.markActivity(now)
 
 	// A response without a payload and without an error is a successful reply
 	// with nothing to return (NoErr).
@@ -707,7 +727,7 @@ func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
 		return gerrors.ErrReentrancyDisabled
 	}
 
-	grainContext := getGrainContext()
+	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.WithoutCancel(ctx), pid, pid.actorSystem, pid.getIdentity(), envelope, grainEnvelope)
 
 	if err := queue.Enqueue(grainContext); err != nil {
@@ -817,10 +837,12 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 	grainContext.NoErr()
 }
 
-func (pid *grainPID) handleGrainContext(grainContext *GrainContext) {
+// handleGrainContext runs a user message through OnReceive. now is the
+// turn's shared activity timestamp.
+func (pid *grainPID) handleGrainContext(grainContext *GrainContext, now time.Time) {
 	defer pid.recovery(grainContext)
 	pid.processedCount.Inc()
-	pid.markActivity(time.Now())
+	pid.markActivity(now)
 	pid.grain.OnReceive(grainContext)
 }
 
@@ -834,7 +856,7 @@ func (pid *grainPID) deliverTimerTick(entry *grainTimerEntry) {
 		return
 	}
 
-	grainContext := getGrainContext()
+	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), entry.tick, grainTell)
 
 	if err := pid.mailbox.Enqueue(grainContext); err != nil {
@@ -855,8 +877,8 @@ func (pid *grainPID) deliverTimerTick(entry *grainTimerEntry) {
 // cancelled, or that arrives while the grain deactivates, is dropped: grain
 // timers are activation-scoped and must never outlive their activation. A tick
 // counts as passivation activity only when its timer was registered with
-// WithTimerKeepAlive.
-func (pid *grainPID) handleTimerTick(grainContext *GrainContext) {
+// WithTimerKeepAlive. now is the turn's shared activity timestamp.
+func (pid *grainPID) handleTimerTick(grainContext *GrainContext, now time.Time) {
 	tick := grainContext.Message().(*grainTimerTick)
 	entry := tick.entry
 
@@ -866,7 +888,7 @@ func (pid *grainPID) handleTimerTick(grainContext *GrainContext) {
 
 	pid.processedCount.Inc()
 	if entry.keepAlive {
-		pid.markActivity(time.Now())
+		pid.markActivity(now)
 	}
 
 	pid.runTimerTick(grainContext, entry.message)
@@ -925,10 +947,12 @@ func (pid *grainPID) recovery(received *GrainContext) {
 		)
 	}
 
-	// A response envelope has no channels and no reply route: the log is the
-	// only signal anyone gets. Request envelopes and channel messages report
-	// through Err, which routes an async reply or signals the channel.
-	if received.err == nil && received.requestID == "" {
+	// A response envelope has no reply route: the log is the only signal
+	// anyone gets. Everything else reports through Err, which routes an
+	// async reply (request envelopes), the ask reply channel (synchronous
+	// contexts, whose err channel is nil by construction), or the Tell ack
+	// channel.
+	if received.err == nil && received.requestID == "" && !received.synchronous {
 		if pid.logger.Enabled(log.ErrorLevel) {
 			pid.logger.Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
 		}
@@ -1044,7 +1068,7 @@ func (pid *grainPID) passivationTry(reason string) bool {
 // instead of hot-looping; a full mailbox means pending traffic, so the touch
 // is approximately honest.
 func (pid *grainPID) enqueuePassivationPill() bool {
-	grainContext := getGrainContext()
+	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), grainPassivationPill{}, grainEnvelope)
 
 	if err := pid.mailbox.Enqueue(grainContext); err != nil {
@@ -1093,10 +1117,26 @@ func (pid *grainPID) handlePassivationPill() {
 	}
 }
 
+// markActivity records at as the grain's latest activity. The cheap atomic
+// store always happens; the passivation manager Touch, which takes the
+// manager's shared mutex, is coalesced to at most once per
+// passivationTouchInterval exactly like the actor-side markActivity. The
+// manager's idle deadline therefore trails true activity by at most one
+// interval, well inside any practical deactivateAfter.
 func (pid *grainPID) markActivity(at time.Time) {
-	pid.latestReceiveTimeNano.Store(at.UnixNano())
+	nanos := at.UnixNano()
+	pid.latestReceiveTimeNano.Store(nanos)
+
 	if pid.passivationManager != nil {
-		pid.passivationManager.Touch(pid)
+		// Coalesce Touch calls: only acquire the passivation manager's mutex
+		// when at least passivationTouchInterval has elapsed since the last
+		// Touch. The CAS ensures exactly one goroutine wins per interval.
+		last := pid.lastPassivationTouch.Load()
+		if nanos-last >= passivationTouchInterval {
+			if pid.lastPassivationTouch.CompareAndSwap(last, nanos) {
+				pid.passivationManager.Touch(pid)
+			}
+		}
 	}
 }
 

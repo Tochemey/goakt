@@ -69,8 +69,8 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	ctx := context.Background()
 	identity := &GrainIdentity{kind: "TestKind", name: "TestID"}
 
-	first := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, grainTell)
-	second := getGrainContext().build(ctx, pid, nil, identity, &testpb.TestReply{}, grainTell)
+	first := getGrainContext(0).build(ctx, pid, nil, identity, &testpb.TestReply{}, grainTell)
+	second := getGrainContext(0).build(ctx, pid, nil, identity, &testpb.TestReply{}, grainTell)
 
 	pid.receive(first)
 	pid.receive(second)

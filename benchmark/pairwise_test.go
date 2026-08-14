@@ -204,6 +204,158 @@ func BenchmarkTellPairwise(b *testing.B) {
 // actors (pooled reply channels, timers) shows up here as a flat curve.
 // No done channels are needed because Ask is synchronous: when every
 // asker has returned, every message has been processed.
+// BenchmarkGrainTellPairwise measures aggregate TellGrain throughput
+// across GOMAXPROCS independent producer/grain pairs: each producer
+// goroutine tells its own private grain, and the reported messages/sec
+// aggregates all pairs.
+//
+// This is the scaling surface that BenchmarkGrainTell cannot see. With
+// every producer racing on one grain, throughput is bounded by that
+// grain's serial drain rate; with independent pairs, anything the grain
+// path shares across grains (context pool shards, ack channel pool
+// shards, the passivation manager) shows up here as a flat curve. Each
+// TellGrain blocks for the processed acknowledgment, so per-pair
+// throughput is round-trip bound and no completion tracking is needed:
+// a producer returning proves its messages were processed. Cite this
+// number for multi-grain workloads.
+func BenchmarkGrainTellPairwise(b *testing.B) {
+	pairs := runtime.GOMAXPROCS(0)
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// b.N messages are split near-evenly: the first b.N % pairs pairs
+	// take one extra message.
+	identities := make([]*actor.GrainIdentity, pairs)
+	targets := make([]int64, pairs)
+	base := int64(b.N) / int64(pairs)
+	extra := int64(b.N) % int64(pairs)
+
+	for i := range pairs {
+		target := base
+		if int64(i) < extra {
+			target++
+		}
+
+		identity, err := actor.GrainOf[*benchGrain](ctx, actorSystem, fmt.Sprintf("receiver-%d", i))
+		if err != nil {
+			b.Fatalf("failed to create grain identity: %v", err)
+		}
+
+		identities[i], targets[i] = identity, target
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(pairs)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range pairs {
+		go func(i int) {
+			defer wg.Done()
+
+			// Reuse the same message per goroutine to reduce allocs in the hot path.
+			msg := new(testpb.TestSend)
+			for range targets[i] {
+				if err := actorSystem.TellGrain(ctx, identities[i], msg); err != nil {
+					b.Error(err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
+// BenchmarkGrainAskPairwise measures aggregate AskGrain throughput
+// across GOMAXPROCS independent asker/grain pairs: each producer
+// goroutine issues sequential AskGrain round trips against its own
+// private grain, and the reported messages/sec aggregates all pairs.
+//
+// BenchmarkGrainAsk is the single-pair counterpart. As with actors, the
+// pairwise shape is the scaling surface: aggregate throughput should
+// approach pair-count times the BenchmarkGrainAsk rate, and anything
+// the ask path shares across grains shows up here as a flat curve. No
+// done channels are needed because AskGrain is synchronous: when every
+// asker has returned, every message has been processed.
+func BenchmarkGrainAskPairwise(b *testing.B) {
+	pairs := runtime.GOMAXPROCS(0)
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// b.N round trips are split near-evenly: the first b.N % pairs
+	// pairs take one extra.
+	identities := make([]*actor.GrainIdentity, pairs)
+	targets := make([]int64, pairs)
+	base := int64(b.N) / int64(pairs)
+	extra := int64(b.N) % int64(pairs)
+
+	for i := range pairs {
+		target := base
+		if int64(i) < extra {
+			target++
+		}
+
+		identity, err := actor.GrainOf[*benchGrain](ctx, actorSystem, fmt.Sprintf("receiver-%d", i))
+		if err != nil {
+			b.Fatalf("failed to create grain identity: %v", err)
+		}
+
+		identities[i], targets[i] = identity, target
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(pairs)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range pairs {
+		go func(i int) {
+			defer wg.Done()
+
+			msg := new(testpb.TestReply)
+			for range targets[i] {
+				if _, err := actorSystem.AskGrain(ctx, identities[i], msg, time.Second); err != nil {
+					b.Error(err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
 func BenchmarkAskPairwise(b *testing.B) {
 	pairs := runtime.GOMAXPROCS(0)
 	ctx := context.Background()

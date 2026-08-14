@@ -95,14 +95,11 @@ func (m *grainMailbox) Dequeue() *GrainContext {
 	m.len.Add(-1)
 
 	// The previous sentinel (head) is no longer referenced by the mailbox.
-	// Reset and recycle into the shared pool so the next producer can skip
-	// mallocgc.
+	// Reset and recycle into its home pool shard so the next producer can
+	// skip mallocgc.
 	head.next.Store(nil)
 	head.reset()
-	select {
-	case grainContextCh <- head:
-	default:
-	}
+	grainContextPool.put(head)
 
 	return next
 }
