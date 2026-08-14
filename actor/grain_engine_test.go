@@ -2598,7 +2598,7 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 		sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 		// Deactivate the grain so delivery has to go through activation.
-		gctx := getGrainContext().build(ctx, pid, sys, identity, new(PoisonPill), grainTell)
+		gctx := getGrainContext(0).build(ctx, pid, sys, identity, new(PoisonPill), grainTell)
 		pid.receive(gctx)
 
 		select {

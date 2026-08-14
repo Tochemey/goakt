@@ -32,10 +32,16 @@
 - ⚡ Dispatcher wake-ups now use direct worker handoff, removing a shared condition-variable bottleneck.
 - 💬 `Ask` uses per-request reply channels, removing global channel-pool contention and timeout reuse hazards.
 - ⚡ `GrainOf` and `GrainIdentity` now resolve an already active local grain without cluster registry reads or writes, matching the fast path `TellGrain` and `AskGrain` use ([#1307](https://github.com/Tochemey/goakt/issues/1307)).
+- 🧵 Grain context and `TellGrain` acknowledgment channel recycling now use per-grain sharded pools, removing global channel-pool contention from the grain messaging path.
+- 🕰️ Grain turns now stamp activity once per turn and coalesce passivation-manager updates, removing a shared mutex from the per-message drain path.
+- 💬 `AskGrain` replies, success and failure alike, now travel on a single per-request reply channel; handler errors and panics are returned to the caller exactly as before.
+- 📈 On an 8-core Apple M1, `TellGrain` against a single grain increased from `1.4M` to `2.1M` msg/s, fan-out across 256 grains doubled from `1.2M` to `2.5M` msg/s, and `AskGrain` increased from `1.0M` to `1.27M` req/s, landing within `10%` of actor `Ask`.
+- 🔒 `TellGrain` and `AskGrain` delivery semantics are unchanged: `TellGrain` still blocks until the grain has processed and acknowledged the message.
 
 ## 🧪 Tests & Benchmarks
 
 - 📊 Added benchmarks for pairwise throughput and tail latency.
+- 📊 Added pairwise grain benchmarks (`GrainTellPairwise`, `GrainAskPairwise`) measuring aggregate throughput across independent producer/grain pairs; at that scaling surface grains now match actor `Ask` throughput.
 
 ## 📚 Documentation
 

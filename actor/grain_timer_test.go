@@ -749,7 +749,7 @@ func TestGrainTimerScheduleFromOnReceive(t *testing.T) {
 func TestGrainContextTimerAPI(t *testing.T) {
 	fx := spawnTimerProbeGrain(t)
 
-	gctx := getGrainContext().build(context.Background(), fx.pid, fx.system, fx.identity, "probe", grainTell)
+	gctx := getGrainContext(0).build(context.Background(), fx.pid, fx.system, fx.identity, "probe", grainTell)
 
 	reference, err := gctx.ScheduleOnce("once", time.Hour, WithTimerReference("ctx-once"))
 	require.NoError(t, err)
@@ -795,7 +795,7 @@ func TestGrainContextTimersOnDeactivatedGrain(t *testing.T) {
 	require.NoError(t, fx.pid.deactivate(ctx))
 
 	// every scheduling operation on a deactivated grain is rejected
-	gctx := getGrainContext().build(ctx, fx.pid, fx.system, fx.identity, "probe", grainTell)
+	gctx := getGrainContext(0).build(ctx, fx.pid, fx.system, fx.identity, "probe", grainTell)
 
 	_, err := gctx.ScheduleOnce("tick", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
@@ -814,7 +814,7 @@ func TestGrainContextTimersOnNeverActivatedGrain(t *testing.T) {
 	pid := newTestGrainPID(grain, "never-activated")
 
 	// a grain process that never activated has no registry to schedule into
-	gctx := getGrainContext().build(context.Background(), pid, nil, pid.getIdentity(), "probe", grainTell)
+	gctx := getGrainContext(0).build(context.Background(), pid, nil, pid.getIdentity(), "probe", grainTell)
 
 	_, err := gctx.ScheduleOnce("tick", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
@@ -861,7 +861,7 @@ func TestGrainPIDReportTimerTickFailure(t *testing.T) {
 	}
 
 	entry := &grainTimerEntry{reference: "tick"}
-	grainContext := getGrainContext()
+	grainContext := getGrainContext(0)
 	grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 
 	// an error reported during the tick is drained and logged
@@ -882,19 +882,19 @@ func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
 	pid.activated.Store(true)
 
 	tickContext := func(entry *grainTimerEntry) *GrainContext {
-		grainContext := getGrainContext()
+		grainContext := getGrainContext(0)
 		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 	}
 
 	// cancelled entry: the tick was in the mailbox when its timer was cancelled
 	cancelled := &grainTimerEntry{reference: "tick", message: "m"}
 	cancelled.cancelled.Store(true)
-	pid.handleTimerTick(tickContext(cancelled))
+	pid.handleTimerTick(tickContext(cancelled), time.Now())
 	require.Empty(t, grain.received)
 
 	// inactive grain: the tick arrived while the grain deactivates
 	pid.activated.Store(false)
-	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "tick", message: "m"}))
+	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "tick", message: "m"}), time.Now())
 	require.Empty(t, grain.received)
 
 	require.Zero(t, pid.processedCount.Load())
@@ -910,18 +910,18 @@ func TestGrainPIDHandleTimerTickActivityMarking(t *testing.T) {
 	pid.activated.Store(true)
 
 	tickContext := func(entry *grainTimerEntry) *GrainContext {
-		grainContext := getGrainContext()
+		grainContext := getGrainContext(0)
 		return grainContext.build(context.Background(), pid, nil, pid.getIdentity(), &grainTimerTick{entry: entry}, grainTell)
 	}
 
 	// a plain tick is delivered with the timer's message but does not count as
 	// passivation activity
-	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "plain", message: "hello"}))
+	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "plain", message: "hello"}), time.Now())
 	require.Equal(t, "hello", <-grain.received)
 	require.Zero(t, pid.latestReceiveTimeNano.Load())
 
 	// a keep-alive tick does
-	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "keep", message: "hello", keepAlive: true}))
+	pid.handleTimerTick(tickContext(&grainTimerEntry{reference: "keep", message: "hello", keepAlive: true}), time.Now())
 	require.Equal(t, "hello", <-grain.received)
 	require.NotZero(t, pid.latestReceiveTimeNano.Load())
 	require.EqualValues(t, 2, pid.processedCount.Load())

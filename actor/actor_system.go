@@ -3222,7 +3222,7 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 		// nothing would ever end.
 		grain.enqueueInFlightCancellations()
 
-		gctx := getGrainContext()
+		gctx := getGrainContext(grain.ctxShard)
 		gctx.build(ctx, grain, x, grain.getIdentity(), new(PoisonPill), grainTell)
 		grain.receive(gctx)
 		pending = append(pending, grain)
