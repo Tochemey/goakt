@@ -191,23 +191,27 @@ func TestContextPool_ContextHelpers(t *testing.T) {
 }
 
 func TestCloneContext_ClearsResponseClosed(t *testing.T) {
-	src := getContext(0)
+	const shard uint32 = 0
+
+	// The shard ring is FIFO and process-global. Drain leftovers from
+	// earlier tests so cloneContext's get cannot pop a clean context
+	// and hide a missing Store(false).
+	for contextPool.shards[shard].pop() != nil {
+	}
+
+	src := getContext(shard)
 	src.ctx = context.Background()
 	src.message = "stashed-ask"
 	src.response = getResponseChannel()
 	src.requestID = "corr"
 	src.responseClosed.Store(true)
 
-	// Recycle contexts on src's shard with the guard already tripped so
-	// cloneContext's get reuses one. That is the stash/unstash failure
-	// mode: reset() leaves the flag set and clones bypass build().
-	for range 8 {
-		stale := getContext(src.poolShard)
-		stale.responseClosed.Store(true)
-		recycleContext(stale)
-	}
+	stale := getContext(shard)
+	stale.responseClosed.Store(true)
+	recycleContext(stale)
 
 	clone := cloneContext(src)
+	require.Same(t, stale, clone)
 	require.False(t, clone.responseClosed.Load())
 	assert.Equal(t, src.ctx, clone.ctx)
 	assert.Equal(t, src.message, clone.message)
