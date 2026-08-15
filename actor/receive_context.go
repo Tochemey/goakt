@@ -170,9 +170,11 @@ func (rctx *ReceiveContext) Response(resp any) {
 		}
 		return
 	}
-	// For Ask-based replies, guard against late responses after the caller timed out.
-	// This prevents pooled response channels from receiving stale replies that could
-	// be consumed by a later Ask call.
+	// Once-per-delivery guard: the first Response on this context wins.
+	// Ask waiters never write this flag after handing the context to the
+	// mailbox (the object may already have been recycled). A reply that
+	// arrives after the caller gives up lands on the per-request channel,
+	// which is not pooled, and is dropped with it.
 	if !rctx.responseClosed.CompareAndSwap(false, true) {
 		return
 	}

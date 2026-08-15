@@ -244,9 +244,10 @@ func (gctx *GrainContext) Response(resp any) {
 }
 
 // sendReply delivers value on the ask reply channel exactly once. The
-// responseClosed CAS guards against late replies after the caller timed out:
-// a stale reply is dropped here instead of landing in a channel a later ask
-// could observe. The non-blocking send tolerates a caller that is gone.
+// responseClosed CAS is a once-per-delivery guard, not a timeout signal:
+// Ask waiters never write this flag after handing the context to the
+// mailbox. A reply that arrives after the caller gives up lands on the
+// per-request channel, which is not pooled, and is dropped with it.
 func (gctx *GrainContext) sendReply(value any) {
 	if !gctx.responseClosed.CompareAndSwap(false, true) {
 		return

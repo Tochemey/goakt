@@ -448,6 +448,42 @@ func (x *MockStashAsk) PostStop(*Context) error {
 
 var _ Actor = &MockStashAsk{}
 
+// MockStashAskAll is the UnstashAll counterpart of MockStashAsk: every
+// Ask is stashed once and answered only after a self-sent TestUnstashAll
+// releases the whole buffer. repliesOwed is increased by the stash size
+// at release so each unstashed command still gets exactly one reply.
+type MockStashAskAll struct {
+	repliesOwed int
+}
+
+func (x *MockStashAskAll) PreStart(*Context) error {
+	return nil
+}
+
+func (x *MockStashAskAll) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestCount:
+		if x.repliesOwed > 0 {
+			x.repliesOwed--
+			ctx.Response(testpb.TestCount_builder{Value: msg.GetValue()}.Build())
+			return
+		}
+
+		ctx.Stash()
+		ctx.Tell(ctx.Self(), new(testpb.TestUnstashAll))
+
+	case *testpb.TestUnstashAll:
+		x.repliesOwed += int(ctx.Self().StashSize())
+		ctx.UnstashAll()
+	}
+}
+
+func (x *MockStashAskAll) PostStop(*Context) error {
+	return nil
+}
+
+var _ Actor = &MockStashAskAll{}
+
 type MockPreStart struct{}
 
 func (x *MockPreStart) PreStart(*Context) error {
