@@ -685,6 +685,11 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	if synchronous {
 		responseCh := grainContext.response
 
+		// receive hands the context to the mailbox; it can be recycled and
+		// rebuilt for an unrelated message at any point after, so only the
+		// per-request response channel captured above may be touched from here
+		// on. A reply arriving after this Ask gives up lands in that
+		// unreachable channel and is dropped with it.
 		pid.receive(grainContext)
 		select {
 		case res := <-responseCh:
@@ -698,14 +703,9 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 			}
 			return res, nil
 		case <-ctx.Done():
-			// The grain goroutine may still be processing and could reply
-			// later. Mark response as closed so the sendReply CAS guard
-			// prevents late sends.
-			grainContext.responseClosed.Store(true)
 			timers.Put(timer)
 			return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		case <-timer.C:
-			grainContext.responseClosed.Store(true)
 			timers.Put(timer)
 			return nil, gerrors.ErrRequestTimeout
 		}

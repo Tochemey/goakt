@@ -1308,6 +1308,49 @@ func TestAskGrain(t *testing.T) {
 		require.NotNil(t, resp)
 	})
 
+	t.Run("subsequent Ask succeeds after a timeout", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-after-timeout", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		started := make(chan struct{})
+		release := make(chan struct{})
+		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+			switch gctx.Message().(type) {
+			case *testpb.TestTimeout:
+				close(started)
+				<-release
+				gctx.Response(new(testpb.Reply))
+			case *testpb.TestReply:
+				gctx.Response(new(testpb.Reply))
+			default:
+				gctx.Unhandled()
+			}
+		}}
+
+		identity, err := sys.GrainIdentity(ctx, "after-timeout", func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		resp, err := sys.AskGrain(ctx, identity, new(testpb.TestTimeout), 50*time.Millisecond)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		require.Nil(t, resp)
+
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("grain never started the timed-out ask")
+		}
+		close(release)
+
+		resp, err = sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, &testpb.Reply{}, resp)
+	})
+
 	t.Run("cluster mode with GetGrain success", func(t *testing.T) {
 		ctx := context.Background()
 		cl := mockcluster.NewCluster(t)

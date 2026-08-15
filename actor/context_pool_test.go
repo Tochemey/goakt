@@ -153,8 +153,10 @@ func TestContextPool_ConcurrentGetPut(t *testing.T) {
 
 func TestReceiveContext_ResetPreservesPoolShard(t *testing.T) {
 	ctx := contextPool.get(4)
+	ctx.responseClosed.Store(true)
 	ctx.reset()
 	assert.Equal(t, uint32(4), ctx.poolShard)
+	assert.True(t, ctx.responseClosed.Load(), "reset leaves the late-reply guard set for build/cloneContext to clear")
 }
 
 func TestNextContextShard_CoversAllShards(t *testing.T) {
@@ -186,4 +188,37 @@ func TestContextPool_ContextHelpers(t *testing.T) {
 	assert.Nil(t, ctx.ctx)
 	assert.Nil(t, ctx.message)
 	assert.Empty(t, ctx.requestID)
+}
+
+func TestCloneContext_ClearsResponseClosed(t *testing.T) {
+	const shard uint32 = 0
+
+	// The shard ring is FIFO and process-global. Drain leftovers from
+	// earlier tests so cloneContext's get cannot pop a clean context
+	// and hide a missing Store(false).
+	for range contextShardCapacity {
+		if contextPool.shards[shard].pop() == nil {
+			break
+		}
+	}
+
+	src := getContext(shard)
+	src.ctx = context.Background()
+	src.message = "stashed-ask"
+	src.response = getResponseChannel()
+	src.requestID = "corr"
+	src.responseClosed.Store(true)
+
+	stale := getContext(shard)
+	stale.responseClosed.Store(true)
+	recycleContext(stale)
+
+	clone := cloneContext(src)
+	require.Same(t, stale, clone)
+	require.False(t, clone.responseClosed.Load())
+	assert.Equal(t, src.ctx, clone.ctx)
+	assert.Equal(t, src.message, clone.message)
+	assert.Equal(t, src.response, clone.response)
+	assert.Equal(t, src.requestID, clone.requestID)
+	assert.True(t, src.responseClosed.Load(), "clone must not clear the source guard")
 }

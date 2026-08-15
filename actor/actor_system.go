@@ -2289,6 +2289,12 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 	receiveContext := toReceiveContext(ctx, from, to, message, false)
 
 	responseCh := receiveContext.response
+
+	// doReceive hands the context to the mailbox; it can be recycled and
+	// rebuilt for an unrelated message at any point after, so only the
+	// per-request response channel captured above may be touched from here
+	// on. A reply arriving after this Ask gives up lands in that
+	// unreachable channel and is dropped with it.
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
@@ -2297,19 +2303,16 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 	select {
 	case response = <-responseCh:
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
 		to.handleReceivedErrorWithMessage(noSender, message, err)
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return
 	}
 }

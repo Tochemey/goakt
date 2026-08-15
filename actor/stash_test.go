@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -258,4 +259,65 @@ func TestStash(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With stashed Ask replies under concurrent load", func(t *testing.T) {
+		assertConcurrentStashedAsks(t, "StashAsk", &MockStashAsk{})
+	})
+	t.Run("With UnstashAll Ask replies under concurrent load", func(t *testing.T) {
+		assertConcurrentStashedAsks(t, "StashAskAll", &MockStashAskAll{})
+	})
+}
+
+// assertConcurrentStashedAsks fires repeated rounds of concurrent Asks
+// against an actor that stashes each command and replies only after
+// Unstash or UnstashAll. Dropped replies need context-pool churn to
+// surface: a recycled receive context whose late-reply guard was left
+// tripped silently fails Response and the caller times out.
+func assertConcurrentStashedAsks(t *testing.T, name string, actor Actor) {
+	t.Helper()
+
+	ctx := context.TODO()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NotNil(t, actorSystem)
+
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, name, actor, WithStashing(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	const concurrency = 5
+	const rounds = 40
+
+	for range rounds {
+		var wg sync.WaitGroup
+
+		errs := make([]error, concurrency)
+		responses := make([]any, concurrency)
+
+		wg.Add(concurrency)
+
+		for i := range concurrency {
+			go func(idx int) {
+				defer wg.Done()
+				responses[idx], errs[idx] = Ask(ctx, pid, testpb.TestCount_builder{Value: int32(idx)}.Build(), 5*time.Second)
+			}(i)
+		}
+
+		wg.Wait()
+
+		for i := range concurrency {
+			require.NoError(t, errs[i])
+			reply, ok := responses[i].(*testpb.TestCount)
+			require.True(t, ok)
+			require.EqualValues(t, i, reply.GetValue())
+		}
+	}
+
+	require.NoError(t, actorSystem.Stop(ctx))
 }

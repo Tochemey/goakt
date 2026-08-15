@@ -126,7 +126,7 @@ func TestGrainContextAskReplyRouting(t *testing.T) {
 	t.Run("late reply after timeout is suppressed", func(t *testing.T) {
 		gctx := newAskContext()
 
-		// The caller timed out: localSend closes the reply window.
+		// A tripped guard (first reply already taken) drops further sends.
 		gctx.responseClosed.Store(true)
 
 		gctx.Err(errors.New("late failure"))
