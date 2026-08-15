@@ -196,10 +196,7 @@ func TestCloneContext_ClearsResponseClosed(t *testing.T) {
 	// The shard ring is FIFO and process-global. Drain leftovers from
 	// earlier tests so cloneContext's get cannot pop a clean context
 	// and hide a missing Store(false).
-	for {
-		if contextPool.shards[shard].pop() == nil {
-			break
-		}
+	for contextPool.shards[shard].pop() != nil {
 	}
 
 	src := getContext(shard)
