@@ -412,6 +412,42 @@ func (x *MockStash) PostStop(*Context) error {
 
 var _ Actor = &MockStash{}
 
+// MockStashAsk defers every Ask once via Stash and answers it with Response
+// only after the command has been released by Unstash. Every stashed command
+// pairs with exactly one self-sent TestUnstash that grants one reply slot, so
+// each Ask receives exactly one reply regardless of how messages interleave.
+type MockStashAsk struct {
+	repliesOwed int
+}
+
+func (x *MockStashAsk) PreStart(*Context) error {
+	return nil
+}
+
+func (x *MockStashAsk) Receive(ctx *ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *testpb.TestCount:
+		if x.repliesOwed > 0 {
+			x.repliesOwed--
+			ctx.Response(testpb.TestCount_builder{Value: msg.GetValue()}.Build())
+			return
+		}
+
+		ctx.Stash()
+		ctx.Tell(ctx.Self(), new(testpb.TestUnstash))
+
+	case *testpb.TestUnstash:
+		x.repliesOwed++
+		ctx.Unstash()
+	}
+}
+
+func (x *MockStashAsk) PostStop(*Context) error {
+	return nil
+}
+
+var _ Actor = &MockStashAsk{}
+
 type MockPreStart struct{}
 
 func (x *MockPreStart) PreStart(*Context) error {

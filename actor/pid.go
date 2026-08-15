@@ -1146,25 +1146,27 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 	receiveContext.build(ctx, pid, to, message, false)
 	responseCh := receiveContext.response
 
+	// doReceive hands the context to the mailbox; it can be recycled and
+	// rebuilt for an unrelated message at any point after, so only the
+	// per-request response channel captured above may be touched from here
+	// on. A reply arriving after this Ask gives up lands in that
+	// unreachable channel and is dropped with it.
 	to.doReceive(receiveContext)
 	timer := timers.Get(timeout)
 
 	select {
 	case result := <-responseCh:
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return result, nil
 	case <-ctx.Done():
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return nil, err
 	case <-timer.C:
 		err = gerrors.ErrRequestTimeout
 		pid.handleReceivedErrorWithMessage(pid, message, err)
 		timers.Put(timer)
-		receiveContext.responseClosed.Store(true)
 		return nil, err
 	}
 }

@@ -253,5 +253,11 @@ func cloneContext(src *ReceiveContext) *ReceiveContext {
 	dst.requestID = src.requestID
 	dst.requestReplyTo = src.requestReplyTo
 	dst.err = src.err
+
+	// reset() deliberately leaves responseClosed set, relying on build()
+	// to clear it. Clones bypass build(), so a context recycled after a
+	// completed Ask would arrive with the late-reply guard already
+	// tripped and silently drop this message's response.
+	dst.responseClosed.Store(false)
 	return dst
 }

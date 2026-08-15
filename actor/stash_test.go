@@ -24,6 +24,7 @@ package actor
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -257,5 +258,55 @@ func TestStash(t *testing.T) {
 		assert.NoError(t, err)
 		pause.For(time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With stashed Ask replies under concurrent load", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSystem)
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "StashAsk", &MockStashAsk{}, WithStashing(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		pause.For(time.Second)
+
+		// Dropped replies need context-pool churn to surface: repeated
+		// rounds of concurrent Asks make the actor's pool shard recycle
+		// contexts whose late-reply guard was tripped by a completed Ask.
+		const concurrency = 5
+		const rounds = 40
+
+		for range rounds {
+			var wg sync.WaitGroup
+
+			errs := make([]error, concurrency)
+			responses := make([]any, concurrency)
+
+			wg.Add(concurrency)
+
+			for i := range concurrency {
+				go func(idx int) {
+					defer wg.Done()
+					responses[idx], errs[idx] = Ask(ctx, pid, testpb.TestCount_builder{Value: int32(idx)}.Build(), 5*time.Second)
+				}(i)
+			}
+
+			wg.Wait()
+
+			for i := range concurrency {
+				require.NoError(t, errs[i])
+				reply, ok := responses[i].(*testpb.TestCount)
+				require.True(t, ok)
+				require.EqualValues(t, i, reply.GetValue())
+			}
+		}
+
+		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }

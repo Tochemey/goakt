@@ -835,8 +835,9 @@ func (rctx *ReceiveContext) reset() {
 	rctx.requestReplyTo = nil
 
 	// responseClosed is not reset: build() overwrites it in the sync
-	// path, and async (Tell) never reads it. Skipping the atomic store
-	// saves a handful of ns on the hot path.
+	// path, cloneContext() clears it for clones, and async (Tell) never
+	// reads it. Skipping the atomic store saves a handful of ns on the
+	// hot path.
 }
 
 // withoutCancel safely derives a non-cancelable context from the current context.
