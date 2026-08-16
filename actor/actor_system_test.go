@@ -46,6 +46,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -8089,4 +8090,167 @@ func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
 	}
 
 	assert.ElementsMatch(t, []string{"worker", "orders-producer"}, names)
+}
+
+// TestActorMetricsAggregation verifies the aggregated per-actor metrics
+// callback: constant registration count, full instrument coverage per actor,
+// attribute identity, value correctness, restart continuity, and the skip
+// guards for nodes without cached attributes or with a cleared PID slot.
+func TestActorMetricsAggregation(t *testing.T) {
+	ctx := context.Background()
+
+	prevProvider := otel.GetMeterProvider()
+	meterProvider := newRecordingMeterProvider()
+	otel.SetMeterProvider(meterProvider)
+	t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+	parent, err := sys.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, parent)
+
+	child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, child)
+	pause.For(500 * time.Millisecond)
+
+	// exactly two callbacks exist regardless of the population: the system
+	// callback and the aggregated actor callback.
+	recording := meterProvider.meter
+	require.Len(t, recording.callbacks, 2)
+
+	observer := &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+
+	perActor := groupRecordsByActor(observer.records)
+
+	expectedInstruments := []string{
+		"actor.children.count",
+		"actor.stash.size",
+		"actor.restart.count",
+		"actor.processed.count",
+		"actor.last.received.duration",
+		"actor.uptime",
+		"actor.deadletters.count",
+		"actor.failure.count",
+		"actor.reinstate.count",
+	}
+
+	for _, name := range []string{"parent", "child"} {
+		instruments := perActor[name]
+		require.NotNil(t, instruments, name)
+
+		for _, instrument := range expectedInstruments {
+			require.Contains(t, instruments, instrument, name)
+		}
+	}
+
+	require.EqualValues(t, 1, perActor["parent"]["actor.children.count"])
+	require.EqualValues(t, 0, perActor["child"]["actor.children.count"])
+
+	// observable counters never record negative values
+	for _, record := range observer.records {
+		require.GreaterOrEqual(t, record.value, int64(0), record.instrument)
+	}
+
+	// every observation carries the full attribute identity
+	var parentRecord *attrObserveRecord
+
+	for i := range observer.records {
+		if value, ok := observer.records[i].attrs.Value(attribute.Key("actor.name")); ok && value.AsString() == "parent" {
+			parentRecord = &observer.records[i]
+			break
+		}
+	}
+
+	require.NotNil(t, parentRecord)
+	systemAttr, ok := parentRecord.attrs.Value(attribute.Key("actor.system"))
+	require.True(t, ok)
+	require.Equal(t, "testSys", systemAttr.AsString())
+	addressAttr, ok := parentRecord.attrs.Value(attribute.Key("actor.address"))
+	require.True(t, ok)
+	require.Equal(t, parent.ID(), addressAttr.AsString())
+	kindAttr, ok := parentRecord.attrs.Value(attribute.Key("actor.kind"))
+	require.True(t, ok)
+	require.NotEmpty(t, kindAttr.AsString())
+
+	// a restart neither adds a registration nor drops the actor from scrapes
+	require.NoError(t, parent.Restart(ctx))
+	pause.For(500 * time.Millisecond)
+
+	require.Len(t, recording.callbacks, 2)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.Contains(t, actorNamesFromRecords(observer.records), "parent")
+
+	// a tree node whose PID has no cached attributes is skipped
+	sysImpl := sys.(*actorSystem)
+	bare := MockPID(sys, "bare", 0)
+	require.NoError(t, sysImpl.tree().addNode(parent, bare))
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.NotContains(t, actorNamesFromRecords(observer.records), "bare")
+	sysImpl.tree().deleteNode(bare)
+
+	// a tree node whose PID slot was cleared concurrently is skipped
+	childNode, ok := sysImpl.tree().node(child.ID())
+	require.True(t, ok)
+	stored := childNode.value()
+	childNode.pid.Store(nil)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+	childNode.pid.Store(stored)
+
+	// an actor that is not running (suspended, stopping, or passivating) is
+	// skipped until it is running again
+	child.setState(suspendedState, true)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+
+	child.setState(suspendedState, false)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.Contains(t, actorNamesFromRecords(observer.records), "child")
+
+	// an actor whose PostStart has not been processed yet (a mid-restart
+	// scrape window) is skipped so processed.count never observes -1
+	storedProcessed := child.processedCount.Load()
+	child.processedCount.Store(0)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+
+	child.processedCount.Store(storedProcessed)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.Contains(t, actorNamesFromRecords(observer.records), "child")
 }

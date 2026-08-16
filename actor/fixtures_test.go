@@ -42,6 +42,7 @@ import (
 	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 	"go.uber.org/atomic"
@@ -2610,4 +2611,129 @@ func (o *manualObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value in
 		instrument: fmt.Sprintf("%T", obsrv),
 		value:      value,
 	})
+}
+
+// recordingMeterProvider hands out a recordingMeter so tests can group
+// observations by instrument name.
+type recordingMeterProvider struct {
+	otelmetric.MeterProvider
+	meter *recordingMeter
+}
+
+func newRecordingMeterProvider() *recordingMeterProvider {
+	delegate := noopmetric.NewMeterProvider()
+	return &recordingMeterProvider{
+		MeterProvider: delegate,
+		meter: &recordingMeter{
+			Meter: delegate.Meter("test"),
+		},
+	}
+}
+
+func (m *recordingMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) otelmetric.Meter {
+	return m.meter
+}
+
+// recordingMeter captures registered callbacks and creates named observable
+// counters so observations can be attributed to their instrument.
+type recordingMeter struct {
+	otelmetric.Meter
+	callbacks []otelmetric.Callback
+}
+
+func (m *recordingMeter) Int64ObservableCounter(name string, _ ...otelmetric.Int64ObservableCounterOption) (otelmetric.Int64ObservableCounter, error) {
+	return &namedObservableCounter{name: name}, nil
+}
+
+func (m *recordingMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.callbacks = append(m.callbacks, cb)
+	return noopmetric.Registration{}, nil
+}
+
+// namedObservableCounter is a no-op observable counter that remembers the
+// instrument name it was created with.
+type namedObservableCounter struct {
+	noopmetric.Int64ObservableCounter
+	name string
+}
+
+// attrObserver records every ObserveInt64 call with its instrument name,
+// value, and attribute set.
+type attrObserver struct {
+	noopmetric.Observer
+	records []attrObserveRecord
+}
+
+type attrObserveRecord struct {
+	instrument string
+	value      int64
+	attrs      attribute.Set
+}
+
+func (o *attrObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, opts ...otelmetric.ObserveOption) {
+	name := fmt.Sprintf("%T", obsrv)
+	if named, ok := obsrv.(*namedObservableCounter); ok {
+		name = named.name
+	}
+
+	o.records = append(o.records, attrObserveRecord{
+		instrument: name,
+		value:      value,
+		attrs:      otelmetric.NewObserveConfig(opts).Attributes(),
+	})
+}
+
+// actorNamesFromRecords returns the distinct actor.name attribute values
+// present in the records.
+func actorNamesFromRecords(records []attrObserveRecord) []string {
+	seen := make(map[string]bool)
+	names := make([]string, 0, len(records))
+
+	for _, record := range records {
+		if value, ok := record.attrs.Value(attribute.Key("actor.name")); ok && !seen[value.AsString()] {
+			seen[value.AsString()] = true
+			names = append(names, value.AsString())
+		}
+	}
+
+	return names
+}
+
+// groupRecordsByActor indexes records by actor.name and instrument name.
+func groupRecordsByActor(records []attrObserveRecord) map[string]map[string]int64 {
+	result := make(map[string]map[string]int64)
+
+	for _, record := range records {
+		value, ok := record.attrs.Value(attribute.Key("actor.name"))
+		if !ok {
+			continue
+		}
+
+		name := value.AsString()
+		if result[name] == nil {
+			result[name] = make(map[string]int64)
+		}
+
+		result[name][record.instrument] = record.value
+	}
+
+	return result
+}
+
+// nthCallbackFailingMeter fails the nth RegisterCallback call (1-based) and
+// succeeds all others.
+type nthCallbackFailingMeter struct {
+	otelmetric.Meter
+	calls  int
+	failOn int
+	err    error
+}
+
+func (m *nthCallbackFailingMeter) RegisterCallback(_ otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.calls++
+	if m.calls == m.failOn {
+		return nil, m.err
+	}
+
+	return noopmetric.Registration{}, nil
 }

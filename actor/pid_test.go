@@ -4739,48 +4739,30 @@ func TestNewPID(t *testing.T) {
 	t.Run("With metrics registration error", func(t *testing.T) {
 		ctx := context.Background()
 
-		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
-		require.NotNil(t, actorSystem)
-
-		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
-
 		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
 		errRegister := assert.AnError
 		baseProvider := noopmetric.NewMeterProvider()
 		otel.SetMeterProvider(&MockMeterProvider{
 			MeterProvider: baseProvider,
-			meter: registerCallbackFailingMeter{
-				Meter: baseProvider.Meter("test"),
-				err:   errRegister,
+			meter: &nthCallbackFailingMeter{
+				Meter:  baseProvider.Meter("test"),
+				failOn: 2,
+				err:    errRegister,
 			},
 		})
-		metricProvider := metric.NewProvider()
 
-		pid, err := newPID(
-			ctx,
-			addr,
-			NewMockActor(),
-			withActorSystem(actorSystem),
-			withMetricProvider(metricProvider),
-			asSystemActor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
-		)
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
 
+		// the aggregated per-actor callback is the second registration made at
+		// system start; its failure surfaces there, not from newPID.
+		err = sys.Start(ctx)
 		require.Error(t, err)
 		require.ErrorIs(t, err, errRegister)
-		require.Nil(t, pid)
 	})
 	t.Run("With metric instrument creation error", func(t *testing.T) {
 		ctx := context.Background()
-
-		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
-		require.NotNil(t, actorSystem)
-
-		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
 
 		t.Cleanup(func() { otel.SetMeterProvider(noopmetric.NewMeterProvider()) })
 
@@ -4795,22 +4777,36 @@ func TestNewPID(t *testing.T) {
 				},
 			},
 		})
-		metricProvider := metric.NewProvider()
 
+		// actor instruments are created once at system start; the failure
+		// surfaces there.
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+
+		err = sys.Start(ctx)
+		require.Error(t, err)
+		require.ErrorContains(t, err, fmt.Sprintf("failed to create childrenCount instrument, %v", errInstrument))
+
+		// newPID no longer creates instruments, so construction succeeds under
+		// the same failing meter and only caches the attribute set.
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
 		pid, err := newPID(
 			ctx,
 			addr,
 			NewMockActor(),
 			withActorSystem(actorSystem),
-			withMetricProvider(metricProvider),
+			withMetricProvider(metric.NewProvider()),
 			asSystemActor(),
 			withInitMaxRetries(1),
 			withCustomLogger(log.DiscardLogger),
 		)
 
-		require.Error(t, err)
-		require.EqualError(t, err, fmt.Sprintf("failed to create childrenCount instrument, %v", errInstrument))
-		require.Nil(t, pid)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.Len(t, pid.observeOptions, 4)
 	})
 	t.Run("With RegisterMetrics callback", func(t *testing.T) {
 		ctx := context.Background()
@@ -4843,11 +4839,11 @@ func TestNewPID(t *testing.T) {
 		}
 		require.NotEmpty(t, observer.records)
 	})
-	t.Run("With metrics callback unregistered on shutdown", func(t *testing.T) {
+	t.Run("With stopped actor removed from metrics scrapes", func(t *testing.T) {
 		ctx := context.Background()
 
 		prevProvider := otel.GetMeterProvider()
-		meterProvider := newManualMeterProvider()
+		meterProvider := newRecordingMeterProvider()
 		otel.SetMeterProvider(meterProvider)
 		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
 
@@ -4860,19 +4856,30 @@ func TestNewPID(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
 
-		manual, ok := meterProvider.meter.(*manualMeter)
-		require.True(t, ok)
-
 		pid, err := sys.Spawn(ctx, "metrics-actor", NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		before := manual.unregistered
-		require.NoError(t, pid.Shutdown(ctx))
+		recording := meterProvider.meter
+		require.Len(t, recording.callbacks, 2)
 
-		// stopping the actor must release its metrics callback so it no longer
-		// fires on subsequent scrapes.
-		require.Equal(t, before+1, manual.unregistered)
+		observer := &attrObserver{}
+		for _, cb := range recording.callbacks {
+			require.NoError(t, cb(ctx, observer))
+		}
+		require.Contains(t, actorNamesFromRecords(observer.records), "metrics-actor")
+
+		require.NoError(t, pid.Shutdown(ctx))
+		pause.For(time.Second)
+
+		// the aggregated callback stops observing the actor once the death
+		// watch removes it from the tree; no per-actor registration exists, so
+		// nothing needs unregistering on shutdown.
+		observer = &attrObserver{}
+		for _, cb := range recording.callbacks {
+			require.NoError(t, cb(ctx, observer))
+		}
+		require.NotContains(t, actorNamesFromRecords(observer.records), "metrics-actor")
 	})
 }
 
@@ -7591,4 +7598,121 @@ func TestSupervisorExponentialBackoffDelaysRestart(t *testing.T) {
 
 	require.NoError(t, parent.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+// TestNewPIDDefaultLogger verifies that PIDs constructed without a logger
+// option share the package-level default logger and that a custom logger
+// still takes precedence.
+func TestNewPIDDefaultLogger(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender.setState(runningState, true)
+	system.dispatcher.start()
+	t.Cleanup(func() { system.dispatcher.signalStop() })
+
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
+	require.NoError(t, err)
+	require.Same(t, defaultLogger, first.logger)
+
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
+	require.NoError(t, err)
+	require.Same(t, first.logger, second.logger)
+
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Equal(t, log.DiscardLogger, third.logger)
+}
+
+// TestNewPIDDefaultSupervisorAndStrategy verifies that PIDs constructed
+// without a supervisor or passivation strategy option share the package-level
+// defaults and that explicit options still take precedence.
+func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender.setState(runningState, true)
+	system.dispatcher.start()
+	t.Cleanup(func() { system.dispatcher.signalStop() })
+
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Same(t, defaultSupervisor, first.supervisor)
+	require.Same(t, defaultPassivationStrategy, first.passivationStrategy)
+
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Same(t, first.supervisor, second.supervisor)
+	require.Same(t, first.passivationStrategy, second.passivationStrategy)
+
+	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
+	strategy := passivation.NewTimeBasedStrategy(time.Minute)
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withSupervisor(custom), withPassivationStrategy(strategy))
+	require.NoError(t, err)
+	require.Same(t, custom, third.supervisor)
+	require.Same(t, strategy, third.passivationStrategy)
+}
+
+// TestSpawnChildSharesDefaultSupervisor verifies that a child spawned without
+// a supervisor option shares the package-level default supervisor instead of
+// allocating one per child.
+func TestSpawnChildSharesDefaultSupervisor(t *testing.T) {
+	ctx := context.TODO()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	child, err := pid.SpawnChild(ctx, "child", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, child)
+	pause.For(500 * time.Millisecond)
+
+	require.Same(t, defaultSupervisor, child.supervisor)
+
+	sibling, err := pid.SpawnChild(ctx, "sibling", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, sibling)
+	pause.For(500 * time.Millisecond)
+
+	require.Same(t, child.supervisor, sibling.supervisor)
+
+	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+// TestBuildObserveOptions verifies that the metric attribute cache is built
+// only when a metric provider is configured.
+func TestBuildObserveOptions(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender.setState(runningState, true)
+	system.dispatcher.start()
+	t.Cleanup(func() { system.dispatcher.signalStop() })
+
+	plain, err := newPID(ctx, system.actorAddress("plain"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Nil(t, plain.observeOptions)
+
+	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withMetricProvider(metric.NewProvider()))
+	require.NoError(t, err)
+	require.Len(t, metered.observeOptions, 4)
 }
