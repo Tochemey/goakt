@@ -1,12 +1,12 @@
 ---
 title: Dispatcher Pool
-description: The execution substrate underneath every actor — a fixed worker pool that cooperatively multiplexes the entire actor population.
+description: The execution substrate underneath every actor: a fixed worker pool that cooperatively multiplexes the entire actor population.
 sidebarTitle: "Dispatcher Pool"
 ---
 
 GoAkt processes actor messages on a **fixed pool of worker goroutines** that cooperatively multiplex the entire actor population. Each `ActorSystem` owns one `dispatcher`. When an actor receives a message, it is scheduled onto a shared ready queue; a worker pulls it off, drains up to a configurable throughput budget, and yields back so other actors get a turn.
 
-This is the Akka / Pekko / Erlang / Orleans pattern adapted for Go: the worker count is bounded by `GOMAXPROCS`, independent of the actor count. Actors become units of work on a scheduler rather than units that each own a goroutine — making `runtime.NumGoroutine()` stable at `workerCount + O(1)` no matter how many actors are active.
+This is the Akka / Pekko / Erlang / Orleans pattern adapted for Go: the worker count is bounded by `GOMAXPROCS`, independent of the actor count. Actors become units of work on a scheduler rather than units that each own a goroutine, making `runtime.NumGoroutine()` stable at `workerCount + O(1)` no matter how many actors are active.
 
 ```mermaid
 flowchart TB
@@ -19,7 +19,7 @@ flowchart TB
     Workers -.->|"yield &amp; reschedule<br/>to owner's local ring"| Actors
 ```
 
-The public API is untouched: `Tell`, `Ask`, `Spawn`, `Actor.Receive`, `PreStart`, `PostStop`, mailboxes — all unchanged. The dispatcher lives below `PID.doReceive` and is an implementation detail of the actor package.
+The public API is untouched: `Tell`, `Ask`, `Spawn`, `Actor.Receive`, `PreStart`, `PostStop`, mailboxes; all unchanged. The dispatcher lives below `PID.doReceive` and is an implementation detail of the actor package.
 
 ## Components
 
@@ -94,9 +94,9 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 }
 ```
 
-`isControlMessage` routes `PoisonPill`, `Panicking`, `Pause/ResumePassivation`, `PanicSignal`, `Terminated`, and `SendDeadletter` to the system mailbox. All other messages go to the user mailbox. `AsyncRequest` / `AsyncResponse` are _not_ control messages — they participate in the reentrancy stash and must keep FIFO order with user traffic.
+`isControlMessage` routes `PoisonPill`, `Panicking`, `Pause/ResumePassivation`, `PanicSignal`, `Terminated`, and `SendDeadletter` to the system mailbox. All other messages go to the user mailbox. `AsyncRequest` / `AsyncResponse` are _not_ control messages: they participate in the reentrancy stash and must keep FIFO order with user traffic.
 
-The hot path is one atomic read, one CAS, one mailbox op, and — for the first producer that wins the `Idle → Scheduled` transition — one global-queue push with condvar signal.
+The hot path is one atomic read, one CAS, one mailbox op, and (for the first producer that wins the `Idle → Scheduled` transition) one global-queue push with condvar signal.
 
 ## Worker turn
 
@@ -130,7 +130,7 @@ func (pid *PID) runTurn(w *worker) {
 Two correctness details worth calling out:
 
 - **`dispatchOne` returns a `retained` flag.** The reentrancy-stash path holds on to the `ReceiveContext` beyond the turn, so the caller must _not_ return it to the pool in that case.
-- **`finishOrReclaim` closes the enqueue/finish race.** After a drained dequeue, it stores `Idle`, re-reads both mailboxes, and — if a concurrent `doReceive` slipped a message in between the last dequeue and the state store — attempts `TrySchedule` followed by `TakeForProcessing` to reclaim ownership within the current turn.
+- **`finishOrReclaim` closes the enqueue/finish race.** After a drained dequeue, it stores `Idle`, re-reads both mailboxes, and (if a concurrent `doReceive` slipped a message in between the last dequeue and the state store) attempts `TrySchedule` followed by `TakeForProcessing` to reclaim ownership within the current turn.
 
 When the budget is exhausted and work remains, the actor yields to `Scheduled` and is re-pushed onto the owning worker's local ring via `worker.reschedule`. Yielded actors land at the **tail** of the local ring, behind any other scheduled actor, guaranteeing forward progress for peers.
 
@@ -153,8 +153,8 @@ A lock-free `globalCount` atomic mirrors `global.size` so workers can skip the m
 
 Control-plane messages cannot queue behind a user-message backlog. Every actor has two mailboxes:
 
-- `systemMailbox` — unbounded, holds control messages. Always consulted first inside the budget loop.
-- `mailbox` — the user mailbox, unchanged from the public `Mailbox` contract.
+- `systemMailbox`: unbounded, holds control messages. Always consulted first inside the budget loop.
+- `mailbox`: the user mailbox, unchanged from the public `Mailbox` contract.
 
 This is the same split used by Akka and Pekko. A `PoisonPill` delivered to an actor with 10,000 user messages queued shuts the actor down after at most one additional user message, not 10,000.
 
@@ -214,7 +214,7 @@ system, err := NewActorSystem("my-system",
 | `128`          | Ingest and aggregation (log pipelines, event firehoses, batch processors).                                        |
 | `256`+         | Synthetic benchmarks or pathological single-hot-actor workloads only. Throughput flattens and tail latency grows. |
 
-Per-actor FIFO ordering and the single-threaded-per-actor execution invariant hold regardless of the budget — a yield is a pause, not a reorder.
+Per-actor FIFO ordering and the single-threaded-per-actor execution invariant hold regardless of the budget: a yield is a pause, not a reorder.
 
 ## References
 
@@ -226,7 +226,8 @@ Per-actor FIFO ordering and the single-threaded-per-actor execution invariant ho
 
 ## See also
 
-- [Architecture Overview](/architecture/overview) — bird's-eye view of the system
-- [Code Map](/architecture/code-map) — package layout and file-level responsibilities
-- [Design Decisions](/architecture/design-decisions) — rationale for architectural choices
+- [Architecture Overview](/architecture/overview): bird's-eye view of the system
+- [Context Pools](/architecture/context-pools): sharded `ReceiveContext` / `GrainContext` recycling on the send and dequeue path
+- [Code Map](/architecture/code-map): package layout and file-level responsibilities
+- [Design Decisions](/architecture/design-decisions): rationale for architectural choices
 - Full design document: [`architecture/DISPATCHER_POOL_DESIGN.md`](https://github.com/tochemey/goakt/blob/main/architecture/DISPATCHER_POOL_DESIGN.md)

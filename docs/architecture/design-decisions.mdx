@@ -6,24 +6,30 @@ sidebarTitle: "Design Decisions"
 
 ## Why a fixed dispatcher pool instead of a goroutine per actor?
 
-Earlier versions ran each active actor on its own drainer goroutine. v4.2.1 replaced that with a **fixed worker pool** — typically `max(GOMAXPROCS, 2)` workers — that cooperatively multiplexes the entire actor population, following the Akka / Pekko / Erlang / Orleans pattern.
+Earlier versions ran each active actor on its own drainer goroutine. v4.2.1 replaced that with a **fixed worker pool** (typically `max(GOMAXPROCS, 2)` workers) that cooperatively multiplexes the entire actor population, following the Akka / Pekko / Erlang / Orleans pattern.
 
 Trade-offs driving the change:
 
 - **Goroutine count decoupled from actor count.** Systems with 100k actors no longer allocate 100k goroutine stacks. `runtime.NumGoroutine()` stabilises at `workerCount + O(1)`.
-- **Fairness by construction.** A per-turn throughput budget (configurable via `WithThroughputBudget`, default 32) bounds how long one busy actor can hold a worker before yielding — peers aren't starved by a hot mailbox.
-- **Better CPU cache use.** When a worker processes several messages for the same actor back-to-back, the CPU keeps that actor's mailbox, state, and `Receive` code in its fast on-chip memory (CPU cache). Rotating to a different actor on every message would force the CPU to reload everything from main memory each time — measurably slower.
+- **Fairness by construction.** A per-turn throughput budget (configurable via `WithThroughputBudget`, default 32) bounds how long one busy actor can hold a worker before yielding: peers aren't starved by a hot mailbox.
+- **Better CPU cache use.** When a worker processes several messages for the same actor back-to-back, the CPU keeps that actor's mailbox, state, and `Receive` code in its fast on-chip memory (CPU cache). Rotating to a different actor on every message would force the CPU to reload everything from main memory each time: measurably slower.
 - **Control-plane priority preserved.** Every actor carries a dedicated system mailbox drained before the user mailbox on every turn, so `PoisonPill`, supervision, passivation, and termination messages cannot queue behind a user-message backlog.
 
-Every user-visible semantic is unchanged: per-actor FIFO, single-threaded execution, `PreStart` / `PostStop` contract, reentrancy, panic recovery, and supervision all hold — the three-state `Idle` / `Scheduled` / `Processing` CAS on each PID enforces the single-consumer invariant the mailbox contract depends on. See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
+Every user-visible semantic is unchanged: per-actor FIFO, single-threaded execution, `PreStart` / `PostStop` contract, reentrancy, panic recovery, and supervision all hold: the three-state `Idle` / `Scheduled` / `Processing` CAS on each PID enforces the single-consumer invariant the mailbox contract depends on. See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
+
+## Why a sharded context pool instead of a channel or `sync.Pool`?
+
+Every `Tell` and `Ask` needs a `ReceiveContext`. A single process-wide buffered channel serialized every get and put on one lock; pairwise `Tell` spent most of its CPU inside `chansend`/`chanrecv`, so aggregate throughput collapsed to the single-actor rate. `sync.Pool` is per-P and may drop everything on GC, which is the opposite of predictable reuse.
+
+The pool is sharded by actor: each PID is assigned a home shard at spawn, and contexts for that actor are taken from and returned to that shard. Shard count tracks `GOMAXPROCS` so concurrently active actors *spread* across rings; many actors still share a shard. Capacity is a memory cap, not a throughput cap: empty shards allocate, full shards drop for GC. Grains use a separate copy of the same ring (`grain_context_pool.go`) plus a sharded Tell-ack channel pool. See [Context Pools](/architecture/context-pools) for the actor ring and [Grain sibling](/architecture/context-pools#grain-sibling) for the delta.
 
 ## Why `any` instead of `proto.Message` (v4)?
 
 v4 allows any type as actor messages. Benefits:
 
-- **Flexibility** — Plain Go structs, protobuf, or custom types
-- **Simplicity** — No mandatory .proto definitions for simple cases
-- **CBOR** — Efficient serialization for arbitrary Go types
+- **Flexibility**: Plain Go structs, protobuf, or custom types
+- **Simplicity**: No mandatory .proto definitions for simple cases
+- **CBOR**: Efficient serialization for arbitrary Go types
 
 ProtoSerializer remains the default for protobuf messages. CBOR and custom serializers extend the set of supported
 types.
@@ -32,21 +38,21 @@ types.
 
 GoAkt uses length-prefixed binary frames over TCP instead of gRPC:
 
-- **Low overhead** — No HTTP/2, HPACK, or stream multiplexing
-- **Control** — Connection pools, compression, buffer pooling tuned for actor traffic
-- **Fewer dependencies** — Leaner than gRPC
+- **Low overhead**: No HTTP/2, HPACK, or stream multiplexing
+- **Control**: Connection pools, compression, buffer pooling tuned for actor traffic
+- **Fewer dependencies**: Leaner than gRPC
 
 ## Why Olric for cluster state?
 
 Cluster state (actor/grain placement) needs replication. Olric provides:
 
-- **Embedded** — No external database
-- **Distributed hash map** — Configurable quorum for consistency
-- **Memberlist** — Same membership layer as the cluster
+- **Embedded**: No external database
+- **Distributed hash map**: Configurable quorum for consistency
+- **Memberlist**: Same membership layer as the cluster
 
 ## Why CRDTs in addition to Olric?
 
-Actor and grain **registry** entries are strongly consistent via Olric quorums. **Application data** that must stay available under partition and merge without a single writer uses **CRDTs** in the `crdt` package, replicated by a dedicated **Replicator** actor. Deltas fan out over the existing topic bus—separate concern from registry reads and writes. See [Distributed data](/advanced/distributed-data).
+Actor and grain **registry** entries are strongly consistent via Olric quorums. **Application data** that must stay available under partition and merge without a single writer uses **CRDTs** in the `crdt` package, replicated by a dedicated **Replicator** actor. Deltas fan out over the existing topic bus: separate concern from registry reads and writes. See [Distributed data](/advanced/distributed-data).
 
 ## Why reactive streams on top of actors?
 
@@ -56,13 +62,13 @@ The `stream` package composes **Source → Flow → Sink** graphs that materiali
 
 Mirrors Erlang/OTP and Akka:
 
-- **Lifecycle ordering** — Stopping a parent stops descendants first (depth-first)
-- **Scoped supervision** — Parent defines failure policy for children
-- **Namespacing** — Addresses reflect tree path; no name collisions
+- **Lifecycle ordering**: Stopping a parent stops descendants first (depth-first)
+- **Scoped supervision**: Parent defines failure policy for children
+- **Namespacing**: Addresses reflect tree path; no name collisions
 
 ## Why separate Actor and Grain?
 
-- **Actors** — Explicit spawn/stop; caller controls lifecycle. Best for services and infrastructure.
-- **Grains** — Identity-addressed; framework manages activation and passivation. Best for entity-per-identity patterns.
+- **Actors**: Explicit spawn/stop; caller controls lifecycle. Best for services and infrastructure.
+- **Grains**: Identity-addressed; framework manages activation and passivation. Best for entity-per-identity patterns.
 
 Both share the same runtime; choose based on use case.

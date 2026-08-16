@@ -52,10 +52,10 @@ routerPID, err := system.SpawnRouter(ctx, "my-router", 5, &MyWorker{}, actor.Wit
 
 Parameters:
 
-- `name` – Router actor name
-- `poolSize` – Number of routees to spawn (must be > 0)
-- `routeesKind` – Actor type for routees (a pointer to a struct implementing `Actor`)
-- `opts` – Router options (see below)
+- `name`: Router actor name
+- `poolSize`: Number of routees to spawn (must be > 0)
+- `routeesKind`: Actor type for routees (a pointer to a struct implementing `Actor`)
+- `opts`: Router options (see below)
 
 ## Router Options
 
@@ -155,11 +155,11 @@ func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 
 ## When to Use
 
-- **Load balancing** – RoundRobin or Random across a pool of workers
-- **Sticky sessions / partition affinity** – ConsistentHash when messages with the same key (e.g. order ID, customer ID) must always go to the same routee
-- **Parallel processing** – FanOut for pub/sub, cache invalidation, multi-sink processing
-- **Fastest responder** – Scatter-Gather First when you want the first successful reply
-- **Controlled probing** – Tail-Chopping when you prefer sequential probing with bounded fan-out
+- **Load balancing**: RoundRobin or Random across a pool of workers
+- **Sticky sessions / partition affinity**: ConsistentHash when messages with the same key (e.g. order ID, customer ID) must always go to the same routee
+- **Parallel processing**: FanOut for pub/sub, cache invalidation, multi-sink processing
+- **Fastest responder**: Scatter-Gather First when you want the first successful reply
+- **Controlled probing**: Tail-Chopping when you prefer sequential probing with bounded fan-out
 
 ## Routee Supervision
 

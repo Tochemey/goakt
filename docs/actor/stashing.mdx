@@ -28,9 +28,9 @@ Stashed messages are processed in FIFO order when unstashed.
 
 ## When to use
 
-- **Behavior transitions** — Stash messages you cannot handle in the current behavior; unstash after switching.
-- **Conditional processing** — Stash messages until a condition is met (e.g., dependency ready, lock acquired).
-- **Reentrancy** — With `StashNonReentrant` mode, in-flight Ask requests cause user messages to be stashed automatically until the request completes.
+- **Behavior transitions**: Stash messages you cannot handle in the current behavior; unstash after switching.
+- **Conditional processing**: Stash messages until a condition is met (e.g., dependency ready, lock acquired).
+- **Reentrancy**: With `StashNonReentrant` mode, in-flight Ask requests cause user messages to be stashed automatically until the request completes.
 
 ## Example
 

@@ -20,22 +20,22 @@ Singleton identity is the actor name: several singletons of the same actor kind 
 
 ## When to use singletons
 
-- **Cluster-wide coordinator** — Job scheduler, leader election, or coordination that must run once across the cluster
-- **Single source of truth** — Centralized state or registry that must be unique (e.g. license manager, cluster metadata)
-- **Exclusive resource** — A resource that must have exactly one owner (e.g. distributed lock coordinator)
+- **Cluster-wide coordinator**: Job scheduler, leader election, or coordination that must run once across the cluster
+- **Single source of truth**: Centralized state or registry that must be unique (e.g. license manager, cluster metadata)
+- **Exclusive resource**: A resource that must have exactly one owner (e.g. distributed lock coordinator)
 
 ## When to use normal actors
 
-- **Scalable workers** — Many instances for parallelism (e.g. request handlers, workers)
-- **Per-entity or per-request** — One actor per user, session, or task
-- **Explicit lifecycle** — You control when to spawn and stop
-- **Standalone or local-only** — No cluster, or node-local state
+- **Scalable workers**: Many instances for parallelism (e.g. request handlers, workers)
+- **Per-entity or per-request**: One actor per user, session, or task
+- **Explicit lifecycle**: You control when to spawn and stop
+- **Standalone or local-only**: No cluster, or node-local state
 
 ## Requirements
 
-- **Cluster mode** — Singletons require clustering. `SpawnSingleton` returns `ErrClusterDisabled` when cluster mode is off.
-- **Remoting** — Clustering requires remoting; the singleton may run on a different node than the caller.
-- **Actor kind registered** — The actor type must be registered via `WithKinds` when creating the actor system.
+- **Cluster mode**: Singletons require clustering. `SpawnSingleton` returns `ErrClusterDisabled` when cluster mode is off.
+- **Remoting**: Clustering requires remoting; the singleton may run on a different node than the caller.
+- **Actor kind registered**: The actor type must be registered via `WithKinds` when creating the actor system.
 
 ## API
 
@@ -47,8 +47,8 @@ Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is lo
 
 ## Placement
 
-- **Default** — The singleton runs on the cluster coordinator (oldest node by membership).
-- **With role** — Use `WithSingletonRole(role)` to pin the singleton to nodes that advertise that role. The oldest node with the role (by `CreatedAt`) hosts it. If no node has the role, `SpawnSingleton` retries according to the spawn options; it returns an error only after retries are exhausted or the spawn timeout elapses.
+- **Default**: The singleton runs on the cluster coordinator (oldest node by membership).
+- **With role**: Use `WithSingletonRole(role)` to pin the singleton to nodes that advertise that role. The oldest node with the role (by `CreatedAt`) hosts it. If no node has the role, `SpawnSingleton` retries according to the spawn options; it returns an error only after retries are exhausted or the spawn timeout elapses.
 
 ## Configuration options
 
@@ -121,6 +121,6 @@ If the host node crashes (kill -9, OOM, etc.), relocation does not run; the sing
 
 ## See also
 
-- [Actor System](/actor/actor-system) — `SpawnSingleton` in the spawn methods table
-- [Clustering](/clustering/overview) — Cluster setup
-- [Relocation](/actor/relocation) — How singletons are relocated when nodes leave
+- [Actor System](/actor/actor-system): `SpawnSingleton` in the spawn methods table
+- [Clustering](/clustering/overview): Cluster setup
+- [Relocation](/actor/relocation): How singletons are relocated when nodes leave

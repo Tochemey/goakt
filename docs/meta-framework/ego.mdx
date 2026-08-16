@@ -16,7 +16,7 @@ go get github.com/tochemey/ego/v4
 
 ## Why eGo
 
-GoAkt provides the actor runtime — messaging, supervision, clustering, streams. eGo builds on that runtime to solve the **persistence and workflow** layer:
+GoAkt provides the actor runtime: messaging, supervision, clustering, streams. eGo builds on that runtime to solve the **persistence and workflow** layer:
 
 | Concern                 | GoAkt | eGo                            |
 | ----------------------- | ----- | ------------------------------ |
@@ -36,7 +36,7 @@ eGo offers two persistence models. Choose based on whether you need a full event
 
 ### Event-sourced behavior
 
-`EventSourcedBehavior` captures state changes as domain events. Commands are processed sequentially — each command produces zero or more events that are persisted to a journal. State is rebuilt by replaying events on recovery.
+`EventSourcedBehavior` captures state changes as domain events. Commands are processed sequentially: each command produces zero or more events that are persisted to a journal. State is rebuilt by replaying events on recovery.
 
 | Method                                    | Purpose                                                                  |
 | ----------------------------------------- | ------------------------------------------------------------------------ |
@@ -57,7 +57,7 @@ Additional capabilities:
 
 ### Durable-state behavior
 
-`DurableStateBehavior` persists only the latest state — no event log, no replay. Each successful command produces a new state version, and only the latest version is stored.
+`DurableStateBehavior` persists only the latest state: no event log, no replay. Each successful command produces a new state version, and only the latest version is stored.
 
 | Method                                              | Purpose                                         |
 | --------------------------------------------------- | ----------------------------------------------- |
@@ -177,8 +177,8 @@ eGo ships a scenario-based testkit for validating behaviors without a running st
 
 ## See also
 
-- [eGo repository](https://github.com/Tochemey/ego) — Source code, examples, and changelog
-- [ego-contrib](https://github.com/Tochemey/ego-contrib) — Postgres and MongoDB store implementations
-- [Extensions and Dependencies](/advanced/extensions-and-dependencies) — GoAkt extension mechanism that eGo builds on
-- [PubSub](/advanced/pubsub) — Application-level topic-based messaging
-- [Coordinated Shutdown](/advanced/coordinated-shutdown) — Graceful shutdown that eGo entities participate in
+- [eGo repository](https://github.com/Tochemey/ego): Source code, examples, and changelog
+- [ego-contrib](https://github.com/Tochemey/ego-contrib): Postgres and MongoDB store implementations
+- [Extensions and Dependencies](/advanced/extensions-and-dependencies): GoAkt extension mechanism that eGo builds on
+- [PubSub](/advanced/pubsub): Application-level topic-based messaging
+- [Coordinated Shutdown](/advanced/coordinated-shutdown): Graceful shutdown that eGo entities participate in

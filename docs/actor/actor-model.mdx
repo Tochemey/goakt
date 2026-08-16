@@ -18,10 +18,10 @@ There is no shared state between actors. The only way to interact with one is to
 
 Actors provide a natural model for concurrent and distributed systems:
 
-- **Encapsulation** — State is private; no locks or mutexes needed inside an actor
-- **Location transparency** — You send to a PID; the framework routes locally or remotely
-- **Fault isolation** — A failing actor does not corrupt others; supervision handles recovery
-- **Scalability** — Actors can be distributed across nodes; the cluster manages placement
+- **Encapsulation**: State is private; no locks or mutexes needed inside an actor
+- **Location transparency**: You send to a PID; the framework routes locally or remotely
+- **Fault isolation**: A failing actor does not corrupt others; supervision handles recovery
+- **Scalability**: Actors can be distributed across nodes; the cluster manages placement
 
 ## Core concepts
 
@@ -29,7 +29,7 @@ Actors provide a natural model for concurrent and distributed systems:
 |-----------------|----------------------------------------------------------------------------------------------------------------------------|
 | **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                           |
 | **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](/actor/actor-system). |
-| **PID**         | Process identifier—a live handle to a running actor. Used for all interactions.                                            |
+| **PID**         | Process identifier: a live handle to a running actor. Used for all interactions.                                            |
 | **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                              |
 | **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                                     |
 
@@ -37,9 +37,9 @@ Actors provide a natural model for concurrent and distributed systems:
 
 Every actor lives inside a tree. GoAkt creates guardian actors at startup:
 
-- **Root** — Top of the tree
-- **System** — Parent of internal actors (dead letter, scheduler, etc.)
-- **User** — Parent of all user-spawned actors
+- **Root**: Top of the tree
+- **System**: Parent of internal actors (dead letter, scheduler, etc.)
+- **User**: Parent of all user-spawned actors
 
 ```mermaid
 graph TD
@@ -213,6 +213,6 @@ single-threaded execution per actor, so no locks are needed inside `Receive`.
 
 ## Further reading
 
-- [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/) — Short introduction
-- [Messaging](/actor/messaging) — Tell vs Ask, message types
-- [Actor Lifecycle](/actor/lifecycle) — Spawn, stop, state transitions
+- [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/): Short introduction
+- [Messaging](/actor/messaging): Tell vs Ask, message types
+- [Actor Lifecycle](/actor/lifecycle): Spawn, stop, state transitions

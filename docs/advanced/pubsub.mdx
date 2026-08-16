@@ -31,7 +31,7 @@ In a cluster, each node has its own topic actor. **Topic actors communicate with
 
 ## When to use
 
-- Decouple publishers from subscribers—publishers do not need to know who is listening
+- Decouple publishers from subscribers: publishers do not need to know who is listening
 - Broadcast application events (e.g. order created, inventory updated) to multiple actors
 - Event-driven architectures where actors react to domain events
 
@@ -44,7 +44,7 @@ The **topic actor** is spawned when either:
 
 ```go
 system, _ := actor.NewActorSystem("app", actor.WithPubSub())
-// or: actor.WithCluster(config) — topic actor is spawned when cluster is enabled
+// or: actor.WithCluster(config); topic actor is spawned when cluster is enabled
 ```
 
 ## Topic actor
@@ -82,7 +82,7 @@ msg := actor.NewPublish(uuid.New().String(), "orders", orderEvent)
 ctx.Tell(ctx.ActorSystem().TopicActor(), msg)
 ```
 
-Subscribers receive the message as a normal `Receive` invocation—the payload is the published `message`, not a wrapper.
+Subscribers receive the message as a normal `Receive` invocation: the payload is the published `message`, not a wrapper.
 
 ## Cluster behavior
 

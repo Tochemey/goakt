@@ -18,15 +18,15 @@ Behaviors are stored on a stack. The top of the stack handles each incoming mess
 
 | Method                        | Purpose                                                                                                                                                     |
 |-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ctx.Become(behavior)`        | Replace the current behavior. The current message finishes under the old behavior; subsequent messages use the new one. No stack—previous behavior is lost. |
+| `ctx.Become(behavior)`        | Replace the current behavior. The current message finishes under the old behavior; subsequent messages use the new one. No stack: previous behavior is lost. |
 | `ctx.BecomeStacked(behavior)` | Push a new behavior on top. Current message still uses the existing behavior; subsequent messages use the new one until `UnBecomeStacked`.                  |
 | `ctx.UnBecomeStacked()`       | Pop the top behavior. Resume the previous one. No effect if the stack is empty.                                                                             |
 | `ctx.UnBecome()`              | Reset to the default (initial) behavior. Clears the stack.                                                                                                  |
 
 ## Become vs BecomeStacked
 
-- **Become** — Swap behavior. Use when transitioning to a new state and you do not need to return to the previous one.
-- **BecomeStacked** — Push behavior. Use when you need to temporarily handle messages differently, then pop back (e.g., a modal dialog, a temporary protocol phase).
+- **Become**: Swap behavior. Use when transitioning to a new state and you do not need to return to the previous one.
+- **BecomeStacked**: Push behavior. Use when you need to temporarily handle messages differently, then pop back (e.g., a modal dialog, a temporary protocol phase).
 
 ## Example
 

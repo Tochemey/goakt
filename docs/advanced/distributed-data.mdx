@@ -4,13 +4,13 @@ description: Replicated data structures that converge across cluster nodes witho
 sidebarTitle: "Distributed Data"
 ---
 
-**Distributed Data** provides replicated data structures — **Conflict-free Replicated Data Types (CRDTs)** — that can be updated independently on any node and are guaranteed to converge to a consistent state. No coordination, no locks, no consensus rounds.
+**Distributed Data** provides replicated data structures (**Conflict-free Replicated Data Types (CRDTs)**) that can be updated independently on any node and are guaranteed to converge to a consistent state. No coordination, no locks, no consensus rounds.
 
 This enables use cases like distributed counters, cluster-wide session registries, feature flags, and shopping carts where every node can read and write locally with immediate response, and all nodes converge automatically. With **multi-datacenter** cluster configuration and `WithDataCenterReplication`, the same CRDTs can also replicate **across** datacenters (leader batch flush over remoting), while each DC keeps its own cluster and TopicActor fan-out.
 
 ## Architecture
 
-Each node in the cluster runs its own **Replicator** system actor (`GoAktReplicator`). There is no central coordinator — each Replicator owns its node's local CRDT store and communicates with peer Replicators via GoAkt's existing [TopicActor](/advanced/pubsub) pub/sub system.
+Each node in the cluster runs its own **Replicator** system actor (`GoAktReplicator`). There is no central coordinator: each Replicator owns its node's local CRDT store and communicates with peer Replicators via GoAkt's existing [TopicActor](/advanced/pubsub) pub/sub system.
 
 ```mermaid
 graph TB
@@ -36,13 +36,13 @@ graph TB
 
 ### Data Flow
 
-**Step 1 — Subscription at startup.** When a Replicator starts (in `PostStart`), it subscribes to the well-known topic `goakt.crdt.deltas` via the TopicActor. This is a one-time operation — there is no per-key subscription. Every delta for every key flows through this single topic.
+**Step 1: Subscription at startup.** When a Replicator starts (in `PostStart`), it subscribes to the well-known topic `goakt.crdt.deltas` via the TopicActor. This is a one-time operation: there is no per-key subscription. Every delta for every key flows through this single topic.
 
-**Step 2 — Local update.** A user actor sends an `Update` message to its local Replicator. The Replicator applies the mutation to its local CRDT store, extracts the delta, encodes it as a protobuf `CRDTDelta` message (which includes the key ID, data type, origin node, and serialized delta state), and publishes it to the shared topic via the TopicActor.
+**Step 2: Local update.** A user actor sends an `Update` message to its local Replicator. The Replicator applies the mutation to its local CRDT store, extracts the delta, encodes it as a protobuf `CRDTDelta` message (which includes the key ID, data type, origin node, and serialized delta state), and publishes it to the shared topic via the TopicActor.
 
-**Step 3 — Dissemination.** The TopicActor delivers the protobuf delta to all subscribers of `goakt.crdt.deltas` — which is the Replicator on every other node. The TopicActor handles serialization (protobuf), remote TCP delivery, and deduplication. This is not a Replicator concern.
+**Step 3: Dissemination.** The TopicActor delivers the protobuf delta to all subscribers of `goakt.crdt.deltas`: which is the Replicator on every other node. The TopicActor handles serialization (protobuf), remote TCP delivery, and deduplication. This is not a Replicator concern.
 
-**Step 4 — Remote merge.** Each peer Replicator receives the protobuf delta, decodes it back to the CRDT type, ignores it if the origin is itself, and merges it into its local store using the type's merge function. If the merge changes the value, it notifies any local user actors watching that key.
+**Step 4: Remote merge.** Each peer Replicator receives the protobuf delta, decodes it back to the CRDT type, ignores it if the origin is itself, and merges it into its local store using the type's merge function. If the merge changes the value, it notifies any local user actors watching that key.
 
 ```mermaid
 sequenceDiagram
@@ -69,13 +69,13 @@ sequenceDiagram
     deactivate RB
 ```
 
-Both Replicators are **equal participants** — they both subscribe to the same topic and both can publish to it. There is no publisher/subscriber distinction. When Node B updates the same key, the flow is identical with roles reversed.
+Both Replicators are **equal participants**: they both subscribe to the same topic and both can publish to it. There is no publisher/subscriber distinction. When Node B updates the same key, the flow is identical with roles reversed.
 
 **Anti-entropy** runs periodically as a safety net. Each Replicator exchanges version digests with a random peer, and any divergent keys are repaired. This ensures convergence even if some deltas were lost during a network partition.
 
 ## CRDT types
 
-All types implement the `ReplicatedData` interface and are **immutable values** — every mutation returns a new value plus a delta. Values stored in generic CRDT types (`LWWRegister`, `ORSet`, `MVRegister`, `ORMap`) are typed as `any` and serialized over the wire using a composite Proto+CBOR serializer. Go primitives (`string`, `int`, `bool`, etc.) work out of the box; custom struct types require CBOR registration via `remote.WithSerializers`.
+All types implement the `ReplicatedData` interface and are **immutable values**: every mutation returns a new value plus a delta. Values stored in generic CRDT types (`LWWRegister`, `ORSet`, `MVRegister`, `ORMap`) are typed as `any` and serialized over the wire using a composite Proto+CBOR serializer. Go primitives (`string`, `int`, `bool`, etc.) work out of the box; custom struct types require CBOR registration via `remote.WithSerializers`.
 
 | Type          | Description                                                                                             | Primary use cases                    |
 | ------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -102,7 +102,7 @@ var (
 
 ## Enabling CRDTs
 
-CRDT replication is enabled through `ClusterConfig.WithCRDT(...)`. When not enabled, no Replicator is spawned — zero overhead.
+CRDT replication is enabled through `ClusterConfig.WithCRDT(...)`. When not enabled, no Replicator is spawned: zero overhead.
 
 ```go
 clusterConfig := actor.NewClusterConfig().
@@ -178,7 +178,7 @@ The Replicator PID is accessed via `ActorSystem.Replicator()`. It returns `nil` 
 
 ### Writing data
 
-Send an `Update` to the Replicator. The `Modify` function receives the current value as `ReplicatedData` — use a type assertion to access the concrete type.
+Send an `Update` to the Replicator. The `Modify` function receives the current value as `ReplicatedData`: use a type assertion to access the concrete type.
 
 ```go
 func (a *RateLimiter) Receive(ctx *actor.ReceiveContext) {
@@ -205,7 +205,7 @@ func (a *RateLimiter) Receive(ctx *actor.ReceiveContext) {
 
 ### Reading data
 
-Send a `Get` to the Replicator. The response's `Data` field is `ReplicatedData` — use a type assertion to access the concrete type.
+Send a `Get` to the Replicator. The response's `Data` field is `ReplicatedData`: use a type assertion to access the concrete type.
 
 ```go
 func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
@@ -229,7 +229,7 @@ func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
 
 ### Subscribing to changes
 
-Actors can watch keys and receive `Changed` notifications whenever the value changes — from local updates or peer deltas.
+Actors can watch keys and receive `Changed` notifications whenever the value changes: from local updates or peer deltas.
 
 ```go
 func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
@@ -467,7 +467,7 @@ CRDTs guarantee **convergence**, not immediate consistency. If your domain requi
 
 The CRDT subsystem is designed for moderate working sets, not billions of entries:
 
-- **All data is held in memory.** The in-memory store (`map[string]crdt.ReplicatedData`) is bounded only by the Go runtime's memory limits. There is no disk-backed storage for the working set — snapshots are a recovery optimization, not a storage tier.
+- **All data is held in memory.** The in-memory store (`map[string]crdt.ReplicatedData`) is bounded only by the Go runtime's memory limits. There is no disk-backed storage for the working set: snapshots are a recovery optimization, not a storage tier.
 - **New node convergence cost.** When a new node joins the cluster, it starts with an empty store and catches up via anti-entropy (periodic digest exchange with random peers, default every 30 seconds). All existing nodes collaborate, but transferring a large number of entries takes time proportional to the store size.
 - **No built-in entry count limit.** There is no enforced ceiling, but as a practical guideline, keep the number of top-level keys reasonable for your cluster size and network bandwidth. Tens of thousands of keys is fine; millions will strain anti-entropy and increase convergence time for new nodes.
 
@@ -475,7 +475,7 @@ The CRDT subsystem is designed for moderate working sets, not billions of entrie
 
 When a data entry is changed, the Replicator publishes a **delta** (incremental change) to peers. However, the full state of the entry is replicated in several situations:
 
-- The serialized delta exceeds `MaxDeltaSize` (default 64KB) — the Replicator falls back to full-state transfer.
+- The serialized delta exceeds `MaxDeltaSize` (default 64KB): the Replicator falls back to full-state transfer.
 - During anti-entropy, when a peer is detected to be behind on a key.
 - When new nodes join and need to catch up from scratch.
 
@@ -485,7 +485,7 @@ This means you should avoid very large individual CRDT values (e.g., an ORSet wi
 
 Some CRDT types accumulate metadata that grows over the lifetime of the system:
 
-- **GCounter and PNCounter** keep a counter slot per node ID. If many nodes are added and removed over time, the counter maps retain entries for every node that ever incremented them. There is currently **no automatic pruning of departed node slots** from counters — these entries persist indefinitely. For long-running clusters with high node churn, this can become a source of unbounded (though individually small) memory growth.
+- **GCounter and PNCounter** keep a counter slot per node ID. If many nodes are added and removed over time, the counter maps retain entries for every node that ever incremented them. There is currently **no automatic pruning of departed node slots** from counters: these entries persist indefinitely. For long-running clusters with high node churn, this can become a source of unbounded (though individually small) memory growth.
 - **ORSet and ORMap** track causal dots (one per unique add operation). Periodic compaction (`Compactable` interface) reduces redundant dots by keeping only the highest counter per node, but the number of distinct node entries still grows with cluster membership history.
 
 The Replicator runs a **prune cycle** (default every 5 minutes) that handles tombstone expiry and CRDT compaction, but does not yet implement full removed-node pruning (reassigning departed node state to a surviving node). This is a known gap and is planned for a future release.

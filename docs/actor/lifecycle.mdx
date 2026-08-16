@@ -19,14 +19,14 @@ Use `pid.IsRunning()`, `pid.IsSuspended()`, `pid.IsStopping()` to query state wh
 
 ## Lifecycle hooks
 
-- **PreStart** — Called once when the actor is spawned. Use for initialization.
-- **Receive** — Called for each message. This is where your logic lives.
-- **PostStop** — Called once when the actor is about to stop. Use for cleanup.
+- **PreStart**: Called once when the actor is spawned. Use for initialization.
+- **Receive**: Called for each message. This is where your logic lives.
+- **PostStop**: Called once when the actor is about to stop. Use for cleanup.
 
 ## Spawn and stop
 
-- **Spawn** — Creates the actor, registers it, calls `PreStart`, and starts the mailbox dispatch loop.
-- **Stop** — Sends a stop signal. The actor finishes current work, runs `PostStop`, and is removed from the tree.
+- **Spawn**: Creates the actor, registers it, calls `PreStart`, and starts the mailbox dispatch loop.
+- **Stop**: Sends a stop signal. The actor finishes current work, runs `PostStop`, and is removed from the tree.
 
 When a parent stops, all children stop first (depth-first). The order among descendants is not guaranteed.
 
@@ -68,7 +68,7 @@ Go structs in the `actor` package. Handle them in `Receive` when you need to rea
 | Message        | Role                                                                                                                                                                               |
 |----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **PostStart**  | Delivered as the first message after the actor is spawned. Use it to capture `ctx.Self()`, set up references, or perform logic that must run after the actor is fully started.     |
-| **PoisonPill** | Gracefully stops the actor. It is enqueued like any other message—the actor processes all messages already in the mailbox first, then shuts down. Use for clean, ordered shutdown. |
+| **PoisonPill** | Gracefully stops the actor. It is enqueued like any other message: the actor processes all messages already in the mailbox first, then shuts down. Use for clean, ordered shutdown. |
 
 ### Death watch
 

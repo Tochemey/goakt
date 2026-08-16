@@ -27,9 +27,9 @@ See [Architecture Overview](/architecture/overview) for the component diagram.
 Start(ctx) → [running] → Stop(ctx) → [stopped]
 ```
 
-- **NewActorSystem** — Applies options; does not start services.
-- **Start** — Initializes remoting (if enabled), cluster (if enabled), scheduler, eviction, passivation, and system actors. Handle SIGTERM/SIGINT and call `Stop` for clean shutdown.
-- **Stop** — Runs coordinated shutdown hooks, stops user actors, deactivates grains, shuts down system actors, leaves cluster, stops remoting. Does not exit the process; call `os.Exit` if needed.
+- **NewActorSystem**: Applies options; does not start services.
+- **Start**: Initializes remoting (if enabled), cluster (if enabled), scheduler, eviction, passivation, and system actors. Handle SIGTERM/SIGINT and call `Stop` for clean shutdown.
+- **Stop**: Runs coordinated shutdown hooks, stops user actors, deactivates grains, shuts down system actors, leaves cluster, stops remoting. Does not exit the process; call `os.Exit` if needed.
 
 Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [First Actor](/actor/first-actor).
 
@@ -65,8 +65,8 @@ See [PID](/actor/pid), [Location Transparency](/actor/location-transparency).
 
 From outside the actor system (e.g. `main`), use `system.NoSender()`:
 
-- `NoSender().Tell(pid, msg)` — Fire-and-forget.
-- `NoSender().Ask(ctx, pid, msg, timeout)` — Request-response; actor must call `ctx.Response(resp)`.
+- `NoSender().Tell(pid, msg)`: Fire-and-forget.
+- `NoSender().Ask(ctx, pid, msg, timeout)`: Request-response; actor must call `ctx.Response(resp)`.
 
 For processes that do not run an actor system (CLI, API server, batch job), use the [Client](/advanced/client) package to connect to the cluster and send messages by actor name.
 
@@ -142,17 +142,17 @@ Options are passed to `NewActorSystem(name, opts...)`. Each option is documented
 
 The ActorSystem composes:
 
-- **Remoting** — TCP server/client; used when `WithRemote` is set.
-- **Cluster** — Membership, discovery, Olric DMap; used when `WithCluster` is set.
-- **Event stream** — In-process pub/sub; always present; topic actors when `WithPubSub` is set.
-- **Scheduler** — For `ScheduleOnce`, `Schedule`, `ScheduleWithCron`.
-- **Extensions** — Accessed via `ctx.Extension(id)` from actors.
+- **Remoting**: TCP server/client; used when `WithRemote` is set.
+- **Cluster**: Membership, discovery, Olric DMap; used when `WithCluster` is set.
+- **Event stream**: In-process pub/sub; always present; topic actors when `WithPubSub` is set.
+- **Scheduler**: For `ScheduleOnce`, `Schedule`, `ScheduleWithCron`.
+- **Extensions**: Accessed via `ctx.Extension(id)` from actors.
 
 Actors obtain the system via `ctx.ActorSystem()` (or `ReceiveContext`, `GrainContext`). Use it to spawn children, resolve actors, schedule, or access extensions. Do not store the ActorSystem in actor state; always obtain it from context.
 
 ## Further reading
 
-- [First Actor](/actor/first-actor) — Minimal flow
-- [Actor Model](/actor/actor-model) — Actor interface and hierarchy
-- [Clustering](/clustering/overview) — Standalone vs clustered vs multi-DC
-- [Reference: Interfaces](/reference/interfaces) — Interface definitions
+- [First Actor](/actor/first-actor): Minimal flow
+- [Actor Model](/actor/actor-model): Actor interface and hierarchy
+- [Clustering](/clustering/overview): Standalone vs clustered vs multi-DC
+- [Reference: Interfaces](/reference/interfaces): Interface definitions

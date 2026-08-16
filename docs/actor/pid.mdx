@@ -4,7 +4,7 @@ description: Process identifier for location-transparent actor references.
 sidebarTitle: "PID"
 ---
 
-A **PID** is the sole actor reference in GoAkt. It is a live handle to a running actor—either local (same process) or remote (another node). All messaging goes through a PID.
+A **PID** is the sole actor reference in GoAkt. It is a live handle to a running actor: either local (same process) or remote (another node). All messaging goes through a PID.
 
 ## Role
 
@@ -21,7 +21,7 @@ A **PID** is the sole actor reference in GoAkt. It is a live handle to a running
 | **Local PID**  | Live mailbox, supervision state, full actor-system reference, etc.... Created by `Spawn`.                                        |
 | **Remote PID** | Lightweight handle with address and remoting; messaging via remoting layer. Returned by `ActorOf` when actor is on another node. |
 
-Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem()` returns `nil` for remote PIDs—guard before use.
+Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem()` returns `nil` for remote PIDs: guard before use.
 
 ## Key methods
 
@@ -40,9 +40,9 @@ Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem(
 
 ## Obtaining a PID
 
-- **Spawn** — `system.Spawn(ctx, name, actor)` returns a local PID.
-- **ActorOf** — `system.ActorOf(ctx, name)` returns local or remote PID.
-- **Context** — `ctx.Self()` (current actor), `ctx.Sender()` (message sender).
+- **Spawn**: `system.Spawn(ctx, name, actor)` returns a local PID.
+- **ActorOf**: `system.ActorOf(ctx, name)` returns local or remote PID.
+- **Context**: `ctx.Self()` (current actor), `ctx.Sender()` (message sender).
 
 ## NoSender
 

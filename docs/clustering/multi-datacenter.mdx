@@ -12,15 +12,15 @@ GoAkt supports multiple clusters across datacenters. A pluggable **control plane
 
 ![Multi-Datacenter Architecture - DC-1 and DC-2 clusters communicate via a Control Plane (NATS JetStream or etcd) for registration, heartbeats, and cross-DC messaging](/assets/multi-datacenter-architecture.png)
 
-- **Control plane** — Manages datacenter registration, heartbeats, state transitions, and event watching. Implementations: NATS JetStream, etcd.
-- **DC leader** — Only the cluster leader in each DC runs the datacenter controller. It registers the local DC with the control plane using cluster members' remoting addresses.
-- **DataCenterRecord** — Each DC has a record: ID, metadata (Name, Region, Zone, Labels), Endpoints (remoting addresses), State, LeaseExpiry, Version.
+- **Control plane**: Manages datacenter registration, heartbeats, state transitions, and event watching. Implementations: NATS JetStream, etcd.
+- **DC leader**: Only the cluster leader in each DC runs the datacenter controller. It registers the local DC with the control plane using cluster members' remoting addresses.
+- **DataCenterRecord**: Each DC has a record: ID, metadata (Name, Region, Zone, Labels), Endpoints (remoting addresses), State, LeaseExpiry, Version.
 
 ## When to use
 
-- **Geographic distribution** — Run actors close to users or data in different regions.
-- **Disaster recovery and failover** — Replicate or fail over to another DC.
-- **DC-aware placement** — Spawn actors in a specific datacenter via `SpawnOn` with `WithDataCenter`.
+- **Geographic distribution**: Run actors close to users or data in different regions.
+- **Disaster recovery and failover**: Replicate or fail over to another DC.
+- **DC-aware placement**: Spawn actors in a specific datacenter via `SpawnOn` with `WithDataCenter`.
 
 ## Control Planes
 
@@ -135,7 +135,7 @@ if err != nil {
 pid, err := system.ActorOf(ctx, "analytics-worker")
 ```
 
-Placement: the target is one of the target DC's `DataCenterRecord.Endpoints`, selected uniformly at random. Which node runs the actor depends on what that DC registered—if it registered all nodes' remoting addresses, the actor is placed on a random node in that DC.
+Placement: the target is one of the target DC's `DataCenterRecord.Endpoints`, selected uniformly at random. Which node runs the actor depends on what that DC registered: if it registered all nodes' remoting addresses, the actor is placed on a random node in that DC.
 
 The actor kind must be registered on the target DC's actor systems; otherwise the remote node returns `ErrTypeNotRegistered`.
 
@@ -169,6 +169,6 @@ See `datacenter/controlplane/nats` and `datacenter/controlplane/etcd` as referen
 
 ## See also
 
-- [Clustering](/clustering/overview) — Cluster setup and discovery
-- [Relocation](/actor/relocation) — Actor relocation within a cluster
-- [Remoting](/advanced/remoting) — Cross-node messaging
+- [Clustering](/clustering/overview): Cluster setup and discovery
+- [Relocation](/actor/relocation): Actor relocation within a cluster
+- [Remoting](/advanced/remoting): Cross-node messaging

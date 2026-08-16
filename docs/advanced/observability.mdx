@@ -18,7 +18,7 @@ dashboards and exporters.
 | **OpenTelemetry**     | Metrics exported when `WithMetrics()` is used                                              |
 | **Tracing**           | Zero-instrumentation actor traces via [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf) |
 
-All metrics are local—they reflect the current node only. Metrics are point-in-time snapshots; values do not update
+All metrics are local: they reflect the current node only. Metrics are point-in-time snapshots; values do not update
 after the struct is returned.
 
 ---
@@ -161,4 +161,4 @@ sys, _ := actor.NewActorSystem("app", actor.WithMetrics())
 
 ## Tracing
 
-For **zero-instrumentation distributed tracing** of actor message flows, use [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf). It runs as a sidecar process, attaches to your GoAkt v4 application via eBPF uprobes, and exports spans to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.)—no code changes or SDK dependency in your app.
+For **zero-instrumentation distributed tracing** of actor message flows, use [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf). It runs as a sidecar process, attaches to your GoAkt v4 application via eBPF uprobes, and exports spans to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.): no code changes or SDK dependency in your app.

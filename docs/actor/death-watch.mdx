@@ -38,13 +38,13 @@ case *actor.Terminated:
 
 ## When to use
 
-- **Dependencies** — Watch a child or peer; when it stops, recreate or fail over.
-- **Resource cleanup** — Release references to the stopped actor.
-- **Supervision** — Custom logic when a watched actor dies.
+- **Dependencies**: Watch a child or peer; when it stops, recreate or fail over.
+- **Resource cleanup**: Release references to the stopped actor.
+- **Supervision**: Custom logic when a watched actor dies.
 
 ## Automatic unwatch
 
-When an actor stops, the system automatically calls `UnWatch` on all actors it was watching. Watchers do not need to call `UnWatch` when they receive `Terminated`—the watch is already cancelled. Call `UnWatch` only when you want to stop watching before the target terminates.
+When an actor stops, the system automatically calls `UnWatch` on all actors it was watching. Watchers do not need to call `UnWatch` when they receive `Terminated`: the watch is already cancelled. Call `UnWatch` only when you want to stop watching before the target terminates.
 
 ## Example
 

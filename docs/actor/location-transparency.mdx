@@ -11,14 +11,14 @@ another node). The same Tell/Ask APIs work in both cases.
 
 ## How it works
 
-- **Local** — Message is enqueued directly into the actor's mailbox.
-- **Remote** — Message is serialized, sent over TCP, deserialized on the target node, and enqueued there.
+- **Local**: Message is enqueued directly into the actor's mailbox.
+- **Remote**: Message is serialized, sent over TCP, deserialized on the target node, and enqueued there.
 
 The caller uses the same `pid.Tell(msg)` or `pid.Ask(ctx, msg, timeout)` regardless of location.
 
 ## The Path interface
 
-`pid.Path()` returns a `Path` interface—the location-transparent actor identity:
+`pid.Path()` returns a `Path` interface: the location-transparent actor identity:
 
 ```go
 package actor

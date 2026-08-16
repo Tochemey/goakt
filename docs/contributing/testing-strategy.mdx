@@ -13,9 +13,9 @@ Tests are co-located with source code in `_test.go` files. There is no separate 
 The `testkit` package provides helpers for actor-level testing. See [TestKit](/actor/testkit) for full documentation.
 
 - **TestKit**: Creates a throwaway actor system. Provides Spawn, SpawnChild, Kill, Subscribe, NewProbe, NewGrainProbe, plus the package-level GrainOf and NodeGrainOf helpers for grain identities.
-- **Probe** — Test actor that records messages. Assertions: ExpectMessage, ExpectMessageOfType, ExpectNoMessage, ExpectTerminated; Send, SendSync; Watch, WatchNamed.
-- **GrainProbe** — Similar for grain testing.
-- **MultiNodes** — Multi-node cluster in-process for integration tests.
+- **Probe**: Test actor that records messages. Assertions: ExpectMessage, ExpectMessageOfType, ExpectNoMessage, ExpectTerminated; Send, SendSync; Watch, WatchNamed.
+- **GrainProbe**: Similar for grain testing.
+- **MultiNodes**: Multi-node cluster in-process for integration tests.
 
 Use probes instead of sleeps or polling for message assertions.
 
@@ -33,4 +33,4 @@ isolate components in unit tests.
 
 - New public types or behavior changes should have test coverage
 - Prefer TestKit probes for message-level assertions
-- Use testcontainers for external infrastructure—don't assume services on the host
+- Use testcontainers for external infrastructure: don't assume services on the host

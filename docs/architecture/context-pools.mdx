@@ -1,0 +1,416 @@
+---
+title: Context Pools
+description: Sharded lock-free pools for ReceiveContext and GrainContext envelopes on the messaging hot path.
+sidebarTitle: "Context Pools"
+---
+
+`context_pool.go` and `grain_context_pool.go` are sibling sharded free lists. They share ring geometry and sizing constants; they do not share rings, objects, or counters. This page teaches the actor pool in full. The [grain sibling](#grain-sibling) section is only the delta. Do not copy the ring, [ABA](#aba-protection), or [pairwise Tell](#pairwise-tell) walkthroughs there.
+
+`context_pool.go` is the **object pool for `ReceiveContext`**, the envelope every actor message rides in. Treat it as a lock-free data structure on the hottest path: local `Tell`/`Ask` take from it, and participating mailboxes return objects to it on dequeue. Not every mailbox recycles, and `dispatchOne` must not. Recycle is owned by the mailbox, not the dispatcher.
+
+## 1. The problem it exists to solve
+
+Every inbound message needs a `ReceiveContext`: sender, self, payload, optional response channel, request ID, mailbox link, and so on. That is a heap object. Under a [pairwise `Tell`](#pairwise-tell) workload you create and destroy millions of them per second.
+
+The old design was **one buffered channel shared by the whole process**. Every actor `get`/`put` serialized on that channel’s lock. Profiling showed ~80% of CPU inside `chansend`/`chanrecv`, and aggregate throughput collapsed to roughly the single-actor rate. The pool had become the global mutex of the runtime.
+
+The current design answers three requirements at once:
+
+1. **Reuse objects** so the allocator and GC are not on the hot path.
+2. **No global lock** so concurrent actors do not serialize.
+3. **Bounded memory** so a burst of messages cannot grow the pool forever.
+
+That is why this is not `sync.Pool`. `sync.Pool` is per-P, opportunistic, and can drop everything on GC. Here we need **reuse with home-shard affinity and a hard cap**. Under contention a get allocates and a put drops; the pool is a cache, not a guarantee that every envelope is reused.
+
+## 2. What is being pooled
+
+A `ReceiveContext` is both:
+
+- the **message envelope** (`message`, `sender`, `self`, `response`, …)
+- an **intrusive mailbox node** via `next`
+
+That second point is load-bearing. `UnboundedMailbox` is an MPSC linked list whose nodes *are* the contexts. A context can live in **at most one mailbox at a time**. That is why `cloneContext` exists: stash / re-enqueue must copy the envelope into a second object.
+
+Two fields on the envelope are pool-owned, not message-owned:
+
+| Field                      | Meaning                                              |
+| -------------------------- | ---------------------------------------------------- |
+| `PID.ctxShard`             | Home shard of the **actor**, assigned at spawn       |
+| `ReceiveContext.poolShard` | Home shard of **this object**, stamped at allocation |
+
+`reset()` deliberately does **not** clear `poolShard`. If you ever add it to `reset()`, objects start hopping shards and the isolation guarantee dies.
+
+## 3. How the pool is built (top down)
+
+Think of three layers.
+
+```text
+process
+  └── contextPool  (one, package-global)
+        └── N shards  (power of two, 8..128)
+              └── each shard: a 512-slot MPMC ring
+```
+
+### Layer A: shard count
+
+```go
+var contextShardCount = func() uint32 {
+	n := uint32(8)
+
+	for n < uint32(2*runtime.GOMAXPROCS(0)) && n < 128 {
+		n <<= 1
+	}
+
+	return n
+}()
+```
+
+At least twice `GOMAXPROCS`, floor 8, cap 128, always a power of two. Power of two is not aesthetics: every shard index is `x & mask` instead of `%`. Twice GOMAXPROCS is so concurrently running actors land on distinct rings instead of colliding on one.
+
+Actors are assigned shards round-robin at construction:
+
+```go
+func nextContextShard() uint32 {
+	return contextShardCounter.Add(1) & contextPool.mask
+}
+```
+
+That value is stored on the PID as `ctxShard`. Every later `getContext(to.ctxShard)` draws from **that actor’s home shard**, not a process-wide free list.
+
+A home shard is not a private ring. Shard count is `2 × GOMAXPROCS` (floored at 8, capped at 128), so many actors share a shard. Round-robin assignment *spreads* concurrently active actors so they are less likely to serialize on one ring; it does not give each actor exclusive cursors. Actors whose `ctxShard` collides **do** CAS the same `enqueuePos`/`dequeuePos`.
+
+### Layer B: a shard is Vyukov’s array MPMC queue
+
+Each `contextShard` is a bounded multi-producer, multi-consumer ring:
+
+```go
+type contextShard struct {
+	enqueuePos atomic.Uint64
+	_          CacheLinePadding
+
+	dequeuePos atomic.Uint64
+	_          CacheLinePadding
+
+	cells [contextShardCapacity]poolCell
+}
+```
+
+`CacheLinePadding` is 64 bytes. Producers bump `enqueuePos`; consumers bump `dequeuePos`. Without padding, those two atomics sit on the same cache line and every put invalidates every get’s line (false sharing). You will see the same padding on `UnboundedMailbox.head`/`tail`. Same lesson, same machine.
+
+Each cell is:
+
+```go
+type poolCell struct {
+	seq atomic.Uint64
+	ctx *ReceiveContext
+}
+```
+
+`seq` is the **publication protocol**. `ctx` is a plain pointer. That is legal because:
+
+- writers store `ctx` **then** store `seq`
+- readers load `seq` **then** load `ctx`
+
+The atomic on `seq` is the memory barrier. Do not “optimize” this into two atomics or a single CAS of a tagged pointer unless you re-prove the ordering.
+
+### Layer C: sequence numbers (the part people get wrong)
+
+On construction, cell `i` starts with `seq = i`. Empty ring: `enqueuePos = dequeuePos = 0`.
+
+A cell is **ready to fill** when `seq == enqueuePos`.
+A cell is **ready to take** when `seq == dequeuePos + 1`.
+
+After a successful put at position `pos`, the cell is published with `seq = pos + 1`.
+After a successful get at position `pos`, the cell is released with `seq = pos + capacity`.
+
+That last store is why wraparound works. The ring is 512 long. The cursors are `uint64` and grow forever. Indexing is `pos & (capacity-1)`. After one full lap, cell 0’s sequence is `512`, which equals the next enqueue position `512`. After two laps it is `1024`, and so on.
+
+This is also why the ring is **[ABA-safe](#aba-protection) without tagged pointers**. A stalled CAS that resumes after the ring has wrapped sees a sequence that no longer matches its `pos`, so the CAS fails instead of claiming a cell that now belongs to a later generation.
+
+The `diff` arithmetic in `push`/`pop` is the whole state machine:
+
+| `diff` | Meaning                                      | Action                   |
+| ------ | -------------------------------------------- | ------------------------ |
+| `0`    | This cell is yours if you win the cursor CAS | try CAS, then read/write |
+| `< 0`  | Empty (pop) or full (push)                   | give up                  |
+| `> 0`  | Another thread already claimed this slot     | reload cursor, retry     |
+
+`poolSpinLimit = 4` is the number of loop iterations in `push`/`pop`, not four retries after a first attempt. After those iterations, **get allocates**, **put drops for GC**. The pool is a cache, not a correctness requirement. Never spin unbounded here: a hot shard under contention would burn CPU to avoid a cheap `new(ReceiveContext)`.
+
+Capacity **bounds memory, not throughput**. Empty → heap. Full → GC. That is the contract.
+
+## 4. Object lifecycle (what actually happens at runtime)
+
+Walk a `Tell`:
+
+1. **Spawn.** `newPID` calls `nextContextShard()` and stores it on `pid.ctxShard`.
+
+2. **Send.** Local `toReceiveContext` / `PID.Tell` / `PID.Ask` call `getContext(to.ctxShard)`.
+   - Hit: pop from that shard. `get` does not restamp `poolShard`; the object already carries it from allocation.
+   - Miss: `new(ReceiveContext)` and stamp `poolShard`.
+   - Then `build(...)` fills message fields.
+
+   Remote `Tell` on the sender does not touch this pool. A few internal paths (`newReceiveContext`, used by `PipeTo`) allocate outside it; if those objects later pass through a recycling mailbox they re-enter as `poolShard == 0`.
+
+3. **Mailbox.** The context is enqueued. For `UnboundedMailbox`, `next` links it into the MPSC list. It is now **owned by the mailbox**, not the pool.
+
+4. **Dispatch.** `dispatchOne` runs the actor’s `Receive` against that object and **must not** return it to the pool. Recycle is owned by the mailbox `Dequeue` that handed it out.
+
+5. **Recycle.** Only some mailboxes return contexts to the pool. Know which:
+
+   - **`UnboundedMailbox` (default):** the dequeued node becomes the new sentinel. The *previous* sentinel is `reset()` + `contextPool.put` inside `Dequeue`. The context the actor just processed is **not** recycled yet; it is the new sentinel and will be recycled on the *next* dequeue. The mailbox’s initial sentinel is `new(ReceiveContext)` with `poolShard == 0`, so the first put lands on shard 0. `UnboundedFairMailbox` uses one `UnboundedMailbox` per sender, so it inherits this path.
+   - **`recycleContext` (one-dequeue-later):** `NonBlockingBoundedMailbox`, `BoundedPriorityMailbox`, `BoundedStablePriorityMailbox`, and `UnboundedStablePriorityMailbox` keep the last dequeued context in `prev` and call `recycleContext` on the *next* `Dequeue`. That helper `reset()`s, clears `next`, then `put`s.
+   - **No recycle:** `BoundedMailbox`, `UnboundedPriorityMailBox`, and `UnboundedSegmentedMailbox` return the pointer from `Dequeue` and never put it back. Those envelopes become GC work after the turn. That is intentional: they do not use the sentinel or `prev` scheme.
+
+6. **Home-shard return.** `put` always uses `ctx.poolShard`, not the caller’s shard hint. An object allocated for shard 2 always goes back to shard 2, even if some code path passed a different hint.
+
+`cloneContext` is the exception path: stash, unstash, anything that needs the same message in a second mailbox. It `get`s from the **source’s** home shard, copies message-scoped fields, and **must** clear `responseClosed`. `reset()` leaves that flag set on purpose (saves an atomic on the Tell path). Clones bypass `build()`, so a recycled Ask context would otherwise arrive with the late-reply guard already tripped and silently drop the response. There is a dedicated test for this. Do not “simplify” it.
+
+## 5. Invariants you must not break as a maintainer
+
+These are the landmines. The tests encode most of them; read `context_pool_test.go` as the spec.
+
+1. **`poolShard` is immutable after allocation.** `reset()` must not touch it. `put` returns to home shard only (`TestContextPool_PutReturnsToHomeShardOnly`).
+
+2. **A context is in exactly one place:** pool, or one mailbox, or in-hand on a dispatcher. Never pool an object that is still linked (`next != nil`). `recycleContext` clears `next` for that reason; `UnboundedMailbox.Dequeue` does it itself.
+
+3. **Never hold a pointer into a recycled context.** After `Ask` enqueues, the comment in `pid.go` is explicit: capture the response channel, then forget the context. It can be rebuilt for an unrelated message immediately after dequeue.
+
+4. **Overflow must drop, not block or panic.** `TestContextPool_OverflowDropsForGC` fills past capacity. If you add blocking, you can deadlock a dispatcher waiting to return a context.
+
+5. **Get must never return nil.** Empty or contended → allocate. Callers do not nil-check.
+
+6. **Power-of-two sizes are load-bearing.** Capacity 512, shard count 8/16/…/128. If you change either to a non-power-of-two, every `& (n-1)` becomes a silent bug.
+
+7. **Publication order:** write `ctx`, then `seq`; on pop, observe `seq`, then read `ctx`, then nil `ctx`, then advance `seq`. Reverse that and you have a data race the race detector may or may not catch depending on timing.
+
+8. **`cloneContext` must clear `responseClosed`.** The test `TestCloneContext_ClearsResponseClosed` exists because a FIFO leftover from a previous Ask will hide a missing `Store(false)` if you are not careful.
+
+9. **This pool is not the grain pool.** Same geometry, separate instance. See [Grain sibling](#grain-sibling). If you change `contextShardCapacity`, `poolSpinLimit`, or `contextShardCount`, decide whether the grain rings (and the grain ack-channel ring) move with them.
+
+## 6. How to think about a change
+
+Before you touch this file, ask:
+
+- **Am I changing topology** (shard count, capacity, padding)? Measure [pairwise Tell](#pairwise-tell) *and* many-actors-many-cores. The original bug was “looks fine on one actor.”
+- **Am I changing ownership?** Trace every `getContext` to its matching `put`. `UnboundedMailbox.Dequeue` and the `prev`-based mailboxes recycle one dequeue later; `BoundedMailbox`, `UnboundedPriorityMailBox`, and `UnboundedSegmentedMailbox` never put back. `dispatchOne` must not put.
+- **Am I adding a field to `ReceiveContext`?** Decide: does `reset()` clear it? Does `cloneContext` copy it? Does `build()` set it? Those three sites are a triple; miss one and you leak identity across messages.
+- **Am I tempted to use `sync.Pool` or a channel again?** That is the design we left. The comments at the top of the file are the postmortem.
+
+The concurrent test (`TestContextPool_ConcurrentGetPut`) is your safety net: it hammers one shared shard and many shards, and touches a field while the object is held so the race detector screams if two goroutines ever own the same context.
+
+## 7. Mental model to keep
+
+> A `ReceiveContext` is a **ticket**.
+> The actor’s `ctxShard` is **which window** issues tickets.
+> Each window is a **512-slot lock-free ring**.
+> If the window is empty you print a new ticket; if it is full you throw the returned ticket away.
+> Tickets always go back to the window that printed them.
+
+Once that picture is solid, the CAS loops are just the implementation of “take from window / return to window” without a mutex. The rest of the file (`getContext`, `recycleContext`, `cloneContext`, `nextContextShard`) is the runtime-facing API that keeps the rest of `actor/` from having to know any of this.
+
+When you are ready to go deeper, the next files to read in order are `receive_context.go` (`reset`/`build`), `unbounded_mailbox.go` (sentinel recycle), then `stash.go` (`cloneContext`). That is the full ownership story.
+
+## 8. 512-slot MPMC ring
+
+That phrase is three claims glued together. Unpack them in order: **ring**, **512-slot**, **MPMC**. Then they snap onto `contextShard`.
+
+### Ring
+
+A ring (circular buffer) is a **fixed array that wraps**. You never grow it. You never shift elements. Two cursors walk it forever:
+
+- `enqueuePos`: where the next spare context is stored (put / push)
+- `dequeuePos`: where the next spare context is taken (get / pop)
+
+The physical index is always:
+
+```text
+cells[pos & (capacity - 1)]
+```
+
+For 512, that is `pos & 511`. Position `0` and position `512` and position `1024` are the **same cell**. The cursors are `uint64` and only go up; wraparound is in the index, not in the counters.
+
+Empty: `enqueuePos == dequeuePos`
+Full: the putter has lapped the getter by exactly `capacity` (512 unused puts would overwrite live slots, so put gives up instead)
+
+Think of a revolving door with 512 stalls. People enter at one pointer, leave at the other. When you pass stall 511 you are back at stall 0, but you remember *which lap* you are on. That lap number is the cell’s `seq`.
+
+### 512-slot
+
+`contextShardCapacity = 512`. That is **how many `ReceiveContext` pointers one shard may hold at rest**. It is not how many messages the actor system can process.
+
+| Empty shard                           | Full shard                          |
+| ------------------------------------- | ----------------------------------- |
+| `get` allocates `new(ReceiveContext)` | `put` drops the object; GC takes it |
+
+So 512 is a **memory cap per shard**, not a throughput cap. Throughput is “how fast can you push and pop.” Capacity is “how many spare envelopes we keep warm.”
+
+It must be a power of two. Indexing is a bitmask (`pos & 511`). If someone changed it to 500, every `& (capacity-1)` would map two different positions onto the same cell and corrupt the ring.
+
+Why 512 rather than 8 or 8192? Enough that a burst of in-flight messages (mailbox depth + a few extra gets) usually hits a pooled object, small enough that 128 shards × 512 pointers is still a bounded, predictable footprint. The comments say this explicitly: capacity bounds pooled memory, not throughput.
+
+Each slot is a `poolCell`:
+
+```go
+type poolCell struct {
+	seq atomic.Uint64
+	ctx *ReceiveContext
+}
+```
+
+`ctx` is the payload (or `nil` when empty). `seq` is the lap counter that tells a cursor “this stall is vacant” vs “this stall holds an object from *my* generation.”
+
+On init, cell `i` gets `seq = i`. That makes the first put at position `i` see `seq == enqueuePos` and treat the cell as empty.
+
+### MPMC
+
+**M**ulti-**P**roducer **M**ulti-**C**onsumer: many goroutines may `push` at once, and many may `pop` at once, **without a mutex**.
+
+That matches the runtime:
+
+- **Producers (put):** every mailbox consumer recycling a context. Many actors, many dispatcher workers.
+- **Consumers (get):** every `Tell`/`Ask` to actors on this shard. Many senders.
+
+Contrast with `UnboundedMailbox`, which is **MPSC** (many enqueue, *one* dequeue: the actor’s dispatcher). A shard cannot be MPSC: there is no single owner of a shard. Many actors share a shard (round-robin assignment), and both send and recycle hit it.
+
+The algorithm is Vyukov’s array MPMC queue. The trick is **not** locking the ring. The trick is:
+
+1. Load my cursor (`enqueuePos` or `dequeuePos`).
+2. Look at that cell’s `seq`.
+3. If `seq` says the cell is ready for *this* `pos`, **CAS the cursor forward** (`pos` → `pos+1`). Winning the CAS is how you claim the slot. Losing means another thread took it; reload and retry, up to `poolSpinLimit` (4) loop iterations total.
+4. Only the winner writes or reads `ctx`, then publishes a new `seq`.
+
+Worked micro-example with capacity 4, so you can see 512 later as “the same, just bigger”:
+
+```text
+cells:  [0]    [1]    [2]    [3]
+seq:     0      1      2      3     ← constructed empty
+enqueuePos = 0, dequeuePos = 0
+```
+
+**First put** at `pos=0`: `seq(0)==0` → cell empty and ours. CAS `enqueuePos` 0→1. Store the pointer. Store `seq=1` (that is `pos+1`). Slot 0 is now full.
+
+**First get** at `pos=0`: `seq(0)==1` which equals `dequeuePos+1` → cell full and ours. CAS `dequeuePos` 0→1. Take the pointer, nil the cell, store `seq=4` (that is `pos+capacity`). Slot 0 is empty *for the next lap*.
+
+**Next put** that lands on slot 0 will have `enqueuePos=4`. `seq==4==pos`, so it is empty again. Without `+ capacity`, a late CAS from lap 0 could think the cell was still its own. That is the [ABA protection](#aba-protection).
+
+`diff` is just `seq - pos` (put) or `seq - (pos+1)` (get):
+
+- `0`: this cell matches this cursor; try to claim it
+- `< 0`: empty (get) or full (put); stop
+- `> 0`: someone else already moved past this cell; reload the cursor
+
+After `poolSpinLimit` loop iterations, get allocates and put drops. The ring never blocks. Blocking a dispatcher on “wait for a free slot” would be a deadlock waiting to happen.
+
+### Put the three words back together
+
+**Each shard** is its own tiny pool, isolated from the others (own cursors, own 512 cells, padded so get and put do not false-share a cache line). Isolation is between shards, not between actors: many PIDs share one shard.
+
+**A 512-slot MPMC ring** means: a circular array of 512 cells, concurrent puts and gets, lock-free, bounded. It is the data structure that implements “here are some spare `ReceiveContext`s for the actors assigned to this shard.”
+
+If you remember one sentence:
+
+> A shard is not a list and not a channel. It is a fixed revolving array that many threads can fill and drain at once, and when it is empty or full it refuses instead of waiting.
+
+## 9. ABA protection {#aba-protection}
+
+ABA is a false “nothing changed.”
+
+A compare-and-swap only compares bits. It asks: is this still A? If yes, write C. It cannot ask: is this still the *same* A I saw, or a later A that just looks identical?
+
+The letters are the three states:
+
+1. You observe **A**.
+2. While you are preempted, other threads change A to **B**, then back to **A**.
+3. You resume, CAS succeeds, and you finish an operation against a structure that has been emptied, reused, and refilled. You think you were first. You were last.
+
+A locker-room picture: you see your coat on hook 0 (A). You look away. Someone takes it, hangs a different coat (B), then hangs another coat on hook 0 that happens to look like yours (A again). You come back, the hook still “matches,” and you take the wrong coat. The hook number did not change. The generation did.
+
+That is why a pointer CAS on a recycled node is dangerous. The node can be popped, used for something else, and pushed back. The address is A again. The meaning is not.
+
+This ring does not CAS on `ctx`. It CAS-es the cursor (`enqueuePos` / `dequeuePos`), and it stamps each cell with a `seq` that increases every lap (`pos + capacity` after a get). After one wrap, cell 0’s sequence is `512`, not `0`. A stalled put that still believes `pos == 0` loads `seq == 512`, sees a mismatch, and fails instead of writing into a cell that now belongs to the next lap.
+
+The sequence number is a generation counter. Same slot, different era. That is the ABA protection.
+
+## 10. Pairwise Tell {#pairwise-tell}
+
+**Pairwise Tell** is a *workload shape*, not a different API. It still calls `Tell`. What changes is *who talks to whom*.
+
+You run **N independent sender/receiver couples in parallel**, each couple isolated from the others. In this repo, N is `GOMAXPROCS`: eight cores means eight senders, eight receivers, eight private conversations at once. The number you report is the **sum** of all those conversations (messages per second across the whole process).
+
+That is `BenchmarkTellPairwise` in `benchmark/pairwise_test.go`.
+
+### Three Tell shapes, and why they are not interchangeable
+
+| Benchmark                 | Topology                            | What the number actually measures                                                            |
+| ------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `BenchmarkTell`           | Many producers → **one** receiver   | That one actor’s drain rate. Send-path contention is hidden behind the single consumer.      |
+| `BenchmarkTellSinglePair` | **One** producer → **one** receiver | Per-message cost with a contention-free enqueue. The “how fast is one conversation?” number. |
+| `BenchmarkTellPairwise`   | **N** private pairs, in parallel    | Whether independent conversations **add up**. The scaling surface.                           |
+
+`BenchmarkTell` looks busy (many goroutines) but serializes on one mailbox. If the old global context-pool channel was a bottleneck, you would never see it there: the receiver was already the ceiling.
+
+`BenchmarkTellSinglePair` is honest about one conversation, and useless for “does the runtime scale?” Gets and puts for that pair use the **receiver’s** `ctxShard` (the sender’s shard is unused on this path) and the receiver’s mailbox. Dispatcher workers remain a shared pool.
+
+`BenchmarkTellPairwise` is the question the pool was rewritten to answer: **if I add more unrelated actor pairs, does aggregate throughput go up, or stay flat?**
+
+Ideal: `pairwise ≈ N × single-pair`.
+Flat: something in the process is shared (the old channel pool, a global lock, one ready-queue mutex). That is the “capping aggregate throughput at roughly the single-actor rate” line in `context_pool.go`.
+
+The v4.5.0 changelog reports, on an 8-core Apple M1: single-pair Tell 7.8M → ~12M msg/s; pairwise Tell 9.3M → 25M. The second jump is the one that shows the process-wide channel lock is gone. Before the change, 9.3M pairwise next to 7.8M for one pair meant seven extra pairs bought almost nothing. After it, pairwise is still not `8 ×` the single-pair rate (the dispatcher and allocator remain shared), but it is no longer glued to the single-actor ceiling.
+
+### Why “pair”
+
+Each unit of work is a **pair**: one producer goroutine, one receiver actor, messages flow only between those two. No fan-in, no shared mailbox, no one actor as a chokepoint.
+
+That is the same idea as pairwise independence in concurrent systems: if two conversations do not share state, their rates should add. Any leftover sharing is a bug in the runtime, not in the benchmark.
+
+`AskPairwise` is the same topology with `Ask` instead of `Tell` (sequential round trips per pair). Same diagnostic, different path (reply channels, timers).
+
+### How it connects back to the pool
+
+A pairwise Tell workload is exactly what sharding is for:
+
+- Each receiver is assigned a `ctxShard` at spawn (round-robin, shared with other actors).
+- Each pair’s `getContext`/`put` uses the **receiver’s** home shard, not a process-wide channel.
+- With `GOMAXPROCS` pairs and `2 × GOMAXPROCS` shards, pairs *tend* to land on different rings, which is why this workload exposes a global lock. It does not prove exclusive per-actor rings; when actor count exceeds shard count, sharing is guaranteed.
+
+If you ever change the pool, `BenchmarkTellSinglePair` tells you whether you made one message cheaper. `BenchmarkTellPairwise` tells you whether you reintroduced a process-wide bottleneck. Cite the second number for multi-actor claims.
+
+## 11. Grain sibling {#grain-sibling}
+
+`grain_context_pool.go` is a typed copy of the same Vyukov MPMC ring, not a second tutorial. `push` / `pop`, `seq`, [ABA protection](#aba-protection), empty-allocate / full-drop, and the sizing constants (`contextShardCapacity`, `poolSpinLimit`, `contextShardCount`) are shared. Everything below is what is *not* true of the actor pool.
+
+**Separate instance.** `grainContextPool` and `contextPool` are two process-global pools. `grainContextShardCounter` does not share a round-robin with `contextShardCounter`. An actor on shard 3 and a grain on shard 3 are on different rings.
+
+**Different payload.** Cells hold `*GrainContext`, not `*ReceiveContext`. `grainPID.ctxShard` is assigned by `nextGrainContextShard()` at grain-process construction. There is no `cloneContext`; grains do not stash an envelope into a second mailbox that way.
+
+**Recycle mix.** Grains recycle mostly from mailbox dequeue:
+
+- **`grainMailbox.Dequeue`** is the sentinel path, same idea as `UnboundedMailbox`: the previous head is `reset()`, `next` cleared, `grainContextPool.put`.
+- **`releaseGrainContext`** is for failed enqueue (bounded mailbox full, timer tick dropped, passivation pill refused). It is not the steady-state drain path.
+
+`next` is `atomic.Pointer[*GrainContext]`, not `unsafe.Pointer`. `releaseGrainContext` uses `gctx.next.Store(nil)`.
+
+**Ack-channel pool in the same file.** The bottom half of `grain_context_pool.go` is a third sibling ring, `grainErrorChannelPool`: buffered capacity-1 error channels for `TellGrain` processed-acks. Callers index it with the context’s `poolShard`, so get and put stay on the same shard as the envelope.
+
+That pool exists because `TellGrain` blocks until the grain has processed the message. A process-wide `errorCh` put two channel-lock crossings on every tell once contexts were already sharded. `AskGrain` does **not** use it: grain Ask replies use `getResponseChannel()`, a fresh `make(chan any, 1)`, same late-reply reason as actor Ask.
+
+On `TellGrain` timeout, **do not** `putGrainErrorChannel`. The grain may still send on that channel; the timeout path abandons it to the GC. Returning it would hand the next borrower a stale ack.
+
+**How to think about a grain-side change.**
+
+- Topology constants are shared. Changing them is a both-or-reasoned decision, including the ack-channel ring.
+- Recycle / `GrainContext` fields / `TellGrain` acks: leave `context_pool.go` alone.
+- Scaling surface: `BenchmarkGrainTellPairwise` and `BenchmarkGrainAskPairwise` are the grain analogue of [pairwise Tell](#pairwise-tell). Single-grain tell cannot see a process-wide pool lock.
+
+Tests live in `grain_context_pool_test.go`.
+
+## See also
+
+- [Dispatcher Pool](/architecture/dispatcher-pool): the scheduler that drains mailboxes; `dispatchOne` must not return contexts to the pool
+- [Mailboxes](/actor/mailboxes): `UnboundedMailbox` sentinel recycle vs `recycleContext`
+- [Stashing](/actor/stashing): `cloneContext` when a message must enter a second mailbox
+- [Code Map](/architecture/code-map): `actor/context_pool.go` and `actor/grain_context_pool.go`
+- [Grains](/grains/overview): identity-addressed activation; `TellGrain` still blocks for a processed ack
+- [Design Decisions](/architecture/design-decisions): rationale for sharding instead of a process-wide channel

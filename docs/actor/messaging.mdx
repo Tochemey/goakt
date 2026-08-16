@@ -11,8 +11,8 @@ sidebarTitle: "Messaging"
 | **Tell** | Fire-and-forget  | None                 |
 | **Ask**  | Request-response | Future you can await |
 
-Use **Tell** when you don't need a reply—logging, notifications, commands that trigger side effects. Use **Ask** when
-you need a result—queries, computations, or any flow that depends on the response.
+Use **Tell** when you don't need a reply: logging, notifications, commands that trigger side effects. Use **Ask** when
+you need a result: queries, computations, or any flow that depends on the response.
 
 ## Message types (v4)
 
@@ -28,11 +28,11 @@ without serialization.
 ### Keep messages pure
 
 Treat every message as a **pure data struct**: fields should carry only values the receiver needs to process the
-message (IDs, payloads, commands, query parameters). Prefer **immutable** messages—do not mutate a message after it
+message (IDs, payloads, commands, query parameters). Prefer **immutable** messages: do not mutate a message after it
 has been sent, and do not share mutable references between actors through message fields.
 
 <Warning>
-Do **not** embed concurrency primitives in messages to collect a reply—especially `chan` fields, mutexes, wait
+Do **not** embed concurrency primitives in messages to collect a reply: especially `chan` fields, mutexes, wait
 groups, or callbacks. That couples the sender's goroutine to the actor's mailbox, breaks the actor model, and can
 cause races, deadlocks, or unpredictable behavior when messages are stashed, forwarded, retried, or sent remotely
 (channels and function values do not serialize).
@@ -69,6 +69,6 @@ before sending.
 
 ## No shared state
 
-Actors never share memory. All communication is through pure, preferably immutable message structs—not shared channels,
+Actors never share memory. All communication is through pure, preferably immutable message structs: not shared channels,
 mutable bags of state, or callbacks stuffed into the payload. That discipline eliminates whole classes of concurrency
 bugs and keeps behavior predictable under remoting, supervision, and mailbox scheduling.

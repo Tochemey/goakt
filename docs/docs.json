@@ -42,6 +42,10 @@
     {
       "source": "/advanced/reliable-delivery",
       "destination": "/clustering/reliable-delivery/point-to-point"
+    },
+    {
+      "source": "/architecture/context-pool",
+      "destination": "/architecture/context-pools"
     }
   ],
   "navigation": {
@@ -137,7 +141,8 @@
           "/architecture/overview",
           "/architecture/code-map",
           "/architecture/design-decisions",
-          "/architecture/dispatcher-pool"
+          "/architecture/dispatcher-pool",
+          "/architecture/context-pools"
         ],
         "icon": "blocks"
       },

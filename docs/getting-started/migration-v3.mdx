@@ -104,8 +104,8 @@ instead of `*timestamppb.Timestamp`.
 
 | Case                   | Old                | New                       |
 |------------------------|--------------------|---------------------------|
-| Actor found locally    | `(addr, pid, nil)` | `(pid, nil)` — local PID  |
-| Actor found in cluster | `(addr, nil, nil)` | `(pid, nil)` — remote PID |
+| Actor found locally    | `(addr, pid, nil)` | `(pid, nil)`: local PID  |
+| Actor found in cluster | `(addr, nil, nil)` | `(pid, nil)`: remote PID |
 | Not found              | `(nil, nil, err)`  | `(nil, err)`              |
 
 **Migration:** Use `pid.Path()` for host/port/name/system; `pid.IsLocal()` / `pid.IsRemote()` for location.
@@ -164,8 +164,8 @@ Actors(ctx context.Context, timeout time.Duration) ([]*PID, error)
 The remoting client is internal. The `remote` package exposes only configuration and protocol types (`Config`,
 `Serializer`, `Compression`, `ContextPropagator`, etc.).
 
-**Migration:** Replace `remote.Remoting` / `remote.Client` — use actor system and `client.Node` APIs. Replace
-`remote.NewRemoting()` / `remote.NewClient()` — use `WithRemote(config)` when creating the actor system. For tests:
+**Migration:** Replace `remote.Remoting` / `remote.Client`: use actor system and `client.Node` APIs. Replace
+`remote.NewRemoting()` / `remote.NewClient()`: use `WithRemote(config)` when creating the actor system. For tests:
 `mockremote.NewClient(t)` for mock injection.
 
 ---
@@ -202,20 +202,20 @@ Custom `Logger` implementations must implement additional methods:
 
 ### Pluggable serialization
 
-- **ProtoSerializer** — Default for `proto.Message`. No change for protobuf users.
-- **CBORSerializer** — For arbitrary Go types. Register via
+- **ProtoSerializer**: Default for `proto.Message`. No change for protobuf users.
+- **CBORSerializer**: For arbitrary Go types. Register via
   `remote.WithSerializers(new(MyMessage), remote.NewCBORSerializer())`; types are auto-registered.
-- **Custom** — Implement `remote.Serializer`; register via `WithSerializers` on `remote.Config`.
+- **Custom**: Implement `remote.Serializer`; register via `WithSerializers` on `remote.Config`.
 
 ### Path interface
 
-`pid.Path()` returns a `Path` interface—location-transparent actor identity.
+`pid.Path()` returns a `Path` interface: location-transparent actor identity.
 See [Location Transparency](/actor/location-transparency#the-path-interface).
 
 ### New sentinel errors
 
-- `errors.ErrRemotingDisabled` — Remote operation attempted but remoting not configured
-- `errors.ErrNotLocal` — Operation requires local PID but remote PID provided
+- `errors.ErrRemotingDisabled`: Remote operation attempted but remoting not configured
+- `errors.ErrNotLocal`: Operation requires local PID but remote PID provided
 
 ### PID.Kind()
 
@@ -223,9 +223,9 @@ See [Location Transparency](/actor/location-transparency#the-path-interface).
 
 ### Log implementations
 
-- `log.NewSlog(level, writers...)` — stdlib slog with low-GC optimizations
-- `log.NewZap(level, writers...)` — Zap with buffered file output
-- `log.DiscardLogger` — No-op for tests
+- `log.NewSlog(level, writers...)`: stdlib slog with low-GC optimizations
+- `log.NewZap(level, writers...)`: Zap with buffered file output
+- `log.DiscardLogger`: No-op for tests
 
 ---
 

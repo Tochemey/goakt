@@ -32,7 +32,7 @@ Raw actor messaging requires you to handle buffer overflow, message loss, and ba
 | `Source[T]`     | Origin of stream elements; produces values of type `T`                      |
 | `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                            |
 | `Sink[T]`       | Terminal consumer; processes elements and drives backpressure               |
-| `SubFlow[K, T]` | "Stream of streams" — partition by key, transform per-substream, merge back |
+| `SubFlow[K, T]` | "Stream of streams": partition by key, transform per-substream, merge back |
 | `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times     |
 | `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics       |
 
@@ -102,7 +102,7 @@ g := stream.ViaLinear(
 
 ## Sources
 
-Sources are the origin of stream data. All sources apply backpressure — they produce only as many elements as downstream demands.
+Sources are the origin of stream data. All sources apply backpressure: they produce only as many elements as downstream demands.
 
 ### Finite sources
 
@@ -243,7 +243,7 @@ stream.FlatMapMerge(8, func(userID int) stream.Source[Order] {
 ```
 
 Backpressure is bounded by the breadth: the FlatMap stage requests at most `breadth` elements from upstream, and
-the next batch is requested only as sub-sources complete — so a slow inner source naturally throttles the outer
+the next batch is requested only as sub-sources complete: so a slow inner source naturally throttles the outer
 pipeline. Sub-pipeline handles are tracked and aborted on cancellation or failure to avoid leaking goroutines.
 
 ### Windowing and rate control
@@ -265,7 +265,7 @@ stream.Buffer[int](256, stream.DropTail)
 // Deduplicate: suppresses consecutive duplicates (T must be comparable)
 stream.Deduplicate[string]()
 
-// Scan: running accumulation — emits each intermediate state
+// Scan: running accumulation; emits each intermediate state
 stream.Scan(0, func(acc, n int) int { return acc + n })
 ```
 
@@ -275,10 +275,10 @@ stream.Scan(0, func(acc, n int) int { return acc + n })
 must match input order:
 
 ```go
-// Unordered — results arrive as goroutines complete
+// Unordered: results arrive as goroutines complete
 stream.ParallelMap(8, func(req Request) Response { return callAPI(req) })
 
-// Ordered — min-heap resequences results to preserve input order
+// Ordered: min-heap resequences results to preserve input order
 stream.OrderedParallelMap(8, func(req Request) Response { return callAPI(req) })
 ```
 
@@ -392,7 +392,7 @@ Both pipelines must be materialized. The upstream sub-pipeline starts once the *
 ### Balance
 
 `Balance` distributes elements across N branches using round-robin routing with backpressure. Each element goes to
-exactly one branch — the next one with available demand. Use this to parallelise work across independent consumers:
+exactly one branch: the next one with available demand. Use this to parallelise work across independent consumers:
 
 ```go
 workers := stream.Balance[Job](stream.FromChannel(jobCh), 4)
@@ -572,7 +572,7 @@ ordered := stream.MergeSequence(
 
 ## Substreams (SubFlow)
 
-Three constructors produce a `SubFlow`, each with different routing semantics: `GroupBy` partitions by a key function (one substream per distinct key, materialised lazily), `SplitWhen` starts a new substream when a predicate is true (the triggering element becomes the FIRST of the new substream), and `SplitAfter` ends the current substream after a predicate-true element (the triggering element becomes the LAST of the closing substream). Per-substream state — `Scan` accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain — is genuinely independent because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams` collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across substreams while preserving order within a single substream.
+Three constructors produce a `SubFlow`, each with different routing semantics: `GroupBy` partitions by a key function (one substream per distinct key, materialised lazily), `SplitWhen` starts a new substream when a predicate is true (the triggering element becomes the FIRST of the new substream), and `SplitAfter` ends the current substream after a predicate-true element (the triggering element becomes the LAST of the closing substream). Per-substream state (`Scan` accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain) is genuinely independent because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams` collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across substreams while preserving order within a single substream.
 
 ```go
 // Partition events by tenantID, count events per tenant via a per-substream
@@ -588,7 +588,7 @@ stream.From(merged).
     Run(ctx, sys)
 ```
 
-The key function is captured at `GroupBy` time and applied to upstream elements regardless of how many `SubFlowVia` calls follow — the per-substream output type can change freely without affecting routing.
+The key function is captured at `GroupBy` time and applied to upstream elements regardless of how many `SubFlowVia` calls follow: the per-substream output type can change freely without affecting routing.
 
 ### Splitting on a delimiter
 
@@ -607,7 +607,7 @@ sf  := stream.SplitWhen(src, func(n int) bool { return n == 0 })
 sf  := stream.SplitAfter(src, func(n int) bool { return n == 0 })
 ```
 
-These are the natural primitives for parsing delimited streams (newline-terminated frames, control sentinels, batch markers) where each delimiter starts or ends a logical group rather than tagging a key. Substreams are sequential — at most one is actively receiving new elements at a time — so the `maxSubstreams` cap is generally unnecessary and `0` (unbounded) is fine.
+These are the natural primitives for parsing delimited streams (newline-terminated frames, control sentinels, batch markers) where each delimiter starts or ends a logical group rather than tagging a key. Substreams are sequential (at most one is actively receiving new elements at a time), so the `maxSubstreams` cap is generally unnecessary and `0` (unbounded) is fine.
 
 ### Cardinality cap
 
@@ -629,7 +629,7 @@ sf := stream.GroupBy(src, 0, keyFn).
 | Strategy                          | Behaviour                                                                                                                                   |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DropTail` (default)              | Discard the newest element when the substream is at capacity                                                                                |
-| `DropHead` / `BackpressureSource` | Currently collapse to drop-newest — `DropHead` would break per-key ordering and `BackpressureSource` would deadlock the splitter on inbound |
+| `DropHead` / `BackpressureSource` | Currently collapse to drop-newest: `DropHead` would break per-key ordering and `BackpressureSource` would deadlock the splitter on inbound |
 | `FailSource`                      | Terminate the stream with `ErrSubstreamOverflow`                                                                                            |
 
 Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
@@ -701,13 +701,13 @@ g := stream.NewGraph().
 
 ## Cross-node stream refs
 
-`SourceRef[T]` and `SinkRef[T]` are wire-portable handles to a stream endpoint actor. Pass one inside any registered remote message and a different node materialises it back into an ordinary `Source[T]` or `Sink[T]` — the same fluent builder works whether the producer and consumer share an actor system or live on opposite ends of a cluster. The model mirrors Akka StreamRefs.
+`SourceRef[T]` and `SinkRef[T]` are wire-portable handles to a stream endpoint actor. Pass one inside any registered remote message and a different node materialises it back into an ordinary `Source[T]` or `Sink[T]`: the same fluent builder works whether the producer and consumer share an actor system or live on opposite ends of a cluster. The model mirrors Akka StreamRefs.
 
-Refs encode the producer node's address (host, port, actor name), so cross-node resolution is a direct `RemoteLookup` against the producer's remote server. There is no reliance on cluster-registry replication — the consumer can resolve and subscribe the moment the producer node is reachable, regardless of how loaded the cluster's actor registry is.
+Refs encode the producer node's address (host, port, actor name), so cross-node resolution is a direct `RemoteLookup` against the producer's remote server. There is no reliance on cluster-registry replication: the consumer can resolve and subscribe the moment the producer node is reachable, regardless of how loaded the cluster's actor registry is.
 
 ### Setup
 
-Cross-node refs only work when both sides of the connection have the wire control protocol **and** the element type registered with their remoting layer. Without this registration the consumer's bridge can't subscribe (control messages won't deserialize) or the producer's elements can't be serialised — symptoms include hanging `Run` calls, stream-level `"no serializer found for message type ..."` errors, and elements silently routed to dead-letter.
+Cross-node refs only work when both sides of the connection have the wire control protocol **and** the element type registered with their remoting layer. Without this registration the consumer's bridge can't subscribe (control messages won't deserialize) or the producer's elements can't be serialised: symptoms include hanging `Run` calls, stream-level `"no serializer found for message type ..."` errors, and elements silently routed to dead-letter.
 
 **Required on every node that participates:**
 
@@ -723,25 +723,25 @@ sys, err := actor.NewActorSystem("my-app",
 )
 ```
 
-1. `stream.RemoteOptions()` registers the small subscribe / request / complete / error / cancel control-plane wire types. Append it to your existing `remote.NewConfig` options on every node — producer side, consumer side, and any node that might hold or forward a ref. **Forgetting it on either side is the most common cause of hangs**: the bridge sends `streamSubscribeWire` and the endpoint never sees a recognisable message because its remoting layer can't decode the type.
-2. Element types must be registered with `remote.WithSerializables(new(MyEvent))` — same as for any other `rctx.Tell` to a remote PID. Refs do **not** wrap elements in an envelope, so missing element-type registration on the producer side fails the send, and missing it on the consumer side fails the receive.
+1. `stream.RemoteOptions()` registers the small subscribe / request / complete / error / cancel control-plane wire types. Append it to your existing `remote.NewConfig` options on every node: producer side, consumer side, and any node that might hold or forward a ref. **Forgetting it on either side is the most common cause of hangs**: the bridge sends `streamSubscribeWire` and the endpoint never sees a recognisable message because its remoting layer can't decode the type.
+2. Element types must be registered with `remote.WithSerializables(new(MyEvent))`: same as for any other `rctx.Tell` to a remote PID. Refs do **not** wrap elements in an envelope, so missing element-type registration on the producer side fails the send, and missing it on the consumer side fails the receive.
 
 **Things that will silently break the feature otherwise:**
 
 - **Asymmetric registration.** The producer registers `MyEvent` but the consumer does not (or vice versa). The end with the missing registration logs a `"no serializer found"` warning when the message arrives; for the consumer that means elements never reach the local sink. Always register the same element types on both ends.
-- **Registering the value type as a non-pointer.** `remote.WithSerializables` keys on the exact type passed in — typically `*MyEvent` from `new(MyEvent)`. Sending a value-type element over the wire still works because the bridge's `wireForm` helper auto-wraps non-pointer values into a `*T` registered key, but if you pass a struct value (instead of `new(...)` or an interface pointer) into `WithSerializables` itself, the registry stores the wrong type and lookups miss. Stick to the `new(MyEvent)` form.
-- **Skipping `stream.RemoteOptions()` on a forwarding-only node.** Any node that may receive a `SourceRef[T]` / `SinkRef[T]` inside another message — even just to inspect or relay it — needs `stream.RemoteOptions()` registered, because the ref struct itself is serialised through the same registry. A node missing it will fail to deserialize incoming refs.
+- **Registering the value type as a non-pointer.** `remote.WithSerializables` keys on the exact type passed in: typically `*MyEvent` from `new(MyEvent)`. Sending a value-type element over the wire still works because the bridge's `wireForm` helper auto-wraps non-pointer values into a `*T` registered key, but if you pass a struct value (instead of `new(...)` or an interface pointer) into `WithSerializables` itself, the registry stores the wrong type and lookups miss. Stick to the `new(MyEvent)` form.
+- **Skipping `stream.RemoteOptions()` on a forwarding-only node.** Any node that may receive a `SourceRef[T]` / `SinkRef[T]` inside another message (even just to inspect or relay it) needs `stream.RemoteOptions()` registered, because the ref struct itself is serialised through the same registry. A node missing it will fail to deserialize incoming refs.
 - **Disabling remoting entirely.** Cross-node refs require `actor.WithRemote(...)` on both ends. Without it `ref.Source(sys)` / `ref.Sink(sys)` materialise a bridge that can't reach the remote endpoint and surfaces an `"actor not found"` resolution error after the retry budget expires.
-- **Producer node unreachable at resolve time.** Refs carry the producer node's host:port, so resolution is a direct `RemoteLookup` against the producer's remote server — there is no dependency on async cluster registry propagation. If the producer node is briefly unreachable when the consumer resolves (network blip, just-restarting node), the bridge retries with jittered exponential backoff for up to 10s. After that it surfaces a `"resolve source ref"` / `"resolve sink ref"` error rather than hanging — handle it in the receiving side just like any remote-Tell failure.
+- **Producer node unreachable at resolve time.** Refs carry the producer node's host:port, so resolution is a direct `RemoteLookup` against the producer's remote server: there is no dependency on async cluster registry propagation. If the producer node is briefly unreachable when the consumer resolves (network blip, just-restarting node), the bridge retries with jittered exponential backoff for up to 10s. After that it surfaces a `"resolve source ref"` / `"resolve sink ref"` error rather than hanging: handle it in the receiving side just like any remote-Tell failure.
 
-Element values cross the wire as ordinary remote messages — no extra envelope, no double encoding. Whatever is registered with `remote.WithSerializables` round-trips automatically, just as it would for any other `rctx.Tell` to a remote PID.
+Element values cross the wire as ordinary remote messages: no extra envelope, no double encoding. Whatever is registered with `remote.WithSerializables` round-trips automatically, just as it would for any other `rctx.Tell` to a remote PID.
 
-### `SourceRef` — publish a producer
+### `SourceRef`: publish a producer
 
-A `SourceRef[T]` exposes a local `Source[T]` to a remote consumer. The ref is a plain serialisable value — wrap it in any user-defined message type you like (registered with the same remoting layer) and ship it however your application already moves data between nodes.
+A `SourceRef[T]` exposes a local `Source[T]` to a remote consumer. The ref is a plain serialisable value: wrap it in any user-defined message type you like (registered with the same remoting layer) and ship it however your application already moves data between nodes.
 
 ```go
-// User-defined wrapper — anything carrying the ref alongside whatever
+// User-defined wrapper: anything carrying the ref alongside whatever
 // other context the consumer needs.
 type OffersFeed struct {
     Ref stream.SourceRef[int]
@@ -755,7 +755,7 @@ type OffersFeed struct {
 ref, err := stream.Of(1, 2, 3, 4, 5).SourceRef(ctx, sysA)
 if err != nil { return err }
 
-// Hand the ref off through whatever channel makes sense for your app —
+// Hand the ref off through whatever channel makes sense for your app:
 // a remote Tell, a cluster pub/sub topic, an actor registry, an HTTP
 // response body decoded back into an OffersFeed, etc.
 publisher.Tell(ctx, downstreamPID, &OffersFeed{Ref: ref})
@@ -769,9 +769,9 @@ h, err := feed.Ref.Source(sysB).
     Run(ctx, sysB)
 ```
 
-The underlying source pipeline is materialised lazily — only when a subscriber connects via `ref.Source(...).Run(...)`. Constructing the ref is cheap.
+The underlying source pipeline is materialised lazily: only when a subscriber connects via `ref.Source(...).Run(...)`. Constructing the ref is cheap.
 
-### `SinkRef` — publish a consumer
+### `SinkRef`: publish a consumer
 
 The mirror image: a `SinkRef[T]` exposes a local `Sink[T]` so a remote node can pipe data into it.
 
@@ -792,7 +792,7 @@ h, err := stream.From(stream.Of(10, 20, 30, 40, 50)).
 - **Single subscription per ref.** A second `ref.Source(...)` / `ref.Sink(...)` materialisation observes a stream-level error (`"already subscribed"` while the first stream is active, `"already consumed"` after it finishes). Refs are one-shot, matching Akka StreamRefs.
 - **Wire-level credit.** The consumer's downstream demand drives `streamRequestWire` to the producer; the producer ships exactly that many elements before pausing. A bounded pending queue (1024 elements) on the producer side converts a slow-consumer scenario into a visible `"backpressure overflow"` stream error rather than unbounded buffering on the producer node.
 - **Bounded lifecycle.** After the stream completes (success or error), the endpoint actor stays alive for a 30-second grace window so a racing late subscriber gets a clean rejection rather than telling a dead actor and hanging. After the grace window the endpoint reaps itself via `system.ScheduleOnce`. Refs that are never consumed are reaped at actor-system shutdown.
-- **Death detection.** Bridges `Watch` their remote endpoint as defense in depth — an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces as a stream error on the bridge's `StreamHandle.Err()`, never a hang. Combined with retry-with-jitter resolution that absorbs cluster propagation latency, this keeps cross-node graphs reliable under load.
+- **Death detection.** Bridges `Watch` their remote endpoint as defense in depth: an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces as a stream error on the bridge's `StreamHandle.Err()`, never a hang. Combined with retry-with-jitter resolution that absorbs cluster propagation latency, this keeps cross-node graphs reliable under load.
 
 ### Reference
 
@@ -826,7 +826,7 @@ Key parameters (in `StageConfig`):
 
 The sliding-window watermark means:
 
-- When `credit > RefillThreshold`, no refill is sent — the pipeline is healthy.
+- When `credit > RefillThreshold`, no refill is sent: the pipeline is healthy.
 - When `credit ≤ RefillThreshold`, the stage requests `InitialDemand - credit` more elements from upstream.
 - This keeps in-flight data bounded while keeping the pipeline saturated.
 
@@ -999,7 +999,7 @@ stream.Map(fn).
 
 ### Go channels and goroutines
 
-Go channels are the native concurrency primitive. They are low-level, composable, and require no dependencies — but
+Go channels are the native concurrency primitive. They are low-level, composable, and require no dependencies: but
 they demand that the developer hand-craft every concern that GoAkt Streams handles automatically.
 
 | Concern        | Channels + goroutines                              | GoAkt Streams                                             |
@@ -1060,7 +1060,7 @@ connecting data systems. It is configuration-driven and ships with hundreds of c
 | **Backpressure**        | Ack-based; built into every connector           | Credit-based demand propagation                                  |
 | **Connectors**          | 200+ built-in (Kafka, S3, HTTP, databases…)     | User-defined via `Source`, `Sink` wrappers                       |
 | **Type safety**         | Untyped message blobs                           | Generic `Source[T]` / `Flow[In,Out]`                             |
-| **Embedding**           | Supported via Go library                        | Native — it is a Go library                                      |
+| **Embedding**           | Supported via Go library                        | Native: it is a Go library                                      |
 | **Processing model**    | Component DAG configured in YAML                | Composable Go values assembled in code                           |
 | **Testing**             | Unit tests via YAML fixtures                    | Standard Go tests; testkit                                       |
 | **Error handling**      | Retry / DLQ per connector                       | `ErrorStrategy` + `OnDrop` callback per stage                    |
@@ -1123,16 +1123,16 @@ GoAkt Streams. Both implement the Reactive Streams specification.
 | **Runtime**           | JVM; Akka actor system                                                      | Go runtime; GoAkt actor system                                                                         |
 | **Licence**           | BSL 1.1 (Lightbend)                                                         | MIT                                                                                                    |
 
-GoAkt Streams deliberately mirrors Akka Streams' core concepts — lazy `Source`, `Flow`, `Sink`, demand-driven
-backpressure, stage fusion — while adapting them to Go idioms and the GoAkt actor hierarchy. The `PullRequest` /
+GoAkt Streams deliberately mirrors Akka Streams' core concepts: lazy `Source`, `Flow`, `Sink`, demand-driven
+backpressure, stage fusion: while adapting them to Go idioms and the GoAkt actor hierarchy. The `PullRequest` /
 `PullResponse` actor source protocol is analogous to Akka's `Source.actorRefWithBackpressure`.
 
 ---
 
 ## Related
 
-- [Observability](/advanced/observability) — Metrics and OpenTelemetry integration
-- [Event Streams](/advanced/event-streams) — Internal system and cluster event bus
-- [PubSub](/advanced/pubsub) — Application-level topic-based pub/sub
-- [Actor Scheduling](/actor/scheduling) — Timer and cron scheduling used by `Tick` and `Batch`
-- [Supervision](/actor/supervision) — Actor failure handling that underpins stream stage recovery
+- [Observability](/advanced/observability): Metrics and OpenTelemetry integration
+- [Event Streams](/advanced/event-streams): Internal system and cluster event bus
+- [PubSub](/advanced/pubsub): Application-level topic-based pub/sub
+- [Actor Scheduling](/actor/scheduling): Timer and cron scheduling used by `Tick` and `Batch`
+- [Supervision](/actor/supervision): Actor failure handling that underpins stream stage recovery

@@ -48,15 +48,15 @@ pid, err := system.Spawn(ctx, "service", actor, actor.WithLongLived())
 
 ## System eviction
 
-**System eviction** is a node-wide mechanism that limits the total number of active actors. When the count exceeds the configured limit, the framework passivates actors according to an eviction policy (LRU, LFU, or MRU). This is independent of per-actor passivation—system eviction can stop any user actor, including those with `LongLivedStrategy`.
+**System eviction** is a node-wide mechanism that limits the total number of active actors. When the count exceeds the configured limit, the framework passivates actors according to an eviction policy (LRU, LFU, or MRU). This is independent of per-actor passivation: system eviction can stop any user actor, including those with `LongLivedStrategy`.
 
 ### Eviction policies
 
 | Policy  | Description                                                                 |
 |---------|-----------------------------------------------------------------------------|
-| **LRU** | Least Recently Used — passivate actors with the oldest `LatestActivityTime` |
-| **LFU** | Least Frequently Used — passivate actors with the lowest `ProcessedCount`   |
-| **MRU** | Most Recently Used — passivate actors with the newest `LatestActivityTime`  |
+| **LRU** | Least Recently Used: passivate actors with the oldest `LatestActivityTime` |
+| **LFU** | Least Frequently Used: passivate actors with the lowest `ProcessedCount`   |
+| **MRU** | Most Recently Used: passivate actors with the newest `LatestActivityTime`  |
 
 ### Configuration
 

@@ -126,7 +126,7 @@ In `StashNonReentrant` mode, user messages are automatically stashed while any s
 
 - **Actors that make async requests** and need to stay responsive (e.g. fan-out, long I/O via PipeTo).
 - **Avoiding deadlock** in call cycles (A -> B -> A). Use `AllowAll` so A can process B's reply while waiting.
-- **Strict ordering** when you must not interleave user messages with async responses—use `StashNonReentrant`.
+- **Strict ordering** when you must not interleave user messages with async responses: use `StashNonReentrant`.
 
 ## Production notes
 
@@ -254,6 +254,6 @@ func main() {
 ## See also
 
 - [Grain Reentrancy](/grains/reentrancy) for the grain-side API: `RequestGrain`/`RequestActor` from grains, `DeferResponse`, and paused-consumption stash semantics.
-- [Stashing](/actor/stashing) — Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
-- [Messaging](/actor/messaging) — `Ask`, `Tell`, `PipeTo`.
-- [Behaviors](/actor/behaviors) — `Become`, `UnBecome` for state transitions.
+- [Stashing](/actor/stashing): Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
+- [Messaging](/actor/messaging): `Ask`, `Tell`, `PipeTo`.
+- [Behaviors](/actor/behaviors): `Become`, `UnBecome` for state transitions.

@@ -8,7 +8,7 @@ The **event stream** is an internal in-process mechanism that publishes **system
 
 ## Purpose
 
-The framework publishes lifecycle and cluster events so that external components (monitoring, logging, dashboards) can observe the actor system without coupling to internal implementation. Subscribers receive events as they occur—actor started, actor stopped, node joined, dead letter, and so on.
+The framework publishes lifecycle and cluster events so that external components (monitoring, logging, dashboards) can observe the actor system without coupling to internal implementation. Subscribers receive events as they occur: actor started, actor stopped, node joined, dead letter, and so on.
 
 ## API
 
@@ -30,8 +30,8 @@ The `eventstream.Subscriber` interface:
 
 Each message has:
 
-- **Topic** — `msg.Topic()` returns the topic (e.g. `topic.events`, the internal topic).
-- **Payload** — `msg.Payload()` returns the event. Use a type assertion to handle specific events.
+- **Topic**: `msg.Topic()` returns the topic (e.g. `topic.events`, the internal topic).
+- **Payload**: `msg.Payload()` returns the event. Use a type assertion to handle specific events.
 
 ## Event types
 
@@ -97,5 +97,5 @@ for msg := range subscriber.Iterator() {
 
 ## Related
 
-- [Observability](/advanced/observability) — Metrics and dead letters
-- [PubSub](/advanced/pubsub) — Application-level topic-based pub/sub (separate mechanism)
+- [Observability](/advanced/observability): Metrics and dead letters
+- [PubSub](/advanced/pubsub): Application-level topic-based pub/sub (separate mechanism)

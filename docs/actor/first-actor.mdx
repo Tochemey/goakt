@@ -22,8 +22,8 @@ for the full interface and method explanations.
 
 From outside the actor system (e.g., `main`), use `NoSender()` to send:
 
-- **Tell** — Fire-and-forget. No response expected.
-- **Ask** — Request-response. Blocks until reply or timeout. The actor must call `ctx.Response(resp)` to complete the
+- **Tell**: Fire-and-forget. No response expected.
+- **Ask**: Request-response. Blocks until reply or timeout. The actor must call `ctx.Response(resp)` to complete the
   request.
 
 ## Replying from an actor
