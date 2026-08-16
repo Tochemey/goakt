@@ -12,6 +12,7 @@ The sample reruns the issue's reproduction and guards the fix with deterministic
 2. Measures the allocation and GC cycle cost of 20k spawn/stop cycles.
 3. Measures the retained live heap per idle actor for 50k flat spawns.
 4. Measures the retained live heap per idle child for 50k `SpawnChild` actors, the path that allocated a supervisor and strategy per child before the fix.
+5. Measures the wall time of one full metrics scrape over 10k resident actors and guards that a metrics-enabled system registers a constant 2 meter callbacks instead of one per actor plus one.
 
 ## Run
 
@@ -41,6 +42,8 @@ The GC gains follow directly from those numbers: the collector marks 10.5% to 24
 
 Metrics-enabled systems additionally drop from N+1 meter callback registrations and N instrument sets to a constant 2 registrations and 1 instrument set; the per-actor cost is a cached 4-entry attribute slice. `unsafe.Sizeof(PID{})` grew from 456 to 464 bytes because the cached attribute slice header is 8 bytes larger than the registration handle it replaced; the retained-footprint numbers above already include that.
 
+A full scrape over 10k resident actors takes about 16ms, roughly 2µs per actor. Each per-actor observation still asks the deadletter actor for its count, so scrape wall time grows linearly with the resident population (about 160ms extrapolated at 100k actors); batching those counts into one request is possible follow-up work if very large metrics-enabled populations need faster scrapes. Actors that are suspended, stopping, passivating, or whose PostStart has not yet been processed are skipped by the scrape; the per-actor callbacks previously kept reporting suspended actors, so this is a deliberate output change, not an accident.
+
 ## Expected output
 
 ```text
@@ -49,14 +52,17 @@ struct sizes:
   ReceiveContext:   128 bytes
   UnboundedMailbox: 144 bytes
 
-spawn/stop churn (20000 cycles): 22684 bytes per cycle, 239 GC cycles
+spawn/stop churn (20000 cycles): 22685 bytes per cycle, 243 GC cycles
   objects per cycle               287.1 (limit 300.0) ok
 
-flat population (50000 idle actors): 2408 bytes per actor
+flat population (50000 idle actors): 2347 bytes per actor
   objects per actor                17.0 (limit 18.0) ok
 
-child population (50000 idle children): 2459 bytes per child
+child population (50000 idle children): 2494 bytes per child
   objects per child                19.0 (limit 21.0) ok
+
+metrics scrape (10000 resident actors): 16ms per full scrape, 2µs per actor
+  meter registrations               2.0 (limit 2.0) ok
 
 PASS: resident footprint and churn allocation guards hold
 ```

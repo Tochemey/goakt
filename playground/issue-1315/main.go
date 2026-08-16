@@ -39,7 +39,12 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"time"
 	"unsafe"
+
+	"go.opentelemetry.io/otel"
+	otelmetric "go.opentelemetry.io/otel/metric"
+	noopmetric "go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/log"
@@ -68,6 +73,15 @@ const maxChildObjectsPerActor = 21.0
 // maxChurnObjectsPerCycle sits between the roughly 287 objects a spawn/stop
 // cycle allocates after the fix and the roughly 312 it allocated before.
 const maxChurnObjectsPerCycle = 300.0
+
+// scrapePopulation is the number of resident actors in the metrics scrape
+// measurement.
+const scrapePopulation = 10_000
+
+// maxMeterRegistrations is the constant number of meter callbacks a
+// metrics-enabled system registers after the fix; before the fix it was one
+// per actor plus one.
+const maxMeterRegistrations = 2.0
 
 // noop is the smallest possible actor: no state, no message handling.
 type noop struct{}
@@ -154,6 +168,70 @@ func measureChildren(ctx context.Context) (uint64, float64) {
 	return (liveBytes - baseBytes) / population, float64(liveObjects-baseObjects) / float64(population)
 }
 
+// scrapeMeterProvider hands out its scrapeMeter regardless of the requested
+// meter name.
+type scrapeMeterProvider struct {
+	otelmetric.MeterProvider
+	meter *scrapeMeter
+}
+
+// Meter implements otelmetric.MeterProvider.
+func (p *scrapeMeterProvider) Meter(string, ...otelmetric.MeterOption) otelmetric.Meter {
+	return p.meter
+}
+
+// scrapeMeter captures registered callbacks so the sample can invoke a full
+// scrape and time it.
+type scrapeMeter struct {
+	otelmetric.Meter
+	callbacks []otelmetric.Callback
+}
+
+// RegisterCallback implements otelmetric.Meter.
+func (m *scrapeMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
+	m.callbacks = append(m.callbacks, cb)
+	return noopmetric.Registration{}, nil
+}
+
+// measureScrape reports the number of meter callback registrations for a
+// metrics-enabled system and the wall time of one full scrape over the
+// resident population. Every actor observation asks the deadletter actor for
+// its count, so this is the population-scale scrape cost the issue asked to
+// measure.
+func measureScrape(ctx context.Context) (int, time.Duration) {
+	delegate := noopmetric.NewMeterProvider()
+	meter := &scrapeMeter{Meter: delegate.Meter("scrape")}
+	otel.SetMeterProvider(&scrapeMeterProvider{MeterProvider: delegate, meter: meter})
+
+	system, err := actor.NewActorSystem("scrape", actor.WithLogger(log.DiscardLogger), actor.WithMetrics())
+	if err != nil {
+		panic(err)
+	}
+
+	if err := system.Start(ctx); err != nil {
+		panic(err)
+	}
+
+	defer func() { _ = system.Stop(ctx) }()
+
+	for i := range scrapePopulation {
+		if _, err := system.Spawn(ctx, fmt.Sprintf("s-%d", i), &noop{}, actor.WithLongLived()); err != nil {
+			panic(err)
+		}
+	}
+
+	observer := noopmetric.Observer{}
+	start := time.Now()
+
+	for _, cb := range meter.callbacks {
+		if err := cb(ctx, observer); err != nil {
+			panic(err)
+		}
+	}
+
+	return len(meter.callbacks), time.Since(start)
+}
+
 // measureChurn reports the bytes and objects allocated per spawn/stop cycle
 // and the number of GC cycles the churn triggered.
 func measureChurn(ctx context.Context) (uint64, float64, uint32) {
@@ -219,6 +297,11 @@ func main() {
 	childBytes, childObjects := measureChildren(ctx)
 	fmt.Printf("\nchild population (%d idle children): %d bytes per child\n", childParents*childrenPerParent, childBytes)
 	check("objects per child", childObjects, maxChildObjectsPerActor)
+
+	registrations, scrapeTime := measureScrape(ctx)
+	fmt.Printf("\nmetrics scrape (%d resident actors): %s per full scrape, %s per actor\n",
+		scrapePopulation, scrapeTime.Round(time.Millisecond), (scrapeTime / scrapePopulation).Round(time.Microsecond))
+	check("meter registrations", float64(registrations), maxMeterRegistrations)
 
 	if failed {
 		fmt.Println("\nFAIL: at least one footprint guard regressed")

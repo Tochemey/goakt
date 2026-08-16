@@ -4628,10 +4628,18 @@ func (x *actorSystem) registerMetrics() error {
 					continue
 				}
 
+				// snapshot once: a restart's reset() can zero the count between
+				// reads. Skipping until PostStart is processed keeps a
+				// mid-restart scrape from reporting processed.count as -1
+				processed := int64(pid.ProcessedCount())
+				if processed < 1 {
+					continue
+				}
+
 				observer.ObserveInt64(actorMetrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.StashSize(), int64(pid.StashSize()), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.ProcessedCount(), int64(pid.ProcessedCount()-1), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.ProcessedCount(), processed-1, pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.Uptime(), pid.Uptime(), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), pid.observeOptions...)

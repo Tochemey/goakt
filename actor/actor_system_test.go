@@ -8154,6 +8154,11 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.EqualValues(t, 1, perActor["parent"]["actor.children.count"])
 	require.EqualValues(t, 0, perActor["child"]["actor.children.count"])
 
+	// observable counters never record negative values
+	for _, record := range observer.records {
+		require.GreaterOrEqual(t, record.value, int64(0), record.instrument)
+	}
+
 	// every observation carries the full attribute identity
 	var parentRecord *attrObserveRecord
 
@@ -8223,6 +8228,25 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
 
 	child.setState(suspendedState, false)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.Contains(t, actorNamesFromRecords(observer.records), "child")
+
+	// an actor whose PostStart has not been processed yet (a mid-restart
+	// scrape window) is skipped so processed.count never observes -1
+	storedProcessed := child.processedCount.Load()
+	child.processedCount.Store(0)
+
+	observer = &attrObserver{}
+	for _, cb := range recording.callbacks {
+		require.NoError(t, cb(ctx, observer))
+	}
+	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+
+	child.processedCount.Store(storedProcessed)
 
 	observer = &attrObserver{}
 	for _, cb := range recording.callbacks {
