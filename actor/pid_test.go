@@ -7620,3 +7620,69 @@ func TestNewPIDDefaultLogger(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, log.DiscardLogger, third.logger)
 }
+
+// TestNewPIDDefaultSupervisorAndStrategy verifies that PIDs constructed
+// without a supervisor or passivation strategy option share the package-level
+// defaults and that explicit options still take precedence.
+func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender.setState(runningState, true)
+	system.dispatcher.start()
+	t.Cleanup(func() { system.dispatcher.signalStop() })
+
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Same(t, defaultSupervisor, first.supervisor)
+	require.Same(t, defaultPassivationStrategy, first.passivationStrategy)
+
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Same(t, first.supervisor, second.supervisor)
+	require.Same(t, first.passivationStrategy, second.passivationStrategy)
+
+	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
+	strategy := passivation.NewTimeBasedStrategy(time.Minute)
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withSupervisor(custom), withPassivationStrategy(strategy))
+	require.NoError(t, err)
+	require.Same(t, custom, third.supervisor)
+	require.Same(t, strategy, third.passivationStrategy)
+}
+
+// TestSpawnChildSharesDefaultSupervisor verifies that a child spawned without
+// a supervisor option shares the package-level default supervisor instead of
+// allocating one per child.
+func TestSpawnChildSharesDefaultSupervisor(t *testing.T) {
+	ctx := context.TODO()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	child, err := pid.SpawnChild(ctx, "child", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, child)
+	pause.For(500 * time.Millisecond)
+
+	require.Same(t, defaultSupervisor, child.supervisor)
+
+	sibling, err := pid.SpawnChild(ctx, "sibling", NewMockActor())
+	require.NoError(t, err)
+	require.NotNil(t, sibling)
+	pause.For(500 * time.Millisecond)
+
+	require.Same(t, child.supervisor, sibling.supervisor)
+
+	require.NoError(t, actorSystem.Stop(ctx))
+}

@@ -74,6 +74,15 @@ import (
 // This avoids acquiring the passivation manager's mutex on every message.
 const passivationTouchInterval = int64(100 * time.Millisecond)
 
+// defaultSupervisor is the shared supervisor assigned to PIDs constructed
+// without a supervisor option. Supervisors are read-only after construction,
+// so a single instance serves every such PID.
+var defaultSupervisor = supervisor.NewSupervisor()
+
+// defaultPassivationStrategy is the shared passivation strategy assigned to
+// PIDs constructed without a passivation strategy option.
+var defaultPassivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
+
 // defaultLogger is the shared logger assigned to PIDs constructed without
 // a logger option.
 var defaultLogger = log.NewZap(log.ErrorLevel, os.Stderr)
@@ -308,11 +317,11 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	if pid.supervisor == nil {
-		pid.supervisor = supervisor.NewSupervisor()
+		pid.supervisor = defaultSupervisor
 	}
 
 	if pid.passivationStrategy == nil {
-		pid.passivationStrategy = passivation.NewTimeBasedStrategy(DefaultPassivationTimeout)
+		pid.passivationStrategy = defaultPassivationStrategy
 	}
 
 	behaviorStack := newBehaviorStack()
