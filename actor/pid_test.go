@@ -7592,3 +7592,31 @@ func TestSupervisorExponentialBackoffDelaysRestart(t *testing.T) {
 	require.NoError(t, parent.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
 }
+
+// TestNewPIDDefaultLogger verifies that PIDs constructed without a logger
+// option share the package-level default logger and that a custom logger
+// still takes precedence.
+func TestNewPIDDefaultLogger(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	system := sys.(*actorSystem)
+	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender.setState(runningState, true)
+	system.dispatcher.start()
+	t.Cleanup(func() { system.dispatcher.signalStop() })
+
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
+	require.NoError(t, err)
+	require.Same(t, defaultLogger, first.logger)
+
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
+	require.NoError(t, err)
+	require.Same(t, first.logger, second.logger)
+
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.Equal(t, log.DiscardLogger, third.logger)
+}

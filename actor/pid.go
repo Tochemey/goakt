@@ -74,6 +74,10 @@ import (
 // This avoids acquiring the passivation manager's mutex on every message.
 const passivationTouchInterval = int64(100 * time.Millisecond)
 
+// defaultLogger is the shared logger assigned to PIDs constructed without
+// a logger option.
+var defaultLogger = log.NewZap(log.ErrorLevel, os.Stderr)
+
 // taskCompletion is used to track completions' taskCompletion
 // to pipe the result to the appropriate PID
 type taskCompletion struct {
@@ -279,7 +283,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid := &PID{
 		actor:                 actor,
 		latestReceiveTimeNano: atomic.Int64{},
-		logger:                log.NewZap(log.ErrorLevel, os.Stderr),
 		address:               address,
 		mailbox:               NewUnboundedMailbox(),
 		systemMailbox:         NewUnboundedMailbox(),
@@ -298,6 +301,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	for _, opt := range opts {
 		opt(pid)
+	}
+
+	if pid.logger == nil {
+		pid.logger = defaultLogger
 	}
 
 	if pid.supervisor == nil {
