@@ -266,10 +266,10 @@ type PID struct {
 
 	metricProvider *metric.Provider
 
-	// metricRegistration holds the OTel callback registration so it can be
-	// unregistered when the actor stops. Guarded by fieldsLocker. Without this
-	// the callback outlives the actor and keeps firing on every scrape.
-	metricRegistration otelmetric.Registration
+	// observeOptions caches the OTel attribute set identifying this actor in
+	// observations made by the actor system's metrics callback. Built once at
+	// construction when metrics are enabled; nil otherwise.
+	observeOptions []otelmetric.ObserveOption
 }
 
 var (
@@ -333,11 +333,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	pid.startPassivation()
-
-	if err := pid.registerMetrics(); err != nil {
-		return nil, err
-	}
-
+	pid.buildObserveOptions()
 	pid.fireSystemMessage(ctx, new(PostStart))
 
 	pid.startedAt.Store(time.Now().Unix())
@@ -2765,10 +2761,6 @@ func (pid *PID) unsetBehaviorStacked() {
 func (pid *PID) doStop(ctx context.Context) error {
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 
-	// stop the OTel metrics callback so it no longer fires on scrapes once the
-	// actor is gone, preventing callback accumulation under high actor churn.
-	pid.unregisterMetrics()
-
 	defer func() {
 		pid.setState(runningState, false)
 		pid.reset()
@@ -3409,70 +3401,17 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	return actor, nil
 }
 
-func (pid *PID) registerMetrics() error {
+// buildObserveOptions caches the OTel attribute set used by the actor
+// system's metrics callback when observing this actor. It leaves
+// observeOptions nil when metrics are disabled.
+func (pid *PID) buildObserveOptions() {
 	if pid.metricProvider != nil && pid.metricProvider.Meter() != nil {
-		meter := pid.metricProvider.Meter()
-		metrics, err := metric.NewActorMetric(meter)
-		if err != nil {
-			return err
-		}
-
-		observeOptions := []otelmetric.ObserveOption{
+		pid.observeOptions = []otelmetric.ObserveOption{
 			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
 			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
 			otelmetric.WithAttributes(attribute.String("actor.kind", types.Name(pid.Actor()))),
 			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 		}
-
-		// unregister any previous callback before registering a new one so
-		// that restarting an actor does not leak a second live registration.
-		pid.unregisterMetrics()
-
-		registration, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
-			observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), observeOptions...)
-			observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), observeOptions...)
-			observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), observeOptions...)
-			observer.ObserveInt64(metrics.ProcessedCount(), int64(pid.ProcessedCount()-1), observeOptions...)
-			observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), observeOptions...)
-			observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), observeOptions...)
-			observer.ObserveInt64(metrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), observeOptions...)
-			observer.ObserveInt64(metrics.FailureCount(), int64(pid.failureCount.Load()), observeOptions...)
-			observer.ObserveInt64(metrics.ReinstateCount(), int64(pid.reinstateCount.Load()), observeOptions...)
-			return nil
-		}, metrics.ChildrenCount(),
-			metrics.StashSize(),
-			metrics.RestartCount(),
-			metrics.ProcessedCount(),
-			metrics.LastReceivedDuration(),
-			metrics.Uptime(),
-			metrics.DeadlettersCount(),
-			metrics.FailureCount(),
-			metrics.ReinstateCount(),
-		)
-		if err != nil {
-			return err
-		}
-
-		pid.fieldsLocker.Lock()
-		pid.metricRegistration = registration
-		pid.fieldsLocker.Unlock()
-	}
-	return nil
-}
-
-// unregisterMetrics unregisters the OTel callback previously installed by
-// registerMetrics, if any. It is safe to call multiple times and when metrics
-// were never registered.
-func (pid *PID) unregisterMetrics() {
-	pid.fieldsLocker.Lock()
-	registration := pid.metricRegistration
-	pid.metricRegistration = nil
-	pid.fieldsLocker.Unlock()
-
-	if registration != nil {
-		// the error returned by Unregister is non-actionable here; the handle
-		// is discarded regardless so the callback stops firing.
-		_ = registration.Unregister()
 	}
 }
 
@@ -3768,10 +3707,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
 		actorSystem.increaseActorsCounter()
-	}
-
-	if err := pid.registerMetrics(); err != nil {
-		return err
 	}
 
 	pid.logger.Debugf("actor=%s restarted", pid.Name())

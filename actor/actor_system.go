@@ -4573,6 +4573,9 @@ func (x *actorSystem) getDispatcher() *dispatcher {
 	return x.dispatcher
 }
 
+// registerMetrics registers the OTel callbacks reporting system-level and
+// per-actor metrics. A single callback observes every actor in the tree, so
+// registrations stay constant regardless of the actor population.
 func (x *actorSystem) registerMetrics() error {
 	if x.metricProvider != nil && x.metricProvider.Meter() != nil {
 		meter := x.metricProvider.Meter()
@@ -4608,6 +4611,44 @@ func (x *actorSystem) registerMetrics() error {
 			metrics.Uptime(),
 			metrics.PeersCount(),
 			metrics.DeadlettersCount(),
+		)
+		if err != nil {
+			return err
+		}
+
+		actorMetrics, err := metric.NewActorMetric(meter)
+		if err != nil {
+			return err
+		}
+
+		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+			for _, node := range x.actors.nodes() {
+				pid := node.value()
+				if pid == nil || !pid.IsRunning() || pid.observeOptions == nil {
+					continue
+				}
+
+				observer.ObserveInt64(actorMetrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.StashSize(), int64(pid.StashSize()), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.ProcessedCount(), int64(pid.ProcessedCount()-1), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.Uptime(), pid.Uptime(), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
+			}
+
+			return nil
+		}, actorMetrics.ChildrenCount(),
+			actorMetrics.StashSize(),
+			actorMetrics.RestartCount(),
+			actorMetrics.ProcessedCount(),
+			actorMetrics.LastReceivedDuration(),
+			actorMetrics.Uptime(),
+			actorMetrics.DeadlettersCount(),
+			actorMetrics.FailureCount(),
+			actorMetrics.ReinstateCount(),
 		)
 
 		return err
