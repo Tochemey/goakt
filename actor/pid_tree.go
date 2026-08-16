@@ -43,9 +43,9 @@ type pidNode struct {
 	parentNode  *pidNode            // Parent node; nil if root.
 	id          string              // Cached pid.ID() — avoids repeated string building.
 	name        string              // Cached pid.Name().
-	watchers    map[string]*PID     // Actors watching this node (key = watcher ID).
-	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID).
-	descendants map[string]*pidNode // Direct children (key = child ID).
+	watchers    map[string]*PID     // Actors watching this node (key = watcher ID). Nil until the first watcher; use putLazy to insert.
+	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
+	descendants map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
 }
 
 // value returns the PID stored in the node, or nil if cleared by deleteNode.
@@ -56,18 +56,28 @@ func (n *pidNode) value() *PID {
 
 // newPidNode creates a pidNode with cached id/name fields.
 // If pid is nil the cached strings remain empty (used for the initial root node).
+// The watchers, watchees, and descendants maps stay nil until their first
+// insert via putLazy; all read paths treat the nil maps as empty.
 func newPidNode(pid *PID) *pidNode {
-	n := &pidNode{
-		watchers:    make(map[string]*PID),
-		watchees:    make(map[string]*PID),
-		descendants: make(map[string]*pidNode),
-	}
+	n := &pidNode{}
 	n.pid.Store(pid)
+
 	if pid != nil {
 		n.id = pid.ID()
 		n.name = pid.Name()
 	}
+
 	return n
+}
+
+// putLazy inserts key/value into the map pointed to by m, allocating the map
+// on first use.
+func putLazy[V any](m *map[string]V, key string, value V) {
+	if *m == nil {
+		*m = make(map[string]V, 1)
+	}
+
+	(*m)[key] = value
 }
 
 // tree maintains actor relationships in a concurrency-safe structure.
@@ -172,18 +182,15 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	name := pid.Name()
 	childNode := &pidNode{
-		parentNode:  parentNode,
-		id:          id,
-		name:        name,
-		watchers:    make(map[string]*PID),
-		watchees:    make(map[string]*PID),
-		descendants: make(map[string]*pidNode),
+		parentNode: parentNode,
+		id:         id,
+		name:       name,
 	}
 	childNode.pid.Store(pid)
 
-	parentNode.descendants[id] = childNode
-	parentNode.watchees[id] = pid
-	childNode.watchers[parentID] = parent
+	putLazy(&parentNode.descendants, id, childNode)
+	putLazy(&parentNode.watchees, id, pid)
+	putLazy(&childNode.watchers, parentID, parent)
 
 	x.pids[id] = childNode
 	x.names[name] = childNode
@@ -221,9 +228,9 @@ func (x *tree) attachNodeLocked(parent, pid *PID) error {
 	}
 
 	childNode.parentNode = parentNode
-	parentNode.descendants[childID] = childNode
-	parentNode.watchees[childID] = pid
-	childNode.watchers[parentID] = parent
+	putLazy(&parentNode.descendants, childID, childNode)
+	putLazy(&parentNode.watchees, childID, pid)
+	putLazy(&childNode.watchers, parentID, parent)
 	return nil
 }
 
@@ -323,8 +330,8 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 		return
 	}
 
-	pidNode.watchers[watcherID] = watcher
-	watcherNode.watchees[pidID] = pid
+	putLazy(&pidNode.watchers, watcherID, watcher)
+	putLazy(&watcherNode.watchees, pidID, pid)
 }
 
 // deleteNode removes pid and its entire subtree (all descendants).

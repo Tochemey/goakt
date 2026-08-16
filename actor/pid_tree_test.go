@@ -763,3 +763,158 @@ func TestTreeResetPreservesNoSender(t *testing.T) {
 	require.False(t, ok)
 	require.Nil(t, rootPID)
 }
+
+// TestLazyMapsNewNodeCarriesNoMaps verifies that a fresh pidNode does not
+// allocate its watchers, watchees, and descendants maps, and that every read
+// path treats the nil maps as empty.
+func TestLazyMapsNewNodeCarriesNoMaps(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	pid := MockPID(actorSystem, "lazy", ports[0])
+
+	node := newPidNode(pid)
+	require.Nil(t, node.watchers)
+	require.Nil(t, node.watchees)
+	require.Nil(t, node.descendants)
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(pid))
+
+	// Reads over the nil maps behave as reads over empty maps.
+	require.Empty(t, tree.watchers(pid))
+	require.Empty(t, tree.watchees(pid))
+	require.Empty(t, tree.children(pid))
+	require.Empty(t, tree.descendants(pid))
+	require.Empty(t, tree.siblings(pid))
+}
+
+// TestLazyMapsChildAllocatesOnlyTouchedMaps verifies that spawning a child
+// materializes exactly the maps the relationship writes: the parent's
+// descendants and watchees, and the child's watchers. The child's own
+// watchees and descendants must stay nil.
+func TestLazyMapsChildAllocatesOnlyTouchedMaps(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	parent := MockPID(actorSystem, "parent", ports[0])
+	child := MockPID(actorSystem, "child", ports[0])
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(parent))
+	require.NoError(t, tree.addNode(parent, child))
+
+	parentNode, ok := tree.node(parent.ID())
+	require.True(t, ok)
+	require.Len(t, parentNode.descendants, 1)
+	require.Len(t, parentNode.watchees, 1)
+	require.Nil(t, parentNode.watchers)
+
+	childNode, ok := tree.node(child.ID())
+	require.True(t, ok)
+	require.Len(t, childNode.watchers, 1)
+	require.Nil(t, childNode.watchees)
+	require.Nil(t, childNode.descendants)
+}
+
+// TestLazyMapsWatchUnwatchOnBareNode exercises addWatcher and removeWatcher
+// against sibling nodes whose watcher and watchee maps were never touched
+// before, covering the lazy-allocation path of both maps.
+func TestLazyMapsWatchUnwatchOnBareNode(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	root := MockPID(actorSystem, "root", ports[0])
+	watched := MockPID(actorSystem, "watched", ports[0])
+	watcher := MockPID(actorSystem, "watcher", ports[0])
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, watched))
+	require.NoError(t, tree.addNode(root, watcher))
+
+	// The watcher node has no watchees map until the watch registers.
+	watcherNode, ok := tree.node(watcher.ID())
+	require.True(t, ok)
+	require.Nil(t, watcherNode.watchees)
+
+	tree.addWatcher(watched, watcher)
+
+	watchers := tree.watchers(watched)
+	require.Len(t, watchers, 2)
+	require.Len(t, tree.watchees(watcher), 1)
+
+	tree.removeWatcher(watched, watcher)
+	require.Len(t, tree.watchers(watched), 1)
+	require.Empty(t, tree.watchees(watcher))
+
+	// Removing a watch that was never registered stays a no-op on nil maps.
+	other := MockPID(actorSystem, "other", ports[0])
+	require.NoError(t, tree.addNode(root, other))
+	tree.removeWatcher(other, watcher)
+	require.Empty(t, tree.watchees(watcher))
+}
+
+// TestLazyMapsDeleteMixedSubtree deletes a subtree in which some nodes carry
+// materialized maps and some are bare leaves with nil maps, then verifies the
+// tree is consistent and the parent can spawn again.
+func TestLazyMapsDeleteMixedSubtree(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	root := MockPID(actorSystem, "root", ports[0])
+	branch := MockPID(actorSystem, "branch", ports[0])
+	leaf := MockPID(actorSystem, "leaf", ports[0])
+	observer := MockPID(actorSystem, "observer", ports[0])
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, branch))
+	require.NoError(t, tree.addNode(branch, leaf))
+	require.NoError(t, tree.addNode(root, observer))
+
+	// branch has a descendants map, leaf does not; observer watches leaf so
+	// deletion must also clean a lazily created watch relationship.
+	tree.addWatcher(leaf, observer)
+
+	tree.deleteNode(branch)
+
+	_, ok := tree.node(branch.ID())
+	require.False(t, ok)
+	_, ok = tree.node(leaf.ID())
+	require.False(t, ok)
+	require.Empty(t, tree.watchees(observer))
+	require.Len(t, tree.children(root), 1)
+
+	// The parent spawns a replacement under the same tree without issue.
+	replacement := MockPID(actorSystem, "replacement", ports[0])
+	require.NoError(t, tree.addNode(root, replacement))
+	require.Len(t, tree.children(root), 2)
+}
+
+// TestLazyMapsReattachExistingNode covers attachNodeLocked through
+// addOrAttachNode: relinking an existing node must lazily materialize the new
+// parent's maps and the child's watchers map exactly as a fresh add does.
+func TestLazyMapsReattachExistingNode(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+	root := MockPID(actorSystem, "root", ports[0])
+	first := MockPID(actorSystem, "first", ports[0])
+	second := MockPID(actorSystem, "second", ports[0])
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, first))
+	require.NoError(t, tree.addNode(root, second))
+
+	// Relink second under first; first's descendants map does not exist yet.
+	firstNode, ok := tree.node(first.ID())
+	require.True(t, ok)
+	require.Nil(t, firstNode.descendants)
+
+	require.NoError(t, tree.addOrAttachNode(first, second))
+	require.Len(t, tree.children(first), 1)
+
+	watchers := tree.watchers(second)
+	names := make([]string, len(watchers))
+	for i, w := range watchers {
+		names[i] = w.Name()
+	}
+	require.Contains(t, names, "first")
+}
