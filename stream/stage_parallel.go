@@ -55,6 +55,7 @@ func (h *seqHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = parallelResult{}
 	*h = old[:n-1]
 	return x
 }

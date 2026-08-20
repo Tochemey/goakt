@@ -50,6 +50,7 @@ func (h *mergeSeqHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	old[n-1] = mergeSeqEntry{}
 	*h = old[:n-1]
 	return x
 }

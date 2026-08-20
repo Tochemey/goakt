@@ -24,6 +24,7 @@
 package stream
 
 import (
+	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -582,4 +583,16 @@ func waitDone(t *testing.T, h StreamHandle, timeout time.Duration) {
 	case <-time.After(timeout):
 		t.Fatal("stream did not complete within timeout")
 	}
+}
+
+func TestSeqHeapPopClearsBackingArraySlot(t *testing.T) {
+	result := parallelResult{seqNo: 1, value: "retained", err: errors.New("boom")}
+	queue := seqHeap{result}
+	backing := queue[:cap(queue)]
+
+	popped := heap.Pop(&queue)
+
+	require.Equal(t, result, popped)
+	require.Empty(t, queue)
+	require.Equal(t, parallelResult{}, backing[0])
 }
