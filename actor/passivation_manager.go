@@ -580,6 +580,7 @@ func (h *passivationHeap) Pop() any {
 	old := *h
 	n := len(old)
 	entry := old[n-1]
+	old[n-1] = nil
 	entry.index = -1
 	*h = old[:n-1]
 	return entry
