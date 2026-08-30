@@ -23,7 +23,7 @@ type Provider interface {
 ```
 
 | Method            | Purpose                                       |
-|-------------------|-----------------------------------------------|
+| ----------------- | --------------------------------------------- |
 | **ID**            | Provider name                                 |
 | **Initialize**    | One-time setup                                |
 | **Register**      | Register this node with the discovery backend |
@@ -49,7 +49,7 @@ type Mailbox interface {
 ```
 
 | Method                | Purpose                                                            |
-|-----------------------|--------------------------------------------------------------------|
+| --------------------- | ------------------------------------------------------------------ |
 | **Enqueue**           | Push a message. Return error when full (bounded mailbox).          |
 | **Dequeue**           | Fetch the next message. Called only from the processing goroutine. |
 | **IsEmpty** / **Len** | Query mailbox state                                                |

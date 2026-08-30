@@ -12,19 +12,19 @@ The framework publishes lifecycle and cluster events so that external components
 
 ## API
 
-| Method                                | Purpose                                                                                         |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `ActorSystem.Subscribe()`             | Create a subscriber. Subscribes to the internal events topic. Returns `eventstream.Subscriber`. |
-| `ActorSystem.Unsubscribe(subscriber)` | Release the subscriber. Call to avoid leaks.                                                    |
+| Method                    | Purpose                                                                                         |
+| ------------------------- | ----------------------------------------------------------------------------------------------- |
+| `ActorSystem.Subscribe`   | Create a subscriber. Subscribes to the internal events topic. Returns `eventstream.Subscriber`. |
+| `ActorSystem.Unsubscribe` | Release the subscriber. Call to avoid leaks.                                                    |
 
 The `eventstream.Subscriber` interface:
 
-| Method       | Purpose                                                                               |
-| ------------ | ------------------------------------------------------------------------------------- |
-| `ID()`       | Unique subscriber identifier                                                          |
-| `Topics()`   | Topics this subscriber is subscribed to (includes the internal topic)                 |
-| `Iterator()` | Channel of buffered messages; drains and closes. Messages are `*eventstream.Message`. |
-| `Shutdown()` | Mark subscriber inactive                                                              |
+| Method     | Purpose                                                                               |
+| ---------- | ------------------------------------------------------------------------------------- |
+| `ID`       | Unique subscriber identifier                                                          |
+| `Topics`   | Topics this subscriber is subscribed to (includes the internal topic)                 |
+| `Iterator` | Channel of buffered messages; drains and closes. Messages are `*eventstream.Message`. |
+| `Shutdown` | Mark subscriber inactive                                                              |
 
 ## Message structure
 
@@ -37,21 +37,21 @@ Each message has:
 
 The system publishes these events to the event stream:
 
-| Event               | When                                                                          |
-| ------------------- | ----------------------------------------------------------------------------- |
-| `ActorStarted`      | Actor has started                                                             |
-| `ActorStopped`      | Actor has stopped                                                             |
-| `ActorChildCreated` | A child actor was spawned                                                     |
-| `ActorPassivated`   | Actor was passivated (idle timeout)                                           |
-| `ActorRestarted`    | Actor was restarted by supervisor                                             |
-| `ActorSuspended`    | Actor was suspended after a failure                                           |
-| `ActorReinstated`   | Actor was reinstated by supervisor                                            |
-| `Deadletter`        | Message could not be delivered (non-existent or stopped actor)                |
-| `NodeJoined`        | A node joined the cluster (cluster mode only)                                 |
-| `NodeLeft`          | A node left the cluster (cluster mode only)                                   |
-| `LeaderChanged`     | The cluster coordinator moved to a different node (cluster mode only)        |
-| `RelocationFailed`  | A departed node's actors or grains could not be relocated (cluster mode only) |
-| `RelocationStarted` | The leader started relocating a departed node's actors and grains; `BestEffort()` is true when the set was reconstructed after a crash (cluster mode only) |
+| Event               | When                                                                                                                                                     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ActorStarted`      | Actor has started                                                                                                                                        |
+| `ActorStopped`      | Actor has stopped                                                                                                                                        |
+| `ActorChildCreated` | A child actor was spawned                                                                                                                                |
+| `ActorPassivated`   | Actor was passivated (idle timeout)                                                                                                                      |
+| `ActorRestarted`    | Actor was restarted by supervisor                                                                                                                        |
+| `ActorSuspended`    | Actor was suspended after a failure                                                                                                                      |
+| `ActorReinstated`   | Actor was reinstated by supervisor                                                                                                                       |
+| `Deadletter`        | Message could not be delivered (non-existent or stopped actor)                                                                                           |
+| `NodeJoined`        | A node joined the cluster (cluster mode only)                                                                                                            |
+| `NodeLeft`          | A node left the cluster (cluster mode only)                                                                                                              |
+| `LeaderChanged`     | The cluster coordinator moved to a different node (cluster mode only)                                                                                    |
+| `RelocationFailed`  | A departed node's actors or grains could not be relocated (cluster mode only)                                                                            |
+| `RelocationStarted` | The leader started relocating a departed node's actors and grains; `BestEffort` is true when the set was reconstructed after a crash (cluster mode only) |
 
 ## Usage
 

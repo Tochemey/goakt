@@ -27,14 +27,14 @@ Raw actor messaging requires you to handle buffer overflow, message loss, and ba
 
 ## Core abstractions
 
-| Type            | Role                                                                        |
-| --------------- | --------------------------------------------------------------------------- |
-| `Source[T]`     | Origin of stream elements; produces values of type `T`                      |
-| `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                            |
-| `Sink[T]`       | Terminal consumer; processes elements and drives backpressure               |
+| Type            | Role                                                                       |
+| --------------- | -------------------------------------------------------------------------- |
+| `Source[T]`     | Origin of stream elements; produces values of type `T`                     |
+| `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                           |
+| `Sink[T]`       | Terminal consumer; processes elements and drives backpressure              |
 | `SubFlow[K, T]` | "Stream of streams": partition by key, transform per-substream, merge back |
-| `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times     |
-| `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics       |
+| `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times    |
+| `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics      |
 
 A minimal pipeline looks like this:
 
@@ -173,28 +173,28 @@ handle, err := stream.From(stream.FromConn(conn, 4096)).
 
 ### Reference
 
-| Constructor                          | Description                                                            |
-| ------------------------------------ | ---------------------------------------------------------------------- |
-| `Of[T](values...)`                   | Finite source from a fixed set of values                               |
-| `Range(start, end)`                  | Integer range `[start, end)`                                           |
-| `Unfold[S, T](seed, step)`           | Generates values from a seed with a stateful step function             |
-| `FromChannel[T](ch)`                 | Reads from a Go channel; completes when the channel closes             |
-| `FromActor[T](pid)`                  | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
-| `Tick(interval)`                     | Emits `time.Time` on a fixed interval; runs until cancelled            |
-| `Merge[T](sources...)`               | Fans N sources into one; completes when all inputs complete            |
-| `Concat[T](sources...)`              | Consumes sub-sources sequentially; completes when the last completes   |
-| `Combine[T, U, V](left, right, fn)`  | Zips two sources pairwise via `fn` (mixed input types)                 |
-| `Zip[T](sources...)`                 | Zips N same-typed sources into `[]T` tuples                            |
-| `ZipWith[T, V](fn, sources...)`      | N-input zip via user combine `fn`                                      |
-| `MergePreferred[T](idx, sources...)` | Like `Merge` but drains slot `idx` first when it has data              |
-| `MergePrioritized[T](weights, srcs)` | Weighted random slot selection over slots that have data               |
-| `MergeLatest[T](sources...)`         | Emits `[]T` snapshots of the latest value on every input               |
-| `MergeSequence[T](extractSeq, srcs)` | Emits in ascending seq order across N inputs                           |
-| `Broadcast[T](src, n)`               | Fans one source out to N independent branches                          |
-| `Balance[T](src, n)`                 | Distributes one source across N branches with round-robin backpressure |
-| `Partition[T](src, n, fn)`           | Routes each element to one of N branches via predicate `fn`            |
-| `Unzip[T, A, B](src, fn)`            | Splits a source into two sources of different element types            |
-| `FromConn(conn, bufSize)`            | Reads `[]byte` frames from a `net.Conn`                                |
+| Constructor           | Description                                                            |
+| --------------------- | ---------------------------------------------------------------------- |
+| `Of[T]`               | Finite source from a fixed set of values                               |
+| `Range`               | Integer range `[start, end)`                                           |
+| `Unfold[S, T]`        | Generates values from a seed with a stateful step function             |
+| `FromChannel[T]`      | Reads from a Go channel; completes when the channel closes             |
+| `FromActor[T]`        | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
+| `Tick`                | Emits `time.Time` on a fixed interval; runs until cancelled            |
+| `Merge[T]`            | Fans N sources into one; completes when all inputs complete            |
+| `Concat[T]`           | Consumes sub-sources sequentially; completes when the last completes   |
+| `Combine[T, U, V]`    | Zips two sources pairwise via `fn` (mixed input types)                 |
+| `Zip[T]`              | Zips N same-typed sources into `[]T` tuples                            |
+| `ZipWith[T, V]`       | N-input zip via user combine `fn`                                      |
+| `MergePreferred[T]`   | Like `Merge` but drains slot `idx` first when it has data              |
+| `MergePrioritized[T]` | Weighted random slot selection over slots that have data               |
+| `MergeLatest[T]`      | Emits `[]T` snapshots of the latest value on every input               |
+| `MergeSequence[T]`    | Emits in ascending seq order across N inputs                           |
+| `Broadcast[T]`        | Fans one source out to N independent branches                          |
+| `Balance[T]`          | Distributes one source across N branches with round-robin backpressure |
+| `Partition[T]`        | Routes each element to one of N branches via predicate `fn`            |
+| `Unzip[T, A, B]`      | Splits a source into two sources of different element types            |
+| `FromConn`            | Reads `[]byte` frames from a `net.Conn`                                |
 
 ---
 
@@ -284,23 +284,23 @@ stream.OrderedParallelMap(8, func(req Request) Response { return callAPI(req) })
 
 ### Reference
 
-| Constructor                          | Description                                                            |
-| ------------------------------------ | ---------------------------------------------------------------------- |
-| `Map[In, Out](fn)`                   | Type-changing transformation; no error path                            |
-| `TryMap[In, Out](fn)`                | Transformation with error; `ErrorStrategy` controls failure handling   |
-| `Filter[T](predicate)`               | Keeps only elements where `predicate` returns true                     |
-| `FlatMap[In, Out](fn)`               | Expands each element into a slice of outputs                           |
-| `FlatMapConcat[In, Out](fn)`         | Per-element streaming flat-map; sub-sources drained sequentially       |
-| `FlatMapMerge[In, Out](breadth, fn)` | Per-element streaming flat-map; up to `breadth` sub-sources concurrent |
-| `Flatten[T]()`                       | Unwraps `[]T` elements into individual elements                        |
-| `Batch[T](n, maxWait)`               | Groups into `[]T` slices of at most `n`; flushes early after `maxWait` |
-| `Buffer[T](size, strategy)`          | Asynchronous buffer with configurable overflow strategy                |
-| `Throttle[T](n, per)`                | Limits throughput to at most `n` elements per `per` duration           |
-| `Deduplicate[T]()`                   | Suppresses consecutive duplicate elements (`T` must be comparable)     |
-| `Scan[In, State](zero, fn)`          | Running accumulation; emits each intermediate state                    |
-| `WithContext[T](key, value)`         | Marks a named tracing boundary; passes elements through unchanged      |
-| `ParallelMap[In, Out](n, fn)`        | Applies `fn` concurrently with up to `n` goroutines; unordered output  |
-| `OrderedParallelMap[In, Out](n, fn)` | Like `ParallelMap` but preserves input order via min-heap resequencing |
+| Constructor                   | Description                                                            |
+| ----------------------------- | ---------------------------------------------------------------------- |
+| `Map[In, Out]`                | Type-changing transformation; no error path                            |
+| `TryMap[In, Out]`             | Transformation with error; `ErrorStrategy` controls failure handling   |
+| `Filter[T]`                   | Keeps only elements where `predicate` returns true                     |
+| `FlatMap[In, Out]`            | Expands each element into a slice of outputs                           |
+| `FlatMapConcat[In, Out]`      | Per-element streaming flat-map; sub-sources drained sequentially       |
+| `FlatMapMerge[In, Out]`       | Per-element streaming flat-map; up to `breadth` sub-sources concurrent |
+| `Flatten[T]`                  | Unwraps `[]T` elements into individual elements                        |
+| `Batch[T]`                    | Groups into `[]T` slices of at most `n`; flushes early after `maxWait` |
+| `Buffer[T]`                   | Asynchronous buffer with configurable overflow strategy                |
+| `Throttle[T]`                 | Limits throughput to at most `n` elements per `per` duration           |
+| `Deduplicate[T]`              | Suppresses consecutive duplicate elements (`T` must be comparable)     |
+| `Scan[In, State]`             | Running accumulation; emits each intermediate state                    |
+| `WithContext[T]`              | Marks a named tracing boundary; passes elements through unchanged      |
+| `ParallelMap[In, Out]`        | Applies `fn` concurrently with up to `n` goroutines; unordered output  |
+| `OrderedParallelMap[In, Out]` | Like `ParallelMap` but preserves input order via min-heap resequencing |
 
 ---
 
@@ -353,16 +353,16 @@ stream.Chan(ch)
 
 ### Reference
 
-| Constructor                     | Description                                                         |
-| ------------------------------- | ------------------------------------------------------------------- |
-| `ForEach[T](fn)`                | Calls `fn` for each element                                         |
-| `Collect[T]()`                  | Accumulates all elements; retrieve via `Collector[T].Items()`       |
-| `Fold[T, U](zero, fn)`          | Reduces to a single value; retrieve via `FoldResult[U].Value()`     |
-| `First[T]()`                    | Captures the first element then cancels upstream                    |
-| `Ignore[T]()`                   | Discards all elements                                               |
-| `Chan[T](ch)`                   | Writes each element to a Go channel; applies backpressure when full |
-| `ToActor[T](pid)`               | Forwards each element to a GoAkt actor via `Tell`                   |
-| `ToActorNamed[T](system, name)` | Resolves actor by name and forwards via `Tell`                      |
+| Constructor       | Description                                                         |
+| ----------------- | ------------------------------------------------------------------- |
+| `ForEach[T]`      | Calls `fn` for each element                                         |
+| `Collect[T]`      | Accumulates all elements; retrieve via `Collector[T].Items()`       |
+| `Fold[T, U]`      | Reduces to a single value; retrieve via `FoldResult[U].Value()`     |
+| `First[T]`        | Captures the first element then cancels upstream                    |
+| `Ignore[T]`       | Discards all elements                                               |
+| `Chan[T]`         | Writes each element to a Go channel; applies backpressure when full |
+| `ToActor[T]`      | Forwards each element to a GoAkt actor via `Tell`                   |
+| `ToActorNamed[T]` | Resolves actor by name and forwards via `Tell`                      |
 
 ---
 
@@ -626,11 +626,11 @@ sf := stream.GroupBy(src, 0, keyFn).
     WithSubstreamBuffer(64, stream.FailSource)
 ```
 
-| Strategy                          | Behaviour                                                                                                                                   |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `DropTail` (default)              | Discard the newest element when the substream is at capacity                                                                                |
+| Strategy                          | Behaviour                                                                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DropTail` (default)              | Discard the newest element when the substream is at capacity                                                                               |
 | `DropHead` / `BackpressureSource` | Currently collapse to drop-newest: `DropHead` would break per-key ordering and `BackpressureSource` would deadlock the splitter on inbound |
-| `FailSource`                      | Terminate the stream with `ErrSubstreamOverflow`                                                                                            |
+| `FailSource`                      | Terminate the stream with `ErrSubstreamOverflow`                                                                                           |
 
 Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
 
@@ -640,7 +640,7 @@ When a per-key sub-pipeline fails, `SubstreamErrorStrategy` controls how the spl
 
 | Strategy                     | Behaviour                                                                                                                                                 |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SubstreamFailAll` (default) | Surface the error verbatim via `StreamHandle.Err()` and terminate the entire stream                                                                       |
+| `SubstreamFailAll` (default) | Surface the error verbatim via `StreamHandle.Err` and terminate the entire stream                                                                         |
 | `SubstreamDrop`              | Blocklist the failing key and complete that substream silently; sibling substreams finish normally; further elements with the blocklisted key are dropped |
 | `SubstreamRestart`           | Discard the failed pipeline; the next element with that key spawns a fresh substream from scratch                                                         |
 
@@ -651,15 +651,15 @@ sf := stream.GroupBy(src, 0, keyFn).
 
 ### Reference
 
-| Constructor / method                                  | Description                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GroupBy[T, K](src, maxSubstreams, keyFn)`            | Partition `src` by `keyFn`; returns `SubFlow[K, T]`                                 |
-| `SplitWhen[T](src, predicate)`                        | New substream begins when `predicate` is true; element is FIRST of new substream    |
-| `SplitAfter[T](src, predicate)`                       | Current substream ends after `predicate` is true; element is LAST of that substream |
-| `SubFlowVia[K, In, Out](sf, flow)`                    | Append a transformation to each substream's pipeline                                |
-| `MergeSubstreams[K, T](sf)`                           | Collapse substreams back into a flat `Source[T]` (non-deterministic interleave)     |
-| `SubFlow.WithSubstreamBuffer(perKeyBuffer, strategy)` | Per-substream in-flight cap and overflow strategy                                   |
-| `SubFlow.WithErrorStrategy(strategy)`                 | Per-substream failure handling policy                                               |
+| Constructor / method          | Description                                                                         |
+| ----------------------------- | ----------------------------------------------------------------------------------- |
+| `GroupBy[T, K]`               | Partition `src` by `keyFn`; returns `SubFlow[K, T]`                                 |
+| `SplitWhen[T]`                | New substream begins when `predicate` is true; element is FIRST of new substream    |
+| `SplitAfter[T]`               | Current substream ends after `predicate` is true; element is LAST of that substream |
+| `SubFlowVia[K, In, Out]`      | Append a transformation to each substream's pipeline                                |
+| `MergeSubstreams[K, T]`       | Collapse substreams back into a flat `Source[T]` (non-deterministic interleave)     |
+| `SubFlow.WithSubstreamBuffer` | Per-substream in-flight cap and overflow strategy                                   |
+| `SubFlow.WithErrorStrategy`   | Per-substream failure handling policy                                               |
 
 ---
 
@@ -916,14 +916,14 @@ if err := handle.Stop(ctx); err != nil {
 handle.Abort()
 ```
 
-| Method      | Purpose                                                            |
-| ----------- | ------------------------------------------------------------------ |
-| `ID()`      | Unique stream identifier                                           |
-| `Done()`    | Channel closed when the stream terminates (naturally or by error)  |
-| `Err()`     | Terminal error; valid only after `Done()` is closed                |
-| `Stop(ctx)` | Orderly shutdown; drains in-flight elements, then stops all stages |
-| `Abort()`   | Immediate termination; discards buffered elements                  |
-| `Metrics()` | Returns a `StreamMetrics` snapshot                                 |
+| Method    | Purpose                                                            |
+| --------- | ------------------------------------------------------------------ |
+| `ID`      | Unique stream identifier                                           |
+| `Done`    | Channel closed when the stream terminates (naturally or by error)  |
+| `Err`     | Terminal error; valid only after `Done` is closed                  |
+| `Stop`    | Orderly shutdown; drains in-flight elements, then stops all stages |
+| `Abort`   | Immediate termination; discards buffered elements                  |
+| `Metrics` | Returns a `StreamMetrics` snapshot                                 |
 
 ---
 
@@ -991,7 +991,7 @@ stream.Map(fn).
 | `Tracer`                  | `Tracer`            | `nil`      | Optional distributed tracing hook                                      |
 | `Fusion`                  | `bool`              | `true`     | Whether this stage may participate in stage fusion                     |
 | `MicroBatch`              | `int`               | `1`        | Accumulate this many elements before forwarding (flow stages only)     |
-| `OnDrop`                  | `func(any, string)` | `nil`      | Called when an element is dropped due to overflow or exhausted retries |
+| `OnDrop`                  | `func`              | `nil`      | Called when an element is dropped due to overflow or exhausted retries |
 
 ---
 
@@ -1008,10 +1008,10 @@ they demand that the developer hand-craft every concern that GoAkt Streams handl
 | Error handling | Explicit error channels and coordination logic     | `ErrorStrategy` per stage (`FailFast`, `Resume`, `Retry`) |
 | Fan-out        | Manual goroutine fan; complex synchronisation      | `Broadcast`, `Balance` primitives                         |
 | Fan-in         | `select` or `sync.WaitGroup` coordination          | `Merge`, `Combine` primitives                             |
-| Windowing      | Custom timer goroutines and buffers                | `Batch[T](n, maxWait)` built-in                           |
-| Rate limiting  | Custom token bucket / ticker goroutines            | `Throttle[T](n, per)` built-in                            |
-| Cancellation   | `context.Context` plumbing through every goroutine | `handle.Stop(ctx)` / `handle.Abort()`                     |
-| Lifecycle      | Manual `sync.WaitGroup` + goroutine tracking       | `StreamHandle.Done()` + supervision tree                  |
+| Windowing      | Custom timer goroutines and buffers                | `Batch[T]` built-in                                       |
+| Rate limiting  | Custom token bucket / ticker goroutines            | `Throttle[T]` built-in                                    |
+| Cancellation   | `context.Context` plumbing through every goroutine | `handle.Stop` / `handle.Abort`                            |
+| Lifecycle      | Manual `sync.WaitGroup` + goroutine tracking       | `StreamHandle.Done` + supervision tree                    |
 | Observability  | Manual counters                                    | Built-in `StreamMetrics` and `Tracer`                     |
 
 **When to prefer channels:** simple point-to-point pipelines with one producer and one consumer, or when you need
@@ -1060,7 +1060,7 @@ connecting data systems. It is configuration-driven and ships with hundreds of c
 | **Backpressure**        | Ack-based; built into every connector           | Credit-based demand propagation                                  |
 | **Connectors**          | 200+ built-in (Kafka, S3, HTTP, databases…)     | User-defined via `Source`, `Sink` wrappers                       |
 | **Type safety**         | Untyped message blobs                           | Generic `Source[T]` / `Flow[In,Out]`                             |
-| **Embedding**           | Supported via Go library                        | Native: it is a Go library                                      |
+| **Embedding**           | Supported via Go library                        | Native: it is a Go library                                       |
 | **Processing model**    | Component DAG configured in YAML                | Composable Go values assembled in code                           |
 | **Testing**             | Unit tests via YAML fixtures                    | Standard Go tests; testkit                                       |
 | **Error handling**      | Retry / DLQ per connector                       | `ErrorStrategy` + `OnDrop` callback per stage                    |
@@ -1088,7 +1088,7 @@ processors on top of Apache Kafka.
 | **Scalability**       | Horizontal via Kafka partitions                | Vertical + actor location transparency               |
 | **Backpressure**      | Implicit via Kafka consumer offset             | Explicit credit-based demand                         |
 | **Exactly-once**      | Exactly-once semantics with transactions       | Exactly-once within a local pipeline                 |
-| **Windowing**         | Tumbling, hopping, sliding, session windows    | `Batch[T](n, maxWait)` for simple windowing          |
+| **Windowing**         | Tumbling, hopping, sliding, session windows    | `Batch[T]` for simple windowing                      |
 | **Table joins**       | KTable / KStream joins with changelog topics   | Not built-in; compose via actor state                |
 | **Operator richness** | Filter, map, flatMap, groupBy, aggregate, join | See flow reference table above                       |
 

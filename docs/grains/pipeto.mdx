@@ -10,11 +10,11 @@ the outcome comes back as an ordinary message.
 
 ## API
 
-| Method                              | Result delivered to |
-|-------------------------------------|---------------------|
-| `PipeToSelf(task, opts...)`         | This grain          |
-| `PipeToGrain(to, task, opts...)`    | Another grain       |
-| `PipeToActor(name, task, opts...)`  | A named actor       |
+| Method        | Result delivered to |
+| ------------- | ------------------- |
+| `PipeToSelf`  | This grain          |
+| `PipeToGrain` | Another grain       |
+| `PipeToActor` | A named actor       |
 
 All three are methods on `GrainContext`, so they are called from inside `OnReceive`.
 
@@ -41,10 +41,10 @@ results back through the piped message and update state when it arrives in `OnRe
 
 ## Options
 
-| Option                   | Purpose                                                           |
-|--------------------------|-------------------------------------------------------------------|
-| `WithTimeout(d)`         | Abort delivery if the task does not complete within `d`.          |
-| `WithCircuitBreaker(cb)` | If the circuit breaker is open, do not deliver; drop the outcome. |
+| Option               | Purpose                                                           |
+| -------------------- | ----------------------------------------------------------------- |
+| `WithTimeout`        | Abort delivery if the task does not complete within `d`.          |
+| `WithCircuitBreaker` | If the circuit breaker is open, do not deliver; drop the outcome. |
 
 Only one of the two may be used per call; using both returns `ErrOnlyOneOptionAllowed`.
 

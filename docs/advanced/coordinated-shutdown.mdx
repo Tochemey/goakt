@@ -37,14 +37,14 @@ type ShutdownHook interface {
 ```
 
 | Method       | Purpose                                                       |
-|--------------|---------------------------------------------------------------|
+| ------------ | ------------------------------------------------------------- |
 | **Execute**  | Run cleanup logic. Use the actor system for final operations. |
 | **Recovery** | Return retry and recovery configuration for failures.         |
 
 ### Recovery strategies
 
 | Strategy             | Behavior                                       |
-|----------------------|------------------------------------------------|
+| -------------------- | ---------------------------------------------- |
 | `ShouldFail`         | Stop shutdown on hook failure                  |
 | `ShouldRetryAndFail` | Retry, then stop if still failing              |
 | `ShouldSkip`         | Skip failed hook, continue                     |

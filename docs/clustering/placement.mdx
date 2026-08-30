@@ -10,12 +10,12 @@ Placement answers one question: which node runs an actor or grain. Actors are pl
 placed at activation time, every time they go from inactive to active. When cluster mode is disabled, all placement
 options are ignored and everything runs on the local node.
 
-| Workload        | API                            | Placement decided                                        | Default strategy  |
-|-----------------|--------------------------------|----------------------------------------------------------|-------------------|
-| Actor           | `Spawn`                        | At spawn: the calling node, or an explicit node via `WithHostAndPort` | Local             |
-| Actor           | `SpawnOn`                      | At spawn: node selected by strategy and role             | `RoundRobin`      |
-| Singleton actor | `SpawnSingleton`               | At spawn: coordinator, or oldest node with the role      | Leader            |
-| Grain           | `GrainOf` / first message      | At activation: node selected by strategy and role        | `LocalActivation` |
+| Workload        | API                       | Placement decided                                                     | Default strategy  |
+| --------------- | ------------------------- | --------------------------------------------------------------------- | ----------------- |
+| Actor           | `Spawn`                   | At spawn: the calling node, or an explicit node via `WithHostAndPort` | Local             |
+| Actor           | `SpawnOn`                 | At spawn: node selected by strategy and role                          | `RoundRobin`      |
+| Singleton actor | `SpawnSingleton`          | At spawn: coordinator, or oldest node with the role                   | Leader            |
+| Grain           | `GrainOf` / first message | At activation: node selected by strategy and role                     | `LocalActivation` |
 
 ## Actor placement
 
@@ -59,12 +59,12 @@ In cluster mode, `SpawnOn` selects a target node with a placement strategy and c
 set is the current cluster membership, including the calling node. Outside cluster mode, `SpawnOn` behaves exactly like
 `Spawn`.
 
-| Strategy               | Selection                                              | Notes                                                                                                       |
-|------------------------|--------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| `RoundRobin` (default) | Cycles through candidate nodes                         | Uses a cluster-wide shared counter, so the rotation is even across callers. Actors and grains keep separate counters. |
-| `Random`               | Uniform random candidate                               | Stateless and cheap; distribution can be uneven over small samples.                                          |
-| `Local`                | Always the calling node                                | Use when locality matters (node-local caches, files, devices).                                               |
-| `LeastLoad`            | Candidate reporting the smallest load                  | Queries every candidate's load metric over remoting before spawning; placement cost grows with cluster size. |
+| Strategy               | Selection                             | Notes                                                                                                                 |
+| ---------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `RoundRobin` (default) | Cycles through candidate nodes        | Uses a cluster-wide shared counter, so the rotation is even across callers. Actors and grains keep separate counters. |
+| `Random`               | Uniform random candidate              | Stateless and cheap; distribution can be uneven over small samples.                                                   |
+| `Local`                | Always the calling node               | Use when locality matters (node-local caches, files, devices).                                                        |
+| `LeastLoad`            | Candidate reporting the smallest load | Queries every candidate's load metric over remoting before spawning; placement cost grows with cluster size.          |
 
 ```go
 pid, err := system.SpawnOn(ctx, "analytics-worker", NewWorkerActor(),
@@ -167,12 +167,12 @@ the loser routes to the winner. See the [activation guarantee](/grains/overview#
 
 ### Activation strategies
 
-| Strategy                       | Selection                             | Notes                                                                              |
-|--------------------------------|---------------------------------------|------------------------------------------------------------------------------------|
-| `LocalActivation` (default)    | The calling node                      | The grain lives where it is first used.                                            |
-| `RoundRobinActivation`         | Cycles through candidate nodes        | Cluster-wide shared counter, independent from the actor counter.                   |
-| `RandomActivation`             | Uniform random candidate              | Stateless spreading.                                                               |
-| `LeastLoadActivation`          | Candidate reporting the smallest load | Queries every candidate's load metric over remoting; activation cost grows with cluster size. |
+| Strategy                    | Selection                             | Notes                                                                                         |
+| --------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `LocalActivation` (default) | The calling node                      | The grain lives where it is first used.                                                       |
+| `RoundRobinActivation`      | Cycles through candidate nodes        | Cluster-wide shared counter, independent from the actor counter.                              |
+| `RandomActivation`          | Uniform random candidate              | Stateless spreading.                                                                          |
+| `LeastLoadActivation`       | Candidate reporting the smallest load | Queries every candidate's load metric over remoting; activation cost grows with cluster size. |
 
 ```go
 identity, err := actor.GrainOf[*UserGrain](ctx, system, "user-123",

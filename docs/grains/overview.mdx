@@ -24,31 +24,31 @@ type Grain interface {
 }
 ```
 
-| Method           | When called                                          | Purpose                                                                            |
-|------------------|------------------------------------------------------|------------------------------------------------------------------------------------|
-| **OnActivate**   | When the grain is loaded into memory (first message) | Initialize state or resources. Return error to prevent activation.                 |
-| **OnReceive**    | For each message                                     | Handle messages. Use `ctx.Response(resp)` for Ask, `ctx.NoErr()` for Tell success. |
-| **OnDeactivate** | Before the grain is removed (passivation)            | Persist state, release resources.                                                  |
+| Method           | When called                                          | Purpose                                                                    |
+| ---------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
+| **OnActivate**   | When the grain is loaded into memory (first message) | Initialize state or resources. Return error to prevent activation.         |
+| **OnReceive**    | For each message                                     | Handle messages. Use `ctx.Response` for Ask, `ctx.NoErr` for Tell success. |
+| **OnDeactivate** | Before the grain is removed (passivation)            | Persist state, release resources.                                          |
 
 ## GrainContext
 
 Inside `OnReceive`, `GrainContext` provides:
 
-| Method                                                                | Purpose                                                                       |
-|-----------------------------------------------------------------------|-------------------------------------------------------------------------------|
-| `Message()`                                                           | The message being processed                                                   |
-| `Self()`                                                              | Grain identity                                                                |
-| `Response(resp)`                                                      | Reply to an Ask                                                               |
-| `NoErr()`                                                             | Signal success for Tell (no response)                                         |
-| `Err(err)`                                                            | Signal failure                                                                |
-| `Unhandled()`                                                         | Mark message as unhandled                                                     |
-| `TellActor(name, msg)`                                                | Send to an actor by name                                                      |
-| `AskActor(name, msg, timeout)`                                        | Ask an actor by name                                                          |
-| `AskGrain(to, msg, timeout)`                                          | Ask another grain                                                             |
-| `RequestGrain(to, msg, opts...)` / `RequestActor(name, msg, opts...)` | Non-blocking async request; needs [reentrancy](/grains/reentrancy)            |
-| `DeferResponse()`                                                     | Hand off this Ask's reply to a `GrainReply` for a later turn                  |
-| `PipeToSelf`, `PipeToGrain`, `PipeToActor`                            | Run a task off the message loop, deliver its result as a message; see [Grain PipeTo](/grains/pipeto) |
-| `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule`      | Manage [grain timers](/grains/timers)                                         |
+| Method                                                           | Purpose                                                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `Message`                                                        | The message being processed                                                                          |
+| `Self`                                                           | Grain identity                                                                                       |
+| `Response`                                                       | Reply to an Ask                                                                                      |
+| `NoErr`                                                          | Signal success for Tell (no response)                                                                |
+| `Err`                                                            | Signal failure                                                                                       |
+| `Unhandled`                                                      | Mark message as unhandled                                                                            |
+| `TellActor`                                                      | Send to an actor by name                                                                             |
+| `AskActor`                                                       | Ask an actor by name                                                                                 |
+| `AskGrain`                                                       | Ask another grain                                                                                    |
+| `RequestGrain` / `RequestActor`                                  | Non-blocking async request; needs [reentrancy](/grains/reentrancy)                                   |
+| `DeferResponse`                                                  | Hand off this Ask's reply to a `GrainReply` for a later turn                                         |
+| `PipeToSelf`, `PipeToGrain`, `PipeToActor`                       | Run a task off the message loop, deliver its result as a message; see [Grain PipeTo](/grains/pipeto) |
+| `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule` | Manage [grain timers](/grains/timers)                                                                |
 
 ## Identity and messaging
 

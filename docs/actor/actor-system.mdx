@@ -9,13 +9,13 @@ The **ActorSystem** is the top-level runtime that hosts actors and orchestrates 
 ## Role and responsibilities
 
 | Responsibility           | Description                                                                                                                                    |
-|--------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Actor hosting**        | Spawns and supervises actors under the `/user` guardian. Manages the actor tree and parent-child relationships.                                |
 | **Messaging**            | Routes messages locally or remotely. Serializes and deserializes when crossing node boundaries.                                                |
 | **Clustering**           | When enabled, joins a cluster, discovers peers, and provides location-transparent actor resolution.                                            |
 | **Remoting**             | When enabled, exposes a TCP server and client for cross-node communication.                                                                    |
 | **Event stream**         | Publishes system and cluster events (ActorStarted, NodeJoined, Deadletter, etc.) to subscribers. See [Event Streams](/advanced/event-streams). |
-| **PubSub**               | When `WithPubSub()` or cluster is enabled, a topic actor manages application-level topics. See [PubSub](/advanced/pubsub).                     |
+| **PubSub**               | When `WithPubSub` or cluster is enabled, a topic actor manages application-level topics. See [PubSub](/advanced/pubsub).                       |
 | **Scheduling**           | Delivers one-time, recurring, and cron-scheduled messages to actors.                                                                           |
 | **Coordinated shutdown** | Runs shutdown hooks, stops actors depth-first, and leaves the cluster gracefully.                                                              |
 
@@ -37,27 +37,27 @@ Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [First Actor](/
 
 ### Spawning
 
-| Method                                                   | Use case                                                                                                                       |
-|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `Spawn(ctx, name, actor, opts...)`                       | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                   |
-| `SpawnOn(ctx, name, actor, opts...)`                     | Create actor on a cluster node (see [Placement](/clustering/placement)) or in another data center (`WithDataCenter`).          |
-| `SpawnFromFunc(ctx, receiveFunc, opts...)`               | Functional actor; no `Actor` implementation.                                                                                   |
-| `SpawnNamedFromFunc(ctx, name, receiveFunc, opts...)`    | Named functional actor.                                                                                                        |
-| `SpawnRouter(ctx, name, poolSize, routeesKind, opts...)` | Router with a pool of routees. Not cluster-relocatable.                                                                        |
-| `SpawnSingleton(ctx, name, actor, opts...)`              | Cluster singleton; one instance per name across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons).   |
+| Method               | Use case                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `Spawn`              | Create a named actor locally (or on a specific host with `WithHostAndPort`).                                                 |
+| `SpawnOn`            | Create actor on a cluster node (see [Placement](/clustering/placement)) or in another data center (`WithDataCenter`).        |
+| `SpawnFromFunc`      | Functional actor; no `Actor` implementation.                                                                                 |
+| `SpawnNamedFromFunc` | Named functional actor.                                                                                                      |
+| `SpawnRouter`        | Router with a pool of routees. Not cluster-relocatable.                                                                      |
+| `SpawnSingleton`     | Cluster singleton; one instance per name across the cluster, hosted on the oldest node. See [Singletons](/actor/singletons). |
 
 See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons), [Clustering](/clustering/overview).
 
 ### Resolution and inspection
 
-| Method                   | Purpose                                                                                         |
-|--------------------------|-------------------------------------------------------------------------------------------------|
-| `ActorOf(ctx, name)`     | Resolve a PID by name. Local or remote; use `pid.IsLocal()` / `pid.IsRemote()` when it matters. |
-| `ActorExists(ctx, name)` | Check if an actor exists locally or in the cluster.                                             |
-| `Actors(ctx, timeout)`   | Enumerate all actors visible to this node. Use sparingly; cluster scan is costly.               |
-| `NumActors()`            | Count of local actors only.                                                                     |
-| `Partition(name)`        | Partition ID for a given actor name (cluster hashing).                                          |
-| `InCluster()`            | Whether the system is running in cluster mode.                                                  |
+| Method        | Purpose                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| `ActorOf`     | Resolve a PID by name. Local or remote; use `pid.IsLocal` / `pid.IsRemote` when it matters. |
+| `ActorExists` | Check if an actor exists locally or in the cluster.                                         |
+| `Actors`      | Enumerate all actors visible to this node. Use sparingly; cluster scan is costly.           |
+| `NumActors`   | Count of local actors only.                                                                 |
+| `Partition`   | Partition ID for a given actor name (cluster hashing).                                      |
+| `InCluster`   | Whether the system is running in cluster mode.                                              |
 
 See [PID](/actor/pid), [Location Transparency](/actor/location-transparency).
 
@@ -74,69 +74,69 @@ See [Messaging](/actor/messaging).
 
 ### Scheduling
 
-| Method                                                   | Purpose                           |
-|----------------------------------------------------------|-----------------------------------|
-| `ScheduleOnce(ctx, msg, pid, delay, opts...)`            | One-time delivery after `delay`.  |
-| `Schedule(ctx, msg, pid, interval, opts...)`             | Recurring delivery at `interval`. |
-| `ScheduleWithCron(ctx, msg, pid, cronExpr, opts...)`     | Cron-based delivery.              |
-| `CancelSchedule(reference)`                              | Cancel by reference.              |
-| `PauseSchedule(reference)` / `ResumeSchedule(reference)` | Pause or resume a scheduled task. |
+| Method                             | Purpose                           |
+| ---------------------------------- | --------------------------------- |
+| `ScheduleOnce`                     | One-time delivery after `delay`.  |
+| `Schedule`                         | Recurring delivery at `interval`. |
+| `ScheduleWithCron`                 | Cron-based delivery.              |
+| `CancelSchedule`                   | Cancel by reference.              |
+| `PauseSchedule` / `ResumeSchedule` | Pause or resume a scheduled task. |
 
 Use `WithReference(id)` when scheduling if you need to cancel, pause, or resume. See [Scheduling](/actor/scheduling).
 
 ### Events and observability
 
-| Method                    | Purpose                                                                                                                  |
-|---------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| `Subscribe()`             | Create an event-stream subscriber for system/cluster events. Returns `eventstream.Subscriber`; iterate via `Iterator()`. |
-| `Unsubscribe(subscriber)` | Release subscriber; call to avoid leaks.                                                                                 |
-| `TopicActor()`            | Topic actor PID for PubSub (when `WithPubSub()` or cluster is enabled). Send Subscribe, Unsubscribe, Publish.            |
-| `Metric(ctx)`             | Node-level metrics (actor count, mailbox sizes, throughput, uptime).                                                     |
+| Method        | Purpose                                                                                                                |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `Subscribe`   | Create an event-stream subscriber for system/cluster events. Returns `eventstream.Subscriber`; iterate via `Iterator`. |
+| `Unsubscribe` | Release subscriber; call to avoid leaks.                                                                               |
+| `TopicActor`  | Topic actor PID for PubSub (when `WithPubSub` or cluster is enabled). Send Subscribe, Unsubscribe, Publish.            |
+| `Metric`      | Node-level metrics (actor count, mailbox sizes, throughput, uptime).                                                   |
 
 See [Event Streams](/advanced/event-streams), [PubSub](/advanced/pubsub), [Observability](/advanced/observability).
 
 ### Cluster and lifecycle control
 
-| Method               | Purpose                                                      |
-|----------------------|--------------------------------------------------------------|
-| `Kill(ctx, name)`    | Stop an actor by name (local or remote).                     |
-| `ReSpawn(ctx, name)` | Restart an actor; children are recreated with initial state. |
-| `Name()`             | Actor system name.                                           |
+| Method    | Purpose                                                      |
+| --------- | ------------------------------------------------------------ |
+| `Kill`    | Stop an actor by name (local or remote).                     |
+| `ReSpawn` | Restart an actor; children are recreated with initial state. |
+| `Name`    | Actor system name.                                           |
 
 ### Dependency injection
 
-| Method                    | Purpose                                                                                                                                                                                    |
-|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Inject(dependencies...)` | Register dependency types with the actor system after startup. Enables restoration during cluster topology changes and when creating actors on remote hosts. Must be called after `Start`. |
+| Method   | Purpose                                                                                                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Inject` | Register dependency types with the actor system after startup. Enables restoration during cluster topology changes and when creating actors on remote hosts. Must be called after `Start`. |
 
 ## Configuration options
 
 Options are passed to `NewActorSystem(name, opts...)`. Each option is documented in the source; this table groups them by concern.
 
-| Option                                     | Purpose                                                                                           |
-|--------------------------------------------|---------------------------------------------------------------------------------------------------|
-| **Core**                                   |                                                                                                   |
-| `WithLogger(logger)`                       | Custom logger. `WithLoggingDisabled()` for no-op.                                                 |
-| `WithActorInitTimeout(d)`                  | Actor startup timeout.                                                                            |
-| `WithActorInitMaxRetries(n)`               | Retries for actor init.                                                                           |
-| `WithShutdownTimeout(d)`                   | Total shutdown timeout (default: 3 min).                                                          |
-| `WithAskTimeout(d)`                        | System-wide timeout for internal Ask round-trips (default: 5s).                                   |
-| `WithDefaultSupervisor(supervisor)`        | Fallback supervisor for actors without explicit config.                                           |
-| **Remoting & cluster**                     |                                                                                                   |
-| `WithRemote(config)`                       | Enable remoting. See [Remoting](/advanced/remoting).                                              |
-| `WithCluster(config)`                      | Enable clustering. See [Clustering](/clustering/overview).                                        |
-| `WithTLS(info)`                            | Deprecated: use `remote.WithTLS` on the remote config. See [TLS](/advanced/remoting#tls).         |
-| `WithoutRelocation()`                      | Disable actor relocation on node departure.                                                       |
-| **Extensions & capabilities**              |                                                                                                   |
-| `WithExtensions(ext...)`                   | System-wide extensions. See [Extensions and Dependencies](/advanced/extensions-and-dependencies). |
-| `WithPubSub()`                             | Enable topic-based pub/sub.                                                                       |
-| `WithMetrics()`                            | OpenTelemetry metrics. See [Observability](/advanced/observability).                              |
-| **Shutdown & eviction**                    |                                                                                                   |
-| `WithCoordinatedShutdown(hooks...)`        | Shutdown hooks. See [Coordinated Shutdown](/advanced/coordinated-shutdown).                       |
-| `WithEvictionStrategy(strategy, interval)` | Passivation when actor count exceeds limit.                                                       |
-| **Advanced**                               |                                                                                                   |
-| `WithThroughputBudget(n)`                  | Messages an actor may process per scheduler turn (default: 32). See [Dispatcher Pool](/architecture/dispatcher-pool#tuning-the-throughput-budget) for tuning profiles. |
-| `WithPartitionHasher(hasher)`              | Deprecated: use `ClusterConfig.WithPartitionHasher`. See [Partition Hashing](/clustering/partition-hashing). |
+| Option                        | Purpose                                                                                                                                                                |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Core**                      |                                                                                                                                                                        |
+| `WithLogger`                  | Custom logger. `WithLoggingDisabled` for no-op.                                                                                                                        |
+| `WithActorInitTimeout`        | Actor startup timeout.                                                                                                                                                 |
+| `WithActorInitMaxRetries`     | Retries for actor init.                                                                                                                                                |
+| `WithShutdownTimeout`         | Total shutdown timeout (default: 3 min).                                                                                                                               |
+| `WithAskTimeout`              | System-wide timeout for internal Ask round-trips (default: 5s).                                                                                                        |
+| `WithDefaultSupervisor`       | Fallback supervisor for actors without explicit config.                                                                                                                |
+| **Remoting & cluster**        |                                                                                                                                                                        |
+| `WithRemote`                  | Enable remoting. See [Remoting](/advanced/remoting).                                                                                                                   |
+| `WithCluster`                 | Enable clustering. See [Clustering](/clustering/overview).                                                                                                             |
+| `WithTLS`                     | Deprecated: use `remote.WithTLS` on the remote config. See [TLS](/advanced/remoting#tls).                                                                              |
+| `WithoutRelocation`           | Disable actor relocation on node departure.                                                                                                                            |
+| **Extensions & capabilities** |                                                                                                                                                                        |
+| `WithExtensions`              | System-wide extensions. See [Extensions and Dependencies](/advanced/extensions-and-dependencies).                                                                      |
+| `WithPubSub`                  | Enable topic-based pub/sub.                                                                                                                                            |
+| `WithMetrics`                 | OpenTelemetry metrics. See [Observability](/advanced/observability).                                                                                                   |
+| **Shutdown & eviction**       |                                                                                                                                                                        |
+| `WithCoordinatedShutdown`     | Shutdown hooks. See [Coordinated Shutdown](/advanced/coordinated-shutdown).                                                                                            |
+| `WithEvictionStrategy`        | Passivation when actor count exceeds limit.                                                                                                                            |
+| **Advanced**                  |                                                                                                                                                                        |
+| `WithThroughputBudget`        | Messages an actor may process per scheduler turn (default: 32). See [Dispatcher Pool](/architecture/dispatcher-pool#tuning-the-throughput-budget) for tuning profiles. |
+| `WithPartitionHasher`         | Deprecated: use `ClusterConfig.WithPartitionHasher`. See [Partition Hashing](/clustering/partition-hashing).                                                           |
 
 ## Component relationships
 

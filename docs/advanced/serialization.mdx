@@ -10,8 +10,8 @@ Messages crossing process boundaries must be serialized. GoAkt v4 ships three pl
 
 | Serializer          | Wire format        | Best for                                                                |
 | ------------------- | ------------------ | ----------------------------------------------------------------------- |
-| **ProtoSerializer** | protobuf (default) | `proto.Message` types: schema-driven, compact, language-portable.      |
-| **CBORSerializer**  | CBOR (binary)      | Plain Go structs: compact binary, faster than JSON, schema-less.       |
+| **ProtoSerializer** | protobuf (default) | `proto.Message` types: schema-driven, compact, language-portable.       |
+| **CBORSerializer**  | CBOR (binary)      | Plain Go structs: compact binary, faster than JSON, schema-less.        |
 | **JSONSerializer**  | JSON (via sonic)   | Plain Go structs where interoperability or human-readability is wanted. |
 
 All three use the same length-prefixed self-describing frame, so a custom implementation that follows the same pattern can interoperate.

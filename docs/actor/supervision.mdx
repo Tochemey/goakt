@@ -12,7 +12,7 @@ decides what to do. This keeps failures localized and recoverable.
 ## Strategies
 
 | Strategy      | Effect                                          |
-|---------------|-------------------------------------------------|
+| ------------- | ----------------------------------------------- |
 | **OneForOne** | Only the failing child is affected              |
 | **OneForAll** | All siblings are affected (e.g., all restarted) |
 
@@ -21,7 +21,7 @@ Choose **OneForOne** when failures are independent; **OneForAll** when siblings 
 ## Directives
 
 | Directive    | Action                                        |
-|--------------|-----------------------------------------------|
+| ------------ | --------------------------------------------- |
 | **Resume**   | Ignore the failure; continue processing       |
 | **Restart**  | Re-initialize the child (PreStart runs again) |
 | **Stop**     | Terminate the child                           |
@@ -35,13 +35,13 @@ budget is exhausted, the faulty child is suspended instead of restarted.
 Supervisors are created with `supervisor.NewSupervisor(opts...)` and passed via `WithSupervisor` when spawning. Key
 options:
 
-| Option                                                       | Purpose                                          |
-|--------------------------------------------------------------|--------------------------------------------------|
-| `WithDirective(errType, directive)`                          | Map a specific error type to a directive         |
-| `WithAnyErrorDirective(directive)`                           | Catch-all for any error                          |
-| `WithRetry(maxRetries, timeout)`                             | Bound consecutive restarts within a time window  |
-| `WithExponentialBackoff(initialDelay, maxDelay, resetAfter)` | Delay each consecutive restart, doubling per fault |
-| `WithStrategy(strategy)`                                     | `OneForOne` (default) or `OneForAll`             |
+| Option                   | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `WithDirective`          | Map a specific error type to a directive           |
+| `WithAnyErrorDirective`  | Catch-all for any error                            |
+| `WithRetry`              | Bound consecutive restarts within a time window    |
+| `WithExponentialBackoff` | Delay each consecutive restart, doubling per fault |
+| `WithStrategy`           | `OneForOne` (default) or `OneForAll`               |
 
 Directives: `Resume`, `Restart`, `Stop`, `Escalate`.
 

@@ -27,7 +27,7 @@ The router unwraps the payload and dispatches it to its routees based on the rou
 These strategies never wait for replies. They are fire-and-forget; routees process messages asynchronously.
 
 | Strategy           | Behavior                                                              |
-|--------------------|-----------------------------------------------------------------------|
+| ------------------ | --------------------------------------------------------------------- |
 | **RoundRobin**     | Rotate through routees in order                                       |
 | **Random**         | Pick a random routee                                                  |
 | **FanOut**         | Send to all routees concurrently (default)                            |
@@ -38,7 +38,7 @@ These strategies never wait for replies. They are fire-and-forget; routees proce
 When you need the router to observe replies and relay the first successful response back to the sender, use one of these. Outcomes are delivered **asynchronously** to the sender as ordinary messages (not via `Ask`).
 
 | Strategy                 | Behavior                                                                                                                                                                                                                                                                         |
-|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Scatter-Gather First** | Sends the request to all routees concurrently. The first successful reply within the time budget is forwarded to the original sender. Late replies are ignored. If no routee replies in time, the sender receives a `StatusFailure`.                                             |
 | **Tail-Chopping**        | Probes one routee at a time (in random order). If no response arrives before the interval, sends to the next routee. Repeats until a routee replies, all routees are tried, or the global deadline expires. First success wins; otherwise the sender receives a `StatusFailure`. |
 
@@ -59,17 +59,17 @@ Parameters:
 
 ## Router Options
 
-| Option                                            | Description                                                                                                                                                                                         |
-|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `WithRoutingStrategy(strategy)`                   | Set RoundRobin, Random, FanOut, or ConsistentHash. Default is FanOut.                                                                                                                               |
-| `WithConsistentHashRouter(extractor)`             | Use consistent-hash routing. `extractor` is a `MessageRoutingKeyExtractor` (`func(msg any) string`). Messages with the same key go to the same routee. Returns empty string to fall back to random. |
-| `WithConsistentHashVirtualNodes(n)`               | Virtual nodes per routee for the hash ring (default 150). Only with `WithConsistentHashRouter`.                                                                                                     |
-| `WithConsistentHashHasher(h)`                     | Custom hash function for the ring (default xxh3). Only with `WithConsistentHashRouter`.                                                                                                             |
-| `AsScatterGatherFirst(within)`                    | Use scatter-gather-first. `within` is the total time budget for any reply.                                                                                                                          |
-| `AsTailChopping(within, interval)`                | Use tail-chopping. `within` is the global deadline; `interval` is the delay between successive attempts. Requires `interval` > 0 and `within` > 0; typically `interval` < `within`.                 |
-| `WithRestartRouteeOnFailure(maxRetries, timeout)` | On routee panic: restart the routee (up to `maxRetries` within `timeout`).                                                                                                                          |
-| `WithStopRouteeOnFailure()`                       | On routee panic: stop and remove the routee from the pool. **Default.**                                                                                                                             |
-| `WithResumeRouteeOnFailure()`                     | On routee panic: resume the routee (keep state, continue processing).                                                                                                                               |
+| Option                           | Description                                                                                                                                                                                         |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithRoutingStrategy`            | Set RoundRobin, Random, FanOut, or ConsistentHash. Default is FanOut.                                                                                                                               |
+| `WithConsistentHashRouter`       | Use consistent-hash routing. `extractor` is a `MessageRoutingKeyExtractor` (`func(msg any) string`). Messages with the same key go to the same routee. Returns empty string to fall back to random. |
+| `WithConsistentHashVirtualNodes` | Virtual nodes per routee for the hash ring (default 150). Only with `WithConsistentHashRouter`.                                                                                                     |
+| `WithConsistentHashHasher`       | Custom hash function for the ring (default xxh3). Only with `WithConsistentHashRouter`.                                                                                                             |
+| `AsScatterGatherFirst`           | Use scatter-gather-first. `within` is the total time budget for any reply.                                                                                                                          |
+| `AsTailChopping`                 | Use tail-chopping. `within` is the global deadline; `interval` is the delay between successive attempts. Requires `interval` > 0 and `within` > 0; typically `interval` < `within`.                 |
+| `WithRestartRouteeOnFailure`     | On routee panic: restart the routee (up to `maxRetries` within `timeout`).                                                                                                                          |
+| `WithStopRouteeOnFailure`        | On routee panic: stop and remove the routee from the pool. **Default.**                                                                                                                             |
+| `WithResumeRouteeOnFailure`      | On routee panic: resume the routee (keep state, continue processing).                                                                                                                               |
 
 ### Examples
 
@@ -106,7 +106,7 @@ system.SpawnRouter(ctx, "resilient", 5, &Worker{}, actor.WithRestartRouteeOnFail
 Routers accept these control messages via `Tell` or `Ask`:
 
 | Message                | Usage                      | Response               |
-|------------------------|----------------------------|------------------------|
+| ---------------------- | -------------------------- | ---------------------- |
 | `GetRoutees`           | Query current routee names | `Routees` (use `Ask`)  |
 | `AdjustRouterPoolSize` | Scale pool at runtime      | None (fire-and-forget) |
 

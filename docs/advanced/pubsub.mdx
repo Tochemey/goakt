@@ -12,7 +12,13 @@ Each node runs one **topic actor** (`GoAktTopicActor`). Local actors subscribe t
 
 ### Standalone mode
 
-![PubSub Standalone Mode - Publisher sends Publish to Topic Actor, which delivers via Tell to local subscribers](/assets/pubsub-standalone-mode.png)
+```mermaid
+flowchart LR
+    P["publisher actor"] -->|"Publish"| T["topic actor<br/>GoAktTopicActor"]
+    T -->|"Tell"| S1["subscriber A"]
+    T -->|"Tell"| S2["subscriber B"]
+    T -->|"Tell"| S3["subscriber C"]
+```
 
 Publishers send `Publish` to the local topic actor. The topic actor delivers the message to all local subscribers via `Tell`.
 
@@ -25,7 +31,24 @@ In a cluster, each node has its own topic actor. **Topic actors communicate with
 3. The local topic actor sends a `TopicMessage` (serialized) to each peer node's topic actor via remoting.
 4. Each remote topic actor receives the `TopicMessage`, deserializes it, and delivers to **its** local subscribers.
 
-![PubSub Cluster Mode - Topic actors on each node; Node A publisher sends Publish, Topic Actors exchange TopicMessage via remoting, each delivers via Tell to local subscribers](/assets/pubsub-cluster-mode.png)
+```mermaid
+flowchart LR
+    subgraph nodeA["Node A"]
+        P["publisher actor"] -->|"Publish"| TA["topic actor"]
+        TA -->|"Tell"| SA["local subscribers"]
+    end
+
+    subgraph nodeB["Node B"]
+        TB["topic actor"] -->|"Tell"| SB["local subscribers"]
+    end
+
+    subgraph nodeC["Node C"]
+        TC["topic actor"] -->|"Tell"| SC["local subscribers"]
+    end
+
+    TA -->|"TopicMessage<br/>(remoting)"| TB
+    TA -->|"TopicMessage<br/>(remoting)"| TC
+```
 
 **Key point:** Subscribers always register with their **local** topic actor. Topic actors are responsible for cross-node dissemination; application actors never talk to remote topic actors directly.
 
@@ -49,9 +72,9 @@ system, _ := actor.NewActorSystem("app", actor.WithPubSub())
 
 ## Topic actor
 
-| Method                     | Purpose                                                                     |
-|----------------------------|-----------------------------------------------------------------------------|
-| `ActorSystem.TopicActor()` | Returns the topic actor's PID. Use to send Subscribe, Unsubscribe, Publish. |
+| Method                   | Purpose                                                                     |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `ActorSystem.TopicActor` | Returns the topic actor's PID. Use to send Subscribe, Unsubscribe, Publish. |
 
 The topic actor has a reserved name (`GoAktTopicActor`). From within an actor, use `ctx.ActorSystem().TopicActor()`. From outside (e.g. `main`), use `system.TopicActor()`. Returns `nil` if PubSub is not enabled.
 
@@ -59,10 +82,10 @@ The topic actor has a reserved name (`GoAktTopicActor`). From within an actor, u
 
 Actors send messages to the **local** topic actor to subscribe or unsubscribe from topics:
 
-| Message       | Constructor                   | Purpose                                                                     |
-|---------------|-------------------------------|-----------------------------------------------------------------------------|
-| `Subscribe`   | `actor.NewSubscribe(topic)`   | Subscribe this actor to a topic. Sender receives `SubscribeAck` on success. |
-| `Unsubscribe` | `actor.NewUnsubscribe(topic)` | Unsubscribe from a topic. Sender receives `UnsubscribeAck` on success.      |
+| Message       | Constructor            | Purpose                                                                     |
+| ------------- | ---------------------- | --------------------------------------------------------------------------- |
+| `Subscribe`   | `actor.NewSubscribe`   | Subscribe this actor to a topic. Sender receives `SubscribeAck` on success. |
+| `Unsubscribe` | `actor.NewUnsubscribe` | Unsubscribe from a topic. Sender receives `UnsubscribeAck` on success.      |
 
 The topic actor watches subscribers. When a subscriber terminates, it is automatically removed from all topics.
 
@@ -73,9 +96,9 @@ ctx.Tell(ctx.ActorSystem().TopicActor(), actor.NewSubscribe("orders"))
 
 ## Publish
 
-| Message   | Constructor                            | Purpose                                                                                           |
-|-----------|----------------------------------------|---------------------------------------------------------------------------------------------------|
-| `Publish` | `actor.NewPublish(id, topic, message)` | Publish a message to all subscribers of the topic. `id` is a unique message ID for deduplication. |
+| Message   | Constructor        | Purpose                                                                                           |
+| --------- | ------------------ | ------------------------------------------------------------------------------------------------- |
+| `Publish` | `actor.NewPublish` | Publish a message to all subscribers of the topic. `id` is a unique message ID for deduplication. |
 
 ```go
 msg := actor.NewPublish(uuid.New().String(), "orders", orderEvent)
@@ -164,10 +187,10 @@ In cluster mode, the local node's topic actor answers with its own local subscri
 ## Event stream vs PubSub
 
 | Aspect      | Event stream                          | PubSub                               |
-|-------------|---------------------------------------|--------------------------------------|
+| ----------- | ------------------------------------- | ------------------------------------ |
 | Purpose     | System and cluster observability      | Application-level event distribution |
 | Topics      | Fixed internal topic                  | Application-defined topics           |
 | Publishers  | Framework (PID, cluster, dead-letter) | Your actors                          |
 | Subscribers | External (monitoring, logging)        | Your actors                          |
-| API         | `Subscribe()` / `Unsubscribe()`       | Messages to `TopicActor()`           |
-| Option      | Always present                        | `WithPubSub()` or cluster            |
+| API         | `Subscribe` / `Unsubscribe`           | Messages to `TopicActor`             |
+| Option      | Always present                        | `WithPubSub` or cluster              |

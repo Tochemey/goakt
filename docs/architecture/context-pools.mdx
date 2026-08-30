@@ -239,9 +239,9 @@ Think of a revolving door with 512 stalls. People enter at one pointer, leave at
 
 `contextShardCapacity = 512`. That is **how many `ReceiveContext` pointers one shard may hold at rest**. It is not how many messages the actor system can process.
 
-| Empty shard                           | Full shard                          |
-| ------------------------------------- | ----------------------------------- |
-| `get` allocates `new(ReceiveContext)` | `put` drops the object; GC takes it |
+| Empty shard           | Full shard                          |
+| --------------------- | ----------------------------------- |
+| `get` allocates `new` | `put` drops the object; GC takes it |
 
 So 512 is a **memory cap per shard**, not a throughput cap. Throughput is “how fast can you push and pop.” Capacity is “how many spare envelopes we keep warm.”
 

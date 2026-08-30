@@ -21,17 +21,17 @@ Without `WithMailbox`, the actor uses `UnboundedMailbox`, a lock-free FIFO queue
 
 ## Built-in mailboxes
 
-| Mailbox | Capacity | Ordering | On overflow |
-|---|---|---|---|
-| `UnboundedMailbox` (default) | Unbounded | FIFO | Grows |
-| `UnboundedSegmentedMailbox` | Unbounded | FIFO | Grows |
-| `UnboundedFairMailbox` | Unbounded | FIFO per sender, round-robin across senders | Grows |
-| `BoundedMailbox` | Bounded | FIFO | Blocks the producer |
-| `NonBlockingBoundedMailbox` | Bounded | FIFO | Drops to the dead-letter stream |
-| `UnboundedPriorityMailBox` | Unbounded | Priority | Grows |
-| `UnboundedStablePriorityMailbox` | Unbounded | Priority, FIFO on ties | Grows |
-| `BoundedPriorityMailbox` | Bounded | Priority | Drops to the dead-letter stream |
-| `BoundedStablePriorityMailbox` | Bounded | Priority, FIFO on ties | Drops to the dead-letter stream |
+| Mailbox                          | Capacity  | Ordering                                    | On overflow                     |
+| -------------------------------- | --------- | ------------------------------------------- | ------------------------------- |
+| `UnboundedMailbox` (default)     | Unbounded | FIFO                                        | Grows                           |
+| `UnboundedSegmentedMailbox`      | Unbounded | FIFO                                        | Grows                           |
+| `UnboundedFairMailbox`           | Unbounded | FIFO per sender, round-robin across senders | Grows                           |
+| `BoundedMailbox`                 | Bounded   | FIFO                                        | Blocks the producer             |
+| `NonBlockingBoundedMailbox`      | Bounded   | FIFO                                        | Drops to the dead-letter stream |
+| `UnboundedPriorityMailBox`       | Unbounded | Priority                                    | Grows                           |
+| `UnboundedStablePriorityMailbox` | Unbounded | Priority, FIFO on ties                      | Grows                           |
+| `BoundedPriorityMailbox`         | Bounded   | Priority                                    | Drops to the dead-letter stream |
+| `BoundedStablePriorityMailbox`   | Bounded   | Priority, FIFO on ties                      | Drops to the dead-letter stream |
 
 ### Unbounded FIFO
 

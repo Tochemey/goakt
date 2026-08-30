@@ -8,12 +8,12 @@ Death watch lets an actor receive a `Terminated` message when another actor stop
 
 ## API
 
-| Method             | Purpose                                            |
-|--------------------|----------------------------------------------------|
-| `pid.Watch(cid)`   | Register to receive `Terminated` when `cid` stops. |
-| `pid.UnWatch(cid)` | Cancel the watch for `cid`.                        |
-| `ctx.Watch(cid)`   | Same as `ctx.Self().Watch(cid)`.                   |
-| `ctx.UnWatch(cid)` | Same as `ctx.Self().UnWatch(cid)`.                 |
+| Method        | Purpose                                            |
+| ------------- | -------------------------------------------------- |
+| `pid.Watch`   | Register to receive `Terminated` when `cid` stops. |
+| `pid.UnWatch` | Cancel the watch for `cid`.                        |
+| `ctx.Watch`   | Same as `ctx.Self`.                                |
+| `ctx.UnWatch` | Same as `ctx.Self`.                                |
 
 `Watch` and `UnWatch` are on `*PID` and `ReceiveContext`. Use `ctx.Watch(pid)` from inside `Receive` to watch another actor.
 

@@ -22,7 +22,7 @@ type Provider interface {
 ```
 
 | Method            | Purpose                                        |
-|-------------------|------------------------------------------------|
+| ----------------- | ---------------------------------------------- |
 | **ID**            | Provider name.                                 |
 | **Initialize**    | One-time setup (e.g., connect to backend).     |
 | **Register**      | Register this node with the discovery backend. |
@@ -33,7 +33,7 @@ type Provider interface {
 ## Built-in providers
 
 | Provider         | Package                 | Use case                              |
-|------------------|-------------------------|---------------------------------------|
+| ---------------- | ----------------------- | ------------------------------------- |
 | **Consul**       | `discovery/consul`      | HashiCorp Consul.                     |
 | **etcd**         | `discovery/etcd`        | etcd.                                 |
 | **Kubernetes**   | `discovery/kubernetes`  | K8s API for pod discovery.            |

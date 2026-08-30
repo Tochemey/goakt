@@ -8,10 +8,10 @@ sidebarTitle: "Overview"
 
 A GoAkt actor system runs in one of two modes:
 
-| Mode           | What it gives you                                                                          | Setup                                    |
-|----------------|--------------------------------------------------------------------------------------------|------------------------------------------|
+| Mode           | What it gives you                                                                          | Setup                                        |
+| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------- |
 | **Standalone** | Single-process actor system; all messaging is in-process                                   | `NewActorSystem` + `Start`, no extra options |
-| **Clustered**  | Multi-node membership: location transparency, distribution, relocation, cluster singletons | `WithRemote` + `WithCluster`             |
+| **Clustered**  | Multi-node membership: location transparency, distribution, relocation, cluster singletons | `WithRemote` + `WithCluster`                 |
 
 Remoting can also be enabled without clustering for point-to-point messaging between known nodes. That middle ground
 (no membership, no registry, no relocation) is covered in [Remoting](/advanced/remoting).
@@ -81,11 +81,11 @@ if err := system.Start(ctx); err != nil {
 
 Each node listens on three ports:
 
-| Port           | Set with                        | Carries                                        |
-|----------------|---------------------------------|------------------------------------------------|
-| Remoting port  | `remote.NewConfig(host, port)`  | Actor and grain messages between nodes         |
-| Discovery port | `WithDiscoveryPort`             | Gossip and membership traffic                  |
-| Peers port     | `WithPeersPort`                 | Cluster registry replication                   |
+| Port           | Set with            | Carries                                |
+| -------------- | ------------------- | -------------------------------------- |
+| Remoting port  | `remote.NewConfig`  | Actor and grain messages between nodes |
+| Discovery port | `WithDiscoveryPort` | Gossip and membership traffic          |
+| Peers port     | `WithPeersPort`     | Cluster registry replication           |
 
 <Note>
 TLS configured on the actor system with `actor.WithTLS` applies to both remoting and the cluster transport. See
@@ -99,29 +99,29 @@ The options below are grouped by concern.
 
 ### Workload and topology
 
-| Option                              | Default  | Purpose                                                                                                                                     |
-|-------------------------------------|----------|---------------------------------------------------------------------------------------------------------------------------------------------|
-| `WithKinds(actors...)`              | none     | Registers actor kinds this node can host (remote spawn, relocation).                                                                        |
-| `WithGrains(grains...)`             | none     | Registers grain kinds this node can host (remote activation, recreation, relocation).                                                       |
-| `WithRoles(roles...)`               | none     | Advertises node roles for role-constrained [placement](/clustering/placement). Duplicates are removed; order is not meaningful.              |
-| `WithGrainActivationBarrier(d)`     | disabled | Delays grain activations until the minimum peers quorum is reached, or until `d` elapses. `0` waits indefinitely. Reduces churn during startup and rolling deployments. |
-| `WithDataCenter(config)`            | disabled | Enables the multi-DC control plane. See [Multi Datacenter](/clustering/multi-datacenter).                                                   |
-| `WithCRDT(opts...)`                 | disabled | Enables CRDT replication through a Replicator system actor. Without it there is zero CRDT overhead. See [Distributed Data](/advanced/distributed-data). |
+| Option                       | Default  | Purpose                                                                                                                                                                 |
+| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithKinds`                  | none     | Registers actor kinds this node can host (remote spawn, relocation).                                                                                                    |
+| `WithGrains`                 | none     | Registers grain kinds this node can host (remote activation, recreation, relocation).                                                                                   |
+| `WithRoles`                  | none     | Advertises node roles for role-constrained [placement](/clustering/placement). Duplicates are removed; order is not meaningful.                                         |
+| `WithGrainActivationBarrier` | disabled | Delays grain activations until the minimum peers quorum is reached, or until `d` elapses. `0` waits indefinitely. Reduces churn during startup and rolling deployments. |
+| `WithDataCenter`             | disabled | Enables the multi-DC control plane. See [Multi Datacenter](/clustering/multi-datacenter).                                                                               |
+| `WithCRDT`                   | disabled | Enables CRDT replication through a Replicator system actor. Without it there is zero CRDT overhead. See [Distributed Data](/advanced/distributed-data).                 |
 
 ### Registry replication and storage
 
 The cluster registry is partitioned across nodes and replicated per partition. These knobs control durability,
 consistency, and memory footprint.
 
-| Option                       | Default | Purpose                                                                                                                                 |
-|------------------------------|---------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| `WithPartitionCount(n)`      | 271     | Number of registry partitions. Should be a prime number. See [Partition Hashing](/clustering/partition-hashing).                         |
-| `WithPartitionHasher(h)`     | xxh3    | Hash mapping names and identities to partitions. Must be identical, deterministic, and stable on every node.                             |
-| `WithReplicaCount(n)`        | 2       | Copies kept of each partition. The default survives one node loss. Use 3 to tolerate two concurrent losses.                              |
-| `WithWriteQuorum(n)`         | 1       | Replicas that must acknowledge a registry write. Must be `>= 1` and `<= replicaCount`.                                                   |
-| `WithReadQuorum(n)`          | 1       | Replicas consulted per registry read. Must be `>= 1` and `<= replicaCount`.                                                              |
-| `WithMinimumPeersQuorum(n)`  | 1       | Members required before the cluster serves operations. Also the quorum the grain activation barrier waits for. Keep it `<= replicaCount`. |
-| `WithTableSize(bytes)`       | 4 MB    | In-memory size of the registry key/value store on this node.                                                                             |
+| Option                   | Default | Purpose                                                                                                                                   |
+| ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithPartitionCount`     | 271     | Number of registry partitions. Should be a prime number. See [Partition Hashing](/clustering/partition-hashing).                          |
+| `WithPartitionHasher`    | xxh3    | Hash mapping names and identities to partitions. Must be identical, deterministic, and stable on every node.                              |
+| `WithReplicaCount`       | 2       | Copies kept of each partition. The default survives one node loss. Use 3 to tolerate two concurrent losses.                               |
+| `WithWriteQuorum`        | 1       | Replicas that must acknowledge a registry write. Must be `>= 1` and `<= replicaCount`.                                                    |
+| `WithReadQuorum`         | 1       | Replicas consulted per registry read. Must be `>= 1` and `<= replicaCount`.                                                               |
+| `WithMinimumPeersQuorum` | 1       | Members required before the cluster serves operations. Also the quorum the grain activation barrier waits for. Keep it `<= replicaCount`. |
+| `WithTableSize`          | 4 MB    | In-memory size of the registry key/value store on this node.                                                                              |
 
 <Warning>
 `WithReplicaCount(1)` keeps no backups: registry partitions owned by a crashed node are lost with it, crash recovery
@@ -137,14 +137,14 @@ registry writes succeeding while a node is down. For a majority configuration, u
 
 ### Timing
 
-| Option                              | Default | Purpose                                                                                                             |
-|-------------------------------------|---------|----------------------------------------------------------------------------------------------------------------------|
-| `WithWriteTimeout(d)`               | 1s      | Maximum duration of a registry write before it fails.                                                               |
-| `WithReadTimeout(d)`                | 1s      | Maximum duration of a registry read before it fails.                                                                |
-| `WithBootstrapTimeout(d)`           | 10s     | Maximum wait for cluster formation during `Start`; the system fails to start when it elapses.                       |
-| `WithShutdownTimeout(d)`            | 3m      | Maximum duration of a graceful cluster shutdown.                                                                    |
-| `WithClusterStateSyncInterval(d)`   | 1m      | How often nodes synchronize routing tables. Keep it greater than the write timeout.                                 |
-| `WithClusterBalancerInterval(d)`    | 1s      | How often the balancer evaluates placement and acknowledges rebalance epochs. Keep it shorter than the state sync interval so epochs do not stack. |
+| Option                         | Default | Purpose                                                                                                                                            |
+| ------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithWriteTimeout`             | 1s      | Maximum duration of a registry write before it fails.                                                                                              |
+| `WithReadTimeout`              | 1s      | Maximum duration of a registry read before it fails.                                                                                               |
+| `WithBootstrapTimeout`         | 10s     | Maximum wait for cluster formation during `Start`; the system fails to start when it elapses.                                                      |
+| `WithShutdownTimeout`          | 3m      | Maximum duration of a graceful cluster shutdown.                                                                                                   |
+| `WithClusterStateSyncInterval` | 1m      | How often nodes synchronize routing tables. Keep it greater than the write timeout.                                                                |
+| `WithClusterBalancerInterval`  | 1s      | How often the balancer evaluates placement and acknowledges rebalance epochs. Keep it shorter than the state sync interval so epochs do not stack. |
 
 Recommended starting points: small and medium clusters run well with a 1s to 5s balancer interval and 30s to 1m state
 sync; large or busy clusters should increase both together (for example 5s balancer with 1m to 2m state sync).
@@ -175,10 +175,10 @@ Exactly one node in the cluster acts as the coordinator (leader) at any given ti
 responsibilities such as relocation and cluster singleton placement, but its status is also queryable from application
 code:
 
-| Method                     | Purpose                                                                              |
-| -------------------------- | ------------------------------------------------------------------------------------- |
-| `ActorSystem.IsLeader(ctx)` | Reports whether the local node is the current cluster coordinator.                   |
-| `ActorSystem.Leader(ctx)`   | Returns the `*remote.Peer` describing the current cluster leader.                    |
+| Method                 | Purpose                                                            |
+| ---------------------- | ------------------------------------------------------------------ |
+| `ActorSystem.IsLeader` | Reports whether the local node is the current cluster coordinator. |
+| `ActorSystem.Leader`   | Returns the `*remote.Peer` describing the current cluster leader.  |
 
 Both methods require cluster mode; they return `ErrClusterDisabled` when clustering is not enabled.
 

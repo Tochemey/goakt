@@ -38,12 +38,12 @@ eGo offers two persistence models. Choose based on whether you need a full event
 
 `EventSourcedBehavior` captures state changes as domain events. Commands are processed sequentially: each command produces zero or more events that are persisted to a journal. State is rebuilt by replaying events on recovery.
 
-| Method                                    | Purpose                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------ |
-| `ID()`                                    | Unique behavior identifier                                               |
-| `InitialState()`                          | Returns the zero-value state (protobuf message)                          |
-| `HandleCommand(ctx, command, priorState)` | Validates the command against current state and returns resulting events |
-| `HandleEvent(ctx, event, priorState)`     | Applies a single event to produce the next state                         |
+| Method          | Purpose                                                                  |
+| --------------- | ------------------------------------------------------------------------ |
+| `ID`            | Unique behavior identifier                                               |
+| `InitialState`  | Returns the zero-value state (protobuf message)                          |
+| `HandleCommand` | Validates the command against current state and returns resulting events |
+| `HandleEvent`   | Applies a single event to produce the next state                         |
 
 Additional capabilities:
 
@@ -59,11 +59,11 @@ Additional capabilities:
 
 `DurableStateBehavior` persists only the latest state: no event log, no replay. Each successful command produces a new state version, and only the latest version is stored.
 
-| Method                                              | Purpose                                         |
-| --------------------------------------------------- | ----------------------------------------------- |
-| `ID()`                                              | Unique behavior identifier                      |
-| `InitialState()`                                    | Returns the zero-value state (protobuf message) |
-| `HandleCommand(ctx, command, priorState, revision)` | Validates the command and returns the new state |
+| Method          | Purpose                                         |
+| --------------- | ----------------------------------------------- |
+| `ID`            | Unique behavior identifier                      |
+| `InitialState`  | Returns the zero-value state (protobuf message) |
+| `HandleCommand` | Validates the command and returns the new state |
 
 This model is a good fit for configuration-style entities, lower-overhead persistence needs, and use cases where audit replay is not required.
 
@@ -94,23 +94,23 @@ Implement any interface to plug in your own backend.
 
 The eGo `Engine` manages entity lifecycle, wires persistence, and optionally enables clustering. Create an engine with `ego.NewEngine(name, eventStore, options...)`, then call `Start` and `Stop` to manage its lifecycle.
 
-| Option                      | Purpose                                               |
-| --------------------------- | ----------------------------------------------------- |
-| `WithSnapshotStore(store)`  | Enable snapshot-based recovery                        |
-| `WithSnapshotInterval(n)`   | Snapshot every `n` events                             |
-| `WithTelemetry(telemetry)`  | Enable OpenTelemetry traces and metrics               |
-| `WithLogger(logger)`        | Pluggable structured logging                          |
-| `WithEncryption(encryptor)` | At-rest encryption for events and snapshots           |
-| `WithCluster(...)`          | Distribute entities across nodes via GoAkt clustering |
+| Option                 | Purpose                                               |
+| ---------------------- | ----------------------------------------------------- |
+| `WithSnapshotStore`    | Enable snapshot-based recovery                        |
+| `WithSnapshotInterval` | Snapshot every `n` events                             |
+| `WithTelemetry`        | Enable OpenTelemetry traces and metrics               |
+| `WithLogger`           | Pluggable structured logging                          |
+| `WithEncryption`       | At-rest encryption for events and snapshots           |
+| `WithCluster`          | Distribute entities across nodes via GoAkt clustering |
 
 ### Entity spawn options
 
-| Option                        | Purpose                                         |
-| ----------------------------- | ----------------------------------------------- |
-| `WithSnapshotInterval(n)`     | Snapshot every `n` events for this entity       |
-| `WithBatchThreshold(n)`       | Flush after `n` accumulated events              |
-| `WithBatchFlushWindow(d)`     | Flush after duration `d`, whichever comes first |
-| `WithRetentionPolicy(policy)` | Auto-cleanup of old events and snapshots        |
+| Option                 | Purpose                                         |
+| ---------------------- | ----------------------------------------------- |
+| `WithSnapshotInterval` | Snapshot every `n` events for this entity       |
+| `WithBatchThreshold`   | Flush after `n` accumulated events              |
+| `WithBatchFlushWindow` | Flush after duration `d`, whichever comes first |
+| `WithRetentionPolicy`  | Auto-cleanup of old events and snapshots        |
 
 ### Clustering
 
@@ -131,14 +131,14 @@ Under concurrent load, individual store writes become a throughput bottleneck. E
 
 Projections consume persisted events and build read models. They track progress via an offset store and support retry, dead-letter handling, and rebuild.
 
-| Capability      | Description                                              |
-| --------------- | -------------------------------------------------------- |
-| Offset tracking | Resumes from the last committed offset                   |
-| Dead letters    | Captures failures after retry exhaustion                 |
-| Rebuild         | `Engine.RebuildProjection()` from a chosen point in time |
-| Lag monitoring  | `Engine.ProjectionLag()` per shard with OTel metrics     |
-| Event adapters  | Schema evolution during consumption                      |
-| Decryption      | Automatic decryption before handler processing           |
+| Capability      | Description                                            |
+| --------------- | ------------------------------------------------------ |
+| Offset tracking | Resumes from the last committed offset                 |
+| Dead letters    | Captures failures after retry exhaustion               |
+| Rebuild         | `Engine.RebuildProjection` from a chosen point in time |
+| Lag monitoring  | `Engine.ProjectionLag` per shard with OTel metrics     |
+| Event adapters  | Schema evolution during consumption                    |
+| Decryption      | Automatic decryption before handler processing         |
 
 ## Event publishing
 

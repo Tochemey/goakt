@@ -94,12 +94,12 @@ Without a durable work queue, a producer-side restart loses jobs already accepte
 
 ### When to use one
 
-| Event                                                    | Without a durable work queue                                    | With a durable work queue                                                          |
-| -------------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Worker crash, stop, respawn, or protocol violation        | Unconfirmed jobs requeue in the controller and re-dispatch      | Same: requeueing writes nothing to the queue                                       |
-| Producer endpoint crash, restart, or relocation           | Every accepted job is lost, pending and dispatched alike        | Accepted, unconfirmed jobs reload and re-dispatch to whichever workers are registered |
-| Retriable backend error after queue retries are exhausted | No durable operations exist                                     | The controller restarts, reloads authoritative state under a fresh epoch, and resumes |
-| `ErrQueueFenced` or `ErrQueueConflict`                    | No durable operations exist                                     | Terminal: the controller publishes `ReliableDeliveryFailed` and stops              |
+| Event                                                     | Without a durable work queue                               | With a durable work queue                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Worker crash, stop, respawn, or protocol violation        | Unconfirmed jobs requeue in the controller and re-dispatch | Same: requeueing writes nothing to the queue                                          |
+| Producer endpoint crash, restart, or relocation           | Every accepted job is lost, pending and dispatched alike   | Accepted, unconfirmed jobs reload and re-dispatch to whichever workers are registered |
+| Retriable backend error after queue retries are exhausted | No durable operations exist                                | The controller restarts, reloads authoritative state under a fresh epoch, and resumes |
+| `ErrQueueFenced` or `ErrQueueConflict`                    | No durable operations exist                                | Terminal: the controller publishes `ReliableDeliveryFailed` and stops                 |
 
 Attach one when an accepted job represents work that cannot simply be recreated: a payment to settle, an email to send, a customer-visible task the dispatcher already acknowledged. Leave it off when jobs are cheap to regenerate, for example a periodic scan that can be re-run or a stream the producer can replay from a source it never trims. Durability is not free: every job then costs a `Store`, an `Accept`, and a `ConfirmMessage` round trip against your backend.
 
@@ -157,14 +157,14 @@ A durable work-pulling flow still performs `Store` plus `Accept` before the next
 
 ## Configuration
 
-| Option                     | Side     | Default | Meaning                                                                          |
-| -------------------------- | -------- | ------- | -------------------------------------------------------------------------------- |
-| `WithReliableRetryInterval`   | Producer | 500ms   | `RequestNext` and `Stored` retry cadence toward the producer actor               |
-| `WithReliableDurableWorkQueue`     | Producer | off     | Persist accepted jobs; reload re-dispatches unconfirmed work after a crash       |
-| `WithReliableQueueRetry`           | Producer | 3 / 100ms | Retry policy for durable work-queue operations                                |
-| `WithReliableDeliveryConfirmation` | Producer | off     | Tell the producer a `DeliveryConfirmed` when a worker confirms a job             |
-| `WithReliableFlowControlWindow`    | Worker   | 50      | Demand granted per request and the worker-side buffer capacity; maximum 10,000   |
-| `WithReliableResendInterval`       | Worker   | 2s      | Worker controller tick: re-registration and resend cadence                       |
+| Option                             | Side     | Default   | Meaning                                                                        |
+| ---------------------------------- | -------- | --------- | ------------------------------------------------------------------------------ |
+| `WithReliableRetryInterval`        | Producer | 500ms     | `RequestNext` and `Stored` retry cadence toward the producer actor             |
+| `WithReliableDurableWorkQueue`     | Producer | off       | Persist accepted jobs; reload re-dispatches unconfirmed work after a crash     |
+| `WithReliableQueueRetry`           | Producer | 3 / 100ms | Retry policy for durable work-queue operations                                 |
+| `WithReliableDeliveryConfirmation` | Producer | off       | Tell the producer a `DeliveryConfirmed` when a worker confirms a job           |
+| `WithReliableFlowControlWindow`    | Worker   | 50        | Demand granted per request and the worker-side buffer capacity; maximum 10,000 |
+| `WithReliableResendInterval`       | Worker   | 2s        | Worker controller tick: re-registration and resend cadence                     |
 
 ## Failure handling
 

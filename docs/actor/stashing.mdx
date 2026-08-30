@@ -18,11 +18,11 @@ Without `WithStashing()`, calls to `Stash`, `Unstash`, or `UnstashAll` record `E
 
 ## API
 
-| Method             | Purpose                                                                                                                                                 |
-|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ctx.Stash()`      | Buffer the current message. It will not be processed until unstashed. The message is moved to a side buffer; the actor continues with the next message. |
-| `ctx.Unstash()`    | Dequeue the oldest stashed message and prepend it to the mailbox. Processes one message.                                                                |
-| `ctx.UnstashAll()` | Move all stashed messages back to the mailbox in arrival order.                                                                                         |
+| Method           | Purpose                                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ctx.Stash`      | Buffer the current message. It will not be processed until unstashed. The message is moved to a side buffer; the actor continues with the next message. |
+| `ctx.Unstash`    | Dequeue the oldest stashed message and prepend it to the mailbox. Processes one message.                                                                |
+| `ctx.UnstashAll` | Move all stashed messages back to the mailbox in arrival order.                                                                                         |
 
 Stashed messages are processed in FIFO order when unstashed.
 

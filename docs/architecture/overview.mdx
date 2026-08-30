@@ -20,9 +20,9 @@ The [Actor System](/actor/actor-system) is the top-level runtime that hosts acto
 
 ## Core building blocks
 
-| Concept               | Role                                                                                                                                                                                                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Reactive stream**   | Composable `stream.Source` → `Flow` stages → `Sink` pipelines, materialized with `RunnableGraph.Run` on an `ActorSystem`. Stages run as actors with demand-driven backpressure. See [Streams](/advanced/streams).                                                  |
+| Concept               | Role                                                                                                                                                                                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reactive stream**   | Composable `stream.Source` → `Flow` stages → `Sink` pipelines, materialized with `RunnableGraph.Run` on an `ActorSystem`. Stages run as actors with demand-driven backpressure. See [Streams](/advanced/streams).                                                   |
 | **CRDT / Replicator** | Conflict-free replicated data types (`crdt` package), merged by a per-node **Replicator** system actor. Replication is **eventually consistent**: separate from the Olric actor/grain registry (quorum-strong). See [Distributed data](/advanced/distributed-data). |
 
 ## Cluster architecture
@@ -47,9 +47,9 @@ graph LR
 
 The following pages describe the internal architecture of each major subsystem:
 
-| Subsystem         | Page                                             | What it covers                                                                                                  |
-| ----------------- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| **Scheduler**     | [Dispatcher Pool](/architecture/dispatcher-pool) | Fixed worker pool, actor state machine, ready queue, work stealing, system-message priority, throughput tuning. |
+| Subsystem         | Page                                             | What it covers                                                                                                               |
+| ----------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| **Scheduler**     | [Dispatcher Pool](/architecture/dispatcher-pool) | Fixed worker pool, actor state machine, ready queue, work stealing, system-message priority, throughput tuning.              |
 | **Context pools** | [Context Pools](/architecture/context-pools)     | Sharded lock-free `ReceiveContext` / `GrainContext` recycling, MPMC rings, ABA safety, pairwise Tell as the scaling surface. |
 
 ## See also

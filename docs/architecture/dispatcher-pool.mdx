@@ -164,9 +164,9 @@ User-provided custom mailboxes continue to work: they sit in the `mailbox` slot 
 
 | Phase           | Behaviour                                                                                                           |
 | --------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **Start**       | `dispatcher.start()` spawns worker goroutines. Idempotent. Must run before the first schedule.                      |
-| **Shutdown**    | `dispatcher.stop()` closes the ready queue and blocks on the worker WaitGroup. Not safe from within a worker turn.  |
-| **Signal stop** | `signalStop()` closes the queue and wakes all parked workers without blocking. Safe from inside a receive handler.  |
+| **Start**       | `dispatcher.start` spawns worker goroutines. Idempotent. Must run before the first schedule.                        |
+| **Shutdown**    | `dispatcher.stop` closes the ready queue and blocks on the worker WaitGroup. Not safe from within a worker turn.    |
+| **Signal stop** | `signalStop` closes the queue and wakes all parked workers without blocking. Safe from inside a receive handler.    |
 | **Restart**     | `PID` restart spins on `schedState != Processing` before reinitialising, since the MPSC mailbox is single-consumer. |
 
 PoisonPill delivery is preserved during shutdown: the system-message path is drained at turn time, so actors still process their final lifecycle messages even as the system unwinds.
@@ -188,7 +188,7 @@ The only externally-visible change is `runtime.NumGoroutine()`: it now returns `
 
 | Constant                | Value                  | Where                                             |
 | ----------------------- | ---------------------- | ------------------------------------------------- |
-| Worker pool size        | `max(GOMAXPROCS, 2)`   | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
+| Worker pool size        | `max`                  | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
 | Throughput budget       | `32` (default)         | `dispatcherThroughput` in `actor/dispatcher.go`   |
 | Local-ring capacity     | `256`                  | `localQueueCap` in `actor/ready_queue.go`         |
 | Global-ring initial cap | `64` (doubles on grow) | `globalQueueInitialCap` in `actor/ready_queue.go` |

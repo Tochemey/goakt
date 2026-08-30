@@ -10,13 +10,13 @@ Singleton identity is the actor name: several singletons of the same actor kind 
 
 ## Singletons vs normal actors
 
-| Aspect        | Singleton                         | Normal actor                             |
-|---------------|-----------------------------------|------------------------------------------|
+| Aspect        | Singleton                          | Normal actor                             |
+| ------------- | ---------------------------------- | ---------------------------------------- |
 | **Instances** | Exactly one per name, cluster-wide | One per spawn (many per node or cluster) |
-| **Placement** | Coordinator (oldest node) or role | Local, or any node via `SpawnOn`         |
-| **Cluster**   | Requires cluster mode             | Works standalone or in cluster           |
-| **Lifecycle** | Long-lived, relocated on shutdown | Explicit spawn/stop, can passivate       |
-| **API**       | `SpawnSingleton`                  | `Spawn`, `SpawnOn`, `SpawnFromFunc`      |
+| **Placement** | Coordinator (oldest node) or role  | Local, or any node via `SpawnOn`         |
+| **Cluster**   | Requires cluster mode              | Works standalone or in cluster           |
+| **Lifecycle** | Long-lived, relocated on shutdown  | Explicit spawn/stop, can passivate       |
+| **API**       | `SpawnSingleton`                   | `Spawn`, `SpawnOn`, `SpawnFromFunc`      |
 
 ## When to use singletons
 
@@ -52,13 +52,13 @@ Use `ActorOf(ctx, name)` to resolve the singleton from any node. Messaging is lo
 
 ## Configuration options
 
-| Option                              | Purpose                                       | Default |
-|-------------------------------------|-----------------------------------------------|---------|
-| `WithSingletonRole(role)`           | Pin singleton to nodes with this role         | —       |
-| `WithSingletonSpawnTimeout(d)`      | Max time to wait for spawn (retries + checks) | 30s     |
-| `WithSingletonSpawnWaitInterval(d)` | Delay between retry attempts                  | 500ms   |
-| `WithSingletonSpawnRetries(n)`      | Max retry attempts before giving up           | 5       |
-| `WithSingletonSupervisor(s)`        | Supervisor attached to the singleton          | Stop on panics and internal errors |
+| Option                           | Purpose                                       | Default                            |
+| -------------------------------- | --------------------------------------------- | ---------------------------------- |
+| `WithSingletonRole`              | Pin singleton to nodes with this role         | —                                  |
+| `WithSingletonSpawnTimeout`      | Max time to wait for spawn (retries + checks) | 30s                                |
+| `WithSingletonSpawnWaitInterval` | Delay between retry attempts                  | 500ms                              |
+| `WithSingletonSpawnRetries`      | Max retry attempts before giving up           | 5                                  |
+| `WithSingletonSupervisor`        | Supervisor attached to the singleton          | Stop on panics and internal errors |
 
 Example with role:
 
@@ -108,12 +108,12 @@ If the host node crashes (kill -9, OOM, etc.), relocation does not run; the sing
 
 ## Errors
 
-| Error                   | When                                                                       |
-|-------------------------|----------------------------------------------------------------------------|
-| `ErrClusterDisabled`    | Cluster mode is not enabled                                                |
-| `ErrLeaderNotFound`     | No coordinator (oldest node) in the cluster                                |
-| `ErrActorAlreadyExists` | The name is already used by a different actor                              |
-| Quorum errors           | Cluster cannot reach write/read quorum; retries may succeed                |
+| Error                   | When                                                        |
+| ----------------------- | ----------------------------------------------------------- |
+| `ErrClusterDisabled`    | Cluster mode is not enabled                                 |
+| `ErrLeaderNotFound`     | No coordinator (oldest node) in the cluster                 |
+| `ErrActorAlreadyExists` | The name is already used by a different actor               |
+| Quorum errors           | Cluster cannot reach write/read quorum; retries may succeed |
 
 <Note>
 `ErrSingletonAlreadyExists` is deprecated. It is only returned when the spawn is handled by a cluster node running an older version of GoAkt during a rolling upgrade.

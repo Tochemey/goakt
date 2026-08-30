@@ -66,10 +66,10 @@ Reentrancy is an activation-time property like every grain option. A grain react
 
 ## RequestGrain and RequestActor
 
-| Method                                         | Purpose                                                                                                                        |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ctx.RequestGrain(identity, message, opts...)` | Async request to another grain, including the grain itself. The target activates on demand, locally or on its owning node.     |
-| `ctx.RequestActor(name, message, opts...)`     | Async request to a named actor, local or remote. The actor replies with `ctx.Response` as it does for actor-to-actor requests. |
+| Method             | Purpose                                                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.RequestGrain` | Async request to another grain, including the grain itself. The target activates on demand, locally or on its owning node.     |
+| `ctx.RequestActor` | Async request to a named actor, local or remote. The actor replies with `ctx.Response` as it does for actor-to-actor requests. |
 
 Both return the same `RequestCall` handle actors use: register a continuation with `Then(func(any, error))`, cancel with `Cancel()`. Continuations run on the grain's turn when the response arrives.
 
@@ -81,10 +81,10 @@ In the opposite direction, an actor requests a grain with `ReceiveContext.Reques
 
 Grain requests default to `DefaultGrainRequestTimeout` (5 seconds), unlike actor requests, which have no default.
 
-| Option                     | Purpose                                                                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `WithRequestTimeout(d)`    | Change the timeout for this request. On expiry the continuation runs with `ErrRequestTimeout`. `d <= 0` disables the timeout. |
-| `WithReentrancyMode(mode)` | Override the grain's mode for this request only.                                                                              |
+| Option               | Purpose                                                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `WithRequestTimeout` | Change the timeout for this request. On expiry the continuation runs with `ErrRequestTimeout`. `d <= 0` disables the timeout. |
+| `WithReentrancyMode` | Override the grain's mode for this request only.                                                                              |
 
 ## Deferring a reply
 
@@ -127,7 +127,7 @@ All request failures surface through the returned call's `Then` continuation.
 | `ErrReentrancyDisabled`      | The grain has no reentrancy policy, or the effective mode is `Off` with no per-call override.             |
 | `ErrReentrancyInFlightLimit` | The `MaxInFlight` cap is reached; no new requests until some complete.                                    |
 | `ErrRequestTimeout`          | The request timed out (default `DefaultGrainRequestTimeout`, or the per-call `WithRequestTimeout` value). |
-| `ErrRequestCanceled`         | The request was canceled with `Cancel()`, or the system shut down while it was in flight.                 |
+| `ErrRequestCanceled`         | The request was canceled with `Cancel`, or the system shut down while it was in flight.                   |
 
 ## Passivation interaction
 
