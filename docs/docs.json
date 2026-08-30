@@ -2,31 +2,44 @@
   "$schema": "https://mintlify.com/docs.json",
   "name": "GoAkt",
   "description": "Distributed actor framework for Go, inspired by Erlang and Akka. Build reactive and distributed systems with typed actor messages.",
-  "theme": "mint",
+  "theme": "aspen",
   "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
   "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
   "favicon": "/assets/goakt-icon.png",
+  "icons": { "library": "lucide" },
+  "appearance": { "default": "system" },
+  "fonts": {
+    "heading": { "family": "Geist" },
+    "body": { "family": "Geist" }
+  },
   "logo": {
     "light": "/assets/goakt-logo-light.svg",
     "dark": "/assets/goakt-logo-dark.svg",
     "href": "https://docs.goakt.dev"
   },
   "background": { "decoration": "gradient" },
-  "fonts": {
-    "heading": { "family": "Geist" },
-    "body": { "family": "Geist" }
-  },
-  "appearance": { "default": "system" },
   "navbar": {
     "links": [
       {
-        "label": "Reference",
+        "label": "Migration from v3.x",
+        "href": "/getting-started/migration-v3"
+      },
+      {
+        "label": "API",
         "href": "https://pkg.go.dev/github.com/tochemey/goakt/v4"
       },
-      { "label": "GitHub", "href": "https://github.com/tochemey/goakt" }
+      { "label": "GitHub", "href": "https://github.com/tochemey/goakt" },
+      {
+        "label": "Install",
+        "href": "/getting-started/installation",
+        "icon": "download",
+        "primary": true
+      }
     ]
   },
-  "footer": { "socials": { "github": "https://github.com/tochemey/goakt" } },
+  "contextual": {
+    "options": ["copy", "view", "claude", "mcp", "vscode"]
+  },
   "styling": {
     "codeblocks": { "theme": { "light": "github-light", "dark": "dracula" } }
   },
@@ -49,128 +62,214 @@
     }
   ],
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Getting Started",
-        "pages": [
-          "/index",
-          "/getting-started/installation",
-          "/getting-started/migration-v3"
-        ],
-        "icon": "rocket"
+        "tab": "Get Started",
+        "icon": "rocket",
+        "groups": [
+          {
+            "group": "Get Started",
+            "icon": "rocket",
+            "pages": [
+              "/index",
+              "/getting-started/installation",
+              "/actor/first-actor"
+            ]
+          },
+          {
+            "group": "Upgrading",
+            "icon": "arrow-up",
+            "pages": [
+              "/getting-started/migration-v3",
+              "/reference/v400-changes"
+            ]
+          }
+        ]
       },
       {
-        "group": "Actor",
-        "pages": [
-          "/actor/first-actor",
-          "/actor/actor-model",
-          "/actor/actor-system",
-          "/actor/pid",
-          "/actor/messaging",
-          "/actor/mailboxes",
-          "/actor/lifecycle",
-          "/actor/supervision",
-          "/actor/location-transparency",
-          "/actor/behaviors",
-          "/actor/stashing",
-          "/actor/death-watch",
-          "/actor/pipeto",
-          "/actor/reentrancy",
-          "/actor/passivation",
-          "/actor/relocation",
-          "/actor/singletons",
-          "/actor/routers",
-          "/actor/scheduling",
-          "/actor/testkit"
-        ],
-        "icon": "users"
+        "tab": "Actors",
+        "icon": "users",
+        "groups": [
+          {
+            "group": "Core Concepts",
+            "icon": "circle-dot",
+            "pages": [
+              "/actor/actor-model",
+              "/actor/actor-system",
+              "/actor/pid",
+              "/actor/lifecycle"
+            ]
+          },
+          {
+            "group": "Messaging",
+            "icon": "send",
+            "pages": [
+              "/actor/messaging",
+              "/actor/mailboxes",
+              "/actor/pipeto",
+              "/actor/stashing",
+              "/actor/reentrancy",
+              "/actor/scheduling"
+            ]
+          },
+          {
+            "group": "Fault Tolerance",
+            "icon": "shield",
+            "pages": [
+              "/actor/supervision",
+              "/actor/death-watch",
+              "/actor/behaviors"
+            ]
+          },
+          {
+            "group": "Scaling & Placement",
+            "icon": "move",
+            "pages": [
+              "/actor/location-transparency",
+              "/actor/passivation",
+              "/actor/relocation",
+              "/actor/singletons",
+              "/actor/routers"
+            ]
+          },
+          {
+            "group": "Testing",
+            "icon": "flask-conical",
+            "pages": ["/actor/testkit"]
+          }
+        ]
       },
       {
-        "group": "Grains",
-        "pages": [
-          "/grains/overview",
-          "/grains/reentrancy",
-          "/grains/pipeto",
-          "/grains/timers"
-        ],
-        "icon": "box"
+        "tab": "Grains",
+        "icon": "box",
+        "groups": [
+          {
+            "group": "Grains",
+            "icon": "box",
+            "pages": [
+              "/grains/overview",
+              "/grains/reentrancy",
+              "/grains/pipeto",
+              "/grains/timers"
+            ]
+          }
+        ]
       },
       {
-        "group": "Remoting",
-        "pages": ["/advanced/remoting", "/advanced/serialization"],
-        "icon": "radio"
-      },
-      {
-        "group": "Cluster",
-        "pages": [
-          "/clustering/overview",
-          "/clustering/placement",
-          "/clustering/multi-datacenter",
-          "/clustering/service-discovery",
-          "/clustering/partition-hashing",
+        "tab": "Cluster",
+        "icon": "network",
+        "groups": [
+          {
+            "group": "Remoting",
+            "icon": "radio",
+            "pages": ["/advanced/remoting", "/advanced/serialization"]
+          },
+          {
+            "group": "Clustering",
+            "icon": "server",
+            "pages": [
+              "/clustering/overview",
+              "/clustering/placement",
+              "/clustering/service-discovery",
+              "/clustering/partition-hashing",
+              "/clustering/multi-datacenter"
+            ]
+          },
           {
             "group": "Reliable Delivery",
+            "icon": "shield-check",
             "pages": [
               "/clustering/reliable-delivery/point-to-point",
               "/clustering/reliable-delivery/work-pulling"
             ]
           }
-        ],
-        "icon": "network"
+        ]
       },
       {
-        "group": "Observability",
-        "pages": ["/advanced/observability", "/advanced/event-streams"],
-        "icon": "activity"
+        "tab": "Advanced",
+        "icon": "zap",
+        "groups": [
+          {
+            "group": "Messaging Patterns",
+            "icon": "radio-tower",
+            "pages": [
+              "/advanced/pubsub",
+              "/advanced/streams",
+              "/advanced/distributed-data"
+            ]
+          },
+          {
+            "group": "Runtime",
+            "icon": "settings",
+            "pages": [
+              "/advanced/client",
+              "/advanced/extensions-and-dependencies",
+              "/advanced/coordinated-shutdown"
+            ]
+          },
+          {
+            "group": "Observability",
+            "icon": "activity",
+            "pages": ["/advanced/observability", "/advanced/event-streams"]
+          }
+        ]
       },
       {
-        "group": "Advanced",
-        "pages": [
-          "/advanced/client",
-          "/advanced/extensions-and-dependencies",
-          "/advanced/pubsub",
-          "/advanced/distributed-data",
-          "/advanced/streams",
-          "/advanced/coordinated-shutdown"
-        ],
-        "icon": "zap"
+        "tab": "Architecture",
+        "icon": "blocks",
+        "groups": [
+          {
+            "group": "Architecture",
+            "icon": "blocks",
+            "pages": [
+              "/architecture/overview",
+              "/architecture/code-map",
+              "/architecture/design-decisions",
+              "/architecture/dispatcher-pool",
+              "/architecture/context-pools"
+            ]
+          }
+        ]
       },
       {
-        "group": "Architecture",
-        "pages": [
-          "/architecture/overview",
-          "/architecture/code-map",
-          "/architecture/design-decisions",
-          "/architecture/dispatcher-pool",
-          "/architecture/context-pools"
-        ],
-        "icon": "blocks"
+        "tab": "Reference",
+        "icon": "book",
+        "groups": [
+          {
+            "group": "Reference",
+            "icon": "book",
+            "pages": ["/reference/interfaces", "/reference/glossary"]
+          }
+        ]
       },
       {
-        "group": "Contribution",
-        "pages": [
-          "/contributing/overview",
-          "/contributing/development-setup",
-          "/contributing/testing-strategy",
-          "/contributing/extending"
-        ],
-        "icon": "hand-heart"
+        "tab": "eGo",
+        "icon": "layers",
+        "groups": [
+          {
+            "group": "Meta Framework",
+            "icon": "layers",
+            "pages": ["/meta-framework/ego"]
+          }
+        ]
       },
       {
-        "group": "Reference",
-        "pages": [
-          "/reference/interfaces",
-          "/reference/v400-changes",
-          "/reference/glossary"
-        ],
-        "icon": "book"
-      },
-      {
-        "group": "Meta Framework",
-        "pages": ["/meta-framework/ego"],
-        "icon": "layers"
+        "tab": "Contributing",
+        "icon": "hand-heart",
+        "groups": [
+          {
+            "group": "Contributing",
+            "icon": "hand-heart",
+            "pages": [
+              "/contributing/overview",
+              "/contributing/development-setup",
+              "/contributing/testing-strategy",
+              "/contributing/extending"
+            ]
+          }
+        ]
       }
     ]
   },
-  "icons": { "library": "lucide" }
+  "footer": { "socials": { "github": "https://github.com/tochemey/goakt" } }
 }

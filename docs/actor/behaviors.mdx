@@ -16,12 +16,12 @@ Behaviors are stored on a stack. The top of the stack handles each incoming mess
 
 ## API
 
-| Method                        | Purpose                                                                                                                                                     |
-|-------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `ctx.Become(behavior)`        | Replace the current behavior. The current message finishes under the old behavior; subsequent messages use the new one. No stack: previous behavior is lost. |
-| `ctx.BecomeStacked(behavior)` | Push a new behavior on top. Current message still uses the existing behavior; subsequent messages use the new one until `UnBecomeStacked`.                  |
-| `ctx.UnBecomeStacked()`       | Pop the top behavior. Resume the previous one. No effect if the stack is empty.                                                                             |
-| `ctx.UnBecome()`              | Reset to the default (initial) behavior. Clears the stack.                                                                                                  |
+| Method                | Purpose                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ctx.Become`          | Replace the current behavior. The current message finishes under the old behavior; subsequent messages use the new one. No stack: previous behavior is lost. |
+| `ctx.BecomeStacked`   | Push a new behavior on top. Current message still uses the existing behavior; subsequent messages use the new one until `UnBecomeStacked`.                   |
+| `ctx.UnBecomeStacked` | Pop the top behavior. Resume the previous one. No effect if the stack is empty.                                                                              |
+| `ctx.UnBecome`        | Reset to the default (initial) behavior. Clears the stack.                                                                                                   |
 
 ## Become vs BecomeStacked
 
@@ -120,15 +120,12 @@ func main() {
 
     // Login -> switches to Authenticated
     _ = actor.Tell(ctx, pid, &Login{User: "alice"})
-    time.Sleep(10 * time.Millisecond)
 
     // Transfer -> pushes ConfirmTransfer on stack
     _ = actor.Tell(ctx, pid, &Transfer{To: "bob", Amount: 50})
-    time.Sleep(10 * time.Millisecond)
 
     // Confirm -> pops ConfirmTransfer, executes transfer
     _ = actor.Tell(ctx, pid, &Confirm{})
-    time.Sleep(10 * time.Millisecond)
 
     fmt.Println("Done. Balance:", acc.balance) // 950
 }

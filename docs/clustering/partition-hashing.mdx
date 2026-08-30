@@ -19,10 +19,10 @@ The default implementation, `hash.DefaultHasher()`, uses [xxh3](https://github.c
 
 Two parts of the framework accept a custom `Hasher`:
 
-| Consumer                      | Option                                              | Applies in                       |
-| ----------------------------- | --------------------------------------------------- | -------------------------------- |
-| Cluster registry partitioning | `ClusterConfig.WithPartitionHasher(hasher)`         | Cluster mode only                |
-| Consistent-hash routers       | `WithConsistentHashHasher(h)` (router option)       | Both standalone and cluster mode |
+| Consumer                      | Option                                     | Applies in                       |
+| ----------------------------- | ------------------------------------------ | -------------------------------- |
+| Cluster registry partitioning | `ClusterConfig.WithPartitionHasher`        | Cluster mode only                |
+| Consistent-hash routers       | `WithConsistentHashHasher` (router option) | Both standalone and cluster mode |
 
 ## Cluster mode
 

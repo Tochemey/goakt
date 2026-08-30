@@ -14,6 +14,26 @@ The actor model treats **actors** as the fundamental unit of computation. Each a
 
 There is no shared state between actors. The only way to interact with one is to send it a message.
 
+An actor resembles an object whose fields are unreachable and whose only public method is "here is a message". The send
+is asynchronous: the sender hands the message over and carries on, rather than waiting on a stack frame.
+
+## What an actor does with a message
+
+In the model's original formulation, everything an actor may do in response to one message falls into three categories.
+GoAkt maps each to a concrete API:
+
+| Action                                     | In GoAkt                                                                     |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
+| Create more actors                         | `ctx.Spawn` for a child; `system.Spawn` from outside an actor                |
+| Send messages to other actors              | `ctx.Tell`, `ctx.Ask`; see [Messaging](/actor/messaging)                     |
+| Designate how to handle the _next_ message | `ctx.Become` / `ctx.UnBecome`; see [Behaviors](/actor/behaviors)             |
+
+The third is the one that surprises people. A classical actor does not so much mutate state as decide what it will be
+when the next message arrives: a counter receiving `add(1)` designates "I am now 1" rather than editing a cell someone
+else might be reading. Nothing outside can observe the difference, so GoAkt lets you write the direct form and assign to
+a private field. Behavior designation is then reserved for when the _shape_ of the handling changes rather than a value:
+a connection becoming authenticated, a circuit breaker opening, an order moving to `paid`.
+
 ## Why use actors?
 
 Actors provide a natural model for concurrent and distributed systems:
@@ -26,10 +46,10 @@ Actors provide a natural model for concurrent and distributed systems:
 ## Core concepts
 
 | Concept         | Description                                                                                                                |
-|-----------------|----------------------------------------------------------------------------------------------------------------------------|
+| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                           |
 | **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](/actor/actor-system). |
-| **PID**         | Process identifier: a live handle to a running actor. Used for all interactions.                                            |
+| **PID**         | Process identifier: a live handle to a running actor. Used for all interactions.                                           |
 | **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                              |
 | **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                                     |
 
@@ -61,6 +81,20 @@ graph TD
 
 When a parent stops, all children stop first (depth-first). A parent supervises its children: on failure, the configured
 strategy decides whether to resume, restart, stop, or escalate.
+
+## Let it crash
+
+The actor model's answer to failure is not to defend against it in every handler. Code that tries to anticipate every
+fault buries the common path in error handling and still misses the fault nobody imagined. The Erlang tradition inverts
+this: let the failing actor crash, and make recovery an explicit job that belongs to somebody else.
+
+That somebody is the parent. A crash arrives at the supervisor as a message, and it applies a directive: `Resume` to
+keep the state and drop the offending message, `Restart` to discard state that may now be inconsistent and begin again
+from a known-good one, `Stop`, or `Escalate` to its own parent. Isolation is what makes this safe. The crashed actor's
+state was private, so nothing else was corrupted and no peer ever observed a half-finished mutation.
+
+A restart is therefore a repair rather than an outage. See [Supervision](/actor/supervision) for the strategies and
+[Lifecycle](/actor/lifecycle) for what a restart means for `PreStart` and `PostStop`.
 
 ## Concurrency without synchronization
 
@@ -155,13 +189,13 @@ and teardown belong there. `PreStart` is bounded by the init timeout, configurab
 
 ### Doing real work without blocking
 
-| Need                                 | Approach                                                                                                                        |
-|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| Call an HTTP API or a database       | [`ctx.PipeTo`](/actor/pipeto) or `ctx.PipeToName`; the result arrives as a message.                                             |
+| Need                                  | Approach                                                                                                                                |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Call an HTTP API or a database        | [`ctx.PipeTo`](/actor/pipeto) or `ctx.PipeToName`; the result arrives as a message.                                                     |
 | Ask another actor and stay responsive | `ctx.Request` or `ctx.RequestName` under a [reentrancy](/actor/reentrancy) policy; the reply runs through `Then` on the mailbox thread. |
-| Wait for a precondition              | [`ctx.Stash()`](/actor/stashing), then `ctx.UnstashAll()` once the condition holds.                                             |
-| CPU-heavy computation                | `PipeTo`, or spread the work across child actors.                                                                               |
-| Periodic work                        | [Scheduling](/actor/scheduling), not a sleep loop.                                                                              |
+| Wait for a precondition               | [`ctx.Stash`](/actor/stashing), then `ctx.UnstashAll` once the condition holds.                                                         |
+| CPU-heavy computation                 | `PipeTo`, or spread the work across child actors.                                                                                       |
+| Periodic work                         | [Scheduling](/actor/scheduling), not a sleep loop.                                                                                      |
 
 The one way to bring the race back is a goroutine you start yourself. A `PipeTo` task runs off the mailbox thread, so it
 must not touch actor fields. Copy what it needs, return the result, and mutate state when the result arrives as a
@@ -203,16 +237,10 @@ type Actor interface {
 ```
 
 | Method       | When called                                  | Purpose                                                                                                                               |
-|--------------|----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|
+| ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **PreStart** | Once, before the actor processes any message | Initialize dependencies, caches, or recover persistent state. Return an error to prevent startup; the supervisor handles the failure. |
-| **Receive**  | For each message in the mailbox              | Handle messages. Use a type switch on `ctx.Message()`. Call `ctx.Unhandled()` for unknown types.                                      |
+| **Receive**  | For each message in the mailbox              | Handle messages. Use a type switch on `ctx.Message`. Call `ctx.Unhandled` for unknown types.                                          |
 | **PostStop** | When the actor is about to shut down         | Release resources, flush logs, notify other systems. Called after the mailbox is drained.                                             |
 
 Keep actor state in unexported fields. Initialize in `PreStart`, not in constructors. The framework guarantees
 single-threaded execution per actor, so no locks are needed inside `Receive`.
-
-## Further reading
-
-- [Brian Storti: The Actor Model](https://www.brianstorti.com/the-actor-model/): Short introduction
-- [Messaging](/actor/messaging): Tell vs Ask, message types
-- [Actor Lifecycle](/actor/lifecycle): Spawn, stop, state transitions

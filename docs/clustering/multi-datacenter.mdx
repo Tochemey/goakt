@@ -10,7 +10,26 @@ GoAkt supports multiple clusters across datacenters. A pluggable **control plane
 
 ## Architecture
 
-![Multi-Datacenter Architecture - DC-1 and DC-2 clusters communicate via a Control Plane (NATS JetStream or etcd) for registration, heartbeats, and cross-DC messaging](/assets/multi-datacenter-architecture.png)
+```mermaid
+flowchart TB
+    CP[("control plane<br/>NATS JetStream or etcd")]
+
+    subgraph dc1["DC-1"]
+        L1["cluster leader<br/>datacenter controller"]
+        N1["cluster members"]
+        L1 --- N1
+    end
+
+    subgraph dc2["DC-2"]
+        L2["cluster leader<br/>datacenter controller"]
+        N2["cluster members"]
+        L2 --- N2
+    end
+
+    L1 <-->|"register, heartbeat,<br/>watch events"| CP
+    L2 <-->|"register, heartbeat,<br/>watch events"| CP
+    N1 <-->|"cross-DC messaging<br/>(remoting)"| N2
+```
 
 - **Control plane**: Manages datacenter registration, heartbeats, state transitions, and event watching. Implementations: NATS JetStream, etcd.
 - **DC leader**: Only the cluster leader in each DC runs the datacenter controller. It registers the local DC with the control plane using cluster members' remoting addresses.
@@ -148,10 +167,10 @@ active datacenter records and attempts delivery to the first endpoint that succe
 
 ## Readiness and errors
 
-| API                              | Purpose                                                |
-| -------------------------------- | ------------------------------------------------------ |
-| `system.DataCenterReady()`       | Returns whether the multi-DC controller is operational |
-| `system.DataCenterLastRefresh()` | Time of last successful DC cache refresh               |
+| API                            | Purpose                                                |
+| ------------------------------ | ------------------------------------------------------ |
+| `system.DataCenterReady`       | Returns whether the multi-DC controller is operational |
+| `system.DataCenterLastRefresh` | Time of last successful DC cache refresh               |
 
 | Error                         | When                                                                |
 | ----------------------------- | ------------------------------------------------------------------- |

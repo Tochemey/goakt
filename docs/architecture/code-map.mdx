@@ -39,27 +39,27 @@ Grouped by subsystem.
 
 ### Core API and runtime
 
-| File                                           | Purpose                                                                             |
-| ---------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `actor.go`                                     | `Actor` interface: `PreStart`, `Receive`, `PostStop`                                |
-| `actor_system.go`                              | `ActorSystem` implementation; wires cluster, remoting, scheduling, passivation      |
-| `actor_path.go`                                | Address/path parsing and formatting for `goakt://system@host:port/path` URLs        |
-| `api.go`                                       | Top-level API surface: `Tell`, `Ask`, `BatchTell`, `BatchAsk`                       |
-| `pid.go`                                       | `PID`: live reference to an actor; implements `schedulable.runTurn`                |
-| `pid_option.go`, `pid_state.go`, `pid_tree.go` | PID options, lifecycle state, and the parent/child tree structure                   |
-| `receive_context.go`                           | `ReceiveContext` passed to `Receive`; messaging, stash, behaviors                   |
+| File                                           | Purpose                                                                                                |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `actor.go`                                     | `Actor` interface: `PreStart`, `Receive`, `PostStop`                                                   |
+| `actor_system.go`                              | `ActorSystem` implementation; wires cluster, remoting, scheduling, passivation                         |
+| `actor_path.go`                                | Address/path parsing and formatting for `goakt://system@host:port/path` URLs                           |
+| `api.go`                                       | Top-level API surface: `Tell`, `Ask`, `BatchTell`, `BatchAsk`                                          |
+| `pid.go`                                       | `PID`: live reference to an actor; implements `schedulable.runTurn`                                    |
+| `pid_option.go`, `pid_state.go`, `pid_tree.go` | PID options, lifecycle state, and the parent/child tree structure                                      |
+| `receive_context.go`                           | `ReceiveContext` passed to `Receive`; messaging, stash, behaviors                                      |
 | `context_pool.go`                              | Sharded lock-free pool for `ReceiveContext` objects. See [Context Pools](/architecture/context-pools). |
-| `context.go`                                   | `Context` passed to `PreStart` / `PostStop`                                         |
-| `option.go`                                    | Options for `NewActorSystem` (logger, remoting, cluster, `WithThroughputBudget`, …) |
-| `defaults.go`                                  | Package-level default constants                                                     |
-| `messages.go`                                  | Internal protocol messages (`PostStart`, `Terminated`, `Panicking`, …)              |
-| `no_sender.go`                                 | Sentinel PID used when a message has no sender                                      |
-| `pools.go`                                     | Error-channel pool and per-request Ask reply channels (not `ReceiveContext`)        |
-| `pipe_option.go`                               | Options for `PipeTo` (async outbound with circuit breaker)                          |
-| `poison_pill_serializer.go`                    | Registration of the `PoisonPill` control message with the serializer registry       |
-| `reflection.go`                                | Runtime type helpers; instantiate actor/grain from type name                        |
-| `metric.go`                                    | OpenTelemetry actor metrics                                                         |
-| `guardrails.go`                                | Reserved actor/grain name guards                                                    |
+| `context.go`                                   | `Context` passed to `PreStart` / `PostStop`                                                            |
+| `option.go`                                    | Options for `NewActorSystem` (logger, remoting, cluster, `WithThroughputBudget`, …)                    |
+| `defaults.go`                                  | Package-level default constants                                                                        |
+| `messages.go`                                  | Internal protocol messages (`PostStart`, `Terminated`, `Panicking`, …)                                 |
+| `no_sender.go`                                 | Sentinel PID used when a message has no sender                                                         |
+| `pools.go`                                     | Error-channel pool and per-request Ask reply channels (not `ReceiveContext`)                           |
+| `pipe_option.go`                               | Options for `PipeTo` (async outbound with circuit breaker)                                             |
+| `poison_pill_serializer.go`                    | Registration of the `PoisonPill` control message with the serializer registry                          |
+| `reflection.go`                                | Runtime type helpers; instantiate actor/grain from type name                                           |
+| `metric.go`                                    | OpenTelemetry actor metrics                                                                            |
+| `guardrails.go`                                | Reserved actor/grain name guards                                                                       |
 
 ### Scheduler: the dispatcher pool
 
@@ -107,7 +107,7 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 | `router.go` / `router_option.go`      | Router actor; fans out to routees                                            |
 | `routing_strategy.go`                 | Round-robin, random, fan-out strategies                                      |
 | `scheduler.go` / `schedule_option.go` | Scheduled / recurring / cron message delivery                                |
-| `func_actor.go`                       | `FuncActor`: create an actor from a plain function                          |
+| `func_actor.go`                       | `FuncActor`: create an actor from a plain function                           |
 | `topic_actor.go`                      | Pub/sub topic actor; also backs the CRDT delta topic (`goakt.crdt.deltas`)   |
 
 ### Cluster, remoting, multi-DC
@@ -123,19 +123,19 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 
 ### Grains (virtual actors)
 
-| File                          | Purpose                                                                 |
-| ----------------------------- | ----------------------------------------------------------------------- |
-| `grain.go`                    | `Grain` interface                                                       |
-| `grain_of.go`                 | `GrainOf[T]` generic, factory-free grain activation entry point         |
-| `grain_engine.go`             | Grain activation, routing, passivation                                  |
-| `grain_pid.go`                | `grainPID`: `PID` variant for virtual actors; implements `schedulable` |
-| `grain_context.go`            | `GrainContext` for `OnReceive`                                          |
+| File                          | Purpose                                                                                                                          |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `grain.go`                    | `Grain` interface                                                                                                                |
+| `grain_of.go`                 | `GrainOf[T]` generic, factory-free grain activation entry point                                                                  |
+| `grain_engine.go`             | Grain activation, routing, passivation                                                                                           |
+| `grain_pid.go`                | `grainPID`: `PID` variant for virtual actors; implements `schedulable`                                                           |
+| `grain_context.go`            | `GrainContext` for `OnReceive`                                                                                                   |
 | `grain_context_pool.go`       | Sharded lock-free pool for `GrainContext` and Tell ack channels. See [Grain sibling](/architecture/context-pools#grain-sibling). |
-| `grain_identity.go`           | `GrainIdentity` with memoised validation (hot-path allocation fix)      |
-| `grain_mailbox.go`            | Grain-specific mailbox with system-message priorities                   |
-| `grain_props.go`              | `GrainProps` passed to `OnActivate` / `OnDeactivate`                    |
-| `grain_option.go`             | Grain activation options                                                |
-| `grain_activation_barrier.go` | Barrier for grain activation during cluster events                      |
+| `grain_identity.go`           | `GrainIdentity` with memoised validation (hot-path allocation fix)                                                               |
+| `grain_mailbox.go`            | Grain-specific mailbox with system-message priorities                                                                            |
+| `grain_props.go`              | `GrainProps` passed to `OnActivate` / `OnDeactivate`                                                                             |
+| `grain_option.go`             | Grain activation options                                                                                                         |
+| `grain_activation_barrier.go` | Barrier for grain activation during cluster events                                                                               |
 
 ### CRDT replicator
 
@@ -214,15 +214,15 @@ Pluggable service discovery. Each sub-package implements `discovery.Provider`:
 
 Standalone cluster client for callers outside the actor system. See [Client](/advanced/client) for full documentation.
 
-| File             | Purpose                                                        |
-| ---------------- | -------------------------------------------------------------- |
-| `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop            |
-| `option.go`      | `Option` for `NewClient` (balancer strategy, refresh interval) |
+| File             | Purpose                                                           |
+| ---------------- | ----------------------------------------------------------------- |
+| `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop               |
+| `option.go`      | `Option` for `NewClient` (balancer strategy, refresh interval)    |
 | `node.go`        | `Node`: cluster-member endpoint; `WithRemoteConfig`, `WithWeight` |
-| `balancer.go`    | `Balancer` interface                                           |
-| `round_robin.go` | Round-robin node selection                                     |
-| `random.go`      | Random node selection                                          |
-| `least_load.go`  | Least-loaded node selection                                    |
+| `balancer.go`    | `Balancer` interface                                              |
+| `round_robin.go` | Round-robin node selection                                        |
+| `random.go`      | Random node selection                                             |
+| `least_load.go`  | Least-loaded node selection                                       |
 
 ## Internal packages
 

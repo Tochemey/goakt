@@ -17,29 +17,29 @@ The scheduler starts automatically when the actor system starts and stops when t
 ## Operations
 
 | Operation            | Trigger Type | Behavior                                          |
-|----------------------|--------------|---------------------------------------------------|
+| -------------------- | ------------ | ------------------------------------------------- |
 | **ScheduleOnce**     | RunOnce      | Deliver a message once after a delay              |
 | **Schedule**         | Simple       | Deliver a message at a fixed interval (repeating) |
 | **ScheduleWithCron** | Cron         | Deliver a message according to a cron expression  |
 
 ## API
 
-| Method                                                   | Purpose                                 |
-|----------------------------------------------------------|-----------------------------------------|
-| `ScheduleOnce(ctx, message, pid, delay, opts...)`        | Deliver once after the delay            |
-| `Schedule(ctx, message, pid, interval, opts...)`         | Deliver at a fixed interval (repeating) |
-| `ScheduleWithCron(ctx, message, pid, cronExpr, opts...)` | Cron-style scheduling                   |
-| `CancelSchedule(reference)`                              | Cancel a scheduled message              |
-| `PauseSchedule(reference)`                               | Pause delivery                          |
-| `ResumeSchedule(reference)`                              | Resume a paused schedule                |
-| `ListSchedules()`                                         | List every schedule currently known to the scheduler |
+| Method             | Purpose                                              |
+| ------------------ | ---------------------------------------------------- |
+| `ScheduleOnce`     | Deliver once after the delay                         |
+| `Schedule`         | Deliver at a fixed interval (repeating)              |
+| `ScheduleWithCron` | Cron-style scheduling                                |
+| `CancelSchedule`   | Cancel a scheduled message                           |
+| `PauseSchedule`    | Pause delivery                                       |
+| `ResumeSchedule`   | Resume a paused schedule                             |
+| `ListSchedules`    | List every schedule currently known to the scheduler |
 
 ## Schedule Options
 
-| Option                       | Purpose                                                                                                                                                                                 |
-|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `WithReference(referenceID)` | Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for `ScheduleWithCron` in cluster mode; see [Cluster-Wide Single Fire](#cluster-wide-single-fire) below. |
-| `WithSender(pid)`            | Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees `ctx.Sender()` as nil.                                                              |
+| Option          | Purpose                                                                                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithReference` | Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for `ScheduleWithCron` in cluster mode; see [Cluster-Wide Single Fire](#cluster-wide-single-fire) below. |
+| `WithSender`    | Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees `ctx.Sender` as nil.                                                                                                                                                                                      |
 
 ## Examples
 
@@ -66,7 +66,7 @@ system.ResumeSchedule("cleanup")
 ### Field Summary
 
 | Field Name   | Mandatory | Allowed Values  | Allowed Special Characters  |
-|--------------|-----------|-----------------|-----------------------------|
+| ------------ | --------- | --------------- | --------------------------- |
 | Seconds      | YES       | 0-59            | `,` `-` `*` `/`             |
 | Minutes      | YES       | 0-59            | `,` `-` `*` `/`             |
 | Hours        | YES       | 0-23            | `,` `-` `*` `/`             |
@@ -96,7 +96,7 @@ system.ResumeSchedule("cleanup")
 ### Cron Examples
 
 | Expression       | Meaning                             |
-|------------------|-------------------------------------|
+| ---------------- | ----------------------------------- |
 | `0 * * * * *`    | Every minute at second 0            |
 | `0 0 * * * *`    | Every hour at minute 0              |
 | `0 0 12 * * *`   | Every day at noon                   |
@@ -158,11 +158,11 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 
 ## Errors
 
-| Error                           | Condition                                                      |
-|---------------------------------|----------------------------------------------------------------|
-| `ErrSchedulerNotStarted`        | Actor system not started; scheduler is started with the system |
-| `ErrScheduledReferenceNotFound` | Cancel, pause, or resume called with an unknown reference      |
-| `ErrRemotingDisabled`           | Scheduling to a remote PID when remoting is not enabled        |
+| Error                           | Condition                                                         |
+| ------------------------------- | ----------------------------------------------------------------- |
+| `ErrSchedulerNotStarted`        | Actor system not started; scheduler is started with the system    |
+| `ErrScheduledReferenceNotFound` | Cancel, pause, or resume called with an unknown reference         |
+| `ErrRemotingDisabled`           | Scheduling to a remote PID when remoting is not enabled           |
 | `ErrScheduleReferenceRequired`  | `ScheduleWithCron` in cluster mode called without `WithReference` |
 
 ## Delivery Semantics

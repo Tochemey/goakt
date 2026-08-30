@@ -18,21 +18,21 @@ Grain timers are self-scheduling only. To schedule messages to actors from anywh
 
 The same four methods are available on `GrainContext` (inside `OnReceive`) and on `GrainProps` (inside `OnActivate` and `OnDeactivate`):
 
-| Method                                         | Behavior                               |
-| ---------------------------------------------- | -------------------------------------- |
-| `ScheduleOnce(message, delay, opts...)`        | Deliver once after the delay           |
-| `Schedule(message, interval, opts...)`         | Deliver repeatedly at a fixed interval |
-| `ScheduleWithCron(message, cronExpr, opts...)` | Deliver according to a cron expression |
-| `CancelSchedule(reference)`                    | Cancel a timer                         |
+| Method             | Behavior                               |
+| ------------------ | -------------------------------------- |
+| `ScheduleOnce`     | Deliver once after the delay           |
+| `Schedule`         | Deliver repeatedly at a fixed interval |
+| `ScheduleWithCron` | Deliver according to a cron expression |
+| `CancelSchedule`   | Cancel a timer                         |
 
 Every schedule call returns the timer's reference, the handle used to cancel it.
 
 ### Timer Options
 
-| Option                    | Purpose                                                                                                                                              |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithTimerReference(ref)` | Set the timer's reference. References are scoped to the grain; registering under a reference already in use cancels and replaces the existing timer. |
-| `WithTimerKeepAlive()`    | Make ticks count as passivation activity, keeping the grain alive while the timer runs. By default ticks do not reset the passivation clock.         |
+| Option               | Purpose                                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WithTimerReference` | Set the timer's reference. References are scoped to the grain; registering under a reference already in use cancels and replaces the existing timer. |
+| `WithTimerKeepAlive` | Make ticks count as passivation activity, keeping the grain alive while the timer runs. By default ticks do not reset the passivation clock.         |
 
 ## Starting a Timer From OnActivate
 

@@ -40,24 +40,24 @@ The bind address must be a concrete IP (`127.0.0.1`, `0.0.0.0`, …), not a
 hostname. When the bind address is `0.0.0.0`, GoAkt picks a suitable private IP
 to advertise. Pass the config via `actor.WithRemote(cfg)`.
 
-| Option                            | Purpose                                                                 | Default        |
-| --------------------------------- | ----------------------------------------------------------------------- | -------------- |
-| `WithProtocolPin`                 | Wire protocol on dial and accept: `auto`, `legacy`, or `duplex`         | `auto`         |
-| `WithOrdinaryLanes`               | Ordinary duplex lanes per peer for user tell/ask                        | `1`            |
-| `WithLargeMessageDestinations`    | Actor-path patterns that prefer the large lane                          | none           |
-| `WithChunkSize`                   | Logical size above which senders emit `CHUNK` frames (16 KiB–4 MiB)     | `256 KiB`      |
-| `WithMaxMessageSize`              | Cap on a reassembled logical frame (≥ max frame, ≤ 4 GiB−1; negotiated) | `16 MiB`       |
-| `WithMaxFrameSize`                | Max whole-frame size (16 KiB–16 MiB; HELLO pairwise minimum)            | `16 MiB`       |
-| `WithMaxConcurrentLargeTransfers` | Concurrent CHUNK reassembly groups per connection (negotiated)          | `4`            |
-| `WithCreditWindow`                | Unreclaimed in-flight byte budget per duplex connection (≥ chunk size)  | `16 MiB`       |
-| `WithWriteTimeout`                | Duplex outbound admission bound when the caller has no deadline         | `10s`          |
-| `WithReadIdleTimeout`             | Duplex PING interval; two missed PONGs close the connection (`0` = off) | `10s`          |
-| `WithCompression`                 | None, Gzip, Zstd, or Brotli                                             | None           |
-| `WithSerializers`                 | Bind a `Serializer` to a message type or interface                      | protobuf       |
-| `WithSerializables`               | Bulk-register types with the built-in CBOR serializer                   | none           |
-| `WithJSONSerializables`           | Bulk-register types with the built-in JSON serializer                   | none           |
-| `WithContextPropagator`           | Propagate trace IDs, auth tokens, correlation IDs                       | none           |
-| `WithTLS`                         | TLS for remoting (and cluster transports when clustering). See [TLS](#tls) | off         |
+| Option                            | Purpose                                                                    | Default   |
+| --------------------------------- | -------------------------------------------------------------------------- | --------- |
+| `WithProtocolPin`                 | Wire protocol on dial and accept: `auto`, `legacy`, or `duplex`            | `auto`    |
+| `WithOrdinaryLanes`               | Ordinary duplex lanes per peer for user tell/ask                           | `1`       |
+| `WithLargeMessageDestinations`    | Actor-path patterns that prefer the large lane                             | none      |
+| `WithChunkSize`                   | Logical size above which senders emit `CHUNK` frames (16 KiB–4 MiB)        | `256 KiB` |
+| `WithMaxMessageSize`              | Cap on a reassembled logical frame (≥ max frame, ≤ 4 GiB−1; negotiated)    | `16 MiB`  |
+| `WithMaxFrameSize`                | Max whole-frame size (16 KiB–16 MiB; HELLO pairwise minimum)               | `16 MiB`  |
+| `WithMaxConcurrentLargeTransfers` | Concurrent CHUNK reassembly groups per connection (negotiated)             | `4`       |
+| `WithCreditWindow`                | Unreclaimed in-flight byte budget per duplex connection (≥ chunk size)     | `16 MiB`  |
+| `WithWriteTimeout`                | Duplex outbound admission bound when the caller has no deadline            | `10s`     |
+| `WithReadIdleTimeout`             | Duplex PING interval; two missed PONGs close the connection (`0` = off)    | `10s`     |
+| `WithCompression`                 | None, Gzip, Zstd, or Brotli                                                | None      |
+| `WithSerializers`                 | Bind a `Serializer` to a message type or interface                         | protobuf  |
+| `WithSerializables`               | Bulk-register types with the built-in CBOR serializer                      | none      |
+| `WithJSONSerializables`           | Bulk-register types with the built-in JSON serializer                      | none      |
+| `WithContextPropagator`           | Propagate trace IDs, auth tokens, correlation IDs                          | none      |
+| `WithTLS`                         | TLS for remoting (and cluster transports when clustering). See [TLS](#tls) | off       |
 
 Message serialization is covered on the [Serialization](/advanced/serialization) page.
 
@@ -66,11 +66,11 @@ Message serialization is covered on the [Serialization](/advanced/serialization)
 `WithProtocolPin` selects which remoting wire protocol this node dials and
 accepts. It applies to both the remoting listener and the outbound client.
 
-| Pin      | Constant                   | Behavior |
-| -------- | -------------------------- | -------- |
+| Pin      | Constant                   | Behavior                                                                                                                                                                                                                                        |
+| -------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `auto`   | `remote.ProtocolPinAuto`   | Default. Accept: sniff the first byte after TLS (`0x02` → duplex, otherwise legacy). Dial: prefer duplex, fall back to legacy on EOF or connection reset before `HELLO_ACK`; a peer classified legacy is re-probed for duplex after 30 seconds. |
-| `legacy` | `remote.ProtocolPinLegacy` | Unary protobuf-over-TCP only. No duplex sniff, dial, or fallback. |
-| `duplex` | `remote.ProtocolPinDuplex` | Multiplexed duplex only. Non-duplex first bytes are refused; no legacy fallback. |
+| `legacy` | `remote.ProtocolPinLegacy` | Unary protobuf-over-TCP only. No duplex sniff, dial, or fallback.                                                                                                                                                                               |
+| `duplex` | `remote.ProtocolPinDuplex` | Multiplexed duplex only. Non-duplex first bytes are refused; no legacy fallback.                                                                                                                                                                |
 
 Use `auto` for mixed-version rolling upgrades. Pin `legacy` or `duplex` for
 homogeneous clusters, deterministic rollout, or when first-byte discrimination
@@ -87,11 +87,11 @@ cfg := remote.NewConfig("0.0.0.0", 8080,
 
 Per peer, duplex remoting opens a small set of persistent connections:
 
-| Lane     | Role |
-| -------- | ---- |
+| Lane     | Role                                                                                                       |
+| -------- | ---------------------------------------------------------------------------------------------------------- |
 | Control  | System traffic (watch/unwatch, spawn/stop, cluster RPCs, liveness) so user floods cannot delay death-watch |
-| Ordinary | User tells and asks; hashed by the receiver’s full canonical address across `WithOrdinaryLanes` |
-| Large    | Destinations listed in `WithLargeMessageDestinations` |
+| Ordinary | User tells and asks; hashed by the receiver’s full canonical address across `WithOrdinaryLanes`            |
+| Large    | Destinations listed in `WithLargeMessageDestinations`                                                      |
 
 Ordering is **per sender–target pair FIFO**. With the default single ordinary
 lane, that matches today’s effective ordering except that control may overtake

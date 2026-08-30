@@ -421,17 +421,17 @@ An in-memory `seen` map, as in the example above, deduplicates within one consum
 
 ## Configuration
 
-| Option                     | Side     | Default           | Meaning                                                                                          |
-| -------------------------- | -------- | ----------------- | ------------------------------------------------------------------------------------------------ |
-| `WithReliableFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                 |
-| `WithReliableResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                     |
-| `WithReliableDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                        |
-| `WithReliableQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                       |
-| `WithReliableRetryInterval`   | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                               |
-| `WithReliableChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinReliableChunkSize`, `MaxReliableChunkSize`]             |
-| `WithReliableDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                     |
-| `WithReliableRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow               |
-| `WithReliableRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow               |
+| Option                             | Side     | Default           | Meaning                                                                                              |
+| ---------------------------------- | -------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `WithReliableFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                     |
+| `WithReliableResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                         |
+| `WithReliableDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                            |
+| `WithReliableQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                           |
+| `WithReliableRetryInterval`        | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                                   |
+| `WithReliableChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinReliableChunkSize`, `MaxReliableChunkSize`] |
+| `WithReliableDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                         |
+| `WithReliableRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow                   |
+| `WithReliableRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow                   |
 
 The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
 

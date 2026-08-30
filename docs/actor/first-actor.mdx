@@ -35,14 +35,14 @@ When handling a message sent via `Ask`, call `ctx.Response(resp)` exactly once. 
 
 Inside `Receive`, `ctx` provides:
 
-| Method                  | Purpose                                                  |
-|-------------------------|----------------------------------------------------------|
-| `Message()`             | The message being processed                              |
-| `Sender()`              | PID of the sender (nil for scheduled or system messages) |
-| `Self()`                | PID of the current actor                                 |
-| `Tell(to, msg)`         | Send fire-and-forget to another actor                    |
-| `Ask(to, msg, timeout)` | Send request-response                                    |
-| `Response(resp)`        | Reply to an Ask                                          |
-| `Unhandled()`           | Mark message as unhandled                                |
+| Method      | Purpose                                                  |
+| ----------- | -------------------------------------------------------- |
+| `Message`   | The message being processed                              |
+| `Sender`    | PID of the sender (nil for scheduled or system messages) |
+| `Self`      | PID of the current actor                                 |
+| `Tell`      | Send fire-and-forget to another actor                    |
+| `Ask`       | Send request-response                                    |
+| `Response`  | Reply to an Ask                                          |
+| `Unhandled` | Mark message as unhandled                                |
 
 For more examples, see the [goakt-examples](https://github.com/Tochemey/goakt-examples) repository.

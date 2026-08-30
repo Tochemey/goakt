@@ -13,25 +13,25 @@ PipeTo runs a task asynchronously and delivers its result (or failure) to a targ
 
 ### From ReceiveContext
 
-| Method                                     | Purpose                                                                                                  |
-|--------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| `ctx.PipeTo(to, task, opts...)`            | Run `task` in a goroutine; on success, send the result to `to`. On failure, behavior depends on options. |
-| `ctx.PipeToName(actorName, task, opts...)` | Same, but target is resolved by name (location-transparent).                                             |
+| Method           | Purpose                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| `ctx.PipeTo`     | Run `task` in a goroutine; on success, send the result to `to`. On failure, behavior depends on options. |
+| `ctx.PipeToName` | Same, but target is resolved by name (location-transparent).                                             |
 
 ### From PID
 
-| Method                                          | Purpose                                                                     |
-|-------------------------------------------------|-----------------------------------------------------------------------------|
-| `pid.PipeTo(ctx, to, task, opts...)`            | Run `task`; deliver result to `to`. The sender (`pid`) is used for context. |
-| `pid.PipeToName(ctx, actorName, task, opts...)` | Same, target by name.                                                       |
+| Method           | Purpose                                                                     |
+| ---------------- | --------------------------------------------------------------------------- |
+| `pid.PipeTo`     | Run `task`; deliver result to `to`. The sender (`pid`) is used for context. |
+| `pid.PipeToName` | Same, target by name.                                                       |
 
 ### From GrainContext
 
-| Method                                       | Purpose                          |
-|----------------------------------------------|----------------------------------|
-| `gctx.PipeToGrain(to, task, opts...)`        | Deliver result to a grain.       |
-| `gctx.PipeToActor(actorName, task, opts...)` | Deliver result to a named actor. |
-| `gctx.PipeToSelf(task, opts...)`             | Deliver result to this grain.    |
+| Method             | Purpose                          |
+| ------------------ | -------------------------------- |
+| `gctx.PipeToGrain` | Deliver result to a grain.       |
+| `gctx.PipeToActor` | Deliver result to a named actor. |
+| `gctx.PipeToSelf`  | Deliver result to this grain.    |
 
 Failure semantics differ for grain targets: a failed task delivers a `*StatusFailure` message to the target grain
 instead of going to the dead-letter queue. `PipeToActor` follows the actor semantics below. See
@@ -69,10 +69,10 @@ ctx.PipeTo(ctx.Self(), func() (any, error) {
 
 ## PipeOption
 
-| Option                   | Purpose                                                           |
-|--------------------------|-------------------------------------------------------------------|
-| `WithTimeout(d)`         | Abort delivery if the task does not complete within `d`.          |
-| `WithCircuitBreaker(cb)` | If the circuit breaker is open, do not deliver; drop the outcome. |
+| Option               | Purpose                                                           |
+| -------------------- | ----------------------------------------------------------------- |
+| `WithTimeout`        | Abort delivery if the task does not complete within `d`.          |
+| `WithCircuitBreaker` | If the circuit breaker is open, do not deliver; drop the outcome. |
 
 Only one of `WithTimeout` or `WithCircuitBreaker` may be used per call. Using both returns `ErrOnlyOneOptionAllowed`.
 

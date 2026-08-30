@@ -46,10 +46,10 @@ Each `Node` represents a cluster node. Call `Close()` when done to release conne
 
 ### Node options
 
-| Option                     | Purpose                                                                                       |
-|----------------------------|-----------------------------------------------------------------------------------------------|
-| `WithRemoteConfig(config)` | Set remoting config (compression, serializers, timeouts, TLS). Required for correct serialization. |
-| `WithWeight(weight)`       | Set initial node weight for load balancing (used by `LeastLoadStrategy`).                     |
+| Option             | Purpose                                                                                            |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| `WithRemoteConfig` | Set remoting config (compression, serializers, timeouts, TLS). Required for correct serialization. |
+| `WithWeight`       | Set initial node weight for load balancing (used by `LeastLoadStrategy`).                          |
 
 ### Connecting to a TLS-enabled cluster
 
@@ -72,45 +72,45 @@ TLS-enabled cluster; the first operation fails with a network error.
 
 ## Messaging
 
-| Method                                          | Purpose                                                                                                                                                            |
-|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Tell(ctx, actorName, message)`                 | Fire-and-forget to an actor. `message` must be `proto.Message`. Returns `ErrActorNotFound` if the actor is not found.                                              |
-| `Ask(ctx, actorName, message, timeout)`         | Request-response to an actor. Blocks until reply or timeout. `message` accepts `any` (must be serializable). Returns `ErrActorNotFound` if the actor is not found. |
-| `TellGrain(ctx, grainRequest, message)`         | Fire-and-forget to a grain. `message` must be `proto.Message`. The grain kind must be registered on the cluster via `RegisterGrainKind`.                           |
-| `AskGrain(ctx, grainRequest, message, timeout)` | Request-response to a grain. `message` accepts `any`. The grain kind must be registered on the cluster.                                                            |
+| Method      | Purpose                                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Tell`      | Fire-and-forget to an actor. `message` must be `proto.Message`. Returns `ErrActorNotFound` if the actor is not found.                                              |
+| `Ask`       | Request-response to an actor. Blocks until reply or timeout. `message` accepts `any` (must be serializable). Returns `ErrActorNotFound` if the actor is not found. |
+| `TellGrain` | Fire-and-forget to a grain. `message` must be `proto.Message`. The grain kind must be registered on the cluster via `RegisterGrainKind`.                           |
+| `AskGrain`  | Request-response to a grain. `message` accepts `any`. The grain kind must be registered on the cluster.                                                            |
 
 The client performs a cluster lookup by actor name (or grain identity) and routes the message to the correct node. For grains, use `remote.GrainRequest{Name: "id", Kind: "MyGrain"}`. `Name` and `Kind` are required and are trimmed of whitespace.
 
 ## Spawning and lifecycle
 
-| Method                                       | Purpose                                                                                                  |
-|----------------------------------------------|----------------------------------------------------------------------------------------------------------|
-| `Spawn(ctx, spawnRequest)`                   | Spawn an actor on a node (uses default balancer). Returns error only; does not return the actor address. |
-| `SpawnBalanced(ctx, spawnRequest, strategy)` | Spawn with a specific balancing strategy for that call.                                                  |
-| `ReSpawn(ctx, actorName)`                    | Restart an actor (stop and spawn again). If the actor is not found, returns `nil` (no error).            |
-| `Stop(ctx, actorName)`                       | Stop an actor. If the actor is not found, returns `nil` (no error).                                      |
-| `Reinstate(ctx, actorName)`                  | Reinstate a suspended actor. If the actor is not found, returns `nil` (no error).                        |
+| Method          | Purpose                                                                                                  |
+| --------------- | -------------------------------------------------------------------------------------------------------- |
+| `Spawn`         | Spawn an actor on a node (uses default balancer). Returns error only; does not return the actor address. |
+| `SpawnBalanced` | Spawn with a specific balancing strategy for that call.                                                  |
+| `ReSpawn`       | Restart an actor (stop and spawn again). If the actor is not found, returns `nil` (no error).            |
+| `Stop`          | Stop an actor. If the actor is not found, returns `nil` (no error).                                      |
+| `Reinstate`     | Reinstate a suspended actor. If the actor is not found, returns `nil` (no error).                        |
 
 The actor kind must be registered on the cluster via `WithKinds` when creating the actor system. `SpawnRequest` requires `Name` and `Kind`; optional fields include `Singleton`, `Relocatable`, `PassivationStrategy`, `Supervisor`, `Dependencies`, `EnableStashing`, `Role`, and `Reentrancy`.
 
 ## Discovery and inspection
 
-| Method                   | Purpose                                                                                                                                                       |
-|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Exists(ctx, actorName)` | Check if an actor is registered in the cluster. Returns `(false, nil)` when the actor does not exist; returns an error only on lookup failure (e.g. network). |
-| `Kinds(ctx)`             | List registered actor kinds. Queries one node (via balancer) and returns kinds from the cluster.                                                              |
+| Method   | Purpose                                                                                                                                                       |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Exists` | Check if an actor is registered in the cluster. Returns `(false, nil)` when the actor does not exist; returns an error only on lookup failure (e.g. network). |
+| `Kinds`  | List registered actor kinds. Queries one node (via balancer) and returns kinds from the cluster.                                                              |
 
 ## Options
 
-| Option                           | Purpose                                                                                                                      |
-|----------------------------------|------------------------------------------------------------------------------------------------------------------------------|
-| `WithBalancerStrategy(strategy)` | Set load-balancing strategy (default: round-robin).                                                                          |
-| `WithRefresh(interval)`          | Periodically refresh node weights by querying each node's load. Used by `LeastLoadStrategy` to prefer the least-loaded node. |
+| Option                 | Purpose                                                                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `WithBalancerStrategy` | Set load-balancing strategy (default: round-robin).                                                                          |
+| `WithRefresh`          | Periodically refresh node weights by querying each node's load. Used by `LeastLoadStrategy` to prefer the least-loaded node. |
 
 ## Balancer strategies
 
 | Strategy             | Behavior                                                                                                                  |
-|----------------------|---------------------------------------------------------------------------------------------------------------------------|
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `RoundRobinStrategy` | Cycle through nodes in order.                                                                                             |
 | `RandomStrategy`     | Pick a node at random.                                                                                                    |
 | `LeastLoadStrategy`  | Prefer the node with the lowest load. Requires `WithRefresh` to update weights; otherwise weights stay at initial values. |
@@ -122,7 +122,7 @@ The client is safe for concurrent use by multiple goroutines.
 ## Errors
 
 | Error                  | When                                                                                      |
-|------------------------|-------------------------------------------------------------------------------------------|
+| ---------------------- | ----------------------------------------------------------------------------------------- |
 | `ErrActorNotFound`     | `Tell` or `Ask` when the actor is not found in the cluster.                               |
 | `"nodes are required"` | `New` when the nodes slice is nil or empty.                                               |
 | Proto errors           | Various errors from the remote layer (e.g. `CODE_UNAVAILABLE`, `CODE_DEADLINE_EXCEEDED`). |

@@ -11,12 +11,13 @@ started.
 
 - [Docker](https://docs.docker.com/get-started/get-docker/)
 - `make` (pre-installed on macOS and most Linux distributions)
+- [Mint CLI](https://mintlify.com/docs), only if you plan to preview documentation changes
 
 All developer tooling (Go, `buf`, `mockery`, `golangci-lint`, `openssl`) runs inside a Docker image built by the `Makefile`. No additional local installs are required.
 
 ## Before you start
 
-1. Read the [Architecture Document](https://github.com/tochemey/goakt/blob/main/arch/ARCHITECTURE.md) to understand the codebase
+1. Read the [Architecture Document](https://github.com/tochemey/goakt/blob/main/design/ARCHITECTURE.md) to understand the codebase
 2. Check existing [issues](https://github.com/Tochemey/goakt/issues)
    and [discussions](https://github.com/Tochemey/goakt/discussions)
 3. Follow [Conventional Commits](https://www.conventionalcommits.org/) for commit messages
@@ -26,12 +27,47 @@ All developer tooling (Go, `buf`, `mockery`, `golangci-lint`, `openssl`) runs in
 1. Fork the repository
 2. Create a branch for your change
 3. Make your changes; ensure tests pass: `make test`
-4. Commit with a conventional commit message
-5. Open a pull request to the `main` branch
-6. For bug fixes, leave a working sample in the `playground` package per its instructions
+4. Document user-facing changes in [`changelogs/unreleased.md`](https://github.com/tochemey/goakt/blob/main/changelogs/unreleased.md)
+5. Commit with a conventional commit message
+6. Open a pull request to the `main` branch
+7. For a bug fix or a new feature, leave a working sample in the `playground` package per its instructions
+
+## Changelog entries
+
+User-facing changes are documented in
+[`changelogs/unreleased.md`](https://github.com/tochemey/goakt/blob/main/changelogs/unreleased.md), updated in the same
+pull request as the code change. Entries are grouped under the headings that apply (Features, Fixes, Performance,
+Behavior Changes, Deprecations, Documentation); keep only the headings you actually use.
+
+```markdown
+## ✨ Features
+
+- **Short title** ([#1234](https://github.com/Tochemey/goakt/issues/1234)). One or two sentences on what changed and why it matters to callers.
+```
+
+Link the authorizing issue, prefer user-facing language over implementation detail, and skip the entry entirely for
+purely internal refactors with no observable behavior change.
+
+## Contributor License Agreement
+
+Every contributor must sign the [CLA](https://github.com/tochemey/goakt/blob/main/CLA.md) before a pull request can be
+merged. It only needs to be done once and covers all your future contributions.
+
+On your first pull request the **CLA Assistant** bot comments with a signing link: click it, authenticate with GitHub,
+and confirm. The pull request cannot be merged until the CLA check passes.
+
+## Previewing documentation
+
+Documentation lives under `docs/` and is built with [Mintlify](https://mintlify.com/docs). To preview changes locally:
+
+```bash
+cd docs
+mint dev
+```
 
 ## Key documents
 
+- [CONTRIBUTING.md](https://github.com/tochemey/goakt/blob/main/CONTRIBUTING.md): the canonical contribution guide in the repository
 - [Development Setup](/contributing/development-setup): Clone, build, run tests
 - [Testing Strategy](/contributing/testing-strategy): TestKit, mocks, integration tests
 - [Extending GoAkt](/contributing/extending): Adding discovery, mailboxes, extensions

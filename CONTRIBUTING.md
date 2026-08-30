@@ -94,8 +94,9 @@ When you open your first pull request, the **CLA Assistant** bot (powered by [cl
 
 ### Previewing Documentation
 
-To preview documentation changes locally, install [Mint CLI](https://mintlify.com/docs) and run:
+The documentation site lives under `docs/`. To preview changes locally, install [Mint CLI](https://mintlify.com/docs) and run:
 
 ```bash
+cd docs
 mint dev
 ```

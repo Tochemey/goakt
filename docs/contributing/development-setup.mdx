@@ -20,7 +20,18 @@ make image   # build the tools image (once)
 make test    # run lint + full test suite
 ```
 
-Run `make help` to see every target (`vendor`, `mock`, `protogen`, `certs`, `lint`, `unit-test`, `clean`).
+Run `make help` to list every target. The common ones are:
+
+| Target           | Purpose                                              |
+| ---------------- | ---------------------------------------------------- |
+| `make test`      | Run lint and the full test suite                     |
+| `make lint`      | Run `golangci-lint`                                  |
+| `make unit-test` | Run tests with coverage (writes `coverage.out`)      |
+| `make vendor`    | `go mod tidy` and `go mod vendor`                    |
+| `make mock`      | Regenerate mocks under `mocks/`                      |
+| `make protogen`  | Regenerate protobuf Go code                          |
+| `make certs`     | Regenerate test TLS fixtures under `test/data/certs` |
+| `make clean`     | Remove the tools image                               |
 
 ## Local Go commands
 

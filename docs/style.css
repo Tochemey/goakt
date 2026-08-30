@@ -1,176 +1,218 @@
-/* Inter for tables */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap");
+/* Fonts: Geist for text (also set in docs.json) and Geist Mono for code */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap");
 
-/* ===========================================================================
-   Typography: compact, readable, sleek
-
-   Mintlify's defaults are tuned for very wide reading widths; on a typical
-   developer screen the body and heading scale runs slightly large. We scale
-   down the content area (not the chrome) and tighten heading line-heights /
-   letter-spacing for a more refined feel. The HTML root remains at 16px so
-   navbar / footer / chrome rems are unaffected.
-   =========================================================================== */
-
-#content,
-mdx-content {
-  font-size: 14px;
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "kern", "liga", "calt";
+.steps {
+  margin-top: 0;
 }
 
-#page-title,
-#content h1 {
-  font-size: 1.6rem;
-  line-height: 1.2;
-  letter-spacing: -0.015em;
+div[data-component-part="card-icon"] > svg {
+  mask-size: 80%;
 }
 
-#content h2 {
-  font-size: 1.25rem;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
-  margin-top: 2rem;
+.font-mono {
+  font-weight: 700 !important;
 }
 
-#content h3 {
-  font-size: 1.03rem;
-  line-height: 1.3;
-  margin-top: 1.5rem;
+.nav-tabs .nav-tabs-item {
+  font-size: 0.8rem !important;
 }
 
-#content h4 {
-  font-size: 0.9rem;
-  line-height: 1.35;
+.mdx-content > span[data-as="p"] {
+  margin-bottom: 2rem !important;
 }
 
-#content p {
-  margin: 0.6rem 0;
+.dark\:bg-white\/5:is(.dark *) {
+  background-color: rgb(155 155 155 / 5%);
 }
 
-#content ul,
-#content ol {
-  margin: 0.5rem 0;
+ul#sidebar-group > li > a {
+  font-size: 0.825rem;
+  line-height: 1rem;
+  font-weight: 500;
 }
 
-#content li {
-  margin: 0.2rem 0;
-}
-
-#content li > p {
-  margin: 0.25rem 0;
-}
-
-/* Sidebar: compact navigation */
-#sidebar-content {
-  font-size: 13px;
-}
-
-sidebar-group-header {
-  font-size: 11px !important;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-/* Table of contents: smallest, subtle */
-#table-of-contents-content,
-toc {
-  font-size: 12.5px;
-}
-
-toc-item {
-  line-height: 1.45;
-}
-
-/* Code blocks */
 pre.shiki {
-  font-size: 0.8rem;
   line-height: 1.4rem;
+  font-size: 0.8rem;
 }
 
-/* Remove top border radius when code block has a header */
-.code-block:has([data-component-part="code-block-header"])
-  div[data-component-part="code-block-root"] {
+.dark\:ring-white\/\[0\.14\]:is(.dark *) {
+  border: 1px solid rgb(255 255 255/0.14) !important;
+  --tw-ring-color: transparent;
+}
+
+.ring-transparent {
+  border: 1px solid transparent !important;
+}
+
+/* Remove top border radius when there's a header */
+.code-block:has([data-component-part="code-block-header"]) div[data-component-part="code-block-root"] {
   border-top-right-radius: 0px !important;
   border-top-left-radius: 0px !important;
 }
 
 /* Remove top border radius for code groups with tab bars */
-.code-group:has([data-component-part="code-group-tab-bar"])
-  div[data-component-part="code-block-root"] {
+.code-group:has([data-component-part="code-group-tab-bar"]) div[data-component-part="code-block-root"] {
   border-top-right-radius: 0px !important;
   border-top-left-radius: 0px !important;
 }
 
-/* Line-highlighted code blocks */
-.dark
-  [data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight,
-.dark
-  [data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:after,
-.dark
-  [data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:before {
-  background: rgb(219 219 219 / 20%) !important;
+img.code-block-icon {
+  background: transparent !important;
 }
 
-.dark
-  [data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:before {
-  border-color: white;
+div[data-component-part="card-icon"] img {
+  background: transparent !important;
 }
 
-[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
-[data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:after,
-[data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:before {
-  background: rgb(var(--gray-200) / 0.5) !important;
+html.dark .card-group .card:not(:hover) {
+  border: 1px solid rgb(255 255 255/0.1) !important;
 }
 
-[data-component-part="code-block-root"]:not(.has-line-numbers)
-  .line-highlight:before {
-  border-color: rgb(172, 172, 172);
+html:not(.dark) .card-group .card {
+  border: 1px solid rgb(var(--gray-200)) !important;
 }
 
-/* Tighten code blocks inside callouts */
+.dark div[data-component-part="card-content-container"] {
+  background: rgb(255 255 255/0.03);
+}
+
+.card:hover {
+  border-color: rgb(var(--gray-400) / var(--tw-border-opacity)) !important;
+}
+
+html.dark .shiki,
+html.dark .shiki span {
+  background-color: transparent !important;
+}
+
+.prose :where(hr):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
+  margin-top: 2rem !important;
+  margin-bottom: 2rem !important;
+}
+
+.nav-tabs {
+  width: 100% !important;
+}
+
+a[href="/guides"],
+a[href="/docs/guides"] {
+  margin-left: auto !important;
+}
+
+div[data-component-part="card-content-container"] {
+  height: 100% !important;
+}
+
+div#guides-list div[data-component-part="card-content-container"] > *:nth-child(2) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between !important;
+}
+
+/* hacky css to show terminal output until we have a better component */
+.code-block + .code-block[language="text"] {
+  margin-top: -32px;
+  z-index: -1;
+  border-top-right-radius: 0px;
+  border-top-left-radius: 0px;
+  border-top: none;
+}
+
+.code-block + .code-block[language="text"],
+.code-block + .code-block[language="text"] div[data-component-part="code-block-root"] {
+  background-color: rgb(var(--gray-50)) !important;
+}
+
+html.dark .code-block + .code-block[language="text"],
+html.dark .code-block + .code-block[language="text"] div[data-component-part="code-block-root"] {
+  background-color: #16171e !important;
+}
+
+.code-block + .code-block[language="text"] div.absolute.top-3 {
+  display: none;
+}
+
+.code-block:has(+ .code-block[language="text"]) {
+  border-bottom-right-radius: 0px;
+  border-bottom-left-radius: 0px;
+}
+
+.code-block:has(+ .code-block[language="text"]) div[data-component-part="code-block-root"] {
+  border-bottom-right-radius: 0px;
+  border-bottom-left-radius: 0px;
+}
+
 div.callout .code-block {
   margin-bottom: 0px;
 }
 
-/* Reduce space around diagram images */
-#body-content img,
-.mdx-content img {
-  margin: 0.25rem 0;
-  display: block;
+[language="shellscript"] code span.line:not(:empty):has(span)::before {
+  content: "$ ";
+  color: #6272a4;
+  user-select: none;
 }
 
-/* Table content: compact, readable */
-#body-content table td,
-#body-content table th,
-.mdx-content table td,
-.mdx-content table th {
+[language="shellscript"] code span.line:has(> span:first-child[style*="color: rgb(98, 114, 164)"])::before,
+[language="shellscript"] code span.line:has(> span:first-child[style*="#6272A4"])::before {
+  content: "";
+}
+
+[language="powershell"] code span.line:not(:empty):has(span)::before {
+  content: "> ";
+  color: #6272a4;
+  user-select: none;
+}
+
+[language="powershell"] code span.line:has(> span:first-child[style*="color: rgb(98, 114, 164)"])::before,
+[language="powershell"] code span.line:has(> span:first-child[style*="#6272A4"])::before {
+  content: "";
+}
+
+.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
+.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:after,
+.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
+  background: rgb(219 219 219 / 20%) !important;
+}
+
+.dark[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
+  border-color: white;
+}
+
+[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
+[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:after,
+[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
+  background: rgb(var(--gray-200) / 0.5) !important;
+}
+
+[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
+  border-color: rgb(172, 172, 172);
+}
+
+/* Monospace: Geist Mono for code, inline and in blocks */
+code,
+kbd,
+samp,
+pre,
+pre.shiki {
   font-family:
-    "Inter",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif !important;
-  font-size: 0.875rem !important;
-  line-height: 1.4 !important;
-  padding: 0.4rem 0.6rem !important;
-  white-space: nowrap !important;
-  overflow-wrap: break-word !important;
-  word-break: normal !important;
+    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
 }
 
-#body-content table th,
-.mdx-content table th {
-  font-weight: 600 !important;
-  font-size: 0.8rem !important;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+/* Table cells: never break an API name mid-word; prose columns still wrap */
+#body-content table td code,
+#body-content table th code,
+.mdx-content table td code,
+.mdx-content table th code {
+  white-space: nowrap;
+}
+
+/* Headings: 600 is the heaviest Geist weight loaded above, so no synthetic bold */
+#page-title,
+#content h1,
+#content h2,
+#content h3,
+#content h4 {
+  font-weight: 600;
 }
