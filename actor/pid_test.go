@@ -52,6 +52,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -120,6 +121,7 @@ func TestReceive(t *testing.T) {
 		assert.Zero(t, metric.DeadlettersCount())
 		assert.Zero(t, metric.FailureCount())
 		assert.Zero(t, metric.ReinstateCount())
+		assert.Zero(t, metric.UnhandledCount())
 
 		// stop the actor
 		err = pid.Shutdown(ctx)
@@ -7715,4 +7717,123 @@ func TestBuildObserveOptions(t *testing.T) {
 	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withMetricProvider(metric.NewProvider()))
 	require.NoError(t, err)
 	require.Len(t, metered.observeOptions, 4)
+
+	// the kind is cached whenever metrics are enabled, so no scrape ever pays
+	// for the reflection that resolves it.
+	require.Empty(t, plain.metricKind)
+	require.Equal(t, types.Name(NewMockActor()), metered.metricKind)
+
+	// under the low cardinality mode the callback reports one series per kind,
+	// so a PID caches its kind and no per-actor attribute set at all.
+	lowCardinality, err := NewActorSystem("lowCardSys", WithLogger(log.DiscardLogger), WithMetrics(WithLowCardinalityMetrics()))
+	require.NoError(t, err)
+
+	aggregating := lowCardinality.(*actorSystem)
+	aggregating.noSender = &PID{actorSystem: aggregating, logger: log.DiscardLogger}
+	aggregating.noSender.setState(runningState, true)
+	aggregating.dispatcher.start()
+	t.Cleanup(func() { aggregating.dispatcher.signalStop() })
+
+	aggregated, err := newPID(ctx, aggregating.actorAddress("aggregated"), NewMockActor(), withActorSystem(aggregating), withCustomLogger(log.DiscardLogger), withMetricProvider(metric.NewProvider()))
+	require.NoError(t, err)
+	require.Nil(t, aggregated.observeOptions)
+	require.Equal(t, types.Name(NewMockActor()), aggregated.metricKind)
+}
+
+// restartMarkerActor records whether the restarting state bit was raised on its
+// own PID at the moment PostStop ran. The teardown embedded in a restart runs
+// PostStop, so that is the observation point for the marker restartSubtree
+// installs.
+type restartMarkerActor struct {
+	self         atomic.Pointer[PID]
+	markedAtStop atomic.Bool
+}
+
+var _ Actor = (*restartMarkerActor)(nil)
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (a *restartMarkerActor) PreStart(*Context) error { return nil }
+
+// Receive ignores every message; the actor exists only for its stop hook.
+func (a *restartMarkerActor) Receive(*ReceiveContext) {}
+
+// PostStop samples the restarting bit on the PID the test handed the actor.
+func (a *restartMarkerActor) PostStop(*Context) error {
+	if pid := a.self.Load(); pid != nil {
+		a.markedAtStop.Store(pid.isStateSet(restartingState))
+	}
+	return nil
+}
+
+// TestRestartMarker asserts that restartSubtree flags the PID as restarting for
+// the duration of the restart, so the teardown it performs is distinguishable
+// from a plain stop, and that the flag is cleared once the restart returns.
+func TestRestartMarker(t *testing.T) {
+	ctx := context.TODO()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	marker := &restartMarkerActor{}
+	pid, err := actorSystem.Spawn(ctx, "marker", marker, WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	marker.self.Store(pid)
+	require.False(t, pid.isStateSet(restartingState))
+
+	require.NoError(t, pid.Restart(ctx))
+	pause.For(500 * time.Millisecond)
+
+	require.True(t, marker.markedAtStop.Load(), "the restart teardown must run with the restarting bit raised")
+	require.False(t, pid.isStateSet(restartingState), "the restarting bit must be cleared once the restart returns")
+
+	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+// TestUnhandledCount asserts that the per-PID unhandled counter accumulates one
+// increment per ReceiveContext.Unhandled call and, like every other per-PID
+// counter, starts over at zero on the incarnation that follows a restart.
+func TestUnhandledCount(t *testing.T) {
+	ctx := context.TODO()
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	pid, err := actorSystem.Spawn(ctx, "unhandled", &MockUnhandled{}, WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(500 * time.Millisecond)
+	require.Zero(t, pid.unhandledCount.Load())
+
+	const messages = 5
+	for range messages {
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+	}
+
+	require.Eventually(t, func() bool {
+		return pid.unhandledCount.Load() == messages
+	}, time.Second, 10*time.Millisecond)
+
+	snapshot := pid.Metric(ctx)
+	require.NotNil(t, snapshot)
+	require.EqualValues(t, messages, snapshot.UnhandledCount())
+
+	require.NoError(t, pid.Restart(ctx))
+	pause.For(500 * time.Millisecond)
+
+	require.Zero(t, pid.unhandledCount.Load())
+
+	snapshot = pid.Metric(ctx)
+	require.NotNil(t, snapshot)
+	require.Zero(t, snapshot.UnhandledCount())
+
+	require.NoError(t, actorSystem.Stop(ctx))
 }

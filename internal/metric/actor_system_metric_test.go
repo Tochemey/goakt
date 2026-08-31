@@ -40,6 +40,9 @@ func TestActorSystemInstrument(t *testing.T) {
 	require.NotNil(t, instruments.PIDsCount())
 	require.NotNil(t, instruments.Uptime())
 	require.NotNil(t, instruments.PeersCount())
+	require.NotNil(t, instruments.SpawnedCount())
+	require.NotNil(t, instruments.StoppedCount())
+	require.NotNil(t, instruments.PassivatedCount())
 }
 
 func TestActorSystemInstrumentErrors(t *testing.T) {
@@ -56,6 +59,9 @@ func TestActorSystemInstrumentErrors(t *testing.T) {
 		{name: "actors gauge", failKey: "actorsystem.actors.count"},
 		{name: "uptime gauge", failKey: "actorsystem.uptime"},
 		{name: "peers gauge", failKey: "actorsystem.peers.count"},
+		{name: "spawned counter", failKey: "actor.spawned.count"},
+		{name: "stopped counter", failKey: "actor.stopped.count"},
+		{name: "passivated counter", failKey: "actor.passivated.count"},
 	}
 
 	for _, tt := range testCases {

@@ -199,6 +199,10 @@ type PID struct {
 	processedCount atomic.Int64
 	failureCount   atomic.Int64
 	reinstateCount atomic.Int64
+	// unhandledCount counts the messages the actor explicitly rejected through
+	// ReceiveContext.Unhandled. It accumulates for the lifetime of one actor
+	// incarnation and is zeroed by reset(), exactly like processedCount.
+	unhandledCount atomic.Int64
 
 	// consecutiveFaults counts the faults handled by the parent's restart
 	// directive without a fault-free period in between; lastFaultAtNano records
@@ -268,8 +272,15 @@ type PID struct {
 
 	// observeOptions caches the OTel attribute set identifying this actor in
 	// observations made by the actor system's metrics callback. Built once at
-	// construction when metrics are enabled; nil otherwise.
+	// construction when metrics are enabled; nil otherwise. It stays nil in the
+	// low cardinality mode, where the callback reports one series per actor kind
+	// and no actor is named individually.
 	observeOptions []otelmetric.ObserveOption
+	// metricKind caches the actor kind reported by the metrics callback, so a
+	// scrape never pays for the reflection that resolves it. Set once at
+	// construction when metrics are enabled, in both metric modes; empty
+	// otherwise.
+	metricKind string
 }
 
 var (
@@ -306,6 +317,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.restartCount.Store(0)
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
+	pid.unhandledCount.Store(0)
 	pid.setState(relocationState, true)
 
 	for _, opt := range opts {
@@ -448,6 +460,7 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 			stashSize:               metric.GetStashSize(),
 			failureCount:            metric.GetFailureCount(),
 			reinstateCount:          metric.GetReinstateCount(),
+			unhandledCount:          metric.GetUnhandledCount(),
 		}
 	}
 
@@ -471,6 +484,7 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 			stashSize:               stashSize,
 			failureCount:            uint64(pid.failureCount.Load()),
 			reinstateCount:          uint64(pid.reinstateCount.Load()),
+			unhandledCount:          uint64(pid.unhandledCount.Load()),
 		}
 	}
 	return nil
@@ -1590,6 +1604,10 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.Path()))
 	}
 
+	if actorSystem := pid.ActorSystem(); actorSystem != nil {
+		actorSystem.recordActorStopped(pid)
+	}
+
 	pid.stopLocker.Unlock()
 	pid.logger.Debugf("actor=%s successfully shutdown", pid.Name())
 	return nil
@@ -2489,6 +2507,7 @@ func (pid *PID) reset() {
 	pid.processedCount.Store(0)
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
+	pid.unhandledCount.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
 	pid.setState(runningState, false)
@@ -2721,6 +2740,10 @@ func (pid *PID) tryPassivation(reason string) bool {
 
 	if pid.eventsStream != nil {
 		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.Path()))
+	}
+
+	if actorSystem := pid.ActorSystem(); actorSystem != nil {
+		actorSystem.recordActorPassivated(pid)
 	}
 
 	pid.logger.Debugf("actor=%s successfully passivated", pid.Name())
@@ -3401,17 +3424,29 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	return actor, nil
 }
 
-// buildObserveOptions caches the OTel attribute set used by the actor
-// system's metrics callback when observing this actor. It leaves
-// observeOptions nil when metrics are disabled.
+// buildObserveOptions caches what the actor system's metrics callback needs to
+// observe this actor, and does nothing when metrics are disabled.
+//
+// The actor kind is cached in both metric modes: the default mode carries it as
+// an attribute, and the low cardinality mode groups live actors by it. The
+// per-actor attribute set is built in the default mode only. The low cardinality
+// mode reports one series per kind and never names an individual actor, so it
+// leaves observeOptions nil.
 func (pid *PID) buildObserveOptions() {
-	if pid.metricProvider != nil && pid.metricProvider.Meter() != nil {
-		pid.observeOptions = []otelmetric.ObserveOption{
-			otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
-			otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
-			otelmetric.WithAttributes(attribute.String("actor.kind", types.Name(pid.Actor()))),
-			otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
-		}
+	if pid.metricProvider == nil || pid.metricProvider.Meter() == nil {
+		return
+	}
+
+	pid.metricKind = types.Name(pid.Actor())
+	if pid.actorSystem.lowCardinalityMetrics() {
+		return
+	}
+
+	pid.observeOptions = []otelmetric.ObserveOption{
+		otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
+		otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
+		otelmetric.WithAttributes(attribute.String("actor.kind", pid.metricKind)),
+		otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 	}
 }
 
@@ -3632,6 +3667,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	}
 
 	pid := node.pid
+
+	// Mark the actor as restarting for the whole pass. The Shutdown below is the
+	// teardown half of a restart, not a stop, and the marker is how the stop path
+	// tells the two apart.
+	pid.setState(restartingState, true)
+	defer pid.setState(restartingState, false)
+
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 	_, wasInTree := tree.node(pid.ID())
 	didShutdown := false

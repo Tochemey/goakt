@@ -617,6 +617,7 @@ func (rctx *ReceiveContext) ForwardTo(actorName string) {
 // supervision strategy. Prefer Unhandled when unknown messages are expected.
 func (rctx *ReceiveContext) Unhandled() {
 	me := rctx.self
+	me.unhandledCount.Inc()
 	me.handleReceivedError(rctx, gerrors.ErrUnhandled)
 }
 

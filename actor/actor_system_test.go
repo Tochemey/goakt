@@ -8140,6 +8140,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 		"actor.deadletters.count",
 		"actor.failure.count",
 		"actor.reinstate.count",
+		"actor.unhandled.count",
 	}
 
 	for _, name := range []string{"parent", "child"} {
@@ -8253,4 +8254,86 @@ func TestActorMetricsAggregation(t *testing.T) {
 		require.NoError(t, cb(ctx, observer))
 	}
 	require.Contains(t, actorNamesFromRecords(observer.records), "child")
+}
+
+// TestActorLifecycleCounters asserts that the per-kind lifecycle counters on the
+// actor system record exactly one edge per spawn, per shutdown and per
+// passivation, and that a restart records none of them: the teardown a restart
+// performs belongs to actor.restart.count, not to actor.stopped.count.
+func TestActorLifecycleCounters(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	pause.For(time.Second)
+
+	system, ok := sys.(*actorSystem)
+	require.True(t, ok)
+
+	kind := types.Name(NewMockActor())
+
+	pid, err := sys.Spawn(ctx, "worker", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	counters, ok := system.actorKinds.Get(kind)
+	require.True(t, ok)
+	require.EqualValues(t, 1, counters.spawned.Load())
+	require.Zero(t, counters.stopped.Load())
+	require.Zero(t, counters.passivated.Load())
+
+	// a restart tears the actor down and brings it back: neither half is a
+	// spawn or a stop.
+	require.NoError(t, pid.Restart(ctx))
+	pause.For(500 * time.Millisecond)
+
+	require.EqualValues(t, 1, counters.spawned.Load())
+	require.Zero(t, counters.stopped.Load())
+	require.Zero(t, counters.passivated.Load())
+
+	require.NoError(t, pid.Shutdown(ctx))
+	pause.For(500 * time.Millisecond)
+
+	require.EqualValues(t, 1, counters.spawned.Load())
+	require.EqualValues(t, 1, counters.stopped.Load())
+	require.Zero(t, counters.passivated.Load())
+
+	// a passivating actor stops through doStop, never through Shutdown, so it
+	// lands on its own counter.
+	ephemeral, err := sys.Spawn(ctx, "ephemeral", NewMockActor(),
+		WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)))
+	require.NoError(t, err)
+	require.NotNil(t, ephemeral)
+	require.EqualValues(t, 2, counters.spawned.Load())
+
+	require.Eventually(t, func() bool {
+		return counters.passivated.Load() == 1
+	}, 5*time.Second, 50*time.Millisecond)
+
+	require.EqualValues(t, 1, counters.stopped.Load())
+	require.NoError(t, sys.Stop(ctx))
+}
+
+// TestActorLifecycleCountersExcludeSystemActors asserts that the guardians and
+// the other system actors never reach the lifecycle counters, the same
+// exclusion the live-actor counter applies.
+func TestActorLifecycleCountersExcludeSystemActors(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	pause.For(time.Second)
+
+	system, ok := sys.(*actorSystem)
+	require.True(t, ok)
+	require.Zero(t, system.actorKinds.Len())
+
+	// stopping the system shuts every guardian down through the same Shutdown
+	// path a user actor takes, so this is where the stop-side gate is exercised.
+	require.NoError(t, sys.Stop(ctx))
+	require.Zero(t, system.actorKinds.Len())
 }

@@ -71,16 +71,30 @@ type DeadlettersCountResponse struct {
 	TotalCount int64
 }
 
-// DeadlettersSnapshotRequest requests a snapshot of the per-address deadletter
-// counts. It carries no payload.
+// DeadlettersSnapshotRequest requests a snapshot of the per-address,
+// per-message-type deadletter counts. It carries no payload.
 type DeadlettersSnapshotRequest struct{}
 
-// DeadlettersSnapshotResponse returns the per-address deadletter counts as of
-// the moment the deadletter actor handled the request.
+// DeadletterCount is one entry of a deadletter snapshot: how many deadletters
+// were recorded for a single receiver address and a single message type.
+type DeadletterCount struct {
+	// Address is the string form of the receiver address the deadletters were
+	// recorded against.
+	Address string
+	// MessageType is the name of the type of the message that was dropped. It
+	// reads "unknown" when the message carried no determinable type.
+	MessageType string
+	// Count is the number of deadletters recorded for that address and type.
+	Count int64
+}
+
+// DeadlettersSnapshotResponse returns the per-address, per-message-type
+// deadletter counts as of the moment the deadletter actor handled the request.
 type DeadlettersSnapshotResponse struct {
-	// Counts maps each recorded actor address to the number of deadletters
-	// recorded for it.
-	Counts map[string]int64
+	// Counts holds one entry per recorded (receiver address, message type)
+	// pair. An address that dropped several message types appears once per
+	// type, so a total for that address is the sum of its entries.
+	Counts []DeadletterCount
 }
 
 // HealthCheckRequest is sent internally to an actor (or actor system component) to verify that:

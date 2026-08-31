@@ -45,6 +45,11 @@ type pidState uint32
 //   - remoteHoldsClosedState: teardown has drained the remote hold registry;
 //     a credit share tracked after the drain must be repaid immediately
 //     because nothing will ever walk the registry again.
+//   - restartingState: PID is going through a restart. The restart tears the
+//     actor down with Shutdown before re-initializing it, so this bit tells the
+//     stop path that the teardown it is running belongs to a restart. Restart
+//     churn is owned by actor.restart.count, and actor.stopped.count must not
+//     count it a second time.
 const (
 	runningState pidState = 1 << iota
 	stoppingState
@@ -57,6 +62,7 @@ const (
 	systemState
 	remoteState
 	remoteHoldsClosedState
+	restartingState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {

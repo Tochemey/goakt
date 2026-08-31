@@ -100,6 +100,9 @@ type ActorMetric struct { //nolint:revive
 	failureCount uint64
 	// reinstateCount is the total number of reinstatements (suspended -> resumed transitions).
 	reinstateCount uint64
+	// unhandledCount is the total number of messages this actor rejected through
+	// ReceiveContext.Unhandled. It resets on restart, like processedCount.
+	unhandledCount uint64
 }
 
 // LatestProcessedDuration returns the duration of the latest message processing.
@@ -154,4 +157,11 @@ func (x ActorMetric) FailureCount() uint64 {
 // A reinstatement occurs when an actor transitions from suspended to resumed state.
 func (x ActorMetric) ReinstateCount() uint64 {
 	return x.reinstateCount
+}
+
+// UnhandledCount returns the cumulative number of messages this actor marked as
+// unhandled by calling ReceiveContext.Unhandled. Every such message is also
+// routed to dead letters. Resets to zero on actor restart.
+func (x ActorMetric) UnhandledCount() uint64 {
+	return x.unhandledCount
 }

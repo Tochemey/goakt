@@ -886,6 +886,36 @@ type ActorSystem interface {
 	getClusterStore() cluster.Store
 	getDataCenterController() *datacentercontroller.Controller
 	getDataCenterConfig() *datacenter.Config
+	// recordActorSpawned counts a completed spawn against the actor's kind.
+	// System actors are excluded, the same gate the live-actor counter uses.
+	recordActorSpawned(pid *PID)
+	// recordActorStopped counts a completed shutdown against the actor's kind.
+	// System actors are excluded, and so is the teardown embedded in a restart:
+	// restart churn belongs to actor.restart.count alone.
+	recordActorStopped(pid *PID)
+	// recordActorPassivated counts a completed passivation against the actor's
+	// kind. System actors are excluded.
+	recordActorPassivated(pid *PID)
+	// lowCardinalityMetrics reports whether the per-actor instruments are
+	// reported once per actor kind instead of once per actor.
+	lowCardinalityMetrics() bool
+}
+
+// actorKindMetrics accumulates the actor lifecycle edges observed for a single
+// actor kind. The actor system keeps one entry per kind and the system-level
+// metrics callback observes all three counters once per kind per scrape.
+type actorKindMetrics struct {
+	// spawned counts the actors of this kind whose spawn completed.
+	spawned atomic.Int64
+	// stopped counts the actors of this kind that were shut down, excluding the
+	// teardown embedded in a restart and excluding passivation.
+	stopped atomic.Int64
+	// passivated counts the actors of this kind that passivated.
+	passivated atomic.Int64
+	// observeOptions caches the OTel attribute set naming the actor system and
+	// the kind. It is built once when the entry is created, so a scrape builds
+	// no attribute set of its own.
+	observeOptions []otelmetric.ObserveOption
 }
 
 // ActorSystem represent a collection of actors on a given node
@@ -1032,6 +1062,16 @@ type actorSystem struct {
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
 
+	// actorKinds holds the actor lifecycle counters, keyed by actor kind. The
+	// three edges they count (spawn, stop, passivation) each remove or add a
+	// node in the tree, so no PID survives to carry them; the system does.
+	actorKinds *xsync.Map[string, *actorKindMetrics]
+	// actorKindsLocker serializes the creation of a missing actorKinds entry.
+	// The map has no atomic get-or-create, and two goroutines racing to record
+	// the first edge of a kind would otherwise each install an entry and lose
+	// one of the two counts.
+	actorKindsLocker sync.Mutex
+
 	tlsInfo           *gtls.Info
 	pubsubEnabled     atomic.Bool
 	relocationEnabled atomic.Bool
@@ -1064,6 +1104,11 @@ type actorSystem struct {
 	evictionStopSig  chan types.Unit
 
 	metricProvider *metric.Provider
+	// metricLowCardinality reports the per-actor instruments once per actor
+	// kind instead of once per actor, set by WithLowCardinalityMetrics. It is
+	// written once during construction and only read afterwards, by the metrics
+	// callback and by each PID as it caches its observation attributes.
+	metricLowCardinality bool
 	// relocationMetric holds the synchronous relocation instruments. It is nil
 	// unless OpenTelemetry metrics are enabled, so all recording is guarded.
 	relocationMetric *metric.RelocationMetric
@@ -1145,6 +1190,7 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		extensions:            xsync.NewMap[string, extension.Extension](),
 		grains:                xsync.NewMap[string, *grainPID](),
 		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
+		actorKinds:            xsync.NewMap[string, *actorKindMetrics](),
 		pendingAsks:           pendingasks.New(),
 		askTimeout:            DefaultAskTimeout,
 		messageRetention:      DefaultMessageRetention,
@@ -2433,6 +2479,74 @@ func (x *actorSystem) increaseActorsCounter() {
 	x.actorsCounter.Inc()
 }
 
+// recordActorSpawned counts a completed spawn against the actor's kind.
+// System actors are excluded, the same gate the live-actor counter uses.
+func (x *actorSystem) recordActorSpawned(pid *PID) {
+	if pid == nil || pid.isStateSet(systemState) {
+		return
+	}
+
+	x.actorKindMetricsOf(types.Name(pid.Actor())).spawned.Inc()
+}
+
+// recordActorStopped counts a completed shutdown against the actor's kind.
+//
+// System actors are excluded. So is the teardown a restart performs on its way
+// to re-initializing the actor: the actor never left the tree, and its churn is
+// already reported by actor.restart.count. Passivation stops the actor without
+// going through Shutdown, so it never reaches here either.
+func (x *actorSystem) recordActorStopped(pid *PID) {
+	if pid == nil || pid.isStateSet(systemState) || pid.isStateSet(restartingState) {
+		return
+	}
+
+	x.actorKindMetricsOf(types.Name(pid.Actor())).stopped.Inc()
+}
+
+// recordActorPassivated counts a completed passivation against the actor's
+// kind. System actors are excluded.
+func (x *actorSystem) recordActorPassivated(pid *PID) {
+	if pid == nil || pid.isStateSet(systemState) {
+		return
+	}
+
+	x.actorKindMetricsOf(types.Name(pid.Actor())).passivated.Inc()
+}
+
+// actorKindMetricsOf returns the lifecycle counters recorded for the given
+// actor kind, creating the entry and its cached attribute set the first time
+// the kind is seen. Creation runs under actorKindsLocker so two goroutines
+// racing on a kind's first edge cannot install two entries and drop a count.
+func (x *actorSystem) actorKindMetricsOf(kind string) *actorKindMetrics {
+	if counters, ok := x.actorKinds.Get(kind); ok {
+		return counters
+	}
+
+	x.actorKindsLocker.Lock()
+	defer x.actorKindsLocker.Unlock()
+
+	if counters, ok := x.actorKinds.Get(kind); ok {
+		return counters
+	}
+
+	counters := &actorKindMetrics{
+		observeOptions: []otelmetric.ObserveOption{
+			otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
+			otelmetric.WithAttributes(attribute.String("actor.kind", kind)),
+		},
+	}
+
+	x.actorKinds.Set(kind, counters)
+	return counters
+}
+
+// lowCardinalityMetrics reports whether the per-actor instruments are reported
+// once per actor kind instead of once per actor. The flag is set during
+// construction by WithLowCardinalityMetrics and never changes afterwards.
+func (x *actorSystem) lowCardinalityMetrics() bool {
+	return x.metricLowCardinality
+}
+
 // getRemoting returns the remoting instance of the actor system
 // This method is used internally to access the remoting functionality
 // and is not intended for external use.
@@ -2633,6 +2747,7 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 		return nil, err
 	}
 
+	x.recordActorSpawned(pid)
 	return pid, nil
 }
 
@@ -4606,11 +4721,23 @@ func (x *actorSystem) registerMetrics() error {
 			observer.ObserveInt64(metrics.Uptime(), x.Uptime(), observeOptions...)
 			observer.ObserveInt64(metrics.PeersCount(), peersCount, observeOptions...)
 			observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), observeOptions...)
+
+			// the lifecycle totals are reported once per actor kind, using the
+			// attribute set cached with the kind's counters.
+			x.actorKinds.Range(func(_ string, counters *actorKindMetrics) {
+				observer.ObserveInt64(metrics.SpawnedCount(), counters.spawned.Load(), counters.observeOptions...)
+				observer.ObserveInt64(metrics.StoppedCount(), counters.stopped.Load(), counters.observeOptions...)
+				observer.ObserveInt64(metrics.PassivatedCount(), counters.passivated.Load(), counters.observeOptions...)
+			})
+
 			return nil
 		}, metrics.PIDsCount(),
 			metrics.Uptime(),
 			metrics.PeersCount(),
 			metrics.DeadlettersCount(),
+			metrics.SpawnedCount(),
+			metrics.StoppedCount(),
+			metrics.PassivatedCount(),
 		)
 		if err != nil {
 			return err
@@ -4623,17 +4750,29 @@ func (x *actorSystem) registerMetrics() error {
 
 		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
 			// Ask the deadletter actor once per scrape for a snapshot of the
-			// per-address counts. Asking it per running actor would flood a
-			// single mailbox with one request per actor per collection. A
-			// lookup on a nil map yields zero, so a failed ask degrades to
-			// reporting zero deadletters for that scrape.
-			var deadletterCounts map[string]int64
+			// per-address, per-message-type counts. Asking it per running actor
+			// would flood a single mailbox with one request per actor per
+			// collection. A lookup on a nil map yields no entries, so a failed
+			// ask degrades to reporting zero deadletters for that scrape.
+			var deadletterCounts map[string][]commands.DeadletterCount
 			if deadletter := x.getDeadletter(); deadletter != nil && deadletter.IsRunning() {
 				if resp, askErr := x.getSystemGuardian().Ask(ctx, deadletter, &commands.DeadlettersSnapshotRequest{}, x.askTimeout); askErr == nil {
 					if snapshot, ok := resp.(*commands.DeadlettersSnapshotResponse); ok && snapshot != nil {
-						deadletterCounts = snapshot.Counts
+						deadletterCounts = make(map[string][]commands.DeadletterCount, len(snapshot.Counts))
+
+						for _, entry := range snapshot.Counts {
+							deadletterCounts[entry.Address] = append(deadletterCounts[entry.Address], entry)
+						}
 					}
 				}
+			}
+
+			// the low cardinality mode collapses the live population into one
+			// observation per actor kind, so it takes over the per-actor pass
+			// entirely.
+			if x.metricLowCardinality {
+				x.observeActorKinds(observer, actorMetrics, deadletterCounts)
+				return nil
 			}
 
 			for _, node := range x.actors.nodes() {
@@ -4656,9 +4795,10 @@ func (x *actorSystem) registerMetrics() error {
 				observer.ObserveInt64(actorMetrics.ProcessedCount(), processed-1, pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.Uptime(), pid.Uptime(), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.DeadlettersCount(), deadletterCounts[pid.address.String()], pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.UnhandledCount(), pid.unhandledCount.Load(), pid.observeOptions...)
+				observeDeadletters(observer, actorMetrics.DeadlettersCount(), pid, deadletterCounts[pid.address.String()])
 			}
 
 			return nil
@@ -4671,11 +4811,183 @@ func (x *actorSystem) registerMetrics() error {
 			actorMetrics.DeadlettersCount(),
 			actorMetrics.FailureCount(),
 			actorMetrics.ReinstateCount(),
+			actorMetrics.UnhandledCount(),
 		)
 
 		return err
 	}
 	return nil
+}
+
+// actorKindAggregate accumulates the per-actor instrument values of a single
+// actor kind for the span of one scrape. It exists only in the low cardinality
+// mode, where every live actor of a kind collapses into one observation per
+// instrument.
+type actorKindAggregate struct {
+	// the counters below are plain sums over the live actors of the kind.
+	children   int64
+	stashed    int64
+	restarts   int64
+	processed  int64
+	failures   int64
+	reinstates int64
+	unhandled  int64
+	// uptime holds the age of the oldest live actor of the kind. The time
+	// gauges cannot be summed, and a kind is as old as its longest running
+	// member.
+	uptime int64
+	// lastReceived holds the shortest time since any actor of the kind
+	// processed a message, which is what answers whether the kind is still
+	// active.
+	lastReceived int64
+	// deadletters counts the messages the kind dropped, per message type. It
+	// stays nil for a kind that dropped nothing, which is reported as a single
+	// zero without the message.type attribute.
+	deadletters map[string]int64
+}
+
+// newActorKindAggregate seeds a kind's aggregate from the first live actor
+// found for it, so the max and min reductions start from a real reading instead
+// of from zero, which no min could ever fall below.
+func newActorKindAggregate(pid *PID) *actorKindAggregate {
+	return &actorKindAggregate{
+		uptime:       pid.Uptime(),
+		lastReceived: pid.LatestProcessedDuration().Milliseconds(),
+	}
+}
+
+// accumulate folds one live actor into its kind's aggregate, applying the
+// reduction each instrument calls for. The processed count is passed in rather
+// than read again because the caller already snapshotted it to gate on it, and
+// a restart could zero it between two reads.
+func (a *actorKindAggregate) accumulate(pid *PID, processed int64, deadletters []commands.DeadletterCount) {
+	a.children += int64(pid.ChildrenCount())
+	a.stashed += int64(pid.StashSize())
+	a.restarts += int64(pid.RestartCount())
+	a.processed += processed - 1
+	a.failures += int64(pid.failureCount.Load())
+	a.reinstates += int64(pid.reinstateCount.Load())
+	a.unhandled += pid.unhandledCount.Load()
+	a.uptime = max(a.uptime, pid.Uptime())
+	a.lastReceived = min(a.lastReceived, pid.LatestProcessedDuration().Milliseconds())
+
+	if len(deadletters) > 0 && a.deadletters == nil {
+		a.deadletters = make(map[string]int64, len(deadletters))
+	}
+
+	for _, entry := range deadletters {
+		a.deadletters[entry.MessageType] += entry.Count
+	}
+}
+
+// observeActorKinds reports the per-actor instruments once per actor kind,
+// which is what the low cardinality mode buys in exchange for the per-actor
+// series.
+//
+// The tree is walked once, folding every live actor into its kind's aggregate
+// under the same gate the per-actor mode applies: running, and past its
+// PostStart. Each kind is then observed with the attribute set already cached
+// alongside its lifecycle counters, so the scrape builds attributes for no kind
+// it has not already seen. The aggregates are scratch and live for one scrape.
+func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
+	aggregates := make(map[string]*actorKindAggregate)
+
+	for _, node := range x.actors.nodes() {
+		pid := node.value()
+		if pid == nil || !pid.IsRunning() || pid.metricProvider == nil || pid.metricProvider.Meter() == nil {
+			continue
+		}
+
+		// System actors are left out of the per-kind series: aggregating the
+		// runtime's own machinery tells an operator nothing, and registering
+		// their kinds through actorKindMetricsOf below would make the lifecycle
+		// callback emit zero-valued series for kinds the lifecycle counters
+		// deliberately exclude.
+		if pid.isStateSet(systemState) {
+			continue
+		}
+
+		// snapshot once: a restart's reset() can zero the count between
+		// reads. Skipping until PostStart is processed keeps a mid-restart
+		// scrape from reporting processed.count as -1
+		processed := int64(pid.ProcessedCount())
+		if processed < 1 {
+			continue
+		}
+
+		aggregate, ok := aggregates[pid.metricKind]
+		if !ok {
+			aggregate = newActorKindAggregate(pid)
+			aggregates[pid.metricKind] = aggregate
+		}
+
+		aggregate.accumulate(pid, processed, deadletterCounts[pid.address.String()])
+	}
+
+	for kind, aggregate := range aggregates {
+		options := x.actorKindMetricsOf(kind).observeOptions
+
+		observer.ObserveInt64(metrics.ChildrenCount(), aggregate.children, options...)
+		observer.ObserveInt64(metrics.StashSize(), aggregate.stashed, options...)
+		observer.ObserveInt64(metrics.RestartCount(), aggregate.restarts, options...)
+		observer.ObserveInt64(metrics.ProcessedCount(), aggregate.processed, options...)
+		observer.ObserveInt64(metrics.LastReceivedDuration(), aggregate.lastReceived, options...)
+		observer.ObserveInt64(metrics.Uptime(), aggregate.uptime, options...)
+		observer.ObserveInt64(metrics.FailureCount(), aggregate.failures, options...)
+		observer.ObserveInt64(metrics.ReinstateCount(), aggregate.reinstates, options...)
+		observer.ObserveInt64(metrics.UnhandledCount(), aggregate.unhandled, options...)
+		observeKindDeadletters(observer, metrics.DeadlettersCount(), options, aggregate.deadletters)
+	}
+}
+
+// observeKindDeadletters reports actor.deadletters.count for a single actor
+// kind, mirroring the per-actor contract one level up.
+//
+// Every message type the kind dropped gets its own observation, identified by
+// the kind's cached attribute set plus a message.type attribute. A kind that has
+// dropped nothing reports a single zero without the message.type attribute,
+// which keeps every live kind present in the series.
+func observeKindDeadletters(observer otelmetric.Observer, instrument otelmetric.Int64ObservableCounter, kindOptions []otelmetric.ObserveOption, counts map[string]int64) {
+	if len(counts) == 0 {
+		observer.ObserveInt64(instrument, 0, kindOptions...)
+		return
+	}
+
+	// the kind's cached options are reused for every entry; only the trailing
+	// message.type attribute changes, so the scrape builds one slice per kind
+	// instead of one per message type.
+	options := make([]otelmetric.ObserveOption, len(kindOptions)+1)
+	copy(options, kindOptions)
+
+	for messageType, count := range counts {
+		options[len(options)-1] = otelmetric.WithAttributes(attribute.String("message.type", messageType))
+		observer.ObserveInt64(instrument, count, options...)
+	}
+}
+
+// observeDeadletters reports actor.deadletters.count for a single actor.
+//
+// Every message type the actor dropped gets its own observation, identified by
+// the actor's cached attribute set plus a message.type attribute, so an
+// operator reading the number also sees which messages produced it. An actor
+// that has dropped nothing reports a single zero without the message.type
+// attribute, which keeps every live actor present in the series.
+func observeDeadletters(observer otelmetric.Observer, instrument otelmetric.Int64ObservableCounter, pid *PID, entries []commands.DeadletterCount) {
+	if len(entries) == 0 {
+		observer.ObserveInt64(instrument, 0, pid.observeOptions...)
+		return
+	}
+
+	// the actor's cached options are reused for every entry; only the trailing
+	// message.type attribute changes, so the scrape builds one slice per actor
+	// instead of one per message type.
+	options := make([]otelmetric.ObserveOption, len(pid.observeOptions)+1)
+	copy(options, pid.observeOptions)
+
+	for _, entry := range entries {
+		options[len(options)-1] = otelmetric.WithAttributes(attribute.String("message.type", entry.MessageType))
+		observer.ObserveInt64(instrument, entry.Count, options...)
+	}
 }
 
 // recordRelocationMetrics records the outcome of a single departed node's
