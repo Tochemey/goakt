@@ -222,6 +222,25 @@ func TestWithMetrics(t *testing.T) {
 	opt.Apply(system)
 
 	assert.NotNil(t, system.metricProvider)
+	assert.False(t, system.metricLowCardinality)
+}
+
+func TestWithLowCardinalityMetrics(t *testing.T) {
+	t.Run("When not requested", func(t *testing.T) {
+		system := new(actorSystem)
+		WithMetrics().Apply(system)
+
+		assert.NotNil(t, system.metricProvider)
+		assert.False(t, system.metricLowCardinality)
+	})
+
+	t.Run("When requested", func(t *testing.T) {
+		system := new(actorSystem)
+		WithMetrics(WithLowCardinalityMetrics()).Apply(system)
+
+		assert.NotNil(t, system.metricProvider)
+		assert.True(t, system.metricLowCardinality)
+	})
 }
 
 func TestWithDefaultSupervisor(t *testing.T) {

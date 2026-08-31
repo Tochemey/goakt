@@ -38,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -142,7 +143,7 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With DeadlettersSnapshot returns the per-address counts", func(t *testing.T) {
+	t.Run("With DeadlettersSnapshot returns the per-address per-type counts", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 
@@ -158,9 +159,13 @@ func TestDeadletter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		// every message sent to the actor will result in a deadletter
+		// every message sent to the actor will result in a deadletter; two
+		// distinct message types must land in two distinct buckets
 		for range 5 {
 			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
+		}
+		for range 3 {
+			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestReply)))
 		}
 
 		pause.For(time.Second)
@@ -170,11 +175,70 @@ func TestDeadletter(t *testing.T) {
 		require.NotNil(t, reply)
 		response, ok := reply.(*commands.DeadlettersSnapshotResponse)
 		require.True(t, ok)
-		require.EqualValues(t, 5, response.Counts[actorRef.address.String()])
-		require.Zero(t, response.Counts["unknown-address"])
+
+		counts := make(map[string]int64)
+		for _, entry := range response.Counts {
+			require.Equal(t, actorRef.address.String(), entry.Address)
+			counts[entry.MessageType] = entry.Count
+		}
+
+		require.Len(t, counts, 2)
+		require.EqualValues(t, 5, counts[types.NameOf(new(testpb.TestSend))])
+		require.EqualValues(t, 3, counts[types.NameOf(new(testpb.TestReply))])
+
+		// the single-actor count request still reports the address total
+		countReply, err := Ask(ctx, sys.getDeadletter(), &commands.DeadlettersCountRequest{
+			Address: actorRef.address,
+		}, 500*time.Millisecond)
+		require.NoError(t, err)
+		countResponse, ok := countReply.(*commands.DeadlettersCountResponse)
+		require.True(t, ok)
+		require.EqualValues(t, 8, countResponse.TotalCount)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
+	})
+	t.Run("With a non-pointer message the registry records its type", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		require.NoError(t, sys.Start(ctx))
+		pause.For(time.Second)
+
+		receiver := address.New("gone", sys.Name(), "127.0.0.1", 0)
+		deadletter := sys.getDeadletter()
+		require.NotNil(t, deadletter)
+
+		// a plain string and a nil message both have to survive the type
+		// lookup: types.Name panics on either.
+		for _, message := range []any{"a plain string", nil} {
+			require.NoError(t, Tell(ctx, deadletter, &commands.SendDeadletter{
+				Deadletter: commands.Deadletter{
+					Sender:   sys.NoSender().getAddress(),
+					Receiver: receiver,
+					Message:  message,
+					SendTime: time.Now(),
+					Reason:   "test",
+				},
+			}))
+		}
+
+		pause.For(time.Second)
+
+		reply, err := Ask(ctx, deadletter, &commands.DeadlettersSnapshotRequest{}, 500*time.Millisecond)
+		require.NoError(t, err)
+		response, ok := reply.(*commands.DeadlettersSnapshotResponse)
+		require.True(t, ok)
+
+		counts := make(map[string]int64)
+		for _, entry := range response.Counts {
+			counts[entry.MessageType] = entry.Count
+		}
+
+		require.EqualValues(t, 1, counts["string"])
+		require.EqualValues(t, 1, counts[types.UnknownName])
+
+		require.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("With GetDeadletters", func(t *testing.T) {
 		ctx := context.TODO()

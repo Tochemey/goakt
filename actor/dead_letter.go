@@ -27,9 +27,21 @@ import (
 
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 )
+
+// deadletterKey identifies one deadletter bucket. Counting by receiver address
+// alone answers how many messages an actor dropped; adding the message type
+// answers which messages it dropped, which is what an operator needs to act on
+// the number.
+type deadletterKey struct {
+	// address is the string form of the receiver address.
+	address string
+	// messageType is the type name of the dropped message.
+	messageType string
+}
 
 // deadletter is a synthetic actor that houses all deadletter
 // in GoAkt deadletter are messages that have not been handled
@@ -39,7 +51,7 @@ type deadLetter struct {
 	logger       log.Logger
 	counter      *atomic.Int64
 	letters      *xsync.Map[string, *Deadletter]
-	counters     *xsync.Map[string, *atomic.Int64]
+	counters     *xsync.Map[deadletterKey, *atomic.Int64]
 }
 
 // enforce the implementation of the Actor interface
@@ -50,7 +62,7 @@ func newDeadLetter() *deadLetter {
 	counter := atomic.NewInt64(0)
 	return &deadLetter{
 		letters:  xsync.NewMap[string, *Deadletter](),
-		counters: xsync.NewMap[string, *atomic.Int64](),
+		counters: xsync.NewMap[deadletterKey, *atomic.Int64](),
 		counter:  counter,
 	}
 }
@@ -93,7 +105,7 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.logger = ctx.Logger()
 	x.pid = ctx.Self()
 	x.letters = xsync.NewMap[string, *Deadletter]()
-	x.counters = xsync.NewMap[string, *atomic.Int64]()
+	x.counters = xsync.NewMap[deadletterKey, *atomic.Int64]()
 	x.counter.Store(0)
 	if x.logger.Enabled(log.InfoLevel) {
 		x.logger.Infof("actor=%s started successfully", x.pid.Name())
@@ -111,13 +123,15 @@ func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {
 	// letters the message for future query
 	id := msg.Receiver.String()
 	x.letters.Set(id, deadLetter)
-	if counter, ok := x.counters.Get(id); ok {
+
+	key := deadletterKey{address: id, messageType: types.NameOf(msg.Message)}
+	if counter, ok := x.counters.Get(key); ok {
 		counter.Inc()
 		return
 	}
 
 	counter := atomic.NewInt64(1)
-	x.counters.Set(id, counter)
+	x.counters.Set(key, counter)
 }
 
 // handlePublishDeadletters pushes the actor state back to the stream
@@ -127,26 +141,44 @@ func (x *deadLetter) handlePublishDeadletters() {
 	})
 }
 
-// count returns the deadletter count
+// count returns the deadletter count.
+//
+// The registry buckets counts per (receiver address, message type), so the
+// total for one address is the sum of every bucket it owns. Callers see the
+// same number they saw when the registry was keyed by address alone.
 func (x *deadLetter) count(msg *commands.DeadlettersCountRequest) int64 {
-	if msg.Address != nil {
-		if counter, ok := x.counters.Get(msg.Address.String()); ok {
-			return counter.Load()
-		}
-		return 0
+	if msg.Address == nil {
+		return x.counter.Load()
 	}
-	return x.counter.Load()
+
+	address := msg.Address.String()
+	var total int64
+
+	x.counters.Range(func(key deadletterKey, counter *atomic.Int64) {
+		if key.address == address {
+			total += counter.Load()
+		}
+	})
+
+	return total
 }
 
-// snapshot returns a copy of the per-address deadletter counts. It runs on the
-// deadletter actor's own goroutine while handling a DeadlettersSnapshotRequest,
-// so it reads the registry without racing the receive loop. The metrics
-// collector asks for this once per scrape to observe actor.deadletters.count
-// across the whole tree with a single message instead of one ask per actor.
-func (x *deadLetter) snapshot() map[string]int64 {
-	counts := make(map[string]int64, x.counters.Len())
-	x.counters.Range(func(address string, counter *atomic.Int64) {
-		counts[address] = counter.Load()
+// snapshot returns a copy of the deadletter counts, one entry per recorded
+// (receiver address, message type) pair. It runs on the deadletter actor's own
+// goroutine while handling a DeadlettersSnapshotRequest, so it reads the
+// registry without racing the receive loop. The metrics collector asks for this
+// once per scrape to observe actor.deadletters.count across the whole tree with
+// a single message instead of one ask per actor.
+func (x *deadLetter) snapshot() []commands.DeadletterCount {
+	counts := make([]commands.DeadletterCount, 0, x.counters.Len())
+
+	x.counters.Range(func(key deadletterKey, counter *atomic.Int64) {
+		counts = append(counts, commands.DeadletterCount{
+			Address:     key.address,
+			MessageType: key.messageType,
+			Count:       counter.Load(),
+		})
 	})
+
 	return counts
 }

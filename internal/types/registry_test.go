@@ -59,3 +59,24 @@ func TestRegistry(t *testing.T) {
 		assert.Len(t, registry.TypesMap(), 0)
 	})
 }
+
+func TestNameOf(t *testing.T) {
+	t.Run("With a pointer value it matches Name", func(t *testing.T) {
+		obj := new(testStruct)
+		assert.Equal(t, Name(obj), NameOf(obj))
+		assert.Equal(t, "types.teststruct", NameOf(obj))
+	})
+
+	t.Run("With a non-pointer value it names the value directly", func(t *testing.T) {
+		assert.Equal(t, "types.teststruct", NameOf(testStruct{}))
+		assert.Equal(t, "string", NameOf("a plain string"))
+		assert.Equal(t, "int", NameOf(42))
+	})
+
+	t.Run("With a nil value it reports the unknown name", func(t *testing.T) {
+		assert.Equal(t, UnknownName, NameOf(nil))
+
+		var typed *testStruct
+		assert.Equal(t, "types.teststruct", NameOf(typed))
+	})
+}

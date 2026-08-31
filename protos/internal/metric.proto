@@ -16,4 +16,5 @@ message Metric {
   uint64 stash_size = 7;
   uint64 failure_count = 8;
   uint64 reinstate_count = 9;
+  uint64 unhandled_count = 10;
 }

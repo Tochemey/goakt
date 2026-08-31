@@ -1238,6 +1238,7 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 	metric2.SetStashSize(metric.StashSize())
 	metric2.SetFailureCount(metric.FailureCount())
 	metric2.SetReinstateCount(metric.ReinstateCount())
+	metric2.SetUnhandledCount(metric.UnhandledCount())
 	rmr := &internalpb.RemoteMetricResponse{}
 	rmr.SetMetric(metric2)
 	return rmr, nil

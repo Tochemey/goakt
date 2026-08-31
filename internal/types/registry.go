@@ -29,6 +29,10 @@ import (
 	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
+// UnknownName is the type name reported for a value whose runtime type cannot
+// be determined, which in practice means a nil value.
+const UnknownName = "unknown"
+
 // Registry defines the types registry interface
 type Registry interface {
 	// Register an object
@@ -110,6 +114,29 @@ func reflectType(v any) reflect.Type {
 // Name returns the type name of a given object
 func Name(v any) string {
 	return lowTrim(reflectType(v).String())
+}
+
+// NameOf returns the type name of a given value the way Name does, but accepts
+// the values Name rejects.
+//
+// Name dereferences through reflect.Type.Elem, which panics on anything that is
+// not a pointer, and it panics outright on nil because reflect.TypeOf(nil)
+// returns no type. Values whose type is derived at runtime, such as the
+// messages recorded by the deadletter registry, come from user code and from
+// the wire and may be neither. NameOf reports UnknownName for a nil value,
+// dereferences a pointer exactly like Name, and names a non-pointer value
+// directly.
+func NameOf(v any) string {
+	if v == nil {
+		return UnknownName
+	}
+
+	rtype := reflect.TypeOf(v)
+	if rtype.Kind() == reflect.Pointer {
+		rtype = rtype.Elem()
+	}
+
+	return lowTrim(rtype.String())
 }
 
 // lowTrim trim any space and lower the string value

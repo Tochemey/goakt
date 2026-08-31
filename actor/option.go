@@ -340,6 +340,63 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 	})
 }
 
+// MetricsOption tunes how the metrics enabled by WithMetrics are reported.
+//
+// The interface is closed: its only method is unexported, so the set of
+// supported tunings is the one this package ships.
+type MetricsOption interface {
+	// apply writes the tuning into the actor system being constructed.
+	apply(system *actorSystem)
+}
+
+// enforce compilation error
+var _ MetricsOption = metricsOptionFunc(nil)
+
+// metricsOptionFunc implements the MetricsOption interface.
+type metricsOptionFunc func(*actorSystem)
+
+// apply writes the tuning into the actor system being constructed.
+func (f metricsOptionFunc) apply(system *actorSystem) {
+	f(system)
+}
+
+// WithLowCardinalityMetrics reports the per-actor instruments once per actor
+// kind instead of once per actor.
+//
+// By default every per-actor instrument produces one time series per live
+// actor, identified by the attributes actor.system, actor.name, actor.kind and
+// actor.address. That is precise, but the number of series grows with the actor
+// population, which becomes expensive to store and query once a system runs
+// thousands of actors.
+//
+// With this option the metrics callback aggregates the live actors of each kind
+// and reports one observation per kind, carrying only actor.system and
+// actor.kind. The per-actor attributes actor.name and actor.address are dropped,
+// so an individual actor can no longer be singled out in a dashboard or an
+// alert; what is bought in exchange is a series count that depends on how many
+// actor kinds the system declares, not on how many actors it runs.
+//
+// The counters are summed across the kind. The two time gauges cannot be
+// summed: actor.uptime is reported as the maximum, the age of the oldest live
+// actor of the kind, and actor.last.received.duration as the minimum, the time
+// since the kind last processed a message. actor.deadletters.count keeps its
+// message.type breakdown, summed per kind and message type.
+//
+// The system-level instruments and the actor lifecycle counters are already
+// reported per system and per kind, so they are identical in both modes.
+//
+// Example:
+//
+//	system := NewActorSystem(
+//	    WithLogger(logger),
+//	    WithMetrics(WithLowCardinalityMetrics()),
+//	)
+func WithLowCardinalityMetrics() MetricsOption {
+	return metricsOptionFunc(func(system *actorSystem) {
+		system.metricLowCardinality = true
+	})
+}
+
 // WithMetrics enables OpenTelemetry metrics collection for the ActorSystem.
 //
 // This option wires goakt's internal metric provider so that runtime metrics
@@ -351,6 +408,10 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 //
 //	https://opentelemetry.io/docs/languages/go/getting-started/#initialize-the-opentelemetry-sdk
 //
+// Called without arguments, the per-actor instruments are reported once per
+// live actor. Pass WithLowCardinalityMetrics to report them once per actor kind
+// instead, which caps the number of exported time series.
+//
 // Example:
 //
 //	system := NewActorSystem(
@@ -359,9 +420,13 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 //	)
 //
 // Returns an Option that enables metrics instrumentation during system construction.
-func WithMetrics() Option {
+func WithMetrics(opts ...MetricsOption) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.metricProvider = metric.NewProvider()
+
+		for _, opt := range opts {
+			opt.apply(system)
+		}
 	})
 }
 

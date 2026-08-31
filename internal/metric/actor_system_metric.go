@@ -29,18 +29,29 @@ import "go.opentelemetry.io/otel/metric"
 //
 // The live actor count, connected peer count, and uptime are point-in-time
 // readings that can rise and fall, so they are observable gauges. The
-// deadletter total only grows, so it stays an observable counter.
+// deadletter total and the three actor lifecycle totals only grow, so they stay
+// observable counters.
 //
 // Instruments:
 //   - actorsystem.deadletters.count  (Int64ObservableCounter)
 //   - actorsystem.actors.count       (Int64ObservableGauge)
 //   - actorsystem.peers.count        (Int64ObservableGauge) — optional; see PeersCount
 //   - actorsystem.uptime             (Int64ObservableGauge, unit: seconds)
+//   - actor.spawned.count            (Int64ObservableCounter)
+//   - actor.stopped.count            (Int64ObservableCounter)
+//   - actor.passivated.count         (Int64ObservableCounter)
 type ActorSystemMetric struct {
 	deadlettersCount metric.Int64ObservableCounter
 	pidsCount        metric.Int64ObservableGauge
 	peersCount       metric.Int64ObservableGauge
 	uptime           metric.Int64ObservableGauge
+	// spawnedCount, stoppedCount and passivatedCount report actor lifecycle
+	// edges per actor kind. They live on the system-level instrument set
+	// because the edge they count removes the actor from the tree, so no PID
+	// survives to carry them.
+	spawnedCount    metric.Int64ObservableCounter
+	stoppedCount    metric.Int64ObservableCounter
+	passivatedCount metric.Int64ObservableCounter
 }
 
 // NewActorSystemMetric creates the system‑level instruments using the provided
@@ -49,6 +60,9 @@ type ActorSystemMetric struct {
 //   - actorsystem.actors.count      (Int64ObservableGauge)
 //   - actorsystem.uptime            (Int64ObservableGauge, unit "s")
 //   - actorsystem.peers.count       (Int64ObservableGauge)
+//   - actor.spawned.count           (Int64ObservableCounter)
+//   - actor.stopped.count           (Int64ObservableCounter)
+//   - actor.passivated.count        (Int64ObservableCounter)
 //
 // It returns an error if any instrument cannot be created so telemetry
 // initialization failures are surfaced early.
@@ -85,6 +99,27 @@ func NewActorSystemMetric(meter metric.Meter) (*ActorSystemMetric, error) {
 		return nil, err
 	}
 
+	if instruments.spawnedCount, err = meter.Int64ObservableCounter(
+		"actor.spawned.count",
+		metric.WithDescription("Total number of actors spawned in the actor system"),
+	); err != nil {
+		return nil, err
+	}
+
+	if instruments.stoppedCount, err = meter.Int64ObservableCounter(
+		"actor.stopped.count",
+		metric.WithDescription("Total number of actors stopped in the actor system, excluding restarts and passivations"),
+	); err != nil {
+		return nil, err
+	}
+
+	if instruments.passivatedCount, err = meter.Int64ObservableCounter(
+		"actor.passivated.count",
+		metric.WithDescription("Total number of actors passivated in the actor system"),
+	); err != nil {
+		return nil, err
+	}
+
 	return &instruments, nil
 }
 
@@ -114,4 +149,30 @@ func (x *ActorSystemMetric) Uptime() metric.Int64ObservableGauge {
 // (e.g., cluster members) in the actor system.
 func (x *ActorSystemMetric) PeersCount() metric.Int64ObservableGauge {
 	return x.peersCount
+}
+
+// SpawnedCount returns the observable counter for the number of actors spawned
+// in the actor system, reported per actor kind.
+//
+// Use with Meter.RegisterCallback to observe the current value periodically.
+func (x *ActorSystemMetric) SpawnedCount() metric.Int64ObservableCounter {
+	return x.spawnedCount
+}
+
+// StoppedCount returns the observable counter for the number of actors stopped
+// in the actor system, reported per actor kind. The teardown embedded in a
+// restart and a passivation are not stops: they are reported by
+// actor.restart.count and PassivatedCount respectively.
+//
+// Use with Meter.RegisterCallback to observe the current value periodically.
+func (x *ActorSystemMetric) StoppedCount() metric.Int64ObservableCounter {
+	return x.stoppedCount
+}
+
+// PassivatedCount returns the observable counter for the number of actors
+// passivated in the actor system, reported per actor kind.
+//
+// Use with Meter.RegisterCallback to observe the current value periodically.
+func (x *ActorSystemMetric) PassivatedCount() metric.Int64ObservableCounter {
+	return x.passivatedCount
 }

@@ -46,6 +46,8 @@ import (
 //   - actor.uptime                   (Int64ObservableGauge, unit: s)
 //   - actor.failure.count            (Int64ObservableCounter)
 //   - actor.reinstate.count          (Int64ObservableCounter)
+//   - actor.unhandled.count          (Int64ObservableCounter)
+//   - actor.mailbox.size             (Int64ObservableGauge)
 type ActorMetric struct {
 	deadlettersCount     metric.Int64ObservableCounter
 	childrenCount        metric.Int64ObservableGauge
@@ -56,6 +58,8 @@ type ActorMetric struct {
 	uptime               metric.Int64ObservableGauge
 	failureCount         metric.Int64ObservableCounter
 	reinstateCount       metric.Int64ObservableCounter
+	unhandledCount       metric.Int64ObservableCounter
+	mailboxSize          metric.Int64ObservableGauge
 }
 
 // NewActorMetric constructs all actor-level instruments with the provided Meter.
@@ -141,6 +145,22 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 		return nil, fmt.Errorf("failed to create reinstateCount instrument, %v", err)
 	}
 
+	// set the unhandled count instrument
+	if instruments.unhandledCount, err = meter.Int64ObservableCounter(
+		"actor.unhandled.count",
+		metric.WithDescription("Total number of messages the actor marked as unhandled"),
+	); err != nil {
+		return nil, fmt.Errorf("failed to create unhandledCount instrument, %v", err)
+	}
+
+	// set the mailbox size instrument
+	if instruments.mailboxSize, err = meter.Int64ObservableGauge(
+		"actor.mailbox.size",
+		metric.WithDescription("Current number of messages waiting in the mailbox"),
+	); err != nil {
+		return nil, fmt.Errorf("failed to create mailboxSize instrument, %v", err)
+	}
+
 	return &instruments, nil
 }
 
@@ -198,4 +218,18 @@ func (x *ActorMetric) FailureCount() metric.Int64ObservableCounter {
 // Observe this via Meter.RegisterCallback.
 func (x *ActorMetric) ReinstateCount() metric.Int64ObservableCounter {
 	return x.reinstateCount
+}
+
+// UnhandledCount returns an observable counter for the total number of messages
+// the PID explicitly marked as unhandled through ReceiveContext.Unhandled.
+// Observe this via Meter.RegisterCallback.
+func (x *ActorMetric) UnhandledCount() metric.Int64ObservableCounter {
+	return x.unhandledCount
+}
+
+// MailboxSize returns an observable gauge for the number of messages waiting in
+// the PID's mailbox, enqueued and not yet dispatched.
+// Observe this via Meter.RegisterCallback.
+func (x *ActorMetric) MailboxSize() metric.Int64ObservableGauge {
+	return x.mailboxSize
 }

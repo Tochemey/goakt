@@ -1395,6 +1395,36 @@ func TestReceiveContext(t *testing.T) {
 			},
 		)
 	})
+	t.Run("With Unhandled bumps the unhandled counter", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("sys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		require.Zero(t, pid.unhandledCount.Load())
+
+		receiveContext := &ReceiveContext{
+			ctx:     ctx,
+			message: new(testpb.TestSend),
+			sender:  actorSystem.NoSender(),
+			self:    pid,
+		}
+
+		receiveContext.Unhandled()
+		receiveContext.Unhandled()
+
+		require.EqualValues(t, 2, pid.unhandledCount.Load())
+
+		t.Cleanup(func() {
+			assert.NoError(t, actorSystem.Stop(ctx))
+		})
+	})
 	t.Run("With successful BatchTell", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(1)

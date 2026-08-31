@@ -46,6 +46,8 @@ func TestActorMetric(t *testing.T) {
 	require.NotNil(t, instruments.Uptime())
 	require.NotNil(t, instruments.FailureCount())
 	require.NotNil(t, instruments.ReinstateCount())
+	require.NotNil(t, instruments.UnhandledCount())
+	require.NotNil(t, instruments.MailboxSize())
 }
 
 func TestActorMetricErrors(t *testing.T) {
@@ -67,6 +69,8 @@ func TestActorMetricErrors(t *testing.T) {
 		{name: "uptime gauge", failKey: "actor.uptime"},
 		{name: "failure counter", failKey: "actor.failure.count"},
 		{name: "reinstate counter", failKey: "actor.reinstate.count"},
+		{name: "unhandled counter", failKey: "actor.unhandled.count"},
+		{name: "mailbox size gauge", failKey: "actor.mailbox.size"},
 	}
 
 	for _, tt := range testCases {
