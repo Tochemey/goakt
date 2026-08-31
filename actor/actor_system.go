@@ -4622,6 +4622,20 @@ func (x *actorSystem) registerMetrics() error {
 		}
 
 		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+			// Ask the deadletter actor once per scrape for a snapshot of the
+			// per-address counts. Asking it per running actor would flood a
+			// single mailbox with one request per actor per collection. A
+			// lookup on a nil map yields zero, so a failed ask degrades to
+			// reporting zero deadletters for that scrape.
+			var deadletterCounts map[string]int64
+			if deadletter := x.getDeadletter(); deadletter != nil && deadletter.IsRunning() {
+				if resp, askErr := x.getSystemGuardian().Ask(ctx, deadletter, &commands.DeadlettersSnapshotRequest{}, x.askTimeout); askErr == nil {
+					if snapshot, ok := resp.(*commands.DeadlettersSnapshotResponse); ok && snapshot != nil {
+						deadletterCounts = snapshot.Counts
+					}
+				}
+			}
+
 			for _, node := range x.actors.nodes() {
 				pid := node.value()
 				if pid == nil || !pid.IsRunning() || pid.observeOptions == nil {
@@ -4642,7 +4656,7 @@ func (x *actorSystem) registerMetrics() error {
 				observer.ObserveInt64(actorMetrics.ProcessedCount(), processed-1, pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.Uptime(), pid.Uptime(), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.DeadlettersCount(), pid.getDeadlettersCount(ctx), pid.observeOptions...)
+				observer.ObserveInt64(actorMetrics.DeadlettersCount(), deadletterCounts[pid.address.String()], pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
 				observer.ObserveInt64(actorMetrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
 			}

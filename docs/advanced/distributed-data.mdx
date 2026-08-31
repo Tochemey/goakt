@@ -318,7 +318,7 @@ When `WithMetrics()` is enabled on the actor system, the Replicator registers Op
 | `crdt.replicator.tombstone.count`          | Int64ObservableGauge   | Active tombstones pending pruning          |
 | `crdt.replicator.crossdc.send.count`       | Int64ObservableCounter | Delta batches sent to remote DCs (leader)  |
 | `crdt.replicator.crossdc.receive.count`    | Int64ObservableCounter | Delta batches received from remote DCs     |
-| `crdt.replicator.crossdc.replication.lag`  | Int64ObservableGauge   | Lag (ns) from last received cross-DC batch |
+| `crdt.replicator.crossdc.replication.lag`  | Int64ObservableGauge   | Lag (ms) from last received cross-DC batch |
 | `crdt.replicator.crossdc.stale.skip.count` | Int64ObservableCounter | Flushes skipped due to stale DC cache      |
 
 All instruments carry an `actor.system` attribute with the actor system name.

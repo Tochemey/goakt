@@ -72,6 +72,8 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 	case *commands.DeadlettersCountRequest:
 		count := x.count(msg)
 		ctx.Response(&commands.DeadlettersCountResponse{TotalCount: count})
+	case *commands.DeadlettersSnapshotRequest:
+		ctx.Response(&commands.DeadlettersSnapshotResponse{Counts: x.snapshot()})
 	default:
 		// simply ignore anyhing else
 	}
@@ -134,4 +136,17 @@ func (x *deadLetter) count(msg *commands.DeadlettersCountRequest) int64 {
 		return 0
 	}
 	return x.counter.Load()
+}
+
+// snapshot returns a copy of the per-address deadletter counts. It runs on the
+// deadletter actor's own goroutine while handling a DeadlettersSnapshotRequest,
+// so it reads the registry without racing the receive loop. The metrics
+// collector asks for this once per scrape to observe actor.deadletters.count
+// across the whole tree with a single message instead of one ask per actor.
+func (x *deadLetter) snapshot() map[string]int64 {
+	counts := make(map[string]int64, x.counters.Len())
+	x.counters.Range(func(address string, counter *atomic.Int64) {
+		counts[address] = counter.Load()
+	})
+	return counts
 }

@@ -58,13 +58,13 @@ func TestActorMetricErrors(t *testing.T) {
 		name    string
 		failKey string
 	}{
-		{name: "children counter", failKey: "actor.children.count"},
-		{name: "stash size counter", failKey: "actor.stash.size"},
+		{name: "children gauge", failKey: "actor.children.count"},
+		{name: "stash size gauge", failKey: "actor.stash.size"},
 		{name: "deadletters counter", failKey: "actor.deadletters.count"},
 		{name: "restart counter", failKey: "actor.restart.count"},
-		{name: "last received duration histogram", failKey: "actor.last.received.duration"},
+		{name: "last received duration gauge", failKey: "actor.last.received.duration"},
 		{name: "processed counter", failKey: "actor.processed.count"},
-		{name: "uptime histogram", failKey: "actor.uptime"},
+		{name: "uptime gauge", failKey: "actor.uptime"},
 		{name: "failure counter", failKey: "actor.failure.count"},
 		{name: "reinstate counter", failKey: "actor.reinstate.count"},
 	}
