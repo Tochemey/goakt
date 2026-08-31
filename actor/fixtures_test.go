@@ -2534,6 +2534,16 @@ func (m instrumentFailingMeter) Int64ObservableCounter(
 	return m.Meter.Int64ObservableCounter(name, options...)
 }
 
+func (m instrumentFailingMeter) Int64ObservableGauge(
+	name string,
+	options ...otelmetric.Int64ObservableGaugeOption,
+) (otelmetric.Int64ObservableGauge, error) {
+	if err, ok := m.failures[name]; ok {
+		return nil, err
+	}
+	return m.Meter.Int64ObservableGauge(name, options...)
+}
+
 type manualMeterProvider struct {
 	otelmetric.MeterProvider
 	meter otelmetric.Meter
