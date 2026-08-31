@@ -2635,7 +2635,7 @@ func (m *recordingMeterProvider) Meter(_ string, _ ...otelmetric.MeterOption) ot
 }
 
 // recordingMeter captures registered callbacks and creates named observable
-// counters so observations can be attributed to their instrument.
+// counters and gauges so observations can be attributed to their instrument.
 type recordingMeter struct {
 	otelmetric.Meter
 	callbacks []otelmetric.Callback
@@ -2643,6 +2643,10 @@ type recordingMeter struct {
 
 func (m *recordingMeter) Int64ObservableCounter(name string, _ ...otelmetric.Int64ObservableCounterOption) (otelmetric.Int64ObservableCounter, error) {
 	return &namedObservableCounter{name: name}, nil
+}
+
+func (m *recordingMeter) Int64ObservableGauge(name string, _ ...otelmetric.Int64ObservableGaugeOption) (otelmetric.Int64ObservableGauge, error) {
+	return &namedObservableGauge{name: name}, nil
 }
 
 func (m *recordingMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
@@ -2654,6 +2658,13 @@ func (m *recordingMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetri
 // instrument name it was created with.
 type namedObservableCounter struct {
 	noopmetric.Int64ObservableCounter
+	name string
+}
+
+// namedObservableGauge is a no-op observable gauge that remembers the
+// instrument name it was created with.
+type namedObservableGauge struct {
+	noopmetric.Int64ObservableGauge
 	name string
 }
 
@@ -2672,7 +2683,10 @@ type attrObserveRecord struct {
 
 func (o *attrObserver) ObserveInt64(obsrv otelmetric.Int64Observable, value int64, opts ...otelmetric.ObserveOption) {
 	name := fmt.Sprintf("%T", obsrv)
-	if named, ok := obsrv.(*namedObservableCounter); ok {
+	switch named := obsrv.(type) {
+	case *namedObservableCounter:
+		name = named.name
+	case *namedObservableGauge:
 		name = named.name
 	}
 
