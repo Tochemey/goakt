@@ -53,9 +53,9 @@ func TestActorSystemInstrumentErrors(t *testing.T) {
 		failKey string
 	}{
 		{name: "deadletters counter", failKey: "actorsystem.deadletters.count"},
-		{name: "pids counter", failKey: "actorsystem.actors.count"},
-		{name: "uptime histogram", failKey: "actorsystem.uptime"},
-		{name: "peers counter", failKey: "actorsystem.peers.count"},
+		{name: "actors gauge", failKey: "actorsystem.actors.count"},
+		{name: "uptime gauge", failKey: "actorsystem.uptime"},
+		{name: "peers gauge", failKey: "actorsystem.peers.count"},
 	}
 
 	for _, tt := range testCases {

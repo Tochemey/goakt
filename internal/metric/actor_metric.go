@@ -31,48 +31,54 @@ import (
 // ActorMetric groups OpenTelemetry instruments that describe the health,
 // throughput, and lifecycle of a single PID (actor).
 //
+// Point-in-time readings that can rise and fall (children, stash size, last
+// received duration, uptime) are observable gauges. Cumulative totals that only
+// grow within an actor incarnation (deadletters, restarts, processed, failures,
+// reinstatements) are observable counters.
+//
 // Included instruments:
-//   - pid.children.count             (Int64ObservableCounter)
-//   - pid.stash.size                 (Int64ObservableCounter)
-//   - pid.deadletters.count          (Int64ObservableCounter)
-//   - pid.restart.count              (Int64ObservableCounter)
-//   - pid.last.received.duration     (Int64ObservableCounter, unit: ms)
-//   - pid.processed.count            (Int64ObservableCounter)
-//   - pid.uptime                     (Int64ObservableCounter, unit: s)
-//   - pid.failure.count              (Int64ObservableCounter)
-//   - pid.reinstate.count            (Int64ObservableCounter)
+//   - actor.children.count           (Int64ObservableGauge)
+//   - actor.stash.size               (Int64ObservableGauge)
+//   - actor.deadletters.count        (Int64ObservableCounter)
+//   - actor.restart.count            (Int64ObservableCounter)
+//   - actor.last.received.duration   (Int64ObservableGauge, unit: ms)
+//   - actor.processed.count          (Int64ObservableCounter)
+//   - actor.uptime                   (Int64ObservableGauge, unit: s)
+//   - actor.failure.count            (Int64ObservableCounter)
+//   - actor.reinstate.count          (Int64ObservableCounter)
 type ActorMetric struct {
 	deadlettersCount     metric.Int64ObservableCounter
-	childrenCount        metric.Int64ObservableCounter
+	childrenCount        metric.Int64ObservableGauge
 	restartCount         metric.Int64ObservableCounter
-	lastReceivedDuration metric.Int64ObservableCounter
+	lastReceivedDuration metric.Int64ObservableGauge
 	processedCount       metric.Int64ObservableCounter
-	stashSize            metric.Int64ObservableCounter
-	uptime               metric.Int64ObservableCounter
+	stashSize            metric.Int64ObservableGauge
+	uptime               metric.Int64ObservableGauge
 	failureCount         metric.Int64ObservableCounter
 	reinstateCount       metric.Int64ObservableCounter
 }
 
 // NewActorMetric constructs all actor-level instruments with the provided Meter.
-// It initializes observable counters for counts (children, stash size, deadletters,
-// restarts, processed) and histograms for durations (last received in ms, uptime in s).
-// Returns an error if any instrument fails to be created so telemetry setup issues
-// can be surfaced early.
+// It initializes observable gauges for point-in-time readings that can rise and
+// fall (children, stash size, last received duration, uptime) and observable
+// counters for cumulative totals (deadletters, restarts, processed, failures,
+// reinstatements). Returns an error if any instrument fails to be created so
+// telemetry setup issues can be surfaced early.
 func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 	var instruments ActorMetric
 	var err error
 
-	if instruments.childrenCount, err = meter.Int64ObservableCounter(
+	if instruments.childrenCount, err = meter.Int64ObservableGauge(
 		"actor.children.count",
-		metric.WithDescription("Total number of child actors"),
+		metric.WithDescription("Current number of child actors"),
 	); err != nil {
 		return nil, fmt.Errorf("failed to create childrenCount instrument, %v", err)
 	}
 
 	// set the stashed messages count instrument
-	if instruments.stashSize, err = meter.Int64ObservableCounter(
+	if instruments.stashSize, err = meter.Int64ObservableGauge(
 		"actor.stash.size",
-		metric.WithDescription("Total number of messages stashed"),
+		metric.WithDescription("Current number of messages stashed"),
 	); err != nil {
 		return nil, fmt.Errorf("failed to create stashSize instrument, %v", err)
 	}
@@ -94,7 +100,7 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 	}
 
 	// set the last received duration instrument
-	if instruments.lastReceivedDuration, err = meter.Int64ObservableCounter(
+	if instruments.lastReceivedDuration, err = meter.Int64ObservableGauge(
 		"actor.last.received.duration",
 		metric.WithDescription("Duration since last message received in milliseconds"),
 		metric.WithUnit("ms"),
@@ -111,7 +117,7 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 	}
 
 	// set the uptime instrument
-	if instruments.uptime, err = meter.Int64ObservableCounter(
+	if instruments.uptime, err = meter.Int64ObservableGauge(
 		"actor.uptime",
 		metric.WithDescription("Uptime of the PID in seconds"),
 		metric.WithUnit("s"),
@@ -138,15 +144,15 @@ func NewActorMetric(meter metric.Meter) (*ActorMetric, error) {
 	return &instruments, nil
 }
 
-// ChildrenCount returns an observable counter for the number of child actors
+// ChildrenCount returns an observable gauge for the number of child actors
 // owned by the PID. Observe this via Meter.RegisterCallback.
-func (x *ActorMetric) ChildrenCount() metric.Int64ObservableCounter {
+func (x *ActorMetric) ChildrenCount() metric.Int64ObservableGauge {
 	return x.childrenCount
 }
 
-// StashSize returns an observable counter for the number of messages currently
+// StashSize returns an observable gauge for the number of messages currently
 // stashed by the PID. Observe this via Meter.RegisterCallback.
-func (x *ActorMetric) StashSize() metric.Int64ObservableCounter {
+func (x *ActorMetric) StashSize() metric.Int64ObservableGauge {
 	return x.stashSize
 }
 
@@ -162,13 +168,10 @@ func (x *ActorMetric) RestartCount() metric.Int64ObservableCounter {
 	return x.restartCount
 }
 
-// LastReceivedDuration returns a histogram (unit: milliseconds) used to record
-// time since the PID last processed a message.
-//
-// Example:
-//
-//	inst.LastReceivedDuration().Record(ctx, float64(msSinceLast), metric.WithAttributes(...))
-func (x *ActorMetric) LastReceivedDuration() metric.Int64ObservableCounter {
+// LastReceivedDuration returns an observable gauge (unit: milliseconds) for the
+// time since the PID last processed a message. Observe this via
+// Meter.RegisterCallback.
+func (x *ActorMetric) LastReceivedDuration() metric.Int64ObservableGauge {
 	return x.lastReceivedDuration
 }
 
@@ -178,12 +181,9 @@ func (x *ActorMetric) ProcessedCount() metric.Int64ObservableCounter {
 	return x.processedCount
 }
 
-// Uptime returns a histogram (unit: seconds) used to record the PID’s uptime.
-//
-// Example:
-//
-//	inst.Uptime().Record(ctx, time.Since(start).Seconds(), metric.WithAttributes(...))
-func (x *ActorMetric) Uptime() metric.Int64ObservableCounter {
+// Uptime returns an observable gauge (unit: seconds) for the PID's uptime.
+// Observe this via Meter.RegisterCallback.
+func (x *ActorMetric) Uptime() metric.Int64ObservableGauge {
 	return x.uptime
 }
 

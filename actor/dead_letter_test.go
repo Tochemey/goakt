@@ -142,6 +142,40 @@ func TestDeadletter(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
+	t.Run("With DeadlettersSnapshot returns the per-address counts", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+
+		err := sys.Start(ctx)
+		assert.NoError(t, err)
+
+		pause.For(time.Second)
+
+		actor := &MockUnhandled{}
+		actorRef, err := sys.Spawn(ctx, "actorName", actor)
+		assert.NoError(t, err)
+		assert.NotNil(t, actorRef)
+
+		pause.For(time.Second)
+
+		// every message sent to the actor will result in a deadletter
+		for range 5 {
+			require.NoError(t, Tell(ctx, actorRef, new(testpb.TestSend)))
+		}
+
+		pause.For(time.Second)
+
+		reply, err := Ask(ctx, sys.getDeadletter(), &commands.DeadlettersSnapshotRequest{}, 500*time.Millisecond)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+		response, ok := reply.(*commands.DeadlettersSnapshotResponse)
+		require.True(t, ok)
+		require.EqualValues(t, 5, response.Counts[actorRef.address.String()])
+		require.Zero(t, response.Counts["unknown-address"])
+
+		err = sys.Stop(ctx)
+		assert.NoError(t, err)
+	})
 	t.Run("With GetDeadletters", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

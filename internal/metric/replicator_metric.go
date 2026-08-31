@@ -132,8 +132,8 @@ func NewReplicatorMetric(meter metric.Meter) (*ReplicatorMetric, error) {
 
 	if m.crossDCReplicationLag, err = meter.Int64ObservableGauge(
 		"crdt.replicator.crossdc.replication.lag",
-		metric.WithDescription("Replication lag in nanoseconds from the last received cross-DC batch"),
-		metric.WithUnit("ns"),
+		metric.WithDescription("Replication lag in milliseconds from the last received cross-DC batch"),
+		metric.WithUnit("ms"),
 	); err != nil {
 		return nil, err
 	}

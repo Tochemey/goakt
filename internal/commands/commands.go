@@ -71,6 +71,18 @@ type DeadlettersCountResponse struct {
 	TotalCount int64
 }
 
+// DeadlettersSnapshotRequest requests a snapshot of the per-address deadletter
+// counts. It carries no payload.
+type DeadlettersSnapshotRequest struct{}
+
+// DeadlettersSnapshotResponse returns the per-address deadletter counts as of
+// the moment the deadletter actor handled the request.
+type DeadlettersSnapshotResponse struct {
+	// Counts maps each recorded actor address to the number of deadletters
+	// recorded for it.
+	Counts map[string]int64
+}
+
 // HealthCheckRequest is sent internally to an actor (or actor system component) to verify that:
 //  1. The mailbox is responsive.
 //  2. The actor has completed its initialization.

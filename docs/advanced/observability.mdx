@@ -117,12 +117,12 @@ not exported.
 
 ### System-level instruments
 
-| Instrument                      | Type                       | Description                     |
-| ------------------------------- | -------------------------- | ------------------------------- |
-| `actorsystem.deadletters.count` | Int64ObservableCounter     | Total dead letters on this node |
-| `actorsystem.actors.count`      | Int64ObservableCounter     | Total live actors on this node  |
-| `actorsystem.uptime`            | Int64ObservableCounter (s) | Actor system uptime in seconds  |
-| `actorsystem.peers.count`       | Int64ObservableCounter     | Connected peers (cluster mode)  |
+| Instrument                      | Type                     | Description                     |
+| ------------------------------- | ------------------------ | ------------------------------- |
+| `actorsystem.deadletters.count` | Int64ObservableCounter   | Total dead letters on this node |
+| `actorsystem.actors.count`      | Int64ObservableGauge     | Live actors on this node        |
+| `actorsystem.uptime`            | Int64ObservableGauge (s) | Actor system uptime in seconds  |
+| `actorsystem.peers.count`       | Int64ObservableGauge     | Connected peers (cluster mode)  |
 
 ### Per-actor instruments
 
@@ -132,17 +132,17 @@ Per-actor metrics are collected by a single callback that walks the actor tree o
 registrations stays constant regardless of the actor population. An actor appears in scrapes once it is running and has
 processed its `PostStart` message; suspended, stopping, and passivating actors are omitted until they are running again.
 
-| Instrument                     | Type                        | Description                         |
-| ------------------------------ | --------------------------- | ----------------------------------- |
-| `actor.children.count`         | Int64ObservableCounter      | Total child actors                  |
-| `actor.stash.size`             | Int64ObservableCounter      | Messages stashed                    |
-| `actor.deadletters.count`      | Int64ObservableCounter      | Dead letters sent by this actor     |
-| `actor.restart.count`          | Int64ObservableCounter      | Restarts                            |
-| `actor.last.received.duration` | Int64ObservableCounter (ms) | Duration of last message processing |
-| `actor.processed.count`        | Int64ObservableCounter      | Messages processed                  |
-| `actor.uptime`                 | Int64ObservableCounter (s)  | Actor uptime in seconds             |
-| `actor.failure.count`          | Int64ObservableCounter      | Failures                            |
-| `actor.reinstate.count`        | Int64ObservableCounter      | Reinstatements                      |
+| Instrument                     | Type                      | Description                         |
+| ------------------------------ | ------------------------- | ----------------------------------- |
+| `actor.children.count`         | Int64ObservableGauge      | Current child actors                |
+| `actor.stash.size`             | Int64ObservableGauge      | Messages stashed                    |
+| `actor.deadletters.count`      | Int64ObservableCounter    | Dead letters sent by this actor     |
+| `actor.restart.count`          | Int64ObservableCounter    | Restarts                            |
+| `actor.last.received.duration` | Int64ObservableGauge (ms) | Duration of last message processing |
+| `actor.processed.count`        | Int64ObservableCounter    | Messages processed                  |
+| `actor.uptime`                 | Int64ObservableGauge (s)  | Actor uptime in seconds             |
+| `actor.failure.count`          | Int64ObservableCounter    | Failures                            |
+| `actor.reinstate.count`        | Int64ObservableCounter    | Reinstatements                      |
 
 ### Example
 

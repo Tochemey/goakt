@@ -145,7 +145,10 @@ type replicatorActor struct {
 	crossDCSendCount      atomic.Uint64
 	crossDCReceiveCount   atomic.Uint64
 	crossDCStaleSkipCount atomic.Uint64
-	lastReplicationLag    atomic.Int64
+	// lastReplicationLag holds the delay of the last received cross-DC batch in
+	// nanoseconds. It is stored at nanosecond resolution and converted to
+	// milliseconds when observed by the replication lag gauge.
+	lastReplicationLag atomic.Int64
 }
 
 // enforce compilation error
@@ -1187,7 +1190,7 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 		observer.ObserveInt64(metrics.TombstoneCount(), replActor.tombstoneSize.Load(), observeOptions...)
 		observer.ObserveInt64(metrics.CrossDCSendCount(), int64(replActor.crossDCSendCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.CrossDCReceiveCount(), int64(replActor.crossDCReceiveCount.Load()), observeOptions...)
-		observer.ObserveInt64(metrics.CrossDCReplicationLag(), replActor.lastReplicationLag.Load(), observeOptions...)
+		observer.ObserveInt64(metrics.CrossDCReplicationLag(), replActor.lastReplicationLag.Load()/int64(time.Millisecond), observeOptions...)
 		observer.ObserveInt64(metrics.CrossDCStaleSkipCount(), int64(replActor.crossDCStaleSkipCount.Load()), observeOptions...)
 		return nil
 	},

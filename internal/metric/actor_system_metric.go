@@ -27,23 +27,28 @@ import "go.opentelemetry.io/otel/metric"
 // ActorSystemMetric groups OpenTelemetry instruments that describe
 // actor‑system health and capacity at a coarse (system) level.
 //
+// The live actor count, connected peer count, and uptime are point-in-time
+// readings that can rise and fall, so they are observable gauges. The
+// deadletter total only grows, so it stays an observable counter.
+//
 // Instruments:
 //   - actorsystem.deadletters.count  (Int64ObservableCounter)
-//   - actorsystem.pids.count         (Int64ObservableCounter)
-//   - actorsystem.peers.count        (Int64ObservableCounter) — optional; see PeersCount
-//   - actorsystem.uptime             (Int64ObservableCounter, unit: seconds)
+//   - actorsystem.actors.count       (Int64ObservableGauge)
+//   - actorsystem.peers.count        (Int64ObservableGauge) — optional; see PeersCount
+//   - actorsystem.uptime             (Int64ObservableGauge, unit: seconds)
 type ActorSystemMetric struct {
 	deadlettersCount metric.Int64ObservableCounter
-	pidsCount        metric.Int64ObservableCounter
-	peersCount       metric.Int64ObservableCounter
-	uptime           metric.Int64ObservableCounter
+	pidsCount        metric.Int64ObservableGauge
+	peersCount       metric.Int64ObservableGauge
+	uptime           metric.Int64ObservableGauge
 }
 
 // NewActorSystemMetric creates the system‑level instruments using the provided
 // Meter. It initializes:
 //   - actorsystem.deadletters.count (Int64ObservableCounter)
-//   - actorsystem.pids.count        (Int64ObservableCounter)
-//   - actorsystem.uptime            (Float64Histogram, unit "s")
+//   - actorsystem.actors.count      (Int64ObservableGauge)
+//   - actorsystem.uptime            (Int64ObservableGauge, unit "s")
+//   - actorsystem.peers.count       (Int64ObservableGauge)
 //
 // It returns an error if any instrument cannot be created so telemetry
 // initialization failures are surfaced early.
@@ -58,14 +63,14 @@ func NewActorSystemMetric(meter metric.Meter) (*ActorSystemMetric, error) {
 		return nil, err
 	}
 
-	if instruments.pidsCount, err = meter.Int64ObservableCounter(
+	if instruments.pidsCount, err = meter.Int64ObservableGauge(
 		"actorsystem.actors.count",
-		metric.WithDescription("Total number of PIDs in the actor system"),
+		metric.WithDescription("Current number of live PIDs in the actor system"),
 	); err != nil {
 		return nil, err
 	}
 
-	if instruments.uptime, err = meter.Int64ObservableCounter(
+	if instruments.uptime, err = meter.Int64ObservableGauge(
 		"actorsystem.uptime",
 		metric.WithDescription("Uptime of the actor system in seconds"),
 		metric.WithUnit("s"),
@@ -73,9 +78,9 @@ func NewActorSystemMetric(meter metric.Meter) (*ActorSystemMetric, error) {
 		return nil, err
 	}
 
-	if instruments.peersCount, err = meter.Int64ObservableCounter(
+	if instruments.peersCount, err = meter.Int64ObservableGauge(
 		"actorsystem.peers.count",
-		metric.WithDescription("Total number of connected peers in the actor system"),
+		metric.WithDescription("Current number of connected peers in the actor system"),
 	); err != nil {
 		return nil, err
 	}
@@ -91,22 +96,22 @@ func (x *ActorSystemMetric) DeadlettersCount() metric.Int64ObservableCounter {
 	return x.deadlettersCount
 }
 
-// PIDsCount returns the observable counter that reports the total number of
-// live PIDs (actors) currently active in the actor system.
+// PIDsCount returns the observable gauge that reports the number of live PIDs
+// (actors) currently active in the actor system.
 //
 // Use with Meter.RegisterCallback to observe the current value periodically.
-func (x *ActorSystemMetric) PIDsCount() metric.Int64ObservableCounter {
+func (x *ActorSystemMetric) PIDsCount() metric.Int64ObservableGauge {
 	return x.pidsCount
 }
 
-// Uptime returns the histogram used to record the actor system uptime in
-// seconds. Record deltas or absolute uptime as appropriate for your setup.
-func (x *ActorSystemMetric) Uptime() metric.Int64ObservableCounter {
+// Uptime returns the observable gauge for the actor system uptime in seconds.
+// Use with Meter.RegisterCallback to observe the current value periodically.
+func (x *ActorSystemMetric) Uptime() metric.Int64ObservableGauge {
 	return x.uptime
 }
 
-// PeersCount returns the observable counter for the number of connected peers
+// PeersCount returns the observable gauge for the number of connected peers
 // (e.g., cluster members) in the actor system.
-func (x *ActorSystemMetric) PeersCount() metric.Int64ObservableCounter {
+func (x *ActorSystemMetric) PeersCount() metric.Int64ObservableGauge {
 	return x.peersCount
 }
