@@ -8141,6 +8141,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 		"actor.failure.count",
 		"actor.reinstate.count",
 		"actor.unhandled.count",
+		"actor.mailbox.size",
 	}
 
 	for _, name := range []string{"parent", "child"} {
@@ -8219,14 +8220,16 @@ func TestActorMetricsAggregation(t *testing.T) {
 	childNode.pid.Store(stored)
 
 	// an actor that is not running (suspended, stopping, or passivating) is
-	// skipped until it is running again
+	// skipped until it is running again, except for actor.mailbox.size, which is
+	// reported outside the live-only gate so a backlog growing behind an actor
+	// that stopped consuming stays visible.
 	child.setState(suspendedState, true)
 
 	observer = &attrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
-	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+	require.Equal(t, map[string]int64{"actor.mailbox.size": 0}, groupRecordsByActor(observer.records)["child"])
 
 	child.setState(suspendedState, false)
 
@@ -8237,7 +8240,9 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.Contains(t, actorNamesFromRecords(observer.records), "child")
 
 	// an actor whose PostStart has not been processed yet (a mid-restart
-	// scrape window) is skipped so processed.count never observes -1
+	// scrape window) is skipped so processed.count never observes -1. Here too
+	// actor.mailbox.size is the one instrument that still reports, so a restart
+	// loop does not hide the backlog that is piling up meanwhile.
 	storedProcessed := child.processedCount.Load()
 	child.processedCount.Store(0)
 
@@ -8245,7 +8250,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
-	require.NotContains(t, actorNamesFromRecords(observer.records), "child")
+	require.Equal(t, map[string]int64{"actor.mailbox.size": 0}, groupRecordsByActor(observer.records)["child"])
 
 	child.processedCount.Store(storedProcessed)
 

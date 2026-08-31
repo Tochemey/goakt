@@ -197,8 +197,21 @@ type PID struct {
 	// set the metrics settings
 	restartCount   atomic.Int64
 	processedCount atomic.Int64
-	failureCount   atomic.Int64
-	reinstateCount atomic.Int64
+	// mailboxDequeued counts the user messages the processing turn has taken out
+	// of the mailbox. It is the consumer half of actor.mailbox.size, which is
+	// reported as mailboxEnqueued minus mailboxDequeued rather than as a single
+	// counter both sides write: one shared counter makes every message bounce a
+	// cache line between the producer and the consumer.
+	//
+	// Its position is deliberate. It sits immediately next to processedCount,
+	// which the turn already writes for every message it processes, so the
+	// increment lands on a line the consumer effectively owns and adds no
+	// coherence traffic of its own. Keep the two adjacent.
+	//
+	// It is maintained only when metricsEnabled is set, and zeroed by reset().
+	mailboxDequeued atomic.Int64
+	failureCount    atomic.Int64
+	reinstateCount  atomic.Int64
 	// unhandledCount counts the messages the actor explicitly rejected through
 	// ReceiveContext.Unhandled. It accumulates for the lifetime of one actor
 	// incarnation and is zeroed by reset(), exactly like processedCount.
@@ -239,6 +252,23 @@ type PID struct {
 
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
+
+	// mailboxEnqueued counts the user messages producers have put into the
+	// mailbox. It is the producer half of actor.mailbox.size, the counterpart of
+	// mailboxDequeued.
+	//
+	// Its position is deliberate, and it is the reason the pair exists. It is
+	// parked here among the cold configuration fields, away from every field the
+	// processing turn touches per message (processedCount, mailboxDequeued,
+	// latestReceiveTimeNano, schedState, metricsEnabled, and the mailbox and
+	// dispatcher pointers), so at runtime its cache line is written by producers
+	// only and the consumer never has to reload it. Moving it next to the other
+	// counters would put it back on the line holding schedState, which both
+	// sides write for every message, and hand back the per-message cache line
+	// bounce the split removes. Keep it away from the hot fields.
+	//
+	// It is maintained only when metricsEnabled is set, and zeroed by reset().
+	mailboxEnqueued atomic.Int64
 
 	// reliableDelivery contains the endpoint's reliable-delivery settings.
 	reliableDelivery *reliableDeliveryConfig
@@ -281,6 +311,11 @@ type PID struct {
 	// construction when metrics are enabled, in both metric modes; empty
 	// otherwise.
 	metricKind string
+	// metricsEnabled records whether a metric provider is wired to this actor.
+	// It is written once in newPID and only read afterwards, which is what lets
+	// the message path gate the mailbox counters on a plain field read instead
+	// of on a provider lookup.
+	metricsEnabled bool
 }
 
 var (
@@ -318,11 +353,17 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
 	pid.unhandledCount.Store(0)
+	pid.mailboxEnqueued.Store(0)
+	pid.mailboxDequeued.Store(0)
 	pid.setState(relocationState, true)
 
 	for _, opt := range opts {
 		opt(pid)
 	}
+
+	// resolved once, right after the options wired the provider, so the message
+	// path never inspects the provider itself.
+	pid.metricsEnabled = pid.metricProvider != nil && pid.metricProvider.Meter() != nil
 
 	if pid.logger == nil {
 		pid.logger = defaultLogger
@@ -909,6 +950,20 @@ func (pid *PID) ProcessedCount() int {
 
 	count := pid.processedCount.Load()
 	return int(count)
+}
+
+// observedMailboxSize returns the number of user messages currently waiting in
+// this actor's mailbox, the value reported as actor.mailbox.size.
+//
+// The queue depth is the difference between the two counters the producers and
+// the processing turn keep on their own cache lines. Neither is read on the
+// message path, so the subtraction happens here, once per scrape. The counts are
+// maintained only when metrics are enabled, so the difference reads zero
+// otherwise. The two loads are not atomic with respect to each other and the
+// consumer can advance between them, so the result is clamped at zero rather
+// than surfacing a transient negative value.
+func (pid *PID) observedMailboxSize() int64 {
+	return max(pid.mailboxEnqueued.Load()-pid.mailboxDequeued.Load(), 0)
 }
 
 // LatestProcessedDuration returns the elapsed time since the most recent message was processed.
@@ -1979,13 +2034,21 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 
 	if isControlMessage(msg) {
 		_ = pid.systemMailbox.Enqueue(receiveCtx)
-	} else if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
-		pid.logger.Warn(err)
-		pid.handleReceivedError(receiveCtx, err)
-		// The refused context never enters the mailbox, so no dequeue or
-		// recycle will ever release its remote credit share.
-		receiveCtx.releaseRemoteHold()
-		return
+	} else {
+		if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
+			pid.logger.Warn(err)
+			pid.handleReceivedError(receiveCtx, err)
+			// The refused context never enters the mailbox, so no dequeue or
+			// recycle will ever release its remote credit share.
+			receiveCtx.releaseRemoteHold()
+			return
+		}
+
+		if pid.metricsEnabled {
+			// the message is queued and waiting: count it for actor.mailbox.size.
+			// The system mailbox is deliberately outside the reported size.
+			pid.mailboxEnqueued.Add(1)
+		}
 	}
 
 	if pid.schedState.TrySchedule() {
@@ -2020,6 +2083,13 @@ func (pid *PID) runTurn(w *worker) {
 			}
 			continue
 		}
+
+		// the message has left the queue: it no longer counts towards
+		// actor.mailbox.size, which excludes the in-flight message.
+		if pid.metricsEnabled {
+			pid.mailboxDequeued.Add(1)
+		}
+
 		pid.dispatchOne(received, now)
 	}
 	pid.schedState.YieldToScheduled()
@@ -2508,6 +2578,11 @@ func (pid *PID) reset() {
 	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
 	pid.unhandledCount.Store(0)
+	// the teardown embedded in a restart abandons whatever the mailbox still
+	// held, so both counts restart from zero instead of carrying a phantom
+	// backlog into the new incarnation.
+	pid.mailboxEnqueued.Store(0)
+	pid.mailboxDequeued.Store(0)
 	pid.restartCount.Store(0)
 	pid.startedAt.Store(0)
 	pid.setState(runningState, false)

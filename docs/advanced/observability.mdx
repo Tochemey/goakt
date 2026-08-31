@@ -167,6 +167,7 @@ processed its `PostStart` message; suspended, stopping, and passivating actors a
 | `actor.failure.count`          | Int64ObservableCounter    | Failures                            |
 | `actor.reinstate.count`        | Int64ObservableCounter    | Reinstatements                      |
 | `actor.unhandled.count`        | Int64ObservableCounter    | Messages rejected with `Unhandled`  |
+| `actor.mailbox.size`           | Int64ObservableGauge      | Messages waiting in the mailbox     |
 
 `actor.deadletters.count` carries one extra attribute, `message.type`, naming the type of the dropped message, and is
 reported once per message type the actor dropped. An actor that has dropped nothing reports a single zero without the
@@ -175,6 +176,25 @@ attribute. To get an actor's total across all types, sum the series:
 ```promql
 sum by (actor_name) (actor_deadletters_count)
 ```
+
+<Note>
+  `actor.mailbox.size` is the one instrument reported outside the gate described above. A suspended or restarting actor
+  still emits it, and only it, because a backlog piling up behind an actor that has stopped consuming is exactly the
+  condition the metric exists to expose. It counts user messages that are enqueued and not yet dispatched, so it excludes
+  the message being processed, the stashed messages reported by `actor.stash.size`, and the internal control-plane queue.
+</Note>
+
+#### Average time a message waits in the mailbox
+
+GoAkt records no mailbox wait histogram: measuring one would mean timestamping every message on the message path. The
+average wait follows from Little's law instead, dividing the queue length by the rate at which the actor drains it:
+
+```promql
+actor_mailbox_size / rate(actor_processed_count[5m])
+```
+
+The result is in seconds. A value that climbs while the processed rate stays flat means work is arriving faster than the
+actor can handle it.
 
 ### Reporting one series per actor kind
 
@@ -212,6 +232,7 @@ Each instrument is reduced across the live actors of the kind:
 | `actor.deadletters.count`      | sum per kind and message type | Drops by the kind, still broken down by type      |
 | `actor.uptime`                 | max                           | Age of the oldest live actor of the kind          |
 | `actor.last.received.duration` | min                           | Time since the kind last processed a message      |
+| `actor.mailbox.size`           | sum                           | Messages waiting across the kind                  |
 
 <Note>
   The two time gauges cannot be summed. The maximum uptime answers how long the kind has been running, and the minimum
@@ -219,8 +240,11 @@ Each instrument is reduced across the live actors of the kind:
 </Note>
 
 The gate is unchanged: only running actors that have processed their `PostStart` contribute, so a kind whose actors are
-all suspended drops out of the series until one resumes. A kind that has dropped nothing reports a single zero for
-`actor.deadletters.count` without the `message.type` attribute, exactly as an actor does in the default mode.
+all suspended drops out of the series until one resumes. `actor.mailbox.size` is the exception it is in the default
+mode too: every actor of the kind adds its backlog to the sum whatever its lifecycle state, so a kind whose actors are
+all suspended keeps reporting that one instrument while the others go quiet. A kind that has dropped nothing reports a
+single zero for `actor.deadletters.count` without the `message.type` attribute, exactly as an actor does in the default
+mode.
 
 The system-level instruments and the actor lifecycle instruments already report one series per system and per kind, so
 they are identical in both modes.

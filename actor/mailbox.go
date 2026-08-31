@@ -32,7 +32,13 @@ type Mailbox interface {
 	Dequeue() (msg *ReceiveContext)
 	// IsEmpty returns true when the mailbox is empty
 	IsEmpty() bool
-	// Len returns the size of the mailbox
+	// Len returns the size of the mailbox.
+	//
+	// The cost and the accuracy of Len are implementation defined. On the
+	// default UnboundedMailbox it is an approximation walked in O(n) off the
+	// consumer goroutine, and the walk is longest exactly when the mailbox is
+	// saturated, so it must never be polled. The metrics collector does not call
+	// it: actor.mailbox.size is maintained by the actor itself.
 	Len() int64
 	// Dispose will dispose of this queue and free any blocked threads
 	// in the Enqueue and/or Dequeue methods.

@@ -345,6 +345,187 @@ func TestRegisterMetricsAggregatesPerActorKind(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 }
 
+// TestRegisterMetricsObservesMailboxSize drives one full collection over a
+// metrics-enabled system and asserts what actor.mailbox.size reports in the
+// default per-actor mode: the backlog of a running actor next to every other
+// per-actor instrument, the backlog of a suspended actor, which the live-only
+// gate hides from all of them, and nothing at all for the runtime's own system
+// actors.
+func TestRegisterMetricsObservesMailboxSize(t *testing.T) {
+	ctx := context.Background()
+
+	previous := otel.GetMeterProvider()
+	meterProvider := newRecordingMeterProvider()
+	otel.SetMeterProvider(meterProvider)
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	// both actors park their turn on their first message, so everything sent
+	// after it stays queued and the scrape reads a backlog at rest.
+	backlogged := newMailboxBlockingActor()
+	backloggedPID, err := sys.Spawn(ctx, "backlogged", backlogged, WithLongLived())
+	require.NoError(t, err)
+
+	halted := newMailboxBlockingActor()
+	haltedPID, err := sys.Spawn(ctx, "halted", halted, WithLongLived())
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, backloggedPID, new(testpb.TestSend)))
+	<-backlogged.entered
+
+	require.NoError(t, Tell(ctx, haltedPID, new(testpb.TestSend)))
+	<-halted.entered
+
+	const backlog = 4
+	for range backlog {
+		require.NoError(t, Tell(ctx, backloggedPID, new(testpb.TestSend)))
+	}
+
+	haltedPID.suspend("mailbox size scrape test")
+	require.True(t, haltedPID.IsSuspended())
+
+	// Tell refuses a suspended target, so its backlog is handed to the delivery
+	// entry point every sender funnels into.
+	const haltedBacklog = 2
+	for range haltedBacklog {
+		haltedPID.doReceive(toReceiveContext(ctx, sys.NoSender(), haltedPID, new(testpb.TestSend), true))
+	}
+
+	require.Eventually(t, func() bool {
+		return backloggedPID.observedMailboxSize() == backlog &&
+			haltedPID.observedMailboxSize() == haltedBacklog
+	}, 3*time.Second, 20*time.Millisecond)
+
+	observer := scrapeOnce(t, ctx, meterProvider)
+
+	// only the two user actors report a mailbox: the runtime's system actors are
+	// left out, exactly as they are in the per-kind mode.
+	require.Equal(t, map[string]int64{
+		"backlogged": backlog,
+		"halted":     haltedBacklog,
+	}, mailboxSizesByActor(observer.records))
+
+	records := groupRecordsByActor(observer.records)
+
+	// the running actor reports its backlog alongside every other instrument
+	require.EqualValues(t, backlog, records["backlogged"]["actor.mailbox.size"])
+	require.Contains(t, records["backlogged"], "actor.processed.count")
+
+	// the suspended one reports its backlog and nothing else: the live-only gate
+	// still holds for every other instrument.
+	require.Equal(t, map[string]int64{"actor.mailbox.size": haltedBacklog}, records["halted"])
+
+	close(backlogged.release)
+	close(halted.release)
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
+// TestRegisterMetricsAggregatesMailboxSizePerKind asserts the per-kind reduction
+// of actor.mailbox.size in the low cardinality mode: the backlogs of every actor
+// of a kind are summed, including those of the members the live-only gate hides
+// from the other instruments, and a kind with no live actor left reports its
+// backlog alone.
+func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
+	ctx := context.Background()
+
+	previous := otel.GetMeterProvider()
+	meterProvider := newRecordingMeterProvider()
+	otel.SetMeterProvider(meterProvider)
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
+
+	sys, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithMetrics(WithLowCardinalityMetrics()))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	running := newMailboxBlockingActor()
+	runningPID, err := sys.Spawn(ctx, "worker-0", running, WithLongLived())
+	require.NoError(t, err)
+
+	halted := newMailboxBlockingActor()
+	haltedPID, err := sys.Spawn(ctx, "worker-1", halted, WithLongLived())
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, runningPID, new(testpb.TestSend)))
+	<-running.entered
+
+	require.NoError(t, Tell(ctx, haltedPID, new(testpb.TestSend)))
+	<-halted.entered
+
+	const runningBacklog = 3
+	for range runningBacklog {
+		require.NoError(t, Tell(ctx, runningPID, new(testpb.TestSend)))
+	}
+
+	haltedPID.suspend("mailbox size scrape test")
+
+	const haltedBacklog = 2
+	for range haltedBacklog {
+		haltedPID.doReceive(toReceiveContext(ctx, sys.NoSender(), haltedPID, new(testpb.TestSend), true))
+	}
+
+	// a second kind whose only actor ends up suspended, so no member of it
+	// passes the full gate
+	idlePID, err := sys.Spawn(ctx, "blackhole", &MockUnhandled{}, WithLongLived())
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return idlePID.ProcessedCount() >= 1
+	}, 3*time.Second, 20*time.Millisecond)
+
+	idlePID.suspend("mailbox size scrape test")
+
+	require.Eventually(t, func() bool {
+		return runningPID.observedMailboxSize() == runningBacklog &&
+			haltedPID.observedMailboxSize() == haltedBacklog
+	}, 3*time.Second, 20*time.Millisecond)
+
+	observer := scrapeOnce(t, ctx, meterProvider)
+
+	workerKind := types.Name(newMailboxBlockingActor())
+	workerCounts := aggregatedCountsByKind(observer.records, workerKind)
+
+	// the suspended member's backlog folds into the kind's total even though the
+	// live-only gate keeps it out of every other instrument, which the live
+	// member still reports.
+	require.EqualValues(t, runningBacklog+haltedBacklog, workerCounts["actor.mailbox.size"])
+	require.Contains(t, workerCounts, "actor.processed.count")
+
+	// the kind with no live actor left reports its mailbox and nothing else
+	idleCounts := aggregatedCountsByKind(observer.records, types.Name(&MockUnhandled{}))
+	require.Contains(t, idleCounts, "actor.mailbox.size")
+	require.NotContains(t, idleCounts, "actor.processed.count")
+	require.NotContains(t, idleCounts, "actor.uptime")
+
+	close(running.release)
+	close(halted.release)
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
+// mailboxSizesByActor returns the actor.mailbox.size observations of a default
+// mode scrape, indexed by the actor they name.
+func mailboxSizesByActor(records []attrObserveRecord) map[string]int64 {
+	sizes := make(map[string]int64)
+
+	for _, record := range records {
+		if record.instrument != "actor.mailbox.size" {
+			continue
+		}
+
+		if name, ok := record.attrs.Value(attribute.Key("actor.name")); ok {
+			sizes[name.AsString()] = record.value
+		}
+	}
+
+	return sizes
+}
+
 // scrapeOnce invokes every registered metrics callback once and returns the
 // observer that captured the resulting observations.
 func scrapeOnce(t *testing.T, ctx context.Context, provider *recordingMeterProvider) *attrObserver {

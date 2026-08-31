@@ -4691,132 +4691,209 @@ func (x *actorSystem) getDispatcher() *dispatcher {
 // registerMetrics registers the OTel callbacks reporting system-level and
 // per-actor metrics. A single callback observes every actor in the tree, so
 // registrations stay constant regardless of the actor population.
+//
+// The instruments are created here, in the order their callbacks are
+// registered, so a meter that refuses an instrument fails the start with the
+// first refusal rather than partway through a registration.
 func (x *actorSystem) registerMetrics() error {
-	if x.metricProvider != nil && x.metricProvider.Meter() != nil {
-		meter := x.metricProvider.Meter()
-		metrics, err := metric.NewActorSystemMetric(meter)
-		if err != nil {
-			return err
-		}
+	if x.metricProvider == nil || x.metricProvider.Meter() == nil {
+		return nil
+	}
 
-		if x.relocationMetric, err = metric.NewRelocationMetric(meter); err != nil {
-			return err
-		}
+	meter := x.metricProvider.Meter()
 
-		observeOptions := []otelmetric.ObserveOption{
-			otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
-		}
-
-		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
-			var peersCount int64
-			if x.clusterEnabled.Load() && x.cluster != nil {
-				peers, err := x.cluster.Members(ctx)
-				if err != nil {
-					return err
-				}
-				peersCount = int64(len(peers))
-			}
-
-			observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), observeOptions...)
-			observer.ObserveInt64(metrics.Uptime(), x.Uptime(), observeOptions...)
-			observer.ObserveInt64(metrics.PeersCount(), peersCount, observeOptions...)
-			observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), observeOptions...)
-
-			// the lifecycle totals are reported once per actor kind, using the
-			// attribute set cached with the kind's counters.
-			x.actorKinds.Range(func(_ string, counters *actorKindMetrics) {
-				observer.ObserveInt64(metrics.SpawnedCount(), counters.spawned.Load(), counters.observeOptions...)
-				observer.ObserveInt64(metrics.StoppedCount(), counters.stopped.Load(), counters.observeOptions...)
-				observer.ObserveInt64(metrics.PassivatedCount(), counters.passivated.Load(), counters.observeOptions...)
-			})
-
-			return nil
-		}, metrics.PIDsCount(),
-			metrics.Uptime(),
-			metrics.PeersCount(),
-			metrics.DeadlettersCount(),
-			metrics.SpawnedCount(),
-			metrics.StoppedCount(),
-			metrics.PassivatedCount(),
-		)
-		if err != nil {
-			return err
-		}
-
-		actorMetrics, err := metric.NewActorMetric(meter)
-		if err != nil {
-			return err
-		}
-
-		_, err = meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
-			// Ask the deadletter actor once per scrape for a snapshot of the
-			// per-address, per-message-type counts. Asking it per running actor
-			// would flood a single mailbox with one request per actor per
-			// collection. A lookup on a nil map yields no entries, so a failed
-			// ask degrades to reporting zero deadletters for that scrape.
-			var deadletterCounts map[string][]commands.DeadletterCount
-			if deadletter := x.getDeadletter(); deadletter != nil && deadletter.IsRunning() {
-				if resp, askErr := x.getSystemGuardian().Ask(ctx, deadletter, &commands.DeadlettersSnapshotRequest{}, x.askTimeout); askErr == nil {
-					if snapshot, ok := resp.(*commands.DeadlettersSnapshotResponse); ok && snapshot != nil {
-						deadletterCounts = make(map[string][]commands.DeadletterCount, len(snapshot.Counts))
-
-						for _, entry := range snapshot.Counts {
-							deadletterCounts[entry.Address] = append(deadletterCounts[entry.Address], entry)
-						}
-					}
-				}
-			}
-
-			// the low cardinality mode collapses the live population into one
-			// observation per actor kind, so it takes over the per-actor pass
-			// entirely.
-			if x.metricLowCardinality {
-				x.observeActorKinds(observer, actorMetrics, deadletterCounts)
-				return nil
-			}
-
-			for _, node := range x.actors.nodes() {
-				pid := node.value()
-				if pid == nil || !pid.IsRunning() || pid.observeOptions == nil {
-					continue
-				}
-
-				// snapshot once: a restart's reset() can zero the count between
-				// reads. Skipping until PostStart is processed keeps a
-				// mid-restart scrape from reporting processed.count as -1
-				processed := int64(pid.ProcessedCount())
-				if processed < 1 {
-					continue
-				}
-
-				observer.ObserveInt64(actorMetrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.StashSize(), int64(pid.StashSize()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.ProcessedCount(), processed-1, pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.Uptime(), pid.Uptime(), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
-				observer.ObserveInt64(actorMetrics.UnhandledCount(), pid.unhandledCount.Load(), pid.observeOptions...)
-				observeDeadletters(observer, actorMetrics.DeadlettersCount(), pid, deadletterCounts[pid.address.String()])
-			}
-
-			return nil
-		}, actorMetrics.ChildrenCount(),
-			actorMetrics.StashSize(),
-			actorMetrics.RestartCount(),
-			actorMetrics.ProcessedCount(),
-			actorMetrics.LastReceivedDuration(),
-			actorMetrics.Uptime(),
-			actorMetrics.DeadlettersCount(),
-			actorMetrics.FailureCount(),
-			actorMetrics.ReinstateCount(),
-			actorMetrics.UnhandledCount(),
-		)
-
+	systemMetrics, err := metric.NewActorSystemMetric(meter)
+	if err != nil {
 		return err
 	}
+
+	if x.relocationMetric, err = metric.NewRelocationMetric(meter); err != nil {
+		return err
+	}
+
+	if err := x.registerSystemMetricsCallback(meter, systemMetrics); err != nil {
+		return err
+	}
+
+	actorMetrics, err := metric.NewActorMetric(meter)
+	if err != nil {
+		return err
+	}
+
+	return x.registerActorMetricsCallback(meter, actorMetrics)
+}
+
+// registerSystemMetricsCallback registers the callback reporting the
+// system-level instruments. Their attribute set names the actor system and
+// nothing else, so it is built once here rather than per scrape.
+func (x *actorSystem) registerSystemMetricsCallback(meter otelmetric.Meter, metrics *metric.ActorSystemMetric) error {
+	observeOptions := []otelmetric.ObserveOption{
+		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
+	}
+
+	_, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+		return x.observeSystemMetrics(ctx, observer, metrics, observeOptions)
+	}, metrics.PIDsCount(),
+		metrics.Uptime(),
+		metrics.PeersCount(),
+		metrics.DeadlettersCount(),
+		metrics.SpawnedCount(),
+		metrics.StoppedCount(),
+		metrics.PassivatedCount(),
+	)
+
+	return err
+}
+
+// observeSystemMetrics reports the state of the actor system as a whole for one
+// scrape: its live actor count, its uptime, the size of its cluster, its
+// dead-letter total, and the lifecycle totals of every actor kind it has seen.
+func (x *actorSystem) observeSystemMetrics(ctx context.Context, observer otelmetric.Observer, metrics *metric.ActorSystemMetric, options []otelmetric.ObserveOption) error {
+	peersCount, err := x.observedPeersCount(ctx)
+	if err != nil {
+		return err
+	}
+
+	observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), options...)
+	observer.ObserveInt64(metrics.Uptime(), x.Uptime(), options...)
+	observer.ObserveInt64(metrics.PeersCount(), peersCount, options...)
+	observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), options...)
+
+	x.observeActorKindLifecycles(observer, metrics)
 	return nil
+}
+
+// observedPeersCount returns the number of cluster members for this scrape, or
+// zero for a system running outside a cluster. A membership lookup that fails
+// fails the whole scrape: reporting a fabricated zero would read as a cluster
+// that lost every peer.
+func (x *actorSystem) observedPeersCount(ctx context.Context) (int64, error) {
+	if !x.clusterEnabled.Load() || x.cluster == nil {
+		return 0, nil
+	}
+
+	peers, err := x.cluster.Members(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return int64(len(peers)), nil
+}
+
+// observeActorKindLifecycles reports the spawn, stop and passivation totals
+// once per actor kind, using the attribute set cached with the kind's counters.
+func (x *actorSystem) observeActorKindLifecycles(observer otelmetric.Observer, metrics *metric.ActorSystemMetric) {
+	x.actorKinds.Range(func(_ string, counters *actorKindMetrics) {
+		observer.ObserveInt64(metrics.SpawnedCount(), counters.spawned.Load(), counters.observeOptions...)
+		observer.ObserveInt64(metrics.StoppedCount(), counters.stopped.Load(), counters.observeOptions...)
+		observer.ObserveInt64(metrics.PassivatedCount(), counters.passivated.Load(), counters.observeOptions...)
+	})
+}
+
+// registerActorMetricsCallback registers the single callback that reports every
+// per-actor instrument, in whichever cardinality mode the system was built with.
+func (x *actorSystem) registerActorMetricsCallback(meter otelmetric.Meter, metrics *metric.ActorMetric) error {
+	_, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+		deadletterCounts := x.deadletterSnapshot(ctx)
+
+		// the low cardinality mode collapses the live population into one
+		// observation per actor kind, so it takes over the per-actor pass
+		// entirely.
+		if x.metricLowCardinality {
+			x.observeActorKinds(observer, metrics, deadletterCounts)
+			return nil
+		}
+
+		x.observeEachActor(observer, metrics, deadletterCounts)
+		return nil
+	}, metrics.ChildrenCount(),
+		metrics.StashSize(),
+		metrics.RestartCount(),
+		metrics.ProcessedCount(),
+		metrics.LastReceivedDuration(),
+		metrics.Uptime(),
+		metrics.DeadlettersCount(),
+		metrics.FailureCount(),
+		metrics.ReinstateCount(),
+		metrics.UnhandledCount(),
+		metrics.MailboxSize(),
+	)
+
+	return err
+}
+
+// deadletterSnapshot asks the deadletter actor once per scrape for a snapshot of
+// the per-address, per-message-type counts, indexed by receiver address.
+//
+// Asking it per running actor would flood a single mailbox with one request per
+// actor per collection. A lookup on a nil map yields no entries, so a failed ask
+// degrades to reporting zero deadletters for that scrape.
+func (x *actorSystem) deadletterSnapshot(ctx context.Context) map[string][]commands.DeadletterCount {
+	deadletter := x.getDeadletter()
+	if deadletter == nil || !deadletter.IsRunning() {
+		return nil
+	}
+
+	resp, err := x.getSystemGuardian().Ask(ctx, deadletter, &commands.DeadlettersSnapshotRequest{}, x.askTimeout)
+	if err != nil {
+		return nil
+	}
+
+	snapshot, ok := resp.(*commands.DeadlettersSnapshotResponse)
+	if !ok || snapshot == nil {
+		return nil
+	}
+
+	counts := make(map[string][]commands.DeadletterCount, len(snapshot.Counts))
+	for _, entry := range snapshot.Counts {
+		counts[entry.Address] = append(counts[entry.Address], entry)
+	}
+
+	return counts
+}
+
+// observeEachActor reports the per-actor instruments once per actor, which is
+// the default mode: one time series per live actor, identified by the attribute
+// set cached on the PID at spawn.
+func (x *actorSystem) observeEachActor(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
+	for _, node := range x.actors.nodes() {
+		pid := node.value()
+		if pid == nil || pid.observeOptions == nil {
+			continue
+		}
+
+		// actor.mailbox.size is reported before the live-only gate below: a
+		// suspended or mid-restart actor whose backlog keeps growing is exactly
+		// the saturation this metric exists to expose, and the gate would hide
+		// it. System actors stay out of it, mirroring their exclusion from the
+		// per-kind mode.
+		if !pid.isStateSet(systemState) {
+			observer.ObserveInt64(metrics.MailboxSize(), pid.observedMailboxSize(), pid.observeOptions...)
+		}
+
+		if !pid.IsRunning() {
+			continue
+		}
+
+		// snapshot once: a restart's reset() can zero the count between reads.
+		// Skipping until PostStart is processed keeps a mid-restart scrape from
+		// reporting processed.count as -1
+		processed := int64(pid.ProcessedCount())
+		if processed < 1 {
+			continue
+		}
+
+		observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions...)
+		observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), pid.observeOptions...)
+		observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions...)
+		observer.ObserveInt64(metrics.ProcessedCount(), processed-1, pid.observeOptions...)
+		observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
+		observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), pid.observeOptions...)
+		observer.ObserveInt64(metrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
+		observer.ObserveInt64(metrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
+		observer.ObserveInt64(metrics.UnhandledCount(), pid.unhandledCount.Load(), pid.observeOptions...)
+		observeDeadletters(observer, metrics.DeadlettersCount(), pid, deadletterCounts[pid.address.String()])
+	}
 }
 
 // actorKindAggregate accumulates the per-actor instrument values of a single
@@ -4844,16 +4921,16 @@ type actorKindAggregate struct {
 	// stays nil for a kind that dropped nothing, which is reported as a single
 	// zero without the message.type attribute.
 	deadletters map[string]int64
-}
-
-// newActorKindAggregate seeds a kind's aggregate from the first live actor
-// found for it, so the max and min reductions start from a real reading instead
-// of from zero, which no min could ever fall below.
-func newActorKindAggregate(pid *PID) *actorKindAggregate {
-	return &actorKindAggregate{
-		uptime:       pid.Uptime(),
-		lastReceived: pid.LatestProcessedDuration().Milliseconds(),
-	}
+	// mailboxSize sums the backlog of every actor of the kind, including the
+	// suspended and mid-restart ones the other instruments skip. A growing
+	// backlog behind a suspended actor is the saturation the metric exists to
+	// expose, so it is reported whatever the actor's lifecycle state.
+	mailboxSize int64
+	// live records whether any actor of the kind passed the full per-actor gate:
+	// running and past its PostStart. A kind whose actors are all suspended
+	// reports actor.mailbox.size alone, and the max and min reductions below
+	// stay unseeded until the first such actor arrives.
+	live bool
 }
 
 // accumulate folds one live actor into its kind's aggregate, applying the
@@ -4861,6 +4938,15 @@ func newActorKindAggregate(pid *PID) *actorKindAggregate {
 // than read again because the caller already snapshotted it to gate on it, and
 // a restart could zero it between two reads.
 func (a *actorKindAggregate) accumulate(pid *PID, processed int64, deadletters []commands.DeadletterCount) {
+	if !a.live {
+		// the max and min reductions are seeded from the first live actor of
+		// the kind, so they start from a real reading instead of from zero,
+		// which no min could ever fall below.
+		a.live = true
+		a.uptime = pid.Uptime()
+		a.lastReceived = pid.LatestProcessedDuration().Milliseconds()
+	}
+
 	a.children += int64(pid.ChildrenCount())
 	a.stashed += int64(pid.StashSize())
 	a.restarts += int64(pid.RestartCount())
@@ -4886,15 +4972,17 @@ func (a *actorKindAggregate) accumulate(pid *PID, processed int64, deadletters [
 //
 // The tree is walked once, folding every live actor into its kind's aggregate
 // under the same gate the per-actor mode applies: running, and past its
-// PostStart. Each kind is then observed with the attribute set already cached
-// alongside its lifecycle counters, so the scrape builds attributes for no kind
-// it has not already seen. The aggregates are scratch and live for one scrape.
+// PostStart. Only actor.mailbox.size relaxes that gate, so a kind whose actors
+// are all suspended still reports the backlog piling up behind them. Each kind
+// is then observed with the attribute set already cached alongside its lifecycle
+// counters, so the scrape builds attributes for no kind it has not already seen.
+// The aggregates are scratch and live for one scrape.
 func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
 	aggregates := make(map[string]*actorKindAggregate)
 
 	for _, node := range x.actors.nodes() {
 		pid := node.value()
-		if pid == nil || !pid.IsRunning() || pid.metricProvider == nil || pid.metricProvider.Meter() == nil {
+		if pid == nil || !pid.metricsEnabled {
 			continue
 		}
 
@@ -4907,6 +4995,20 @@ func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *m
 			continue
 		}
 
+		aggregate, ok := aggregates[pid.metricKind]
+		if !ok {
+			aggregate = &actorKindAggregate{}
+			aggregates[pid.metricKind] = aggregate
+		}
+
+		// the backlog counts whatever the actor's lifecycle state, which is what
+		// keeps a suspended actor's growing mailbox visible.
+		aggregate.mailboxSize += pid.observedMailboxSize()
+
+		if !pid.IsRunning() {
+			continue
+		}
+
 		// snapshot once: a restart's reset() can zero the count between
 		// reads. Skipping until PostStart is processed keeps a mid-restart
 		// scrape from reporting processed.count as -1
@@ -4915,17 +5017,19 @@ func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *m
 			continue
 		}
 
-		aggregate, ok := aggregates[pid.metricKind]
-		if !ok {
-			aggregate = newActorKindAggregate(pid)
-			aggregates[pid.metricKind] = aggregate
-		}
-
 		aggregate.accumulate(pid, processed, deadletterCounts[pid.address.String()])
 	}
 
 	for kind, aggregate := range aggregates {
 		options := x.actorKindMetricsOf(kind).observeOptions
+
+		observer.ObserveInt64(metrics.MailboxSize(), aggregate.mailboxSize, options...)
+
+		// a kind with no actor past the full gate reports its backlog and
+		// nothing else, exactly as a suspended actor does in the default mode.
+		if !aggregate.live {
+			continue
+		}
 
 		observer.ObserveInt64(metrics.ChildrenCount(), aggregate.children, options...)
 		observer.ObserveInt64(metrics.StashSize(), aggregate.stashed, options...)

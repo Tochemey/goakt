@@ -7837,3 +7837,237 @@ func TestUnhandledCount(t *testing.T) {
 
 	require.NoError(t, actorSystem.Stop(ctx))
 }
+
+// mailboxBlockingActor holds the processing turn hostage on the first user
+// message it receives, until the test releases it. Every message sent after that
+// one stays queued behind it, which is what lets a test read the mailbox size
+// counter at rest instead of racing the dispatcher for it.
+type mailboxBlockingActor struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+var _ Actor = (*mailboxBlockingActor)(nil)
+
+// newMailboxBlockingActor creates a blocking actor with both of its
+// synchronization channels ready.
+func newMailboxBlockingActor() *mailboxBlockingActor {
+	return &mailboxBlockingActor{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (a *mailboxBlockingActor) PreStart(*Context) error { return nil }
+
+// Receive parks the turn on the first user message and lets every later one
+// through untouched.
+func (a *mailboxBlockingActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
+		return
+	}
+
+	a.once.Do(func() {
+		close(a.entered)
+		<-a.release
+	})
+}
+
+// PostStop is a no-op: the actor owns no resource to release.
+func (a *mailboxBlockingActor) PostStop(*Context) error { return nil }
+
+// TestMailboxSize asserts the semantics of the per-PID mailbox counters that
+// back actor.mailbox.size: one enqueue counted per accepted user message, one
+// dequeue counted per message the turn takes out, nothing counted for a refused
+// enqueue, no dependence on the actor's lifecycle state, a fresh start after a
+// restart, and a reported size that never goes negative. The counters are
+// maintained only when metrics are enabled.
+func TestMailboxSize(t *testing.T) {
+	t.Run("With one enqueue and one dequeue counted per message", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		blocking := newMailboxBlockingActor()
+		pid, err := actorSystem.Spawn(ctx, "blocking", blocking, WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// PostStart travels through the user mailbox too, so its own increment and
+		// decrement must have settled before the size is read as zero.
+		require.Eventually(t, func() bool {
+			return pid.ProcessedCount() >= 1
+		}, time.Second, 10*time.Millisecond)
+		require.Zero(t, pid.observedMailboxSize())
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-blocking.entered
+
+		const backlog = 5
+		for range backlog {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
+
+		// the blocked message has already been dequeued, so only the backlog
+		// behind it counts.
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == backlog
+		}, time.Second, 10*time.Millisecond)
+
+		close(blocking.release)
+
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == 0
+		}, time.Second, 10*time.Millisecond)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With a suspended actor still counted", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		blocking := newMailboxBlockingActor()
+		pid, err := actorSystem.Spawn(ctx, "suspended", blocking, WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-blocking.entered
+
+		pid.suspend("mailbox size test")
+		require.True(t, pid.IsSuspended())
+
+		// Tell refuses a suspended target, so the backlog goes straight to the
+		// delivery entry point every sender funnels into. A suspended actor with a
+		// growing backlog is exactly the case actor.mailbox.size exists to expose.
+		const backlog = 3
+		for range backlog {
+			pid.doReceive(toReceiveContext(ctx, actorSystem.NoSender(), pid, new(testpb.TestSend), true))
+		}
+
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == backlog
+		}, time.Second, 10*time.Millisecond)
+
+		close(blocking.release)
+
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == 0
+		}, time.Second, 10*time.Millisecond)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With a refused enqueue not counted", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		// this mailbox accepts nothing, so every message is refused and turned
+		// into a deadletter instead of waiting in a queue.
+		pid, err := actorSystem.Spawn(ctx, "refusing", NewMockActor(), WithLongLived(), WithMailbox(NewMockErrorMailbox()))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		for range 3 {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
+
+		pause.For(500 * time.Millisecond)
+		require.Zero(t, pid.observedMailboxSize())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With the counters zeroed across a restart", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		pid, err := actorSystem.Spawn(ctx, "restarted", NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		// stand in for the backlog the teardown embedded in a restart abandons:
+		// reset() must clear both counters rather than carry a phantom count
+		// into the new incarnation. Both counters are cumulative, so the backlog
+		// is staged on top of the messages the actor has already drained.
+		pid.mailboxEnqueued.Store(pid.mailboxDequeued.Load() + 7)
+		require.EqualValues(t, 7, pid.observedMailboxSize())
+
+		require.NoError(t, pid.Restart(ctx))
+
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == 0
+		}, time.Second, 10*time.Millisecond)
+
+		// the phantom backlog is gone: both counters restarted from zero and
+		// carry only the PostStart of the new incarnation.
+		require.EqualValues(t, 1, pid.mailboxEnqueued.Load())
+		require.EqualValues(t, 1, pid.mailboxDequeued.Load())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With a negative difference clamped at zero", func(t *testing.T) {
+		// the two counters are read one after the other, so the consumer can
+		// advance between the loads and the difference dip below zero for an
+		// instant. The reported reading never does.
+		pid := new(PID)
+		pid.mailboxDequeued.Store(1)
+		require.Zero(t, pid.observedMailboxSize())
+	})
+
+	t.Run("With metrics disabled the counters stay untouched", func(t *testing.T) {
+		ctx := context.TODO()
+
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		blocking := newMailboxBlockingActor()
+		pid, err := actorSystem.Spawn(ctx, "unmetered", blocking, WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+
+		require.False(t, pid.metricsEnabled)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-blocking.entered
+
+		for range 5 {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
+
+		// the messages are queued, but nothing counts them without metrics.
+		pause.For(500 * time.Millisecond)
+		require.Zero(t, pid.mailboxEnqueued.Load())
+		require.Zero(t, pid.mailboxDequeued.Load())
+
+		close(blocking.release)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+}
