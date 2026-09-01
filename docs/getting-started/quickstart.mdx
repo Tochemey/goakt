@@ -1,0 +1,143 @@
+---
+title: Quickstart
+description: Build and run your first GoAkt actor in a few minutes.
+sidebarTitle: "Quickstart"
+---
+
+This guide creates an actor system, spawns an actor, and exchanges messages with it, all in one file. You need
+[GoAkt installed](/getting-started/installation) and nothing else; standalone mode has no external dependencies.
+
+## The complete program
+
+```go main.go
+package main
+
+import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	goakt "github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
+)
+
+// Greet asks the actor to greet someone; Greeting is its reply.
+type Greet struct{ Name string }
+
+type Greeting struct{ Message string }
+
+// Greeter is the actor. State lives in unexported fields; no locks are
+// needed because an actor processes one message at a time.
+type Greeter struct {
+	greeted int
+}
+
+var _ goakt.Actor = (*Greeter)(nil)
+
+func (x *Greeter) PreStart(*goakt.Context) error { return nil }
+
+func (x *Greeter) Receive(ctx *goakt.ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *Greet:
+		x.greeted++
+		ctx.Response(&Greeting{Message: "Hello, " + msg.Name + "!"})
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *Greeter) PostStop(*goakt.Context) error { return nil }
+
+func main() {
+	ctx := context.Background()
+	logger := log.DefaultLogger
+
+	system, err := goakt.NewActorSystem("quickstart", goakt.WithLogger(logger))
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	if err := system.Start(ctx); err != nil {
+		logger.Fatal(err)
+	}
+
+	pid, err := system.Spawn(ctx, "greeter", &Greeter{})
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	response, err := goakt.Ask(ctx, pid, &Greet{Name: "World"}, time.Second)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	logger.Info(response.(*Greeting).Message)
+
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+
+	_ = system.Stop(ctx)
+}
+```
+
+Run it:
+
+```bash Terminal
+go run main.go
+```
+
+The log shows the actor system starting, then `Hello, World!`. Press Ctrl+C to shut down cleanly.
+
+## What just happened
+
+### You defined messages
+
+Messages are plain Go values. In standalone mode they are delivered in-process without serialization, so any type works;
+keep them immutable and side-effect free. Sending across nodes needs registered serializable types, covered in
+[Serialization](/advanced/serialization).
+
+### You implemented the Actor interface
+
+An actor is any type with three methods:
+
+- **PreStart**: called once before the first message. Initialize dependencies here, not in constructors; returning an
+  error prevents the actor from starting.
+- **Receive**: called for every message, one at a time. Type-switch on `ctx.Message()` and call `ctx.Unhandled()` for
+  types you do not handle.
+- **PostStop**: called after the mailbox drains during shutdown. Release resources here.
+
+Because the framework guarantees one message in flight per actor, the `greeted` counter needs no mutex. That guarantee
+is the heart of the model; [Actor Model](/actor/actor-model) covers it in depth.
+
+### You spawned it and sent messages
+
+`Spawn` returns a `*PID`, the handle for all interaction. From outside the actor system you have two patterns:
+
+- **Tell**: fire-and-forget, `goakt.Tell(ctx, pid, msg)`. No response, no waiting.
+- **Ask**: request-response, `goakt.Ask(ctx, pid, msg, timeout)`. Blocks until the actor calls `ctx.Response` exactly
+  once, or the timeout expires.
+
+Inside `Receive`, the same patterns exist on the context (`ctx.Tell`, `ctx.Ask`), plus non-blocking variants; see
+[Messaging](/actor/messaging).
+
+### ReceiveContext essentials
+
+Inside `Receive`, `ctx` provides:
+
+- **Message**: the message being processed.
+- **Sender**: PID of the sender; nil for scheduled or system messages.
+- **Self**: PID of the current actor.
+- **Tell** / **Ask**: send to another actor.
+- **Response**: reply to an Ask.
+- **Unhandled**: mark the message as unhandled; it lands in the dead-letter stream.
+
+## Where next
+
+- [Messaging](/actor/messaging): Tell, Ask, ordering guarantees, and message design.
+- [Supervision](/actor/supervision): what happens when your actor panics.
+- [Remoting](/advanced/remoting) and [Clustering](/clustering/overview): the same API across processes and nodes.
+- [Testkit](/actor/testkit): unit-test actors with probes.
+- The [examples repository](https://github.com/Tochemey/goakt-examples): runnable projects for every mode.

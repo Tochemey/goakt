@@ -6,44 +6,46 @@ sidebarTitle: "Scheduling"
 
 ## Overview
 
-GoAkt includes a built-in scheduler for delayed and recurring message delivery. It is powered by [go-quartz](https://github.com/reugn/go-quartz), a minimalist scheduling library that supports the Quartz cron expression format.
+GoAkt includes a built-in scheduler for delayed and recurring message delivery. It is powered by
+[go-quartz](https://github.com/reugn/go-quartz), a minimalist scheduling library that supports the Quartz cron
+expression format.
 
-The scheduler starts automatically when the actor system starts and stops when the system shuts down. Use it for timeouts, periodic tasks, heartbeats, and cron-style jobs.
+The scheduler starts automatically when the actor system starts and stops when the system shuts down. Use it for
+timeouts, periodic tasks, heartbeats, and cron-style jobs.
 
-## Location Transparency
+## Location transparency
 
-**Message scheduling is location-transparent:** the same APIs work for local and remote actors. Obtain the target PID via `ActorOf` and pass it to `ScheduleOnce`, `Schedule`, or `ScheduleWithCron`; the scheduler delivers to the actor regardless of where it runs.
+**Message scheduling is location-transparent:** the same APIs work for local and remote actors. Obtain the target PID
+via `ActorOf` and pass it to `ScheduleOnce`, `Schedule`, or `ScheduleWithCron`; the scheduler delivers to the actor
+regardless of where it runs.
 
 ## Operations
 
-| Operation            | Trigger Type | Behavior                                          |
-| -------------------- | ------------ | ------------------------------------------------- |
-| **ScheduleOnce**     | RunOnce      | Deliver a message once after a delay              |
-| **Schedule**         | Simple       | Deliver a message at a fixed interval (repeating) |
-| **ScheduleWithCron** | Cron         | Deliver a message according to a cron expression  |
+- **ScheduleOnce**: Trigger Type: RunOnce. Behavior: Deliver a message once after a delay.
+- **Schedule**: Trigger Type: Simple. Behavior: Deliver a message at a fixed interval (repeating).
+- **ScheduleWithCron**: Trigger Type: Cron. Behavior: Deliver a message according to a cron expression.
 
 ## API
 
-| Method             | Purpose                                              |
-| ------------------ | ---------------------------------------------------- |
-| `ScheduleOnce`     | Deliver once after the delay                         |
-| `Schedule`         | Deliver at a fixed interval (repeating)              |
-| `ScheduleWithCron` | Cron-style scheduling                                |
-| `CancelSchedule`   | Cancel a scheduled message                           |
-| `PauseSchedule`    | Pause delivery                                       |
-| `ResumeSchedule`   | Resume a paused schedule                             |
-| `ListSchedules`    | List every schedule currently known to the scheduler |
+- **ScheduleOnce**: Deliver once after the delay.
+- **Schedule**: Deliver at a fixed interval (repeating).
+- **ScheduleWithCron**: Cron-style scheduling.
+- **CancelSchedule**: Cancel a scheduled message.
+- **PauseSchedule**: Pause delivery.
+- **ResumeSchedule**: Resume a paused schedule.
+- **ListSchedules**: List every schedule currently known to the scheduler.
 
-## Schedule Options
+## Schedule options
 
-| Option          | Purpose                                                                                                                                                                                                                                                                                                       |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithReference` | Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for `ScheduleWithCron` in cluster mode; see [Cluster-Wide Single Fire](#cluster-wide-single-fire) below. |
-| `WithSender`    | Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees `ctx.Sender` as nil.                                                                                                                                                                                      |
+- **WithReference**: Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the
+  schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for
+  `ScheduleWithCron` in cluster mode; see [Cluster-wide single fire](#cluster-wide-single-fire) below.
+- **WithSender**: Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees
+  `ctx.Sender` as nil.
 
 ## Examples
 
-```go
+```go Examples
 // One-time delivery after 5 seconds
 err := system.ScheduleOnce(ctx, &MyMessage{}, pid, 5*time.Second)
 
@@ -59,76 +61,90 @@ system.PauseSchedule("cleanup")
 system.ResumeSchedule("cleanup")
 ```
 
-## Cron Expression Format
+## Cron expression format
 
-`ScheduleWithCron` uses the **Quartz cron expression format** as implemented by [go-quartz](https://github.com/reugn/go-quartz). This format supports 6 or 7 fields (seconds, minutes, hours, day-of-month, month, day-of-week, and optionally year).
+`ScheduleWithCron` uses the **Quartz cron expression format** as implemented by
+[go-quartz](https://github.com/reugn/go-quartz). This format supports 6 or 7 fields (seconds, minutes, hours,
+day-of-month, month, day-of-week, and optionally year).
 
-### Field Summary
+### Field summary
 
-| Field Name   | Mandatory | Allowed Values  | Allowed Special Characters  |
-| ------------ | --------- | --------------- | --------------------------- |
-| Seconds      | YES       | 0-59            | `,` `-` `*` `/`             |
-| Minutes      | YES       | 0-59            | `,` `-` `*` `/`             |
-| Hours        | YES       | 0-23            | `,` `-` `*` `/`             |
-| Day of month | YES       | 1-31            | `,` `-` `*` `?` `/` `L` `W` |
-| Month        | YES       | 1-12 or JAN-DEC | `,` `-` `*` `/`             |
-| Day of week  | YES       | 1-7 or SUN-SAT  | `,` `-` `*` `?` `/` `L` `#` |
-| Year         | NO        | empty, 1970-    | `,` `-` `*` `/`             |
+- **Seconds**: Mandatory: YES. Allowed Values: 0-59. Allowed Special Characters: `,` `-` `*` `/`.
+- **Minutes**: Mandatory: YES. Allowed Values: 0-59. Allowed Special Characters: `,` `-` `*` `/`.
+- **Hours**: Mandatory: YES. Allowed Values: 0-23. Allowed Special Characters: `,` `-` `*` `/`.
+- **Day of month**: Mandatory: YES. Allowed Values: 1-31. Allowed Special Characters: `,` `-` `*` `?` `/` `L` `W`.
+- **Month**: Mandatory: YES. Allowed Values: 1-12 or JAN-DEC. Allowed Special Characters: `,` `-` `*` `/`.
+- **Day of week**: Mandatory: YES. Allowed Values: 1-7 or SUN-SAT. Allowed Special Characters: `,` `-` `*` `?` `/` `L`
+  `#`.
+- **Year**: Mandatory: NO. Allowed Values: empty, 1970-. Allowed Special Characters: `,` `-` `*` `/`.
 
-### Special Characters
+### Special characters
 
 - **`*`**: All values in a field (e.g., `*` in minutes = "every minute").
-- **`?`**: No specific value; use when specifying one of two related fields (e.g., "10" in day-of-month, `?` in day-of-week).
+- **`?`**: No specific value; use when specifying one of two related fields (e.g., "10" in day-of-month, `?` in
+  day-of-week).
 - **`-`**: Range of values (e.g., `10-12` in hour = "hours 10, 11, and 12").
 - **`,`**: List of values (e.g., `MON,WED,FRI` in day-of-week = "Monday, Wednesday, Friday").
 - **`/`**: Increments (e.g., `0/15` in seconds = "0, 15, 30, 45"; `1/3` in day-of-month = "every 3 days from the 1st").
 - **`L`**: Last; meaning varies by field. Ranges or lists are not allowed with `L`.
   - Day-of-month: Last day of the month (e.g., `L-3` = third to last day of the month).
-  - Day-of-week: Last day of the week (7 or SAT) when alone; "last xxx day" when used after another value (e.g., `6L` = "last Friday").
-- **`W`**: Nearest weekday to the given day (e.g., `15W` = "nearest weekday to the 15th"). If `1W` falls on Saturday, it fires Monday the 3rd. `W` only applies to a single day, not ranges or lists.
-- **`#`**: Nth weekday of the month (e.g., `6#3` = "third Friday"; `2#1` = "first Monday"). Does not fire if that nth weekday does not exist in the month.
+  - Day-of-week: Last day of the week (7 or SAT) when alone; "last xxx day" when used after another value (e.g., `6L` =
+    "last Friday").
+- **`W`**: Nearest weekday to the given day (e.g., `15W` = "nearest weekday to the 15th"). If `1W` falls on Saturday, it
+  fires Monday the 3rd. `W` only applies to a single day, not ranges or lists.
+- **`#`**: Nth weekday of the month (e.g., `6#3` = "third Friday"; `2#1` = "first Monday"). Does not fire if that nth
+  weekday does not exist in the month.
 
 **Notes:**
 
 - `L` and `W` can be combined in day-of-month as `LW` = "last weekday of the month".
 - Month and day-of-week names are case-insensitive (e.g., `MON` = `mon`).
 
-### Cron Examples
+### Cron examples
 
-| Expression       | Meaning                             |
-| ---------------- | ----------------------------------- |
-| `0 * * * * *`    | Every minute at second 0            |
-| `0 0 * * * *`    | Every hour at minute 0              |
-| `0 0 12 * * *`   | Every day at noon                   |
-| `0 */5 * * * *`  | Every 5 minutes                     |
-| `0 0 0 * * MON`  | Every Monday at midnight            |
-| `0 0 12 1 * *`   | 1st of every month at noon          |
-| `0 0 12 L * *`   | Last day of every month at noon     |
-| `0 0 12 ? * WED` | Every Wednesday at noon             |
-| `0 0 12 15W * *` | Nearest weekday to the 15th at noon |
+- `0 * * * * *`: Every minute at second 0.
+- `0 0 * * * *`: Every hour at minute 0.
+- `0 0 12 * * *`: Every day at noon.
+- `0 */5 * * * *`: Every 5 minutes.
+- `0 0 0 * * MON`: Every Monday at midnight.
+- `0 0 12 1 * *`: 1st of every month at noon.
+- `0 0 12 L * *`: Last day of every month at noon.
+- `0 0 12 ? * WED`: Every Wednesday at noon.
+- `0 0 12 15W * *`: Nearest weekday to the 15th at noon.
 
 ### Timezone
 
 Cron expressions are evaluated in the **local timezone** of the process (`time.Now().Location()`).
 
-## Use Cases
+## Use cases
 
 - **Heartbeats and health checks**: Use `Schedule` with a fixed interval.
 - **Timeout notifications**: Use `ScheduleOnce` to send a timeout message after a delay.
 - **Periodic aggregation or cleanup**: Use `ScheduleWithCron` for daily, hourly, or custom schedules.
 - **Scheduled jobs**: Use cron expressions for complex recurring patterns (e.g., "every weekday at 9am").
 
-## Cluster-Wide Single Fire
+## Cluster-wide single fire
 
 <Note>
-Cluster-wide single fire applies to `ScheduleWithCron` only, and only in cluster mode ([`WithCluster`](/actor/cluster)). `Schedule` (interval) and `ScheduleOnce` are always node-local, in cluster mode or not.
+  Cluster-wide single fire applies to `ScheduleWithCron` only, and only in cluster mode
+  ([`WithCluster`](/clustering/overview)). `Schedule` (interval) and `ScheduleOnce` are always node-local, in cluster
+  mode or not.
 </Note>
 
-In a clustered deployment, the same application code (and therefore the same `ScheduleWithCron` call) typically runs on every node. **When the actor system is in cluster mode, single-fire delivery for cron schedules is intrinsic**; there is no option to opt in or out of. Every node still runs its own go-quartz cron trigger locally (so ticks stay in sync across the cluster with no extra network round trips on the hot path), but immediately before delivery each node races to claim an exclusive, short-lived slot for that specific tick in the cluster's shared store, the same put-if-absent primitive that guarantees a grain is activated on only one node. Only the winner proceeds to deliver; every other node silently skips that tick.
+In a clustered deployment, the same application code (and therefore the same `ScheduleWithCron` call) typically runs on
+every node. **When the actor system is in cluster mode, single-fire delivery for cron schedules is intrinsic**; there is
+no option to opt in or out of. Every node still runs its own go-quartz cron trigger locally (so ticks stay in sync
+across the cluster with no extra network round trips on the hot path), but immediately before delivery each node races
+to claim an exclusive, short-lived slot for that specific tick in the cluster's shared store, the same put-if-absent
+primitive that guarantees a grain is activated on only one node. Only the winner proceeds to deliver; every other node
+silently skips that tick.
 
-**`WithReference` is required for `ScheduleWithCron` in cluster mode.** The claim is keyed on the reference plus the tick, so every node racing for the same tick must register with the same reference. Since a reference left unset is auto-generated per call (and therefore different on every node), `ScheduleWithCron` rejects the call outright with `ErrScheduleReferenceRequired` rather than silently deliver the message once per node:
+**`WithReference` is required for `ScheduleWithCron` in cluster mode.** The claim is keyed on the reference plus the
+tick, so every node racing for the same tick must register with the same reference. Since a reference left unset is
+auto-generated per call (and therefore different on every node), `ScheduleWithCron` rejects the call outright with
+`ErrScheduleReferenceRequired` rather than silently deliver the message once per node:
 
-```go
+```go Cluster-Wide Single Fire
 // Registered identically on every node in the cluster; only one node delivers per tick.
 err := system.ScheduleWithCron(
     ctx, &DailyReport{}, pid, "0 0 9 * * *",
@@ -137,57 +153,79 @@ err := system.ScheduleWithCron(
 ```
 
 <Note>
-In cluster mode the cron expression is evaluated in **UTC** so every node computes the same tick instants regardless of its local timezone; the claim is keyed on the tick's fire time, and a wall-clock expression like `"0 0 9 * * *"` evaluated in each node's own zone would give mixed-timezone nodes different keys and deliver once per timezone instead of once per cluster. Outside cluster mode the expression is evaluated in the process's local timezone, as before. Express cluster cron schedules in UTC accordingly (for example, `"0 0 9 * * *"` fires at 09:00 UTC).
+  In cluster mode the cron expression is evaluated in **UTC** so every node computes the same tick instants regardless
+  of its local timezone; the claim is keyed on the tick's fire time, and a wall-clock expression like `"0 0 9 * * *"`
+  evaluated in each node's own zone would give mixed-timezone nodes different keys and deliver once per timezone instead
+  of once per cluster. Outside cluster mode the expression is evaluated in the process's local timezone, as before.
+  Express cluster cron schedules in UTC accordingly (for example, `"0 0 9 * * *"` fires at 09:00 UTC).
 </Note>
 
-**`Schedule` and `ScheduleOnce` stay node-local**, even in cluster mode: their fire times are anchored to each node's own local registration clock rather than a shared, deterministic schedule, so there is no common tick for nodes to arbitrate over. Registering the same interval or one-shot schedule on every node delivers on every node, exactly as outside cluster mode.
+**`Schedule` and `ScheduleOnce` stay node-local**, even in cluster mode: their fire times are anchored to each node's
+own local registration clock rather than a shared, deterministic schedule, so there is no common tick for nodes to
+arbitrate over. Registering the same interval or one-shot schedule on every node delivers on every node, exactly as
+outside cluster mode.
 
-The cluster-wide claim's TTL is scaled to the cron schedule's own period, clamped between one minute and 24 hours. The TTL must outlive the worst-case delivery lag between nodes handling the same tick: a node that claims after a stale entry has already expired would win the same tick again and deliver a duplicate. To close that window at its source, a node that reaches a tick more than the claim TTL late (for example, after a long pause while the scheduler still replays overdue ticks) skips it without claiming, trading a missed tick that every node was too late for over a duplicate delivery. Claim entries are reclaimed by their TTL alone; canceling a schedule or stopping a node never deletes them, since an entry may be the winning claim other nodes are still arbitrating against.
+The cluster-wide claim's TTL is scaled to the cron schedule's own period, clamped between one minute and 24 hours. The
+TTL must outlive the worst-case delivery lag between nodes handling the same tick: a node that claims after a stale
+entry has already expired would win the same tick again and deliver a duplicate. To close that window at its source, a
+node that reaches a tick more than the claim TTL late (for example, after a long pause while the scheduler still replays
+overdue ticks) skips it without claiming, trading a missed tick that every node was too late for over a duplicate
+delivery. Claim entries are reclaimed by their TTL alone; canceling a schedule or stopping a node never deletes them,
+since an entry may be the winning claim other nodes are still arbitrating against.
 
 <Note>
-In cluster mode each node registers its own local cron trigger, so `CancelSchedule` only stops the trigger on the node where it is called. The schedule keeps firing cluster-wide from the remaining nodes; to stop it everywhere, cancel it on every node that registered it.
+  In cluster mode each node registers its own local cron trigger, so `CancelSchedule` only stops the trigger on the node
+  where it is called. The schedule keeps firing cluster-wide from the remaining nodes; to stop it everywhere, cancel it
+  on every node that registered it.
 </Note>
 
 <Warning>
-This does not add delivery guarantees beyond what the underlying schedule already offers. If the winning node crashes after claiming the tick but before delivering, that specific tick is skipped cluster-wide; delivery resumes on the next tick. If the winning node leaves the cluster between ticks, arbitration for the next tick proceeds normally among the remaining nodes; there is no fixed "leader" to fail over.
+  This does not add delivery guarantees beyond what the underlying schedule already offers. If the winning node crashes
+  after claiming the tick but before delivering, that specific tick is skipped cluster-wide; delivery resumes on the
+  next tick. If the winning node leaves the cluster between ticks, arbitration for the next tick proceeds normally among
+  the remaining nodes; there is no fixed "leader" to fail over.
 </Warning>
 
-## Sender and Target Actor
+## Sender and target actor
 
-For scheduled messages, the target actor receives the message via `Tell`. By default, `ctx.Sender()` is `nil` (NoSender). Use `WithSender(pid)` if you want the target to know which actor scheduled the message.
+For scheduled messages, the target actor receives the message via `Tell`. By default, `ctx.Sender()` is `nil`
+(NoSender). Use `WithSender(pid)` if you want the target to know which actor scheduled the message.
 
 ## Errors
 
-| Error                           | Condition                                                         |
-| ------------------------------- | ----------------------------------------------------------------- |
-| `ErrSchedulerNotStarted`        | Actor system not started; scheduler is started with the system    |
-| `ErrScheduledReferenceNotFound` | Cancel, pause, or resume called with an unknown reference         |
-| `ErrRemotingDisabled`           | Scheduling to a remote PID when remoting is not enabled           |
-| `ErrScheduleReferenceRequired`  | `ScheduleWithCron` in cluster mode called without `WithReference` |
+- **ErrSchedulerNotStarted**: Actor system not started; scheduler is started with the system.
+- **ErrScheduledReferenceNotFound**: Cancel, pause, or resume called with an unknown reference.
+- **ErrRemotingDisabled**: Scheduling to a remote PID when remoting is not enabled.
+- **ErrScheduleReferenceRequired**: `ScheduleWithCron` in cluster mode called without `WithReference`.
 
-## Delivery Semantics
+## Delivery semantics
 
-- **Fire-and-forget**: Scheduling does not provide built-in delivery guarantees (at-least-once or exactly-once). Ensure idempotency where needed.
+- **Fire-and-forget**: Scheduling does not provide built-in delivery guarantees (at-least-once or exactly-once). Ensure
+  idempotency where needed.
 - **No retries**: If delivery fails (e.g., actor not found), the message is not retried.
 - **ScheduleOnce**: Delivered exactly once after the delay; no further deliveries.
 
 ## Introspection
 
-`ListSchedules()` returns a read-only snapshot of every schedule the scheduler currently knows about. Use it to answer "what is currently scheduled, and to whom will it deliver?" - the read-side counterpart of the reference-based Cancel/Pause/Resume management APIs.
+`ListSchedules()` returns a read-only snapshot of every schedule the scheduler currently knows about. Use it to answer
+"what is currently scheduled, and to whom will it deliver?" - the read-side counterpart of the reference-based
+Cancel/Pause/Resume management APIs.
 
-```go
+```go Introspection
 type ScheduleInfo struct {
 	Reference string // the schedule reference (user-supplied or auto-generated)
 	Path      Path   // target actor path
 }
 ```
 
-```go
+```go Introspection
 for _, info := range system.ListSchedules() {
 	fmt.Printf("%s -> %s\n", info.Reference, info.Path)
 }
 ```
 
 <Note>
-`ListSchedules` is purely read-only: it has no effect on the schedules themselves. A schedule stops appearing once it has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce`, once it has fired and been delivered: there is no need to clean anything up manually.
+  `ListSchedules` is purely read-only: it has no effect on the schedules themselves. A schedule stops appearing once it
+  has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce`, once it has fired and
+  been delivered: there is no need to clean anything up manually.
 </Note>

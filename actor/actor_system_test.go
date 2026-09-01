@@ -8118,10 +8118,10 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.NotNil(t, child)
 	pause.For(500 * time.Millisecond)
 
-	// exactly two callbacks exist regardless of the population: the system
-	// callback and the aggregated actor callback.
+	// exactly three callbacks exist regardless of the population: the system
+	// callback, the aggregated actor callback and the scheduler callback.
 	recording := meterProvider.meter
-	require.Len(t, recording.callbacks, 2)
+	require.Len(t, recording.callbacks, 3)
 
 	observer := &attrObserver{}
 	for _, cb := range recording.callbacks {
@@ -8186,7 +8186,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.NoError(t, parent.Restart(ctx))
 	pause.For(500 * time.Millisecond)
 
-	require.Len(t, recording.callbacks, 2)
+	require.Len(t, recording.callbacks, 3)
 
 	observer = &attrObserver{}
 	for _, cb := range recording.callbacks {
@@ -8341,4 +8341,45 @@ func TestActorLifecycleCountersExcludeSystemActors(t *testing.T) {
 	// path a user actor takes, so this is where the stop-side gate is exercised.
 	require.NoError(t, sys.Stop(ctx))
 	require.Zero(t, system.actorKinds.Len())
+}
+
+// TestHandleClusterEventCountsMembershipChurn asserts that the cluster events
+// loop totals every membership edge it processes: a node joining moves the
+// joined counter, a node leaving moves the left counter, and a leadership
+// change moves neither.
+func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+	system.remoteWatches = newRemoteWatchRegistry()
+
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+
+	now := time.Now()
+	peer := "127.0.0.1:3320"
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.NodeJoined,
+		Payload: &cluster.NodeJoinedEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 0, system.membersLeftCount.Load())
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.NodeLeft,
+		Payload: &cluster.NodeLeftEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 1, system.membersLeftCount.Load())
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.LeaderChanged,
+		Payload: &cluster.LeaderChangedEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 1, system.membersLeftCount.Load())
 }

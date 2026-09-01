@@ -1,218 +1,58 @@
-/* Fonts: Geist for text (also set in docs.json) and Geist Mono for code */
-@import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap");
+/* Code font: IBM Plex Mono, the closest free match to Stripe's Sohne Mono */
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap");
 
-.steps {
-  margin-top: 0;
-}
-
-div[data-component-part="card-icon"] > svg {
-  mask-size: 80%;
-}
-
-.font-mono {
-  font-weight: 700 !important;
-}
-
-.nav-tabs .nav-tabs-item {
-  font-size: 0.8rem !important;
-}
-
-.mdx-content > span[data-as="p"] {
-  margin-bottom: 2rem !important;
-}
-
-.dark\:bg-white\/5:is(.dark *) {
-  background-color: rgb(155 155 155 / 5%);
-}
-
-ul#sidebar-group > li > a {
-  font-size: 0.825rem;
-  line-height: 1rem;
-  font-weight: 500;
-}
-
-pre.shiki {
-  line-height: 1.4rem;
-  font-size: 0.8rem;
-}
-
-.dark\:ring-white\/\[0\.14\]:is(.dark *) {
-  border: 1px solid rgb(255 255 255/0.14) !important;
-  --tw-ring-color: transparent;
-}
-
-.ring-transparent {
-  border: 1px solid transparent !important;
-}
-
-/* Remove top border radius when there's a header */
-.code-block:has([data-component-part="code-block-header"]) div[data-component-part="code-block-root"] {
-  border-top-right-radius: 0px !important;
-  border-top-left-radius: 0px !important;
-}
-
-/* Remove top border radius for code groups with tab bars */
-.code-group:has([data-component-part="code-group-tab-bar"]) div[data-component-part="code-block-root"] {
-  border-top-right-radius: 0px !important;
-  border-top-left-radius: 0px !important;
-}
-
-img.code-block-icon {
-  background: transparent !important;
-}
-
-div[data-component-part="card-icon"] img {
-  background: transparent !important;
-}
-
-html.dark .card-group .card:not(:hover) {
-  border: 1px solid rgb(255 255 255/0.1) !important;
-}
-
-html:not(.dark) .card-group .card {
-  border: 1px solid rgb(var(--gray-200)) !important;
-}
-
-.dark div[data-component-part="card-content-container"] {
-  background: rgb(255 255 255/0.03);
-}
-
-.card:hover {
-  border-color: rgb(var(--gray-400) / var(--tw-border-opacity)) !important;
-}
-
-html.dark .shiki,
-html.dark .shiki span {
-  background-color: transparent !important;
-}
-
-.prose :where(hr):not(:where([class~="not-prose"], [class~="not-prose"] *)) {
-  margin-top: 2rem !important;
-  margin-bottom: 2rem !important;
-}
-
-.nav-tabs {
-  width: 100% !important;
-}
-
-a[href="/guides"],
-a[href="/docs/guides"] {
-  margin-left: auto !important;
-}
-
-div[data-component-part="card-content-container"] {
-  height: 100% !important;
-}
-
-div#guides-list div[data-component-part="card-content-container"] > *:nth-child(2) {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between !important;
-}
-
-/* hacky css to show terminal output until we have a better component */
-.code-block + .code-block[language="text"] {
-  margin-top: -32px;
-  z-index: -1;
-  border-top-right-radius: 0px;
-  border-top-left-radius: 0px;
-  border-top: none;
-}
-
-.code-block + .code-block[language="text"],
-.code-block + .code-block[language="text"] div[data-component-part="code-block-root"] {
-  background-color: rgb(var(--gray-50)) !important;
-}
-
-html.dark .code-block + .code-block[language="text"],
-html.dark .code-block + .code-block[language="text"] div[data-component-part="code-block-root"] {
-  background-color: #16171e !important;
-}
-
-.code-block + .code-block[language="text"] div.absolute.top-3 {
-  display: none;
-}
-
-.code-block:has(+ .code-block[language="text"]) {
-  border-bottom-right-radius: 0px;
-  border-bottom-left-radius: 0px;
-}
-
-.code-block:has(+ .code-block[language="text"]) div[data-component-part="code-block-root"] {
-  border-bottom-right-radius: 0px;
-  border-bottom-left-radius: 0px;
-}
-
-div.callout .code-block {
-  margin-bottom: 0px;
-}
-
-[language="shellscript"] code span.line:not(:empty):has(span)::before {
-  content: "$ ";
-  color: #6272a4;
-  user-select: none;
-}
-
-[language="shellscript"] code span.line:has(> span:first-child[style*="color: rgb(98, 114, 164)"])::before,
-[language="shellscript"] code span.line:has(> span:first-child[style*="#6272A4"])::before {
-  content: "";
-}
-
-[language="powershell"] code span.line:not(:empty):has(span)::before {
-  content: "> ";
-  color: #6272a4;
-  user-select: none;
-}
-
-[language="powershell"] code span.line:has(> span:first-child[style*="color: rgb(98, 114, 164)"])::before,
-[language="powershell"] code span.line:has(> span:first-child[style*="#6272A4"])::before {
-  content: "";
-}
-
-.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
-.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:after,
-.dark [data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
-  background: rgb(219 219 219 / 20%) !important;
-}
-
-.dark[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
-  border-color: white;
-}
-
-[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight,
-[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:after,
-[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
-  background: rgb(var(--gray-200) / 0.5) !important;
-}
-
-[data-component-part="code-block-root"]:not(.has-line-numbers) .line-highlight:before {
-  border-color: rgb(172, 172, 172);
-}
-
-/* Monospace: Geist Mono for code, inline and in blocks */
 code,
 kbd,
 samp,
 pre,
 pre.shiki {
-  font-family:
-    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
 }
 
-/* Table cells: never break an API name mid-word; prose columns still wrap */
-#body-content table td code,
-#body-content table th code,
-.mdx-content table td code,
-.mdx-content table th code {
-  white-space: nowrap;
+/* Headings: the tight Inter treatment from the brand lockup */
+h1,
+h2,
+h3 {
+  letter-spacing: -0.02em;
 }
 
-/* Headings: 600 is the heaviest Geist weight loaded above, so no synthetic bold */
-#page-title,
-#content h1,
-#content h2,
-#content h3,
-#content h4 {
-  font-weight: 600;
+/* Reading rhythm: slightly smaller body with calmer leading */
+#content p,
+#content ul,
+#content ol,
+.mdx-content p,
+.mdx-content ul,
+.mdx-content ol,
+.prose p,
+.prose ul,
+.prose ol,
+#content-container p,
+#content-container ul,
+#content-container ol {
+  font-size: 0.925rem;
+  line-height: 1.7;
+}
+
+/* Lists: keep items close enough to read as one group */
+#content li,
+.mdx-content li,
+.prose li,
+#content-container li {
+  margin-top: 0.3rem;
+  margin-bottom: 0.3rem;
+}
+
+/* Inline code: sit inside the text line instead of breaking its rhythm */
+#content :not(pre) > code,
+.mdx-content :not(pre) > code,
+.prose :not(pre) > code,
+#content-container :not(pre) > code {
+  font-size: 0.82em;
+  padding: 0.1em 0.3em;
+}
+
+/* Compact code blocks; the theme default runs large */
+pre.shiki {
+  line-height: 1.4rem;
+  font-size: 0.8rem;
 }

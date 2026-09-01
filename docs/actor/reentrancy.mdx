@@ -6,23 +6,26 @@ sidebarTitle: "Reentrancy"
 
 ## Concept
 
-By default, an actor processes messages strictly one at a time. **Reentrancy** allows an actor to process other messages while waiting for an async response from `Request` or `RequestName`.
+By default, an actor processes messages strictly one at a time. **Reentrancy** allows an actor to process other messages
+while waiting for an async response from `Request` or `RequestName`.
 
-`Request` and `RequestName` are the non-blocking counterparts of `Ask` and `SendSync`. They return immediately with a `RequestCall` handle instead of blocking until a reply arrives. The reply is delivered back through the actor's mailbox, preserving single-threaded processing.
+`Request` and `RequestName` are the non-blocking counterparts of `Ask` and `SendSync`. They return immediately with a
+`RequestCall` handle instead of blocking until a reply arrives. The reply is delivered back through the actor's mailbox,
+preserving single-threaded processing.
 
 ## Modes
 
-| Mode                  | Behavior                                                                                                                                                                                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Off**               | Strict sequential; `Request`/`RequestName` disabled. Use `Ask`/`SendSync` for sync calls.                                                                                                                                |
-| **AllowAll**          | All incoming messages can be processed while awaiting a response. Maximizes throughput.                                                                                                                                  |
-| **StashNonReentrant** | User messages are stashed while any stash-mode request is in flight; only async responses and system messages (e.g. `PoisonPill`, `HealthCheckRequest`) are processed. Preserves strict ordering at the cost of latency. |
+- **Off**: Strict sequential; `Request`/`RequestName` disabled. Use `Ask`/`SendSync` for sync calls.
+- **AllowAll**: All incoming messages can be processed while awaiting a response. Maximizes throughput.
+- **StashNonReentrant**: User messages are stashed while any stash-mode request is in flight; only async responses and
+  system messages (e.g. `PoisonPill`, `HealthCheckRequest`) are processed. Preserves strict ordering at the cost of
+  latency.
 
 ## Enabling reentrancy
 
 Reentrancy is **opt-in**. Pass `WithReentrancy` when spawning the actor:
 
-```go
+```go Enabling reentrancy
 import "github.com/tochemey/goakt/v4/reentrancy"
 
 cfg := reentrancy.New(
@@ -32,18 +35,18 @@ cfg := reentrancy.New(
 pid, err := system.Spawn(ctx, "my-actor", actor, actor.WithReentrancy(cfg))
 ```
 
-| Option            | Purpose                                                                                                                                             |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithMode`        | Set reentrancy mode: `Off`, `AllowAll`, or `StashNonReentrant`.                                                                                     |
-| `WithMaxInFlight` | Cap the number of outstanding async requests. When reached, `Request`/`RequestName` return `ErrReentrancyInFlightLimit`. Use `n <= 0` for no limit. |
+- **WithMode**: Set reentrancy mode: `Off`, `AllowAll`, or `StashNonReentrant`.
+- **WithMaxInFlight**: Cap the number of outstanding async requests. When reached, `Request`/`RequestName` return
+  `ErrReentrancyInFlightLimit`. Use `n <= 0` for no limit.
 
 Without a reentrancy policy, calls to `Request`, `RequestName`, or `RequestGrain` fail with `ErrReentrancyDisabled`.
 
 ## Runtime toggle
 
-An actor spawned without reentrancy can enable it from inside a handler when the capability is only needed for a particular case, and turn it off again afterward:
+An actor spawned without reentrancy can enable it from inside a handler when the capability is only needed for a
+particular case, and turn it off again afterward:
 
-```go
+```go Runtime toggle
 func (a *Migrator) Receive(ctx *actor.ReceiveContext) {
     switch ctx.Message().(type) {
     case *StartMigration:
@@ -59,41 +62,47 @@ func (a *Migrator) Receive(ctx *actor.ReceiveContext) {
 }
 ```
 
-`EnableReentrancy` installs the policy or retunes an existing one (mode, `MaxInFlight`) and takes effect for requests issued from that point on. `DisableReentrancy` flips the default mode back to `Off`: requests already in flight complete with the mode they were admitted with, stashed messages are released once the last blocking request finishes, and new requests fail with `ErrReentrancyDisabled`. After a runtime disable, a per-call `WithReentrancyMode` override still admits an individual request.
+`EnableReentrancy` installs the policy or retunes an existing one (mode, `MaxInFlight`) and takes effect for requests
+issued from that point on. `DisableReentrancy` flips the default mode back to `Off`: requests already in flight complete
+with the mode they were admitted with, stashed messages are released once the last blocking request finishes, and new
+requests fail with `ErrReentrancyDisabled`. After a runtime disable, a per-call `WithReentrancyMode` override still
+admits an individual request.
 
 Both methods also exist on `GrainContext`; see [Grain Reentrancy](/grains/reentrancy).
 
 ## Request, RequestName, and RequestGrain
 
-| Method             | Purpose                                                                                                                  |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `ctx.Request`      | Send an async request to a PID. Returns a `RequestCall` or `nil` on failure.                                             |
-| `ctx.RequestName`  | Send an async request to an actor by name (local or remote). Returns a `RequestCall` or `nil`.                           |
-| `ctx.RequestGrain` | Send an async request to a grain, which activates on demand like any other grain send. Returns a `RequestCall` or `nil`. |
+- **ctx.Request**: Send an async request to a PID. Returns a `RequestCall` or `nil` on failure.
+- **ctx.RequestName**: Send an async request to an actor by name (local or remote). Returns a `RequestCall` or `nil`.
+- **ctx.RequestGrain**: Send an async request to a grain, which activates on demand like any other grain send. Returns a
+  `RequestCall` or `nil`.
 
-Requests are location transparent: when the requester and the target sit on different nodes, the request and its reply travel over remoting, so cross-node payloads must be protobuf messages, like every other remote send.
+Requests are location transparent: when the requester and the target sit on different nodes, the request and its reply
+travel over remoting, so cross-node payloads must be protobuf messages, like every other remote send.
 
-On failure to initiate the request, `Err` is set on the context and the returned call is `nil`. Check `ctx.Err()` or use `ctx.getError()` in tests.
+On failure to initiate the request, `Err` is set on the context and the returned call is `nil`. Check `ctx.Err()` or use
+`ctx.getError()` in tests.
 
 ## RequestCall
 
 The returned `RequestCall` lets you:
 
-| Method   | Purpose                                                                                                                                                                                                                            |
-| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Then`   | Register a continuation `func` invoked when the request completes (success, error, timeout, or cancel). Only the first call is honored. If the request already completed, the callback runs immediately in the caller's goroutine. |
-| `Cancel` | Request cancellation. Best-effort; the request may still complete. Idempotent. Returns `nil` if already completed or cancel requested.                                                                                             |
+- **Then**: Register a continuation `func` invoked when the request completes (success, error, timeout, or cancel). Only
+  the first call is honored. If the request already completed, the callback runs immediately in the caller's goroutine.
+- **Cancel**: Request cancellation. Best-effort; the request may still complete. Idempotent. Returns `nil` if already
+  completed or cancel requested.
 
-Continuations registered with `Then` run on the actor's mailbox thread when the request completes, preserving single-threaded access to actor state. Call `Then` from within `Receive` to ensure correct execution.
+Continuations registered with `Then` run on the actor's mailbox thread when the request completes, preserving
+single-threaded access to actor state. Call `Then` from within `Receive` to ensure correct execution.
 
 ## Per-call options
 
-| Option               | Purpose                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `WithReentrancyMode` | Override the actor-level mode for this request only. Cannot enable if actor has reentrancy off.        |
-| `WithRequestTimeout` | Set a per-request timeout. On expiry, the request completes with `ErrRequestTimeout`. `<= 0` disables. |
+- **WithReentrancyMode**: Override the actor-level mode for this request only. Cannot enable if actor has reentrancy
+  off.
+- **WithRequestTimeout**: Set a per-request timeout. On expiry, the request completes with `ErrRequestTimeout`. `<= 0`
+  disables.
 
-```go
+```go Per-call options
 call := ctx.Request(target, msg,
     actor.WithReentrancyMode(reentrancy.StashNonReentrant),
     actor.WithRequestTimeout(5*time.Second),
@@ -111,16 +120,17 @@ if call != nil {
 
 ## Errors
 
-| Error                        | When                                                                                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `ErrReentrancyDisabled`      | The actor has no reentrancy policy (neither `WithReentrancy` at spawn nor a later `EnableReentrancy`), or the effective mode is `Off`. |
-| `ErrReentrancyInFlightLimit` | `MaxInFlight` cap reached; no new async requests until some complete.                                                                  |
-| `ErrRequestTimeout`          | Request timed out (via `WithRequestTimeout`).                                                                                          |
-| `ErrRequestCanceled`         | Request was canceled via `Cancel`.                                                                                                     |
+- **ErrReentrancyDisabled**: The actor has no reentrancy policy (neither `WithReentrancy` at spawn nor a later
+  `EnableReentrancy`), or the effective mode is `Off`.
+- **ErrReentrancyInFlightLimit**: `MaxInFlight` cap reached; no new async requests until some complete.
+- **ErrRequestTimeout**: Request timed out (via `WithRequestTimeout`).
+- **ErrRequestCanceled**: Request was canceled via `Cancel`.
 
 ## StashNonReentrant and stashing
 
-In `StashNonReentrant` mode, user messages are automatically stashed while any stash-mode request is in flight. A stash buffer is created on demand; you do **not** need `WithStashing()` for reentrancy-driven stashing. When the last blocking request completes, stashed messages are unstashed and processed in order.
+In `StashNonReentrant` mode, user messages are automatically stashed while any stash-mode request is in flight. A stash
+buffer is created on demand; you do **not** need `WithStashing()` for reentrancy-driven stashing. When the last blocking
+request completes, stashed messages are unstashed and processed in order.
 
 ## When to use
 
@@ -139,9 +149,11 @@ In `StashNonReentrant` mode, user messages are automatically stashed while any s
 
 ## Example
 
-Reentrancy enables safe request/response cycles without deadlock. Flow: Client → ActorA → ActorB → ActorA → Client. ActorA uses `RequestName` (non-blocking); ActorB uses `Ask` (blocking). Without reentrancy, ActorA would block and the cycle would deadlock.
+Reentrancy enables safe request/response cycles without deadlock. Flow: Client → ActorA → ActorB → ActorA → Client.
+ActorA uses `RequestName` (non-blocking); ActorB uses `Ask` (blocking). Without reentrancy, ActorA would block and the
+cycle would deadlock.
 
-```go
+```go Example
 package main
 
 import (
@@ -253,7 +265,9 @@ func main() {
 
 ## See also
 
-- [Grain Reentrancy](/grains/reentrancy) for the grain-side API: `RequestGrain`/`RequestActor` from grains, `DeferResponse`, and paused-consumption stash semantics.
-- [Stashing](/actor/stashing): Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing internally.
+- [Grain Reentrancy](/grains/reentrancy) for the grain-side API: `RequestGrain`/`RequestActor` from grains,
+  `DeferResponse`, and paused-consumption stash semantics.
+- [Stashing](/actor/stashing): Manual stashing with `Stash`, `Unstash`, `UnstashAll`; `StashNonReentrant` uses stashing
+  internally.
 - [Messaging](/actor/messaging): `Ask`, `Tell`, `PipeTo`.
 - [Behaviors](/actor/behaviors): `Become`, `UnBecome` for state transitions.

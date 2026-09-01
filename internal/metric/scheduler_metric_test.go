@@ -30,23 +30,17 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
-func TestActorSystemInstrument(t *testing.T) {
+func TestSchedulerInstrument(t *testing.T) {
 	meter := noop.NewMeterProvider().Meter("test")
-	instruments, err := NewActorSystemMetric(meter)
+	instruments, err := NewSchedulerMetric(meter)
 	require.NoError(t, err)
 	require.NotNil(t, instruments)
 
-	require.NotNil(t, instruments.DeadlettersCount())
-	require.NotNil(t, instruments.PIDsCount())
-	require.NotNil(t, instruments.GrainsCount())
-	require.NotNil(t, instruments.Uptime())
-	require.NotNil(t, instruments.PeersCount())
-	require.NotNil(t, instruments.SpawnedCount())
-	require.NotNil(t, instruments.StoppedCount())
-	require.NotNil(t, instruments.PassivatedCount())
+	require.NotNil(t, instruments.ScheduledCount())
+	require.NotNil(t, instruments.CancelledCount())
 }
 
-func TestActorSystemInstrumentErrors(t *testing.T) {
+func TestSchedulerInstrumentErrors(t *testing.T) {
 	t.Parallel()
 
 	errBoom := errors.New("boom")
@@ -56,14 +50,8 @@ func TestActorSystemInstrumentErrors(t *testing.T) {
 		name    string
 		failKey string
 	}{
-		{name: "deadletters counter", failKey: "actorsystem.deadletters.count"},
-		{name: "actors gauge", failKey: "actorsystem.actors.count"},
-		{name: "grains gauge", failKey: "actorsystem.grains.count"},
-		{name: "uptime gauge", failKey: "actorsystem.uptime"},
-		{name: "peers gauge", failKey: "actorsystem.peers.count"},
-		{name: "spawned counter", failKey: "actor.spawned.count"},
-		{name: "stopped counter", failKey: "actor.stopped.count"},
-		{name: "passivated counter", failKey: "actor.passivated.count"},
+		{name: "scheduled counter", failKey: "scheduler.scheduled.count"},
+		{name: "cancelled counter", failKey: "scheduler.cancelled.count"},
 	}
 
 	for _, tt := range testCases {
@@ -77,7 +65,7 @@ func TestActorSystemInstrumentErrors(t *testing.T) {
 				},
 			}
 
-			instruments, err := NewActorSystemMetric(meter)
+			instruments, err := NewSchedulerMetric(meter)
 			require.Error(t, err)
 			require.Nil(t, instruments)
 		})

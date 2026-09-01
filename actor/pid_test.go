@@ -4862,8 +4862,10 @@ func TestNewPID(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
+		// a metrics-enabled non-cluster system registers the system-level, the
+		// per-actor and the scheduler callbacks
 		recording := meterProvider.meter
-		require.Len(t, recording.callbacks, 2)
+		require.Len(t, recording.callbacks, 3)
 
 		observer := &attrObserver{}
 		for _, cb := range recording.callbacks {

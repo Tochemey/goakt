@@ -19,15 +19,17 @@ When `Stop(ctx)` is called, the system:
 7. Shuts down system actors
 8. Leaves cluster and stops remoting
 
-Shutdown is best-effort: it continues even if individual steps fail, collecting errors. A configurable `shutdownTimeout` (default: 3 minutes) bounds the total time.
+Shutdown is best-effort: it continues even if individual steps fail, collecting errors. A configurable `shutdownTimeout`
+(default: 3 minutes) bounds the total time.
 
 ## Shutdown hooks
 
-Register hooks via `WithCoordinatedShutdown(hooks...)` when creating the actor system. Hooks run during shutdown, before actors are stopped.
+Register hooks via `WithCoordinatedShutdown(hooks...)` when creating the actor system. Hooks run during shutdown, before
+actors are stopped.
 
 ### The ShutdownHook interface
 
-```go
+```go The ShutdownHook interface
 package actor
 
 type ShutdownHook interface {
@@ -36,23 +38,19 @@ type ShutdownHook interface {
 }
 ```
 
-| Method       | Purpose                                                       |
-| ------------ | ------------------------------------------------------------- |
-| **Execute**  | Run cleanup logic. Use the actor system for final operations. |
-| **Recovery** | Return retry and recovery configuration for failures.         |
+- **Execute**: Run cleanup logic. Use the actor system for final operations.
+- **Recovery**: Return retry and recovery configuration for failures.
 
 ### Recovery strategies
 
-| Strategy             | Behavior                                       |
-| -------------------- | ---------------------------------------------- |
-| `ShouldFail`         | Stop shutdown on hook failure                  |
-| `ShouldRetryAndFail` | Retry, then stop if still failing              |
-| `ShouldSkip`         | Skip failed hook, continue                     |
-| `ShouldRetryAndSkip` | Retry, then skip and continue if still failing |
+- **ShouldFail**: Stop shutdown on hook failure.
+- **ShouldRetryAndFail**: Retry, then stop if still failing.
+- **ShouldSkip**: Skip failed hook, continue.
+- **ShouldRetryAndSkip**: Retry, then skip and continue if still failing.
 
 ### Configuring recovery
 
-```go
+```go Configuring recovery
 recovery := actor.NewShutdownHookRecovery(
     actor.WithShutdownHookRetry(2, time.Second),
     actor.WithShutdownHookRecoveryStrategy(actor.ShouldRetryAndSkip),
@@ -63,4 +61,5 @@ Pass this from your hook's `Recovery()` method.
 
 ## Shutdown timeout
 
-Use `WithShutdownTimeout(duration)` when creating the actor system to bound the total shutdown time. The default is 3 minutes.
+Use `WithShutdownTimeout(duration)` when creating the actor system to bound the total shutdown time. The default is 3
+minutes.

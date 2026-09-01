@@ -4,11 +4,14 @@ description: Application-level topic-based publish/subscribe messaging.
 sidebarTitle: "PubSub"
 ---
 
-**PubSub** enables application-level topic-based messaging. Actors subscribe to named topics and receive messages published to those topics by other actors. This is **separate from the event stream**, which only handles system and cluster events (see [Event Streams](/advanced/event-streams)).
+**PubSub** enables application-level topic-based messaging. Actors subscribe to named topics and receive messages
+published to those topics by other actors. This is **separate from the event stream**, which only handles system and
+cluster events (see [Event Streams](/advanced/event-streams)).
 
 ## Architecture
 
-Each node runs one **topic actor** (`GoAktTopicActor`). Local actors subscribe to and publish through their **local** topic actor. The topic actor maintains a registry of topics and their local subscribers.
+Each node runs one **topic actor** (`GoAktTopicActor`). Local actors subscribe to and publish through their **local**
+topic actor. The topic actor maintains a registry of topics and their local subscribers.
 
 ### Standalone mode
 
@@ -20,11 +23,13 @@ flowchart LR
     T -->|"Tell"| S3["subscriber C"]
 ```
 
-Publishers send `Publish` to the local topic actor. The topic actor delivers the message to all local subscribers via `Tell`.
+Publishers send `Publish` to the local topic actor. The topic actor delivers the message to all local subscribers via
+`Tell`.
 
 ### Cluster mode
 
-In a cluster, each node has its own topic actor. **Topic actors communicate with each other** to disseminate messages. When a publish occurs:
+In a cluster, each node has its own topic actor. **Topic actors communicate with each other** to disseminate messages.
+When a publish occurs:
 
 1. The publisher sends `Publish` to its local topic actor.
 2. The local topic actor delivers to its local subscribers.
@@ -50,7 +55,8 @@ flowchart LR
     TA -->|"TopicMessage<br/>(remoting)"| TC
 ```
 
-**Key point:** Subscribers always register with their **local** topic actor. Topic actors are responsible for cross-node dissemination; application actors never talk to remote topic actors directly.
+**Key point:** Subscribers always register with their **local** topic actor. Topic actors are responsible for cross-node
+dissemination; application actors never talk to remote topic actors directly.
 
 ## When to use
 
@@ -65,42 +71,40 @@ The **topic actor** is spawned when either:
 - `WithPubSub()` is passed when creating the actor system, or
 - Cluster mode is enabled (`WithCluster`)
 
-```go
+```go Enabling PubSub
 system, _ := actor.NewActorSystem("app", actor.WithPubSub())
 // or: actor.WithCluster(config); topic actor is spawned when cluster is enabled
 ```
 
 ## Topic actor
 
-| Method                   | Purpose                                                                     |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `ActorSystem.TopicActor` | Returns the topic actor's PID. Use to send Subscribe, Unsubscribe, Publish. |
+- **ActorSystem.TopicActor**: Returns the topic actor's PID. Use to send Subscribe, Unsubscribe, Publish.
 
-The topic actor has a reserved name (`GoAktTopicActor`). From within an actor, use `ctx.ActorSystem().TopicActor()`. From outside (e.g. `main`), use `system.TopicActor()`. Returns `nil` if PubSub is not enabled.
+The topic actor has a reserved name (`GoAktTopicActor`). From within an actor, use `ctx.ActorSystem().TopicActor()`.
+From outside (e.g. `main`), use `system.TopicActor()`. Returns `nil` if PubSub is not enabled.
 
 ## Subscribe and Unsubscribe
 
 Actors send messages to the **local** topic actor to subscribe or unsubscribe from topics:
 
-| Message       | Constructor            | Purpose                                                                     |
-| ------------- | ---------------------- | --------------------------------------------------------------------------- |
-| `Subscribe`   | `actor.NewSubscribe`   | Subscribe this actor to a topic. Sender receives `SubscribeAck` on success. |
-| `Unsubscribe` | `actor.NewUnsubscribe` | Unsubscribe from a topic. Sender receives `UnsubscribeAck` on success.      |
+- **Subscribe**: Constructor: `actor.NewSubscribe`. Purpose: Subscribe this actor to a topic. Sender receives
+  `SubscribeAck` on success.
+- **Unsubscribe**: Constructor: `actor.NewUnsubscribe`. Purpose: Unsubscribe from a topic. Sender receives
+  `UnsubscribeAck` on success.
 
 The topic actor watches subscribers. When a subscriber terminates, it is automatically removed from all topics.
 
-```go
+```go Subscribe and Unsubscribe
 ctx.Tell(ctx.ActorSystem().TopicActor(), actor.NewSubscribe("orders"))
 // later: ctx.Tell(ctx.ActorSystem().TopicActor(), actor.NewUnsubscribe("orders"))
 ```
 
 ## Publish
 
-| Message   | Constructor        | Purpose                                                                                           |
-| --------- | ------------------ | ------------------------------------------------------------------------------------------------- |
-| `Publish` | `actor.NewPublish` | Publish a message to all subscribers of the topic. `id` is a unique message ID for deduplication. |
+- **Publish**: Constructor: `actor.NewPublish`. Purpose: Publish a message to all subscribers of the topic. `id` is a
+  unique message ID for deduplication.
 
-```go
+```go Publish
 msg := actor.NewPublish(uuid.New().String(), "orders", orderEvent)
 ctx.Tell(ctx.ActorSystem().TopicActor(), msg)
 ```
@@ -110,16 +114,20 @@ Subscribers receive the message as a normal `Receive` invocation: the payload is
 ## Cluster behavior
 
 - **Local delivery:** The topic actor that receives the `Publish` delivers to its local subscribers immediately.
-- **Remote dissemination:** The topic actor sends a serialized `TopicMessage` to each peer's topic actor via remoting. Each peer's topic actor deserializes and delivers to its local subscribers.
-- **Deduplication:** Uses sender ID, topic, and message ID to avoid processing the same message twice (e.g. when a topic actor receives a `TopicMessage` from multiple paths).
+- **Remote dissemination:** The topic actor sends a serialized `TopicMessage` to each peer's topic actor via remoting.
+  Each peer's topic actor deserializes and delivers to its local subscribers.
+- **Deduplication:** Uses sender ID, topic, and message ID to avoid processing the same message twice (e.g. when a topic
+  actor receives a `TopicMessage` from multiple paths).
 
 ## Deduplication retention
 
-The topic actor remembers recently delivered message identifiers so it can suppress duplicate deliveries. This state is bounded by a **retention window**: each entry expires after the window elapses, keeping memory flat under sustained, high-rate publishing instead of growing for the lifetime of the actor system.
+The topic actor remembers recently delivered message identifiers so it can suppress duplicate deliveries. This state is
+bounded by a **retention window**: each entry expires after the window elapses, keeping memory flat under sustained,
+high-rate publishing instead of growing for the lifetime of the actor system.
 
 The window defaults to 2 minutes and is configurable with `WithMessageRetention`:
 
-```go
+```go Deduplication retention
 system, _ := actor.NewActorSystem("app",
     actor.WithPubSub(),
     actor.WithMessageRetention(5*time.Minute),
@@ -127,12 +135,14 @@ system, _ := actor.NewActorSystem("app",
 ```
 
 <Note>
-A duplicate that arrives after the retention window has elapsed may be redelivered, which is acceptable under at-least-once delivery. Size the window to the largest plausible redelivery delay for your transport (network retries and cross-node dissemination), not to your total publish volume.
+  A duplicate that arrives after the retention window has elapsed may be redelivered, which is acceptable under
+  at-least-once delivery. Size the window to the largest plausible redelivery delay for your transport (network retries
+  and cross-node dissemination), not to your total publish volume.
 </Note>
 
 ## Example
 
-```go
+```go Example
 // Subscriber actor
 func (a *OrderLogger) Receive(ctx *ReceiveContext) {
     switch msg := ctx.Message().(type) {
@@ -158,13 +168,15 @@ func (a *OrderService) Receive(ctx *ReceiveContext) {
 
 ## Topic statistics
 
-`ActorSystem.TopicStats` returns a read-only, point-in-time snapshot of a topic's subscription state, without ever exposing subscriber identities. `TopicStats` is immutable and exposes its values through accessor methods:
+`ActorSystem.TopicStats` returns a read-only, point-in-time snapshot of a topic's subscription state, without ever
+exposing subscriber identities. `TopicStats` is immutable and exposes its values through accessor methods:
 
 - `Topic() string` is the topic these stats describe.
 - `LocalSubscriberCount() int32` is the number of subscribers registered on **this node's** topic actor for the topic.
-- `TopicInstanceCount() int32` is the number of topic-actor instances (nodes) cluster-wide that currently have at least one subscriber for the topic.
+- `TopicInstanceCount() int32` is the number of topic-actor instances (nodes) cluster-wide that currently have at least
+  one subscriber for the topic.
 
-```go
+```go Topic statistics
 stats, err := system.TopicStats(ctx, "orders", 5*time.Second)
 if err != nil {
     // handle error
@@ -172,25 +184,30 @@ if err != nil {
 fmt.Printf("local=%d instances=%d\n", stats.LocalSubscriberCount(), stats.TopicInstanceCount())
 ```
 
-In cluster mode, the local node's topic actor answers with its own local subscriber count and fans a lightweight query out to every peer's topic actor to determine how many of them also have subscribers. Peers answer with their local view only and never fan the query out any further, which avoids query storms. Outside cluster mode, `TopicInstanceCount` is simply 0 or 1 depending on whether this node has local subscribers.
+In cluster mode, the local node's topic actor answers with its own local subscriber count and fans a lightweight query
+out to every peer's topic actor to determine how many of them also have subscribers. Peers answer with their local view
+only and never fan the query out any further, which avoids query storms. Outside cluster mode, `TopicInstanceCount` is
+simply 0 or 1 depending on whether this node has local subscribers.
 
 <Note>
-`TopicStats` is an eventually consistent, point-in-time snapshot with no delivery guarantee: subscribers may join or leave between the query and the response.
+  `TopicStats` is an eventually consistent, point-in-time snapshot with no delivery guarantee: subscribers may join or
+  leave between the query and the response.
 </Note>
 
 <Warning>
-`TopicStats` prefers an explicit failure over an inconsistent count. In cluster mode, if any peer cannot be reached within `timeout`, the whole call returns an error rather than a silently undercounted `TopicInstanceCount`. Retry the query, or treat the error as "cluster state is currently in flux".
+  `TopicStats` prefers an explicit failure over an inconsistent count. In cluster mode, if any peer cannot be reached
+  within `timeout`, the whole call returns an error rather than a silently undercounted `TopicInstanceCount`. Retry the
+  query, or treat the error as "cluster state is currently in flux".
 </Warning>
 
-`TopicStats` requires the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise it returns `ErrTopicActorNotStarted`.
+`TopicStats` requires the topic actor to be running (`WithPubSub()` or clustering enabled); otherwise it returns
+`ErrTopicActorNotStarted`.
 
 ## Event stream vs PubSub
 
-| Aspect      | Event stream                          | PubSub                               |
-| ----------- | ------------------------------------- | ------------------------------------ |
-| Purpose     | System and cluster observability      | Application-level event distribution |
-| Topics      | Fixed internal topic                  | Application-defined topics           |
-| Publishers  | Framework (PID, cluster, dead-letter) | Your actors                          |
-| Subscribers | External (monitoring, logging)        | Your actors                          |
-| API         | `Subscribe` / `Unsubscribe`           | Messages to `TopicActor`             |
-| Option      | Always present                        | `WithPubSub` or cluster              |
+- **Purpose**: Event stream: System and cluster observability. PubSub: Application-level event distribution.
+- **Topics**: Event stream: Fixed internal topic. PubSub: Application-defined topics.
+- **Publishers**: Event stream: Framework (PID, cluster, dead-letter). PubSub: Your actors.
+- **Subscribers**: Event stream: External (monitoring, logging). PubSub: Your actors.
+- **API**: Event stream: `Subscribe` / `Unsubscribe`. PubSub: Messages to `TopicActor`.
+- **Option**: Event stream: Always present. PubSub: `WithPubSub` or cluster.

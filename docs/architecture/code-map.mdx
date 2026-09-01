@@ -8,30 +8,28 @@ A guided tour of the codebase. Start with `actor/`: everything flows from there.
 
 ## Top-level layout
 
-| Package        | Purpose                                                                       |
-| -------------- | ----------------------------------------------------------------------------- |
-| `actor/`       | Core: ActorSystem, PID, Actor interface, spawn, mailbox, supervision          |
-| `remote/`      | Remoting config, serializers, wire protocol                                   |
-| `client/`      | Standalone cluster client for external callers (Tell, Ask, Spawn)             |
-| `crdt/`        | CRDT types, config, messages; Replicator implementation lives in `actor/`     |
-| `discovery/`   | Pluggable discovery providers (Consul, etcd, K8s, NATS, mDNS, DNS-SD, static) |
-| `datacenter/`  | Multi-DC support, control plane (NATS JetStream, etcd)                        |
-| `supervisor/`  | Supervision strategies and directives                                         |
-| `stream/`      | Reactive streams: Source, Flow, Sink, RunnableGraph; materialized on actors   |
-| `passivation/` | Passivation strategy types                                                    |
-| `reentrancy/`  | Reentrancy configuration for async Request/RequestName                        |
-| `extension/`   | Extension (system-wide) and Dependency (per-actor) interfaces                 |
-| `eventstream/` | In-process event bus for system and cluster events                            |
-| `hash/`        | Consistent hashing for partition-based placement                              |
-| `breaker/`     | Circuit breaker for async outbound calls (e.g. PipeTo)                        |
-| `memory/`      | Memory size helpers                                                           |
-| `tls/`         | TLS configuration for remoting                                                |
-| `log/`         | Logging abstraction                                                           |
-| `errors/`      | Sentinel errors                                                               |
-| `testkit/`     | Testing helpers: Probe, GrainProbe, TestKit, MultiNodes, TestNode             |
-| `benchmark/`   | Throughput and latency benchmarks (`BenchmarkTell`, `BenchmarkGrainTell`, …)  |
-| `mocks/`       | Generated mocks                                                               |
-| `protos/`      | Protobuf source definitions (.proto files)                                    |
+- **actor/**: Core: ActorSystem, PID, Actor interface, spawn, mailbox, supervision.
+- **remote/**: Remoting config, serializers, wire protocol.
+- **client/**: Standalone cluster client for external callers (Tell, Ask, Spawn).
+- **crdt/**: CRDT types, config, messages; Replicator implementation lives in `actor/`.
+- **discovery/**: Pluggable discovery providers (Consul, etcd, K8s, NATS, mDNS, DNS-SD, static).
+- **datacenter/**: Multi-DC support, control plane (NATS JetStream, etcd).
+- **supervisor/**: Supervision strategies and directives.
+- **stream/**: Reactive streams: Source, Flow, Sink, RunnableGraph; materialized on actors.
+- **passivation/**: Passivation strategy types.
+- **reentrancy/**: Reentrancy configuration for async Request/RequestName.
+- **extension/**: Extension (system-wide) and Dependency (per-actor) interfaces.
+- **eventstream/**: In-process event bus for system and cluster events.
+- **hash/**: Consistent hashing for partition-based placement.
+- **breaker/**: Circuit breaker for async outbound calls (e.g. PipeTo).
+- **memory/**: Memory size helpers.
+- **tls/**: TLS configuration for remoting.
+- **log/**: Logging abstraction.
+- **errors/**: Sentinel errors.
+- **testkit/**: Testing helpers: Probe, GrainProbe, TestKit, MultiNodes, TestNode.
+- **benchmark/**: Throughput and latency benchmarks (`BenchmarkTell`, `BenchmarkGrainTell`, …).
+- **mocks/**: Generated mocks.
+- **protos/**: Protobuf source definitions (.proto files).
 
 ## Key files in `actor/`
 
@@ -39,228 +37,209 @@ Grouped by subsystem.
 
 ### Core API and runtime
 
-| File                                           | Purpose                                                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `actor.go`                                     | `Actor` interface: `PreStart`, `Receive`, `PostStop`                                                   |
-| `actor_system.go`                              | `ActorSystem` implementation; wires cluster, remoting, scheduling, passivation                         |
-| `actor_path.go`                                | Address/path parsing and formatting for `goakt://system@host:port/path` URLs                           |
-| `api.go`                                       | Top-level API surface: `Tell`, `Ask`, `BatchTell`, `BatchAsk`                                          |
-| `pid.go`                                       | `PID`: live reference to an actor; implements `schedulable.runTurn`                                    |
-| `pid_option.go`, `pid_state.go`, `pid_tree.go` | PID options, lifecycle state, and the parent/child tree structure                                      |
-| `receive_context.go`                           | `ReceiveContext` passed to `Receive`; messaging, stash, behaviors                                      |
-| `context_pool.go`                              | Sharded lock-free pool for `ReceiveContext` objects. See [Context Pools](/architecture/context-pools). |
-| `context.go`                                   | `Context` passed to `PreStart` / `PostStop`                                                            |
-| `option.go`                                    | Options for `NewActorSystem` (logger, remoting, cluster, `WithThroughputBudget`, …)                    |
-| `defaults.go`                                  | Package-level default constants                                                                        |
-| `messages.go`                                  | Internal protocol messages (`PostStart`, `Terminated`, `Panicking`, …)                                 |
-| `no_sender.go`                                 | Sentinel PID used when a message has no sender                                                         |
-| `pools.go`                                     | Error-channel pool and per-request Ask reply channels (not `ReceiveContext`)                           |
-| `pipe_option.go`                               | Options for `PipeTo` (async outbound with circuit breaker)                                             |
-| `poison_pill_serializer.go`                    | Registration of the `PoisonPill` control message with the serializer registry                          |
-| `reflection.go`                                | Runtime type helpers; instantiate actor/grain from type name                                           |
-| `metric.go`                                    | OpenTelemetry actor metrics                                                                            |
-| `guardrails.go`                                | Reserved actor/grain name guards                                                                       |
+- **actor.go**: `Actor` interface: `PreStart`, `Receive`, `PostStop`.
+- **actor_system.go**: `ActorSystem` implementation; wires cluster, remoting, scheduling, passivation.
+- **actor_path.go**: Address/path parsing and formatting for `goakt://system@host:port/path` URLs.
+- **api.go**: Top-level API surface: `Tell`, `Ask`, `BatchTell`, `BatchAsk`.
+- **pid.go**: `PID`: live reference to an actor; implements `schedulable.runTurn`.
+- **pid_option.go**, **pid_state.go**, **pid_tree.go**: PID options, lifecycle state, and the parent/child tree
+  structure.
+- **receive_context.go**: `ReceiveContext` passed to `Receive`; messaging, stash, behaviors.
+- **context_pool.go**: Sharded lock-free pool for `ReceiveContext` objects. See
+  [Context Pools](/architecture/context-pools).
+- **context.go**: `Context` passed to `PreStart` / `PostStop`.
+- **option.go**: Options for `NewActorSystem` (logger, remoting, cluster, `WithThroughputBudget`, …).
+- **defaults.go**: Package-level default constants.
+- **messages.go**: Internal protocol messages (`PostStart`, `Terminated`, `Panicking`, …).
+- **no_sender.go**: Sentinel PID used when a message has no sender.
+- **pools.go**: Error-channel pool and per-request Ask reply channels (not `ReceiveContext`).
+- **pipe_option.go**: Options for `PipeTo` (async outbound with circuit breaker).
+- **poison_pill_serializer.go**: Registration of the `PoisonPill` control message with the serializer registry.
+- **reflection.go**: Runtime type helpers; instantiate actor/grain from type name.
+- **metric.go**: OpenTelemetry actor metrics.
+- **guardrails.go**: Reserved actor/grain name guards.
 
 ### Scheduler: the dispatcher pool
 
 See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 
-| File                | Purpose                                                                    |
-| ------------------- | -------------------------------------------------------------------------- |
-| `dispatcher.go`     | Fixed worker pool; `start` / `stop` / `signalStop` / `schedule`            |
-| `worker.go`         | Worker goroutine loop; local-queue reschedule helper                       |
-| `ready_queue.go`    | Per-worker local rings, shared global ring, work stealing, condvar parking |
-| `dispatch_state.go` | Three-state atomic machine (`Idle` / `Scheduled` / `Processing`) per actor |
+- **dispatcher.go**: Fixed worker pool; `start` / `stop` / `signalStop` / `schedule`.
+- **worker.go**: Worker goroutine loop; local-queue reschedule helper.
+- **ready_queue.go**: Per-worker local rings, shared global ring, work stealing, condvar parking.
+- **dispatch_state.go**: Three-state atomic machine (`Idle` / `Scheduled` / `Processing`) per actor.
 
 ### Mailboxes
 
-| File                             | Purpose                                              |
-| -------------------------------- | ---------------------------------------------------- |
-| `mailbox.go`                     | `Mailbox` interface                                  |
-| `unbounded_mailbox.go`           | Default MPSC FIFO mailbox                            |
-| `bounded_mailbox.go`             | Capacity-capped mailbox; backpressure when full      |
-| `unbounded_priority_mailbox.go`  | Priority-ordered mailbox                             |
-| `unbounded_fair_mailbox.go`      | Fair-scheduled mailbox; prevents producer starvation |
-| `unbounded_segmented_mailbox.go` | Segmented mailbox for throughput partitioning        |
+- **mailbox.go**: `Mailbox` interface.
+- **unbounded_mailbox.go**: Default MPSC FIFO mailbox.
+- **bounded_mailbox.go**: Capacity-capped mailbox; backpressure when full.
+- **unbounded_priority_mailbox.go**: Priority-ordered mailbox.
+- **unbounded_fair_mailbox.go**: Fair-scheduled mailbox; prevents producer starvation.
+- **unbounded_segmented_mailbox.go**: Segmented mailbox for throughput partitioning.
 
 ### Behaviour, supervision, lifecycle
 
-| File                     | Purpose                                                                      |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| `stash.go`               | Stash buffer for deferred messages                                           |
-| `behavior_stack.go`      | `Become` / `UnBecome` stack for behavior switching                           |
-| `reentrancy.go`          | `RequestCall`, `RequestOption`; async request handling                       |
-| `supervision_signal.go`  | Internal supervision signals routed to the parent's system mailbox           |
-| `passivation_manager.go` | Tracks idle actors; triggers passivation                                     |
-| `dead_letter.go`         | Captures messages to stopped / non-existent actors                           |
-| `death_watch.go`         | Cleans up terminated actors; removes from tree and cluster                   |
-| `shutdown_hook.go`       | User-registered hooks run during coordinated shutdown                        |
-| `system_eviction.go`     | Eviction strategy (LRU / LFU / MRU) and scheduling when the actor cap is hit |
+- **stash.go**: Stash buffer for deferred messages.
+- **behavior_stack.go**: `Become` / `UnBecome` stack for behavior switching.
+- **reentrancy.go**: `RequestCall`, `RequestOption`; async request handling.
+- **supervision_signal.go**: Internal supervision signals routed to the parent's system mailbox.
+- **passivation_manager.go**: Tracks idle actors; triggers passivation.
+- **dead_letter.go**: Captures messages to stopped / non-existent actors.
+- **death_watch.go**: Cleans up terminated actors; removes from tree and cluster.
+- **shutdown_hook.go**: User-registered hooks run during coordinated shutdown.
+- **system_eviction.go**: Eviction strategy (LRU / LFU / MRU) and scheduling when the actor cap is hit.
 
 ### Guardians, routing, scheduling, scheduled delivery
 
-| File                                  | Purpose                                                                      |
-| ------------------------------------- | ---------------------------------------------------------------------------- |
-| `root_guardian.go`                    | Root of the actor hierarchy                                                  |
-| `system_guardian.go`                  | Parent of system actors (dead letter, relocator, replicator, topic actor, …) |
-| `user_guardian.go`                    | Parent of user-spawned actors                                                |
-| `router.go` / `router_option.go`      | Router actor; fans out to routees                                            |
-| `routing_strategy.go`                 | Round-robin, random, fan-out strategies                                      |
-| `scheduler.go` / `schedule_option.go` | Scheduled / recurring / cron message delivery                                |
-| `func_actor.go`                       | `FuncActor`: create an actor from a plain function                           |
-| `topic_actor.go`                      | Pub/sub topic actor; also backs the CRDT delta topic (`goakt.crdt.deltas`)   |
+- **root_guardian.go**: Root of the actor hierarchy.
+- **system_guardian.go**: Parent of system actors (dead letter, relocator, replicator, topic actor, …).
+- **user_guardian.go**: Parent of user-spawned actors.
+- **router.go** / `router_option.go`: Router actor; fans out to routees.
+- **routing_strategy.go**: Round-robin, random, fan-out strategies.
+- **scheduler.go** / `schedule_option.go`: Scheduled / recurring / cron message delivery.
+- **func_actor.go**: `FuncActor`: create an actor from a plain function.
+- **topic_actor.go**: Pub/sub topic actor; also backs the CRDT delta topic (`goakt.crdt.deltas`).
 
 ### Cluster, remoting, multi-DC
 
-| File                                                   | Purpose                                                                                                   |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `cluster_config.go`                                    | Cluster configuration (discovery, CRDT, roles, multi-DC)                                                  |
-| `cluster_singleton.go` / `cluster_singleton_option.go` | Cluster singleton: single instance across all nodes                                                       |
-| `remote_server.go`                                     | TCP server for remoting; handles `RemoteTell`, `RemoteAsk`, `RemoteSpawn`, …                              |
-| `relocator.go`                                         | Relocates actors/grains when a cluster node departs                                                       |
-| `data_center_controller.go`                            | Multi-DC controller; registers DC with the control plane                                                  |
-| `spawn.go` / `spawn_option.go`                         | Spawn logic (local, remote, cross-DC); spawn options (mailbox, supervisor, passivation, reentrancy, role) |
+- **cluster_config.go**: Cluster configuration (discovery, CRDT, roles, multi-DC).
+- **cluster_singleton.go** / **cluster_singleton_option.go**: Cluster singleton: single instance across all nodes.
+- **remote_server.go**: TCP server for remoting; handles `RemoteTell`, `RemoteAsk`, `RemoteSpawn`, ….
+- **relocator.go**: Relocates actors/grains when a cluster node departs.
+- **data_center_controller.go**: Multi-DC controller; registers DC with the control plane.
+- **spawn.go** / `spawn_option.go`: Spawn logic (local, remote, cross-DC); spawn options (mailbox, supervisor,
+  passivation, reentrancy, role).
 
 ### Grains (virtual actors)
 
-| File                          | Purpose                                                                                                                          |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `grain.go`                    | `Grain` interface                                                                                                                |
-| `grain_of.go`                 | `GrainOf[T]` generic, factory-free grain activation entry point                                                                  |
-| `grain_engine.go`             | Grain activation, routing, passivation                                                                                           |
-| `grain_pid.go`                | `grainPID`: `PID` variant for virtual actors; implements `schedulable`                                                           |
-| `grain_context.go`            | `GrainContext` for `OnReceive`                                                                                                   |
-| `grain_context_pool.go`       | Sharded lock-free pool for `GrainContext` and Tell ack channels. See [Grain sibling](/architecture/context-pools#grain-sibling). |
-| `grain_identity.go`           | `GrainIdentity` with memoised validation (hot-path allocation fix)                                                               |
-| `grain_mailbox.go`            | Grain-specific mailbox with system-message priorities                                                                            |
-| `grain_props.go`              | `GrainProps` passed to `OnActivate` / `OnDeactivate`                                                                             |
-| `grain_option.go`             | Grain activation options                                                                                                         |
-| `grain_activation_barrier.go` | Barrier for grain activation during cluster events                                                                               |
+- **grain.go**: `Grain` interface.
+- **grain_of.go**: `GrainOf[T]` generic, factory-free grain activation entry point.
+- **grain_engine.go**: Grain activation, routing, passivation.
+- **grain_pid.go**: `grainPID`: `PID` variant for virtual actors; implements `schedulable`.
+- **grain_context.go**: `GrainContext` for `OnReceive`.
+- **grain_context_pool.go**: Sharded lock-free pool for `GrainContext` and Tell ack channels. See
+  [Grain sibling](/architecture/context-pools#grain-sibling).
+- **grain_identity.go**: `GrainIdentity` with memoised validation (hot-path allocation fix).
+- **grain_mailbox.go**: Grain-specific mailbox with system-message priorities.
+- **grain_props.go**: `GrainProps` passed to `OnActivate` / `OnDeactivate`.
+- **grain_option.go**: Grain activation options.
+- **grain_activation_barrier.go**: Barrier for grain activation during cluster events.
 
 ### CRDT replicator
 
-| File            | Purpose                                                                                      |
-| --------------- | -------------------------------------------------------------------------------------------- |
-| `replicator.go` | CRDT Replicator system actor: local store, delta publish/merge, anti-entropy, cross-DC flush |
+- **replicator.go**: CRDT Replicator system actor: local store, delta publish/merge, anti-entropy, cross-DC flush.
 
 ## `crdt/`
 
-Pure CRDT data types and replication configuration: **no** import of `actor`. User and Replicator code interact via `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository [`architecture/CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md).
+Pure CRDT data types and replication configuration: **no** import of `actor`. User and Replicator code interact via
+`crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository
+[`architecture/CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md).
 
-| File                                                                                                    | Purpose                                                                    |
-| ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `crdt.go`, `key.go`                                                                                     | `ReplicatedData`, keys, `DataType`                                         |
-| `config.go`, `consistency.go`                                                                           | `Config`, options, optional read/write coordination                        |
-| `messages.go`                                                                                           | Replicator messages (`Get`, `Update`, `Subscribe`, `Delete`, `Changed`, …) |
-| `gcounter.go`, `pncounter.go`, `lww_register.go`, `mv_register.go`, `or_set.go`, `or_map.go`, `flag.go` | CRDT implementations                                                       |
+- **crdt.go**, **key.go**: `ReplicatedData`, keys, `DataType`.
+- **config.go**, **consistency.go**: `Config`, options, optional read/write coordination.
+- **messages.go**: Replicator messages (`Get`, `Update`, `Subscribe`, `Delete`, `Changed`, …).
+- **gcounter.go**, **pncounter.go**, `lww_register.go`, `mv_register.go`, `or_set.go`, `or_map.go`, **flag.go**: CRDT
+  implementations.
 
 ## `stream/`
 
-Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure. See [Streams](/advanced/streams) and the repository [`architecture/REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md).
+Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure.
+See [Streams](/advanced/streams) and the repository
+[`architecture/REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md).
 
-| File                                                                                  | Purpose                                                |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `stream.go`, `graph.go`, `graph_builder.go`, `pipeline.go`, `materializer.go`         | Graph construction and `Run`                           |
-| `source.go`, `flow.go`, `sink.go`                                                     | Stream building blocks                                 |
-| `handle.go`, `metrics.go`, `tracer.go`                                                | `StreamHandle`, metrics, per-stage tracing hooks       |
-| `protocol.go`, `queue.go`, `overflow.go`                                              | Wire protocol, GC-safe FIFO queue, overflow strategies |
-| `config.go`, `errors.go`                                                              | Stage configuration and sentinel errors                |
-| `stage_source.go`, `stage_flow.go`, `stage_sink.go`                                   | Stage actor implementations                            |
-| `stage_balance.go`, `stage_broadcast.go`, `stage_parallel.go`, `stage_coordinator.go` | Fan-in/fan-out, parallel map, stream coordinator       |
+- **stream.go**, **graph.go**, `graph_builder.go`, **pipeline.go**, **materializer.go**: Graph construction and `Run`.
+- **source.go**, **flow.go**, **sink.go**: Stream building blocks.
+- **handle.go**, **metrics.go**, **tracer.go**: `StreamHandle`, metrics, per-stage tracing hooks.
+- **protocol.go**, **queue.go**, **overflow.go**: Wire protocol, GC-safe FIFO queue, overflow strategies.
+- **config.go**, **errors.go**: Stage configuration and sentinel errors.
+- **stage_source.go**, **stage_flow.go**, **stage_sink.go**: Stage actor implementations.
+- **stage_balance.go**, **stage_broadcast.go**, **stage_parallel.go**, **stage_coordinator.go**: Fan-in/fan-out,
+  parallel map, stream coordinator.
 
 ## `remote/`
 
-Configuration, serializers, and wire helpers for the remoting layer. The remoting server lives at `actor/remote_server.go`; the remoting client lives at `internal/remoteclient/`.
+Configuration, serializers, and wire helpers for the remoting layer. The remoting server lives at
+`actor/remote_server.go`; the remoting client lives at `internal/remoteclient/`.
 
-| File                     | Purpose                                                      |
-| ------------------------ | ------------------------------------------------------------ |
-| `config.go`, `option.go` | Remoting `Config`: host, port, TLS, compression, batching, … |
-| `serializer.go`          | `Serializer` interface and registry                          |
-| `proto_serializer.go`    | Default protobuf serializer                                  |
-| `cbor_serializer.go`     | CBOR serializer for non-proto messages                       |
-| `compression.go`         | Message compression (gzip, brotli, zstd)                     |
-| `context_propagator.go`  | Context metadata propagation across remote calls             |
-| `peer.go`                | Remote peer addressing                                       |
-| `spawn_request.go`       | Remote spawn request payload                                 |
-| `grain_request.go`       | Remote grain request payload                                 |
-| `actor_state.go`         | Actor state for relocation                                   |
+- **config.go**, **option.go**: Remoting `Config`: host, port, TLS, compression, batching, ….
+- **serializer.go**: `Serializer` interface and registry.
+- **proto_serializer.go**: Default protobuf serializer.
+- **cbor_serializer.go**: CBOR serializer for non-proto messages.
+- **compression.go**: Message compression (gzip, brotli, zstd).
+- **context_propagator.go**: Context metadata propagation across remote calls.
+- **peer.go**: Remote peer addressing.
+- **spawn_request.go**: Remote spawn request payload.
+- **grain_request.go**: Remote grain request payload.
+- **actor_state.go**: Actor state for relocation.
 
 ## `discovery/`
 
 Pluggable service discovery. Each sub-package implements `discovery.Provider`:
 
-| Provider       | Backend                                                 |
-| -------------- | ------------------------------------------------------- |
-| `consul/`      | HashiCorp Consul                                        |
-| `etcd/`        | etcd v3                                                 |
-| `kubernetes/`  | Kubernetes API (headless services, pod labels)          |
-| `nats/`        | NATS                                                    |
-| `mdns/`        | Multicast DNS (local network)                           |
-| `dnssd/`       | DNS Service Discovery                                   |
-| `selfmanaged/` | Gossip-based peer discovery over the cluster memberlist |
-| `static/`      | Hard-coded peer list                                    |
+- **consul/**: HashiCorp Consul.
+- **etcd/**: etcd v3.
+- **kubernetes/**: Kubernetes API (headless services, pod labels).
+- **nats/**: NATS.
+- **mdns/**: Multicast DNS (local network).
+- **dnssd/**: DNS Service Discovery.
+- **selfmanaged/**: Gossip-based peer discovery over the cluster memberlist.
+- **static/**: Hard-coded peer list.
 
 ## `datacenter/`
 
-| File                 | Purpose                               |
-| -------------------- | ------------------------------------- |
-| `data_center.go`     | DataCenter metadata; DataCenterRecord |
-| `config.go`          | Datacenter configuration              |
-| `control_plane.go`   | ControlPlane interface                |
-| `controlplane/nats/` | NATS JetStream control plane          |
-| `controlplane/etcd/` | etcd control plane                    |
+- **data_center.go**: DataCenter metadata; DataCenterRecord.
+- **config.go**: Datacenter configuration.
+- **control_plane.go**: ControlPlane interface.
+- **controlplane/nats/**: NATS JetStream control plane.
+- **controlplane/etcd/**: etcd control plane.
 
 ## `client/`
 
 Standalone cluster client for callers outside the actor system. See [Client](/advanced/client) for full documentation.
 
-| File             | Purpose                                                           |
-| ---------------- | ----------------------------------------------------------------- |
-| `client.go`      | `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop               |
-| `option.go`      | `Option` for `NewClient` (balancer strategy, refresh interval)    |
-| `node.go`        | `Node`: cluster-member endpoint; `WithRemoteConfig`, `WithWeight` |
-| `balancer.go`    | `Balancer` interface                                              |
-| `round_robin.go` | Round-robin node selection                                        |
-| `random.go`      | Random node selection                                             |
-| `least_load.go`  | Least-loaded node selection                                       |
+- **client.go**: `Client`: Tell, Ask, Spawn, SendSync, ReSpawn, Stop.
+- **option.go**: `Option` for `NewClient` (balancer strategy, refresh interval).
+- **node.go**: `Node`: cluster-member endpoint; `WithRemoteConfig`, `WithWeight`.
+- **balancer.go**: `Balancer` interface.
+- **round_robin.go**: Round-robin node selection.
+- **random.go**: Random node selection.
+- **least_load.go**: Least-loaded node selection.
 
 ## Internal packages
 
-| Package                          | Purpose                                                                    |
-| -------------------------------- | -------------------------------------------------------------------------- |
-| `internal/address/`              | Address type; parsing, formatting, path operations                         |
-| `internal/cluster/`              | Cluster membership, Olric, actor/grain registry, peer state store          |
-| `internal/remoteclient/`         | TCP client for remoting; connection pooling, proto frames, send coalescing |
-| `internal/net/`                  | TCP server, client, frame protocol, compression                            |
-| `internal/codec/`                | Protobuf marshal/unmarshal; CRDT key helpers for wire types                |
-| `internal/ddata/`                | CRDT snapshots (BoltDB), `crdt_codec`, `crdt_serializer`                   |
-| `internal/commands/`             | Command types for lifecycle (AsyncRequest, AsyncResponse, etc.)            |
-| `internal/datacentercontroller/` | DC controller; registers DC, heartbeats, cache refresh                     |
-| `internal/types/`                | Registry interface; type name → factory for remote spawn                   |
-| `internal/memberlist/`           | Hashicorp Memberlist wrapper (TLS transport)                               |
-| `internal/chain/`                | Middleware-style chain execution                                           |
-| `internal/future/`               | Future/promise for Ask async delivery                                      |
-| `internal/timer/`                | Timer pool for timeouts                                                    |
-| `internal/ticker/`               | Ticker abstraction                                                         |
-| `internal/pause/`                | Cooperative pause primitive                                                |
-| `internal/duration/`             | Duration helpers                                                           |
-| `internal/locker/`               | Keyed lock / named mutex helpers                                           |
-| `internal/quorum/`               | Quorum computation for cluster writes/reads                                |
-| `internal/queue/`                | General-purpose queue primitives (distinct from `stream/queue.go`)         |
-| `internal/id/`                   | Unique ID generation                                                       |
-| `internal/size/`                 | Byte-size parsing and formatting                                           |
-| `internal/strconvx/`             | Extended string-conversion helpers                                         |
-| `internal/xsync/`                | Atomic maps, extended sync primitives                                      |
-| `internal/validation/`           | Fluent validation helpers                                                  |
-| `internal/pointer/`              | Generic pointer utilities                                                  |
-| `internal/metric/`               | OpenTelemetry metrics (includes Replicator instruments)                    |
-| `internal/chunk/`                | Chunking utilities (e.g. for relocation allocation)                        |
-| `internal/slices/`               | Slice utilities (Filter, etc.)                                             |
-| `internal/internalpb/`           | Generated protobuf Go code (wire types)                                    |
+- **internal/address/**: Address type; parsing, formatting, path operations.
+- **internal/cluster/**: Cluster membership, Olric, actor/grain registry, peer state store.
+- **internal/remoteclient/**: TCP client for remoting; connection pooling, proto frames, send coalescing.
+- **internal/net/**: TCP server, client, frame protocol, compression.
+- **internal/codec/**: Protobuf marshal/unmarshal; CRDT key helpers for wire types.
+- **internal/ddata/**: CRDT snapshots (BoltDB), `crdt_codec`, `crdt_serializer`.
+- **internal/commands/**: Command types for lifecycle (AsyncRequest, AsyncResponse, etc.).
+- **internal/datacentercontroller/**: DC controller; registers DC, heartbeats, cache refresh.
+- **internal/types/**: Registry interface; type name → factory for remote spawn.
+- **internal/memberlist/**: Hashicorp Memberlist wrapper (TLS transport).
+- **internal/chain/**: Middleware-style chain execution.
+- **internal/future/**: Future/promise for Ask async delivery.
+- **internal/timer/**: Timer pool for timeouts.
+- **internal/ticker/**: Ticker abstraction.
+- **internal/pause/**: Cooperative pause primitive.
+- **internal/duration/**: Duration helpers.
+- **internal/locker/**: Keyed lock / named mutex helpers.
+- **internal/quorum/**: Quorum computation for cluster writes/reads.
+- **internal/queue/**: General-purpose queue primitives (distinct from `stream/queue.go`).
+- **internal/id/**: Unique ID generation.
+- **internal/size/**: Byte-size parsing and formatting.
+- **internal/strconvx/**: Extended string-conversion helpers.
+- **internal/xsync/**: Atomic maps, extended sync primitives.
+- **internal/validation/**: Fluent validation helpers.
+- **internal/pointer/**: Generic pointer utilities.
+- **internal/metric/**: OpenTelemetry metrics (includes Replicator instruments).
+- **internal/chunk/**: Chunking utilities (e.g. for relocation allocation).
+- **internal/slices/**: Slice utilities (Filter, etc.).
+- **internal/internalpb/**: Generated protobuf Go code (wire types).
 
 ## `protos/`
 
-```
+```text protos/
 protos/
 ├── internal/   ← Wire types (cluster, remoting, actor, grain, datacenter, crdt, …)
 └── test/       ← Test fixture proto messages
@@ -268,22 +247,27 @@ protos/
 
 ## Dependency summary
 
-| Package            | Depends on                                                                                                                                                              |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `actor`            | `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `crdt`, `supervisor`, `passivation`, `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*` |
-| `remote`           | `internal/net`, `internal/codec`                                                                                                                                        |
-| `internal/cluster` | `discovery`, `internal/memberlist`, `hash`                                                                                                                              |
-| `client`           | `remote`, `internal/address`                                                                                                                                            |
-| `stream`           | `actor`                                                                                                                                                                 |
+- **actor**: `remote`, `internal/cluster`, `discovery/*`, `datacenter`, `crdt`, `supervisor`, `passivation`,
+  `reentrancy`, `eventstream`, `extension`, `log`, `errors`, `internal/*`.
+- **remote**: `internal/net`, `internal/codec`.
+- **internal/cluster**: `discovery`, `internal/memberlist`, `hash`.
+- **client**: `remote`, `internal/address`.
+- **stream**: `actor`.
 
-`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, `hash`, `breaker`, `memory`, `tls`, and **`crdt`** are **leaf packages**: they depend on nothing else in this repository.
+`log`, `errors`, `extension`, `eventstream`, `supervisor`, `passivation`, `reentrancy`, `hash`, `breaker`, `memory`,
+`tls`, and **`crdt`** are **leaf packages**: they depend on nothing else in this repository.
 
 ## See also
 
 - [Architecture Overview](/architecture/overview)
 - [Dispatcher Pool](/architecture/dispatcher-pool): the scheduler every actor and grain runs on
-- [Context Pools](/architecture/context-pools): sharded `ReceiveContext` / `GrainContext` recycling on the messaging hot path
+- [Context Pools](/architecture/context-pools): sharded `ReceiveContext` / `GrainContext` recycling on the messaging hot
+  path
 - [Design Decisions](/architecture/design-decisions): rationale for architectural choices
 - [Streams](/advanced/streams): reactive pipelines on actors
 - [Distributed data](/advanced/distributed-data): CRDTs and the Replicator
-- Repository design docs: [`architecture/ARCHITECTURE.md`](https://github.com/tochemey/goakt/blob/main/architecture/ARCHITECTURE.md), [`CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md), [`DISPATCHER_POOL_DESIGN.md`](https://github.com/tochemey/goakt/blob/main/architecture/DISPATCHER_POOL_DESIGN.md), [`REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md)
+- Repository design docs:
+  [`architecture/ARCHITECTURE.md`](https://github.com/tochemey/goakt/blob/main/architecture/ARCHITECTURE.md),
+  [`CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md),
+  [`DISPATCHER_POOL_DESIGN.md`](https://github.com/tochemey/goakt/blob/main/architecture/DISPATCHER_POOL_DESIGN.md),
+  [`REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md)

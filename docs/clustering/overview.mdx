@@ -8,13 +8,13 @@ sidebarTitle: "Overview"
 
 A GoAkt actor system runs in one of two modes:
 
-| Mode           | What it gives you                                                                          | Setup                                        |
-| -------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------- |
-| **Standalone** | Single-process actor system; all messaging is in-process                                   | `NewActorSystem` + `Start`, no extra options |
-| **Clustered**  | Multi-node membership: location transparency, distribution, relocation, cluster singletons | `WithRemote` + `WithCluster`                 |
+- **Standalone**: What it gives you: Single-process actor system; all messaging is in-process. Setup: `NewActorSystem` +
+  `Start`, no extra options.
+- **Clustered**: What it gives you: Multi-node membership: location transparency, distribution, relocation, cluster
+  singletons. Setup: `WithRemote` + `WithCluster`.
 
-Remoting can also be enabled without clustering for point-to-point messaging between known nodes. That middle ground
-(no membership, no registry, no relocation) is covered in [Remoting](/advanced/remoting).
+Remoting can also be enabled without clustering for point-to-point messaging between known nodes. That middle ground (no
+membership, no registry, no relocation) is covered in [Remoting](/advanced/remoting).
 
 ## Standalone mode
 
@@ -35,8 +35,8 @@ Limitations:
 In clustered mode, multiple nodes form a cluster. Actors and grains are location-transparent: you send to a PID or a
 grain identity, and the framework routes to the correct node. Three components make that work:
 
-- **Discovery**: a pluggable provider (Consul, etcd, Kubernetes, NATS, mDNS, static) that tells the cluster how to
-  find peers. See [Service Discovery](/clustering/service-discovery).
+- **Discovery**: a pluggable provider (Consul, etcd, Kubernetes, NATS, mDNS, static) that tells the cluster how to find
+  peers. See [Service Discovery](/clustering/service-discovery).
 - **Cluster registry**: a distributed, partitioned key/value store (built on Olric) that records where every actor and
   grain lives. See [Partition Hashing](/clustering/partition-hashing).
 - **Remoting**: the TCP transport that carries messages between nodes. See [Remoting](/advanced/remoting).
@@ -55,7 +55,7 @@ Cluster mode has four hard requirements, all checked at start or by configuratio
 4. **At least one registered actor kind or grain kind**, set with `WithKinds` or `WithGrains`, so remote spawns,
    activations, and relocations can instantiate workloads on this node.
 
-```go
+```go Enabling cluster mode
 remoteConfig := remote.NewConfig("0.0.0.0", 4041)
 
 clusterConfig := actor.NewClusterConfig().
@@ -81,93 +81,97 @@ if err := system.Start(ctx); err != nil {
 
 Each node listens on three ports:
 
-| Port           | Set with            | Carries                                |
-| -------------- | ------------------- | -------------------------------------- |
-| Remoting port  | `remote.NewConfig`  | Actor and grain messages between nodes |
-| Discovery port | `WithDiscoveryPort` | Gossip and membership traffic          |
-| Peers port     | `WithPeersPort`     | Cluster registry replication           |
+- **Remoting port**: Set with: `remote.NewConfig`. Carries: Actor and grain messages between nodes.
+- **Discovery port**: Set with: `WithDiscoveryPort`. Carries: Gossip and membership traffic.
+- **Peers port**: Set with: `WithPeersPort`. Carries: Cluster registry replication.
 
 <Note>
-TLS configured on the actor system with `actor.WithTLS` applies to both remoting and the cluster transport. See
-[Remoting](/advanced/remoting) for certificate requirements.
+  TLS configured on the actor system with `actor.WithTLS` applies to both remoting and the cluster transport. See
+  [Remoting](/advanced/remoting) for certificate requirements.
 </Note>
 
 ## Configuration reference
 
-`NewClusterConfig` returns a configuration with working defaults; only the four requirements above must be provided.
-The options below are grouped by concern.
+`NewClusterConfig` returns a configuration with working defaults; only the four requirements above must be provided. The
+options below are grouped by concern.
 
 ### Workload and topology
 
-| Option                       | Default  | Purpose                                                                                                                                                                 |
-| ---------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithKinds`                  | none     | Registers actor kinds this node can host (remote spawn, relocation).                                                                                                    |
-| `WithGrains`                 | none     | Registers grain kinds this node can host (remote activation, recreation, relocation).                                                                                   |
-| `WithRoles`                  | none     | Advertises node roles for role-constrained [placement](/clustering/placement). Duplicates are removed; order is not meaningful.                                         |
-| `WithGrainActivationBarrier` | disabled | Delays grain activations until the minimum peers quorum is reached, or until `d` elapses. `0` waits indefinitely. Reduces churn during startup and rolling deployments. |
-| `WithDataCenter`             | disabled | Enables the multi-DC control plane. See [Multi Datacenter](/clustering/multi-datacenter).                                                                               |
-| `WithCRDT`                   | disabled | Enables CRDT replication through a Replicator system actor. Without it there is zero CRDT overhead. See [Distributed Data](/advanced/distributed-data).                 |
+- **WithKinds**: Registers actor kinds this node can host (remote spawn, relocation). Default: none.
+- **WithGrains**: Registers grain kinds this node can host (remote activation, recreation, relocation). Default: none.
+- **WithRoles**: Advertises node roles for role-constrained [placement](/clustering/placement). Duplicates are removed;
+  order is not meaningful. Default: none.
+- **WithGrainActivationBarrier**: Delays grain activations until the minimum peers quorum is reached, or until `d`
+  elapses. `0` waits indefinitely. Reduces churn during startup and rolling deployments. Default: disabled.
+- **WithDataCenter**: Enables the multi-DC control plane. See [Multi Datacenter](/clustering/multi-datacenter). Default:
+  disabled.
+- **WithCRDT**: Enables CRDT replication through a Replicator system actor. Without it there is zero CRDT overhead. See
+  [Distributed Data](/advanced/distributed-data). Default: disabled.
 
 ### Registry replication and storage
 
 The cluster registry is partitioned across nodes and replicated per partition. These knobs control durability,
 consistency, and memory footprint.
 
-| Option                   | Default | Purpose                                                                                                                                   |
-| ------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithPartitionCount`     | 271     | Number of registry partitions. Should be a prime number. See [Partition Hashing](/clustering/partition-hashing).                          |
-| `WithPartitionHasher`    | xxh3    | Hash mapping names and identities to partitions. Must be identical, deterministic, and stable on every node.                              |
-| `WithReplicaCount`       | 2       | Copies kept of each partition. The default survives one node loss. Use 3 to tolerate two concurrent losses.                               |
-| `WithWriteQuorum`        | 1       | Replicas that must acknowledge a registry write. Must be `>= 1` and `<= replicaCount`.                                                    |
-| `WithReadQuorum`         | 1       | Replicas consulted per registry read. Must be `>= 1` and `<= replicaCount`.                                                               |
-| `WithMinimumPeersQuorum` | 1       | Members required before the cluster serves operations. Also the quorum the grain activation barrier waits for. Keep it `<= replicaCount`. |
-| `WithTableSize`          | 4 MB    | In-memory size of the registry key/value store on this node.                                                                              |
+- **WithPartitionCount**: Number of registry partitions. Should be a prime number. See
+  [Partition Hashing](/clustering/partition-hashing). Default: 271.
+- **WithPartitionHasher**: Hash mapping names and identities to partitions. Must be identical, deterministic, and stable
+  on every node. Default: xxh3.
+- **WithReplicaCount**: Copies kept of each partition. The default survives one node loss. Use 3 to tolerate two
+  concurrent losses. Default: 2.
+- **WithWriteQuorum**: Replicas that must acknowledge a registry write. Must be `>= 1` and `<= replicaCount`.
+  Default: 1.
+- **WithReadQuorum**: Replicas consulted per registry read. Must be `>= 1` and `<= replicaCount`. Default: 1.
+- **WithMinimumPeersQuorum**: Members required before the cluster serves operations. Also the quorum the grain
+  activation barrier waits for. Keep it `<= replicaCount`. Default: 1.
+- **WithTableSize**: In-memory size of the registry key/value store on this node. Default: 4 MB.
 
 <Warning>
-`WithReplicaCount(1)` keeps no backups: registry partitions owned by a crashed node are lost with it, crash recovery
-silently misses the affected records, and the actor system logs a startup warning. Keep the default of 2 or higher in
-production.
+  `WithReplicaCount(1)` keeps no backups: registry partitions owned by a crashed node are lost with it, crash recovery
+  silently misses the affected records, and the actor system logs a startup warning. Keep the default of 2 or higher in
+  production.
 </Warning>
 
 The classic read-your-writes guideline (`readQuorum + writeQuorum > replicaCount`) is not enforced, and the default
 (`replicaCount=2` with both quorums at 1) deliberately does not follow it: the registry is rebuildable, single
-activation is arbitrated by the partition's primary owner rather than by quorum overlap, and quorums of 1 keep
-registry writes succeeding while a node is down. For a majority configuration, use `replicaCount=3` with
-`writeQuorum=2` and `readQuorum=2`, accepting higher write latency and fan-out.
+activation is arbitrated by the partition's primary owner rather than by quorum overlap, and quorums of 1 keep registry
+writes succeeding while a node is down. For a majority configuration, use `replicaCount=3` with `writeQuorum=2` and
+`readQuorum=2`, accepting higher write latency and fan-out.
 
 ### Timing
 
-| Option                         | Default | Purpose                                                                                                                                            |
-| ------------------------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithWriteTimeout`             | 1s      | Maximum duration of a registry write before it fails.                                                                                              |
-| `WithReadTimeout`              | 1s      | Maximum duration of a registry read before it fails.                                                                                               |
-| `WithBootstrapTimeout`         | 10s     | Maximum wait for cluster formation during `Start`; the system fails to start when it elapses.                                                      |
-| `WithShutdownTimeout`          | 3m      | Maximum duration of a graceful cluster shutdown.                                                                                                   |
-| `WithClusterStateSyncInterval` | 1m      | How often nodes synchronize routing tables. Keep it greater than the write timeout.                                                                |
-| `WithClusterBalancerInterval`  | 1s      | How often the balancer evaluates placement and acknowledges rebalance epochs. Keep it shorter than the state sync interval so epochs do not stack. |
+- **WithWriteTimeout**: Maximum duration of a registry write before it fails. Default: 1s.
+- **WithReadTimeout**: Maximum duration of a registry read before it fails. Default: 1s.
+- **WithBootstrapTimeout**: Maximum wait for cluster formation during `Start`; the system fails to start when it
+  elapses. Default: 10s.
+- **WithShutdownTimeout**: Maximum duration of a graceful cluster shutdown. Default: 3m.
+- **WithClusterStateSyncInterval**: How often nodes synchronize routing tables. Keep it greater than the write timeout.
+  Default: 1m.
+- **WithClusterBalancerInterval**: How often the balancer evaluates placement and acknowledges rebalance epochs. Keep it
+  shorter than the state sync interval so epochs do not stack. Default: 1s.
 
 Recommended starting points: small and medium clusters run well with a 1s to 5s balancer interval and 30s to 1m state
 sync; large or busy clusters should increase both together (for example 5s balancer with 1m to 2m state sync).
 
 ## Registry consistency
 
-Actor and grain creation is synchronous with respect to the cluster registry: `Spawn`, `SpawnOn`, `SpawnSingleton`,
-and grain activation only return once the registry record is written to the cluster store. As soon as a creation call
-succeeds, the actor is resolvable by name (for example via `ActorOf`) and reachable from any node in the cluster,
-with no propagation window to retry around. When the registry write fails, the creation call returns the error and
-the actor or grain is stopped, so a failed creation leaves nothing behind.
+Actor and grain creation is synchronous with respect to the cluster registry: `Spawn`, `SpawnOn`, `SpawnSingleton`, and
+grain activation only return once the registry record is written to the cluster store. As soon as a creation call
+succeeds, the actor is resolvable by name (for example via `ActorOf`) and reachable from any node in the cluster, with
+no propagation window to retry around. When the registry write fails, the creation call returns the error and the actor
+or grain is stopped, so a failed creation leaves nothing behind.
 
 ## Placement
 
 Where a new actor or grain lands is controlled at spawn or activation time through placement strategies (round robin,
-random, local, least load) and node roles. See [Placement](/clustering/placement) for the strategies, role
-constraints, and defaults for both actors and grains.
+random, local, least load) and node roles. See [Placement](/clustering/placement) for the strategies, role constraints,
+and defaults for both actors and grains.
 
 ## Relocation
 
 When a node leaves, the leader relocates its actors and grains to remaining nodes. Singleton actors move to the leader;
-others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](/actor/relocation) for
-the full flow, configuration, and relocatability requirements.
+others are distributed. Actors can opt out of relocation via spawn options. See [Relocation](/actor/relocation) for the
+full flow, configuration, and relocatability requirements.
 
 ## Leadership
 
@@ -175,14 +179,12 @@ Exactly one node in the cluster acts as the coordinator (leader) at any given ti
 responsibilities such as relocation and cluster singleton placement, but its status is also queryable from application
 code:
 
-| Method                 | Purpose                                                            |
-| ---------------------- | ------------------------------------------------------------------ |
-| `ActorSystem.IsLeader` | Reports whether the local node is the current cluster coordinator. |
-| `ActorSystem.Leader`   | Returns the `*remote.Peer` describing the current cluster leader.  |
+- **ActorSystem.IsLeader**: Reports whether the local node is the current cluster coordinator.
+- **ActorSystem.Leader**: Returns the `*remote.Peer` describing the current cluster leader.
 
 Both methods require cluster mode; they return `ErrClusterDisabled` when clustering is not enabled.
 
-```go
+```go Leadership
 isLeader, err := system.IsLeader(ctx)
 if err != nil {
     return err
@@ -192,12 +194,12 @@ if isLeader {
 }
 ```
 
-Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its
-local [event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`, carrying the new leader's
-address. Like the other topology events, it exists for observability (monitoring, logging, dashboards); leadership
-itself is managed entirely by the framework.
+Whenever the cluster coordinator moves to a different node, every node publishes a `LeaderChanged` event on its local
+[event stream](/advanced/event-streams), alongside `NodeJoined` and `NodeLeft`, carrying the new leader's address. Like
+the other topology events, it exists for observability (monitoring, logging, dashboards); leadership itself is managed
+entirely by the framework.
 
-```go
+```go Leadership
 for msg := range subscriber.Iterator() {
     if leaderChanged, ok := msg.Payload().(*actor.LeaderChanged); ok {
         log.Printf("cluster leader is now %s", leaderChanged.Address())
@@ -206,11 +208,10 @@ for msg := range subscriber.Iterator() {
 ```
 
 <Note>
-`LeaderChanged` is eventually consistent. It is derived from cluster topology events, so it is published once
-per leadership change shortly after the cluster settles, and the node's initial leadership is seeded silently
-rather than announced. Delivery is best-effort and may be missed under heavy event churn. Treat it as a
-notification, not a source of truth. When you need the authoritative current leader, call `IsLeader(ctx)` or
-`Leader(ctx)`.
+  `LeaderChanged` is eventually consistent. It is derived from cluster topology events, so it is published once per
+  leadership change shortly after the cluster settles, and the node's initial leadership is seeded silently rather than
+  announced. Delivery is best-effort and may be missed under heavy event churn. Treat it as a notification, not a source
+  of truth. When you need the authoritative current leader, call `IsLeader(ctx)` or `Leader(ctx)`.
 </Note>
 
 ## See also

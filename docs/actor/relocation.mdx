@@ -4,18 +4,25 @@ description: Automatic actor migration when nodes leave the cluster.
 sidebarTitle: "Relocation"
 ---
 
-**Relocation** is the automatic migration of actors and grains from a node that has left the cluster to the remaining live nodes. Whether a node shuts down **gracefully** or **crashes**, its relocatable actors and grains are recreated on other nodes so the cluster remains available.
+**Relocation** is the automatic migration of actors and grains from a node that has left the cluster to the remaining
+live nodes. Whether a node shuts down **gracefully** or **crashes**, its relocatable actors and grains are recreated on
+other nodes so the cluster remains available.
 
 <Note>
-  Relocation works for both graceful and abrupt departures. On a graceful shutdown the departing node replicates a `PeerState` snapshot to its oldest peers. On a crash (`kill -9`, OOM, network partition) that snapshot never gets written, so the leader instead reconstructs the departed node's relocation set from the replicated cluster registry. Actors spawned with `WithRelocationDisabled` are still lost with the node either way.
+  Relocation works for both graceful and abrupt departures. On a graceful shutdown the departing node replicates a
+  `PeerState` snapshot to its oldest peers. On a crash (`kill -9`, OOM, network partition) that snapshot never gets
+  written, so the leader instead reconstructs the departed node's relocation set from the replicated cluster registry.
+  Actors spawned with `WithRelocationDisabled` are still lost with the node either way.
 </Note>
 
 ## When relocation happens
 
 Relocation is triggered when:
 
-1. **A node leaves the cluster**: The cluster membership layer (Hashicorp Memberlist) detects the departure and emits a `NodeLeft` event.
-2. **The departed node had relocatable actors or grains**: Only actors spawned with relocation enabled (the default) and grains without `WithGrainDisableRelocation` are eligible.
+1. **A node leaves the cluster**: The cluster membership layer (Hashicorp Memberlist) detects the departure and emits a
+   `NodeLeft` event.
+2. **The departed node had relocatable actors or grains**: Only actors spawned with relocation enabled (the default) and
+   grains without `WithGrainDisableRelocation` are eligible.
 
 Relocation does **not** run in standalone mode; it requires cluster mode and remoting.
 
@@ -52,17 +59,39 @@ sequenceDiagram
 
 ### Key steps
 
-1. **preShutdown**: When a node stops, it builds a `PeerState` snapshot of all relocatable actors and grains. Actors with `WithRelocationDisabled` and grains with `WithGrainDisableRelocation` are excluded.
-2. **persistPeerStateToPeers**: Before leaving membership, the node replicates its `PeerState` to **up to 3 oldest** cluster peers via RPC (not all remaining peers). The implementation uses `selectOldestPeers(3)` to pick the three oldest nodes by `CreatedAt`; if fewer than 3 peers exist, it replicates to all. Replication returns successfully as soon as **2-of-3** peers acknowledge (quorum); remaining RPCs are cancelled. Each peer stores the state in its local cluster store (e.g. BoltDB). The oldest peers are chosen because leadership is determined by node age (the oldest nodes are most likely to remain or become leader when the departing node leaves), so the new leader will have the state when it handles `NodeLeft`.
-3. **cleanupCluster**: The departing node removes its actors and grains from the cluster map (Olric). This runs after persist and before leaving membership.
-4. **NodeLeft**: The cluster emits a `NodeLeft` event. The **leader** node handles it: it fetches the departed node's `PeerState` from its local cluster store (the leader must have been one of the up-to-3 peers that received the state). If no snapshot is found (the usual case for a crash), the leader instead **derives the relocation set from the replicated registry** (see [Crash recovery](#crash-recovery) below). Either way it then registers an in-flight relocation job for the departed address and sends a `Rebalance` message to the relocator. A duplicate `NodeLeft` for an address whose relocation is still in flight is ignored; once the relocation completes, a later departure of the same address is rebalanced again.
-5. **Relocation worker**: The relocator spawns a short-lived worker per departed node, so relocations of distinct nodes proceed concurrently. The worker:
-   - Allocates actors: singletons go to the leader; non-singletons are distributed across the leader + eligible peers, honoring each actor's required [role](#role-aware-allocation).
-   - Allocates grains across leader + peers the same way; each target then dispatches on the grain's own relocation intent. **Lazy** grains (the default) are *not* reactivated upfront: the target only cleans their directory entry so the next `TellGrain`/`AskGrain` re-activates them on a live node. **Eager** grains (opted in with `WithGrainEagerRelocation`) are recreated up front like actors.
+1. **preShutdown**: When a node stops, it builds a `PeerState` snapshot of all relocatable actors and grains. Actors
+   with `WithRelocationDisabled` and grains with `WithGrainDisableRelocation` are excluded.
+2. **persistPeerStateToPeers**: Before leaving membership, the node replicates its `PeerState` to **up to 3 oldest**
+   cluster peers via RPC (not all remaining peers). The implementation uses `selectOldestPeers(3)` to pick the three
+   oldest nodes by `CreatedAt`; if fewer than 3 peers exist, it replicates to all. Replication returns successfully as
+   soon as **2-of-3** peers acknowledge (quorum); remaining RPCs are cancelled. Each peer stores the state in its local
+   cluster store (e.g. BoltDB). The oldest peers are chosen because leadership is determined by node age (the oldest
+   nodes are most likely to remain or become leader when the departing node leaves), so the new leader will have the
+   state when it handles `NodeLeft`.
+3. **cleanupCluster**: The departing node removes its actors and grains from the cluster map (Olric). This runs after
+   persist and before leaving membership.
+4. **NodeLeft**: The cluster emits a `NodeLeft` event. The **leader** node handles it: it fetches the departed node's
+   `PeerState` from its local cluster store (the leader must have been one of the up-to-3 peers that received the
+   state). If no snapshot is found (the usual case for a crash), the leader instead **derives the relocation set from
+   the replicated registry** (see [Crash recovery](#crash-recovery) below). Either way it then registers an in-flight
+   relocation job for the departed address and sends a `Rebalance` message to the relocator. A duplicate `NodeLeft` for
+   an address whose relocation is still in flight is ignored; once the relocation completes, a later departure of the
+   same address is rebalanced again.
+5. **Relocation worker**: The relocator spawns a short-lived worker per departed node, so relocations of distinct nodes
+   proceed concurrently. The worker:
+   - Allocates actors: singletons go to the leader; non-singletons are distributed across the leader + eligible peers,
+     honoring each actor's required [role](#role-aware-allocation).
+   - Allocates grains across leader + peers the same way; each target then dispatches on the grain's own relocation
+     intent. **Lazy** grains (the default) are _not_ reactivated upfront: the target only cleans their directory entry
+     so the next `TellGrain`/`AskGrain` re-activates them on a live node. **Eager** grains (opted in with
+     `WithGrainEagerRelocation`) are recreated up front like actors.
    - Handles the leader's share locally (via `SpawnSingleton` for singletons).
-   - Hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request) instead of one RPC per actor. The target node recreates or releases the items and reports failures per item.
-   - Cleans up stale registry entries with gating: an entry is removed only when it still points at the departed node. An entry pointing at a live node means the item was already recreated elsewhere and is skipped.
-6. **Completion**: The worker publishes the outcome, deletes the departed node's state from the cluster store, releases the relocation job, and stops.
+   - Hands each peer its whole share in batched `RelocateBatch` requests (at most 500 items per request) instead of one
+     RPC per actor. The target node recreates or releases the items and reports failures per item.
+   - Cleans up stale registry entries with gating: an entry is removed only when it still points at the departed node.
+     An entry pointing at a live node means the item was already recreated elsewhere and is skipped.
+6. **Completion**: The worker publishes the outcome, deletes the departed node's state from the cluster store, releases
+   the relocation job, and stops.
 
 ## Failure handling
 
@@ -70,56 +99,69 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
 
 - Each batch request is attempted twice with a short backoff before its target peer is considered unreachable.
 - When a peer is unreachable, the unsent remainder of its share is moved once to the next surviving peer.
-- Each individual item (actor respawn, eager grain reactivation, lazy grain release) is retried a bounded number of times with backoff before it counts as failed: relocation runs while the cluster is still digesting a node loss, so registry operations can transiently time out.
-- A failed actor respawn restores the actor's registry record before the failure is reported, so the actor stays visible and recoverable (by a later departure-triggered relocation or the node's own restart reconciliation) instead of being silently erased.
-- Items that still cannot be relocated are reported in a single [`RelocationFailed`](#relocationfailed) event on the event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not listed.
-- A failed lazy-grain release is never reported: it is a cleanup optimization, not an item loss. The directory entry self-heals when the grain is next addressed.
+- Each individual item (actor respawn, eager grain reactivation, lazy grain release) is retried a bounded number of
+  times with backoff before it counts as failed: relocation runs while the cluster is still digesting a node loss, so
+  registry operations can transiently time out.
+- A failed actor respawn restores the actor's registry record before the failure is reported, so the actor stays visible
+  and recoverable (by a later departure-triggered relocation or the node's own restart reconciliation) instead of being
+  silently erased.
+- Items that still cannot be relocated are reported in a single [`RelocationFailed`](#relocationfailed) event on the
+  event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not
+  listed.
+- A failed lazy-grain release is never reported: it is a cleanup optimization, not an item loss. The directory entry
+  self-heals when the grain is next addressed.
 
 <Warning>
-  The relocation handoff uses a batched wire request. During a rolling upgrade,
-  run homogeneous GoAkt versions before triggering topology changes: an older
-  node cannot process the batched request, and its share is then reassigned to
+  The relocation handoff uses a batched wire request. During a rolling upgrade, run homogeneous GoAkt versions before
+  triggering topology changes: an older node cannot process the batched request, and its share is then reassigned to
   another peer or reported as failed.
 </Warning>
 
 ## Relocation events
 
-Every relocation run publishes two events on the [event stream](/advanced/event-streams): `RelocationStarted` when the leader establishes the relocation set, and `RelocationFailed` when items could not be relocated. Subscribe with `ActorSystem.Subscribe()` to observe or react to relocations; both events are cluster mode only.
+Every relocation run publishes two events on the [event stream](/advanced/event-streams): `RelocationStarted` when the
+leader establishes the relocation set, and `RelocationFailed` when items could not be relocated. Subscribe with
+`ActorSystem.Subscribe()` to observe or react to relocations; both events are cluster mode only.
 
 ### RelocationStarted
 
-Published by the leader whenever it starts relocating a departed node's actors and grains, for graceful shutdowns and crashes alike.
+Published by the leader whenever it starts relocating a departed node's actors and grains, for graceful shutdowns and
+crashes alike.
 
-| Accessor     | Returns                                                       |
-| ------------ | ------------------------------------------------------------- |
-| `Address`    | Address of the departed node whose items are being relocated. |
-| `Timestamp`  | When the relocation set was established.                      |
-| `Actors`     | Actor names in the relocation set (may be empty).             |
-| `Grains`     | Grain IDs in the relocation set (may be empty).               |
-| `BestEffort` | How the relocation set was obtained (see below).              |
+- **Address**: returns address of the departed node whose items are being relocated.
+- **Timestamp**: returns when the relocation set was established.
+- **Actors**: returns actor names in the relocation set (may be empty).
+- **Grains**: returns grain IDs in the relocation set (may be empty).
+- **BestEffort**: returns how the relocation set was obtained (see below).
 
 `BestEffort()` distinguishes the two departure paths:
 
-- **`false` (graceful shutdown)**: the set comes from the `PeerState` snapshot the departed node replicated before leaving, and is complete.
-- **`true` (crash)**: the node left no snapshot, so the set was reconstructed from the replicated cluster registry (see [Crash recovery](#crash-recovery)). Records lost with the crashed node's partitions cannot be listed, so the set may be incomplete even though relocation of the listed items proceeds normally. The event fires even when the reconstructed set is empty, which signals suspected record loss rather than a benign no-op. Subscribers holding an external record of placements can diff it against the listed items to detect and reconcile silent losses.
+- **`false` (graceful shutdown)**: the set comes from the `PeerState` snapshot the departed node replicated before
+  leaving, and is complete.
+- **`true` (crash)**: the node left no snapshot, so the set was reconstructed from the replicated cluster registry (see
+  [Crash recovery](#crash-recovery)). Records lost with the crashed node's partitions cannot be listed, so the set may
+  be incomplete even though relocation of the listed items proceeds normally. The event fires even when the
+  reconstructed set is empty, which signals suspected record loss rather than a benign no-op. Subscribers holding an
+  external record of placements can diff it against the listed items to detect and reconcile silent losses.
 
 ### RelocationFailed
 
-Published when items of a departed node could not be relocated after all retries. It lists exactly the failed items; items that were relocated successfully are never listed.
+Published when items of a departed node could not be relocated after all retries. It lists exactly the failed items;
+items that were relocated successfully are never listed.
 
-| Accessor    | Returns                                                              |
-| ----------- | -------------------------------------------------------------------- |
-| `Address`   | Address of the departed node that triggered the relocation.          |
-| `Timestamp` | When the relocation failure was recorded.                            |
-| `Actors`    | Full addresses of the actors that failed to relocate (may be empty). |
-| `Grains`    | Grain IDs that failed to relocate (may be empty).                    |
-| `Error`     | The underlying error that caused the failure.                        |
+- **Address**: returns address of the departed node that triggered the relocation.
+- **Timestamp**: returns when the relocation failure was recorded.
+- **Actors**: returns full addresses of the actors that failed to relocate (may be empty).
+- **Grains**: returns grain IDs that failed to relocate (may be empty).
+- **Error**: returns the underlying error that caused the failure.
 
-The report is terminal: the relocation run does not revisit failed items. Subscribe to this event to drive your own recovery, for example re-spawning the affected actors, alerting, or adding capacity for a missing [role](#role-aware-allocation).
+The report is terminal: the relocation run does not revisit failed items. Subscribe to this event to drive your own
+recovery, for example re-spawning the affected actors, alerting, or adding capacity for a missing
+[role](#role-aware-allocation).
 
 ### Subscribing
 
-```go
+```go Subscribing
 subscriber, err := system.Subscribe()
 if err != nil {
     return err
@@ -142,59 +184,105 @@ See [Event Streams](/advanced/event-streams) for the full subscriber API and the
 
 ## Actor allocation
 
-| Actor type        | Destination                                        |
-| ----------------- | -------------------------------------------------- |
-| **Singleton**     | Leader node only                                   |
-| **Non-singleton** | Least-loaded eligible target across leader + peers |
+- **Singleton**: Leader node only.
+- **Non-singleton**: Least-loaded eligible target across leader + peers.
 
-Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` are skipped. System actors (e.g. dead letter, scheduler) are never relocated.
+Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` are skipped. System actors (e.g. dead
+letter, scheduler) are never relocated.
 
-Placement is **load-aware**: before distributing the departed node's actors, the leader scans the replicated cluster registry once and seeds each target's "load" with the number of actors it already hosts. The departed node's actors then flow to the nodes that are least loaded *overall*, rather than merely being split evenly among the surviving targets. This prevents a survivor that was already busy (often the leader, which also takes singletons) from being over-assigned. The scan is best-effort: if it fails (e.g. degraded cluster quorum) placement transparently falls back to an even split of the departed node's actors.
+Placement is **load-aware**: before distributing the departed node's actors, the leader scans the replicated cluster
+registry once and seeds each target's "load" with the number of actors it already hosts. The departed node's actors then
+flow to the nodes that are least loaded _overall_, rather than merely being split evenly among the surviving targets.
+This prevents a survivor that was already busy (often the leader, which also takes singletons) from being over-assigned.
+The scan is best-effort: if it fails (e.g. degraded cluster quorum) placement transparently falls back to an even split
+of the departed node's actors.
 
 ### Role-aware allocation
 
-When an actor is spawned with `WithRole`, relocation only considers nodes that advertise that role (the same constraint that governs initial placement). The worker assigns each role-constrained actor to the **least-loaded eligible target** among the leader and surviving peers; role-less actors are eligible everywhere.
+When an actor is spawned with `WithRole`, relocation only considers nodes that advertise that role (the same constraint
+that governs initial placement). The worker assigns each role-constrained actor to the **least-loaded eligible target**
+among the leader and surviving peers; role-less actors are eligible everywhere.
 
-If **no surviving node advertises the required role**, the actor cannot be relocated. It is reported in the `RelocationFailed` event rather than being silently dropped, so you can subscribe and react (add capacity for that role, or relax the constraint). Singletons are always routed to the leader share, where the cluster singleton spawn path re-arbitrates their placement (including any role constraint).
+If **no surviving node advertises the required role**, the actor cannot be relocated. It is reported in the
+`RelocationFailed` event rather than being silently dropped, so you can subscribe and react (add capacity for that role,
+or relax the constraint). Singletons are always routed to the leader share, where the cluster singleton spawn path
+re-arbitrates their placement (including any role constraint).
 
 ## Crash recovery
 
 Relocation does not depend on a clean shutdown. There are two sources for a departed node's relocation set:
 
-1. **Graceful-shutdown snapshot**: the departing node replicated a `PeerState` to its oldest peers before leaving (the steps above).
-2. **Registry-derived set (crash fallback)**: when the leader finds no snapshot for the departed address, it reconstructs the set by scanning the replicated cluster registry for every actor and grain still hosted on that node.
+1. **Graceful-shutdown snapshot**: the departing node replicated a `PeerState` to its oldest peers before leaving (the
+   steps above).
+2. **Registry-derived set (crash fallback)**: when the leader finds no snapshot for the departed address, it
+   reconstructs the set by scanning the replicated cluster registry for every actor and grain still hosted on that node.
 
-To attribute registry records to the crashed node, each node keeps a small cache mapping every peer's **peers address** (`host:peersPort`, carried by the `NodeLeft` event) to its **remoting address** (`host:remotingPort`, how records are keyed). The cache is seeded from membership when clustering starts and refreshed on every `NodeJoined`, so a node observed alive at any point remains resolvable when it later crashes. The derived set contains only **relocatable** actors and the departed node's grains; from there it flows through the exact same worker, gating, and failure-reporting path as the graceful case.
+To attribute registry records to the crashed node, each node keeps a small cache mapping every peer's **peers address**
+(`host:peersPort`, carried by the `NodeLeft` event) to its **remoting address** (`host:remotingPort`, how records are
+keyed). The cache is seeded from membership when clustering starts and refreshed on every `NodeJoined`, so a node
+observed alive at any point remains resolvable when it later crashes. The derived set contains only **relocatable**
+actors and the departed node's grains; from there it flows through the exact same worker, gating, and failure-reporting
+path as the graceful case.
 
-The derivation itself is gated and retried: the leader waits for the cluster's partition repair to go quiet before scanning (bounded, so recovery still proceeds when the repair signal never settles), and a scan that fails transiently (for example on a member that is flapping while the cluster churns) is retried a bounded number of times with backoff before the rebalance is skipped and the loss reported loudly.
+The derivation itself is gated and retried: the leader waits for the cluster's partition repair to go quiet before
+scanning (bounded, so recovery still proceeds when the repair signal never settles), and a scan that fails transiently
+(for example on a member that is flapping while the cluster churns) is retried a bounded number of times with backoff
+before the rebalance is skipped and the loss reported loudly.
 
-A crashed node that **restarts at the same address** (a container restart in place, the common Kubernetes case) is handled separately, because the cluster may never observe a `NodeLeft` for a fast restart: on startup, a node that finds registry records pointing at its own address with no corresponding local actor **respawns the relocatable ones locally**, exactly as crash relocation would have recreated them on a survivor. Singleton and non-relocatable records are removed instead: singletons are re-arbitrated by the leader on demand, and non-relocatable actors are lost with their incarnation by design.
+A crashed node that **restarts at the same address** (a container restart in place, the common Kubernetes case) is
+handled separately, because the cluster may never observe a `NodeLeft` for a fast restart: on startup, a node that finds
+registry records pointing at its own address with no corresponding local actor **respawns the relocatable ones
+locally**, exactly as crash relocation would have recreated them on a survivor. Singleton and non-relocatable records
+are removed instead: singletons are re-arbitrated by the leader on demand, and non-relocatable actors are lost with
+their incarnation by design.
 
-Every relocation is announced by a `RelocationStarted` event on the event stream, listing the actor names and grain IDs in the relocation set; its `BestEffort()` accessor tells you whether the set comes from a graceful-shutdown snapshot (complete) or was reconstructed from the registry after a crash (possibly incomplete). See [Relocation events](#relocation-events).
+Every relocation is announced by a `RelocationStarted` event on the event stream, listing the actor names and grain IDs
+in the relocation set; its `BestEffort()` accessor tells you whether the set comes from a graceful-shutdown snapshot
+(complete) or was reconstructed from the registry after a crash (possibly incomplete). See
+[Relocation events](#relocation-events).
 
 ### Replication settings
 
-Crash recovery is only as good as the registry's replication. Registry records are partitioned by actor name, so the partitions a node owns hold a share of **every** node's records; whatever is not replicated is lost with the node that owned it.
+Crash recovery is only as good as the registry's replication. Registry records are partitioned by actor name, so the
+partitions a node owns hold a share of **every** node's records; whatever is not replicated is lost with the node that
+owned it.
 
 The default configuration is `replicaCount=2` with `writeQuorum=1` and `readQuorum=1`:
 
-- Every registry partition has a backup on another node, so the loss of a **single node** is fully recoverable: the survivor's backup copy is promoted before the recovery scan runs.
-- The quorums stay at 1 so registry writes keep succeeding while a node is down. During the failure-detection window (the few seconds between a crash and the routing table dropping the dead member), writes to partitions where the dead node was primary or backup fail transiently; after the routing table updates, writes succeed against the reassigned owners.
-- Quorum 1 does not weaken grain single activation: that is arbitrated by an atomic put-if-absent on the partition's primary owner, not by read/write quorum overlap. Read repair is enabled, so a replica that missed a write is healed on the next read.
+- Every registry partition has a backup on another node, so the loss of a **single node** is fully recoverable: the
+  survivor's backup copy is promoted before the recovery scan runs.
+- The quorums stay at 1 so registry writes keep succeeding while a node is down. During the failure-detection window
+  (the few seconds between a crash and the routing table dropping the dead member), writes to partitions where the dead
+  node was primary or backup fail transiently; after the routing table updates, writes succeed against the reassigned
+  owners.
+- Quorum 1 does not weaken grain single activation: that is arbitrated by an atomic put-if-absent on the partition's
+  primary owner, not by read/write quorum overlap. Read repair is enabled, so a replica that missed a write is healed on
+  the next read.
 
-Set `WithReplicaCount(3)` to also tolerate two concurrent node losses, at the cost of one more synchronous write per registry update.
+Set `WithReplicaCount(3)` to also tolerate two concurrent node losses, at the cost of one more synchronous write per
+registry update.
 
 <Warning>
-  With `WithReplicaCount(1)` there are no backups: the partitions owned by a crashed node are lost with it, and registry-derived recovery silently misses the affected records. The actor system logs a warning at startup when clustering runs with a replica count of 1.
+  With `WithReplicaCount(1)` there are no backups: the partitions owned by a crashed node are lost with it, and
+  registry-derived recovery silently misses the affected records. The actor system logs a warning at startup when
+  clustering runs with a replica count of 1.
 </Warning>
 
-Cases that remain open at any replica count: losing all owners of a partition at once loses its records; a write acknowledged with a single copy (its backup replication failed and the key was never read again) is lost if its primary crashes; a full-cluster restart starts with an empty registry, which relocation does not cover regardless since no leader survives to rebalance.
+Cases that remain open at any replica count: losing all owners of a partition at once loses its records; a write
+acknowledged with a single copy (its backup replication failed and the key was never read again) is lost if its primary
+crashes; a full-cluster restart starts with an empty registry, which relocation does not cover regardless since no
+leader survives to rebalance.
 
 ## Grain allocation
 
-Grains are virtual actors, so they relocate **lazily by default**: when the hosting node departs, the runtime does *not* reactivate them up front. It only cleans the grain's directory entry, and the grain re-activates on a surviving node the next time it is addressed (`TellGrain`/`AskGrain`). This avoids an `OnActivate` reactivation storm for grains that may never be called again. The cleanup work itself is distributed like any other relocation item (remainder to the leader, then chunks to peers), so it does not funnel through a single node.
+Grains are virtual actors, so they relocate **lazily by default**: when the hosting node departs, the runtime does _not_
+reactivate them up front. It only cleans the grain's directory entry, and the grain re-activates on a surviving node the
+next time it is addressed (`TellGrain`/`AskGrain`). This avoids an `OnActivate` reactivation storm for grains that may
+never be called again. The cleanup work itself is distributed like any other relocation item (remainder to the leader,
+then chunks to peers), so it does not funnel through a single node.
 
-Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node, the same way actors are. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
+Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node,
+the same way actors are. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
 
 ## Configuration
 
@@ -202,7 +290,7 @@ Grains opted into eager relocation with `WithGrainEagerRelocation` are instead r
 
 Use `WithRelocationDisabled` when spawning:
 
-```go
+```go Disable relocation for an actor
 pid, err := system.Spawn(ctx, "my-actor", actor, actor.WithRelocationDisabled())
 ```
 
@@ -213,21 +301,24 @@ When the host node leaves, this actor is **not** recreated elsewhere. Use for:
 
 ### Disable relocation for a grain
 
-```go
+```go Disable relocation for a grain
 identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrainDisableRelocation())
 ```
 
-If the hosting node leaves, the grain instance is lost. Re-addressing the grain by ID will create a new instance on another node; any in-memory state is gone. Persist state externally if you need recovery.
+If the hosting node leaves, the grain instance is lost. Re-addressing the grain by ID will create a new instance on
+another node; any in-memory state is gone. Persist state externally if you need recovery.
 
 ### Eager relocation for a grain
 
-By default grains relocate lazily (reactivate on next use). Opt a grain into upfront reactivation with `WithGrainEagerRelocation`:
+By default grains relocate lazily (reactivate on next use). Opt a grain into upfront reactivation with
+`WithGrainEagerRelocation`:
 
-```go
+```go Eager relocation for a grain
 identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrainEagerRelocation())
 ```
 
-Use this for grains that must stay warm without an external trigger (for example those driving timers, streams, or background work) that must resume immediately after the host departs.
+Use this for grains that must stay warm without an external trigger (for example those driving timers, streams, or
+background work) that must resume immediately after the host departs.
 
 <Note>
   `WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive; configuring both fails validation.
@@ -237,7 +328,7 @@ Use this for grains that must stay warm without an external trigger (for example
 
 Use `WithoutRelocation()` when creating the actor system:
 
-```go
+```go Disable relocation system-wide
 system, err := actor.NewActorSystem("app",
     actor.WithCluster(config),
     actor.WithoutRelocation(),
@@ -252,9 +343,12 @@ When relocation is disabled:
 
 ## Child actors
 
-**Child actors are not relocatable by default.** When a parent spawns a child via `SpawnChild`, the child gets `withRelocationDisabled()` implicitly. Children are tied to their parent's lifecycle; they are not independently relocated.
+**Child actors are not relocatable by default.** When a parent spawns a child via `SpawnChild`, the child gets
+`withRelocationDisabled()` implicitly. Children are tied to their parent's lifecycle; they are not independently
+relocated.
 
-If a parent is relocated, its children are **not** relocated with it. They are recreated only as part of the parent's `PreStart` (or equivalent) on the new node, if the parent explicitly spawns them again.
+If a parent is relocated, its children are **not** relocated with it. They are recreated only as part of the parent's
+`PreStart` (or equivalent) on the new node, if the parent explicitly spawns them again.
 
 ## Relocatability requirements
 
@@ -262,7 +356,8 @@ For an actor to be relocated successfully:
 
 - **Actor type** must be registered (reflection) so the relocator can instantiate it.
 - **Dependencies** must implement `Dependency` (serializable). Pass via `WithDependencies(dep)`.
-- **Supervisor**, **passivation**, **reentrancy**, **stashing**, **role**: these are encoded in the actor's serialized form and restored on the target node.
+- **Supervisor**, **passivation**, **reentrancy**, **stashing**, **role**: these are encoded in the actor's serialized
+  form and restored on the target node.
 
 See [Extensions and Dependencies](/advanced/extensions-and-dependencies) for dependency serialization.
 
@@ -270,44 +365,56 @@ See [Extensions and Dependencies](/advanced/extensions-and-dependencies) for dep
 
 - The actor may **temporarily not exist**: it is removed from the cluster map before being recreated on the target node.
 - The actor's logical identity (name, grain ID) is preserved; only the physical location (host:port) changes.
-- Location transparency means you address by PID or grain ID; the framework routes to the new node once relocation completes.
+- Location transparency means you address by PID or grain ID; the framework routes to the new node once relocation
+  completes.
 
 ### Message handoff
 
-Synchronous name-based sends automatically mask the brief handoff window. When you route a message to an actor whose host has just left the cluster, `SendSync` (and its `ReceiveContext` equivalent) detects that the target is being relocated and **buffers the send by re-resolving and retrying with bounded backoff** instead of failing immediately. Once the actor re-registers on a surviving node, the message is delivered there.
+Synchronous name-based sends automatically mask the brief handoff window. When you route a message to an actor whose
+host has just left the cluster, `SendSync` (and its `ReceiveContext` equivalent) detects that the target is being
+relocated and **buffers the send by re-resolving and retrying with bounded backoff** instead of failing immediately.
+Once the actor re-registers on a surviving node, the message is delivered there.
 
-`SendAsync` is non-blocking by contract (it also backs `rctx.SendAsync` inside actor receive loops), so it never waits out a handoff. A target mid-relocation fails fast with `ErrRelocationInProgress`, a retryable signal, instead of being buffered or dialing the departed host.
+`SendAsync` is non-blocking by contract (it also backs `rctx.SendAsync` inside actor receive loops), so it never waits
+out a handoff. A target mid-relocation fails fast with `ErrRelocationInProgress`, a retryable signal, instead of being
+buffered or dialing the departed host.
 
 <Note>
 Masking is bounded, not unbounded. Each node opens a short handoff window when it observes a departure; a `SendSync` retries only within that window (never beyond its own timeout) and only while the target's former host is still relocating. In steady state (no relocation in flight) sends resolve and deliver exactly once, adding no latency. If the window closes before the actor reappears, the send returns a retryable error:
 
-- `ErrActorNotFound`: the actor could not be resolved on any surviving node.
-- `ErrRelocationInProgress`: the target is still being relocated; retry shortly.
-</Note>
+- **ErrActorNotFound**: the actor could not be resolved on any surviving node.
+- **ErrRelocationInProgress**: the target is still being relocated; retry shortly.
+  </Note>
 
 <Warning>
-Identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers) re-resolves the target on each send, so both observe the relocation. Holding a stale remote `*PID` obtained before the departure and calling `Tell` / `Ask` on it directly bypasses re-resolution and can still surface a connection error, so resolve by name during churn.
+  Identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers) re-resolves the target on each
+  send, so both observe the relocation. Holding a stale remote `*PID` obtained before the departure and calling `Tell` /
+  `Ask` on it directly bypasses re-resolution and can still surface a connection error, so resolve by name during churn.
 </Warning>
 
 ## Check relocatability
 
-| API                 | Purpose                                      |
-| ------------------- | -------------------------------------------- |
-| `pid.IsRelocatable` | Returns whether the actor may be relocated.  |
-| `pid.Path`          | Current host:port; changes after relocation. |
+- **pid.IsRelocatable**: Returns whether the actor may be relocated.
+- **pid.Path**: Current host:port; changes after relocation.
 
 ## Metrics
 
-When OpenTelemetry metrics are enabled (`WithMetrics`), the leader records the outcome of each departed node's relocation:
+When OpenTelemetry metrics are enabled (`WithMetrics`), the leader records the outcome of each departed node's
+relocation:
 
-| Instrument                               | Type            | Description                                                         |
-| ---------------------------------------- | --------------- | ------------------------------------------------------------------- |
-| `actorsystem.relocation.duration`        | Int64 histogram | Wall-clock duration of a single departed node's relocation (ms).    |
-| `actorsystem.relocation.relocated.count` | Int64 counter   | Actors and grains successfully relocated.                           |
-| `actorsystem.relocation.failed.count`    | Int64 counter   | Actors and grains that failed to relocate.                          |
-| `actorsystem.relocation.buffered.count`  | Int64 counter   | Name-based sends buffered and retried while their target relocated. |
+- **actorsystem.relocation.duration**: Type: Int64 histogram. Description: Wall-clock duration of a single departed
+  node's relocation (ms).
+- **actorsystem.relocation.relocated.count**: Type: Int64 counter. Description: Actors and grains successfully
+  relocated.
+- **actorsystem.relocation.failed.count**: Type: Int64 counter. Description: Actors and grains that failed to relocate.
+- **actorsystem.relocation.buffered.count**: Type: Int64 counter. Description: Name-based sends buffered and retried
+  while their target relocated.
 
-The duration, relocated, and failed instruments are tagged with `actor.system` and `relocation.node` (the departed node's address), and are only emitted on the node that performs the relocation (the leader). The buffered counter is tagged with `actor.system` and is emitted on **any** node that masks a send during a handoff (see [Message handoff](#message-handoff)), so you can track how often callers hit the handoff window. When metrics are disabled every recording is a no-op.
+The duration, relocated, and failed instruments are tagged with `actor.system` and `relocation.node` (the departed
+node's address), and are only emitted on the node that performs the relocation (the leader). The buffered counter is
+tagged with `actor.system` and is emitted on **any** node that masks a send during a handoff (see
+[Message handoff](#message-handoff)), so you can track how often callers hit the handoff window. When metrics are
+disabled every recording is a no-op.
 
 ## See also
 

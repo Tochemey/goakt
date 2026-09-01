@@ -27,14 +27,15 @@ import "go.opentelemetry.io/otel/metric"
 // ActorSystemMetric groups OpenTelemetry instruments that describe
 // actor‑system health and capacity at a coarse (system) level.
 //
-// The live actor count, connected peer count, and uptime are point-in-time
-// readings that can rise and fall, so they are observable gauges. The
-// deadletter total and the three actor lifecycle totals only grow, so they stay
-// observable counters.
+// The live actor count, live grain count, connected peer count, and uptime are
+// point-in-time readings that can rise and fall, so they are observable gauges.
+// The deadletter total and the three actor lifecycle totals only grow, so they
+// stay observable counters.
 //
 // Instruments:
 //   - actorsystem.deadletters.count  (Int64ObservableCounter)
 //   - actorsystem.actors.count       (Int64ObservableGauge)
+//   - actorsystem.grains.count       (Int64ObservableGauge)
 //   - actorsystem.peers.count        (Int64ObservableGauge) — optional; see PeersCount
 //   - actorsystem.uptime             (Int64ObservableGauge, unit: seconds)
 //   - actor.spawned.count            (Int64ObservableCounter)
@@ -43,8 +44,13 @@ import "go.opentelemetry.io/otel/metric"
 type ActorSystemMetric struct {
 	deadlettersCount metric.Int64ObservableCounter
 	pidsCount        metric.Int64ObservableGauge
-	peersCount       metric.Int64ObservableGauge
-	uptime           metric.Int64ObservableGauge
+	// grainsCount reports the number of grains currently activated on the local
+	// node. Grains leave the registry the moment they deactivate, so this is a
+	// point-in-time gauge read from the registry at scrape time, never a
+	// lifecycle counter.
+	grainsCount metric.Int64ObservableGauge
+	peersCount  metric.Int64ObservableGauge
+	uptime      metric.Int64ObservableGauge
 	// spawnedCount, stoppedCount and passivatedCount report actor lifecycle
 	// edges per actor kind. They live on the system-level instrument set
 	// because the edge they count removes the actor from the tree, so no PID
@@ -58,6 +64,7 @@ type ActorSystemMetric struct {
 // Meter. It initializes:
 //   - actorsystem.deadletters.count (Int64ObservableCounter)
 //   - actorsystem.actors.count      (Int64ObservableGauge)
+//   - actorsystem.grains.count      (Int64ObservableGauge)
 //   - actorsystem.uptime            (Int64ObservableGauge, unit "s")
 //   - actorsystem.peers.count       (Int64ObservableGauge)
 //   - actor.spawned.count           (Int64ObservableCounter)
@@ -120,6 +127,13 @@ func NewActorSystemMetric(meter metric.Meter) (*ActorSystemMetric, error) {
 		return nil, err
 	}
 
+	if instruments.grainsCount, err = meter.Int64ObservableGauge(
+		"actorsystem.grains.count",
+		metric.WithDescription("Current number of grains activated on the local node"),
+	); err != nil {
+		return nil, err
+	}
+
 	return &instruments, nil
 }
 
@@ -137,6 +151,14 @@ func (x *ActorSystemMetric) DeadlettersCount() metric.Int64ObservableCounter {
 // Use with Meter.RegisterCallback to observe the current value periodically.
 func (x *ActorSystemMetric) PIDsCount() metric.Int64ObservableGauge {
 	return x.pidsCount
+}
+
+// GrainsCount returns the observable gauge that reports the number of grains
+// currently activated on the local node.
+//
+// Use with Meter.RegisterCallback to observe the current value periodically.
+func (x *ActorSystemMetric) GrainsCount() metric.Int64ObservableGauge {
+	return x.grainsCount
 }
 
 // Uptime returns the observable gauge for the actor system uptime in seconds.

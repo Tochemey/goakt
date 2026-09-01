@@ -4,41 +4,38 @@ description: Demand-driven, actor-native stream processing with backpressure, st
 sidebarTitle: "Reactive Streams"
 ---
 
-GoAkt Streams is a reactive, demand-driven data-processing library built directly on top of the GoAkt actor model.
-Every pipeline stage runs inside a GoAkt actor, which means it inherits supervision, lifecycle management, and location
+GoAkt Streams is a reactive, demand-driven data-processing library built directly on top of the GoAkt actor model. Every
+pipeline stage runs inside a GoAkt actor, which means it inherits supervision, lifecycle management, and location
 transparency for free. Pipelines are **lazy**: nothing executes until `RunnableGraph.Run` is called against a live
 `ActorSystem`.
 
 ## Why
 
-Raw actor messaging requires you to handle buffer overflow, message loss, and backpressure by hand: every actor that consumes faster or slower than its peers becomes a coordination problem you have to solve case-by-case. Streams handle all of this automatically, giving you a safe and composable programming model on top of actors so you can focus on what flows through the pipeline rather than how to keep it from breaking under load.
+Raw actor messaging requires you to handle buffer overflow, message loss, and backpressure by hand: every actor that
+consumes faster or slower than its peers becomes a coordination problem you have to solve case-by-case. Streams handle
+all of this automatically, giving you a safe and composable programming model on top of actors so you can focus on what
+flows through the pipeline rather than how to keep it from breaking under load.
 
 ## Overview
 
-| Concept           | What it means in GoAkt Streams                                                     |
-| ----------------- | ---------------------------------------------------------------------------------- |
-| **Correctness**   | Exactly-once delivery semantics within a local pipeline                            |
-| **Backpressure**  | Credit-based demand pull prevents unbounded buffering                              |
-| **Composability** | Stages are plain Go values; pipelines are assembled declaratively                  |
-| **Actor-native**  | Every stage is an actor; supervision, scheduling, and routing apply naturally      |
-| **Type-safety**   | `Source[T]`, `Flow[In, Out]`, `Sink[T]` carry type parameters through the pipeline |
-
----
+- **Correctness**: Exactly-once delivery semantics within a local pipeline.
+- **Backpressure**: Credit-based demand pull prevents unbounded buffering.
+- **Composability**: Stages are plain Go values; pipelines are assembled declaratively.
+- **Actor-native**: Every stage is an actor; supervision, scheduling, and routing apply naturally.
+- **Type-safety**: `Source[T]`, `Flow[In, Out]`, `Sink[T]` carry type parameters through the pipeline.
 
 ## Core abstractions
 
-| Type            | Role                                                                       |
-| --------------- | -------------------------------------------------------------------------- |
-| `Source[T]`     | Origin of stream elements; produces values of type `T`                     |
-| `Flow[In, Out]` | Transformation stage; consumes `In`, emits `Out`                           |
-| `Sink[T]`       | Terminal consumer; processes elements and drives backpressure              |
-| `SubFlow[K, T]` | "Stream of streams": partition by key, transform per-substream, merge back |
-| `RunnableGraph` | Fully assembled pipeline; a value type that can be `Run` multiple times    |
-| `StreamHandle`  | Live handle returned by `Run`; controls lifecycle and exposes metrics      |
+- **Source[T]**: Origin of stream elements; produces values of type `T`.
+- **Flow[In, Out]**: Transformation stage; consumes `In`, emits `Out`.
+- **Sink[T]**: Terminal consumer; processes elements and drives backpressure.
+- **SubFlow[K, T]**: "Stream of streams": partition by key, transform per-substream, merge back.
+- **RunnableGraph**: Fully assembled pipeline; a value type that can be `Run` multiple times.
+- **StreamHandle**: Live handle returned by `Run`; controls lifecycle and exposes metrics.
 
 A minimal pipeline looks like this:
 
-```go
+```go Core abstractions
 import "github.com/tochemey/goakt/v4/stream"
 
 collector, sink := stream.Collect[int]()
@@ -56,15 +53,13 @@ if err != nil {
 fmt.Println(collector.Items()) // [20 40]
 ```
 
----
-
 ## Quick start
 
 ### Linear pipeline
 
 Use the fluent `From` / `Via` / `To` builder for straight-line pipelines:
 
-```go
+```go Linear pipeline
 foldResult, sink := stream.Fold(0, func(acc, n int) int { return acc + n })
 
 handle, err := stream.From(stream.Range(1, 101)).  // 1..100
@@ -84,7 +79,7 @@ fmt.Println(foldResult.Value()) // 2550
 
 When a `Flow` changes the element type, use the package-level `Via` free function or `ViaLinear`:
 
-```go
+```go Type-changing flows
 // Via free function
 strSrc := stream.Via(
     stream.From(stream.Of("1", "2", "3")).Source(),
@@ -98,15 +93,14 @@ g := stream.ViaLinear(
 )
 ```
 
----
-
 ## Sources
 
-Sources are the origin of stream data. All sources apply backpressure: they produce only as many elements as downstream demands.
+Sources are the origin of stream data. All sources apply backpressure: they produce only as many elements as downstream
+demands.
 
 ### Finite sources
 
-```go
+```go Finite sources
 // Fixed values
 stream.Of(1, 2, 3)
 
@@ -123,7 +117,7 @@ stream.Unfold([]int{0, 1}, func(s []int) ([]int, int, bool) {
 
 Bridges an external Go channel into the pipeline. Backpressure naturally limits how fast the goroutine sends:
 
-```go
+```go Channel source
 ch := make(chan string, 100)
 go feedChannel(ch) // your producer
 
@@ -137,7 +131,7 @@ handle, err := stream.From(stream.FromChannel(ch)).
 Pulls elements from a GoAkt actor using the `PullRequest` / `PullResponse[T]` protocol. Useful for integrating existing
 actor-based producers:
 
-```go
+```go Actor source
 // Your actor must handle *stream.PullRequest and reply with *stream.PullResponse[T].
 handle, err := stream.From(stream.FromActor[Order](orderActorPID)).
     To(stream.ForEach(func(o Order) { process(o) })).
@@ -148,7 +142,7 @@ handle, err := stream.From(stream.FromActor[Order](orderActorPID)).
 
 Emits the current time on a fixed interval. Runs indefinitely until `Stop` or `Abort` is called:
 
-```go
+```go Tick source
 handle, err := stream.From(stream.Tick(time.Second)).
     Via(stream.Map(func(t time.Time) string { return t.Format(time.RFC3339) })).
     To(stream.ForEach(func(s string) { log.Println(s) })).
@@ -160,10 +154,10 @@ handle.Stop(ctx)
 
 ### Network source
 
-Reads `[]byte` frames from a `net.Conn`. Each `Read` call produces one element; demand controls how many reads
-are batched per upstream request:
+Reads `[]byte` frames from a `net.Conn`. Each `Read` call produces one element; demand controls how many reads are
+batched per upstream request:
 
-```go
+```go Network source
 conn, _ := net.Dial("tcp", "host:port")
 handle, err := stream.From(stream.FromConn(conn, 4096)).
     Via(stream.Map(func(b []byte) string { return string(b) })).
@@ -173,30 +167,26 @@ handle, err := stream.From(stream.FromConn(conn, 4096)).
 
 ### Reference
 
-| Constructor           | Description                                                            |
-| --------------------- | ---------------------------------------------------------------------- |
-| `Of[T]`               | Finite source from a fixed set of values                               |
-| `Range`               | Integer range `[start, end)`                                           |
-| `Unfold[S, T]`        | Generates values from a seed with a stateful step function             |
-| `FromChannel[T]`      | Reads from a Go channel; completes when the channel closes             |
-| `FromActor[T]`        | Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`         |
-| `Tick`                | Emits `time.Time` on a fixed interval; runs until cancelled            |
-| `Merge[T]`            | Fans N sources into one; completes when all inputs complete            |
-| `Concat[T]`           | Consumes sub-sources sequentially; completes when the last completes   |
-| `Combine[T, U, V]`    | Zips two sources pairwise via `fn` (mixed input types)                 |
-| `Zip[T]`              | Zips N same-typed sources into `[]T` tuples                            |
-| `ZipWith[T, V]`       | N-input zip via user combine `fn`                                      |
-| `MergePreferred[T]`   | Like `Merge` but drains slot `idx` first when it has data              |
-| `MergePrioritized[T]` | Weighted random slot selection over slots that have data               |
-| `MergeLatest[T]`      | Emits `[]T` snapshots of the latest value on every input               |
-| `MergeSequence[T]`    | Emits in ascending seq order across N inputs                           |
-| `Broadcast[T]`        | Fans one source out to N independent branches                          |
-| `Balance[T]`          | Distributes one source across N branches with round-robin backpressure |
-| `Partition[T]`        | Routes each element to one of N branches via predicate `fn`            |
-| `Unzip[T, A, B]`      | Splits a source into two sources of different element types            |
-| `FromConn`            | Reads `[]byte` frames from a `net.Conn`                                |
-
----
+- **Of[T]**: Finite source from a fixed set of values.
+- **Range**: Integer range `[start, end)`.
+- **Unfold[S, T]**: Generates values from a seed with a stateful step function.
+- **FromChannel[T]**: Reads from a Go channel; completes when the channel closes.
+- **FromActor[T]**: Pulls from a GoAkt actor via `PullRequest` / `PullResponse[T]`.
+- **Tick**: Emits `time.Time` on a fixed interval; runs until cancelled.
+- **Merge[T]**: Fans N sources into one; completes when all inputs complete.
+- **Concat[T]**: Consumes sub-sources sequentially; completes when the last completes.
+- **Combine[T, U, V]**: Zips two sources pairwise via `fn` (mixed input types).
+- **Zip[T]**: Zips N same-typed sources into `[]T` tuples.
+- **ZipWith[T, V]**: N-input zip via user combine `fn`.
+- **MergePreferred[T]**: Like `Merge` but drains slot `idx` first when it has data.
+- **MergePrioritized[T]**: Weighted random slot selection over slots that have data.
+- **MergeLatest[T]**: Emits `[]T` snapshots of the latest value on every input.
+- **MergeSequence[T]**: Emits in ascending seq order across N inputs.
+- **Broadcast[T]**: Fans one source out to N independent branches.
+- **Balance[T]**: Distributes one source across N branches with round-robin backpressure.
+- **Partition[T]**: Routes each element to one of N branches via predicate `fn`.
+- **Unzip[T, A, B]**: Splits a source into two sources of different element types.
+- **FromConn**: Reads `[]byte` frames from a `net.Conn`.
 
 ## Flows
 
@@ -205,7 +195,7 @@ without materializing anything.
 
 ### Mapping and filtering
 
-```go
+```go Mapping and filtering
 // Map: type-changing, no error path
 stream.Map(func(n int) string { return strconv.Itoa(n) })
 
@@ -228,7 +218,7 @@ When the per-element expansion is itself a stream (e.g. paginated API calls, per
 streaming flat-map operators instead of `FlatMap`. Each input element produces a `Source[Out]` whose elements are
 flattened into the main pipeline:
 
-```go
+```go Streaming flat-map
 // FlatMapConcat: drain each sub-source fully before starting the next.
 // Order is preserved end-to-end.
 stream.FlatMapConcat(func(userID int) stream.Source[Order] {
@@ -242,13 +232,13 @@ stream.FlatMapMerge(8, func(userID int) stream.Source[Order] {
 })
 ```
 
-Backpressure is bounded by the breadth: the FlatMap stage requests at most `breadth` elements from upstream, and
-the next batch is requested only as sub-sources complete: so a slow inner source naturally throttles the outer
-pipeline. Sub-pipeline handles are tracked and aborted on cancellation or failure to avoid leaking goroutines.
+Backpressure is bounded by the breadth: the FlatMap stage requests at most `breadth` elements from upstream, and the
+next batch is requested only as sub-sources complete: so a slow inner source naturally throttles the outer pipeline.
+Sub-pipeline handles are tracked and aborted on cancellation or failure to avoid leaking goroutines.
 
 ### Windowing and rate control
 
-```go
+```go Windowing and rate control
 // Batch: groups into slices of at most n, flushing early after maxWait
 stream.Batch[Event](100, 500*time.Millisecond)
 
@@ -261,7 +251,7 @@ stream.Buffer[int](256, stream.DropTail)
 
 ### Stateful flows
 
-```go
+```go Stateful flows
 // Deduplicate: suppresses consecutive duplicates (T must be comparable)
 stream.Deduplicate[string]()
 
@@ -271,10 +261,10 @@ stream.Scan(0, func(acc, n int) int { return acc + n })
 
 ### Parallel processing
 
-`ParallelMap` applies a function concurrently with up to `n` goroutines. Use `OrderedParallelMap` when output order
-must match input order:
+`ParallelMap` applies a function concurrently with up to `n` goroutines. Use `OrderedParallelMap` when output order must
+match input order:
 
-```go
+```go Parallel processing
 // Unordered: results arrive as goroutines complete
 stream.ParallelMap(8, func(req Request) Response { return callAPI(req) })
 
@@ -284,34 +274,30 @@ stream.OrderedParallelMap(8, func(req Request) Response { return callAPI(req) })
 
 ### Reference
 
-| Constructor                   | Description                                                            |
-| ----------------------------- | ---------------------------------------------------------------------- |
-| `Map[In, Out]`                | Type-changing transformation; no error path                            |
-| `TryMap[In, Out]`             | Transformation with error; `ErrorStrategy` controls failure handling   |
-| `Filter[T]`                   | Keeps only elements where `predicate` returns true                     |
-| `FlatMap[In, Out]`            | Expands each element into a slice of outputs                           |
-| `FlatMapConcat[In, Out]`      | Per-element streaming flat-map; sub-sources drained sequentially       |
-| `FlatMapMerge[In, Out]`       | Per-element streaming flat-map; up to `breadth` sub-sources concurrent |
-| `Flatten[T]`                  | Unwraps `[]T` elements into individual elements                        |
-| `Batch[T]`                    | Groups into `[]T` slices of at most `n`; flushes early after `maxWait` |
-| `Buffer[T]`                   | Asynchronous buffer with configurable overflow strategy                |
-| `Throttle[T]`                 | Limits throughput to at most `n` elements per `per` duration           |
-| `Deduplicate[T]`              | Suppresses consecutive duplicate elements (`T` must be comparable)     |
-| `Scan[In, State]`             | Running accumulation; emits each intermediate state                    |
-| `WithContext[T]`              | Marks a named tracing boundary; passes elements through unchanged      |
-| `ParallelMap[In, Out]`        | Applies `fn` concurrently with up to `n` goroutines; unordered output  |
-| `OrderedParallelMap[In, Out]` | Like `ParallelMap` but preserves input order via min-heap resequencing |
-
----
+- **Map[In, Out]**: Type-changing transformation; no error path.
+- **TryMap[In, Out]**: Transformation with error; `ErrorStrategy` controls failure handling.
+- **Filter[T]**: Keeps only elements where `predicate` returns true.
+- **FlatMap[In, Out]**: Expands each element into a slice of outputs.
+- **FlatMapConcat[In, Out]**: Per-element streaming flat-map; sub-sources drained sequentially.
+- **FlatMapMerge[In, Out]**: Per-element streaming flat-map; up to `breadth` sub-sources concurrent.
+- **Flatten[T]**: Unwraps `[]T` elements into individual elements.
+- **Batch[T]**: Groups into `[]T` slices of at most `n`; flushes early after `maxWait`.
+- **Buffer[T]**: Asynchronous buffer with configurable overflow strategy.
+- **Throttle[T]**: Limits throughput to at most `n` elements per `per` duration.
+- **Deduplicate[T]**: Suppresses consecutive duplicate elements (`T` must be comparable).
+- **Scan[In, State]**: Running accumulation; emits each intermediate state.
+- **WithContext[T]**: Marks a named tracing boundary; passes elements through unchanged.
+- **ParallelMap[In, Out]**: Applies `fn` concurrently with up to `n` goroutines; unordered output.
+- **OrderedParallelMap[In, Out]**: Like `ParallelMap` but preserves input order via min-heap resequencing.
 
 ## Sinks
 
-Sinks are the terminal consumers of a pipeline. They drive backpressure by signalling demand upstream; the pipeline
-does not produce faster than the sink can consume.
+Sinks are the terminal consumers of a pipeline. They drive backpressure by signalling demand upstream; the pipeline does
+not produce faster than the sink can consume.
 
 ### Common sinks
 
-```go
+```go Common sinks
 // ForEach: side-effect per element
 stream.ForEach(func(n int) { log.Println(n) })
 
@@ -339,7 +325,7 @@ stream.Ignore[int]()
 
 ### Actor and channel sinks
 
-```go
+```go Actor and channel sinks
 // ToActor: forwards each element to a GoAkt actor via Tell
 stream.ToActor[Event](handlerPID)
 
@@ -353,18 +339,14 @@ stream.Chan(ch)
 
 ### Reference
 
-| Constructor       | Description                                                         |
-| ----------------- | ------------------------------------------------------------------- |
-| `ForEach[T]`      | Calls `fn` for each element                                         |
-| `Collect[T]`      | Accumulates all elements; retrieve via `Collector[T].Items()`       |
-| `Fold[T, U]`      | Reduces to a single value; retrieve via `FoldResult[U].Value()`     |
-| `First[T]`        | Captures the first element then cancels upstream                    |
-| `Ignore[T]`       | Discards all elements                                               |
-| `Chan[T]`         | Writes each element to a Go channel; applies backpressure when full |
-| `ToActor[T]`      | Forwards each element to a GoAkt actor via `Tell`                   |
-| `ToActorNamed[T]` | Resolves actor by name and forwards via `Tell`                      |
-
----
+- **ForEach[T]**: Calls `fn` for each element.
+- **Collect[T]**: Accumulates all elements; retrieve via `Collector[T].Items()`.
+- **Fold[T, U]**: Reduces to a single value; retrieve via `FoldResult[U].Value()`.
+- **First[T]**: Captures the first element then cancels upstream.
+- **Ignore[T]**: Discards all elements.
+- **Chan[T]**: Writes each element to a Go channel; applies backpressure when full.
+- **ToActor[T]**: Forwards each element to a GoAkt actor via `Tell`.
+- **ToActorNamed[T]**: Resolves actor by name and forwards via `Tell`.
 
 ## Fan-out and fan-in
 
@@ -373,7 +355,7 @@ stream.Chan(ch)
 `Broadcast` fans a single source out to N independent branches. Every branch receives every element. Backpressure is
 enforced by the slowest branch: the hub pulls from upstream only when all active branches have outstanding demand.
 
-```go
+```go Broadcast
 branches := stream.Broadcast[Event](stream.FromChannel(eventCh), 2)
 
 // Branch 1: write to database
@@ -394,7 +376,7 @@ Both pipelines must be materialized. The upstream sub-pipeline starts once the *
 `Balance` distributes elements across N branches using round-robin routing with backpressure. Each element goes to
 exactly one branch: the next one with available demand. Use this to parallelise work across independent consumers:
 
-```go
+```go Balance
 workers := stream.Balance[Job](stream.FromChannel(jobCh), 4)
 
 for i, branch := range workers {
@@ -408,11 +390,10 @@ for i, branch := range workers {
 ### Partition
 
 `Partition` routes each element to exactly one of N branches based on a user predicate. Out-of-range or
-already-cancelled slot results are dropped silently. Backpressure is conservative: the hub pulls from upstream only
-when every active branch has outstanding demand, so the destination slot for any incoming element is guaranteed
-capacity.
+already-cancelled slot results are dropped silently. Backpressure is conservative: the hub pulls from upstream only when
+every active branch has outstanding demand, so the destination slot for any incoming element is guaranteed capacity.
 
-```go
+```go Partition
 branches := stream.Partition(stream.FromChannel(eventCh), 3, func(e Event) int {
     switch e.Kind {
     case "audit":   return 0
@@ -431,7 +412,7 @@ for i, b := range branches {
 `Unzip` splits a single source into two sources of potentially different element types. It is composed of
 `Broadcast(src, 2)` plus a `Map` per branch and follows the same backpressure rules as `Broadcast`.
 
-```go
+```go Unzip
 type kv struct { K string; V int }
 
 keys, values := stream.Unzip(
@@ -445,7 +426,7 @@ keys, values := stream.Unzip(
 `Merge` fans N independent sources into a single downstream. Elements arrive in non-deterministic order; completion
 happens when all inputs have completed:
 
-```go
+```go Merge
 merged := stream.Merge(
     stream.FromChannel(highPriorityCh),
     stream.FromChannel(lowPriorityCh),
@@ -458,11 +439,10 @@ stream.From(merged).
 
 ### Concat
 
-`Concat` consumes sub-sources sequentially: the next sub-pipeline only spawns after the current one completes,
-bounding in-flight cost at one sub-pipeline regardless of source count. Per-source ordering is preserved across the
-boundary.
+`Concat` consumes sub-sources sequentially: the next sub-pipeline only spawns after the current one completes, bounding
+in-flight cost at one sub-pipeline regardless of source count. Per-source ordering is preserved across the boundary.
 
-```go
+```go Concat
 all := stream.Concat(
     stream.Of(1, 2, 3),
     stream.Of(4, 5),
@@ -473,10 +453,10 @@ all := stream.Concat(
 
 ### Combine (zip, two-input mixed-type)
 
-`Combine` pairs elements from two sources with a combine function. It completes when either source is exhausted.
-Use it when the two inputs have different element types:
+`Combine` pairs elements from two sources with a combine function. It completes when either source is exhausted. Use it
+when the two inputs have different element types:
 
-```go
+```go Combine (zip, two-input mixed-type)
 prices := stream.FromChannel(priceCh)    // Source[Price]
 orders := stream.FromChannel(orderCh)    // Source[Order]
 
@@ -487,10 +467,10 @@ quotes := stream.Combine(prices, orders, func(p Price, o Order) Quote {
 
 ### Zip / ZipWith (N-input same-type)
 
-`Zip` combines N same-typed sources into a stream of `[]T` tuples; `ZipWith` does the same with a user combine
-function. Both complete as soon as any input is exhausted.
+`Zip` combines N same-typed sources into a stream of `[]T` tuples; `ZipWith` does the same with a user combine function.
+Both complete as soon as any input is exhausted.
 
-```go
+```go Zip / ZipWith (N-input same-type)
 // []int snapshots, one per matched group
 trios := stream.Zip(
     stream.Of(1, 2, 3),
@@ -509,11 +489,11 @@ sums := stream.ZipWith(
 
 ### MergePreferred
 
-Like `Merge`, but always drains the priority slot first when it has data, falling back to the lowest-indexed
-non-empty slot otherwise. Useful when one input represents a higher-priority feed (e.g. a control channel) that
-should be drained ahead of background traffic. Panics on out-of-range index.
+Like `Merge`, but always drains the priority slot first when it has data, falling back to the lowest-indexed non-empty
+slot otherwise. Useful when one input represents a higher-priority feed (e.g. a control channel) that should be drained
+ahead of background traffic. Panics on out-of-range index.
 
-```go
+```go MergePreferred
 src := stream.MergePreferred(
     0, // slot 0 = control
     stream.FromChannel(controlCh),
@@ -523,10 +503,10 @@ src := stream.MergePreferred(
 
 ### MergePrioritized
 
-Picks the next slot by weighted random over slots that currently have data. Slots with weight 0 are only selected
-when they are the only ones with data. Panics on `weights` / `sources` length mismatch.
+Picks the next slot by weighted random over slots that currently have data. Slots with weight 0 are only selected when
+they are the only ones with data. Panics on `weights` / `sources` length mismatch.
 
-```go
+```go MergePrioritized
 src := stream.MergePrioritized(
     []int{3, 1}, // src1 wins ~3:1
     src1,
@@ -536,10 +516,10 @@ src := stream.MergePrioritized(
 
 ### MergeLatest
 
-Emits `[]T` snapshots of the latest value seen on every input. Each upstream emission queues one snapshot, but the
-first only fires once every input has emitted at least once. Completes when every input completes.
+Emits `[]T` snapshots of the latest value seen on every input. Each upstream emission queues one snapshot, but the first
+only fires once every input has emitted at least once. Completes when every input completes.
 
-```go
+```go MergeLatest
 snapshots := stream.MergeLatest(
     stream.FromChannel(temperatureCh),
     stream.FromChannel(humidityCh),
@@ -554,11 +534,11 @@ stream.From(snapshots).
 
 ### MergeSequence
 
-Emits in strict ascending sequence-number order across N inputs by buffering out-of-order elements in a min-heap.
-Inputs must collectively produce a contiguous range of sequence numbers starting from 0. If all inputs complete
-with the next-expected sequence still missing, the stream fails with a missing-sequence error.
+Emits in strict ascending sequence-number order across N inputs by buffering out-of-order elements in a min-heap. Inputs
+must collectively produce a contiguous range of sequence numbers starting from 0. If all inputs complete with the
+next-expected sequence still missing, the stream fails with a missing-sequence error.
 
-```go
+```go MergeSequence
 type item struct { Seq int64; Val string }
 
 ordered := stream.MergeSequence(
@@ -568,13 +548,18 @@ ordered := stream.MergeSequence(
 )
 ```
 
----
-
 ## Substreams (SubFlow)
 
-Three constructors produce a `SubFlow`, each with different routing semantics: `GroupBy` partitions by a key function (one substream per distinct key, materialised lazily), `SplitWhen` starts a new substream when a predicate is true (the triggering element becomes the FIRST of the new substream), and `SplitAfter` ends the current substream after a predicate-true element (the triggering element becomes the LAST of the closing substream). Per-substream state (`Scan` accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain) is genuinely independent because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams` collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across substreams while preserving order within a single substream.
+Three constructors produce a `SubFlow`, each with different routing semantics: `GroupBy` partitions by a key function
+(one substream per distinct key, materialised lazily), `SplitWhen` starts a new substream when a predicate is true (the
+triggering element becomes the FIRST of the new substream), and `SplitAfter` ends the current substream after a
+predicate-true element (the triggering element becomes the LAST of the closing substream). Per-substream state (`Scan`
+accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain) is genuinely independent
+because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams`
+collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across
+substreams while preserving order within a single substream.
 
-```go
+```go Substreams (SubFlow)
 // Partition events by tenantID, count events per tenant via a per-substream
 // Scan, then merge all per-tenant counters into a single flat stream.
 src := stream.FromChannel(eventCh) // Source[Event]
@@ -588,13 +573,15 @@ stream.From(merged).
     Run(ctx, sys)
 ```
 
-The key function is captured at `GroupBy` time and applied to upstream elements regardless of how many `SubFlowVia` calls follow: the per-substream output type can change freely without affecting routing.
+The key function is captured at `GroupBy` time and applied to upstream elements regardless of how many `SubFlowVia`
+calls follow: the per-substream output type can change freely without affecting routing.
 
 ### Splitting on a delimiter
 
-`SplitWhen` and `SplitAfter` take a predicate instead of a key function and produce a `SubFlow[int, T]` whose synthetic substream IDs increment on each rotation. They differ in where the triggering element lands:
+`SplitWhen` and `SplitAfter` take a predicate instead of a key function and produce a `SubFlow[int, T]` whose synthetic
+substream IDs increment on each rotation. They differ in where the triggering element lands:
 
-```go
+```go Splitting on a delimiter
 // SplitWhen: predicate-true element starts a NEW substream.
 //   input:        1, 2, 0, 3, 4, 0, 5
 //   substreams:  [1, 2] [0, 3, 4] [0, 5]
@@ -607,68 +594,73 @@ sf  := stream.SplitWhen(src, func(n int) bool { return n == 0 })
 sf  := stream.SplitAfter(src, func(n int) bool { return n == 0 })
 ```
 
-These are the natural primitives for parsing delimited streams (newline-terminated frames, control sentinels, batch markers) where each delimiter starts or ends a logical group rather than tagging a key. Substreams are sequential (at most one is actively receiving new elements at a time), so the `maxSubstreams` cap is generally unnecessary and `0` (unbounded) is fine.
+These are the natural primitives for parsing delimited streams (newline-terminated frames, control sentinels, batch
+markers) where each delimiter starts or ends a logical group rather than tagging a key. Substreams are sequential (at
+most one is actively receiving new elements at a time), so the `maxSubstreams` cap is generally unnecessary and `0`
+(unbounded) is fine.
 
 ### Cardinality cap
 
-The `maxSubstreams` parameter caps the number of concurrently-open substreams; pass `0` for unbounded. Exceeding the cap terminates the stream with `ErrTooManySubstreams`, so unbounded key cardinality is a visible failure rather than a silent memory leak:
+The `maxSubstreams` parameter caps the number of concurrently-open substreams; pass `0` for unbounded. Exceeding the cap
+terminates the stream with `ErrTooManySubstreams`, so unbounded key cardinality is a visible failure rather than a
+silent memory leak:
 
-```go
+```go Cardinality cap
 sf := stream.GroupBy(src, 100, keyFn) // up to 100 distinct keys
 ```
 
 ### Per-substream backpressure
 
-Each substream has an independent in-flight cap (default `256` elements). When a substream is at capacity, the configured `OverflowStrategy` decides what happens to new elements with that key. Substream feed sources acknowledge consumption to the splitter in batches (matching the `flowActor` watermark refill at `perKeyBuffer/4`), so per-key memory is bounded without per-element protocol overhead.
+Each substream has an independent in-flight cap (default `256` elements). When a substream is at capacity, the
+configured `OverflowStrategy` decides what happens to new elements with that key. Substream feed sources acknowledge
+consumption to the splitter in batches (matching the `flowActor` watermark refill at `perKeyBuffer/4`), so per-key
+memory is bounded without per-element protocol overhead.
 
-```go
+```go Per-substream backpressure
 sf := stream.GroupBy(src, 0, keyFn).
     WithSubstreamBuffer(64, stream.FailSource)
 ```
 
-| Strategy                          | Behaviour                                                                                                                                  |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `DropTail` (default)              | Discard the newest element when the substream is at capacity                                                                               |
-| `DropHead` / `BackpressureSource` | Currently collapse to drop-newest: `DropHead` would break per-key ordering and `BackpressureSource` would deadlock the splitter on inbound |
-| `FailSource`                      | Terminate the stream with `ErrSubstreamOverflow`                                                                                           |
+- **DropTail** (default): Discard the newest element when the substream is at capacity.
+- **DropHead** / **BackpressureSource**: Currently collapse to drop-newest: `DropHead` would break per-key ordering and
+  `BackpressureSource` would deadlock the splitter on inbound.
+- **FailSource**: Terminate the stream with `ErrSubstreamOverflow`.
 
-Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
+Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate
+bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
 
 ### Per-substream error strategy
 
-When a per-key sub-pipeline fails, `SubstreamErrorStrategy` controls how the splitter reacts. The default mirrors the FailFast contract of linear flows; the alternatives let one substream's failure stay isolated.
+When a per-key sub-pipeline fails, `SubstreamErrorStrategy` controls how the splitter reacts. The default mirrors the
+FailFast contract of linear flows; the alternatives let one substream's failure stay isolated.
 
-| Strategy                     | Behaviour                                                                                                                                                 |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SubstreamFailAll` (default) | Surface the error verbatim via `StreamHandle.Err` and terminate the entire stream                                                                         |
-| `SubstreamDrop`              | Blocklist the failing key and complete that substream silently; sibling substreams finish normally; further elements with the blocklisted key are dropped |
-| `SubstreamRestart`           | Discard the failed pipeline; the next element with that key spawns a fresh substream from scratch                                                         |
+- **SubstreamFailAll** (default): Surface the error verbatim via `StreamHandle.Err` and terminate the entire stream.
+- **SubstreamDrop**: Blocklist the failing key and complete that substream silently; sibling substreams finish normally;
+  further elements with the blocklisted key are dropped.
+- **SubstreamRestart**: Discard the failed pipeline; the next element with that key spawns a fresh substream from
+  scratch.
 
-```go
+```go Per-substream error strategy
 sf := stream.GroupBy(src, 0, keyFn).
     WithErrorStrategy(stream.SubstreamDrop)
 ```
 
 ### Reference
 
-| Constructor / method          | Description                                                                         |
-| ----------------------------- | ----------------------------------------------------------------------------------- |
-| `GroupBy[T, K]`               | Partition `src` by `keyFn`; returns `SubFlow[K, T]`                                 |
-| `SplitWhen[T]`                | New substream begins when `predicate` is true; element is FIRST of new substream    |
-| `SplitAfter[T]`               | Current substream ends after `predicate` is true; element is LAST of that substream |
-| `SubFlowVia[K, In, Out]`      | Append a transformation to each substream's pipeline                                |
-| `MergeSubstreams[K, T]`       | Collapse substreams back into a flat `Source[T]` (non-deterministic interleave)     |
-| `SubFlow.WithSubstreamBuffer` | Per-substream in-flight cap and overflow strategy                                   |
-| `SubFlow.WithErrorStrategy`   | Per-substream failure handling policy                                               |
-
----
+- **GroupBy[T, K]**: Partition `src` by `keyFn`; returns `SubFlow[K, T]`.
+- **SplitWhen[T]**: New substream begins when `predicate` is true; element is FIRST of new substream.
+- **SplitAfter[T]**: Current substream ends after `predicate` is true; element is LAST of that substream.
+- **SubFlowVia[K, In, Out]**: Append a transformation to each substream's pipeline.
+- **MergeSubstreams[K, T]**: Collapse substreams back into a flat `Source[T]` (non-deterministic interleave).
+- **SubFlow.WithSubstreamBuffer**: Per-substream in-flight cap and overflow strategy.
+- **SubFlow.WithErrorStrategy**: Per-substream failure handling policy.
 
 ## Pipeline DSL (Graph builder)
 
-For non-linear topologies (fan-out branches that later merge, or multiple independent pipelines sharing a source)
-use the `Graph` DSL. Nodes are identified by string names and connected by referencing upstream names:
+For non-linear topologies (fan-out branches that later merge, or multiple independent pipelines sharing a source) use
+the `Graph` DSL. Nodes are identified by string names and connected by referencing upstream names:
 
-```go
+```go Pipeline DSL (Graph builder)
 // The Graph DSL is type-erased: nodes operate on Source[any], Flow[any, any],
 // and Sink[any]. Use these typed constructors when assembling.
 g := stream.NewGraph().
@@ -689,7 +681,7 @@ Two fan-in node kinds are available alongside `AddFlow` and `AddSink`:
 - `MergeInto(name, from...)` interleaves elements from multiple upstream nodes (non-deterministic order).
 - `ConcatInto(name, from...)` consumes upstreams sequentially, preserving per-source ordering across the boundary.
 
-```go
+```go Pipeline DSL (Graph builder)
 g := stream.NewGraph().
     AddSource("a",   srcA).
     AddSource("b",   srcB).
@@ -697,21 +689,27 @@ g := stream.NewGraph().
     AddSink("out",   sink, "ab")
 ```
 
----
-
 ## Cross-node stream refs
 
-`SourceRef[T]` and `SinkRef[T]` are wire-portable handles to a stream endpoint actor. Pass one inside any registered remote message and a different node materialises it back into an ordinary `Source[T]` or `Sink[T]`: the same fluent builder works whether the producer and consumer share an actor system or live on opposite ends of a cluster. The model mirrors Akka StreamRefs.
+`SourceRef[T]` and `SinkRef[T]` are wire-portable handles to a stream endpoint actor. Pass one inside any registered
+remote message and a different node materialises it back into an ordinary `Source[T]` or `Sink[T]`: the same fluent
+builder works whether the producer and consumer share an actor system or live on opposite ends of a cluster. The model
+mirrors Akka StreamRefs.
 
-Refs encode the producer node's address (host, port, actor name), so cross-node resolution is a direct `RemoteLookup` against the producer's remote server. There is no reliance on cluster-registry replication: the consumer can resolve and subscribe the moment the producer node is reachable, regardless of how loaded the cluster's actor registry is.
+Refs encode the producer node's address (host, port, actor name), so cross-node resolution is a direct `RemoteLookup`
+against the producer's remote server. There is no reliance on cluster-registry replication: the consumer can resolve and
+subscribe the moment the producer node is reachable, regardless of how loaded the cluster's actor registry is.
 
 ### Setup
 
-Cross-node refs only work when both sides of the connection have the wire control protocol **and** the element type registered with their remoting layer. Without this registration the consumer's bridge can't subscribe (control messages won't deserialize) or the producer's elements can't be serialised: symptoms include hanging `Run` calls, stream-level `"no serializer found for message type ..."` errors, and elements silently routed to dead-letter.
+Cross-node refs only work when both sides of the connection have the wire control protocol **and** the element type
+registered with their remoting layer. Without this registration the consumer's bridge can't subscribe (control messages
+won't deserialize) or the producer's elements can't be serialised: symptoms include hanging `Run` calls, stream-level
+`"no serializer found for message type ..."` errors, and elements silently routed to dead-letter.
 
 **Required on every node that participates:**
 
-```go
+```go Setup
 remoteCfg := remote.NewConfig("0.0.0.0", 9000,
     stream.RemoteOptions(),                  // (1) control-plane wire types
     remote.WithSerializables(new(MyEvent)),  // (2) your element type T
@@ -723,24 +721,48 @@ sys, err := actor.NewActorSystem("my-app",
 )
 ```
 
-1. `stream.RemoteOptions()` registers the small subscribe / request / complete / error / cancel control-plane wire types. Append it to your existing `remote.NewConfig` options on every node: producer side, consumer side, and any node that might hold or forward a ref. **Forgetting it on either side is the most common cause of hangs**: the bridge sends `streamSubscribeWire` and the endpoint never sees a recognisable message because its remoting layer can't decode the type.
-2. Element types must be registered with `remote.WithSerializables(new(MyEvent))`: same as for any other `rctx.Tell` to a remote PID. Refs do **not** wrap elements in an envelope, so missing element-type registration on the producer side fails the send, and missing it on the consumer side fails the receive.
+1. `stream.RemoteOptions()` registers the small subscribe / request / complete / error / cancel control-plane wire
+   types. Append it to your existing `remote.NewConfig` options on every node: producer side, consumer side, and any
+   node that might hold or forward a ref. **Forgetting it on either side is the most common cause of hangs**: the bridge
+   sends `streamSubscribeWire` and the endpoint never sees a recognisable message because its remoting layer can't
+   decode the type.
+2. Element types must be registered with `remote.WithSerializables(new(MyEvent))`: same as for any other `rctx.Tell` to
+   a remote PID. Refs do **not** wrap elements in an envelope, so missing element-type registration on the producer side
+   fails the send, and missing it on the consumer side fails the receive.
 
 **Things that will silently break the feature otherwise:**
 
-- **Asymmetric registration.** The producer registers `MyEvent` but the consumer does not (or vice versa). The end with the missing registration logs a `"no serializer found"` warning when the message arrives; for the consumer that means elements never reach the local sink. Always register the same element types on both ends.
-- **Registering the value type as a non-pointer.** `remote.WithSerializables` keys on the exact type passed in: typically `*MyEvent` from `new(MyEvent)`. Sending a value-type element over the wire still works because the bridge's `wireForm` helper auto-wraps non-pointer values into a `*T` registered key, but if you pass a struct value (instead of `new(...)` or an interface pointer) into `WithSerializables` itself, the registry stores the wrong type and lookups miss. Stick to the `new(MyEvent)` form.
-- **Skipping `stream.RemoteOptions()` on a forwarding-only node.** Any node that may receive a `SourceRef[T]` / `SinkRef[T]` inside another message (even just to inspect or relay it) needs `stream.RemoteOptions()` registered, because the ref struct itself is serialised through the same registry. A node missing it will fail to deserialize incoming refs.
-- **Disabling remoting entirely.** Cross-node refs require `actor.WithRemote(...)` on both ends. Without it `ref.Source(sys)` / `ref.Sink(sys)` materialise a bridge that can't reach the remote endpoint and surfaces an `"actor not found"` resolution error after the retry budget expires.
-- **Producer node unreachable at resolve time.** Refs carry the producer node's host:port, so resolution is a direct `RemoteLookup` against the producer's remote server: there is no dependency on async cluster registry propagation. If the producer node is briefly unreachable when the consumer resolves (network blip, just-restarting node), the bridge retries with jittered exponential backoff for up to 10s. After that it surfaces a `"resolve source ref"` / `"resolve sink ref"` error rather than hanging: handle it in the receiving side just like any remote-Tell failure.
+- **Asymmetric registration.** The producer registers `MyEvent` but the consumer does not (or vice versa). The end with
+  the missing registration logs a `"no serializer found"` warning when the message arrives; for the consumer that means
+  elements never reach the local sink. Always register the same element types on both ends.
+- **Registering the value type as a non-pointer.** `remote.WithSerializables` keys on the exact type passed in:
+  typically `*MyEvent` from `new(MyEvent)`. Sending a value-type element over the wire still works because the bridge's
+  `wireForm` helper auto-wraps non-pointer values into a `*T` registered key, but if you pass a struct value (instead of
+  `new(...)` or an interface pointer) into `WithSerializables` itself, the registry stores the wrong type and lookups
+  miss. Stick to the `new(MyEvent)` form.
+- **Skipping `stream.RemoteOptions()` on a forwarding-only node.** Any node that may receive a `SourceRef[T]` /
+  `SinkRef[T]` inside another message (even just to inspect or relay it) needs `stream.RemoteOptions()` registered,
+  because the ref struct itself is serialised through the same registry. A node missing it will fail to deserialize
+  incoming refs.
+- **Disabling remoting entirely.** Cross-node refs require `actor.WithRemote(...)` on both ends. Without it
+  `ref.Source(sys)` / `ref.Sink(sys)` materialise a bridge that can't reach the remote endpoint and surfaces an
+  `"actor not found"` resolution error after the retry budget expires.
+- **Producer node unreachable at resolve time.** Refs carry the producer node's host:port, so resolution is a direct
+  `RemoteLookup` against the producer's remote server: there is no dependency on async cluster registry propagation. If
+  the producer node is briefly unreachable when the consumer resolves (network blip, just-restarting node), the bridge
+  retries with jittered exponential backoff for up to 10s. After that it surfaces a `"resolve source ref"` /
+  `"resolve sink ref"` error rather than hanging: handle it in the receiving side just like any remote-Tell failure.
 
-Element values cross the wire as ordinary remote messages: no extra envelope, no double encoding. Whatever is registered with `remote.WithSerializables` round-trips automatically, just as it would for any other `rctx.Tell` to a remote PID.
+Element values cross the wire as ordinary remote messages: no extra envelope, no double encoding. Whatever is registered
+with `remote.WithSerializables` round-trips automatically, just as it would for any other `rctx.Tell` to a remote PID.
 
 ### `SourceRef`: publish a producer
 
-A `SourceRef[T]` exposes a local `Source[T]` to a remote consumer. The ref is a plain serialisable value: wrap it in any user-defined message type you like (registered with the same remoting layer) and ship it however your application already moves data between nodes.
+A `SourceRef[T]` exposes a local `Source[T]` to a remote consumer. The ref is a plain serialisable value: wrap it in any
+user-defined message type you like (registered with the same remoting layer) and ship it however your application
+already moves data between nodes.
 
-```go
+```go SourceRef: publish a producer
 // User-defined wrapper: anything carrying the ref alongside whatever
 // other context the consumer needs.
 type OffersFeed struct {
@@ -769,13 +791,14 @@ h, err := feed.Ref.Source(sysB).
     Run(ctx, sysB)
 ```
 
-The underlying source pipeline is materialised lazily: only when a subscriber connects via `ref.Source(...).Run(...)`. Constructing the ref is cheap.
+The underlying source pipeline is materialised lazily: only when a subscriber connects via `ref.Source(...).Run(...)`.
+Constructing the ref is cheap.
 
 ### `SinkRef`: publish a consumer
 
 The mirror image: a `SinkRef[T]` exposes a local `Sink[T]` so a remote node can pipe data into it.
 
-```go
+```go SinkRef: publish a consumer
 // Consumer node (sysA)
 col, sink := stream.Collect[int]()
 ref, err := sink.SinkRef(ctx, sysA)
@@ -789,40 +812,45 @@ h, err := stream.From(stream.Of(10, 20, 30, 40, 50)).
 
 ### Semantics
 
-- **Single subscription per ref.** A second `ref.Source(...)` / `ref.Sink(...)` materialisation observes a stream-level error (`"already subscribed"` while the first stream is active, `"already consumed"` after it finishes). Refs are one-shot, matching Akka StreamRefs.
-- **Wire-level credit.** The consumer's downstream demand drives `streamRequestWire` to the producer; the producer ships exactly that many elements before pausing. A bounded pending queue (1024 elements) on the producer side converts a slow-consumer scenario into a visible `"backpressure overflow"` stream error rather than unbounded buffering on the producer node.
-- **Bounded lifecycle.** After the stream completes (success or error), the endpoint actor stays alive for a 30-second grace window so a racing late subscriber gets a clean rejection rather than telling a dead actor and hanging. After the grace window the endpoint reaps itself via `system.ScheduleOnce`. Refs that are never consumed are reaped at actor-system shutdown.
-- **Death detection.** Bridges `Watch` their remote endpoint as defense in depth: an unexpected endpoint death (panic, system shutdown mid-stream, expired grace on a stale ref) surfaces as a stream error on the bridge's `StreamHandle.Err()`, never a hang. Combined with retry-with-jitter resolution that absorbs cluster propagation latency, this keeps cross-node graphs reliable under load.
+- **Single subscription per ref.** A second `ref.Source(...)` / `ref.Sink(...)` materialisation observes a stream-level
+  error (`"already subscribed"` while the first stream is active, `"already consumed"` after it finishes). Refs are
+  one-shot, matching Akka StreamRefs.
+- **Wire-level credit.** The consumer's downstream demand drives `streamRequestWire` to the producer; the producer ships
+  exactly that many elements before pausing. A bounded pending queue (1024 elements) on the producer side converts a
+  slow-consumer scenario into a visible `"backpressure overflow"` stream error rather than unbounded buffering on the
+  producer node.
+- **Bounded lifecycle.** After the stream completes (success or error), the endpoint actor stays alive for a 30-second
+  grace window so a racing late subscriber gets a clean rejection rather than telling a dead actor and hanging. After
+  the grace window the endpoint reaps itself via `system.ScheduleOnce`. Refs that are never consumed are reaped at
+  actor-system shutdown.
+- **Death detection.** Bridges `Watch` their remote endpoint as defense in depth: an unexpected endpoint death (panic,
+  system shutdown mid-stream, expired grace on a stale ref) surfaces as a stream error on the bridge's
+  `StreamHandle.Err()`, never a hang. Combined with retry-with-jitter resolution that absorbs cluster propagation
+  latency, this keeps cross-node graphs reliable under load.
 
 ### Reference
 
-| Constructor / method                   | Description                                                       |
-| -------------------------------------- | ----------------------------------------------------------------- |
-| `Source[T].SourceRef(ctx, sys)`        | Publish a `Source[T]` as a wire-portable `SourceRef[T]`           |
-| `(SourceRef[T]).Source(sys) Source[T]` | Adapt a ref back into a `Source[T]` for use in a local graph      |
-| `Sink[T].SinkRef(ctx, sys)`            | Publish a `Sink[T]` as a wire-portable `SinkRef[T]`               |
-| `(SinkRef[T]).Sink(sys) Sink[T]`       | Adapt a ref back into a `Sink[T]` for use in a local graph        |
-| `RemoteOptions() remote.Option`        | Registers the control-plane wire protocol with `remote.NewConfig` |
-
----
+- **Source[T].SourceRef(ctx, sys)**: Publish a `Source[T]` as a wire-portable `SourceRef[T]`.
+- **(SourceRef[T]).Source(sys) Source[T]**: Adapt a ref back into a `Source[T]` for use in a local graph.
+- **Sink[T].SinkRef(ctx, sys)**: Publish a `Sink[T]` as a wire-portable `SinkRef[T]`.
+- **(SinkRef[T]).Sink(sys) Sink[T]**: Adapt a ref back into a `Sink[T]` for use in a local graph.
+- **RemoteOptions() remote.Option**: Registers the control-plane wire protocol with `remote.NewConfig`.
 
 ## Backpressure
 
 GoAkt Streams uses **credit-based demand propagation**. The sink signals how many elements it can accept; each stage
 propagates that demand upstream. Sources produce only what is requested.
 
-```
+```text Backpressure
 Sink ──[streamRequest n=224]──► Flow ──[streamRequest n=224]──► Source
      ◄─[streamElement × 224]──       ◄─[streamElement × 224]──
 ```
 
 Key parameters (in `StageConfig`):
 
-| Parameter         | Default | Purpose                                              |
-| ----------------- | ------- | ---------------------------------------------------- |
-| `InitialDemand`   | `224`   | First batch of demand sent by a sink to its upstream |
-| `RefillThreshold` | `64`    | Credit level at which a refill is requested          |
-| `BufferSize`      | `256`   | Mailbox buffer (bounded mailbox capacity)            |
+- **InitialDemand**: First batch of demand sent by a sink to its upstream. Default: `224`.
+- **RefillThreshold**: Credit level at which a refill is requested. Default: `64`.
+- **BufferSize**: Mailbox buffer (bounded mailbox capacity). Default: `256`.
 
 The sliding-window watermark means:
 
@@ -830,20 +858,16 @@ The sliding-window watermark means:
 - When `credit ≤ RefillThreshold`, the stage requests `InitialDemand - credit` more elements from upstream.
 - This keeps in-flight data bounded while keeping the pipeline saturated.
 
----
-
 ## Error handling
 
 Each stage can be configured with an independent `ErrorStrategy`:
 
-| Strategy             | Behaviour                                                                   |
-| -------------------- | --------------------------------------------------------------------------- |
-| `FailFast` (default) | Propagate error downstream, shut down the pipeline                          |
-| `Resume`             | Skip the failed element; request a replacement from upstream                |
-| `Retry`              | Re-process the element up to `RetryConfig.MaxAttempts` times before failing |
-| `Supervise`          | Delegate to actor supervision (currently equivalent to `FailFast`)          |
+- **FailFast** (default): Propagate error downstream, shut down the pipeline.
+- **Resume**: Skip the failed element; request a replacement from upstream.
+- **Retry**: Re-process the element up to `RetryConfig.MaxAttempts` times before failing.
+- **Supervise**: Delegate to actor supervision (currently equivalent to `FailFast`).
 
-```go
+```go Error handling
 stream.From(stream.FromChannel(ch)).
     Via(stream.TryMap(parse).
         WithErrorStrategy(stream.Retry).
@@ -856,22 +880,18 @@ stream.From(stream.FromChannel(ch)).
 
 Overflow strategies apply when a stage's internal buffer is full:
 
-| Strategy             | Behaviour                                       |
-| -------------------- | ----------------------------------------------- |
-| `DropTail` (default) | Discard the newest incoming element             |
-| `DropHead`           | Discard the oldest buffered element             |
-| `DropBuffer`         | Discard the entire buffer                       |
-| `Backpressure`       | Block the upstream (apply natural backpressure) |
-| `Fail`               | Treat overflow as a fatal error                 |
-
----
+- **DropTail** (default): Discard the newest incoming element.
+- **DropHead**: Discard the oldest buffered element.
+- **DropBuffer**: Discard the entire buffer.
+- **Backpressure**: Block the upstream (apply natural backpressure).
+- **Fail**: Treat overflow as a fatal error.
 
 ## Stage fusion
 
 Adjacent stateless stages (`Map`, `Filter`) are automatically fused into a single actor, eliminating intermediate
 mailbox enqueues and reducing allocations.
 
-```go
+```go Stage fusion
 // Without fusion (FuseNone): source → map-actor → filter-actor → sink-actor
 // With fusion (FuseStateless, default): source → fused-actor → sink-actor
 
@@ -880,22 +900,18 @@ handle, err := graph.
     Run(ctx, sys)
 ```
 
-| Mode                      | Behaviour                                                        |
-| ------------------------- | ---------------------------------------------------------------- |
-| `FuseStateless` (default) | Fuses adjacent `Map` and `Filter` stages into one actor          |
-| `FuseNone`                | No fusion; each stage is a separate actor (useful for debugging) |
-| `FuseAggressive`          | Fuses all fusable adjacent stages                                |
+- **FuseStateless** (default): Fuses adjacent `Map` and `Filter` stages into one actor.
+- **FuseNone**: No fusion; each stage is a separate actor (useful for debugging).
+- **FuseAggressive**: Fuses all fusable adjacent stages.
 
 Fusion is transparent: the external API and semantics are identical. Disable it with `FuseNone` when profiling
 individual stage throughput.
-
----
 
 ## StreamHandle lifecycle
 
 `RunnableGraph.Run` returns a `StreamHandle` for controlling the pipeline at runtime:
 
-```go
+```go StreamHandle lifecycle
 handle, err := graph.Run(ctx, sys)
 if err != nil {
     return err
@@ -916,16 +932,12 @@ if err := handle.Stop(ctx); err != nil {
 handle.Abort()
 ```
 
-| Method    | Purpose                                                            |
-| --------- | ------------------------------------------------------------------ |
-| `ID`      | Unique stream identifier                                           |
-| `Done`    | Channel closed when the stream terminates (naturally or by error)  |
-| `Err`     | Terminal error; valid only after `Done` is closed                  |
-| `Stop`    | Orderly shutdown; drains in-flight elements, then stops all stages |
-| `Abort`   | Immediate termination; discards buffered elements                  |
-| `Metrics` | Returns a `StreamMetrics` snapshot                                 |
-
----
+- **ID**: Unique stream identifier.
+- **Done**: Channel closed when the stream terminates (naturally or by error).
+- **Err**: Terminal error; valid only after `Done` is closed.
+- **Stop**: Orderly shutdown; drains in-flight elements, then stops all stages.
+- **Abort**: Immediate termination; discards buffered elements.
+- **Metrics**: Returns a `StreamMetrics` snapshot.
 
 ## Observability
 
@@ -933,7 +945,7 @@ handle.Abort()
 
 `StreamHandle.Metrics()` returns a live snapshot of element counts:
 
-```go
+```go Metrics
 m := handle.Metrics()
 log.Printf("in=%d out=%d errors=%d", m.ElementsIn(), m.ElementsOut(), m.Errors())
 ```
@@ -942,7 +954,7 @@ log.Printf("in=%d out=%d errors=%d", m.ElementsIn(), m.ElementsOut(), m.Errors()
 
 Attach a `Tracer` to any `Flow` or `Sink` for per-element distributed tracing:
 
-```go
+```go Tracer
 type myTracer struct{}
 
 func (t *myTracer) OnElement(stageName string, seqNo uint64, latencyNs int64) {
@@ -961,13 +973,11 @@ stream.From(src).
     Run(ctx, sys)
 ```
 
----
-
 ## Configuration reference
 
 `StageConfig` carries per-stage configuration. Apply it via the builder methods on `Flow`, `Sink`, or `Source`:
 
-```go
+```go Configuration reference
 stream.Map(fn).
     WithErrorStrategy(stream.Retry).
     WithRetryConfig(stream.RetryConfig{MaxAttempts: 3}).
@@ -976,95 +986,99 @@ stream.Map(fn).
     WithMailbox(actor.NewBoundedMailbox(512))
 ```
 
-| Field                     | Type                | Default    | Purpose                                                                |
-| ------------------------- | ------------------- | ---------- | ---------------------------------------------------------------------- |
-| `InitialDemand`           | `int64`             | `224`      | First demand batch from sink to upstream                               |
-| `RefillThreshold`         | `int64`             | `64`       | Credit level that triggers a refill request                            |
-| `ErrorStrategy`           | `ErrorStrategy`     | `FailFast` | Element-level failure handling                                         |
-| `RetryConfig.MaxAttempts` | `int`               | `1`        | Retry attempts when `ErrorStrategy` is `Retry`                         |
-| `OverflowStrategy`        | `OverflowStrategy`  | `DropTail` | Behaviour when internal buffer is full                                 |
-| `PullTimeout`             | `time.Duration`     | `5s`       | Timeout for `FromActor` pull requests                                  |
-| `BufferSize`              | `int`               | `256`      | Bounded mailbox capacity (`BufferSize × 2` slots)                      |
-| `Mailbox`                 | `actor.Mailbox`     | `nil`      | Override the default mailbox implementation                            |
-| `Name`                    | `string`            | auto       | Custom actor name for this stage                                       |
-| `Tags`                    | `map[string]string` | `nil`      | Key/value labels propagated to metrics and traces                      |
-| `Tracer`                  | `Tracer`            | `nil`      | Optional distributed tracing hook                                      |
-| `Fusion`                  | `bool`              | `true`     | Whether this stage may participate in stage fusion                     |
-| `MicroBatch`              | `int`               | `1`        | Accumulate this many elements before forwarding (flow stages only)     |
-| `OnDrop`                  | `func`              | `nil`      | Called when an element is dropped due to overflow or exhausted retries |
-
----
+- **InitialDemand**: First demand batch from sink to upstream. Type: `int64`. Default: `224`.
+- **RefillThreshold**: Credit level that triggers a refill request. Type: `int64`. Default: `64`.
+- **ErrorStrategy**: Element-level failure handling. Type: `ErrorStrategy`. Default: `FailFast`.
+- **RetryConfig.MaxAttempts**: Retry attempts when `ErrorStrategy` is `Retry`. Type: `int`. Default: `1`.
+- **OverflowStrategy**: Behaviour when internal buffer is full. Type: `OverflowStrategy`. Default: `DropTail`.
+- **PullTimeout**: Timeout for `FromActor` pull requests. Type: `time.Duration`. Default: `5s`.
+- **BufferSize**: Bounded mailbox capacity (`BufferSize × 2` slots). Type: `int`. Default: `256`.
+- **Mailbox**: Override the default mailbox implementation. Type: `actor.Mailbox`. Default: `nil`.
+- **Name**: Custom actor name for this stage. Type: `string`. Default: auto.
+- **Tags**: Key/value labels propagated to metrics and traces. Type: `map[string]string`. Default: `nil`.
+- **Tracer**: Optional distributed tracing hook. Type: `Tracer`. Default: `nil`.
+- **Fusion**: Whether this stage may participate in stage fusion. Type: `bool`. Default: `true`.
+- **MicroBatch**: Accumulate this many elements before forwarding (flow stages only). Type: `int`. Default: `1`.
+- **OnDrop**: Called when an element is dropped due to overflow or exhausted retries. Type: `func`. Default: `nil`.
 
 ## Comparison with other approaches
 
 ### Go channels and goroutines
 
-Go channels are the native concurrency primitive. They are low-level, composable, and require no dependencies: but
-they demand that the developer hand-craft every concern that GoAkt Streams handles automatically.
+Go channels are the native concurrency primitive. They are low-level, composable, and require no dependencies: but they
+demand that the developer hand-craft every concern that GoAkt Streams handles automatically.
 
-| Concern        | Channels + goroutines                              | GoAkt Streams                                             |
-| -------------- | -------------------------------------------------- | --------------------------------------------------------- |
-| Backpressure   | Manual (blocking sends or select/default)          | Automatic credit-based demand propagation                 |
-| Error handling | Explicit error channels and coordination logic     | `ErrorStrategy` per stage (`FailFast`, `Resume`, `Retry`) |
-| Fan-out        | Manual goroutine fan; complex synchronisation      | `Broadcast`, `Balance` primitives                         |
-| Fan-in         | `select` or `sync.WaitGroup` coordination          | `Merge`, `Combine` primitives                             |
-| Windowing      | Custom timer goroutines and buffers                | `Batch[T]` built-in                                       |
-| Rate limiting  | Custom token bucket / ticker goroutines            | `Throttle[T]` built-in                                    |
-| Cancellation   | `context.Context` plumbing through every goroutine | `handle.Stop` / `handle.Abort`                            |
-| Lifecycle      | Manual `sync.WaitGroup` + goroutine tracking       | `StreamHandle.Done` + supervision tree                    |
-| Observability  | Manual counters                                    | Built-in `StreamMetrics` and `Tracer`                     |
+- **Backpressure**: Channels + goroutines: Manual (blocking sends or select/default). GoAkt Streams: Automatic
+  credit-based demand propagation.
+- **Error handling**: Channels + goroutines: Explicit error channels and coordination logic. GoAkt Streams:
+  `ErrorStrategy` per stage (`FailFast`, `Resume`, `Retry`).
+- **Fan-out**: Channels + goroutines: Manual goroutine fan; complex synchronisation. GoAkt Streams: `Broadcast`,
+  `Balance` primitives.
+- **Fan-in**: Channels + goroutines: `select` or `sync.WaitGroup` coordination. GoAkt Streams: `Merge`, `Combine`
+  primitives.
+- **Windowing**: Channels + goroutines: Custom timer goroutines and buffers. GoAkt Streams: `Batch[T]` built-in.
+- **Rate limiting**: Channels + goroutines: Custom token bucket / ticker goroutines. GoAkt Streams: `Throttle[T]`
+  built-in.
+- **Cancellation**: Channels + goroutines: `context.Context` plumbing through every goroutine. GoAkt Streams:
+  `handle.Stop` / `handle.Abort`.
+- **Lifecycle**: Channels + goroutines: Manual `sync.WaitGroup` + goroutine tracking. GoAkt Streams:
+  `StreamHandle.Done` + supervision tree.
+- **Observability**: Channels + goroutines: Manual counters. GoAkt Streams: Built-in `StreamMetrics` and `Tracer`.
 
-**When to prefer channels:** simple point-to-point pipelines with one producer and one consumer, or when you need
-the absolute minimum overhead and are comfortable managing error propagation manually.
+**When to prefer channels:** simple point-to-point pipelines with one producer and one consumer, or when you need the
+absolute minimum overhead and are comfortable managing error propagation manually.
 
 **When to prefer GoAkt Streams:** multi-stage transformations, fan-out/fan-in topologies, variable-rate sources,
 anything requiring windowing, batching, or rate limiting, and whenever you want a managed lifecycle.
 
----
-
 ### RxGo
 
-[RxGo](https://github.com/ReactiveX/RxGo) is a Go implementation of Reactive Extensions (ReactiveX). It offers a
-rich operator library and a familiar API for developers coming from RxJS or RxJava.
+[RxGo](https://github.com/ReactiveX/RxGo) is a Go implementation of Reactive Extensions (ReactiveX). It offers a rich
+operator library and a familiar API for developers coming from RxJS or RxJava.
 
-| Aspect                | RxGo                                                                                        | GoAkt Streams                                                 |
-| --------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| **Backpressure**      | Not supported in `v2`; the observable push model can overflow without consumer-side control | Pull-only, credit-based; source never outpaces downstream     |
-| **Concurrency model** | Goroutines with optional `WithPool` options                                                 | Actor-per-stage; supervised, lifecycle-managed                |
-| **Type safety**       | `interface{}` items in v2; generic operators not yet complete                               | Full generics: `Flow[In, Out]`, `Source[T]`, `Sink[T]`        |
-| **Actor integration** | None                                                                                        | First-class: `FromActor`, `ToActor`, actor supervision        |
-| **Error model**       | Error items in the stream; `OnError` handler                                                | Typed `ErrorStrategy` (FailFast, Resume, Retry) per stage     |
-| **Lifecycle**         | Dispose pattern                                                                             | `StreamHandle` with `Stop` / `Abort` / `Done`                 |
-| **Operator richness** | Very rich (debounce, zip, skip, take, window…)                                              | Core operators; `FlatMap`, `Batch`, `Throttle`, `ParallelMap` |
-| **Fan-out**           | Connectable observables                                                                     | `Broadcast` and `Balance` with automatic backpressure         |
-| **Supervision**       | None                                                                                        | GoAkt actor supervision tree                                  |
-| **Status**            | Maintenance mode                                                                            | Actively maintained                                           |
+- **Backpressure**: RxGo: Not supported in `v2`; the observable push model can overflow without consumer-side control.
+  GoAkt Streams: Pull-only, credit-based; source never outpaces downstream.
+- **Concurrency model**: RxGo: Goroutines with optional `WithPool` options. GoAkt Streams: Actor-per-stage; supervised,
+  lifecycle-managed.
+- **Type safety**: RxGo: `interface{}` items in v2; generic operators not yet complete. GoAkt Streams: Full generics:
+  `Flow[In, Out]`, `Source[T]`, `Sink[T]`.
+- **Actor integration**: RxGo: None. GoAkt Streams: First-class: `FromActor`, `ToActor`, actor supervision.
+- **Error model**: RxGo: Error items in the stream; `OnError` handler. GoAkt Streams: Typed `ErrorStrategy` (FailFast,
+  Resume, Retry) per stage.
+- **Lifecycle**: RxGo: Dispose pattern. GoAkt Streams: `StreamHandle` with `Stop` / `Abort` / `Done`.
+- **Operator richness**: RxGo: Very rich (debounce, zip, skip, take, window…). GoAkt Streams: Core operators; `FlatMap`,
+  `Batch`, `Throttle`, `ParallelMap`.
+- **Fan-out**: RxGo: Connectable observables. GoAkt Streams: `Broadcast` and `Balance` with automatic backpressure.
+- **Supervision**: RxGo: None. GoAkt Streams: GoAkt actor supervision tree.
+- **Status**: RxGo: Maintenance mode. GoAkt Streams: Actively maintained.
 
-**Choose RxGo** if you are building standalone Go applications, want the full ReactiveX operator vocabulary, and do
-not need backpressure or actor integration.
+**Choose RxGo** if you are building standalone Go applications, want the full ReactiveX operator vocabulary, and do not
+need backpressure or actor integration.
 
 **Choose GoAkt Streams** if you need guaranteed backpressure, are already in a GoAkt system, or require supervised
 stages with automatic restart.
-
----
 
 ### Benthos / Redpanda Connect
 
 [Benthos](https://www.benthos.dev) (now Redpanda Connect) is a production-grade stream-processing engine focused on
 connecting data systems. It is configuration-driven and ships with hundreds of connectors.
 
-| Aspect                  | Benthos / Redpanda Connect                      | GoAkt Streams                                                    |
-| ----------------------- | ----------------------------------------------- | ---------------------------------------------------------------- |
-| **Primary audience**    | Platform / DevOps teams building data pipelines | Go application developers integrating stream logic into services |
-| **Configuration model** | YAML configuration files                        | Code-first Go API                                                |
-| **Backpressure**        | Ack-based; built into every connector           | Credit-based demand propagation                                  |
-| **Connectors**          | 200+ built-in (Kafka, S3, HTTP, databases…)     | User-defined via `Source`, `Sink` wrappers                       |
-| **Type safety**         | Untyped message blobs                           | Generic `Source[T]` / `Flow[In,Out]`                             |
-| **Embedding**           | Supported via Go library                        | Native: it is a Go library                                       |
-| **Processing model**    | Component DAG configured in YAML                | Composable Go values assembled in code                           |
-| **Testing**             | Unit tests via YAML fixtures                    | Standard Go tests; testkit                                       |
-| **Error handling**      | Retry / DLQ per connector                       | `ErrorStrategy` + `OnDrop` callback per stage                    |
-| **Actor integration**   | None                                            | First-class GoAkt actor interop                                  |
+- **Primary audience**: Benthos / Redpanda Connect: Platform / DevOps teams building data pipelines. GoAkt Streams: Go
+  application developers integrating stream logic into services.
+- **Configuration model**: Benthos / Redpanda Connect: YAML configuration files. GoAkt Streams: Code-first Go API.
+- **Backpressure**: Benthos / Redpanda Connect: Ack-based; built into every connector. GoAkt Streams: Credit-based
+  demand propagation.
+- **Connectors**: Benthos / Redpanda Connect: 200+ built-in (Kafka, S3, HTTP, databases…). GoAkt Streams: User-defined
+  via `Source`, `Sink` wrappers.
+- **Type safety**: Benthos / Redpanda Connect: Untyped message blobs. GoAkt Streams: Generic `Source[T]` /
+  `Flow[In,Out]`.
+- **Embedding**: Benthos / Redpanda Connect: Supported via Go library. GoAkt Streams: Native: it is a Go library.
+- **Processing model**: Benthos / Redpanda Connect: Component DAG configured in YAML. GoAkt Streams: Composable Go
+  values assembled in code.
+- **Testing**: Benthos / Redpanda Connect: Unit tests via YAML fixtures. GoAkt Streams: Standard Go tests; testkit.
+- **Error handling**: Benthos / Redpanda Connect: Retry / DLQ per connector. GoAkt Streams: `ErrorStrategy` + `OnDrop`
+  callback per stage.
+- **Actor integration**: Benthos / Redpanda Connect: None. GoAkt Streams: First-class GoAkt actor interop.
 
 **Choose Benthos** if you are building a standalone data pipeline product, need ready-made connectors to external
 systems, or want configuration-driven deployments without writing Go code.
@@ -1072,25 +1086,27 @@ systems, or want configuration-driven deployments without writing Go code.
 **Choose GoAkt Streams** if stream processing is one facet of a larger GoAkt application, you want to express pipelines
 in idiomatic Go code, or you need deep integration with the actor supervision model.
 
----
-
 ### Apache Kafka Streams
 
 [Kafka Streams](https://kafka.apache.org/documentation/streams/) is a JVM client library for building stateful stream
 processors on top of Apache Kafka.
 
-| Aspect                | Kafka Streams                                  | GoAkt Streams                                        |
-| --------------------- | ---------------------------------------------- | ---------------------------------------------------- |
-| **Language**          | Java / Kotlin (JVM)                            | Go                                                   |
-| **Broker dependency** | Requires Apache Kafka                          | No broker; in-process                                |
-| **Durability**        | Persistent topics; replayable                  | In-memory within the process; ephemeral              |
-| **State stores**      | RocksDB-backed state stores; fault-tolerant    | Stateful stages via actor state; no persistent store |
-| **Scalability**       | Horizontal via Kafka partitions                | Vertical + actor location transparency               |
-| **Backpressure**      | Implicit via Kafka consumer offset             | Explicit credit-based demand                         |
-| **Exactly-once**      | Exactly-once semantics with transactions       | Exactly-once within a local pipeline                 |
-| **Windowing**         | Tumbling, hopping, sliding, session windows    | `Batch[T]` for simple windowing                      |
-| **Table joins**       | KTable / KStream joins with changelog topics   | Not built-in; compose via actor state                |
-| **Operator richness** | Filter, map, flatMap, groupBy, aggregate, join | See flow reference table above                       |
+- **Language**: Kafka Streams: Java / Kotlin (JVM). GoAkt Streams: Go.
+- **Broker dependency**: Kafka Streams: Requires Apache Kafka. GoAkt Streams: No broker; in-process.
+- **Durability**: Kafka Streams: Persistent topics; replayable. GoAkt Streams: In-memory within the process; ephemeral.
+- **State stores**: Kafka Streams: RocksDB-backed state stores; fault-tolerant. GoAkt Streams: Stateful stages via actor
+  state; no persistent store.
+- **Scalability**: Kafka Streams: Horizontal via Kafka partitions. GoAkt Streams: Vertical + actor location
+  transparency.
+- **Backpressure**: Kafka Streams: Implicit via Kafka consumer offset. GoAkt Streams: Explicit credit-based demand.
+- **Exactly-once**: Kafka Streams: Exactly-once semantics with transactions. GoAkt Streams: Exactly-once within a local
+  pipeline.
+- **Windowing**: Kafka Streams: Tumbling, hopping, sliding, session windows. GoAkt Streams: `Batch[T]` for simple
+  windowing.
+- **Table joins**: Kafka Streams: KTable / KStream joins with changelog topics. GoAkt Streams: Not built-in; compose via
+  actor state.
+- **Operator richness**: Kafka Streams: Filter, map, flatMap, groupBy, aggregate, join. GoAkt Streams: See flow
+  reference table above.
 
 **Choose Kafka Streams** when you need durable, replayable, horizontally scalable stream processing on the JVM with
 Kafka as the backbone.
@@ -1098,36 +1114,35 @@ Kafka as the backbone.
 **Choose GoAkt Streams** for in-process stream processing embedded in a Go service, with no external broker dependency
 and tight integration with GoAkt actor supervision.
 
----
-
 ### Akka Streams
 
 [Akka Streams](https://doc.akka.io/docs/akka/current/stream/index.html) (Scala / Java) is the direct inspiration for
 GoAkt Streams. Both implement the Reactive Streams specification.
 
-| Aspect                | Akka Streams                                                                | GoAkt Streams                                                                                          |
-| --------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| **Language**          | Scala / Java (JVM)                                                          | Go                                                                                                     |
-| **Backpressure**      | Reactive Streams specification                                              | Credit-based pull; equivalent semantics                                                                |
-| **Graph DSL**         | Rich typed graph builder (`GraphDSL`)                                       | `Graph` named-node builder                                                                             |
-| **Stage fusion**      | Automatic operator fusion                                                   | `FuseStateless` (default), `FuseNone`, `FuseAggressive`                                                |
-| **Materializer**      | `ActorMaterializer`                                                         | GoAkt `ActorSystem`                                                                                    |
-| **Error handling**    | `SupervisionStrategy` per flow                                              | `ErrorStrategy` per stage                                                                              |
-| **Fan-out**           | `Broadcast`, `Balance`, `Partition`                                         | `Broadcast`, `Balance`                                                                                 |
-| **Fan-in**            | `Merge`, `MergePreferred`, `Zip`, `ZipWith`                                 | `Merge`, `Combine`                                                                                     |
-| **Substreams**        | `groupBy`, `splitWhen`, `splitAfter`, `mergeSubstreams`, `concatSubstreams` | `GroupBy`, `SplitWhen`, `SplitAfter`, `MergeSubstreams` (with per-substream buffer and error strategy) |
-| **Cross-node refs**   | `SourceRef`, `SinkRef`                                                      | `SourceRef`, `SinkRef` (single-subscription, grace-period reaped, credit-paced)                        |
-| **Actor interop**     | `Source.actorRef`, `Sink.actorRef`                                          | `FromActor`, `ToActor`, `ToActorNamed`                                                                 |
-| **Type safety**       | Full (Scala generics)                                                       | Full (Go generics)                                                                                     |
-| **Operator richness** | Very rich                                                                   | Core operators; sufficient for most workloads                                                          |
-| **Runtime**           | JVM; Akka actor system                                                      | Go runtime; GoAkt actor system                                                                         |
-| **Licence**           | BSL 1.1 (Lightbend)                                                         | MIT                                                                                                    |
+- **Language**: Akka Streams: Scala / Java (JVM). GoAkt Streams: Go.
+- **Backpressure**: Akka Streams: Reactive Streams specification. GoAkt Streams: Credit-based pull; equivalent
+  semantics.
+- **Graph DSL**: Akka Streams: Rich typed graph builder (`GraphDSL`). GoAkt Streams: `Graph` named-node builder.
+- **Stage fusion**: Akka Streams: Automatic operator fusion. GoAkt Streams: `FuseStateless` (default), `FuseNone`,
+  `FuseAggressive`.
+- **Materializer**: Akka Streams: `ActorMaterializer`. GoAkt Streams: GoAkt `ActorSystem`.
+- **Error handling**: Akka Streams: `SupervisionStrategy` per flow. GoAkt Streams: `ErrorStrategy` per stage.
+- **Fan-out**: Akka Streams: `Broadcast`, `Balance`, `Partition`. GoAkt Streams: `Broadcast`, `Balance`.
+- **Fan-in**: Akka Streams: `Merge`, `MergePreferred`, `Zip`, `ZipWith`. GoAkt Streams: `Merge`, `Combine`.
+- **Substreams**: Akka Streams: `groupBy`, `splitWhen`, `splitAfter`, `mergeSubstreams`, `concatSubstreams`. GoAkt
+  Streams: `GroupBy`, `SplitWhen`, `SplitAfter`, `MergeSubstreams` (with per-substream buffer and error strategy).
+- **Cross-node refs**: Akka Streams: `SourceRef`, `SinkRef`. GoAkt Streams: `SourceRef`, `SinkRef` (single-subscription,
+  grace-period reaped, credit-paced).
+- **Actor interop**: Akka Streams: `Source.actorRef`, `Sink.actorRef`. GoAkt Streams: `FromActor`, `ToActor`,
+  `ToActorNamed`.
+- **Type safety**: Akka Streams: Full (Scala generics). GoAkt Streams: Full (Go generics).
+- **Operator richness**: Akka Streams: Very rich. GoAkt Streams: Core operators; sufficient for most workloads.
+- **Runtime**: Akka Streams: JVM; Akka actor system. GoAkt Streams: Go runtime; GoAkt actor system.
+- **Licence**: Akka Streams: BSL 1.1 (Lightbend). GoAkt Streams: MIT.
 
 GoAkt Streams deliberately mirrors Akka Streams' core concepts: lazy `Source`, `Flow`, `Sink`, demand-driven
 backpressure, stage fusion: while adapting them to Go idioms and the GoAkt actor hierarchy. The `PullRequest` /
 `PullResponse` actor source protocol is analogous to Akka's `Source.actorRefWithBackpressure`.
-
----
 
 ## Related
 

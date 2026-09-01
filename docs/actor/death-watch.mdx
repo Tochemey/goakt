@@ -4,24 +4,24 @@ description: Watch actors and react when they terminate.
 sidebarTitle: "Death Watch"
 ---
 
-Death watch lets an actor receive a `Terminated` message when another actor stops. Use it to clean up references, fail over, or react to actor lifecycle.
+Death watch lets an actor receive a `Terminated` message when another actor stops. Use it to clean up references, fail
+over, or react to actor lifecycle.
 
 ## API
 
-| Method        | Purpose                                            |
-| ------------- | -------------------------------------------------- |
-| `pid.Watch`   | Register to receive `Terminated` when `cid` stops. |
-| `pid.UnWatch` | Cancel the watch for `cid`.                        |
-| `ctx.Watch`   | Same as `ctx.Self`.                                |
-| `ctx.UnWatch` | Same as `ctx.Self`.                                |
+- **pid.Watch**: Register to receive `Terminated` when `cid` stops.
+- **pid.UnWatch**: Cancel the watch for `cid`.
+- **ctx.Watch**: Same as `ctx.Self`.
+- **ctx.UnWatch**: Same as `ctx.Self`.
 
-`Watch` and `UnWatch` are on `*PID` and `ReceiveContext`. Use `ctx.Watch(pid)` from inside `Receive` to watch another actor.
+`Watch` and `UnWatch` are on `*PID` and `ReceiveContext`. Use `ctx.Watch(pid)` from inside `Receive` to watch another
+actor.
 
 ## Terminated message
 
 When a watched actor stops, the watcher receives:
 
-```go
+```go Terminated message
 type Terminated struct {
     // Address returns the address (ID) of the terminated actor.
     Address() string
@@ -30,7 +30,7 @@ type Terminated struct {
 
 Handle it in `Receive`:
 
-```go
+```go Terminated message
 case *actor.Terminated:
     addr := msg.Address()
     // remove from local state, restart a replacement, etc.
@@ -44,11 +44,13 @@ case *actor.Terminated:
 
 ## Automatic unwatch
 
-When an actor stops, the system automatically calls `UnWatch` on all actors it was watching. Watchers do not need to call `UnWatch` when they receive `Terminated`: the watch is already cancelled. Call `UnWatch` only when you want to stop watching before the target terminates.
+When an actor stops, the system automatically calls `UnWatch` on all actors it was watching. Watchers do not need to
+call `UnWatch` when they receive `Terminated`: the watch is already cancelled. Call `UnWatch` only when you want to stop
+watching before the target terminates.
 
 ## Example
 
-```go
+```go Example
 func (a *ParentActor) Receive(ctx *ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *SpawnWorker:

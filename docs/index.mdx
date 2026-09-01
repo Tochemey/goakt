@@ -1,23 +1,79 @@
 ---
 title: Introduction
-description: "GoAkt: distributed actor framework for Go."
+description: "GoAkt: distributed actor framework for Go, inspired by Erlang and Akka."
 sidebarTitle: "Introduction"
 ---
 
-GoAkt is a distributed actor framework for Go, inspired by Erlang and Akka. It enables you to build reactive and
-distributed systems with typed actor messages.
+GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Erlang and Akka. In development since 2022
+and [used in production](/getting-started/production-usage), it lets you build responsive, resilient, and elastic
+systems with typed actor messages, running as a single process or a cluster of nodes behind the same API.
 
-This documentation is designed for both **users** getting started with the framework and **collaborators** contributing
-to the project. It focuses on concepts, architecture, and efficient usage patterns rather than exhaustive code examples.
+## Why GoAkt
+
+<CardGroup cols={2}>
+  <Card title="Simpler concurrency" icon="inbox">
+    Actors process one message at a time. You write plain Go with no locks, channel plumbing, or shared-state bugs.
+  </Card>
+  <Card title="Location transparency" icon="globe">
+    Send a message to a local, remote, or clustered actor with the same API. The framework handles the wire.
+  </Card>
+  <Card title="Resilience by design" icon="shield-check">
+    Supervision trees and the "let it crash" model, inspired by Erlang/OTP, keep failures contained and recoverable.
+  </Card>
+  <Card title="Batteries included" icon="battery-charging">
+    Clustering, virtual actors (grains), CRDTs, streams, scheduling, passivation, and observability, without re-rolling
+    them yourself.
+  </Card>
+</CardGroup>
+
+Teams use GoAkt for event processing, IoT and edge workloads, real-time platforms, and distributed backends that would
+otherwise need a message broker plus custom coordination code. See [Use Cases](/getting-started/use-cases) for the full
+picture.
+
+## New to the actor model?
+
+Actors are isolated units of computation that share no memory. Each one has a mailbox, private state, and one message in
+flight at a time. On a message, an actor can create more actors, send messages, or change how it handles the next one.
+[Actor Model](/actor/actor-model) covers the concepts in depth, and Carl Hewitt, the father of the actor model,
+[explains it in his own words](https://www.youtube.com/watch?v=7erJ1DV_Tlo).
 
 ## Requirements
 
 - Go 1.26 or higher
 
-## Quick Links
+## Explore the documentation
 
-- [Getting Started](/getting-started/installation): Installation and first actor
-- [Actor System](/actor/actor-system): Runtime, API, configuration
-- [Actor Model](/actor/actor-model): Actor model, messaging, lifecycle
-- [Architecture](/architecture/overview): System design and component map
-- [Contributing](/contributing/overview): How to contribute to GoAkt
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/getting-started/quickstart">
+    Install GoAkt, spawn an actor, and exchange your first messages.
+  </Card>
+  <Card title="Actors" icon="users" href="/actor/actor-model">
+    Lifecycle, messaging, mailboxes, supervision, routers, and placement.
+  </Card>
+  <Card title="Grains" icon="box" href="/grains/overview">
+    Virtual actors with automatic activation and passivation.
+  </Card>
+  <Card title="Clustering" icon="network" href="/clustering/overview">
+    One API across many nodes, with discovery, placement, and relocation.
+  </Card>
+  <Card title="Remoting" icon="radio" href="/advanced/remoting">
+    Message actors in other processes with the same Tell and Ask API.
+  </Card>
+  <Card title="Advanced" icon="zap" href="/advanced/pubsub">
+    PubSub, streams, CRDTs, extensions, and coordinated shutdown.
+  </Card>
+  <Card title="Architecture" icon="blocks" href="/architecture/overview">
+    How the runtime is put together, and the reasoning behind it.
+  </Card>
+  <Card title="eGo" icon="layers" href="/meta-framework/ego">
+    Event sourcing, durable state, CQRS projections, and sagas built on GoAkt.
+  </Card>
+</CardGroup>
+
+## Community
+
+Ask questions and follow the work in [Discussions](https://github.com/Tochemey/goakt/discussions),
+[Issues](https://github.com/Tochemey/goakt/issues), or on
+[Slack](https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ). Runnable examples
+covering local, remote, and clustered actor systems live in the
+[examples repository](https://github.com/Tochemey/goakt-examples).

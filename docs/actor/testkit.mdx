@@ -4,39 +4,36 @@ description: Testing helpers for actor systems and grains.
 sidebarTitle: "TestKit"
 ---
 
-The `testkit` package provides helpers for actor-level testing. It creates a throwaway actor system, probes for message assertions, and supports grain testing.
+The `testkit` package provides helpers for actor-level testing. It creates a throwaway actor system, probes for message
+assertions, and supports grain testing.
 
 ## TestKit
 
-```go
+```go TestKit
     kit := testkit.New(ctx, t, testkit.WithLogging(log.DebugLevel), testkit.WithExtensions(ext))
     defer kit.Shutdown(ctx)
 ```
 
-| Method          | Purpose                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| `ActorSystem`   | Access the underlying actor system.                                   |
-| `Spawn`         | Spawn an actor. Fails the test on error.                              |
-| `SpawnChild`    | Spawn a child of an existing actor.                                   |
-| `Subscribe`     | Create an event-stream subscriber. Auto-unsubscribes on test cleanup. |
-| `Kill`          | Stop an actor by name.                                                |
-| `NewProbe`      | Create a test probe.                                                  |
-| `NewGrainProbe` | Create a grain test probe.                                            |
-| `GrainOf[T]`    | Create a grain identity of kind T (package-level function).           |
-| `Shutdown`      | Stop the actor system.                                                |
+- **ActorSystem**: Access the underlying actor system.
+- **Spawn**: Spawn an actor. Fails the test on error.
+- **SpawnChild**: Spawn a child of an existing actor.
+- **Subscribe**: Create an event-stream subscriber. Auto-unsubscribes on test cleanup.
+- **Kill**: Stop an actor by name.
+- **NewProbe**: Create a test probe.
+- **NewGrainProbe**: Create a grain test probe.
+- **GrainOf[T]**: Create a grain identity of kind T (package-level function).
+- **Shutdown**: Stop the actor system.
 
 ### Options
 
-| Option           | Purpose                                   |
-| ---------------- | ----------------------------------------- |
-| `WithLogging`    | Enable logging at the given level.        |
-| `WithExtensions` | Register extensions with the test system. |
+- **WithLogging**: Enable logging at the given level.
+- **WithExtensions**: Register extensions with the test system.
 
 ## Probe
 
 A probe is a test actor that records messages. Use it to assert message delivery instead of sleeps or polling.
 
-```go
+```go Probe
     probe := kit.NewProbe(ctx)
     defer probe.Stop()
     kit.Spawn(ctx, "worker", NewWorkerActor())
@@ -46,28 +43,26 @@ A probe is a test actor that records messages. Use it to assert message delivery
 
 ### Probe interface
 
-| Method                      | Purpose                                                                      |
-| --------------------------- | ---------------------------------------------------------------------------- |
-| `ExpectMessage`             | Assert the next message exactly matches `msg`. Fails on timeout or mismatch. |
-| `ExpectMessageWithin`       | Same with custom timeout.                                                    |
-| `ExpectMessageOfType`       | Assert the next message has the same type as `msg`.                          |
-| `ExpectMessageOfTypeWithin` | Same with custom timeout.                                                    |
-| `ExpectNoMessage`           | Assert no message arrives within the default timeout.                        |
-| `ExpectAnyMessage`          | Wait for and return the next message.                                        |
-| `ExpectAnyMessageWithin`    | Same with custom timeout.                                                    |
-| `ExpectTerminated`          | Assert a `Terminated` message for the given actor.                           |
-| `ExpectTerminatedWithin`    | Same with custom timeout.                                                    |
-| `ExpectMessageMatching`     | Assert the next message satisfies the predicate function.                    |
-| `ExpectChildSpawned`        | Assert a child actor was spawned by the given parent.                        |
-| `ExpectChildSpawnedWithin`  | Same with custom timeout.                                                    |
-| `ClearMessages`             | Drain all pending messages from the probe's queue.                           |
-| `Send`                      | Tell the named actor (fire-and-forget).                                      |
-| `SendSync`                  | Ask the named actor; record the response in the probe.                       |
-| `Sender`                    | PID of the sender of the last received message.                              |
-| `PID`                       | PID of the probe itself (use as sender in tests).                            |
-| `Watch`                     | Subscribe to termination of `pid`.                                           |
-| `WatchNamed`                | Subscribe to termination of the named actor.                                 |
-| `Stop`                      | Shutdown the probe. Call in cleanup.                                         |
+- **ExpectMessage**: Assert the next message exactly matches `msg`. Fails on timeout or mismatch.
+- **ExpectMessageWithin**: Same with custom timeout.
+- **ExpectMessageOfType**: Assert the next message has the same type as `msg`.
+- **ExpectMessageOfTypeWithin**: Same with custom timeout.
+- **ExpectNoMessage**: Assert no message arrives within the default timeout.
+- **ExpectAnyMessage**: Wait for and return the next message.
+- **ExpectAnyMessageWithin**: Same with custom timeout.
+- **ExpectTerminated**: Assert a `Terminated` message for the given actor.
+- **ExpectTerminatedWithin**: Same with custom timeout.
+- **ExpectMessageMatching**: Assert the next message satisfies the predicate function.
+- **ExpectChildSpawned**: Assert a child actor was spawned by the given parent.
+- **ExpectChildSpawnedWithin**: Same with custom timeout.
+- **ClearMessages**: Drain all pending messages from the probe's queue.
+- **Send**: Tell the named actor (fire-and-forget).
+- **SendSync**: Ask the named actor; record the response in the probe.
+- **Sender**: PID of the sender of the last received message.
+- **PID**: PID of the probe itself (use as sender in tests).
+- **Watch**: Subscribe to termination of `pid`.
+- **WatchNamed**: Subscribe to termination of the named actor.
+- **Stop**: Shutdown the probe. Call in cleanup.
 
 Default timeout is 3 seconds. Probes work in both standalone and cluster mode.
 
@@ -75,7 +70,7 @@ Default timeout is 3 seconds. Probes work in both standalone and cluster mode.
 
 When an actor spawns a child during message handling, use `ExpectChildSpawned` to verify:
 
-```go
+```go Asserting child actor creation
 func TestSpawnsChild(t *testing.T) {
     ctx := context.Background()
     kit := testkit.New(ctx, t)
@@ -94,25 +89,24 @@ func TestSpawnsChild(t *testing.T) {
 Similar to Probe but for grains. Use the package-level `testkit.GrainOf[T]` function (or `testkit.NodeGrainOf[T]` on a
 cluster test node) to create identities, then send and assert responses.
 
-| Method                 | Purpose                                |
-| ---------------------- | -------------------------------------- |
-| `ExpectResponse`       | Assert the next response matches.      |
-| `ExpectResponseWithin` | Same with custom timeout.              |
-| `ExpectResponseOfType` | Assert type match.                     |
-| `ExpectNoResponse`     | Assert no response within timeout.     |
-| `ExpectAnyResponse`    | Wait for and return the next response. |
-| `ExpectTerminated`     | Assert grain termination.              |
-| `Send`                 | Tell the grain.                        |
-| `SendSync`             | Ask the grain; record response.        |
-| `Stop`                 | Shutdown the probe.                    |
+- **ExpectResponse**: Assert the next response matches.
+- **ExpectResponseWithin**: Same with custom timeout.
+- **ExpectResponseOfType**: Assert type match.
+- **ExpectNoResponse**: Assert no response within timeout.
+- **ExpectAnyResponse**: Wait for and return the next response.
+- **ExpectTerminated**: Assert grain termination.
+- **Send**: Tell the grain.
+- **SendSync**: Ask the grain; record response.
+- **Stop**: Shutdown the probe.
 
 ## MultiNodes
 
-For integration tests, `MultiNodes` creates an in-process multi-node cluster. See `testkit/multi_nodes.go` for usage. Requires cluster and remoting configuration.
+For integration tests, `MultiNodes` creates an in-process multi-node cluster. See `testkit/multi_nodes.go` for usage.
+Requires cluster and remoting configuration.
 
 ## Usage pattern
 
-```go
+```go Usage pattern
 func TestWorker(t *testing.T) {
     ctx := context.Background()
     kit := testkit.New(ctx, t)
