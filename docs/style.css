@@ -9,6 +9,12 @@ pre.shiki {
   font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
 }
 
+/* Navbar wordmark: lift it above the theme's ~28px logo cap */
+img[src$="goakt-wordmark-light.svg"],
+img[src$="goakt-wordmark-dark.svg"] {
+  height: 2.25rem;
+}
+
 /* Headings: the tight Inter treatment from the brand lockup */
 h1,
 h2,

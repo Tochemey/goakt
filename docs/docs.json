@@ -3,19 +3,35 @@
   "name": "GoAkt",
   "description": "Distributed actor framework for Go, inspired by Erlang and Akka. Build reactive and distributed systems with typed actor messages.",
   "theme": "aspen",
-  "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
-  "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
+  "seo": {
+    "metatags": {
+      "canonical": "https://docs.goakt.dev"
+    }
+  },
+  "colors": {
+    "primary": "#2563EB",
+    "light": "#3B82F6",
+    "dark": "#1D4ED8"
+  },
   "favicon": "/assets/goakt-icon.svg",
-  "icons": { "library": "lucide" },
-  "appearance": { "default": "dark" },
-  "fonts": {
-    "heading": { "family": "Inter" },
-    "body": { "family": "Inter" }
+  "icons": {
+    "library": "lucide"
+  },
+  "appearance": {
+    "default": "dark"
   },
   "logo": {
-    "light": "/assets/goakt-logo-light.svg",
-    "dark": "/assets/goakt-logo-dark.svg",
+    "light": "/assets/goakt-wordmark-light.svg",
+    "dark": "/assets/goakt-wordmark-dark.svg",
     "href": "https://docs.goakt.dev"
+  },
+  "fonts": {
+    "heading": {
+      "family": "Inter"
+    },
+    "body": {
+      "family": "Inter"
+    }
   },
   "navbar": {
     "links": [
@@ -38,10 +54,18 @@
     ]
   },
   "contextual": {
-    "options": ["copy", "view", "claude", "mcp", "vscode"]
+    "options": [
+      "copy",
+      "view",
+      "claude",
+      "mcp",
+      "vscode"
+    ]
   },
   "styling": {
-    "codeblocks": { "theme": "night-owl" }
+    "codeblocks": {
+      "theme": "night-owl"
+    }
   },
   "redirects": [
     {
@@ -130,7 +154,10 @@
           {
             "group": "Remoting",
             "icon": "radio",
-            "pages": ["/advanced/remoting", "/advanced/serialization"]
+            "pages": [
+              "/advanced/remoting",
+              "/advanced/serialization"
+            ]
           },
           {
             "group": "Clustering",
@@ -179,7 +206,10 @@
           {
             "group": "Reference",
             "icon": "book",
-            "pages": ["/reference/glossary", "/reference/interfaces"]
+            "pages": [
+              "/reference/glossary",
+              "/reference/interfaces"
+            ]
           }
         ]
       },
@@ -206,11 +236,17 @@
           {
             "group": "Meta Framework",
             "icon": "layers",
-            "pages": ["/meta-framework/ego"]
+            "pages": [
+              "/meta-framework/ego"
+            ]
           }
         ]
       }
     ]
   },
-  "footer": { "socials": { "github": "https://github.com/tochemey/goakt" } }
+  "footer": {
+    "socials": {
+      "github": "https://github.com/tochemey/goakt"
+    }
+  }
 }

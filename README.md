@@ -1,9 +1,8 @@
 <h2 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/goakt-logo-dark.svg">
-    <img src="docs/assets/goakt-logo-light.svg" alt="GoAkt" width="300"/>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/goakt-wordmark-dark.svg">
+    <img src="docs/assets/goakt-wordmark-light.svg" alt="GoAkt" width="220"/>
   </picture><br />
-  Distributed Actor framework for Go
 </h2>
 
 <p align="center">
@@ -70,3 +69,7 @@ See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full 
 GoAkt is free and open source. If you need priority support on complex topics or want to fund new features, consider [sponsorship](https://github.com/sponsors/Tochemey).
 
 <!-- sponsors --><a href="https://github.com/andrew-werdna"><img src="https:&#x2F;&#x2F;github.com&#x2F;andrew-werdna.png" width="60px" alt="User avatar: Andrew Brown" /></a><a href="https://github.com/StringKe"><img src="https:&#x2F;&#x2F;github.com&#x2F;StringKe.png" width="60px" alt="User avatar: StringKe" /></a><!-- sponsors -->
+
+## Credits
+
+The Go gopher was designed by [Renée French](https://reneefrench.blogspot.com/) and is used under the [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) license.
