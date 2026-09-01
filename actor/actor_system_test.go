@@ -8118,10 +8118,10 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.NotNil(t, child)
 	pause.For(500 * time.Millisecond)
 
-	// exactly two callbacks exist regardless of the population: the system
-	// callback and the aggregated actor callback.
+	// exactly three callbacks exist regardless of the population: the system
+	// callback, the aggregated actor callback and the scheduler callback.
 	recording := meterProvider.meter
-	require.Len(t, recording.callbacks, 2)
+	require.Len(t, recording.callbacks, 3)
 
 	observer := &attrObserver{}
 	for _, cb := range recording.callbacks {
@@ -8186,7 +8186,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	require.NoError(t, parent.Restart(ctx))
 	pause.For(500 * time.Millisecond)
 
-	require.Len(t, recording.callbacks, 2)
+	require.Len(t, recording.callbacks, 3)
 
 	observer = &attrObserver{}
 	for _, cb := range recording.callbacks {
