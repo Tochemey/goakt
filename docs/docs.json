@@ -5,30 +5,30 @@
   "theme": "aspen",
   "seo": { "metatags": { "canonical": "https://docs.goakt.dev" } },
   "colors": { "primary": "#2563EB", "light": "#3B82F6", "dark": "#1D4ED8" },
-  "favicon": "/assets/goakt-icon.png",
+  "favicon": "/assets/goakt-icon.svg",
   "icons": { "library": "lucide" },
-  "appearance": { "default": "system" },
+  "appearance": { "default": "dark" },
   "fonts": {
-    "heading": { "family": "Geist" },
-    "body": { "family": "Geist" }
+    "heading": { "family": "Inter" },
+    "body": { "family": "Inter" }
   },
   "logo": {
     "light": "/assets/goakt-logo-light.svg",
     "dark": "/assets/goakt-logo-dark.svg",
     "href": "https://docs.goakt.dev"
   },
-  "background": { "decoration": "gradient" },
   "navbar": {
     "links": [
       {
-        "label": "Migration from v3.x",
-        "href": "/getting-started/migration-v3"
+        "label": "API Reference",
+        "href": "https://pkg.go.dev/github.com/tochemey/goakt/v4",
+        "icon": "package"
       },
       {
-        "label": "API",
-        "href": "https://pkg.go.dev/github.com/tochemey/goakt/v4"
+        "label": "GitHub",
+        "href": "https://github.com/tochemey/goakt",
+        "icon": "github"
       },
-      { "label": "GitHub", "href": "https://github.com/tochemey/goakt" },
       {
         "label": "Install",
         "href": "/getting-started/installation",
@@ -41,9 +41,17 @@
     "options": ["copy", "view", "claude", "mcp", "vscode"]
   },
   "styling": {
-    "codeblocks": { "theme": { "light": "github-light", "dark": "dracula" } }
+    "codeblocks": { "theme": "night-owl" }
   },
   "redirects": [
+    {
+      "source": "/actor/first-actor",
+      "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/migration-v3",
+      "destination": "/reference/v400-changes"
+    },
     {
       "source": "/clustering/standalone",
       "destination": "/clustering/overview"
@@ -73,76 +81,42 @@
             "pages": [
               "/index",
               "/getting-started/installation",
-              "/actor/first-actor"
-            ]
-          },
-          {
-            "group": "Upgrading",
-            "icon": "arrow-up",
-            "pages": [
-              "/getting-started/migration-v3",
-              "/reference/v400-changes"
+              "/getting-started/quickstart",
+              "/getting-started/use-cases",
+              "/getting-started/production-usage"
             ]
           }
         ]
       },
       {
-        "tab": "Actors",
-        "icon": "users",
+        "tab": "Guides",
+        "icon": "book-open",
         "groups": [
           {
-            "group": "Core Concepts",
-            "icon": "circle-dot",
+            "group": "Actors",
+            "icon": "users",
             "pages": [
               "/actor/actor-model",
               "/actor/actor-system",
               "/actor/pid",
-              "/actor/lifecycle"
-            ]
-          },
-          {
-            "group": "Messaging",
-            "icon": "send",
-            "pages": [
+              "/actor/lifecycle",
               "/actor/messaging",
               "/actor/mailboxes",
               "/actor/pipeto",
               "/actor/stashing",
               "/actor/reentrancy",
-              "/actor/scheduling"
-            ]
-          },
-          {
-            "group": "Fault Tolerance",
-            "icon": "shield",
-            "pages": [
+              "/actor/scheduling",
               "/actor/supervision",
               "/actor/death-watch",
-              "/actor/behaviors"
-            ]
-          },
-          {
-            "group": "Scaling & Placement",
-            "icon": "move",
-            "pages": [
+              "/actor/behaviors",
               "/actor/location-transparency",
               "/actor/passivation",
               "/actor/relocation",
               "/actor/singletons",
-              "/actor/routers"
+              "/actor/routers",
+              "/actor/testkit"
             ]
           },
-          {
-            "group": "Testing",
-            "icon": "flask-conical",
-            "pages": ["/actor/testkit"]
-          }
-        ]
-      },
-      {
-        "tab": "Grains",
-        "icon": "box",
-        "groups": [
           {
             "group": "Grains",
             "icon": "box",
@@ -152,13 +126,7 @@
               "/grains/pipeto",
               "/grains/timers"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Cluster",
-        "icon": "network",
-        "groups": [
+          },
           {
             "group": "Remoting",
             "icon": "radio",
@@ -166,58 +134,31 @@
           },
           {
             "group": "Clustering",
-            "icon": "server",
+            "icon": "network",
             "pages": [
               "/clustering/overview",
               "/clustering/placement",
               "/clustering/service-discovery",
               "/clustering/partition-hashing",
-              "/clustering/multi-datacenter"
-            ]
-          },
-          {
-            "group": "Reliable Delivery",
-            "icon": "shield-check",
-            "pages": [
+              "/clustering/multi-datacenter",
               "/clustering/reliable-delivery/point-to-point",
               "/clustering/reliable-delivery/work-pulling"
             ]
-          }
-        ]
-      },
-      {
-        "tab": "Advanced",
-        "icon": "zap",
-        "groups": [
+          },
           {
-            "group": "Messaging Patterns",
-            "icon": "radio-tower",
+            "group": "Advanced",
+            "icon": "zap",
             "pages": [
               "/advanced/pubsub",
               "/advanced/streams",
-              "/advanced/distributed-data"
-            ]
-          },
-          {
-            "group": "Runtime",
-            "icon": "settings",
-            "pages": [
+              "/advanced/distributed-data",
               "/advanced/client",
               "/advanced/extensions-and-dependencies",
-              "/advanced/coordinated-shutdown"
+              "/advanced/coordinated-shutdown",
+              "/advanced/observability",
+              "/advanced/event-streams"
             ]
           },
-          {
-            "group": "Observability",
-            "icon": "activity",
-            "pages": ["/advanced/observability", "/advanced/event-streams"]
-          }
-        ]
-      },
-      {
-        "tab": "Architecture",
-        "icon": "blocks",
-        "groups": [
           {
             "group": "Architecture",
             "icon": "blocks",
@@ -238,18 +179,7 @@
           {
             "group": "Reference",
             "icon": "book",
-            "pages": ["/reference/interfaces", "/reference/glossary"]
-          }
-        ]
-      },
-      {
-        "tab": "eGo",
-        "icon": "layers",
-        "groups": [
-          {
-            "group": "Meta Framework",
-            "icon": "layers",
-            "pages": ["/meta-framework/ego"]
+            "pages": ["/reference/glossary", "/reference/interfaces"]
           }
         ]
       },
@@ -266,6 +196,17 @@
               "/contributing/testing-strategy",
               "/contributing/extending"
             ]
+          }
+        ]
+      },
+      {
+        "tab": "eGo",
+        "icon": "layers",
+        "groups": [
+          {
+            "group": "Meta Framework",
+            "icon": "layers",
+            "pages": ["/meta-framework/ego"]
           }
         ]
       }

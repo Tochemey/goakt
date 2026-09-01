@@ -4,39 +4,36 @@ description: Process identifier for location-transparent actor references.
 sidebarTitle: "PID"
 ---
 
-A **PID** is the sole actor reference in GoAkt. It is a live handle to a running actor: either local (same process) or remote (another node). All messaging goes through a PID.
+A **PID** is the sole actor reference in GoAkt. It is a live handle to a running actor: either local (same process) or
+remote (another node). All messaging goes through a PID.
 
 ## Role
 
-| Aspect                   | Description                                                              |
-| ------------------------ | ------------------------------------------------------------------------ |
-| **Unified reference**    | One type for local and remote actors. No separate `ActorRef`.            |
-| **Location-transparent** | Use `Tell` and `Ask` the same way regardless of location.                |
-| **Identity**             | `Path` returns the canonical address. `Name`, `Kind` identify the actor. |
+- **Unified reference**: One type for local and remote actors. No separate `ActorRef`.
+- **Location-transparent**: Use `Tell` and `Ask` the same way regardless of location.
+- **Identity**: `Path` returns the canonical address. `Name`, `Kind` identify the actor.
 
-## Local vs Remote
+## Local vs remote
 
-| Type           | Description                                                                                                                      |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **Local PID**  | Live mailbox, supervision state, full actor-system reference, etc.... Created by `Spawn`.                                        |
-| **Remote PID** | Lightweight handle with address and remoting; messaging via remoting layer. Returned by `ActorOf` when actor is on another node. |
+- **Local PID**: Live mailbox, supervision state, full actor-system reference, etc.... Created by `Spawn`.
+- **Remote PID**: Lightweight handle with address and remoting; messaging via remoting layer. Returned by `ActorOf` when
+  actor is on another node.
 
-Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem()` returns `nil` for remote PIDs: guard before use.
+Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem()` returns `nil` for remote PIDs: guard
+before use.
 
 ## Key methods
 
-| Method        | Purpose                                                                        |
-| ------------- | ------------------------------------------------------------------------------ |
-| `Path`        | Canonical actor identity (host, port, name, system). Returns `Path` interface. |
-| `Name`        | Actor name within its parent.                                                  |
-| `Kind`        | Reflected type name of the actor. Empty for remote PIDs.                       |
-| `Tell`        | Fire-and-forget to another PID.                                                |
-| `Ask`         | Request-response. Blocks until reply or timeout.                               |
-| `IsRunning`   | Actor is active and processing.                                                |
-| `IsSuspended` | Actor suspended by supervisor.                                                 |
-| `IsStopping`  | Shutdown in progress.                                                          |
-| `Watch`       | Receive `Terminated` when `cid` stops. Local only.                             |
-| `UnWatch`     | Stop watching.                                                                 |
+- **Path**: Canonical actor identity (host, port, name, system). Returns `Path` interface.
+- **Name**: Actor name within its parent.
+- **Kind**: Reflected type name of the actor. Empty for remote PIDs.
+- **Tell**: Fire-and-forget to another PID.
+- **Ask**: Request-response. Blocks until reply or timeout.
+- **IsRunning**: Actor is active and processing.
+- **IsSuspended**: Actor suspended by supervisor.
+- **IsStopping**: Shutdown in progress.
+- **Watch**: Receive `Terminated` when `cid` stops. Local only.
+- **UnWatch**: Stop watching.
 
 ## Obtaining a PID
 
@@ -46,4 +43,5 @@ Use `pid.IsLocal()` or `pid.IsRemote()` when location matters. `pid.ActorSystem(
 
 ## NoSender
 
-`system.NoSender()` returns a special PID for messages without a sender (e.g., scheduled messages, external clients). Use it when sending from outside the actor system. `NoSender().Path()` may be used for wire encoding.
+`system.NoSender()` returns a special PID for messages without a sender (e.g., scheduled messages, external clients).
+Use it when sending from outside the actor system. `NoSender().Path()` may be used for wire encoding.

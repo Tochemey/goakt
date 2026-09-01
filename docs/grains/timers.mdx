@@ -6,39 +6,45 @@ sidebarTitle: "Timers"
 
 ## Overview
 
-Grain timers let a grain schedule messages **to itself**: once after a delay, repeatedly at a fixed interval, or on a cron expression. Ticks are delivered through the grain's mailbox and processed like any other message, serialized with the rest of the grain's messages, with `ctx.Message()` returning the scheduled message.
+Grain timers let a grain schedule messages **to itself**: once after a delay, repeatedly at a fixed interval, or on a
+cron expression. Ticks are delivered through the grain's mailbox and processed like any other message, serialized with
+the rest of the grain's messages, with `ctx.Message()` returning the scheduled message.
 
-Timers are **volatile and activation-scoped**. They are all cancelled when the grain deactivates, they are never persisted, and they never reactivate a passivated grain. Use them for work that only matters while the grain is in memory: heartbeats, batch flushing, cache refresh, timeouts, and polling.
+Timers are **volatile and activation-scoped**. They are all cancelled when the grain deactivates, they are never
+persisted, and they never reactivate a passivated grain. Use them for work that only matters while the grain is in
+memory: heartbeats, batch flushing, cache refresh, timeouts, and polling.
 
 <Note>
-Grain timers are self-scheduling only. To schedule messages to actors from anywhere in the system, use the [actor scheduler](/actor/scheduling). Durable, reactivating schedules for grains (reminders) are not available.
+  Grain timers are self-scheduling only. To schedule messages to actors from anywhere in the system, use the [actor
+  scheduler](/actor/scheduling). Durable, reactivating schedules for grains (reminders) are not available.
 </Note>
 
 ## API
 
-The same four methods are available on `GrainContext` (inside `OnReceive`) and on `GrainProps` (inside `OnActivate` and `OnDeactivate`):
+The same four methods are available on `GrainContext` (inside `OnReceive`) and on `GrainProps` (inside `OnActivate` and
+`OnDeactivate`):
 
-| Method             | Behavior                               |
-| ------------------ | -------------------------------------- |
-| `ScheduleOnce`     | Deliver once after the delay           |
-| `Schedule`         | Deliver repeatedly at a fixed interval |
-| `ScheduleWithCron` | Deliver according to a cron expression |
-| `CancelSchedule`   | Cancel a timer                         |
+- **ScheduleOnce**: Deliver once after the delay.
+- **Schedule**: Deliver repeatedly at a fixed interval.
+- **ScheduleWithCron**: Deliver according to a cron expression.
+- **CancelSchedule**: Cancel a timer.
 
 Every schedule call returns the timer's reference, the handle used to cancel it.
 
-### Timer Options
+### Timer options
 
-| Option               | Purpose                                                                                                                                              |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WithTimerReference` | Set the timer's reference. References are scoped to the grain; registering under a reference already in use cancels and replaces the existing timer. |
-| `WithTimerKeepAlive` | Make ticks count as passivation activity, keeping the grain alive while the timer runs. By default ticks do not reset the passivation clock.         |
+- **WithTimerReference**: Set the timer's reference. References are scoped to the grain; registering under a reference
+  already in use cancels and replaces the existing timer.
+- **WithTimerKeepAlive**: Make ticks count as passivation activity, keeping the grain alive while the timer runs. By
+  default ticks do not reset the passivation clock.
 
-## Starting a Timer From OnActivate
+## Starting a timer from OnActivate
 
-Registering timers in `OnActivate` is the canonical way to start a grain's periodic behavior. Timers registered there stay dormant until activation completes, so a short delay cannot fire into a grain that is not ready yet, and they are discarded if activation fails.
+Registering timers in `OnActivate` is the canonical way to start a grain's periodic behavior. Timers registered there
+stay dormant until activation completes, so a short delay cannot fire into a grain that is not ready yet, and they are
+discarded if activation fails.
 
-```go
+```go Starting a Timer From OnActivate
 type DeviceGrain struct {
     lastSeen time.Time
 }
@@ -70,11 +76,11 @@ func (g *DeviceGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps)
 }
 ```
 
-## Scheduling From OnReceive
+## Scheduling from OnReceive
 
 A grain can schedule and cancel timers while handling messages, for example to implement a timeout:
 
-```go
+```go Scheduling From OnReceive
 func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
     switch ctx.Message().(type) {
     case *PaymentStarted:
@@ -99,7 +105,9 @@ func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
 ```
 
 <Warning>
-Timers do not survive passivation. A grain with a pending 30-minute one-shot passivates on its normal schedule and the timer is lost. If the grain must stay available for the timer, register it with `WithTimerKeepAlive()` or extend the grain's passivation timeout.
+  Timers do not survive passivation. A grain with a pending 30-minute one-shot passivates on its normal schedule and the
+  timer is lost. If the grain must stay available for the timer, register it with `WithTimerKeepAlive()` or extend the
+  grain's passivation timeout.
 </Warning>
 
 ## Semantics
@@ -107,42 +115,51 @@ Timers do not survive passivation. A grain with a pending 30-minute one-shot pas
 ### Lifecycle
 
 - Timers registered during `OnActivate` stay dormant until activation completes and are discarded when activation fails.
-- All timers are cancelled when the grain deactivates: passivation, system shutdown, or a failure. `OnDeactivate` runs after the timers are stopped, so scheduling from that hook returns `ErrGrainTimersStopped`.
-- A tick that is already in the mailbox when its timer is cancelled, or when the grain deactivates, is dropped instead of delivered.
+- All timers are cancelled when the grain deactivates: passivation, system shutdown, or a failure. `OnDeactivate` runs
+  after the timers are stopped, so scheduling from that hook returns `ErrGrainTimersStopped`.
+- A tick that is already in the mailbox when its timer is cancelled, or when the grain deactivates, is dropped instead
+  of delivered.
 - After reactivation a grain starts with no timers; re-register them in `OnActivate`.
 
 ### Delivery
 
-- Ticks are processed one at a time, serialized with the grain's other messages. Tick handling never runs concurrently with other work on the same grain.
-- `Schedule` fires at a **fixed cadence**, matching the actor scheduler. A handler slower than the interval accumulates queued ticks in the mailbox; execution itself never overlaps. This differs from Orleans, where the period is measured from callback completion.
+- Ticks are processed one at a time, serialized with the grain's other messages. Tick handling never runs concurrently
+  with other work on the same grain.
+- `Schedule` fires at a **fixed cadence**, matching the actor scheduler. A handler slower than the interval accumulates
+  queued ticks in the mailbox; execution itself never overlaps. This differs from Orleans, where the period is measured
+  from callback completion.
 - Tick handlers run with a background context: no deadline and no cancellation.
-- A tick is fire-and-forget: an error reported with `ctx.Err(err)` is logged as a warning, and `ctx.Unhandled()` is logged the same way. Signal at most once per message (`Err`, `NoErr`, or `Unhandled`), as with any Tell-style message.
-- When the mailbox is full (bounded mailboxes only), the tick is dropped and logged; interval and cron timers keep firing.
+- A tick is fire-and-forget: an error reported with `ctx.Err(err)` is logged as a warning, and `ctx.Unhandled()` is
+  logged the same way. Signal at most once per message (`Err`, `NoErr`, or `Unhandled`), as with any Tell-style message.
+- When the mailbox is full (bounded mailboxes only), the tick is dropped and logged; interval and cron timers keep
+  firing.
 
 ### Passivation
 
-- By default a tick does not reset the grain's passivation clock: a grain that only receives timer ticks still passivates on schedule. Opt in per timer with `WithTimerKeepAlive()`.
+- By default a tick does not reset the grain's passivation clock: a grain that only receives timer ticks still
+  passivates on schedule. Opt in per timer with `WithTimerKeepAlive()`.
 - Delivered ticks count as processed messages, so message-count-based passivation strategies see them.
 
 ### Cron
 
 - Cron expressions use the Quartz format, evaluated in the process's local timezone.
-- Unlike `ActorSystem.ScheduleWithCron` in cluster mode, no explicit reference is required and no cluster-wide arbitration takes place: a grain has exactly one activation cluster-wide, so each tick fires exactly once by construction.
+- Unlike `ActorSystem.ScheduleWithCron` in cluster mode, no explicit reference is required and no cluster-wide
+  arbitration takes place: a grain has exactly one activation cluster-wide, so each tick fires exactly once by
+  construction.
 
 ### Errors
 
-| Error                           | Returned when                                                             |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `ErrGrainTimersStopped`         | Scheduling or cancelling while the grain is deactivating or not activated |
-| `ErrInvalidTimerInterval`       | `Schedule` is called with an interval that is not strictly positive       |
-| `ErrScheduledReferenceNotFound` | Cancelling an unknown reference, or a one-shot that has already fired     |
+- **ErrGrainTimersStopped**: Scheduling or cancelling while the grain is deactivating or not activated.
+- **ErrInvalidTimerInterval**: `Schedule` is called with an interval that is not strictly positive.
+- **ErrScheduledReferenceNotFound**: Cancelling an unknown reference, or a one-shot that has already fired.
 
-## Grain Timers vs Actor Scheduling
+## Grain timers vs actor scheduling
 
-|                  | Grain timers                              | [Actor scheduler](/actor/scheduling)     |
-| ---------------- | ----------------------------------------- | ---------------------------------------- |
-| Who schedules    | The grain itself                          | Any code holding a `*PID`                |
-| Target           | Always the scheduling grain               | Any actor, local or remote               |
-| Lifetime         | The current activation                    | Until cancelled or the node stops        |
-| Wakes the target | Never                                     | Delivery fails if the actor is gone      |
-| Cluster cron     | No arbitration needed (single activation) | Requires `WithReference` for single fire |
+- **Who schedules**: Grain timers: The grain itself. [Actor scheduler](/actor/scheduling): Any code holding a `*PID`.
+- **Target**: Grain timers: Always the scheduling grain. [Actor scheduler](/actor/scheduling): Any actor, local or
+  remote.
+- **Lifetime**: Grain timers: The current activation. [Actor scheduler](/actor/scheduling): Until cancelled or the node
+  stops.
+- **Wakes the target**: Grain timers: Never. [Actor scheduler](/actor/scheduling): Delivery fails if the actor is gone.
+- **Cluster cron**: Grain timers: No arbitration needed (single activation). [Actor scheduler](/actor/scheduling):
+  Requires `WithReference` for single fire.

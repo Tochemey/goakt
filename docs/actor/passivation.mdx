@@ -4,32 +4,32 @@ description: Idle-based and capacity-based actor deactivation.
 sidebarTitle: "Passivation"
 ---
 
-Passivation automatically stops actors to reclaim memory and resources. GoAkt supports two distinct mechanisms: **per-actor passivation** (idle-based) and **system eviction** (capacity-based).
-
----
+Passivation automatically stops actors to reclaim memory and resources. GoAkt supports two distinct mechanisms:
+**per-actor passivation** (idle-based) and **system eviction** (capacity-based).
 
 ## Per-actor passivation
 
-Per-actor passivation is configured per actor at spawn. The passivation manager tracks each actor and stops it when its strategy triggers. Only actors with a passivation strategy (other than `LongLivedStrategy`) are tracked.
+Per-actor passivation is configured per actor at spawn. The passivation manager tracks each actor and stops it when its
+strategy triggers. Only actors with a passivation strategy (other than `LongLivedStrategy`) are tracked.
 
 ### Strategies
 
-| Strategy                       | Constructor                                | Trigger                                                                      |
-| ------------------------------ | ------------------------------------------ | ---------------------------------------------------------------------------- |
-| **TimeBasedStrategy**          | `passivation.NewTimeBasedStrategy`         | No message within the configured duration                                    |
-| **MessagesCountBasedStrategy** | `passivation.NewMessageCountBasedStrategy` | Actor has processed at least `maxMessages` since the strategy was registered |
-| **LongLivedStrategy**          | `passivation.NewLongLivedStrategy`         | Never passivate (opt-out)                                                    |
+- **TimeBasedStrategy**: Constructor: `passivation.NewTimeBasedStrategy`. Trigger: No message within the configured
+  duration.
+- **MessagesCountBasedStrategy**: Constructor: `passivation.NewMessageCountBasedStrategy`. Trigger: Actor has processed
+  at least `maxMessages` since the strategy was registered.
+- **LongLivedStrategy**: Constructor: `passivation.NewLongLivedStrategy`. Trigger: Never passivate (opt-out).
 
 ### Usage
 
-```go
+```go Usage
 pid, err := system.Spawn(ctx, "cache", actor,
     actor.WithPassivationStrategy(passivation.NewTimeBasedStrategy(5*time.Minute)))
 ```
 
 Or use `WithLongLived()` to opt out:
 
-```go
+```go Usage
 pid, err := system.Spawn(ctx, "service", actor, actor.WithLongLived())
 ```
 
@@ -44,35 +44,31 @@ pid, err := system.Spawn(ctx, "service", actor, actor.WithLongLived())
 - Long-lived services that must stay up
 - Actors that handle infrequent but critical messages
 
----
-
 ## System eviction
 
-**System eviction** is a node-wide mechanism that limits the total number of active actors. When the count exceeds the configured limit, the framework passivates actors according to an eviction policy (LRU, LFU, or MRU). This is independent of per-actor passivation: system eviction can stop any user actor, including those with `LongLivedStrategy`.
+**System eviction** is a node-wide mechanism that limits the total number of active actors. When the count exceeds the
+configured limit, the framework passivates actors according to an eviction policy (LRU, LFU, or MRU). This is
+independent of per-actor passivation: system eviction can stop any user actor, including those with `LongLivedStrategy`.
 
 ### Eviction policies
 
-| Policy  | Description                                                                |
-| ------- | -------------------------------------------------------------------------- |
-| **LRU** | Least Recently Used: passivate actors with the oldest `LatestActivityTime` |
-| **LFU** | Least Frequently Used: passivate actors with the lowest `ProcessedCount`   |
-| **MRU** | Most Recently Used: passivate actors with the newest `LatestActivityTime`  |
+- **LRU**: Least Recently Used: passivate actors with the oldest `LatestActivityTime`.
+- **LFU**: Least Frequently Used: passivate actors with the lowest `ProcessedCount`.
+- **MRU**: Most Recently Used: passivate actors with the newest `LatestActivityTime`.
 
 ### Configuration
 
-```go
+```go Configuration
 strategy, err := actor.NewEvictionStrategy(1000, actor.LRU, 20)
 // limit=1000, policy=LRU, percentage=20
 system, _ := actor.NewActorSystem("app",
     actor.WithEvictionStrategy(strategy, 5*time.Second))
 ```
 
-| Parameter      | Purpose                                                                           |
-| -------------- | --------------------------------------------------------------------------------- |
-| **limit**      | Maximum number of active actors before eviction runs. Must be > 0.                |
-| **policy**     | `actor.LRU`, `actor.LFU`, or `actor.MRU`                                          |
-| **percentage** | Percentage of actors to passivate when over limit (0–100). Clamped automatically. |
-| **interval**   | How often the eviction engine runs (e.g. `5*time.Second`)                         |
+- **limit**: Maximum number of active actors before eviction runs. Must be > 0.
+- **policy**: `actor.LRU`, `actor.LFU`, or `actor.MRU`.
+- **percentage**: Percentage of actors to passivate when over limit (0–100). Clamped automatically.
+- **interval**: How often the eviction engine runs (e.g. `5*time.Second`).
 
 ### Behavior
 
@@ -87,13 +83,11 @@ system, _ := actor.NewActorSystem("app",
 - Bounding actor count regardless of per-actor strategy
 - Coarse-grained capacity management
 
----
-
 ## Comparison
 
-| Aspect        | Per-actor passivation              | System eviction                           |
-| ------------- | ---------------------------------- | ----------------------------------------- |
-| **Scope**     | Per actor                          | Node-wide                                 |
-| **Trigger**   | Idle timeout or message count      | Total actors > limit                      |
-| **Config**    | `WithPassivationStrategy` at spawn | `WithEvictionStrategy` at system creation |
-| **LongLived** | Opts out of per-actor passivation  | Does not opt out; can still be evicted    |
+- **Scope**: Per-actor passivation: Per actor. System eviction: Node-wide.
+- **Trigger**: Per-actor passivation: Idle timeout or message count. System eviction: Total actors > limit.
+- **Config**: Per-actor passivation: `WithPassivationStrategy` at spawn. System eviction: `WithEvictionStrategy` at
+  system creation.
+- **LongLived**: Per-actor passivation: Opts out of per-actor passivation. System eviction: Does not opt out; can still
+  be evicted.

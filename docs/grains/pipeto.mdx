@@ -10,47 +10,43 @@ the outcome comes back as an ordinary message.
 
 ## API
 
-| Method        | Result delivered to |
-| ------------- | ------------------- |
-| `PipeToSelf`  | This grain          |
-| `PipeToGrain` | Another grain       |
-| `PipeToActor` | A named actor       |
+- **PipeToSelf**: delivers the result to this grain.
+- **PipeToGrain**: delivers the result to another grain.
+- **PipeToActor**: delivers the result to a named actor.
 
 All three are methods on `GrainContext`, so they are called from inside `OnReceive`.
 
 ## Task signature and outcome
 
-```go
+```go Task signature and outcome
 task func() (any, error)
 ```
 
 - **Success**: the `any` result is delivered to the target as a normal message.
-- **Failure with a grain target** (`PipeToSelf`, `PipeToGrain`): the target receives a `*StatusFailure` message
-  carrying the error; handle it in `OnReceive` via `msg.Error()`. A `WithTimeout` expiry counts as a failure.
+- **Failure with a grain target** (`PipeToSelf`, `PipeToGrain`): the target receives a `*StatusFailure` message carrying
+  the error; handle it in `OnReceive` via `msg.Error()`. A `WithTimeout` expiry counts as a failure.
 - **Failure with an actor target** (`PipeToActor`): the error follows the actor [PipeTo](/actor/pipeto) semantics and
   goes to the dead-letter queue.
 
 Delivery to a grain target uses the regular grain addressing path: if the target has passivated by the time the task
-completes, delivery reactivates it. The task itself is detached from the current message's context, so it keeps
-running after the originating call completes.
+completes, delivery reactivates it. The task itself is detached from the current message's context, so it keeps running
+after the originating call completes.
 
 <Warning>
-The task runs outside the grain's single-threaded message loop. Never read or mutate grain state inside it; hand
-results back through the piped message and update state when it arrives in `OnReceive`.
+  The task runs outside the grain's single-threaded message loop. Never read or mutate grain state inside it; hand
+  results back through the piped message and update state when it arrives in `OnReceive`.
 </Warning>
 
 ## Options
 
-| Option               | Purpose                                                           |
-| -------------------- | ----------------------------------------------------------------- |
-| `WithTimeout`        | Abort delivery if the task does not complete within `d`.          |
-| `WithCircuitBreaker` | If the circuit breaker is open, do not deliver; drop the outcome. |
+- **WithTimeout**: Abort delivery if the task does not complete within `d`.
+- **WithCircuitBreaker**: If the circuit breaker is open, do not deliver; drop the outcome.
 
 Only one of the two may be used per call; using both returns `ErrOnlyOneOptionAllowed`.
 
 ## Example
 
-```go
+```go Example
 func (g *ReportGrain) OnReceive(ctx *actor.GrainContext) {
     switch msg := ctx.Message().(type) {
     case *BuildReport:

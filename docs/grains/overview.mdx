@@ -1,7 +1,7 @@
 ---
 title: Grains
 description: Virtual actors with automatic activation and passivation.
-sidebarTitle: "Grains"
+sidebarTitle: "Overview"
 ---
 
 ## Concept
@@ -14,7 +14,7 @@ instance.
 
 Every grain must implement the `Grain` interface:
 
-```go
+```go The Grain interface
 package actor
 
 type Grain interface {
@@ -24,39 +24,37 @@ type Grain interface {
 }
 ```
 
-| Method           | When called                                          | Purpose                                                                    |
-| ---------------- | ---------------------------------------------------- | -------------------------------------------------------------------------- |
-| **OnActivate**   | When the grain is loaded into memory (first message) | Initialize state or resources. Return error to prevent activation.         |
-| **OnReceive**    | For each message                                     | Handle messages. Use `ctx.Response` for Ask, `ctx.NoErr` for Tell success. |
-| **OnDeactivate** | Before the grain is removed (passivation)            | Persist state, release resources.                                          |
+- **OnActivate**: called when the grain is loaded into memory (first message). Initialize state or resources. Return
+  error to prevent activation.
+- **OnReceive**: called for each message. Handle messages. Use `ctx.Response` for Ask, `ctx.NoErr` for Tell success.
+- **OnDeactivate**: called before the grain is removed (passivation). Persist state, release resources.
 
 ## GrainContext
 
 Inside `OnReceive`, `GrainContext` provides:
 
-| Method                                                           | Purpose                                                                                              |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `Message`                                                        | The message being processed                                                                          |
-| `Self`                                                           | Grain identity                                                                                       |
-| `Response`                                                       | Reply to an Ask                                                                                      |
-| `NoErr`                                                          | Signal success for Tell (no response)                                                                |
-| `Err`                                                            | Signal failure                                                                                       |
-| `Unhandled`                                                      | Mark message as unhandled                                                                            |
-| `TellActor`                                                      | Send to an actor by name                                                                             |
-| `AskActor`                                                       | Ask an actor by name                                                                                 |
-| `AskGrain`                                                       | Ask another grain                                                                                    |
-| `RequestGrain` / `RequestActor`                                  | Non-blocking async request; needs [reentrancy](/grains/reentrancy)                                   |
-| `DeferResponse`                                                  | Hand off this Ask's reply to a `GrainReply` for a later turn                                         |
-| `PipeToSelf`, `PipeToGrain`, `PipeToActor`                       | Run a task off the message loop, deliver its result as a message; see [Grain PipeTo](/grains/pipeto) |
-| `ScheduleOnce`, `Schedule`, `ScheduleWithCron`, `CancelSchedule` | Manage [grain timers](/grains/timers)                                                                |
+- **Message**: The message being processed.
+- **Self**: Grain identity.
+- **Response**: Reply to an Ask.
+- **NoErr**: Signal success for Tell (no response).
+- **Err**: Signal failure.
+- **Unhandled**: Mark message as unhandled.
+- **TellActor**: Send to an actor by name.
+- **AskActor**: Ask an actor by name.
+- **AskGrain**: Ask another grain.
+- **RequestGrain** / **RequestActor**: Non-blocking async request; needs [reentrancy](/grains/reentrancy).
+- **DeferResponse**: Hand off this Ask's reply to a `GrainReply` for a later turn.
+- **PipeToSelf**, **PipeToGrain**, **PipeToActor**: Run a task off the message loop, deliver its result as a message;
+  see [Grain PipeTo](/grains/pipeto).
+- **ScheduleOnce**, **Schedule**, **ScheduleWithCron**, **CancelSchedule**: Manage [grain timers](/grains/timers).
 
 ## Identity and messaging
 
 Use the generic `actor.GrainOf` function to obtain an identity. The type parameter must be a pointer to your grain
-struct; the framework derives the grain kind from it, so no factory is required. Then use `TellGrain` or `AskGrain`
-with that identity. The instance name (e.g., `"user-123"`) uniquely identifies the grain within its kind.
+struct; the framework derives the grain kind from it, so no factory is required. Then use `TellGrain` or `AskGrain` with
+that identity. The instance name (e.g., `"user-123"`) uniquely identifies the grain within its kind.
 
-```go
+```go Identity and messaging
 identity, err := actor.GrainOf[*UserGrain](ctx, system, "user-123")
 if err != nil {
     return err
@@ -71,36 +69,34 @@ logic in `OnActivate` and supply external resources (database handles, clients, 
 contract the cluster applies when it recreates or relocates a grain on another node.
 
 <Note>
-Calling `GrainOf` automatically registers the grain kind on the calling node. In cluster mode, nodes that can host a
-grain without ever resolving it themselves (for example, targets of relocation or remote activation) must register the
-kind at startup, either with `RegisterGrainKind` or through `ClusterConfig.WithGrains`.
+  Calling `GrainOf` automatically registers the grain kind on the calling node. In cluster mode, nodes that can host a
+  grain without ever resolving it themselves (for example, targets of relocation or remote activation) must register the
+  kind at startup, either with `RegisterGrainKind` or through `ClusterConfig.WithGrains`.
 </Note>
 
 <Warning>
-The factory-based `GrainIdentity(ctx, name, factory, opts...)` API is deprecated. It still works, but factories that
-capture dependencies in their closure only take effect on the local node; a grain recreated or relocated elsewhere is
-always built as a zero value. Migrate to `GrainOf` with `OnActivate`-based initialization.
+  The factory-based `GrainIdentity(ctx, name, factory, opts...)` API is deprecated. It still works, but factories that
+  capture dependencies in their closure only take effect on the local node; a grain recreated or relocated elsewhere is
+  always built as a zero value. Migrate to `GrainOf` with `OnActivate`-based initialization.
 </Warning>
 
 ## Reentrancy
 
-By default a grain processes one message at a time. **Reentrancy** lets a grain issue
-non-blocking requests to other grains or actors (`RequestGrain`, `RequestActor`) and keep
-processing while the replies are in flight, which is what lets request cycles (A asks B while B
-asks A back) complete instead of deadlocking. It also unlocks `DeferResponse`, which answers an
-incoming Ask only after an outbound request completes.
+By default a grain processes one message at a time. **Reentrancy** lets a grain issue non-blocking requests to other
+grains or actors (`RequestGrain`, `RequestActor`) and keep processing while the replies are in flight, which is what
+lets request cycles (A asks B while B asks A back) complete instead of deadlocking. It also unlocks `DeferResponse`,
+which answers an incoming Ask only after an outbound request completes.
 
-Enable it at activation with `WithGrainReentrancy` or at runtime with `ctx.EnableReentrancy`.
-Modes, per-call options, deferred replies, the passivation interaction, and a complete
-request-cycle example are on the [Grain Reentrancy](/grains/reentrancy) page.
+Enable it at activation with `WithGrainReentrancy` or at runtime with `ctx.EnableReentrancy`. Modes, per-call options,
+deferred replies, the passivation interaction, and a complete request-cycle example are on the
+[Grain Reentrancy](/grains/reentrancy) page.
 
 ## PipeTo
 
 A grain processes one message at a time, so blocking on slow I/O inside `OnReceive` stalls every queued message.
-`PipeToSelf`, `PipeToGrain`, and `PipeToActor` offload that work: the task runs in a goroutine outside the message
-loop, the grain keeps processing, and the outcome comes back as an ordinary message (`*StatusFailure` on failure for
-grain targets). Methods, failure semantics, options, and a complete example are on the
-[Grain PipeTo](/grains/pipeto) page.
+`PipeToSelf`, `PipeToGrain`, and `PipeToActor` offload that work: the task runs in a goroutine outside the message loop,
+the grain keeps processing, and the outcome comes back as an ordinary message (`*StatusFailure` on failure for grain
+targets). Methods, failure semantics, options, and a complete example are on the [Grain PipeTo](/grains/pipeto) page.
 
 ## When to use grains
 
@@ -123,9 +119,9 @@ grain targets). Methods, failure semantics, options, and a complete example are 
 
 ## Activation guarantee
 
-In cluster mode, the system claims grain ownership in the cluster registry using an atomic put-if-absent operation before
-activating locally. If another node already owns the grain, requests are forwarded to that owner. If local activation
-fails after a successful claim, the claim is removed.
+In cluster mode, the system claims grain ownership in the cluster registry using an atomic put-if-absent operation
+before activating locally. If another node already owns the grain, requests are forwarded to that owner. If local
+activation fails after a successful claim, the claim is removed.
 
 When configured, the grain activation barrier delays grain activations until the cluster reaches the minimum peers
 quorum (or until the barrier timeout elapses).

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-label="GoAkt">
+  <rect width="48" height="48" rx="11" fill="#2563eb"/>
+  <g stroke="#ffffff" stroke-width="3.4" stroke-linecap="round">
+    <line x1="24" y1="13" x2="13" y2="34"/>
+    <line x1="24" y1="13" x2="35" y2="34"/>
+    <line x1="13" y1="34" x2="35" y2="34"/>
+  </g>
+  <circle cx="24" cy="13" r="5.5" fill="#ffffff"/>
+  <circle cx="13" cy="34" r="5.5" fill="#ffffff"/>
+  <circle cx="35" cy="34" r="5.5" fill="#ffffff"/>
+</svg>

@@ -6,7 +6,7 @@ sidebarTitle: "Development Setup"
 
 ## Clone and prepare
 
-```bash
+```bash Clone and prepare
 git clone https://github.com/your-username/goakt.git
 cd goakt
 ```
@@ -15,29 +15,27 @@ cd goakt
 
 Developer tooling runs inside Docker via the `Makefile`, so you only need Docker and `make`:
 
-```bash
+```bash Build and test
 make image   # build the tools image (once)
 make test    # run lint + full test suite
 ```
 
 Run `make help` to list every target. The common ones are:
 
-| Target           | Purpose                                              |
-| ---------------- | ---------------------------------------------------- |
-| `make test`      | Run lint and the full test suite                     |
-| `make lint`      | Run `golangci-lint`                                  |
-| `make unit-test` | Run tests with coverage (writes `coverage.out`)      |
-| `make vendor`    | `go mod tidy` and `go mod vendor`                    |
-| `make mock`      | Regenerate mocks under `mocks/`                      |
-| `make protogen`  | Regenerate protobuf Go code                          |
-| `make certs`     | Regenerate test TLS fixtures under `test/data/certs` |
-| `make clean`     | Remove the tools image                               |
+- **make test**: Run lint and the full test suite.
+- **make lint**: Run `golangci-lint`.
+- **make unit-test**: Run tests with coverage (writes `coverage.out`).
+- **make vendor**: `go mod tidy` and `go mod vendor`.
+- **make mock**: Regenerate mocks under `mocks/`.
+- **make protogen**: Regenerate protobuf Go code.
+- **make certs**: Regenerate test TLS fixtures under `test/data/certs`.
+- **make clean**: Remove the tools image.
 
 ## Local Go commands
 
 You can also use standard Go commands if you have Go installed:
 
-```bash
+```bash Local Go commands
 go build ./...
 go test ./...
 ```

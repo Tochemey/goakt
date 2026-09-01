@@ -1,0 +1,98 @@
+---
+title: Use Cases
+description: Where GoAkt fits, from stateful microservices to AI agent runtimes.
+sidebarTitle: "Use Cases"
+---
+
+GoAkt is built for systems that are concurrent, stateful, and expected to survive failure. This page maps common
+workloads to the framework features that carry them, so you can judge the fit before writing code.
+
+## Distributed systems and microservices
+
+- **Stateful microservices**: keep state next to the compute with [actors](/actor/actor-model) or
+  [grains](/grains/overview) and scale horizontally across a [cluster](/clustering/overview), instead of round-tripping
+  to a cache on every request.
+- **Long-lived processes**: model workflows that outlive a single request; [supervision](/actor/supervision) restarts
+  failed actors and [relocation](/actor/relocation) moves them when a node leaves the cluster.
+- **Service-to-service messaging**: exchange typed messages asynchronously with
+  [location transparency](/actor/location-transparency); the caller does not care which process or node handles them.
+- **Event-driven architectures**: build event sourcing and CQRS on [eGo](/meta-framework/ego), which uses GoAkt for
+  execution, supervision, clustering, and remoting.
+
+## Real-time systems
+
+- **Financial market data**: fan price updates, risk checks, and order flow across [routers](/actor/routers) with
+  per-instrument actors serializing access to hot state.
+- **Gaming servers**: give each player session its own actor or grain; [passivation](/actor/passivation) reclaims memory
+  when sessions go idle.
+- **IoT and edge computing**: represent each device as a digital twin grain, activated on first message and addressable
+  from anywhere in the cluster.
+- **Chat and presence**: distribute conversations and notifications over [PubSub](/advanced/pubsub) topics that work the
+  same in standalone and cluster mode.
+
+## High-performance data processing
+
+- **Stream processing**: run fraud detection, anomaly tracking, and alerting pipelines on [streams](/advanced/streams)
+  backed by actor concurrency.
+- **ETL pipelines**: spread batch workloads across worker actors with
+  [work pulling](/clustering/reliable-delivery/work-pulling), so fast workers take more of the load and slow ones are
+  never overwhelmed.
+- **Event-driven analytics**: subscribe actors to live [event streams](/advanced/event-streams) and compute on demand as
+  events arrive.
+
+## Fault-tolerant systems
+
+- **Self-healing applications**: [supervision trees](/actor/supervision) restart failing components with directives,
+  restart budgets, and exponential backoff, while the rest of the system keeps serving.
+- **High availability**: a [cluster](/clustering/overview) redistributes actors from a lost node to healthy peers
+  through [relocation](/actor/relocation), without an operator in the loop.
+- **Replicated state**: share counters, sets, and maps across nodes with conflict-free
+  [distributed data](/advanced/distributed-data) types that converge without coordination.
+
+## Workflow orchestration and automation
+
+- **Business processes**: automate approval chains, payments, and order fulfilment as actors that hold each case's
+  state; eGo adds [saga orchestration](/meta-framework/ego) when steps span services.
+- **Background jobs**: schedule one-shot and recurring work with the built-in [scheduler](/actor/scheduling), and let
+  supervision handle retries.
+- **Workflow engines**: model multi-step processes with [behaviors](/actor/behaviors) that switch the message handler as
+  the process advances, and [stashing](/actor/stashing) to defer messages that arrive too early.
+
+## Security and threat detection
+
+- **Intrusion detection**: process log and telemetry streams in real time, one actor per source, and escalate suspicious
+  activity through the actor hierarchy.
+- **Bot and DDoS mitigation**: throttle abusive traffic with per-client actors that count, rate-limit, and expire
+  through passivation.
+- **Transaction validation**: run validation and consensus steps as isolated actors so one poisoned input cannot corrupt
+  shared state.
+
+## AI and machine learning
+
+- **Distributed training coordination**: coordinate workers across a cluster with actor-based scheduling and
+  [reliable point-to-point delivery](/clustering/reliable-delivery/point-to-point).
+- **Real-time inference serving**: pool model workers behind [routers](/actor/routers) and keep tail latency down with
+  one request in flight per worker.
+- **Multi-agent systems**: give every agent an actor with private state, a mailbox, and supervision; agents collaborate
+  by exchanging typed messages.
+
+## AI agents and MCP servers
+
+Actors map naturally onto agent runtimes: an agent is a unit of state, memory, and autonomy that talks to peers through
+messages.
+
+- **Agent coordination**: spawn one actor per agent and let the actor hierarchy express delegation and oversight.
+- **Tool orchestration**: manage concurrent MCP tools, databases, APIs, and knowledge sources as child actors, each
+  supervised independently.
+- **Conversation management**: hold each conversation in a grain that activates on the first message and passivates when
+  the user goes quiet.
+- **Agent swarms**: distribute reasoning across a cluster where agents delegate tasks to peers with location-transparent
+  messaging.
+- **Resilient pipelines**: supervision restarts a failed stage and [PipeTo](/actor/pipeto) feeds async results back into
+  the flow.
+
+## Where to start
+
+Work through [Quickstart](/getting-started/quickstart) for the local flow, then add [remoting](/advanced/remoting) or
+[clustering](/clustering/overview) when you need more than one process. The
+[examples repository](https://github.com/Tochemey/goakt-examples) has runnable projects for each mode.

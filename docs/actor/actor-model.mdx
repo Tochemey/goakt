@@ -22,11 +22,9 @@ is asynchronous: the sender hands the message over and carries on, rather than w
 In the model's original formulation, everything an actor may do in response to one message falls into three categories.
 GoAkt maps each to a concrete API:
 
-| Action                                     | In GoAkt                                                                     |
-| ------------------------------------------ | ---------------------------------------------------------------------------- |
-| Create more actors                         | `ctx.Spawn` for a child; `system.Spawn` from outside an actor                |
-| Send messages to other actors              | `ctx.Tell`, `ctx.Ask`; see [Messaging](/actor/messaging)                     |
-| Designate how to handle the _next_ message | `ctx.Become` / `ctx.UnBecome`; see [Behaviors](/actor/behaviors)             |
+- **Create more actors**: `ctx.Spawn` for a child; `system.Spawn` from outside an actor.
+- **Send messages to other actors**: `ctx.Tell`, `ctx.Ask`; see [Messaging](/actor/messaging).
+- **Designate how to handle the _next_ message**: `ctx.Become` / `ctx.UnBecome`; see [Behaviors](/actor/behaviors).
 
 The third is the one that surprises people. A classical actor does not so much mutate state as decide what it will be
 when the next message arrives: a counter receiving `add(1)` designates "I am now 1" rather than editing a cell someone
@@ -45,13 +43,12 @@ Actors provide a natural model for concurrent and distributed systems:
 
 ## Core concepts
 
-| Concept         | Description                                                                                                                |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Actor**       | The fundamental unit. Receives messages, updates private state, spawns children, sends messages.                           |
-| **ActorSystem** | The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See [Actor System](/actor/actor-system). |
-| **PID**         | Process identifier: a live handle to a running actor. Used for all interactions.                                           |
-| **Path**        | The canonical location of an actor: `goakt://system@host:port/path/to/actor`.                                              |
-| **Mailbox**     | Each actor has one. Messages wait here until the actor processes them.                                                     |
+- **Actor**: The fundamental unit. Receives messages, updates private state, spawns children, sends messages.
+- **ActorSystem**: The runtime host. Manages lifecycle, messaging, cluster membership, and remoting. See
+  [Actor System](/actor/actor-system).
+- **PID**: Process identifier: a live handle to a running actor. Used for all interactions.
+- **Path**: The canonical location of an actor: `goakt://system@host:port/path/to/actor`.
+- **Mailbox**: Each actor has one. Messages wait here until the actor processes them.
 
 ## Actor hierarchy
 
@@ -63,7 +60,7 @@ Every actor lives inside a tree. GoAkt creates guardian actors at startup:
 
 ```mermaid
 graph TD
-    root["/ (root guardian)"]
+    root["/root (guardian)"]
     system["/system<br/>dead letter, scheduler, topic actors"]
     user["/user<br/>user-defined actors"]
     order["/user/orderService"]
@@ -115,7 +112,7 @@ the handler ran, which is why GoAkt actors hold plain fields and mutate them dir
 
 ### The same counter, both ways
 
-```go
+```go The same counter with mutex
 // Shared memory: correctness depends on every caller remembering the lock.
 type Counter struct {
     mu    sync.Mutex
@@ -135,7 +132,7 @@ func (c *Counter) Count() int64 {
 }
 ```
 
-```go
+```go The same counter as an Actor
 // As an actor: no lock to forget, because no second goroutine can get in.
 type Counter struct {
     count int64
@@ -158,9 +155,7 @@ func (a *Counter) Receive(ctx *actor.ReceiveContext) {
 
 ## Never block inside Receive
 
-<Warning>
-  A `Receive` handler must never block. In GoAkt this is a hard rule, not a performance preference.
-</Warning>
+<Warning>A `Receive` handler must never block. In GoAkt this is a hard rule, not a performance preference.</Warning>
 
 Actors do not own goroutines. They run on a fixed [dispatcher pool](/architecture/dispatcher-pool) of
 `max(GOMAXPROCS, 2)` workers that multiplexes the entire actor population. A worker picks up an actor, runs its turn to
@@ -189,13 +184,13 @@ and teardown belong there. `PreStart` is bounded by the init timeout, configurab
 
 ### Doing real work without blocking
 
-| Need                                  | Approach                                                                                                                                |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Call an HTTP API or a database        | [`ctx.PipeTo`](/actor/pipeto) or `ctx.PipeToName`; the result arrives as a message.                                                     |
-| Ask another actor and stay responsive | `ctx.Request` or `ctx.RequestName` under a [reentrancy](/actor/reentrancy) policy; the reply runs through `Then` on the mailbox thread. |
-| Wait for a precondition               | [`ctx.Stash`](/actor/stashing), then `ctx.UnstashAll` once the condition holds.                                                         |
-| CPU-heavy computation                 | `PipeTo`, or spread the work across child actors.                                                                                       |
-| Periodic work                         | [Scheduling](/actor/scheduling), not a sleep loop.                                                                                      |
+- **Call an HTTP API or a database**: [`ctx.PipeTo`](/actor/pipeto) or `ctx.PipeToName`; the result arrives as a
+  message.
+- **Ask another actor and stay responsive**: `ctx.Request` or `ctx.RequestName` under a [reentrancy](/actor/reentrancy)
+  policy; the reply runs through `Then` on the mailbox thread.
+- **Wait for a precondition**: [`ctx.Stash`](/actor/stashing), then `ctx.UnstashAll` once the condition holds.
+- **CPU-heavy computation**: `PipeTo`, or spread the work across child actors.
+- **Periodic work**: [Scheduling](/actor/scheduling), not a sleep loop.
 
 The one way to bring the race back is a goroutine you start yourself. A `PipeTo` task runs off the mailbox thread, so it
 must not touch actor fields. Copy what it needs, return the result, and mutate state when the result arrives as a
@@ -226,7 +221,7 @@ compression.
 
 Every actor must implement the `Actor` interface:
 
-```go
+```go The Actor interface
 package actor
 
 type Actor interface {
@@ -236,11 +231,12 @@ type Actor interface {
 }
 ```
 
-| Method       | When called                                  | Purpose                                                                                                                               |
-| ------------ | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **PreStart** | Once, before the actor processes any message | Initialize dependencies, caches, or recover persistent state. Return an error to prevent startup; the supervisor handles the failure. |
-| **Receive**  | For each message in the mailbox              | Handle messages. Use a type switch on `ctx.Message`. Call `ctx.Unhandled` for unknown types.                                          |
-| **PostStop** | When the actor is about to shut down         | Release resources, flush logs, notify other systems. Called after the mailbox is drained.                                             |
+- **PreStart**: called once, before the actor processes any message. Initialize dependencies, caches, or recover
+  persistent state. Return an error to prevent startup; the supervisor handles the failure.
+- **Receive**: called for each message in the mailbox. Handle messages. Use a type switch on `ctx.Message`. Call
+  `ctx.Unhandled` for unknown types.
+- **PostStop**: called when the actor is about to shut down. Release resources, flush logs, notify other systems. Called
+  after the mailbox is drained.
 
 Keep actor state in unexported fields. Initialize in `PreStart`, not in constructors. The framework guarantees
 single-threaded execution per actor, so no locks are needed inside `Receive`.

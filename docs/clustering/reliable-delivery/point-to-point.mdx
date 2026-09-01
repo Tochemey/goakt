@@ -1,28 +1,46 @@
 ---
 title: Point-to-Point
 description: Confirmed, ordered, flow-controlled message delivery between a producer actor and a consumer actor.
-sidebarTitle: "Point-to-Point"
+sidebarTitle: "Reliable Point-to-Point"
 ---
 
-Ordinary GoAkt messaging is at-most-once: a **Tell** that races a crash, a full bounded mailbox, or a network fault is lost. The **point-to-point** reliable delivery pattern adds a confirmed, ordered, flow-controlled flow between exactly two of your actors, a producer and a consumer. Default **Tell** semantics are unchanged; reliability applies only to flows you explicitly configure.
+Ordinary GoAkt messaging is at-most-once: a **Tell** that races a crash, a full bounded mailbox, or a network fault is
+lost. The **point-to-point** reliable delivery pattern adds a confirmed, ordered, flow-controlled flow between exactly
+two of your actors, a producer and a consumer. Default **Tell** semantics are unchanged; reliability applies only to
+flows you explicitly configure.
 
-You enable a flow with one spawn option per side. The actor system then creates and manages an internal controller next to each endpoint. The controllers sequence messages, grant send credit, resend after loss, deduplicate after restarts, and optionally persist producer state in a durable queue. Your actors stay ordinary actors: anyone can message them, and only a small handshake connects them to the flow.
+You enable a flow with one spawn option per side. The actor system then creates and manages an internal controller next
+to each endpoint. The controllers sequence messages, grant send credit, resend after loss, deduplicate after restarts,
+and optionally persist producer state in a durable queue. Your actors stay ordinary actors: anyone can message them, and
+only a small handshake connects them to the flow.
 
 ## Use cases
 
-Reach for point-to-point reliable delivery when one actor must hand work to another and the default at-most-once semantics are not enough:
+Reach for point-to-point reliable delivery when one actor must hand work to another and the default at-most-once
+semantics are not enough:
 
-- **Message loss is unacceptable.** Two specific actors need at-least-once or effectively-once processing instead of best-effort **Tell**. A checkout actor handing accepted orders to a fulfillment processor is the running example on this page: every order must arrive, in order, exactly once in effect, across restarts, redeploys, and node loss.
-- **Flow-controlled producer-consumer pipelines.** A fast producer risks overwhelming a slower consumer or saturating the network. The producer sends only when its controller grants demand through `RequestNext`, so the consumer-side buffer stays bounded no matter how fast the producer runs and mailboxes never grow without limit.
-- **Ordered, sequential processing.** Deliveries arrive in sequence order, and the next message reaches the consumer only after the current one is confirmed; the consumer controller buffers anything that arrives in the meantime. A coordinator streaming jobs to a worker knows each job was processed, not merely enqueued, before the next one lands.
-- **Cross-node event forwarding.** An actor on one cluster node feeds an actor on another, and the receiver must see every event in order even though the network hop is lossy.
-- **Crash-resilient handoff.** With a durable queue on the producer side, messages that were stored but not yet confirmed are redelivered after a producer crash, restart, or relocation. Combined with an idempotent consumer, this gives outbox-style, crash-surviving handoff between two parts of your system without operating an external broker.
+- **Message loss is unacceptable.** Two specific actors need at-least-once or effectively-once processing instead of
+  best-effort **Tell**. A checkout actor handing accepted orders to a fulfillment processor is the running example on
+  this page: every order must arrive, in order, exactly once in effect, across restarts, redeploys, and node loss.
+- **Flow-controlled producer-consumer pipelines.** A fast producer risks overwhelming a slower consumer or saturating
+  the network. The producer sends only when its controller grants demand through `RequestNext`, so the consumer-side
+  buffer stays bounded no matter how fast the producer runs and mailboxes never grow without limit.
+- **Ordered, sequential processing.** Deliveries arrive in sequence order, and the next message reaches the consumer
+  only after the current one is confirmed; the consumer controller buffers anything that arrives in the meantime. A
+  coordinator streaming jobs to a worker knows each job was processed, not merely enqueued, before the next one lands.
+- **Cross-node event forwarding.** An actor on one cluster node feeds an actor on another, and the receiver must see
+  every event in order even though the network hop is lossy.
+- **Crash-resilient handoff.** With a durable queue on the producer side, messages that were stored but not yet
+  confirmed are redelivered after a producer crash, restart, or relocation. Combined with an idempotent consumer, this
+  gives outbox-style, crash-surviving handoff between two parts of your system without operating an external broker.
 
-It is the wrong tool for fan-out to many receivers (use [PubSub](/advanced/pubsub)), for request-response (use `Ask`), and for best-effort telemetry where plain `Tell` is enough.
+It is the wrong tool for fan-out to many receivers (use [PubSub](/advanced/pubsub)), for request-response (use `Ask`),
+and for best-effort telemetry where plain `Tell` is enough.
 
 ## How it works
 
-One flow connects one producer to one consumer. The actor system spawns an internal controller next to each endpoint; your actors talk only to their own controller, and the controllers run the protocol between themselves:
+One flow connects one producer to one consumer. The actor system spawns an internal controller next to each endpoint;
+your actors talk only to their own controller, and the controllers run the protocol between themselves:
 
 ```mermaid
 flowchart LR
@@ -46,7 +64,9 @@ flowchart LR
     C -->|"Confirmed"| CC
 ```
 
-The producer controller sends only when the consumer controller has granted demand, sequences every message, and resends until the consumer confirms. Registration, session management, resends, and deduplication after restarts are entirely the controllers' job. The full path of one message:
+The producer controller sends only when the consumer controller has granted demand, sequences every message, and resends
+until the consumer confirms. Registration, session management, resends, and deduplication after restarts are entirely
+the controllers' job. The full path of one message:
 
 ```mermaid
 sequenceDiagram
@@ -74,24 +94,30 @@ sequenceDiagram
 
 ## Guarantees
 
-| Condition                                     | Guarantee                                                                                    |
-| --------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| Neither side crashes, controllers connected   | Effectively-once, in order, within the consumer-driven flow-control window                   |
-| Message loss or consumer-side restart         | At-least-once; the consumer handler must be idempotent                                       |
-| Producer-side restart without a durable queue | Messages already handed to the controller but unconfirmed are lost; the flow resumes cleanly |
-| Producer-side restart with a durable queue    | Stored messages reload and redeliver; unacknowledged submissions are resubmitted             |
+- **Neither side crashes, controllers connected**: Effectively-once, in order, within the consumer-driven flow-control
+  window.
+- **Message loss or consumer-side restart**: At-least-once; the consumer handler must be idempotent.
+- **Producer-side restart without a durable queue**: Messages already handed to the controller but unconfirmed are lost;
+  the flow resumes cleanly.
+- **Producer-side restart with a durable queue**: Stored messages reload and redeliver; unacknowledged submissions are
+  resubmitted.
 
-Effectively-once holds only on the fault-free path. Any lost message, restart, or relocation legitimately redelivers, so consumer processing must always be idempotent. The framework never claims exactly-once business effects; see [Deduplication](#deduplication-and-exactly-once-effects) for how to build them.
+Effectively-once holds only on the fault-free path. Any lost message, restart, or relocation legitimately redelivers, so
+consumer processing must always be idempotent. The framework never claims exactly-once business effects; see
+[Deduplication](#deduplication-and-exactly-once-effects) for how to build them.
 
-Confirmation is business-level. The consumer confirms after processing a delivery, not when it is enqueued, and a delivery is retried until confirmed. It is never dropped, skipped, or marked successful without confirmation.
+Confirmation is business-level. The consumer confirms after processing a delivery, not when it is enqueued, and a
+delivery is retried until confirmed. It is never dropped, skipped, or marked successful without confirmation.
 
-The guarantee begins at the producer's handoff to its controller, and with a durable queue at the point the message is stored. The hop into the producer is ordinary at-most-once messaging. A producer that needs ingress reliability feeds itself from its own durable source, as described in [Durable delivery](#durable-delivery).
+The guarantee begins at the producer's handoff to its controller, and with a durable queue at the point the message is
+stored. The hop into the producer is ordinary at-most-once messaging. A producer that needs ingress reliability feeds
+itself from its own durable source, as described in [Durable delivery](#durable-delivery).
 
 ## Enabling a flow
 
 Each side names its peer's actor name. There are no controller names or handles anywhere in your code.
 
-```go
+```go Enabling a flow
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor"))
 if err != nil {
@@ -107,7 +133,9 @@ if err != nil {
 ```
 
 <Note>
-The controllers carry internal, activation-scoped identities under the reserved `GoAkt` prefix. They are invisible to `Actors`, `ActorOf`, `Kill`, `ReSpawn`, and every other actor-management API, and they impose no naming convention on your own actors.
+  The controllers carry internal, activation-scoped identities under the reserved `GoAkt` prefix. They are invisible to
+  `Actors`, `ActorOf`, `Kill`, `ReSpawn`, and every other actor-management API, and they impose no naming convention on
+  your own actors.
 </Note>
 
 Both options reject finite passivation: reliable endpoints are long-lived.
@@ -117,10 +145,11 @@ Both options reject finite passivation: reliable endpoints are long-lived.
 The producer buffers incoming work and answers three protocol messages:
 
 - `RequestNext` grants one tokenized send permission. Hold the grant until there is something to send; it never expires.
-- Answer a grant with exactly one `Produced`, built with `actor.NewProduced`. A retried grant carrying a token you already answered must receive the same `Produced` again, never a second message.
+- Answer a grant with exactly one `Produced`, built with `actor.NewProduced`. A retried grant carrying a token you
+  already answered must receive the same `Produced` again, never a second message.
 - `Stored` acknowledges your submission. Reply with `actor.NewStoredAck`.
 
-```go
+```go The producer contract
 type pendingOrder struct {
     messageID string
     order     *OrderCreated // a protobuf message, or a type with a registered serializer
@@ -198,23 +227,29 @@ func (x *OrderPublisher) flush(ctx *actor.ReceiveContext) {
 }
 ```
 
-The `IsAuthorizedFor` check matters: `RequestNext` grants the right to hand over a business message, so honoring a spoofed grant would let another actor pull work out of your producer.
+The `IsAuthorizedFor` check matters: `RequestNext` grants the right to hand over a business message, so honoring a
+spoofed grant would let another actor pull work out of your producer.
 
-Backpressure surfaces in the `pending` buffer. A slow consumer means the buffer grows; bounding or shedding it is an application policy decision.
+Backpressure surfaces in the `pending` buffer. A slow consumer means the buffer grows; bounding or shedding it is an
+application policy decision.
 
 ## Knowing when the consumer confirmed
 
-By default the producer learns that a message was stored, never that it was processed. Enable `WithReliableDeliveryConfirmation` and the controller tells the producer a `DeliveryConfirmed` for every message the consumer confirms:
+By default the producer learns that a message was stored, never that it was processed. Enable
+`WithReliableDeliveryConfirmation` and the controller tells the producer a `DeliveryConfirmed` for every message the
+consumer confirms:
 
-```go
+```go Knowing when the consumer confirmed
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
         actor.WithReliableDeliveryConfirmation()))
 ```
 
-The producer records who should hear back when the work arrives, for example a `submitters map[string]*actor.PID` field keyed by `MessageID` and filled in the `*OrderCreated` case. The handler then relays with any message your submitter understands:
+The producer records who should hear back when the work arrives, for example a `submitters map[string]*actor.PID` field
+keyed by `MessageID` and filled in the `*OrderCreated` case. The handler then relays with any message your submitter
+understands:
 
-```go
+```go Knowing when the consumer confirmed
 case *actor.DeliveryConfirmed:
     if !msg.IsAuthorizedFor(ctx.Self(), ctx.Sender()) {
         return
@@ -226,17 +261,23 @@ case *actor.DeliveryConfirmed:
     }
 ```
 
-The notification stops at the producer. The flow never learns who submitted the work, because work enters the producer through an ordinary `Tell` that carries no reply address, so relaying the outcome to the original submitter is your code, using correlation the producer recorded at ingress.
+The notification stops at the producer. The flow never learns who submitted the work, because work enters the producer
+through an ordinary `Tell` that carries no reply address, so relaying the outcome to the original submitter is your
+code, using correlation the producer recorded at ingress.
 
 <Warning>
-Treat `DeliveryConfirmed` idempotently, keyed by `MessageID`, exactly as the consumer treats `Delivery`. It carries no protocol obligation and is not retried: a full producer mailbox or a controller restart can drop it, and a message that is redelivered and confirmed again is reported again. When you need a durable record of what completed, use a durable queue rather than counting notifications.
+  Treat `DeliveryConfirmed` idempotently, keyed by `MessageID`, exactly as the consumer treats `Delivery`. It carries no
+  protocol obligation and is not retried: a full producer mailbox or a controller restart can drop it, and a message
+  that is redelivered and confirmed again is reported again. When you need a durable record of what completed, use a
+  durable queue rather than counting notifications.
 </Warning>
 
 ## Feeding the flow
 
-The producer is a normal actor, so work reaches it like any other message: from application code with `actor.Tell`, from another actor's `Receive`, or from a remote node. Nothing in the sender knows reliable delivery exists:
+The producer is a normal actor, so work reaches it like any other message: from application code with `actor.Tell`, from
+another actor's `Receive`, or from a remote node. Nothing in the sender knows reliable delivery exists:
 
-```go
+```go Feeding the flow
 // CheckoutActor hands finished orders to the reliable flow the same way it
 // would message any other actor.
 type CheckoutActor struct {
@@ -251,13 +292,15 @@ func (x *CheckoutActor) Receive(ctx *actor.ReceiveContext) {
 }
 ```
 
-If the origin actor needs to know its order was processed, carry the correlation in the payload, for example the order ID and the origin's actor name, and have the consumer notify it through ordinary messaging after processing. The flow itself offers no reply path: `Delivery`'s sender is the controller, never the business origin.
+If the origin actor needs to know its order was processed, carry the correlation in the payload, for example the order
+ID and the origin's actor name, and have the consumer notify it through ordinary messaging after processing. The flow
+itself offers no reply path: `Delivery`'s sender is the controller, never the business origin.
 
 ## The consumer contract
 
 The consumer processes each `Delivery` idempotently, then confirms to the sender:
 
-```go
+```go The consumer contract
 type OrderProcessor struct {
     seen map[string]bool
 }
@@ -298,46 +341,70 @@ Confirm only after processing. Confirming early converts every later fault into 
 
 ## One-way flows and Ask
 
-Every hop inside the machinery is a `Tell`; the flow carries one-way, ordered, confirmed transfers. `Ask` still works at the edges with bounded meaning:
+Every hop inside the machinery is a `Tell`; the flow carries one-way, ordered, confirmed transfers. `Ask` still works at
+the edges with bounded meaning:
 
-- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my buffer". `Stored` acknowledges controller storage; it is not consumer confirmation. When the producer needs to know the consumer confirmed, enable `WithReliableDeliveryConfirmation` and handle `DeliveryConfirmed` (see [Knowing when the consumer confirmed](#knowing-when-the-consumer-confirmed)). Relaying that signal to an original submitter remains application code: `Ask` at the edge still cannot mean "delivered".
-- The consumer cannot reply to the original submitter through the flow, because `Delivery`'s sender is the controller. Carry correlation in the payload and reply through ordinary messaging, use `DeliveryConfirmed` at the producer when a completion signal is enough, or run a second flow in the opposite direction when the reply itself must be reliable.
+- A caller may `Ask` the producer, but the producer can only answer from local knowledge, such as "accepted into my
+  buffer". `Stored` acknowledges controller storage; it is not consumer confirmation. When the producer needs to know
+  the consumer confirmed, enable `WithReliableDeliveryConfirmation` and handle `DeliveryConfirmed` (see
+  [Knowing when the consumer confirmed](#knowing-when-the-consumer-confirmed)). Relaying that signal to an original
+  submitter remains application code: `Ask` at the edge still cannot mean "delivered".
+- The consumer cannot reply to the original submitter through the flow, because `Delivery`'s sender is the controller.
+  Carry correlation in the payload and reply through ordinary messaging, use `DeliveryConfirmed` at the producer when a
+  completion signal is enough, or run a second flow in the opposite direction when the reply itself must be reliable.
 
 ## Payload serialization
 
-Every reliable payload is encoded before it is sequenced or stored, even on a single node, using the same serializer dispatch as remoting. Protobuf payloads work with no configuration. Any other payload type must be registered:
+Every reliable payload is encoded before it is sequenced or stored, even on a single node, using the same serializer
+dispatch as remoting. Protobuf payloads work with no configuration. Any other payload type must be registered:
 
-```go
+```go Payload serialization
 system, err := actor.NewActorSystem("orders",
     actor.WithRemote(remote.NewConfig("127.0.0.1", 9090,
         remote.WithSerializables(new(Order)))))
 ```
 
 <Warning>
-Protobuf payloads need no setup. Non-protobuf payloads currently require `WithRemote` for serializer registration even when the flow never leaves the node, and that also enables remoting and binds the configured listener.
+  Protobuf payloads need no setup. Non-protobuf payloads currently require `WithRemote` for serializer registration even
+  when the flow never leaves the node, and that also enables remoting and binds the configured listener.
 </Warning>
 
-An unregistered payload type is a terminal flow failure, not a retried one: encoding is deterministic, so the producer controller stops and publishes a failure event instead of retrying forever. See [Failure handling](#failure-handling-and-recovery).
+An unregistered payload type is a terminal flow failure, not a retried one: encoding is deterministic, so the producer
+controller stops and publishes a failure event instead of retrying forever. See
+[Failure handling](#failure-handling-and-recovery).
 
 ## Large messages
 
-One reliable payload rides one remoting transport frame. The remoting `maxFrameSize` cap is 16 MiB, and an oversized frame closes the connection without an error frame, so a large reliable payload can wedge the flow in a resend loop that kills the connection on every attempt. Enable chunking when payloads may approach that bound or monopolize a shared connection:
+One reliable payload rides one remoting transport frame. The remoting `maxFrameSize` cap is 16 MiB, and an oversized
+frame closes the connection without an error frame, so a large reliable payload can wedge the flow in a resend loop that
+kills the connection on every attempt. Enable chunking when payloads may approach that bound or monopolize a shared
+connection:
 
-```go
+```go Large messages
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
         actor.WithReliableChunking(256*1024)))
 ```
 
-The size must be in [`MinReliableChunkSize`, `MaxReliableChunkSize`] (1 KiB through 16 MiB minus envelope headroom). Each chunk consumes one sequence number; the consumer controller reassembles before `Delivery`, so your consumer still sees one business message. A message must fit in the consumer's flow-control window worth of chunks: the consumer confirms nothing mid-message, so a message needing more chunks than the window can never drain. A violation fails the flow terminally and names the remedy (raise `WithReliableFlowControlWindow` or the chunk size).
+The size must be in [`MinReliableChunkSize`, `MaxReliableChunkSize`] (1 KiB through 16 MiB minus envelope headroom).
+Each chunk consumes one sequence number; the consumer controller reassembles before `Delivery`, so your consumer still
+sees one business message. A message must fit in the consumer's flow-control window worth of chunks: the consumer
+confirms nothing mid-message, so a message needing more chunks than the window can never drain. A violation fails the
+flow terminally and names the remedy (raise `WithReliableFlowControlWindow` or the chunk size).
 
-With a durable queue, the producer controller stores the whole chunked message through `StoreChunked` so a crash mid-message cannot mix two encodings of the same payload. A resubmission after a producer crash recovers the stored shape even when the re-encoded payload crosses the chunk threshold in either direction: the first write stays authoritative. Queue implementors must treat the batch as atomic; see [Durable delivery](#durable-delivery). The derived chunk identities live in a reserved namespace: an application `MessageID` must not start with `GoAktChunk:`, and `NewProduced` rejects one that does.
+With a durable queue, the producer controller stores the whole chunked message through `StoreChunked` so a crash
+mid-message cannot mix two encodings of the same payload. A resubmission after a producer crash recovers the stored
+shape even when the re-encoded payload crosses the chunk threshold in either direction: the first write stays
+authoritative. Queue implementors must treat the batch as atomic; see [Durable delivery](#durable-delivery). The derived
+chunk identities live in a reserved namespace: an application `MessageID` must not start with `GoAktChunk:`, and
+`NewProduced` rejects one that does.
 
 ## Durable delivery
 
-Without a durable queue, a producer-side restart loses the messages already handed to the controller but not yet confirmed. To survive producer crashes, attach a `DurableProducerQueue`:
+Without a durable queue, a producer-side restart loses the messages already handed to the controller but not yet
+confirmed. To survive producer crashes, attach a `DurableProducerQueue`:
 
-```go
+```go Durable delivery
 publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
         actor.WithReliableDurableQueue(queue),
@@ -346,7 +413,7 @@ publisher, err := system.Spawn(ctx, "order-publisher", &OrderPublisher{},
 
 The queue is a pluggable contract you implement against your own store:
 
-```go
+```go Durable delivery
 type DurableProducerQueue interface {
     extension.Dependency
 
@@ -377,19 +444,31 @@ type DurableProducerQueue interface {
 }
 ```
 
-The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so retries and nondeterministic serializers cannot create conflicts; a `Store` addressing a `MessageID` owned by a retained chunked batch returns `ErrQueueChunkedBatch` so the controller can recover the batch instead of appending a duplicate; state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithReliableQueueRetry`. The full contract is documented on the interface.
+The contract in brief: all operations are linearizable; `Load` returns a new positive epoch that fences every earlier
+one, and stale writers receive `ErrQueueFenced`; the first `Store` / `StoreChunked` for a business `MessageID` wins, so
+retries and nondeterministic serializers cannot create conflicts; a `Store` addressing a `MessageID` owned by a retained
+chunked batch returns `ErrQueueChunkedBatch` so the controller can recover the batch instead of appending a duplicate;
+state integrity violations return `ErrQueueConflict`; other backend errors are retried under `WithReliableQueueRetry`.
+The full contract is documented on the interface.
 
-A producer backed by its own recoverable source completes the loop: it durably marks or removes the submission before replying `StoredAck`, and after a crash it resubmits every unmarked item with its original `MessageID`. The queue's first-write ownership then guarantees one durable sequence per message.
+A producer backed by its own recoverable source completes the loop: it durably marks or removes the submission before
+replying `StoredAck`, and after a crash it resubmits every unmarked item with its original `MessageID`. The queue's
+first-write ownership then guarantees one durable sequence per message.
 
 <Warning>
-A durable flow performs `Store` plus `Accept` before granting the next credit: roughly two durable backend round trips per message, plus amortized `Confirm` writes. Backend latency directly bounds per-flow throughput. Scale horizontally with multiple independent flows.
+  A durable flow performs `Store` plus `Accept` before granting the next credit: roughly two durable backend round trips
+  per message, plus amortized `Confirm` writes. Backend latency directly bounds per-flow throughput. Scale horizontally
+  with multiple independent flows.
 </Warning>
 
 ## Deduplication and exactly-once effects
 
-`MessageID` is the canonical deduplication key. The producer generates it once, when work enters its pending buffer, and it identifies the same business message across retries, controller restarts, sessions, and durable recovery. `Seq` only orders messages within one sequencing history.
+`MessageID` is the canonical deduplication key. The producer generates it once, when work enters its pending buffer, and
+it identifies the same business message across retries, controller restarts, sessions, and durable recovery. `Seq` only
+orders messages within one sequencing history.
 
-Redelivery is normal, not exceptional. A lost confirmation is indistinguishable from a lost delivery, so the consumer controller resends and the consumer sees the same message twice:
+Redelivery is normal, not exceptional. A lost confirmation is indistinguishable from a lost delivery, so the consumer
+controller resends and the consumer sees the same message twice:
 
 ```mermaid
 sequenceDiagram
@@ -407,11 +486,14 @@ sequenceDiagram
     CC-->>PC: confirmation advances
 ```
 
-`MessageID` also closes the ambiguous-acceptance window: if the producer crashes after the controller stored a message but before the handshake completed, resubmitting under the same `MessageID` returns the original sequence instead of storing a duplicate.
+`MessageID` also closes the ambiguous-acceptance window: if the producer crashes after the controller stored a message
+but before the handshake completed, resubmitting under the same `MessageID` returns the original sequence instead of
+storing a duplicate.
 
-For exactly-once business effects, the consumer must commit the `MessageID` and the business mutation in one transaction:
+For exactly-once business effects, the consumer must commit the `MessageID` and the business mutation in one
+transaction:
 
-```go
+```go Deduplication and exactly-once effects
 tx, err := db.BeginTx(ctx, nil)
 // insert the MessageID into a processed-messages table with a unique key,
 // apply the business mutation, commit; a duplicate key means already processed
@@ -421,23 +503,33 @@ An in-memory `seen` map, as in the example above, deduplicates within one consum
 
 ## Configuration
 
-| Option                             | Side     | Default           | Meaning                                                                                              |
-| ---------------------------------- | -------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `WithReliableFlowControlWindow`    | Consumer | 50                | Demand granted per request and the consumer-side buffer capacity; maximum 10,000                     |
-| `WithReliableResendInterval`       | Consumer | 2s                | Consumer controller tick: re-registration and resend cadence                                         |
-| `WithReliableDurableQueue`         | Producer | none              | Durable queue for producer-crash survival                                                            |
-| `WithReliableQueueRetry`           | Producer | 3 attempts, 100ms | Durable operation retries before the controller raises a reliability error                           |
-| `WithReliableRetryInterval`        | Producer | 500ms             | `RequestNext` and `Stored` retry cadence toward the producer actor                                   |
-| `WithReliableChunking`             | Producer | off               | Split large payloads into sequenced chunks; size in [`MinReliableChunkSize`, `MaxReliableChunkSize`] |
-| `WithReliableDeliveryConfirmation` | Producer | off               | Tell the producer a `DeliveryConfirmed` when the consumer confirms a message                         |
-| `WithReliableRemoteConsumer`       | Producer | none              | Remoting address of the node hosting the consumer endpoint in a remoting-only flow                   |
-| `WithReliableRemoteProducer`       | Consumer | none              | Remoting address of the node hosting the producer endpoint in a remoting-only flow                   |
+- **WithReliableFlowControlWindow** (consumer): Demand granted per request and the consumer-side buffer capacity;
+  maximum 10,000. Default: 50.
+- **WithReliableResendInterval** (consumer): Consumer controller tick: re-registration and resend cadence. Default: 2s.
+- **WithReliableDurableQueue** (producer): Durable queue for producer-crash survival. Default: none.
+- **WithReliableQueueRetry** (producer): Durable operation retries before the controller raises a reliability error.
+  Default: 3 attempts, 100ms.
+- **WithReliableRetryInterval** (producer): `RequestNext` and `Stored` retry cadence toward the producer actor. Default:
+  500ms.
+- **WithReliableChunking** (producer): Split large payloads into sequenced chunks; size in [`MinReliableChunkSize`,
+  `MaxReliableChunkSize`]. Default: off.
+- **WithReliableDeliveryConfirmation** (producer): Tell the producer a `DeliveryConfirmed` when the consumer confirms a
+  message. Default: off.
+- **WithReliableRemoteConsumer** (producer): Remoting address of the node hosting the consumer endpoint in a
+  remoting-only flow. Default: none.
+- **WithReliableRemoteProducer** (consumer): Remoting address of the node hosting the producer endpoint in a
+  remoting-only flow. Default: none.
 
-The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
+The flow-control window bounds how far the producer may run ahead of confirmations. The producer controller never sends
+beyond the granted demand, which keeps the consumer-side buffer bounded regardless of producer speed.
 
 ## Clustered flows
 
-A flow can cross nodes in one of two modes: both systems join the same GoAkt cluster and resolve each other through its registry, or both run remoting-only and name each other's address explicitly (see [Remoting-only flows](#remoting-only-flows)). This section covers cluster mode, where controller discovery and endpoint relocation use the cluster registry. Remote placement of a reliable endpoint on a remoting-only system fails fast with `ErrReliableClusterRequired` instead of spawning a flow that never connects:
+A flow can cross nodes in one of two modes: both systems join the same GoAkt cluster and resolve each other through its
+registry, or both run remoting-only and name each other's address explicitly (see
+[Remoting-only flows](#remoting-only-flows)). This section covers cluster mode, where controller discovery and endpoint
+relocation use the cluster registry. Remote placement of a reliable endpoint on a remoting-only system fails fast with
+`ErrReliableClusterRequired` instead of spawning a flow that never connects:
 
 ```mermaid
 flowchart LR
@@ -459,7 +551,7 @@ flowchart LR
 
 The spawn calls are unchanged; each node spawns its endpoint and the controllers find each other through the registry:
 
-```go
+```go Clustered flows
 // node A
 publisher, err := producerSystem.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor"))
@@ -472,14 +564,23 @@ _, err = consumerSystem.Spawn(ctx, "order-processor", &OrderProcessor{},
 Requirements:
 
 - Register the payload types on every node.
-- A durable queue is a serializable dependency: register its type on every node eligible to host the producer, and make sure the reconstructed instance observes the same durable state from every node.
-- Run the cluster with a replica count of at least 2 when reliable endpoints are relocatable. With a single copy, registry state owned by a lost node disappears with it and the peer lookup cannot recover.
+- A durable queue is a serializable dependency: register its type on every node eligible to host the producer, and make
+  sure the reconstructed instance observes the same durable state from every node.
+- Run the cluster with a replica count of at least 2 when reliable endpoints are relocatable. With a single copy,
+  registry state owned by a lost node disappears with it and the peer lookup cannot recover.
 
-Relocation uses the existing replicated actor record and dependency reconstruction: when a node is lost, the surviving node rebuilds the endpoint from its record, and the fresh endpoint gets a fresh controller. Controllers are never relocated on their own. A relocated durable producer reloads its queue under a new epoch, which fences any writes from the departed node, and redelivers unconfirmed messages. A relocated consumer re-registers and resumes. Without a durable queue, relocation has the same loss boundary as a producer crash.
+Relocation uses the existing replicated actor record and dependency reconstruction: when a node is lost, the surviving
+node rebuilds the endpoint from its record, and the fresh endpoint gets a fresh controller. Controllers are never
+relocated on their own. A relocated durable producer reloads its queue under a new epoch, which fences any writes from
+the departed node, and redelivers unconfirmed messages. A relocated consumer re-registers and resumes. Without a durable
+queue, relocation has the same loss boundary as a producer crash.
 
 ## Remoting-only flows
 
-Two nodes with remoting enabled and no cluster form a flow by naming each other's address explicitly: the producer side carries `WithReliableRemoteConsumer(host, port)` with the consumer node's remoting address, and the consumer side carries `WithReliableRemoteProducer(host, port)` with the producer node's. Each endpoint is spawned locally on its own node; there is no remote placement in this mode.
+Two nodes with remoting enabled and no cluster form a flow by naming each other's address explicitly: the producer side
+carries `WithReliableRemoteConsumer(host, port)` with the consumer node's remoting address, and the consumer side
+carries `WithReliableRemoteProducer(host, port)` with the producer node's. Each endpoint is spawned locally on its own
+node; there is no remote placement in this mode.
 
 ```mermaid
 flowchart LR
@@ -498,7 +599,7 @@ flowchart LR
     CC -.->|"resolve peer at<br/>configured address"| nodeA
 ```
 
-```go
+```go Remoting-only flows
 // node A (remoting on 192.168.1.10:2280)
 publisher, err := producerSystem.Spawn(ctx, "order-publisher", &OrderPublisher{},
     actor.AsReliableProducer("order-processor",
@@ -510,22 +611,32 @@ _, err = consumerSystem.Spawn(ctx, "order-processor", &OrderProcessor{},
         actor.WithReliableRemoteProducer("192.168.1.10", 2280)))
 ```
 
-Resolution asks the addressed node directly: an internal lookup served by the peer's remoting server resolves the endpoint's current controller from that node's local actor tree and validates its ownership before answering, so the caller always gets the peer's live incarnation, never a stale record. Registration fencing runs the same lookup in the other direction. An unreachable or not-yet-started peer is a transient condition: controllers retry on their timers and the flow forms once both sides are up, in either start order.
+Resolution asks the addressed node directly: an internal lookup served by the peer's remoting server resolves the
+endpoint's current controller from that node's local actor tree and validates its ownership before answering, so the
+caller always gets the peer's live incarnation, never a stale record. Registration fencing runs the same lookup in the
+other direction. An unreachable or not-yet-started peer is a transient condition: controllers retry on their timers and
+the flow forms once both sides are up, in either start order.
 
 <Note>
-A flow follows exactly one resolution authority. A peer address requires remoting (`ErrReliablePeerRemotingRequired` otherwise) and cannot be combined with clustering (`ErrReliablePeerClusterConflict`), both rejected at spawn.
+  A flow follows exactly one resolution authority. A peer address requires remoting (`ErrReliablePeerRemotingRequired`
+  otherwise) and cannot be combined with clustering (`ErrReliablePeerClusterConflict`), both rejected at spawn.
 </Note>
 
 The recovery model differs from cluster mode:
 
-- There is no relocation: nothing exists to relocate through. Node loss is recovered by restarting the peer process at its configured address; the restarted endpoint has a new incarnation and the ordinary registration resync reconnects the flow.
-- The loss boundary equals a process crash: with a durable queue the producer reloads stored state and redelivers, without one controller-unconfirmed messages are lost.
+- There is no relocation: nothing exists to relocate through. Node loss is recovered by restarting the peer process at
+  its configured address; the restarted endpoint has a new incarnation and the ordinary registration resync reconnects
+  the flow.
+- The loss boundary equals a process crash: with a durable queue the producer reloads stored state and redelivers,
+  without one controller-unconfirmed messages are lost.
 - Work-pulling does not support peer addresses; a worker set spanning nodes requires cluster mode.
 - Payload types must be registered on both nodes, exactly as in cluster mode.
 
 ## Failure handling and recovery
 
-Transient trouble heals itself: lost messages, unreachable peers, and controller restarts are recovered by the protocol's timers, and retriable durable-queue errors restart the producer controller, which reloads authoritative queue state. Deterministic conditions that no retry can fix take a different path:
+Transient trouble heals itself: lost messages, unreachable peers, and controller restarts are recovered by the
+protocol's timers, and retriable durable-queue errors restart the producer controller, which reloads authoritative queue
+state. Deterministic conditions that no retry can fix take a different path:
 
 ```mermaid
 flowchart TD
@@ -537,17 +648,17 @@ flowchart TD
     RS --> N["fresh controller,<br/>new session and queue epoch"]
 ```
 
-Non-recoverable conditions stop the affected controller and publish exactly one `ReliableDeliveryFailed` event on the [event stream](/advanced/event-streams), while your endpoint actor stays alive:
+Non-recoverable conditions stop the affected controller and publish exactly one `ReliableDeliveryFailed` event on the
+[event stream](/advanced/event-streams), while your endpoint actor stays alive:
 
-| Stage                           | Cause                                                                                   |
-| ------------------------------- | --------------------------------------------------------------------------------------- |
-| `ReliableDeliveryStageLoad`     | Durable queue state could not be loaded on a controller restart                         |
-| `ReliableDeliveryStageStore`    | Durable store failed terminally (fenced writer or state conflict)                       |
-| `ReliableDeliveryStageAccept`   | Durable acceptance failed terminally                                                    |
-| `ReliableDeliveryStageConfirm`  | Durable confirmation failed terminally                                                  |
-| `ReliableDeliveryStageProtocol` | Deterministic contract violation, including an unregistered or undecodable payload type |
+- **ReliableDeliveryStageLoad**: Durable queue state could not be loaded on a controller restart.
+- **ReliableDeliveryStageStore**: Durable store failed terminally (fenced writer or state conflict).
+- **ReliableDeliveryStageAccept**: Durable acceptance failed terminally.
+- **ReliableDeliveryStageConfirm**: Durable confirmation failed terminally.
+- **ReliableDeliveryStageProtocol**: Deterministic contract violation, including an unregistered or undecodable payload
+  type.
 
-```go
+```go Failure handling and recovery
 subscriber, err := system.Subscribe()
 if err != nil {
     return err
@@ -564,10 +675,13 @@ for message := range subscriber.Iterator() {
 }
 ```
 
-The event identifies the flow by the endpoint's actor name and the controller role (`ReliableControllerRoleProducer` or `ReliableControllerRoleConsumer`). The flow stays disabled until an operator fixes the cause, for example registering the missing serializer or restoring queue ownership, and then calls `ReSpawn` on the endpoint:
+The event identifies the flow by the endpoint's actor name and the controller role (`ReliableControllerRoleProducer` or
+`ReliableControllerRoleConsumer`). The flow stays disabled until an operator fixes the cause, for example registering
+the missing serializer or restoring queue ownership, and then calls `ReSpawn` on the endpoint:
 
-```go
+```go Failure handling and recovery
 pid, err := system.ReSpawn(ctx, "order-publisher")
 ```
 
-`ReSpawn` restarts the endpoint, recreates its controller, and for a durable producer acquires a fresh queue epoch. Submissions the producer kept buffered during the outage flow again once the controller is back.
+`ReSpawn` restarts the endpoint, recreates its controller, and for a durable producer acquires a fresh queue epoch.
+Submissions the producer kept buffered during the outage flow again once the controller is back.

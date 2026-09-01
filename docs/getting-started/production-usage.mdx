@@ -1,0 +1,59 @@
+---
+title: Production Usage
+description: Who runs GoAkt in production, and what to wire up before you join them.
+sidebarTitle: "Production Usage"
+---
+
+GoAkt has been in development since 2022 and runs in production today. This page lists known adopters and the parts of
+the framework worth configuring before your own launch.
+
+## In production
+
+- **[Baki Money](https://www.baki.money/)**: AI-powered expense tracking platform that turns receipts into stories.
+- **[Event Processor](https://www.v-app.io/iot-builder-3/)**: clustered Complex Event Processor (CEP) for IoT data
+  streams.
+
+<Note>
+  Running GoAkt in production? Open a [discussion](https://github.com/Tochemey/goakt/discussions) or a pull request
+  against the README to be added to this list.
+</Note>
+
+## Before you go live
+
+<CardGroup cols={2}>
+  <Card title="Supervision" icon="shield-check" href="/actor/supervision">
+    Decide how each actor subtree fails: directives, restart budgets, and backoff. The defaults are sensible, but
+    payment flows and ingest pipelines rarely want the same policy.
+  </Card>
+  <Card title="Coordinated shutdown" icon="power" href="/advanced/coordinated-shutdown">
+    Register shutdown hooks so deploys and scale-downs drain mailboxes and release resources instead of dropping
+    in-flight work.
+  </Card>
+  <Card title="Observability" icon="activity" href="/advanced/observability">
+    Export system and actor metrics through OpenTelemetry, watch the event stream for lifecycle signals, and monitor
+    dead letters. A rising dead-letter count is usually the first symptom of a bug.
+  </Card>
+  <Card title="Passivation" icon="moon" href="/actor/passivation">
+    Tune idle and capacity-based passivation so memory tracks the working set rather than the total number of entities
+    ever seen.
+  </Card>
+  <Card title="Service discovery" icon="search" href="/clustering/service-discovery">
+    Pick the provider that matches your platform: Kubernetes, Consul, etcd, NATS, mDNS, DNS-SD, a static list, or the
+    self-managed LAN mode.
+  </Card>
+  <Card title="Transport security" icon="lock" href="/advanced/remoting#tls">
+    Enable TLS on remoting; the same configuration also secures cluster transports when clustering is on.
+  </Card>
+</CardGroup>
+
+## Keeping your deployment secure
+
+Routinely upgrade your Go version and refresh dependencies. GoAkt keeps its own dependencies current and runs
+vulnerability checks, but the application build is yours. To report a vulnerability, use GitHub's
+[Report a Vulnerability](https://github.com/Tochemey/goakt/security/advisories/new) form.
+
+## Getting help
+
+Community support happens in [Discussions](https://github.com/Tochemey/goakt/discussions) and on
+[Slack](https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ). For priority support on
+complex topics or to fund new features, consider [sponsorship](https://github.com/sponsors/Tochemey).

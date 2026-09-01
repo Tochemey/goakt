@@ -10,34 +10,28 @@ dashboards and exporters.
 
 ## Overview
 
-| Mechanism             | Purpose                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------ |
-| **System metrics**    | Node-level statistics via `ActorSystem.Metric`                                             |
-| **Per-actor metrics** | Actor-level statistics via `pid.Metric`                                                    |
-| **Event stream**      | System and cluster events (lifecycle, membership, dead letters)                            |
-| **OpenTelemetry**     | Metrics exported when `WithMetrics` is used                                                |
-| **Tracing**           | Zero-instrumentation actor traces via [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf) |
+- **System metrics**: Node-level statistics via `ActorSystem.Metric`.
+- **Per-actor metrics**: Actor-level statistics via `pid.Metric`.
+- **Event stream**: System and cluster events (lifecycle, membership, dead letters).
+- **OpenTelemetry**: Metrics exported when `WithMetrics` is used.
+- **Tracing**: Zero-instrumentation actor traces via [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf).
 
 All metrics are local: they reflect the current node only. Metrics are point-in-time snapshots; values do not update
 after the struct is returned.
-
----
 
 ## System metrics
 
 `ActorSystem.Metric(ctx)` returns a `*Metric` struct with node-level statistics. Returns `nil` when the actor system is
 not started.
 
-| Field              | Type     | Description                                         |
-| ------------------ | -------- | --------------------------------------------------- |
-| `DeadlettersCount` | `int64`  | Total messages dropped to dead letters on this node |
-| `ActorsCount`      | `int64`  | Total number of live actors on this node            |
-| `Uptime`           | `int64`  | Seconds since the actor system started              |
-| `MemoryUsed`       | `uint64` | Used memory in bytes (host)                         |
-| `MemorySize`       | `uint64` | Total memory in bytes (host)                        |
-| `MemoryAvailable`  | `uint64` | Available memory in bytes (host)                    |
+- **DeadlettersCount**: Type: `int64`. Description: Total messages dropped to dead letters on this node.
+- **ActorsCount**: Type: `int64`. Description: Total number of live actors on this node.
+- **Uptime**: Type: `int64`. Description: Seconds since the actor system started.
+- **MemoryUsed**: Type: `uint64`. Description: Used memory in bytes (host).
+- **MemorySize**: Type: `uint64`. Description: Total memory in bytes (host).
+- **MemoryAvailable**: Type: `uint64`. Description: Available memory in bytes (host).
 
-```go
+```go System metrics
 m := sys.Metric(ctx)
 if m != nil {
     log.Printf("actors=%d deadletters=%d uptime=%ds",
@@ -45,27 +39,25 @@ if m != nil {
 }
 ```
 
----
-
 ## Per-actor metrics
 
 `pid.Metric(ctx)` returns an `*ActorMetric` struct with actor-level statistics. Returns `nil` when the actor is not
 running. For remote actors, metrics are fetched via remoting; the same fields are available.
 
-| Field                     | Type            | Description                                                                  |
-| ------------------------- | --------------- | ---------------------------------------------------------------------------- |
-| `ProcessedCount`          | `uint64`        | Cumulative messages processed (excludes PostStart; excludes stashed/dropped) |
-| `ChidrenCount`            | `uint64`        | Number of direct child actors                                                |
-| `RestartCount`            | `uint64`        | Cumulative restarts (supervision)                                            |
-| `Uptime`                  | `int64`         | Seconds since actor started (resets on restart)                              |
-| `LatestProcessedDuration` | `time.Duration` | Duration of the most recent message processing                               |
-| `StashSize`               | `uint64`        | Current number of stashed messages                                           |
-| `DeadlettersCount`        | `uint64`        | Messages sent to dead letters by this actor                                  |
-| `FailureCount`            | `uint64`        | Cumulative failures (panics, errors triggering supervision)                  |
-| `ReinstateCount`          | `uint64`        | Cumulative reinstatements (suspended → resumed)                              |
-| `UnhandledCount`          | `uint64`        | Cumulative messages the actor rejected with `ReceiveContext.Unhandled`       |
+- **ProcessedCount**: Type: `uint64`. Description: Cumulative messages processed (excludes PostStart; excludes
+  stashed/dropped).
+- **ChidrenCount**: Type: `uint64`. Description: Number of direct child actors.
+- **RestartCount**: Type: `uint64`. Description: Cumulative restarts (supervision).
+- **Uptime**: Type: `int64`. Description: Seconds since actor started (resets on restart).
+- **LatestProcessedDuration**: Type: `time.Duration`. Description: Duration of the most recent message processing.
+- **StashSize**: Type: `uint64`. Description: Current number of stashed messages.
+- **DeadlettersCount**: Type: `uint64`. Description: Messages sent to dead letters by this actor.
+- **FailureCount**: Type: `uint64`. Description: Cumulative failures (panics, errors triggering supervision).
+- **ReinstateCount**: Type: `uint64`. Description: Cumulative reinstatements (suspended → resumed).
+- **UnhandledCount**: Type: `uint64`. Description: Cumulative messages the actor rejected with
+  `ReceiveContext.Unhandled`.
 
-```go
+```go Per-actor metrics
 m := pid.Metric(ctx)
 if m != nil {
     log.Printf("actors=%s processed=%d restarts=%d stash=%d",
@@ -73,14 +65,12 @@ if m != nil {
 }
 ```
 
----
-
 ## Event stream
 
 The event stream publishes **system and cluster events** (lifecycle, membership, dead letters). It is separate from
 application-level PubSub. See [Event Streams](/advanced/event-streams) for full documentation.
 
-```go
+```go Event stream
 subscriber, err := sys.Subscribe()
 if err != nil {
     return err
@@ -100,15 +90,11 @@ for msg := range subscriber.Iterator() {
 Event types: `ActorStarted`, `ActorStopped`, `ActorChildCreated`, `ActorPassivated`, `ActorRestarted`, `ActorSuspended`,
 `ActorReinstated`, `Deadletter`, `NodeJoined`, `NodeLeft`.
 
----
-
 ## Dead letters
 
 Messages sent to stopped or non-existent actors are captured by the dead-letter actor and published to the event stream.
 The `Deadletter` payload includes sender, receiver, message, and reason. Subscribe to the event stream to observe or log
 dead letters.
-
----
 
 ## OpenTelemetry
 
@@ -120,22 +106,19 @@ not exported.
 
 Attributes: `actor.system`.
 
-| Instrument                      | Type                     | Description                     |
-| ------------------------------- | ------------------------ | ------------------------------- |
-| `actorsystem.deadletters.count` | Int64ObservableCounter   | Total dead letters on this node |
-| `actorsystem.actors.count`      | Int64ObservableGauge     | Live actors on this node        |
-| `actorsystem.grains.count`      | Int64ObservableGauge     | Grains activated on this node   |
-| `actorsystem.uptime`            | Int64ObservableGauge (s) | Actor system uptime in seconds  |
-| `actorsystem.peers.count`       | Int64ObservableGauge     | Connected peers (cluster mode)  |
+- **actorsystem.deadletters.count**: Type: Int64ObservableCounter. Description: Total dead letters on this node.
+- **actorsystem.actors.count**: Type: Int64ObservableGauge. Description: Live actors on this node.
+- **actorsystem.grains.count**: Type: Int64ObservableGauge. Description: Grains activated on this node.
+- **actorsystem.uptime**: Type: Int64ObservableGauge (s). Description: Actor system uptime in seconds.
+- **actorsystem.peers.count**: Type: Int64ObservableGauge. Description: Connected peers (cluster mode).
 
 ### Scheduler instruments
 
 Attributes: `actor.system`.
 
-| Instrument                  | Type                   | Description                                        |
-| --------------------------- | ---------------------- | -------------------------------------------------- |
-| `scheduler.scheduled.count` | Int64ObservableCounter | Messages successfully scheduled for later delivery |
-| `scheduler.cancelled.count` | Int64ObservableCounter | Scheduled messages successfully cancelled          |
+- **scheduler.scheduled.count**: Type: Int64ObservableCounter. Description: Messages successfully scheduled for later
+  delivery.
+- **scheduler.cancelled.count**: Type: Int64ObservableCounter. Description: Scheduled messages successfully cancelled.
 
 Both counters move on the scheduling API calls only: a call that fails, such as a cancellation for an unknown reference,
 does not count.
@@ -144,10 +127,10 @@ does not count.
 
 Attributes: `actor.system`. Registered only when the actor system runs in cluster mode.
 
-| Instrument                     | Type                   | Description                                 |
-| ------------------------------ | ---------------------- | ------------------------------------------- |
-| `cluster.members.joined.count` | Int64ObservableCounter | Members this node has seen join the cluster |
-| `cluster.members.left.count`   | Int64ObservableCounter | Members this node has seen leave the cluster |
+- **cluster.members.joined.count**: Type: Int64ObservableCounter. Description: Members this node has seen join the
+  cluster.
+- **cluster.members.left.count**: Type: Int64ObservableCounter. Description: Members this node has seen leave the
+  cluster.
 
 <Note>
   Each node reports the churn it observed, so a three node cluster reports a single join on three series. Rate either
@@ -162,11 +145,9 @@ Attributes: `actor.system`, `actor.kind`.
 These three totals count events that remove an actor from the tree, so they are reported by the actor system rather than
 by a PID, one series per actor kind. System actors (guardians, the dead-letter actor, topic actors) are excluded.
 
-| Instrument               | Type                   | Description                                    |
-| ------------------------ | ---------------------- | ---------------------------------------------- |
-| `actor.spawned.count`    | Int64ObservableCounter | Actors of this kind whose spawn completed      |
-| `actor.stopped.count`    | Int64ObservableCounter | Actors of this kind that were shut down        |
-| `actor.passivated.count` | Int64ObservableCounter | Actors of this kind that passivated            |
+- **actor.spawned.count**: Type: Int64ObservableCounter. Description: Actors of this kind whose spawn completed.
+- **actor.stopped.count**: Type: Int64ObservableCounter. Description: Actors of this kind that were shut down.
+- **actor.passivated.count**: Type: Int64ObservableCounter. Description: Actors of this kind that passivated.
 
 <Note>
   `actor.stopped.count` counts terminal stops only. The teardown a restart performs before re-initializing an actor is
@@ -183,33 +164,32 @@ Per-actor metrics are collected by a single callback that walks the actor tree o
 registrations stays constant regardless of the actor population. An actor appears in scrapes once it is running and has
 processed its `PostStart` message; suspended, stopping, and passivating actors are omitted until they are running again.
 
-| Instrument                     | Type                      | Description                         |
-| ------------------------------ | ------------------------- | ----------------------------------- |
-| `actor.children.count`         | Int64ObservableGauge      | Current child actors                |
-| `actor.stash.size`             | Int64ObservableGauge      | Messages stashed                    |
-| `actor.deadletters.count`      | Int64ObservableCounter    | Dead letters sent by this actor     |
-| `actor.restart.count`          | Int64ObservableCounter    | Restarts                            |
-| `actor.last.received.duration` | Int64ObservableGauge (ms) | Duration of last message processing |
-| `actor.processed.count`        | Int64ObservableCounter    | Messages processed                  |
-| `actor.uptime`                 | Int64ObservableGauge (s)  | Actor uptime in seconds             |
-| `actor.failure.count`          | Int64ObservableCounter    | Failures                            |
-| `actor.reinstate.count`        | Int64ObservableCounter    | Reinstatements                      |
-| `actor.unhandled.count`        | Int64ObservableCounter    | Messages rejected with `Unhandled`  |
-| `actor.mailbox.size`           | Int64ObservableGauge      | Messages waiting in the mailbox     |
+- **actor.children.count**: Type: Int64ObservableGauge. Description: Current child actors.
+- **actor.stash.size**: Type: Int64ObservableGauge. Description: Messages stashed.
+- **actor.deadletters.count**: Type: Int64ObservableCounter. Description: Dead letters sent by this actor.
+- **actor.restart.count**: Type: Int64ObservableCounter. Description: Restarts.
+- **actor.last.received.duration**: Type: Int64ObservableGauge (ms). Description: Duration of last message processing.
+- **actor.processed.count**: Type: Int64ObservableCounter. Description: Messages processed.
+- **actor.uptime**: Type: Int64ObservableGauge (s). Description: Actor uptime in seconds.
+- **actor.failure.count**: Type: Int64ObservableCounter. Description: Failures.
+- **actor.reinstate.count**: Type: Int64ObservableCounter. Description: Reinstatements.
+- **actor.unhandled.count**: Type: Int64ObservableCounter. Description: Messages rejected with `Unhandled`.
+- **actor.mailbox.size**: Type: Int64ObservableGauge. Description: Messages waiting in the mailbox.
 
 `actor.deadletters.count` carries one extra attribute, `message.type`, naming the type of the dropped message, and is
 reported once per message type the actor dropped. An actor that has dropped nothing reports a single zero without the
 attribute. To get an actor's total across all types, sum the series:
 
-```promql
+```promql Per-actor instruments
 sum by (actor_name) (actor_deadletters_count)
 ```
 
 <Note>
   `actor.mailbox.size` is the one instrument reported outside the gate described above. A suspended or restarting actor
   still emits it, and only it, because a backlog piling up behind an actor that has stopped consuming is exactly the
-  condition the metric exists to expose. It counts user messages that are enqueued and not yet dispatched, so it excludes
-  the message being processed, the stashed messages reported by `actor.stash.size`, and the internal control-plane queue.
+  condition the metric exists to expose. It counts user messages that are enqueued and not yet dispatched, so it
+  excludes the message being processed, the stashed messages reported by `actor.stash.size`, and the internal
+  control-plane queue.
 </Note>
 
 #### Average time a message waits in the mailbox
@@ -217,7 +197,7 @@ sum by (actor_name) (actor_deadletters_count)
 GoAkt records no mailbox wait histogram: measuring one would mean timestamping every message on the message path. The
 average wait follows from Little's law instead, dividing the queue length by the rate at which the actor drains it:
 
-```promql
+```promql Average time a message waits in the mailbox
 actor_mailbox_size / rate(actor_processed_count[5m])
 ```
 
@@ -232,13 +212,13 @@ with the actor population, which becomes expensive to store and query once a sys
 `WithLowCardinalityMetrics` reports the same instruments once per actor kind instead. The scrape aggregates the live
 actors of each kind and observes each instrument once, carrying only `actor.system` and `actor.kind`:
 
-```go
+```go Reporting one series per actor kind
 sys, _ := actor.NewActorSystem("app", actor.WithMetrics(actor.WithLowCardinalityMetrics()))
 ```
 
-The series count then depends on how many actor kinds the system declares, not on how many actors it runs. System
-actors (guardians, the dead-letter actor, topic actors) are excluded from the per-kind series; they only appear in the
-default per-actor mode.
+The series count then depends on how many actor kinds the system declares, not on how many actors it runs. System actors
+(guardians, the dead-letter actor, topic actors) are excluded from the per-kind series; they only appear in the default
+per-actor mode.
 
 <Warning>
   The per-actor attributes `actor.name` and `actor.address` are dropped in this mode, so an individual actor can no
@@ -248,19 +228,18 @@ default per-actor mode.
 
 Each instrument is reduced across the live actors of the kind:
 
-| Instrument                     | Reduction                     | Meaning per kind                                  |
-| ------------------------------ | ----------------------------- | ------------------------------------------------- |
-| `actor.children.count`         | sum                           | Children held by actors of this kind              |
-| `actor.stash.size`             | sum                           | Stashed messages across the kind                  |
-| `actor.restart.count`          | sum                           | Restarts across the kind                          |
-| `actor.processed.count`        | sum                           | Messages processed by the kind                    |
-| `actor.failure.count`          | sum                           | Failures across the kind                          |
-| `actor.reinstate.count`        | sum                           | Reinstatements across the kind                    |
-| `actor.unhandled.count`        | sum                           | Unhandled messages across the kind                |
-| `actor.deadletters.count`      | sum per kind and message type | Drops by the kind, still broken down by type      |
-| `actor.uptime`                 | max                           | Age of the oldest live actor of the kind          |
-| `actor.last.received.duration` | min                           | Time since the kind last processed a message      |
-| `actor.mailbox.size`           | sum                           | Messages waiting across the kind                  |
+- **actor.children.count**: Reduction: sum. Meaning per kind: Children held by actors of this kind.
+- **actor.stash.size**: Reduction: sum. Meaning per kind: Stashed messages across the kind.
+- **actor.restart.count**: Reduction: sum. Meaning per kind: Restarts across the kind.
+- **actor.processed.count**: Reduction: sum. Meaning per kind: Messages processed by the kind.
+- **actor.failure.count**: Reduction: sum. Meaning per kind: Failures across the kind.
+- **actor.reinstate.count**: Reduction: sum. Meaning per kind: Reinstatements across the kind.
+- **actor.unhandled.count**: Reduction: sum. Meaning per kind: Unhandled messages across the kind.
+- **actor.deadletters.count**: Reduction: sum per kind and message type. Meaning per kind: Drops by the kind, still
+  broken down by type.
+- **actor.uptime**: Reduction: max. Meaning per kind: Age of the oldest live actor of the kind.
+- **actor.last.received.duration**: Reduction: min. Meaning per kind: Time since the kind last processed a message.
+- **actor.mailbox.size**: Reduction: sum. Meaning per kind: Messages waiting across the kind.
 
 <Note>
   The two time gauges cannot be summed. The maximum uptime answers how long the kind has been running, and the minimum
@@ -268,9 +247,9 @@ Each instrument is reduced across the live actors of the kind:
 </Note>
 
 The gate is unchanged: only running actors that have processed their `PostStart` contribute, so a kind whose actors are
-all suspended drops out of the series until one resumes. `actor.mailbox.size` is the exception it is in the default
-mode too: every actor of the kind adds its backlog to the sum whatever its lifecycle state, so a kind whose actors are
-all suspended keeps reporting that one instrument while the others go quiet. A kind that has dropped nothing reports a
+all suspended drops out of the series until one resumes. `actor.mailbox.size` is the exception it is in the default mode
+too: every actor of the kind adds its backlog to the sum whatever its lifecycle state, so a kind whose actors are all
+suspended keeps reporting that one instrument while the others go quiet. A kind that has dropped nothing reports a
 single zero for `actor.deadletters.count` without the `message.type` attribute, exactly as an actor does in the default
 mode.
 
@@ -279,7 +258,7 @@ they are identical in both modes.
 
 ### Example
 
-```go
+```go Example
 import (
 "go.opentelemetry.io/otel"
 "go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
@@ -294,8 +273,9 @@ otel.SetMeterProvider(provider)
 sys, _ := actor.NewActorSystem("app", actor.WithMetrics())
 ```
 
----
-
 ## Tracing
 
-For **zero-instrumentation distributed tracing** of actor message flows, use [goakt-ebpf](https://github.com/Tochemey/goakt-ebpf). It runs as a sidecar process, attaches to your GoAkt v4 application via eBPF uprobes, and exports spans to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.): no code changes or SDK dependency in your app.
+For **zero-instrumentation distributed tracing** of actor message flows, use
+[goakt-ebpf](https://github.com/Tochemey/goakt-ebpf). It runs as a sidecar process, attaches to your GoAkt v4
+application via eBPF uprobes, and exports spans to any OTLP-compatible backend (Jaeger, Grafana Tempo, Honeycomb, etc.):
+no code changes or SDK dependency in your app.

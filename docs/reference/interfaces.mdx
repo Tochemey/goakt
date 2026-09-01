@@ -9,7 +9,7 @@ explanations.
 
 ## Actor
 
-```go
+```go Actor
 type Actor interface {
     PreStart(ctx *Context) error
     Receive(ctx *ReceiveContext)
@@ -21,7 +21,7 @@ Required for all actors. See [Actor Model](/actor/actor-model#the-actor-interfac
 
 ## Grain
 
-```go
+```go Grain
 type Grain interface {
     OnActivate(ctx context.Context, props *GrainProps) error
     OnReceive(ctx *GrainContext)
@@ -33,7 +33,7 @@ Required for virtual actors. See [Grains](/grains/overview#the-grain-interface).
 
 ## Mailbox
 
-```go
+```go Mailbox
 type Mailbox interface {
     Enqueue(msg *ReceiveContext) error
     Dequeue() *ReceiveContext
@@ -47,19 +47,18 @@ Optional; for custom mailbox implementations. See [Extending GoAkt](/contributin
 
 ## Serializer
 
-```go
+```go Serializer
 type Serializer interface {
     Serialize(message any) ([]byte, error)
     Deserialize(data []byte) (any, error)
 }
 ```
 
-For custom message serialization over the wire.
-See [Serialization](/advanced/serialization#the-serializer-interface).
+For custom message serialization over the wire. See [Serialization](/advanced/serialization#the-serializer-interface).
 
 ## Extension
 
-```go
+```go Extension
 type Extension interface {
     ID() string
 }
@@ -69,19 +68,19 @@ System-wide plugin. See [Extending GoAkt](/contributing/extending#extension-syst
 
 ## Dependency
 
-```go
+```go Dependency
 type Dependency interface {
     Serializable  // BinaryMarshaler + BinaryUnmarshaler
     ID() string
 }
 ```
 
-Per-actor injected resource. Must be serializable for relocation.
-See [Extending GoAkt](/contributing/extending#dependency-per-actor).
+Per-actor injected resource. Must be serializable for relocation. See
+[Extending GoAkt](/contributing/extending#dependency-per-actor).
 
-## Discovery Provider
+## Discovery provider
 
-```go
+```go Discovery Provider
 type Provider interface {
     ID() string
     Initialize() error
@@ -98,17 +97,18 @@ For custom passivation behavior. See [Passivation](/actor/passivation#strategies
 
 ## Hasher
 
-```go
+```go Hasher
 type Hasher interface {
     HashCode(key []byte) uint64
 }
 ```
 
-Hash function for cluster partition placement (`ClusterConfig.WithPartitionHasher`) and consistent-hash routers (`WithConsistentHashHasher`). Default is xxh3. See [Partition Hashing](/clustering/partition-hashing).
+Hash function for cluster partition placement (`ClusterConfig.WithPartitionHasher`) and consistent-hash routers
+(`WithConsistentHashHasher`). Default is xxh3. See [Partition Hashing](/clustering/partition-hashing).
 
 ## Path
 
-```go
+```go Path
 type Path interface {
     Host() string
     HostPort() string
@@ -121,5 +121,5 @@ type Path interface {
 }
 ```
 
-Returned by `pid.Path()`. Location-transparent actor identity.
-See [Location Transparency](/actor/location-transparency#the-path-interface).
+Returned by `pid.Path()`. Location-transparent actor identity. See
+[Location Transparency](/actor/location-transparency#the-path-interface).
