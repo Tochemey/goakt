@@ -100,10 +100,10 @@ func TestRegisterMetricsAsksDeadletterOncePerScrape(t *testing.T) {
 	deadletter := system.getDeadletter()
 	require.NotNil(t, deadletter)
 
-	// two callbacks are registered for a non-cluster system: the system-level
-	// one and the per-actor one. Only the per-actor callback asks the
-	// deadletter actor.
-	require.Len(t, meter.callbacks, 2)
+	// three callbacks are registered for a non-cluster system: the
+	// system-level one, the per-actor one and the scheduler one. Only the
+	// per-actor callback asks the deadletter actor.
+	require.Len(t, meter.callbacks, 3)
 
 	observer := noopmetric.Observer{}
 	before := deadletter.ProcessedCount()
@@ -189,6 +189,74 @@ func TestRegisterMetricsObservesRuntimeCounters(t *testing.T) {
 	require.EqualValues(t, 0, lifecycle["actor.passivated.count"])
 
 	require.NoError(t, sys.Stop(ctx))
+}
+
+// TestRegisterMetricsObservesSubsystemCounters drives one full collection over
+// a metrics-enabled non-cluster system and asserts the subsystem observations:
+// the live grain gauge, the scheduler totals, and the absence of the cluster
+// membership instruments outside cluster mode.
+func TestRegisterMetricsObservesSubsystemCounters(t *testing.T) {
+	ctx := context.Background()
+
+	previous := otel.GetMeterProvider()
+	meterProvider := newRecordingMeterProvider()
+	otel.SetMeterProvider(meterProvider)
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+
+	pause.For(time.Second)
+
+	identity, err := sys.GrainIdentity(ctx, "counterGrain", func(_ context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	})
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+
+	pid, err := sys.Spawn(ctx, "receiver", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	message := new(testpb.TestSend)
+	require.NoError(t, sys.ScheduleOnce(ctx, message, pid, time.Hour, WithReference("subsystem-once")))
+	require.NoError(t, sys.Schedule(ctx, message, pid, time.Hour, WithReference("subsystem-interval")))
+	require.NoError(t, sys.CancelSchedule("subsystem-interval"))
+
+	observer := scrapeOnce(t, ctx, meterProvider)
+
+	grains, ok := recordValue(observer.records, "actorsystem.grains.count")
+	require.True(t, ok)
+	require.EqualValues(t, 1, grains)
+
+	scheduled, ok := recordValue(observer.records, "scheduler.scheduled.count")
+	require.True(t, ok)
+	require.EqualValues(t, 2, scheduled)
+
+	cancelled, ok := recordValue(observer.records, "scheduler.cancelled.count")
+	require.True(t, ok)
+	require.EqualValues(t, 1, cancelled)
+
+	// the membership instruments belong to cluster mode only
+	_, ok = recordValue(observer.records, "cluster.members.joined.count")
+	require.False(t, ok)
+	_, ok = recordValue(observer.records, "cluster.members.left.count")
+	require.False(t, ok)
+
+	require.NoError(t, sys.Stop(ctx))
+}
+
+// recordValue returns the value the scrape observed for the named instrument,
+// and whether the instrument was observed at all.
+func recordValue(records []attrObserveRecord, instrument string) (int64, bool) {
+	for _, record := range records {
+		if record.instrument == instrument {
+			return record.value, true
+		}
+	}
+
+	return 0, false
 }
 
 // TestRegisterMetricsAggregatesPerActorKind drives one full collection over a

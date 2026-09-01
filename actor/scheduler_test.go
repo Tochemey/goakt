@@ -2122,3 +2122,52 @@ func TestSchedulerListSchedules(t *testing.T) {
 		require.NoError(t, system.Stop(ctx))
 	})
 }
+
+// TestSchedulerCounters asserts the scheduler totals every successfully
+// accepted schedule and every honored cancellation, and leaves both counters
+// untouched on the error paths.
+func TestSchedulerCounters(t *testing.T) {
+	t.Run("With successful schedules and cancellations", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		typedSystem := newActorSystem.(*actorSystem)
+		require.Zero(t, typedSystem.scheduler.scheduledCount.Load())
+		require.Zero(t, typedSystem.scheduler.cancelledCount.Load())
+
+		message := new(testpb.TestSend)
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, message, actorRef, time.Hour, WithReference("counter-once")))
+		require.NoError(t, newActorSystem.Schedule(ctx, message, actorRef, time.Hour, WithReference("counter-interval")))
+		require.NoError(t, newActorSystem.ScheduleWithCron(ctx, message, actorRef, "* * * ? * *", WithReference("counter-cron")))
+		require.EqualValues(t, 3, typedSystem.scheduler.scheduledCount.Load())
+
+		require.NoError(t, newActorSystem.CancelSchedule("counter-interval"))
+		require.EqualValues(t, 1, typedSystem.scheduler.cancelledCount.Load())
+
+		// an unknown reference is not a cancellation
+		require.Error(t, newActorSystem.CancelSchedule("counter-unknown"))
+		require.EqualValues(t, 1, typedSystem.scheduler.cancelledCount.Load())
+
+		require.EqualValues(t, 3, typedSystem.scheduler.scheduledCount.Load())
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With scheduler not started", func(t *testing.T) {
+		scheduler := newScheduler(log.DiscardLogger, time.Second, nil)
+
+		err := scheduler.ScheduleOnce(new(testpb.TestSend), nil, time.Hour)
+		require.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
+		require.Zero(t, scheduler.scheduledCount.Load())
+
+		err = scheduler.CancelSchedule("counter-none")
+		require.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
+		require.Zero(t, scheduler.cancelledCount.Load())
+	})
+}

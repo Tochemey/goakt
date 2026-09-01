@@ -87,6 +87,12 @@ type scheduler struct {
 	// actorSystem is needed to resolve NoSender() for remote-PID schedules,
 	// since remote PIDs carry no actor-system reference.
 	actorSystem ActorSystem
+	// scheduledCount and cancelledCount total the schedules accepted and the
+	// cancellations honored since the scheduler was created. They feed the
+	// scheduler metrics scrape, are written only by the scheduling API calls,
+	// and survive Stop so the exported counters never decrease.
+	scheduledCount atomic.Int64
+	cancelledCount atomic.Int64
 }
 
 // ScheduleInfo is a read-only snapshot describing a single scheduled message known to the scheduler.
@@ -215,7 +221,12 @@ func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts
 	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
-	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
+	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay)); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
 }
 
 // Schedule schedules a recurring message to be delivered to the specified actor (PID) at a fixed interval.
@@ -258,7 +269,12 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
-	return x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval))
+	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval)); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
 }
 
 // ScheduleWithCron schedules a message to be delivered to the specified actor (PID) using a cron expression.
@@ -341,7 +357,12 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
-	return x.quartzScheduler.ScheduleJob(detail, trigger)
+	if err := x.quartzScheduler.ScheduleJob(detail, trigger); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
 }
 
 // CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
@@ -370,7 +391,12 @@ func (x *scheduler) CancelSchedule(reference string) error {
 		return errors.ErrScheduledReferenceNotFound
 	}
 
-	return x.quartzScheduler.DeleteJob(jobKey)
+	if err := x.quartzScheduler.DeleteJob(jobKey); err != nil {
+		return err
+	}
+
+	x.cancelledCount.Inc()
+	return nil
 }
 
 // PauseSchedule pauses a previously scheduled message that was set to be delivered to a target actor (PID).

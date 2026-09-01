@@ -8342,3 +8342,44 @@ func TestActorLifecycleCountersExcludeSystemActors(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 	require.Zero(t, system.actorKinds.Len())
 }
+
+// TestHandleClusterEventCountsMembershipChurn asserts that the cluster events
+// loop totals every membership edge it processes: a node joining moves the
+// joined counter, a node leaving moves the left counter, and a leadership
+// change moves neither.
+func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := MockReplicationTestSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+	system.remoteWatches = newRemoteWatchRegistry()
+
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+
+	now := time.Now()
+	peer := "127.0.0.1:3320"
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.NodeJoined,
+		Payload: &cluster.NodeJoinedEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 0, system.membersLeftCount.Load())
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.NodeLeft,
+		Payload: &cluster.NodeLeftEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 1, system.membersLeftCount.Load())
+
+	system.handleClusterEvent(&cluster.Event{
+		Type:    cluster.LeaderChanged,
+		Payload: &cluster.LeaderChangedEvent{Address: peer, Timestamp: now},
+	})
+
+	require.EqualValues(t, 1, system.membersJoinedCount.Load())
+	require.EqualValues(t, 1, system.membersLeftCount.Load())
+}

@@ -124,8 +124,36 @@ Attributes: `actor.system`.
 | ------------------------------- | ------------------------ | ------------------------------- |
 | `actorsystem.deadletters.count` | Int64ObservableCounter   | Total dead letters on this node |
 | `actorsystem.actors.count`      | Int64ObservableGauge     | Live actors on this node        |
+| `actorsystem.grains.count`      | Int64ObservableGauge     | Grains activated on this node   |
 | `actorsystem.uptime`            | Int64ObservableGauge (s) | Actor system uptime in seconds  |
 | `actorsystem.peers.count`       | Int64ObservableGauge     | Connected peers (cluster mode)  |
+
+### Scheduler instruments
+
+Attributes: `actor.system`.
+
+| Instrument                  | Type                   | Description                                        |
+| --------------------------- | ---------------------- | -------------------------------------------------- |
+| `scheduler.scheduled.count` | Int64ObservableCounter | Messages successfully scheduled for later delivery |
+| `scheduler.cancelled.count` | Int64ObservableCounter | Scheduled messages successfully cancelled          |
+
+Both counters move on the scheduling API calls only: a call that fails, such as a cancellation for an unknown reference,
+does not count.
+
+### Cluster membership instruments
+
+Attributes: `actor.system`. Registered only when the actor system runs in cluster mode.
+
+| Instrument                     | Type                   | Description                                 |
+| ------------------------------ | ---------------------- | ------------------------------------------- |
+| `cluster.members.joined.count` | Int64ObservableCounter | Members this node has seen join the cluster |
+| `cluster.members.left.count`   | Int64ObservableCounter | Members this node has seen leave the cluster |
+
+<Note>
+  Each node reports the churn it observed, so a three node cluster reports a single join on three series. Rate either
+  counter to alert on membership instability; `actorsystem.peers.count` gives the current membership the churn resolves
+  to.
+</Note>
 
 ### Actor lifecycle instruments
 

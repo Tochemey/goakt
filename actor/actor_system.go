@@ -1062,6 +1062,13 @@ type actorSystem struct {
 	actorsCounter      atomic.Uint64
 	deadlettersCounter atomic.Uint64
 
+	// membersJoinedCount and membersLeftCount total the cluster membership
+	// events this node has observed. They are written only by the cluster
+	// events loop goroutine and read by the metrics scrape callback, so a
+	// non-cluster system never touches them.
+	membersJoinedCount atomic.Uint64
+	membersLeftCount   atomic.Uint64
+
 	// actorKinds holds the actor lifecycle counters, keyed by actor kind. The
 	// three edges they count (spawn, stop, passivation) each remove or add a
 	// node in the tree, so no PID survives to carry them; the system does.
@@ -3436,8 +3443,10 @@ func (x *actorSystem) handleClusterEvent(event *cluster.Event) {
 
 	switch event.Type {
 	case cluster.NodeLeft:
+		x.membersLeftCount.Inc()
 		x.handleNodeLeftEvent(event)
 	case cluster.NodeJoined:
+		x.membersJoinedCount.Inc()
 		x.handleNodeJoinedEvent(event)
 	}
 }
@@ -4720,7 +4729,29 @@ func (x *actorSystem) registerMetrics() error {
 		return err
 	}
 
-	return x.registerActorMetricsCallback(meter, actorMetrics)
+	if err := x.registerActorMetricsCallback(meter, actorMetrics); err != nil {
+		return err
+	}
+
+	schedulerMetrics, err := metric.NewSchedulerMetric(meter)
+	if err != nil {
+		return err
+	}
+
+	if err := x.registerSchedulerMetricsCallback(meter, schedulerMetrics); err != nil {
+		return err
+	}
+
+	if !x.clusterEnabled.Load() {
+		return nil
+	}
+
+	clusterMetrics, err := metric.NewClusterMetric(meter)
+	if err != nil {
+		return err
+	}
+
+	return x.registerClusterMetricsCallback(meter, clusterMetrics)
 }
 
 // registerSystemMetricsCallback registers the callback reporting the
@@ -4740,14 +4771,16 @@ func (x *actorSystem) registerSystemMetricsCallback(meter otelmetric.Meter, metr
 		metrics.SpawnedCount(),
 		metrics.StoppedCount(),
 		metrics.PassivatedCount(),
+		metrics.GrainsCount(),
 	)
 
 	return err
 }
 
 // observeSystemMetrics reports the state of the actor system as a whole for one
-// scrape: its live actor count, its uptime, the size of its cluster, its
-// dead-letter total, and the lifecycle totals of every actor kind it has seen.
+// scrape: its live actor count, its live grain count, its uptime, the size of
+// its cluster, its dead-letter total, and the lifecycle totals of every actor
+// kind it has seen.
 func (x *actorSystem) observeSystemMetrics(ctx context.Context, observer otelmetric.Observer, metrics *metric.ActorSystemMetric, options []otelmetric.ObserveOption) error {
 	peersCount, err := x.observedPeersCount(ctx)
 	if err != nil {
@@ -4755,6 +4788,7 @@ func (x *actorSystem) observeSystemMetrics(ctx context.Context, observer otelmet
 	}
 
 	observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), options...)
+	observer.ObserveInt64(metrics.GrainsCount(), int64(x.grains.Len()), options...)
 	observer.ObserveInt64(metrics.Uptime(), x.Uptime(), options...)
 	observer.ObserveInt64(metrics.PeersCount(), peersCount, options...)
 	observer.ObserveInt64(metrics.DeadlettersCount(), int64(x.deadlettersCounter.Load()), options...)
@@ -4788,6 +4822,40 @@ func (x *actorSystem) observeActorKindLifecycles(observer otelmetric.Observer, m
 		observer.ObserveInt64(metrics.StoppedCount(), counters.stopped.Load(), counters.observeOptions...)
 		observer.ObserveInt64(metrics.PassivatedCount(), counters.passivated.Load(), counters.observeOptions...)
 	})
+}
+
+// registerSchedulerMetricsCallback registers the callback reporting the
+// scheduler instruments. The observations are plain loads of the scheduler's
+// counters, which the scheduling API calls maintain on their success paths.
+func (x *actorSystem) registerSchedulerMetricsCallback(meter otelmetric.Meter, metrics *metric.SchedulerMetric) error {
+	observeOptions := []otelmetric.ObserveOption{
+		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
+	}
+
+	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+		observer.ObserveInt64(metrics.ScheduledCount(), x.scheduler.scheduledCount.Load(), observeOptions...)
+		observer.ObserveInt64(metrics.CancelledCount(), x.scheduler.cancelledCount.Load(), observeOptions...)
+		return nil
+	}, metrics.ScheduledCount(), metrics.CancelledCount())
+
+	return err
+}
+
+// registerClusterMetricsCallback registers the callback reporting the cluster
+// membership instruments. The observations are plain loads of the counters the
+// cluster events loop maintains, so a scrape never touches the cluster engine.
+func (x *actorSystem) registerClusterMetricsCallback(meter otelmetric.Meter, metrics *metric.ClusterMetric) error {
+	observeOptions := []otelmetric.ObserveOption{
+		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
+	}
+
+	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+		observer.ObserveInt64(metrics.MembersJoinedCount(), int64(x.membersJoinedCount.Load()), observeOptions...)
+		observer.ObserveInt64(metrics.MembersLeftCount(), int64(x.membersLeftCount.Load()), observeOptions...)
+		return nil
+	}, metrics.MembersJoinedCount(), metrics.MembersLeftCount())
+
+	return err
 }
 
 // registerActorMetricsCallback registers the single callback that reports every
