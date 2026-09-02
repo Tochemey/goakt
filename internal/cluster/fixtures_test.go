@@ -25,11 +25,14 @@ package cluster
 import (
 	"context"
 	"reflect"
+	"testing"
 	"time"
 	"unsafe"
 
 	goset "github.com/deckarep/golang-set/v2"
+	"github.com/stretchr/testify/require"
 	"github.com/tochemey/olric"
+	"github.com/tochemey/olric/events"
 	"github.com/tochemey/olric/pkg/storage"
 	"github.com/tochemey/olric/stats"
 	"go.uber.org/atomic"
@@ -280,20 +283,66 @@ func (x *MockCluster) NextRoundRobinValue(context.Context, string) (int, error) 
 
 func newEventTestCluster(host string, port int) *cluster {
 	return &cluster{
-		node:                    &discovery.Node{Host: host, PeersPort: port},
-		events:                  make(chan *Event, defaultEventsBufSize),
-		nodeJoinedEventsFilter:  goset.NewSet[string](),
-		nodeLeftEventsFilter:    goset.NewSet[string](),
-		nodeJoinTimestamps:      make(map[string]int64),
-		nodeLeftTimestamps:      make(map[string]int64),
-		rebalanceJoinNodeEpochs: make(map[string]uint64),
-		rebalanceLeftNodeEpochs: make(map[string]uint64),
-		rebalanceStartSeen:      make(map[uint64]struct{}),
-		rebalanceCompleteSeen:   make(map[uint64]struct{}),
-		logger:                  log.DiscardLogger,
-		shutdownTimeout:         5 * time.Second,
-		running:                 atomic.NewBool(true),
+		node:                   &discovery.Node{Host: host, PeersPort: port},
+		events:                 make(chan *Event, defaultEventsBufSize),
+		nodeJoinedEventsFilter: goset.NewSet[string](),
+		nodeLeftEventsFilter:   goset.NewSet[string](),
+		pendingJoins:           make(map[string]pendingEvent),
+		pendingLeaves:          make(map[string]pendingEvent),
+		pendingEmitTimeout:     pendingEventEmitTimeout,
+		logger:                 log.DiscardLogger,
+		shutdownTimeout:        5 * time.Second,
+		running:                atomic.NewBool(true),
 	}
+}
+
+// testCoordinator is the peers address of the coordinator whose convergences
+// and membership event copies the event tests publish.
+const testCoordinator = "127.0.0.1:4100"
+
+// requireNextEvent drains one cluster event from cl and asserts that it
+// announces node with the given type.
+func requireNextEvent(t *testing.T, cl *cluster, eventType EventType, node string) {
+	t.Helper()
+	require.NotEmpty(t, cl.events)
+
+	event := <-cl.events
+	require.Equal(t, eventType, event.Type)
+
+	switch payload := event.Payload.(type) {
+	case *NodeJoinedEvent:
+		require.Equal(t, node, payload.Address)
+	case *NodeLeftEvent:
+		require.Equal(t, node, payload.Address)
+	default:
+		t.Fatalf("unexpected payload %T", payload)
+	}
+}
+
+// requireEmitted asserts that exactly one cluster event is pending on cl and
+// that it announces node with the given type.
+func requireEmitted(t *testing.T, cl *cluster, eventType EventType, node string) {
+	t.Helper()
+	require.Len(t, cl.events, 1)
+	requireNextEvent(t, cl, eventType, node)
+}
+
+// trackJoin delivers to cl the copy of a join of node published by source,
+// which observed the join at generation.
+func trackJoin(cl *cluster, node string, source string, generation uint64) {
+	cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Source: source, Generation: generation, Timestamp: time.Now().UnixNano()})
+}
+
+// trackLeft delivers to cl the copy of a departure of node published by
+// source, which observed the departure at generation.
+func trackLeft(cl *cluster, node string, source string, generation uint64) {
+	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Source: source, Generation: generation, Timestamp: time.Now().UnixNano()})
+}
+
+// converge delivers to cl the test coordinator's announcement that its routing
+// table converged at generation for members.
+func converge(cl *cluster, generation uint64, members ...string) {
+	cl.processRebalanceComplete(events.RebalanceCompleteEvent{Source: testCoordinator, Epoch: generation, Generation: generation, Members: members, Timestamp: time.Now().UnixNano()})
 }
 
 type MockOlricClient struct {

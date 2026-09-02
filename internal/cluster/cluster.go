@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -53,28 +54,27 @@ import (
 )
 
 const (
-	dMapName                = "goakt.dmap"
-	defaultEventsBufSize    = 256
-	namespaceSeparator      = "::"
-	ActorsRoundRobinKey     = "actors_rr_index"
-	GrainsRoundRobinKey     = "grains_rr_index"
-	rebalanceReasonNodeLeft = "node-left"
-	rebalanceReasonNodeJoin = "node-join"
+	dMapName             = "goakt.dmap"
+	defaultEventsBufSize = 256
+	namespaceSeparator   = "::"
+	ActorsRoundRobinKey  = "actors_rr_index"
+	GrainsRoundRobinKey  = "grains_rr_index"
 	// actorScanConcurrency bounds how many actor records are fetched in parallel
 	// when scanning the registry (Actors, CountActorsByHost). The registry scan
 	// otherwise issues one sequential network Get per actor key, which times out
 	// the scan budget on large registries; fanning the Gets out keeps the scan
 	// within budget while capping the burst of concurrent reads.
 	actorScanConcurrency = 16
-	// nodeLeftEmitTimeout bounds how long a tracked node departure may wait for
-	// its rebalance epoch to complete before the NodeLeft event is emitted
-	// anyway. The epoch gate orders NodeLeft after olric's partition promotion,
-	// but it is an ordering optimization, not a correctness requirement:
-	// memberlist has already confirmed the death, and after an abrupt kill
-	// olric's rebalance can wedge (endless fragment moves to the dead member),
-	// which would otherwise suppress the NodeLeft forever and, with it, the
-	// crashed node's relocation.
-	nodeLeftEmitTimeout = 30 * time.Second
+	// pendingEventEmitTimeout bounds how long a tracked join or departure may
+	// wait for the routing table to converge on it before its NodeJoined or
+	// NodeLeft event is announced anyway. Waiting for convergence orders the
+	// event after olric's partition redistribution, but it is an ordering
+	// optimization, not a correctness requirement: memberlist has already
+	// confirmed the change, and a rebalance can fail to complete (a lost ack,
+	// or after an abrupt kill endless fragment moves to the dead member), which
+	// would otherwise suppress the event forever and, with it, a crashed node's
+	// relocation or a restarted node's recovery.
+	pendingEventEmitTimeout = 30 * time.Second
 )
 
 // defaultBootstrapMaxAttempts and defaultBootstrapRetryBackoff bound the in-process
@@ -116,6 +116,37 @@ func hasNamespace(key string, namespace recordNamespace) bool {
 	return strings.HasPrefix(key, prefix)
 }
 
+// convergence is the newest routing table convergence the coordinator
+// announced: the members the converged table was computed for, and the
+// coordinator's install generation of that table. A membership event observed
+// by the coordinator at a lower generation is reflected in the members;
+// generations only compare between events of the same source.
+type convergence struct {
+	source     string
+	generation uint64
+	members    []string
+}
+
+// contains reports whether node is a member of the converged table.
+func (x convergence) contains(node string) bool {
+	return slices.Contains(x.members, node)
+}
+
+// pendingEvent is a membership event waiting for a routing table convergence
+// that reflects it: the event timestamp, the order in which this node observed
+// it, the copy of the event used to place it against the convergence (the
+// coordinator's copy when one was seen, otherwise the first copy), and the
+// timer of the bounded wait after which the event is announced anyway. The
+// timer is stopped once the event is announced or the cluster stops.
+type pendingEvent struct {
+	timestamp  int64
+	sequence   uint64
+	source     string
+	generation uint64
+	timer      *time.Timer
+}
+
+// Cluster captures the behaviour exposed by a cluster engine implementation backed by the unified map.
 // Cluster captures the behaviour exposed by a cluster engine implementation backed by the unified map.
 type Cluster interface {
 	// Start boots the cluster engine and joins the underlying memberlist.
@@ -233,17 +264,25 @@ type cluster struct {
 	consumeCancel context.CancelFunc
 	consumeWg     sync.WaitGroup
 
-	nodeJoinedEventsFilter   goset.Set[string]
-	nodeLeftEventsFilter     goset.Set[string]
-	nodeJoinTimestamps       map[string]int64
-	nodeLeftTimestamps       map[string]int64
-	rebalanceJoinNodeEpochs  map[string]uint64
-	rebalanceLeftNodeEpochs  map[string]uint64
-	rebalanceJoinLatestEpoch uint64
-	rebalanceLeftLatestEpoch uint64
-	rebalanceStartSeen       map[uint64]struct{}
-	rebalanceCompleteSeen    map[uint64]struct{}
-	lastRebalanceEventNanos  atomic.Int64
+	// nodeJoinedEventsFilter and nodeLeftEventsFilter hold the peers addresses
+	// whose latest announced membership event was a join or a departure, so a
+	// membership event is announced once per membership change.
+	nodeJoinedEventsFilter goset.Set[string]
+	nodeLeftEventsFilter   goset.Set[string]
+	// pendingJoins and pendingLeaves hold the membership events not yet
+	// announced, keyed by peers address.
+	pendingJoins  map[string]pendingEvent
+	pendingLeaves map[string]pendingEvent
+	// pendingSequence numbers pending events in the order this node observed
+	// them, an order that does not depend on the publishers' clocks.
+	pendingSequence uint64
+	// pendingEmitTimeout bounds the wait of a pending event. It is
+	// pendingEventEmitTimeout, shortened only by tests that exercise the wait.
+	pendingEmitTimeout time.Duration
+	// converged is the newest routing table convergence announced. Pending
+	// events are announced once a convergence reflects them.
+	converged               convergence
+	lastRebalanceEventNanos atomic.Int64
 
 	// lastCoordinatorAddr caches the coordinator's peers address to detect
 	// leadership changes. It is seeded (non-empty) in Start before the consume
@@ -288,12 +327,9 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		events:                  make(chan *Event, defaultEventsBufSize),
 		nodeJoinedEventsFilter:  goset.NewSet[string](),
 		nodeLeftEventsFilter:    goset.NewSet[string](),
-		nodeJoinTimestamps:      make(map[string]int64),
-		nodeLeftTimestamps:      make(map[string]int64),
-		rebalanceJoinNodeEpochs: make(map[string]uint64),
-		rebalanceLeftNodeEpochs: make(map[string]uint64),
-		rebalanceStartSeen:      make(map[uint64]struct{}),
-		rebalanceCompleteSeen:   make(map[uint64]struct{}),
+		pendingJoins:            make(map[string]pendingEvent),
+		pendingLeaves:           make(map[string]pendingEvent),
+		pendingEmitTimeout:      pendingEventEmitTimeout,
 		running:                 atomic.NewBool(false),
 	}
 }
@@ -443,12 +479,16 @@ func (x *cluster) Stop(ctx context.Context) error {
 		x.logger.Warnf("timeout waiting for consume to finish")
 	}
 
-	// Now safe to close events channel
+	// Drop the pending membership events and close the events channel: nothing
+	// consumes them once the engine stops.
 	x.eventsLock.Lock()
+	x.cancelPendingEventsLocked()
+
 	if x.events != nil {
 		close(x.events)
 		x.events = nil
 	}
+
 	x.eventsLock.Unlock()
 
 	if err := x.server.Shutdown(ctx); err != nil {
@@ -1280,8 +1320,11 @@ func (x *cluster) handleClusterEvent(payload string) error {
 	return nil
 }
 
-// trackNodeJoinEvent records node-join metadata and defers NodeJoined emission until
-// the matching rebalance epoch completes so cluster events reflect a stable topology.
+// trackNodeJoinEvent records a peer join and defers the NodeJoined event until
+// the routing table converges on a member set that includes the peer, so
+// cluster events describe a converged topology. A copy of a join already
+// announced is ignored unless a departure of the same peer is pending, in
+// which case the peer came back.
 func (x *cluster) trackNodeJoinEvent(ev events.NodeJoinEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
@@ -1290,117 +1333,134 @@ func (x *cluster) trackNodeJoinEvent(ev events.NodeJoinEvent) {
 	if x.node.PeersAddress() == ev.NodeJoin {
 		return
 	}
-	if x.nodeJoinedEventsFilter.Contains(ev.NodeJoin) {
-		return
-	}
-	if _, exists := x.nodeJoinTimestamps[ev.NodeJoin]; exists {
-		return
-	}
-	x.nodeJoinTimestamps[ev.NodeJoin] = ev.Timestamp
 
-	if x.rebalanceJoinLatestEpoch != 0 {
-		x.rebalanceJoinNodeEpochs[ev.NodeJoin] = x.rebalanceJoinLatestEpoch
-		if _, complete := x.rebalanceCompleteSeen[x.rebalanceJoinLatestEpoch]; complete {
-			x.emitPendingJoinForEpochLocked(x.rebalanceJoinLatestEpoch)
-		}
+	if x.events == nil {
+		return
 	}
+
+	if _, leaving := x.pendingLeaves[ev.NodeJoin]; !leaving && x.nodeJoinedEventsFilter.Contains(ev.NodeJoin) {
+		return
+	}
+
+	x.trackLocked(ev.NodeJoin, ev.Source, ev.Generation, ev.Timestamp, x.pendingJoins, x.emitOverdueNodeJoined)
 }
 
-// trackNodeLeftEvent records node-left metadata and defers NodeLeft emission until
-// the matching rebalance epoch completes, keeping relocation aligned with routing
-// table convergence while preserving the original node-left timestamp.
+// trackNodeLeftEvent records a peer departure and defers the NodeLeft event
+// until the routing table converges on a member set without the peer, keeping
+// relocation aligned with routing table convergence while preserving the
+// original departure timestamp. A copy of a departure already announced is
+// ignored unless a join of the same peer is pending, in which case the peer
+// restarted and departed again.
 func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
+	if x.events == nil {
+		return
+	}
+
 	x.nodeJoinedEventsFilter.Remove(ev.NodeLeft)
-	if x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
+	if _, joining := x.pendingJoins[ev.NodeLeft]; !joining && x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
 		return
 	}
-	if _, exists := x.nodeLeftTimestamps[ev.NodeLeft]; exists {
-		return
-	}
-	x.nodeLeftTimestamps[ev.NodeLeft] = ev.Timestamp
 
-	// safety net: emit after a bounded wait when the departure's rebalance
-	// epoch never completes (see nodeLeftEmitTimeout)
-	time.AfterFunc(nodeLeftEmitTimeout, func() {
-		x.emitOverdueNodeLeft(ev.NodeLeft)
-	})
-
-	if x.rebalanceLeftLatestEpoch != 0 {
-		x.rebalanceLeftNodeEpochs[ev.NodeLeft] = x.rebalanceLeftLatestEpoch
-		if _, complete := x.rebalanceCompleteSeen[x.rebalanceLeftLatestEpoch]; complete {
-			x.emitPendingLeftForEpochLocked(x.rebalanceLeftLatestEpoch)
-		}
-	}
+	x.trackLocked(ev.NodeLeft, ev.Source, ev.Generation, ev.Timestamp, x.pendingLeaves, x.emitOverdueNodeLeft)
 }
 
-// emitOverdueNodeLeft emits the NodeLeft event for a departure still pending
-// after nodeLeftEmitTimeout, meaning its rebalance epoch never completed. A
-// departure already emitted through the normal epoch-complete path is a no-op.
+// trackLocked records one copy of a membership event of node in pending. The
+// first copy creates the pending event and arms its bounded wait, which
+// overdue ends; every copy from the coordinator refreshes the generation the
+// event is placed with, since only the coordinator's generations compare with
+// the convergence it announces. The event is announced right away when the
+// newest convergence is known to reflect it. It must be called while holding
+// eventsLock.
+func (x *cluster) trackLocked(node string, source string, generation uint64, timestamp int64, pending map[string]pendingEvent, overdue func(string)) {
+	event, exists := pending[node]
+	if !exists {
+		x.pendingSequence++
+		event = pendingEvent{timestamp: timestamp, sequence: x.pendingSequence, timer: time.AfterFunc(x.pendingEmitTimeout, func() { overdue(node) })}
+	}
+
+	if event.source == "" || source == x.converged.source {
+		event.source = source
+		event.generation = generation
+	}
+
+	pending[node] = event
+	x.announceConvergedLocked(node, false)
+}
+
+// emitOverdueNodeLeft announces the departure of node still pending after
+// pendingEventEmitTimeout, meaning no convergence reflected it, together with
+// any pending join of the same node in the order both were observed. A
+// departure already announced is a no-op.
 func (x *cluster) emitOverdueNodeLeft(node string) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
-	timestamp, pending := x.nodeLeftTimestamps[node]
-	if !pending {
+	if _, ok := x.pendingLeaves[node]; !ok {
 		return
 	}
 
-	x.logger.Warnf("emitting overdue NodeLeft for node=%s: its rebalance epoch never completed (hint: olric partition repair may be wedged after an abrupt departure)", node)
-	x.emitNodeLeftLocked(node, timestamp)
-	delete(x.nodeLeftTimestamps, node)
-	delete(x.rebalanceLeftNodeEpochs, node)
+	x.logger.Warnf("emitting overdue NodeLeft for node=%s: the routing table did not converge on its departure (hint: olric partition repair may be wedged after an abrupt departure)", node)
+	x.releaseNodeLocked(node)
 }
 
-// processRebalanceStart records rebalance epochs tied to join/leave triggers.
-func (x *cluster) processRebalanceStart(ev events.RebalanceStartEvent) {
-	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
-	if ev.Reason != rebalanceReasonNodeLeft && ev.Reason != rebalanceReasonNodeJoin {
-		return
-	}
-	if ev.Reason == rebalanceReasonNodeJoin && ev.Node == x.node.PeersAddress() {
-		return
-	}
-
+// emitOverdueNodeJoined announces the join of node still pending after
+// pendingEventEmitTimeout, meaning no convergence reflected it, together with
+// any pending departure of the same node in the order both were observed. A
+// join already announced is a no-op.
+func (x *cluster) emitOverdueNodeJoined(node string) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
-	if _, seen := x.rebalanceStartSeen[ev.Epoch]; seen {
+	if _, ok := x.pendingJoins[node]; !ok {
 		return
 	}
-	x.rebalanceStartSeen[ev.Epoch] = struct{}{}
 
-	switch ev.Reason {
-	case rebalanceReasonNodeLeft:
-		x.rebalanceLeftLatestEpoch = ev.Epoch
-		x.assignLeftEpochLocked(ev.Epoch)
-		if _, complete := x.rebalanceCompleteSeen[ev.Epoch]; complete {
-			x.emitPendingLeftForEpochLocked(ev.Epoch)
-		}
-	case rebalanceReasonNodeJoin:
-		x.rebalanceJoinLatestEpoch = ev.Epoch
-		x.assignJoinEpochLocked(ev.Epoch)
-		if _, complete := x.rebalanceCompleteSeen[ev.Epoch]; complete {
-			x.emitPendingJoinForEpochLocked(ev.Epoch)
-		}
-	}
+	x.logger.Warnf("emitting overdue NodeJoined for node=%s: the routing table did not converge on its join (hint: a member may have failed to ack the rebalance)", node)
+	x.releaseNodeLocked(node)
 }
 
-// processRebalanceComplete emits pending NodeLeft and NodeJoined events when the rebalance epoch completes.
+// cancelPendingEventsLocked drops every pending membership event and stops its
+// bounded-wait timer: the engine is stopping and nothing consumes the events.
+// It must be called while holding eventsLock.
+func (x *cluster) cancelPendingEventsLocked() {
+	for _, pending := range x.pendingJoins {
+		pending.timer.Stop()
+	}
+
+	for _, pending := range x.pendingLeaves {
+		pending.timer.Stop()
+	}
+
+	clear(x.pendingJoins)
+	clear(x.pendingLeaves)
+	x.converged = convergence{}
+}
+
+// processRebalanceStart records that a rebalance epoch started. Membership
+// events are released by convergences, so a start carries no other duty.
+func (x *cluster) processRebalanceStart(_ events.RebalanceStartEvent) {
+	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
+}
+
+// processRebalanceComplete records the newest routing table convergence and
+// announces the pending membership events it reflects. A completion without a
+// generation comes from a coordinator running an olric that does not announce
+// convergences, and one that is not newer than the convergence already known
+// from the same coordinator is stale; neither replaces the known convergence.
 func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
 	x.lastRebalanceEventNanos.Store(time.Now().UnixNano())
+
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
-	if _, seen := x.rebalanceCompleteSeen[ev.Epoch]; seen {
-		return
+	stale := ev.Source == x.converged.source && ev.Generation <= x.converged.generation
+	if ev.Generation != 0 && !stale {
+		x.converged = convergence{source: ev.Source, generation: ev.Generation, members: ev.Members}
+		x.announceAllConvergedLocked()
 	}
-	x.rebalanceCompleteSeen[ev.Epoch] = struct{}{}
-
-	x.emitPendingLeftForEpochLocked(ev.Epoch)
-	x.emitPendingJoinForEpochLocked(ev.Epoch)
 
 	// Reconcile leadership once the membership has settled for this epoch. This
 	// no-ops when the coordinator is unchanged, so join-only rebalances cost a
@@ -1408,52 +1468,109 @@ func (x *cluster) processRebalanceComplete(ev events.RebalanceCompleteEvent) {
 	x.detectLeaderChangeLocked()
 }
 
-// assignJoinEpochLocked maps pending joins to the latest rebalance epoch since newer epochs
-// supersede earlier ones and act as the stable barrier for event emission.
-func (x *cluster) assignJoinEpochLocked(epoch uint64) {
-	for node := range x.nodeJoinTimestamps {
-		x.rebalanceJoinNodeEpochs[node] = epoch
+// announceAllConvergedLocked announces every pending membership event the
+// newest convergence reflects. It must be called while holding eventsLock.
+func (x *cluster) announceAllConvergedLocked() {
+	for node := range x.pendingLeaves {
+		x.announceConvergedLocked(node, true)
+	}
+
+	for node := range x.pendingJoins {
+		x.announceConvergedLocked(node, true)
 	}
 }
 
-// assignLeftEpochLocked maps pending leaves to the latest rebalance epoch to avoid
-// emitting on superseded epochs.
-func (x *cluster) assignLeftEpochLocked(epoch uint64) {
-	for node := range x.nodeLeftTimestamps {
-		x.rebalanceLeftNodeEpochs[node] = epoch
+// reflectedLocked reports whether the newest convergence reflects a pending
+// event: the coordinator observed the event before it computed the converged
+// table. An event only known from another node's copy cannot be placed; it is
+// taken as reflected when assume is set, which a convergence announced after
+// the event was tracked warrants, and as not reflected otherwise. It must be
+// called while holding eventsLock.
+func (x *cluster) reflectedLocked(event pendingEvent, assume bool) bool {
+	if event.source != x.converged.source {
+		return assume
+	}
+
+	return event.generation < x.converged.generation
+}
+
+// announceConvergedLocked announces the pending events of node that the newest
+// convergence reflects. A node pending as both joined and departed is announced
+// in the order the converged member set implies: a member departed and came
+// back, a non-member joined and departed. A departure the coordinator observed
+// before converging on a member set that still lists the node is a stale copy
+// for a live node and is dropped. assume is passed to reflectedLocked. It must
+// be called while holding eventsLock.
+func (x *cluster) announceConvergedLocked(node string, assume bool) {
+	if x.converged.generation == 0 {
+		return
+	}
+
+	join, joining := x.pendingJoins[node]
+	left, leaving := x.pendingLeaves[node]
+	joinReflected := joining && x.reflectedLocked(join, assume)
+	leftReflected := leaving && x.reflectedLocked(left, assume)
+
+	if x.converged.contains(node) {
+		switch {
+		case leftReflected && joining:
+			x.releaseLocked(node, x.pendingLeaves, x.emitNodeLeftLocked)
+			x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
+		case leftReflected && x.reflectedLocked(left, false):
+			x.logger.Debugf("dropping stale departure of node=%s: the routing table converged with it as a member", node)
+			x.discardLocked(node, x.pendingLeaves)
+		case joinReflected:
+			x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
+		}
+
+		return
+	}
+
+	switch {
+	case joinReflected && leaving:
+		x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
+		x.releaseLocked(node, x.pendingLeaves, x.emitNodeLeftLocked)
+	case leftReflected:
+		x.releaseLocked(node, x.pendingLeaves, x.emitNodeLeftLocked)
 	}
 }
 
-func (x *cluster) emitPendingJoinForEpochLocked(epoch uint64) {
-	for node, nodeEpoch := range x.rebalanceJoinNodeEpochs {
-		if nodeEpoch != epoch {
-			continue
-		}
-		timestamp, ok := x.nodeJoinTimestamps[node]
-		if !ok {
-			delete(x.rebalanceJoinNodeEpochs, node)
-			continue
-		}
-		x.emitNodeJoinedLocked(node, timestamp)
-		delete(x.nodeJoinTimestamps, node)
-		delete(x.rebalanceJoinNodeEpochs, node)
+// releaseNodeLocked announces every pending event of node in the order this
+// node observed them and drops their bookkeeping. It must be called while
+// holding eventsLock.
+func (x *cluster) releaseNodeLocked(node string) {
+	join, joining := x.pendingJoins[node]
+	left, leaving := x.pendingLeaves[node]
+
+	if joining && (!leaving || join.sequence < left.sequence) {
+		x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
+	}
+
+	if leaving {
+		x.releaseLocked(node, x.pendingLeaves, x.emitNodeLeftLocked)
+	}
+
+	if joining && leaving && join.sequence > left.sequence {
+		x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
 	}
 }
 
-func (x *cluster) emitPendingLeftForEpochLocked(epoch uint64) {
-	for node, nodeEpoch := range x.rebalanceLeftNodeEpochs {
-		if nodeEpoch != epoch {
-			continue
-		}
-		timestamp, ok := x.nodeLeftTimestamps[node]
-		if !ok {
-			delete(x.rebalanceLeftNodeEpochs, node)
-			continue
-		}
-		x.emitNodeLeftLocked(node, timestamp)
-		delete(x.nodeLeftTimestamps, node)
-		delete(x.rebalanceLeftNodeEpochs, node)
-	}
+// releaseLocked announces the pending event of node held in pending through
+// emit and drops it, stopping its bounded wait. It must be called while
+// holding eventsLock.
+func (x *cluster) releaseLocked(node string, pending map[string]pendingEvent, emit func(string, int64)) {
+	event := pending[node]
+	event.timer.Stop()
+	emit(node, event.timestamp)
+	delete(pending, node)
+}
+
+// discardLocked drops the pending event of node held in pending without
+// announcing it, stopping its bounded wait. It must be called while holding
+// eventsLock.
+func (x *cluster) discardLocked(node string, pending map[string]pendingEvent) {
+	pending[node].timer.Stop()
+	delete(pending, node)
 }
 
 // detectLeaderChangeLocked emits a LeaderChanged event when the cluster
@@ -1479,13 +1596,17 @@ func (x *cluster) detectLeaderChangeLocked() {
 	})
 }
 
+// emitNodeLeftLocked publishes NodeLeft for node once per departure: a node
+// already announced as departed is skipped until it is announced as joined
+// again. It must be called while holding eventsLock.
 func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
 	x.nodeJoinedEventsFilter.Remove(node)
+
 	if x.nodeLeftEventsFilter.Contains(node) {
 		return
 	}
-	x.nodeLeftEventsFilter.Add(node)
 
+	x.nodeLeftEventsFilter.Add(node)
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &NodeLeftEvent{
 		Address:   node,
@@ -1495,12 +1616,19 @@ func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
 	x.sendEventLocked(&Event{Payload: evt, Type: NodeLeft})
 }
 
+// emitNodeJoinedLocked publishes NodeJoined for node once per join: a node
+// already announced as joined is skipped. The node becomes eligible for a later
+// NodeLeft again, so a member that departs, restarts at the same address and
+// departs a second time is announced each time. It must be called while holding
+// eventsLock.
 func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
+	x.nodeLeftEventsFilter.Remove(node)
+
 	if x.nodeJoinedEventsFilter.Contains(node) {
 		return
 	}
-	x.nodeJoinedEventsFilter.Add(node)
 
+	x.nodeJoinedEventsFilter.Add(node)
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &NodeJoinedEvent{
 		Address:   node,

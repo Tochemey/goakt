@@ -20,7 +20,8 @@ other nodes so the cluster remains available.
 Relocation is triggered when:
 
 1. **A node leaves the cluster**: The cluster membership layer (Hashicorp Memberlist) detects the departure and emits a
-   `NodeLeft` event.
+   `NodeLeft` event. The event is published once the cluster's routing table has converged on the departure, bounded by
+   a 30 second fallback, so relocation runs against a table that no longer routes to the departed node.
 2. **The departed node had relocatable actors or grains**: Only actors spawned with relocation enabled (the default) and
    grains without `WithGrainDisableRelocation` are eligible.
 

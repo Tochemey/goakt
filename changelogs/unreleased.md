@@ -1,1 +1,5 @@
 # Unreleased
+
+## 🔧 Fixes
+
+- **Cluster membership events follow routing table convergence** ([#1331](https://github.com/Tochemey/goakt/issues/1331)). `NodeLeft` and `NodeJoined` are now published once the cluster's routing table has converged on the membership change, using the member set olric announces with each convergence, instead of waiting for the single rebalance epoch started for the change. A departure whose epoch was superseded by a later routing table push used to surface only through the 30s fallback timer, and a join in the same situation could go unreported until the next join. A node that joins and departs, or departs and restarts, before the table converges is announced in the order the converged member set implies. A member that departs, restarts at the same address and departs again is announced each time, where the second departure was previously lost. A join whose convergence never comes is announced after the same 30s bound as a departure, and that wait is cancelled as soon as the event is announced or the actor system stops.
