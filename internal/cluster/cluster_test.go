@@ -3022,200 +3022,155 @@ func TestEventsReturnsChannel(t *testing.T) {
 	}
 }
 
-// nolint
 func TestTrackNodeJoinEvent(t *testing.T) {
-	now := time.Now().UnixNano()
-
-	t.Run("defers emission until rebalance completes", func(t *testing.T) {
+	t.Run("waits for a convergence that lists the node", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: now})
+		trackJoin(cl, node, testCoordinator, 1)
+		require.Empty(t, cl.events)
 
-		select {
-		case <-cl.events:
-			t.Fatalf("unexpected event")
-		default:
-		}
+		// converged at the generation the join was observed at: that table
+		// predates the join
+		converge(cl, 1, node)
+		require.Empty(t, cl.events)
 
-		cl.processRebalanceStart(events.RebalanceStartEvent{
-			Epoch:  1,
-			Reason: rebalanceReasonNodeJoin,
-			Node:   node,
-		})
+		// converged after the join but without the node: not the join's table
+		converge(cl, 2)
+		require.Empty(t, cl.events)
 
-		select {
-		case <-cl.events:
-			t.Fatalf("unexpected event")
-		default:
-		}
-
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
-
-		select {
-		case evt := <-cl.events:
-			require.Equal(t, NodeJoined, evt.Type)
-
-			joined, ok := evt.Payload.(*NodeJoinedEvent)
-			require.True(t, ok)
-			require.Equal(t, node, joined.Address)
-			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
-		default:
-			t.Fatalf("expected event")
-		}
+		converge(cl, 3, node)
+		requireEmitted(t, cl, NodeJoined, node)
 	})
 
 	t.Run("ignores self", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
-		ev := events.NodeJoinEvent{NodeJoin: cl.node.PeersAddress(), Timestamp: now}
 
-		cl.trackNodeJoinEvent(ev)
-
-		select {
-		case <-cl.events:
-			t.Fatalf("unexpected event")
-		default:
-		}
+		trackJoin(cl, cl.node.PeersAddress(), testCoordinator, 1)
+		require.Empty(t, cl.pendingJoins)
 	})
 
-	t.Run("deduplicates node-join tracking", func(t *testing.T) {
+	t.Run("deduplicates copies and keeps the coordinator's placement", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 6000)
 		node := "127.0.0.1:7000"
-		later := now + int64(time.Second)
+		converge(cl, 1)
 
-		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: now})
-		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: later})
-		cl.processRebalanceStart(events.RebalanceStartEvent{
-			Epoch:  1,
-			Reason: rebalanceReasonNodeJoin,
-			Node:   node,
-		})
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
+		trackJoin(cl, node, "127.0.0.1:7100", 9)
+		trackJoin(cl, node, testCoordinator, 1)
+		trackJoin(cl, node, "127.0.0.1:7200", 9)
+		require.Len(t, cl.pendingJoins, 1)
+		require.Equal(t, testCoordinator, cl.pendingJoins[node].source)
+		require.Equal(t, uint64(1), cl.pendingJoins[node].generation)
 
-		select {
-		case evt := <-cl.events:
-			require.Equal(t, NodeJoined, evt.Type)
-			joined, ok := evt.Payload.(*NodeJoinedEvent)
-			require.True(t, ok)
-			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
-		default:
-			t.Fatalf("expected event")
-		}
+		converge(cl, 2, node)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
 
-		select {
-		case <-cl.events:
-			t.Fatalf("expected no duplicate event")
-		default:
-		}
+	t.Run("ignores a copy of an announced join", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:5100"
+		cl.nodeJoinedEventsFilter.Add(node)
+
+		trackJoin(cl, node, testCoordinator, 1)
+		require.Empty(t, cl.pendingJoins)
+	})
+
+	t.Run("records a join while the departure of the node is pending", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:5200"
+		cl.nodeJoinedEventsFilter.Add(node)
+
+		trackLeft(cl, node, testCoordinator, 1)
+		trackJoin(cl, node, testCoordinator, 2)
+		require.Contains(t, cl.pendingJoins, node)
 	})
 }
 
-// nolint
 func TestTrackNodeLeftEvent(t *testing.T) {
-	now := time.Now().UnixNano()
-
-	t.Run("defers emission until rebalance completes", func(t *testing.T) {
+	t.Run("waits for a convergence without the node", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
+		trackLeft(cl, node, testCoordinator, 1)
+		require.Empty(t, cl.events)
 
-		select {
-		case <-cl.events:
-			t.Fatalf("unexpected event")
-		default:
-		}
+		converge(cl, 1, node)
+		require.Empty(t, cl.events)
 
-		cl.processRebalanceStart(events.RebalanceStartEvent{
-			Epoch:  1,
-			Reason: rebalanceReasonNodeLeft,
-			Node:   node,
-		})
-
-		select {
-		case <-cl.events:
-			t.Fatalf("unexpected event")
-		default:
-		}
-
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
-
-		select {
-		case evt := <-cl.events:
-			require.Equal(t, NodeLeft, evt.Type)
-			left, ok := evt.Payload.(*NodeLeftEvent)
-			require.True(t, ok)
-			require.Equal(t, node, left.Address)
-			require.Equal(t, now/int64(time.Millisecond), left.Timestamp.UnixMilli())
-		default:
-			t.Fatalf("expected event")
-		}
+		converge(cl, 2)
+		requireEmitted(t, cl, NodeLeft, node)
 	})
 
-	t.Run("deduplicates node-left tracking", func(t *testing.T) {
+	t.Run("deduplicates copies", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:6000"
-		later := now + int64(time.Second)
 
-		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
-		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: later})
-		cl.processRebalanceStart(events.RebalanceStartEvent{
-			Epoch:  1,
-			Reason: rebalanceReasonNodeLeft,
-			Node:   node,
-		})
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 1})
+		trackLeft(cl, node, testCoordinator, 1)
+		trackLeft(cl, node, "127.0.0.1:6100", 1)
+		require.Len(t, cl.pendingLeaves, 1)
 
-		select {
-		case evt := <-cl.events:
-			require.Equal(t, NodeLeft, evt.Type)
-			left, ok := evt.Payload.(*NodeLeftEvent)
-			require.True(t, ok)
-			require.Equal(t, now/int64(time.Millisecond), left.Timestamp.UnixMilli())
-		default:
-			t.Fatalf("expected event")
-		}
+		converge(cl, 2)
+		requireEmitted(t, cl, NodeLeft, node)
+	})
 
-		select {
-		case <-cl.events:
-			t.Fatalf("expected no duplicate event")
-		default:
-		}
+	t.Run("ignores a copy of an announced departure", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9200"
+		cl.nodeLeftEventsFilter.Add(node)
+
+		trackLeft(cl, node, testCoordinator, 1)
+		require.Empty(t, cl.pendingLeaves)
+	})
+
+	t.Run("records a departure while the restart of the node is pending", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9300"
+		cl.nodeLeftEventsFilter.Add(node)
+
+		trackJoin(cl, node, testCoordinator, 1)
+		trackLeft(cl, node, testCoordinator, 2)
+		require.Contains(t, cl.pendingLeaves, node)
 	})
 }
 
-// nolint
-func TestRebalanceEventDedup(t *testing.T) {
-	now := time.Now().UnixNano()
-	cl := newEventTestCluster("127.0.0.1", 4000)
-	node := "127.0.0.1:7000"
+func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
+	t.Run("ignores a completion without a generation", func(t *testing.T) {
+		// a coordinator running an olric that announces no convergence
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:5000"
 
-	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: now})
+		trackJoin(cl, node, testCoordinator, 1)
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Source: testCoordinator, Epoch: 7, Members: []string{node}})
+		require.Zero(t, cl.converged.generation)
+		require.Empty(t, cl.events)
+	})
 
-	start := events.RebalanceStartEvent{
-		Epoch:  1,
-		Reason: rebalanceReasonNodeLeft,
-		Node:   node,
-	}
-	complete := events.RebalanceCompleteEvent{Epoch: 1}
+	t.Run("ignores stale and duplicate completions from the same coordinator", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:5000"
 
-	cl.processRebalanceStart(start)
-	cl.processRebalanceStart(start)
-	cl.processRebalanceComplete(complete)
-	cl.processRebalanceComplete(complete)
+		trackJoin(cl, node, testCoordinator, 1)
+		converge(cl, 3)
+		converge(cl, 2, node)
+		converge(cl, 3, node)
+		require.Equal(t, uint64(3), cl.converged.generation)
+		require.Empty(t, cl.converged.members)
+		require.Empty(t, cl.events)
 
-	select {
-	case evt := <-cl.events:
-		require.Equal(t, NodeLeft, evt.Type)
-	default:
-		t.Fatalf("expected event")
-	}
+		converge(cl, 4, node)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
 
-	select {
-	case <-cl.events:
-		t.Fatalf("expected no duplicate event")
-	default:
-	}
+	t.Run("accepts a lower generation from a new coordinator", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:5000"
+		converge(cl, 5)
+
+		trackJoin(cl, node, testCoordinator, 5)
+		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Source: "127.0.0.1:4200", Epoch: 1, Generation: 1, Members: []string{node}})
+		require.Equal(t, "127.0.0.1:4200", cl.converged.source)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
 }
 
 // nolint
@@ -3226,27 +3181,34 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:7000"
 		payload, err := json.Marshal(events.NodeJoinEvent{
-			Kind:      events.KindNodeJoinEvent,
-			NodeJoin:  node,
-			Timestamp: now,
+			Kind:       events.KindNodeJoinEvent,
+			Source:     testCoordinator,
+			NodeJoin:   node,
+			Generation: 1,
+			Timestamp:  now,
 		})
 		require.NoError(t, err)
 
 		require.NoError(t, cl.handleClusterEvent(string(payload)))
 
 		startPayload, err := json.Marshal(events.RebalanceStartEvent{
-			Kind:      events.KindRebalanceStartEvent,
-			Epoch:     11,
-			Reason:    rebalanceReasonNodeJoin,
-			Node:      node,
-			Timestamp: now + int64(time.Millisecond),
+			Kind:       events.KindRebalanceStartEvent,
+			Source:     testCoordinator,
+			Epoch:      11,
+			Generation: 2,
+			Reason:     "node-join",
+			Node:       node,
+			Timestamp:  now + int64(time.Millisecond),
 		})
 		require.NoError(t, err)
 
 		completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
-			Kind:      events.KindRebalanceCompleteEvent,
-			Epoch:     11,
-			Timestamp: now + int64(2*time.Millisecond),
+			Kind:       events.KindRebalanceCompleteEvent,
+			Source:     testCoordinator,
+			Epoch:      11,
+			Generation: 2,
+			Members:    []string{cl.node.PeersAddress(), node},
+			Timestamp:  now + int64(2*time.Millisecond),
 		})
 		require.NoError(t, err)
 
@@ -3257,7 +3219,6 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		case evt := <-cl.events:
 			require.Equal(t, NodeJoined, evt.Type)
 			joined, ok := evt.Payload.(*NodeJoinedEvent)
-			require.NoError(t, err)
 			require.True(t, ok)
 			require.Equal(t, node, joined.Address)
 			require.Equal(t, now/int64(time.Millisecond), joined.Timestamp.UnixMilli())
@@ -3270,31 +3231,26 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:8000"
 		payload, err := json.Marshal(events.NodeLeftEvent{
-			Kind:      events.KindNodeLeftEvent,
-			NodeLeft:  node,
-			Timestamp: now,
+			Kind:       events.KindNodeLeftEvent,
+			Source:     testCoordinator,
+			NodeLeft:   node,
+			Generation: 1,
+			Timestamp:  now,
 		})
 		require.NoError(t, err)
 
 		require.NoError(t, cl.handleClusterEvent(string(payload)))
 
-		startPayload, err := json.Marshal(events.RebalanceStartEvent{
-			Kind:      events.KindRebalanceStartEvent,
-			Epoch:     42,
-			Reason:    rebalanceReasonNodeLeft,
-			Node:      node,
-			Timestamp: now + int64(time.Millisecond),
-		})
-		require.NoError(t, err)
-
 		completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
-			Kind:      events.KindRebalanceCompleteEvent,
-			Epoch:     42,
-			Timestamp: now + int64(2*time.Millisecond),
+			Kind:       events.KindRebalanceCompleteEvent,
+			Source:     testCoordinator,
+			Epoch:      42,
+			Generation: 2,
+			Members:    []string{cl.node.PeersAddress()},
+			Timestamp:  now + int64(2*time.Millisecond),
 		})
 		require.NoError(t, err)
 
-		require.NoError(t, cl.handleClusterEvent(string(startPayload)))
 		require.NoError(t, cl.handleClusterEvent(string(completePayload)))
 
 		select {
@@ -3338,27 +3294,34 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 
 	node := "127.0.0.1:9000"
 	payload, err := json.Marshal(events.NodeJoinEvent{
-		Kind:      events.KindNodeJoinEvent,
-		NodeJoin:  node,
-		Timestamp: time.Now().UnixNano(),
+		Kind:       events.KindNodeJoinEvent,
+		Source:     testCoordinator,
+		NodeJoin:   node,
+		Generation: 1,
+		Timestamp:  time.Now().UnixNano(),
 	})
 	require.NoError(t, err)
 
 	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(payload)}
 	startPayload, err := json.Marshal(events.RebalanceStartEvent{
-		Kind:      events.KindRebalanceStartEvent,
-		Epoch:     7,
-		Reason:    rebalanceReasonNodeJoin,
-		Node:      node,
-		Timestamp: time.Now().Add(time.Millisecond).UnixNano(),
+		Kind:       events.KindRebalanceStartEvent,
+		Source:     testCoordinator,
+		Epoch:      7,
+		Generation: 2,
+		Reason:     "node-join",
+		Node:       node,
+		Timestamp:  time.Now().Add(time.Millisecond).UnixNano(),
 	})
 	require.NoError(t, err)
 	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(startPayload)}
 
 	completePayload, err := json.Marshal(events.RebalanceCompleteEvent{
-		Kind:      events.KindRebalanceCompleteEvent,
-		Epoch:     7,
-		Timestamp: time.Now().Add(2 * time.Millisecond).UnixNano(),
+		Kind:       events.KindRebalanceCompleteEvent,
+		Source:     testCoordinator,
+		Epoch:      7,
+		Generation: 2,
+		Members:    []string{cl.node.PeersAddress(), node},
+		Timestamp:  time.Now().Add(2 * time.Millisecond).UnixNano(),
 	})
 	require.NoError(t, err)
 	msgs <- &redis.Message{Channel: events.ClusterEventsChannel, Payload: string(completePayload)}
@@ -3370,72 +3333,8 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 		t.Fatalf("expected event from consume")
 	}
 
-	close(msgs)
-
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatalf("consume did not exit")
-	}
-}
-
-// nolint
-func TestSendEventLockedNonBlocking(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
-	// Create a small channel to force blocking scenario
-	cl.events = make(chan *Event, 1)
-
-	// Fill the channel
-	cl.events <- &Event{Type: NodeJoined}
-
-	// This should not block even though channel is full
-	start := time.Now()
-	cl.sendEventLocked(&Event{Type: NodeLeft})
-	duration := time.Since(start)
-
-	require.Less(t, duration, 50*time.Millisecond, "sendEventLocked should not block")
-
-	// Verify event was dropped (channel still has first event)
-	select {
-	case evt := <-cl.events:
-		require.Equal(t, NodeJoined, evt.Type)
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected first event in channel")
-	}
-}
-
-// nolint
-func TestSendEventLockedDropsWhenChannelFull(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
-	cl.events = make(chan *Event, 1)
-	// Use discard logger to avoid test output noise
-	cl.logger = log.DiscardLogger
-
-	// Fill the channel
-	cl.events <- &Event{Type: NodeJoined}
-
-	// Send multiple events - all should be dropped without blocking
-	for range 10 {
-		start := time.Now()
-		cl.sendEventLocked(&Event{Type: NodeLeft})
-		duration := time.Since(start)
-		require.Less(t, duration, 10*time.Millisecond, "sendEventLocked should not block")
-	}
-
-	// Only first event should be in channel
-	select {
-	case evt := <-cl.events:
-		require.Equal(t, NodeJoined, evt.Type)
-		// Channel should be empty now
-		select {
-		case <-cl.events:
-			t.Fatal("expected channel to be empty")
-		default:
-			// Good, channel is empty
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("expected first event in channel")
-	}
+	cl.consumeCancel()
+	<-done
 }
 
 // nolint
@@ -4133,7 +4032,7 @@ func TestConsumeToleratesHandlerErrorsAndForeignChannels(t *testing.T) {
 	require.Eventually(t, func() bool {
 		cl.eventsLock.Lock()
 		defer cl.eventsLock.Unlock()
-		_, tracked := cl.nodeJoinTimestamps[node]
+		_, tracked := cl.pendingJoins[node]
 		return tracked
 	}, time.Second, 10*time.Millisecond)
 
@@ -4153,90 +4052,307 @@ func TestHandleClusterEventInvalidRebalanceComplete(t *testing.T) {
 	require.ErrorContains(t, cl.handleClusterEvent(payload), "unmarshal rebalance complete")
 }
 
-func TestTrackNodeLeftEventIgnoresAlreadyEmittedNode(t *testing.T) {
-	// a departure whose NodeLeft already emitted must not restart the pending
-	// bookkeeping
-	cl := newEventTestCluster("127.0.0.1", 4000)
-	node := "127.0.0.1:9200"
-	cl.nodeLeftEventsFilter.Add(node)
-
-	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: time.Now().UnixNano()})
-
-	require.Empty(t, cl.nodeLeftTimestamps)
-}
-
-func TestProcessRebalanceStartIgnoresIrrelevantReasons(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
-
-	// a rebalance triggered by neither a join nor a departure carries no
-	// topology event duty
-	cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 7, Reason: "manual"})
-	require.Empty(t, cl.rebalanceStartSeen)
-
-	// the local node's own join rebalance is not a peer topology change
-	cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 8, Reason: rebalanceReasonNodeJoin, Node: cl.node.PeersAddress()})
-	require.Empty(t, cl.rebalanceStartSeen)
-}
-
-func TestProcessRebalanceStartEmitsWhenCompleteAlreadySeen(t *testing.T) {
-	// the completion event can land before its start event; the start must
-	// then emit the pending topology events immediately instead of waiting for
-	// a completion that already happened
-	t.Run("node left", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
-		node := "127.0.0.1:9300"
-
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 9})
-		cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Timestamp: time.Now().UnixNano()})
-		cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 9, Reason: rebalanceReasonNodeLeft, Node: node})
-
-		event := <-cl.events
-		require.Equal(t, NodeLeft, event.Type)
-	})
-
-	t.Run("node join", func(t *testing.T) {
+func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
+	// the convergence reflecting a change can be delivered before the change
+	t.Run("coordinator copy observed before the convergence is announced right away", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9400"
+		converge(cl, 2, node)
 
-		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Epoch: 9})
-		cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Timestamp: time.Now().UnixNano()})
-		cl.processRebalanceStart(events.RebalanceStartEvent{Epoch: 9, Reason: rebalanceReasonNodeJoin, Node: node})
+		trackJoin(cl, node, testCoordinator, 1)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
 
-		event := <-cl.events
-		require.Equal(t, NodeJoined, event.Type)
+	t.Run("coordinator copy observed at the converged generation waits", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9410"
+		converge(cl, 2, node)
+
+		trackJoin(cl, node, testCoordinator, 2)
+		require.Empty(t, cl.events)
+
+		converge(cl, 3, node)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
+
+	t.Run("copy from another node waits for the next convergence", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9420"
+		converge(cl, 2, node)
+
+		trackJoin(cl, node, "127.0.0.1:7000", 9)
+		require.Empty(t, cl.events)
+
+		converge(cl, 3, node)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
+
+	t.Run("departure", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9430"
+		converge(cl, 2)
+
+		trackLeft(cl, node, testCoordinator, 1)
+		requireEmitted(t, cl, NodeLeft, node)
 	})
 }
 
-func TestEmitPendingJoinForEpochLockedSkipsOtherEpochsAndPrunesOrphans(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
+	t.Run("departed then restarted is a member", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9500"
 
-	// an entry tied to another epoch stays pending
-	cl.rebalanceJoinNodeEpochs["node-a"] = 3
-	cl.nodeJoinTimestamps["node-a"] = 42
+		trackLeft(cl, node, testCoordinator, 1)
+		trackJoin(cl, node, testCoordinator, 2)
+		converge(cl, 3, node)
 
-	// an entry with no recorded timestamp is an orphan and is pruned silently
-	cl.rebalanceJoinNodeEpochs["node-b"] = 5
+		require.Len(t, cl.events, 2)
+		requireNextEvent(t, cl, NodeLeft, node)
+		requireNextEvent(t, cl, NodeJoined, node)
+	})
 
-	cl.emitPendingJoinForEpochLocked(5)
+	t.Run("joined then departed is not a member", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9510"
 
-	require.Contains(t, cl.rebalanceJoinNodeEpochs, "node-a")
-	require.NotContains(t, cl.rebalanceJoinNodeEpochs, "node-b")
-	require.Zero(t, len(cl.events))
+		trackJoin(cl, node, testCoordinator, 1)
+		trackLeft(cl, node, testCoordinator, 2)
+		converge(cl, 3)
+
+		require.Len(t, cl.events, 2)
+		requireNextEvent(t, cl, NodeJoined, node)
+		requireNextEvent(t, cl, NodeLeft, node)
+	})
+
+	t.Run("convergence reflecting only the join", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9520"
+
+		trackJoin(cl, node, testCoordinator, 1)
+		trackLeft(cl, node, testCoordinator, 2)
+		converge(cl, 2, node)
+		requireEmitted(t, cl, NodeJoined, node)
+		require.Contains(t, cl.pendingLeaves, node)
+
+		converge(cl, 3)
+		requireEmitted(t, cl, NodeLeft, node)
+	})
+
+	t.Run("convergence reflecting only the departure of a restart", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9530"
+
+		trackLeft(cl, node, testCoordinator, 1)
+		trackJoin(cl, node, testCoordinator, 2)
+		converge(cl, 2)
+		requireEmitted(t, cl, NodeLeft, node)
+		require.Contains(t, cl.pendingJoins, node)
+
+		converge(cl, 3, node)
+		requireEmitted(t, cl, NodeJoined, node)
+	})
 }
 
-func TestEmitPendingLeftForEpochLockedSkipsOtherEpochsAndPrunesOrphans(t *testing.T) {
+func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
+	// a lagging member can replay a dead notification for a node that already
+	// restarted; the coordinator observed that departure and still converged
+	// with the node as a member
 	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9600"
+	converge(cl, 1, node)
 
-	cl.rebalanceLeftNodeEpochs["node-a"] = 3
-	cl.nodeLeftTimestamps["node-a"] = 42
+	trackLeft(cl, node, testCoordinator, 1)
+	timer := cl.pendingLeaves[node].timer
+	converge(cl, 2, node)
+	require.Empty(t, cl.pendingLeaves)
+	require.Empty(t, cl.events)
+	require.False(t, timer.Stop())
 
-	cl.rebalanceLeftNodeEpochs["node-b"] = 5
+	// the same departure known only from another node's copy cannot be placed
+	// and is kept
+	trackLeft(cl, node, "127.0.0.1:7000", 9)
+	converge(cl, 3, node)
+	require.Contains(t, cl.pendingLeaves, node)
+	require.Empty(t, cl.events)
+}
 
-	cl.emitPendingLeftForEpochLocked(5)
+func TestRestartedNodeDepartsAgain(t *testing.T) {
+	// a member that departs, restarts at the same address and departs again
+	// must be announced each time
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9700"
 
-	require.Contains(t, cl.rebalanceLeftNodeEpochs, "node-a")
-	require.NotContains(t, cl.rebalanceLeftNodeEpochs, "node-b")
-	require.Zero(t, len(cl.events))
+	trackLeft(cl, node, testCoordinator, 1)
+	converge(cl, 2)
+	requireEmitted(t, cl, NodeLeft, node)
+
+	trackJoin(cl, node, testCoordinator, 2)
+	converge(cl, 3, node)
+	requireEmitted(t, cl, NodeJoined, node)
+
+	trackLeft(cl, node, testCoordinator, 3)
+	converge(cl, 4)
+	requireEmitted(t, cl, NodeLeft, node)
+}
+
+func TestSecondDepartureWhileRestartIsPending(t *testing.T) {
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9710"
+
+	trackLeft(cl, node, testCoordinator, 1)
+	converge(cl, 2)
+	requireEmitted(t, cl, NodeLeft, node)
+
+	// restarted, then crashed again before the table converged on the restart
+	trackJoin(cl, node, testCoordinator, 2)
+	trackLeft(cl, node, testCoordinator, 3)
+	require.Contains(t, cl.pendingLeaves, node)
+
+	converge(cl, 4)
+	require.Len(t, cl.events, 2)
+	requireNextEvent(t, cl, NodeJoined, node)
+	requireNextEvent(t, cl, NodeLeft, node)
+}
+
+func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
+	t.Run("joined then departed", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9800"
+
+		trackJoin(cl, node, testCoordinator, 1)
+		trackLeft(cl, node, testCoordinator, 2)
+		joinTimer := cl.pendingJoins[node].timer
+		leftTimer := cl.pendingLeaves[node].timer
+
+		cl.emitOverdueNodeLeft(node)
+		require.Len(t, cl.events, 2)
+		requireNextEvent(t, cl, NodeJoined, node)
+		requireNextEvent(t, cl, NodeLeft, node)
+		require.False(t, joinTimer.Stop())
+		require.False(t, leftTimer.Stop())
+	})
+
+	t.Run("departed then restarted", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9810"
+
+		trackLeft(cl, node, testCoordinator, 1)
+		trackJoin(cl, node, testCoordinator, 2)
+
+		cl.emitOverdueNodeJoined(node)
+		require.Len(t, cl.events, 2)
+		requireNextEvent(t, cl, NodeLeft, node)
+		requireNextEvent(t, cl, NodeJoined, node)
+	})
+
+	t.Run("already announced is a no-op", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9820"
+
+		trackLeft(cl, node, testCoordinator, 1)
+		converge(cl, 2)
+		requireEmitted(t, cl, NodeLeft, node)
+
+		cl.emitOverdueNodeLeft(node)
+		cl.emitOverdueNodeJoined(node)
+		require.Empty(t, cl.events)
+	})
+}
+
+func TestPendingEventIsAnnouncedAfterTheBoundedWait(t *testing.T) {
+	// with no convergence reflecting them, a departure and a join are announced
+	// once the bounded wait elapses
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.pendingEmitTimeout = 20 * time.Millisecond
+	leaver := "127.0.0.1:9920"
+	joiner := "127.0.0.1:9921"
+
+	trackLeft(cl, leaver, testCoordinator, 1)
+	trackJoin(cl, joiner, testCoordinator, 1)
+
+	require.Eventually(t, func() bool {
+		cl.eventsLock.Lock()
+		defer cl.eventsLock.Unlock()
+
+		return len(cl.pendingLeaves) == 0 && len(cl.pendingJoins) == 0
+	}, time.Second, 5*time.Millisecond)
+
+	require.Len(t, cl.events, 2)
+	announced := map[EventType]int{}
+	for range 2 {
+		announced[(<-cl.events).Type]++
+	}
+
+	require.Equal(t, 1, announced[NodeLeft])
+	require.Equal(t, 1, announced[NodeJoined])
+}
+
+func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
+	// the bounded-wait timer is a safety net; once the event is announced the
+	// timer must not linger for the remainder of the wait
+	t.Run("node left", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9850"
+
+		trackLeft(cl, node, testCoordinator, 1)
+		timer := cl.pendingLeaves[node].timer
+		require.NotNil(t, timer)
+
+		converge(cl, 2)
+		requireEmitted(t, cl, NodeLeft, node)
+
+		// Stop reports false for a timer that was already stopped
+		require.False(t, timer.Stop())
+	})
+
+	t.Run("node joined", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9860"
+
+		trackJoin(cl, node, testCoordinator, 1)
+		timer := cl.pendingJoins[node].timer
+		require.NotNil(t, timer)
+
+		converge(cl, 2, node)
+		requireEmitted(t, cl, NodeJoined, node)
+		require.False(t, timer.Stop())
+	})
+}
+
+func TestCancelPendingEventsLocked(t *testing.T) {
+	// stopping the engine drops every pending event and its timer
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	joiner := "127.0.0.1:9900"
+	leaver := "127.0.0.1:9901"
+	converge(cl, 1, leaver)
+
+	trackJoin(cl, joiner, testCoordinator, 1)
+	trackLeft(cl, leaver, testCoordinator, 1)
+	joinTimer := cl.pendingJoins[joiner].timer
+	leftTimer := cl.pendingLeaves[leaver].timer
+
+	cl.eventsLock.Lock()
+	cl.cancelPendingEventsLocked()
+	cl.eventsLock.Unlock()
+
+	require.Empty(t, cl.pendingJoins)
+	require.Empty(t, cl.pendingLeaves)
+	require.Zero(t, cl.converged.generation)
+	require.False(t, joinTimer.Stop())
+	require.False(t, leftTimer.Stop())
+	require.Empty(t, cl.events)
+}
+
+func TestTrackingIsIgnoredAfterStop(t *testing.T) {
+	// a membership event processed after the engine closed its events channel
+	// must not arm a timer that outlives the engine
+	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl.events = nil
+
+	trackJoin(cl, "127.0.0.1:9910", testCoordinator, 1)
+	trackLeft(cl, "127.0.0.1:9911", testCoordinator, 1)
+	require.Empty(t, cl.pendingJoins)
+	require.Empty(t, cl.pendingLeaves)
 }
 
 func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
@@ -4257,14 +4373,6 @@ func TestEmitNodeJoinedLockedDeduplicates(t *testing.T) {
 	cl.emitNodeJoinedLocked(node, time.Now().UnixNano())
 
 	require.Zero(t, len(cl.events))
-}
-
-func TestPutGrainIfAbsentInternalRejectsEmptyIDValue(t *testing.T) {
-	cl := &cluster{running: atomic.NewBool(true)}
-
-	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: ""}.Build()}.Build()
-	err := cl.putGrainIfAbsent(context.Background(), grain)
-	require.EqualError(t, err, "grain id value is empty")
 }
 
 func TestStopWarnsWhenConsumeExceedsShutdownTimeout(t *testing.T) {

@@ -93,7 +93,10 @@ that reads from the channel.
 - The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and
   subscribes callers to the internal topic `topic.events`.
 - Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events
-  (NodeJoined, NodeLeft) are published by the cluster events loop when membership changes. `LeaderChanged` is published
+  (NodeJoined, NodeLeft) are published by the cluster events loop once the cluster's routing table has converged on the
+  membership change, that is once the coordinator has redistributed partitions for the new member set, so subscribers
+  and relocation act on a stable table. If no convergence is announced within 30 seconds, for example because a member
+  fails to acknowledge the rebalance, the event is published anyway. `LeaderChanged` is published
   from the same loop, on every node, whenever a topology event reveals that the coordinator moved to a different node;
   the initial coordinator election on startup is not published, only subsequent transitions.
 - `RelocationFailed` is published by the relocator when a departed node's actors or grains cannot be re-deployed. Each
