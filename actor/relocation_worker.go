@@ -230,7 +230,7 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	}
 
 	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState, loads)
-	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
+	leaderGrains, peerGrains, unplaceableGrains := allocateGrainsByRole(system.getNodeRoles(), peers, grains)
 
 	// Role-constrained actors with no surviving eligible node cannot be
 	// relocated; record them so subscribers observe the loss via RelocationFailed
@@ -239,6 +239,15 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
 		w.logger.Errorf("cannot relocate actor=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", wireActor.GetAddress(), rerr)
 		failures.record(wireActor.GetAddress(), false, rerr)
+	}
+
+	// Likewise for eager role-constrained grains (WithActivationRole):
+	// reactivating one on an ineligible node would violate its placement
+	// constraint, so it is reported via RelocationFailed instead.
+	for _, wireGrain := range unplaceableGrains {
+		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by grain %s", wireGrain.GetRole(), wireGrain.GetGrainId().GetValue()))
+		w.logger.Errorf("cannot relocate grain=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", wireGrain.GetGrainId().GetValue(), rerr)
+		failures.record(wireGrain.GetGrainId().GetValue(), true, rerr)
 	}
 
 	eg := new(errgroup.Group)
@@ -440,16 +449,16 @@ func retryRelocationItem(ctx context.Context, recreate func() error) error {
 
 // relocateShare delivers one peer's share, batch by batch, to its target. When
 // the target becomes unreachable the unsent remainder is redistributed across
-// the remaining survivors: each actor moves to a survivor that advertises its
-// required role and grains (which carry no role) move to a survivor, so a
-// role-constrained actor is not dropped merely because one ring-neighbor lacks
-// its role. The leader (this node) counts as a surviving host too: an actor
-// only it can host by role is recreated locally, and when no peer survives the
-// whole remainder is taken locally instead of being reported lost. An actor
-// that no surviving node (leader included) can host is recorded once with an
-// accurate message; items a chosen survivor also fails to accept are recorded
-// as failed (eager grains and actors) or have their lazy directory entry
-// released.
+// the remaining survivors: each actor and eager role-constrained grain moves
+// to a survivor that advertises its required role (lazy and role-less grains
+// move to any survivor), so a role-constrained item is not dropped merely
+// because one ring-neighbor lacks its role. The leader (this node) counts as a
+// surviving host too: an item only it can host by role is recreated locally,
+// and when no peer survives the whole remainder is taken locally instead of
+// being reported lost. An item that no surviving node (leader included) can
+// host is recorded once with an accurate message; items a chosen survivor also
+// fails to accept are recorded as failed (eager grains and actors) or have
+// their lazy directory entry released.
 func (w *relocationWorker) relocateShare(ctx context.Context, requests []*internalpb.RelocateBatchRequest, target *cluster.Peer, peers []*cluster.Peer, failures *relocationFailures) {
 	remaining, err := w.sendBatches(ctx, target, requests, failures)
 	if err == nil {
@@ -476,12 +485,68 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 	departedNode := departedNodeOf(remaining)
 	actorShares, leaderActors, grains := reassignByRole(remaining, survivors, leaderRoles, failures)
 
+	// Eager role-constrained grains (WithActivationRole) may only be
+	// reactivated on a node advertising their role; the rest keep the
+	// historical placement below.
+	var constrained []*internalpb.Grain
+	unconstrained := make([]*internalpb.Grain, 0, len(grains))
+
+	for _, grain := range grains {
+		if grainPlacementRole(grain) != "" {
+			constrained = append(constrained, grain)
+			continue
+		}
+		unconstrained = append(unconstrained, grain)
+	}
+
 	// With no peer left standing the leader is the last surviving node, so it
-	// also takes the grains (eager reactivated locally, lazy released).
+	// also takes the unconstrained grains (eager reactivated locally, lazy
+	// released).
 	var leaderGrains []*internalpb.Grain
 	if len(survivors) == 0 {
-		leaderGrains = grains
-		grains = nil
+		leaderGrains = unconstrained
+		unconstrained = nil
+	}
+
+	// Unconstrained grains spread round-robin across the survivors instead of
+	// piling onto one ring-neighbor; a share whose target is unreachable is
+	// released (lazy) or recorded (eager) below.
+	grainShares := make([][]*internalpb.Grain, len(survivors))
+	for i, grain := range unconstrained {
+		grainShares[i%len(survivors)] = append(grainShares[i%len(survivors)], grain)
+	}
+
+	// Each eager role-constrained grain lands on the least-loaded survivor
+	// advertising its role, falling back to the leader when only it qualifies;
+	// a grain no surviving node (leader included) can host is recorded instead
+	// of being reactivated on an ineligible node.
+	for _, grain := range constrained {
+		role := grainPlacementRole(grain)
+		best := -1
+
+		for i, survivor := range survivors {
+			if !eligibleForRole(survivor.Roles, role) {
+				continue
+			}
+
+			if best < 0 || len(grainShares[i]) < len(grainShares[best]) {
+				best = i
+			}
+		}
+
+		if best >= 0 {
+			grainShares[best] = append(grainShares[best], grain)
+			continue
+		}
+
+		if eligibleForRole(leaderRoles, role) {
+			leaderGrains = append(leaderGrains, grain)
+			continue
+		}
+
+		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by grain %s", role, grain.GetGrainId().GetValue()))
+		w.logger.Errorf("cannot relocate grain=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", grain.GetGrainId().GetValue(), rerr)
+		failures.record(grain.GetGrainId().GetValue(), true, rerr)
 	}
 
 	if len(leaderActors) > 0 || len(leaderGrains) > 0 {
@@ -490,14 +555,6 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 		eg.SetLimit(defaultRelocationConcurrency)
 		enqueueRelocation(ctx, eg, system, w.logger, departedNode, leaderActors, leaderGrains, failures.record)
 		_ = eg.Wait()
-	}
-
-	// Grains carry no role, so they spread round-robin across the survivors
-	// instead of piling onto one ring-neighbor; a share whose target is
-	// unreachable is released (lazy) or recorded (eager) below.
-	grainShares := make([][]*internalpb.Grain, len(survivors))
-	for i, grain := range grains {
-		grainShares[i%len(survivors)] = append(grainShares[i%len(survivors)], grain)
 	}
 
 	for i, survivor := range survivors {
@@ -965,4 +1022,105 @@ func allocateGrains(totalPeers int, grains []*internalpb.Grain) (leaderShares []
 	}
 
 	return leaderShares, peersShares
+}
+
+// allocateGrainsByRole distributes the departed node's grains across the
+// leader (index 0) and the surviving peers (indexes 1..n, where index i maps
+// to peers[i-1]), honoring each eager grain's activation role
+// (WithActivationRole).
+//
+// Grains without a placement constraint (see grainPlacementRole) keep the
+// historical even split of allocateGrains. Each eager role-constrained grain
+// is then assigned to the least-loaded target advertising its role; a grain
+// no surviving target (leader included) can host is returned as unplaceable so
+// the caller records it as a relocation failure instead of reactivating it on
+// an ineligible node.
+//
+// leaderRoles carries the roles advertised by the local node (the relocation
+// leader), mirroring allocateActors: the leader is itself a placement target,
+// so its eligibility is decided by the same rule as any peer's.
+func allocateGrainsByRole(leaderRoles []string, peers []*cluster.Peer, grains []*internalpb.Grain) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain, unplaceable []*internalpb.Grain) {
+	unconstrained := make([]*internalpb.Grain, 0, len(grains))
+	var constrained []*internalpb.Grain
+
+	for _, grain := range grains {
+		if grainPlacementRole(grain) != "" {
+			constrained = append(constrained, grain)
+			continue
+		}
+		unconstrained = append(unconstrained, grain)
+	}
+
+	leaderShares, peersShares = allocateGrains(len(peers)+1, unconstrained)
+
+	if len(constrained) == 0 {
+		return leaderShares, peersShares, nil
+	}
+
+	// Widen the fan-out to every target so a role-constrained grain can reach
+	// any eligible peer, not only the ones the even split happened to fill.
+	for len(peersShares) < len(peers)+1 {
+		peersShares = append(peersShares, nil)
+	}
+
+	// targetRoles[0] is the leader; targetRoles[i] maps to peers[i-1]. The peer
+	// role slices are referenced, not copied, so no per-target allocation.
+	targetRoles := make([][]string, 0, len(peers)+1)
+	targetRoles = append(targetRoles, leaderRoles)
+
+	for _, peer := range peers {
+		targetRoles = append(targetRoles, peer.Roles)
+	}
+
+	// The leader's load counts its full local share (the even split's remainder
+	// plus its chunk), which is what leaderShares already holds.
+	loads := make([]int, len(peersShares))
+	loads[0] = len(leaderShares)
+	for i := 1; i < len(peersShares); i++ {
+		loads[i] = len(peersShares[i])
+	}
+
+	for _, grain := range constrained {
+		role := grainPlacementRole(grain)
+		best := -1
+
+		for idx := range targetRoles {
+			if !eligibleForRole(targetRoles[idx], role) {
+				continue
+			}
+
+			if best == -1 || loads[idx] < loads[best] {
+				best = idx
+			}
+		}
+
+		if best == -1 {
+			// no surviving node advertises the required role
+			unplaceable = append(unplaceable, grain)
+			continue
+		}
+
+		peersShares[best] = append(peersShares[best], grain)
+		loads[best]++
+
+		// the leader executes leaderShares, not peersShares[0]; keep them in sync
+		if best == 0 {
+			leaderShares = append(leaderShares, grain)
+		}
+	}
+
+	return leaderShares, peersShares, unplaceable
+}
+
+// grainPlacementRole returns the role constraining a grain's relocation
+// target. Only an eager grain is constrained: its relocation reactivates it on
+// the target, which must therefore advertise the grain's activation role. A
+// lazy grain's relocation work is a directory-entry release any node can
+// perform, and its next activation re-applies whatever placement options the
+// caller supplies.
+func grainPlacementRole(grain *internalpb.Grain) string {
+	if grain.GetEagerRelocation() {
+		return grain.GetRole()
+	}
+	return ""
 }

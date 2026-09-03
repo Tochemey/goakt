@@ -2797,6 +2797,9 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 	grain.SetDisableRelocation(grainRequest.DisableRelocation)
 	grain.SetEagerRelocation(grainRequest.EagerRelocation)
 	grain.SetReentrancy(codec.EncodeReentrancy(grainRequest.Reentrancy))
+	if grainRequest.Role != "" {
+		grain.SetRole(grainRequest.Role)
+	}
 
 	return grain, nil
 }

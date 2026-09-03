@@ -928,6 +928,20 @@ func TestRemoteActivateGrain_InvalidPort(t *testing.T) {
 	assert.ErrorContains(t, err, "out of range")
 }
 
+// TestGetGrainFromRequest_Role verifies the activation role travels from the
+// public GrainRequest into the wire record (and stays absent when unset), so
+// remote activation preserves role-constrained placement.
+func TestGetGrainFromRequest_Role(t *testing.T) {
+	grain, err := getGrainFromRequest("host", 1000, &remote.GrainRequest{Kind: "kind", Name: "name"})
+	require.NoError(t, err)
+	assert.False(t, grain.HasRole())
+
+	grain, err = getGrainFromRequest("host", 1000, &remote.GrainRequest{Kind: "kind", Name: "name", Role: "game-worker"})
+	require.NoError(t, err)
+	assert.True(t, grain.HasRole())
+	assert.Equal(t, "game-worker", grain.GetRole())
+}
+
 func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
 	r := NewClient()
 	grainReq := &remote.GrainRequest{

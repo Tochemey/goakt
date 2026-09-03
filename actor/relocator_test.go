@@ -1701,6 +1701,196 @@ func TestGrainsRelocation(t *testing.T) {
 	srv.Shutdown()
 }
 
+// TestGrainsRelocationWithActivationRole reproduces issue #1334 on a real
+// three-node NATS cluster: an eager Grain created with
+// WithActivationRole("game-worker") activates on a worker node, and when that
+// worker departs, eager relocation must reactivate it on the surviving worker
+// node - never on the gateway-only node, even though the gateway is the
+// relocation leader.
+// nolint
+func TestGrainsRelocationWithActivationRole(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// the gateway starts first so it becomes the oldest node and relocation
+	// leader; it never advertises the game-worker role
+	gateway, sd1 := testNATs(t, srv.Addr().String(), withMockRoles("gateway"))
+	require.NotNil(t, gateway)
+	require.NotNil(t, sd1)
+
+	worker1, sd2 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	require.NotNil(t, worker1)
+	require.NotNil(t, sd2)
+
+	worker2, sd3 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	require.NotNil(t, worker2)
+	require.NotNil(t, sd3)
+
+	pause.For(time.Second)
+
+	// create the eager role-constrained grain from the gateway: it must
+	// activate on one of the worker nodes
+	identity, err := gateway.GrainIdentity(ctx, "role-bound-grain", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	},
+		WithActivationRole("game-worker"),
+		WithActivationStrategy(RoundRobinActivation),
+		WithGrainEagerRelocation(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, identity)
+	require.NoError(t, gateway.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	gatewaySystem := gateway.(*actorSystem)
+
+	var ownerPort int
+	require.Eventually(t, func() bool {
+		owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+		if err != nil {
+			return false
+		}
+		ownerPort = int(owner.GetPort())
+		return true
+	}, time.Minute, time.Second, "grain owner should be registered in the cluster")
+
+	require.NotEqual(t, gateway.Port(), ownerPort, "role-bound grain must not activate on the gateway")
+	require.Contains(t, []int{worker1.Port(), worker2.Port()}, ownerPort)
+
+	// take down the worker hosting the grain
+	departed, survivor := worker1, worker2
+	departedProvider, survivorProvider := sd2, sd3
+	if ownerPort == worker2.Port() {
+		departed, survivor = worker2, worker1
+		departedProvider, survivorProvider = sd3, sd2
+	}
+
+	require.NoError(t, departed.Stop(ctx))
+	require.NoError(t, departedProvider.Close())
+
+	// eager relocation must reactivate the grain on the surviving worker with
+	// its role intact - never on the gateway
+	require.Eventually(t, func() bool {
+		owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+		if err != nil {
+			return false
+		}
+		return int(owner.GetPort()) == survivor.Port()
+	}, 2*time.Minute, time.Second, "grain must be reactivated on the surviving game-worker node")
+
+	owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+	require.NoError(t, err)
+	require.Equal(t, "game-worker", owner.GetRole())
+	require.NotEqual(t, gateway.Port(), int(owner.GetPort()))
+
+	// and the grain is reachable on its new owner
+	require.Eventually(t, func() bool {
+		return gateway.TellGrain(ctx, identity, new(testpb.TestSend)) == nil
+	}, time.Minute, time.Second, "grain should be accessible after relocation")
+
+	assert.NoError(t, gateway.Stop(ctx))
+	assert.NoError(t, survivor.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, survivorProvider.Close())
+	srv.Shutdown()
+}
+
+// TestRelocationWithActorRole is the actor counterpart of
+// TestGrainsRelocationWithActivationRole on a real three-node NATS cluster: an
+// actor spawned with WithRole("game-worker") lands on a worker node, and when
+// that worker departs, relocation must respawn it on the surviving worker node
+// - never on the gateway-only node, even though the gateway is the relocation
+// leader.
+// nolint
+func TestRelocationWithActorRole(t *testing.T) {
+	// create a context
+	ctx := t.Context()
+	// start the NATS server
+	srv := startNatsServer(t)
+
+	// the gateway starts first so it becomes the oldest node and relocation
+	// leader; it never advertises the game-worker role
+	gateway, sd1 := testNATs(t, srv.Addr().String(), withMockRoles("gateway"))
+	require.NotNil(t, gateway)
+	require.NotNil(t, sd1)
+
+	worker1, sd2 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	require.NotNil(t, worker1)
+	require.NotNil(t, sd2)
+
+	worker2, sd3 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	require.NotNil(t, worker2)
+	require.NotNil(t, sd3)
+
+	pause.For(time.Second)
+
+	// spawn the role-constrained actor from the gateway with SpawnOn (the
+	// role-aware placement path): it must land on one of the worker nodes
+	actorName := "role-bound-actor"
+	pid, err := gateway.SpawnOn(ctx, actorName, NewMockActor(), WithLongLived(), WithRole("game-worker"))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	gatewayAddress := net.JoinHostPort(gateway.Host(), strconv.Itoa(gateway.Port()))
+	worker1Address := net.JoinHostPort(worker1.Host(), strconv.Itoa(worker1.Port()))
+	worker2Address := net.JoinHostPort(worker2.Host(), strconv.Itoa(worker2.Port()))
+
+	actorPID, err := gateway.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actorPID)
+
+	ownerAddress := actorPID.Path().HostPort()
+	require.NotEqual(t, gatewayAddress, ownerAddress, "role-bound actor must not spawn on the gateway")
+	require.Contains(t, []string{worker1Address, worker2Address}, ownerAddress)
+
+	// take down the worker hosting the actor
+	departed, departedProvider := worker1, sd2
+	survivor, survivorProvider := worker2, sd3
+	survivorAddress := worker2Address
+	if ownerAddress == worker2Address {
+		departed, departedProvider = worker2, sd3
+		survivor, survivorProvider = worker1, sd2
+		survivorAddress = worker1Address
+	}
+
+	require.NoError(t, departed.Stop(ctx))
+	require.NoError(t, departedProvider.Close())
+
+	// relocation must respawn the actor on the surviving worker - never on
+	// the gateway
+	require.Eventually(t, func() bool {
+		exists, err := gateway.ActorExists(ctx, actorName)
+		if err != nil || !exists {
+			return false
+		}
+
+		relocatedPID, err := gateway.ActorOf(ctx, actorName)
+		if err != nil || relocatedPID == nil {
+			return false
+		}
+
+		return relocatedPID.Path().HostPort() == survivorAddress
+	}, 2*time.Minute, 500*time.Millisecond, "actor %s must be relocated to the surviving game-worker node", actorName)
+
+	// the relocated actor is reachable on its new node
+	require.Eventually(t, func() bool {
+		sender, err := gateway.ActorOf(ctx, actorName)
+		if err != nil || sender == nil {
+			return false
+		}
+		return sender.Path().HostPort() != gatewayAddress
+	}, 30*time.Second, 500*time.Millisecond)
+
+	assert.NoError(t, gateway.Stop(ctx))
+	assert.NoError(t, survivor.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, survivorProvider.Close())
+	srv.Shutdown()
+}
+
 // nolint
 func TestPersistenceGrainsRelocation(t *testing.T) {
 	// create a context

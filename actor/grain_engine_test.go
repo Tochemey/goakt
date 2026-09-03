@@ -881,6 +881,42 @@ func TestEnsureExistingGrainProcess_ActivationBarrierTimeout(t *testing.T) {
 	require.Nil(t, process)
 }
 
+// TestRecreateGrainRestoresActivationRole verifies a relocated or remotely
+// activated grain keeps its WithActivationRole constraint: the reconstructed
+// config must carry the role so the next departure's wire record (toWireGrain)
+// still advertises it, otherwise the constraint would be lost after the first
+// relocation (issue #1334).
+func TestRecreateGrainRestoresActivationRole(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+
+	identity := newGrainIdentity(&MockGrain{}, "role-restore")
+	pid := newGrainPID(identity, &MockGrain{}, sys, newGrainConfig(WithActivationRole("game-worker"), WithGrainEagerRelocation()))
+	wire, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.Equal(t, "game-worker", wire.GetRole())
+
+	require.NoError(t, as.recreateGrain(ctx, wire))
+
+	process, ok := as.grains.Get(identity.String())
+	require.True(t, ok)
+	require.NotNil(t, process.config.role)
+	require.Equal(t, "game-worker", *process.config.role)
+	require.True(t, process.config.eagerRelocation)
+
+	// the role must survive the config -> wire round trip
+	republished, err := process.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, republished.HasRole())
+	require.Equal(t, "game-worker", republished.GetRole())
+}
+
 func TestRecreateGrain_SingleflightActivation(t *testing.T) {
 	ctx := t.Context()
 	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

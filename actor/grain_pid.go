@@ -1208,5 +1208,8 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 	grain.SetDisableRelocation(config.disableRelocation)
 	grain.SetEagerRelocation(config.eagerRelocation)
 	grain.SetReentrancy(codec.EncodeReentrancy(config.reentrancy))
+	if config.role != nil {
+		grain.SetRole(*config.role)
+	}
 	return grain, nil
 }

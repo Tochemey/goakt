@@ -204,9 +204,14 @@ When an actor is spawned with `WithRole`, relocation only considers nodes that a
 that governs initial placement). The worker assigns each role-constrained actor to the **least-loaded eligible target**
 among the leader and surviving peers; role-less actors are eligible everywhere.
 
-If **no surviving node advertises the required role**, the actor cannot be relocated. It is reported in the
-`RelocationFailed` event rather than being silently dropped, so you can subscribe and react (add capacity for that role,
-or relax the constraint). Singletons are always routed to the leader share, where the cluster singleton spawn path
+The same rule applies to **eager grains** activated with `WithActivationRole`: their upfront reactivation only targets
+nodes advertising the required role, so a role-constrained grain never lands on an ineligible node after its host
+departs. Lazy grains are unconstrained regardless of role, because their relocation work is only a directory-entry
+release that any node can perform; the role is re-applied when the grain is next activated.
+
+If **no surviving node advertises the required role**, the actor or eager grain cannot be relocated. It is reported in
+the `RelocationFailed` event rather than being silently dropped, so you can subscribe and react (add capacity for that
+role, or relax the constraint). Singletons are always routed to the leader share, where the cluster singleton spawn path
 re-arbitrates their placement (including any role constraint).
 
 ## Crash recovery
@@ -283,7 +288,9 @@ never be called again. The cleanup work itself is distributed like any other rel
 then chunks to peers), so it does not funnel through a single node.
 
 Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node,
-the same way actors are. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
+the same way actors are - including [role-aware allocation](#role-aware-allocation): an eager grain activated with
+`WithActivationRole` is only reactivated on a node advertising that role, and is reported in `RelocationFailed` when no
+surviving node qualifies. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
 
 ## Configuration
 

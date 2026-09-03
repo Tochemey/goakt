@@ -338,6 +338,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
 		Supervisor:          config.supervisor,
+		Role:                config.role,
 		InitTimeout:         pointer.Deref(config.initTimeout, 0),
 		ReliableDelivery:    config.reliableDelivery.toRemoteSpec(),
 	}

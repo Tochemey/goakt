@@ -534,6 +534,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		DisableRelocation: grain.GetDisableRelocation(),
 		EagerRelocation:   grain.GetEagerRelocation(),
 		Reentrancy:        codec.DecodeReentrancy(grain.GetReentrancy()),
+		Role:              grain.GetRole(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1485,6 +1486,14 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 		if reentrancyConfig := codec.DecodeReentrancy(serializedGrain.GetReentrancy()); reentrancyConfig != nil {
 			options = append(options, WithGrainReentrancy(reentrancyConfig))
+		}
+
+		// Restore the activation role so role-constrained placement survives
+		// relocation and remote activation: the reconstructed config feeds
+		// toWireGrain when this node later departs, so dropping the role here
+		// would lose the constraint on the next relocation.
+		if serializedGrain.HasRole() {
+			options = append(options, WithActivationRole(serializedGrain.GetRole()))
 		}
 
 		config := newGrainConfig(options...)
