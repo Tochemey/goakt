@@ -1,7 +1,7 @@
 ---
 title: Relocation
 description: Automatic actor migration when nodes leave the cluster.
-sidebarTitle: "Relocation"
+sidebarTitle: 'Relocation'
 ---
 
 **Relocation** is the automatic migration of actors and grains from a node that has left the cluster to the remaining
@@ -9,10 +9,10 @@ live nodes. Whether a node shuts down **gracefully** or **crashes**, its relocat
 other nodes so the cluster remains available.
 
 <Note>
-  Relocation works for both graceful and abrupt departures. On a graceful shutdown the departing node replicates a
-  `PeerState` snapshot to its oldest peers. On a crash (`kill -9`, OOM, network partition) that snapshot never gets
-  written, so the leader instead reconstructs the departed node's relocation set from the replicated cluster registry.
-  Actors spawned with `WithRelocationDisabled` are still lost with the node either way.
+  Relocation works for both graceful and abrupt departures. On a graceful shutdown the departing node replicates a `PeerState` snapshot to
+  its oldest peers. On a crash (`kill -9`, OOM, network partition) that snapshot never gets written, so the leader instead reconstructs the
+  departed node's relocation set from the replicated cluster registry. Actors spawned with `WithRelocationDisabled` are still lost with the
+  node either way.
 </Note>
 
 ## When relocation happens
@@ -113,9 +113,8 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
   self-heals when the grain is next addressed.
 
 <Warning>
-  The relocation handoff uses a batched wire request. During a rolling upgrade, run homogeneous GoAkt versions before
-  triggering topology changes: an older node cannot process the batched request, and its share is then reassigned to
-  another peer or reported as failed.
+  The relocation handoff uses a batched wire request. During a rolling upgrade, run homogeneous GoAkt versions before triggering topology
+  changes: an older node cannot process the batched request, and its share is then reassigned to another peer or reported as failed.
 </Warning>
 
 ## Relocation events
@@ -269,9 +268,8 @@ Set `WithReplicaCount(3)` to also tolerate two concurrent node losses, at the co
 registry update.
 
 <Warning>
-  With `WithReplicaCount(1)` there are no backups: the partitions owned by a crashed node are lost with it, and
-  registry-derived recovery silently misses the affected records. The actor system logs a warning at startup when
-  clustering runs with a replica count of 1.
+  With `WithReplicaCount(1)` there are no backups: the partitions owned by a crashed node are lost with it, and registry-derived recovery
+  silently misses the affected records. The actor system logs a warning at startup when clustering runs with a replica count of 1.
 </Warning>
 
 Cases that remain open at any replica count: losing all owners of a partition at once loses its records; a write
@@ -328,9 +326,7 @@ identity, err := actor.GrainOf[*MyGrain](ctx, system, "my-grain", actor.WithGrai
 Use this for grains that must stay warm without an external trigger (for example those driving timers, streams, or
 background work) that must resume immediately after the host departs.
 
-<Note>
-  `WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive; configuring both fails validation.
-</Note>
+<Note>`WithGrainEagerRelocation` and `WithGrainDisableRelocation` are mutually exclusive; configuring both fails validation.</Note>
 
 ### Disable relocation system-wide
 
@@ -392,12 +388,13 @@ Masking is bounded, not unbounded. Each node opens a short handoff window when i
 
 - **ErrActorNotFound**: the actor could not be resolved on any surviving node.
 - **ErrRelocationInProgress**: the target is still being relocated; retry shortly.
-  </Note>
+
+</Note>
 
 <Warning>
-  Identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers) re-resolves the target on each
-  send, so both observe the relocation. Holding a stale remote `*PID` obtained before the departure and calling `Tell` /
-  `Ask` on it directly bypasses re-resolution and can still surface a connection error, so resolve by name during churn.
+  Identity-based routing (`SendAsync` / `SendSync` and their `ReceiveContext` wrappers) re-resolves the target on each send, so both observe
+  the relocation. Holding a stale remote `*PID` obtained before the departure and calling `Tell` / `Ask` on it directly bypasses
+  re-resolution and can still surface a connection error, so resolve by name during churn.
 </Warning>
 
 ## Check relocatability
