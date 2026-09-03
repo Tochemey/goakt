@@ -119,6 +119,7 @@ type Grain struct {
 	xxx_hidden_DisableRelocation bool                   `protobuf:"varint,8,opt,name=disable_relocation,json=disableRelocation,proto3"`
 	xxx_hidden_EagerRelocation   bool                   `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3"`
 	xxx_hidden_Reentrancy        *ReentrancyConfig      `protobuf:"bytes,10,opt,name=reentrancy,proto3"`
+	xxx_hidden_Role              *string                `protobuf:"bytes,11,opt,name=role,proto3,oneof"`
 	XXX_raceDetectHookData       protoimpl.RaceDetectHookData
 	XXX_presence                 [1]uint32
 	unknownFields                protoimpl.UnknownFields
@@ -222,6 +223,16 @@ func (x *Grain) GetReentrancy() *ReentrancyConfig {
 	return nil
 }
 
+func (x *Grain) GetRole() string {
+	if x != nil {
+		if x.xxx_hidden_Role != nil {
+			return *x.xxx_hidden_Role
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *Grain) SetGrainId(v *GrainId) {
 	x.xxx_hidden_GrainId = v
 }
@@ -248,7 +259,7 @@ func (x *Grain) SetActivationRetries(v int32) {
 
 func (x *Grain) SetMailboxCapacity(v int64) {
 	x.xxx_hidden_MailboxCapacity = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 10)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 11)
 }
 
 func (x *Grain) SetDisableRelocation(v bool) {
@@ -261,6 +272,11 @@ func (x *Grain) SetEagerRelocation(v bool) {
 
 func (x *Grain) SetReentrancy(v *ReentrancyConfig) {
 	x.xxx_hidden_Reentrancy = v
+}
+
+func (x *Grain) SetRole(v string) {
+	x.xxx_hidden_Role = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 10, 11)
 }
 
 func (x *Grain) HasGrainId() bool {
@@ -291,6 +307,13 @@ func (x *Grain) HasReentrancy() bool {
 	return x.xxx_hidden_Reentrancy != nil
 }
 
+func (x *Grain) HasRole() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 10)
+}
+
 func (x *Grain) ClearGrainId() {
 	x.xxx_hidden_GrainId = nil
 }
@@ -306,6 +329,11 @@ func (x *Grain) ClearMailboxCapacity() {
 
 func (x *Grain) ClearReentrancy() {
 	x.xxx_hidden_Reentrancy = nil
+}
+
+func (x *Grain) ClearRole() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 10)
+	x.xxx_hidden_Role = nil
 }
 
 type Grain_builder struct {
@@ -327,6 +355,11 @@ type Grain_builder struct {
 	// relocation and remote activation reconstruct it. Absent when the grain has
 	// no policy.
 	Reentrancy *ReentrancyConfig
+	// role carries the node role required to host the grain
+	// (WithActivationRole) so that eager relocation and remote activation
+	// preserve role-constrained placement. Absent when the grain has no role
+	// constraint.
+	Role *string
 }
 
 func (b0 Grain_builder) Build() *Grain {
@@ -340,12 +373,16 @@ func (b0 Grain_builder) Build() *Grain {
 	x.xxx_hidden_ActivationTimeout = b.ActivationTimeout
 	x.xxx_hidden_ActivationRetries = b.ActivationRetries
 	if b.MailboxCapacity != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 10)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 11)
 		x.xxx_hidden_MailboxCapacity = *b.MailboxCapacity
 	}
 	x.xxx_hidden_DisableRelocation = b.DisableRelocation
 	x.xxx_hidden_EagerRelocation = b.EagerRelocation
 	x.xxx_hidden_Reentrancy = b.Reentrancy
+	if b.Role != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 10, 11)
+		x.xxx_hidden_Role = b.Role
+	}
 	return m0
 }
 
@@ -358,7 +395,7 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\xf1\x03\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\x93\x04\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -372,8 +409,10 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\n" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
-	"reentrancyB\x13\n" +
-	"\x11_mailbox_capacityB\xa3\x01\n" +
+	"reentrancy\x12\x17\n" +
+	"\x04role\x18\v \x01(\tH\x01R\x04role\x88\x01\x01B\x13\n" +
+	"\x11_mailbox_capacityB\a\n" +
+	"\x05_roleB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +

@@ -32,4 +32,9 @@ message Grain {
   // relocation and remote activation reconstruct it. Absent when the grain has
   // no policy.
   internalpb.ReentrancyConfig reentrancy = 10;
+  // role carries the node role required to host the grain
+  // (WithActivationRole) so that eager relocation and remote activation
+  // preserve role-constrained placement. Absent when the grain has no role
+  // constraint.
+  optional string role = 11;
 }

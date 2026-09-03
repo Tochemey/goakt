@@ -80,6 +80,11 @@ type GrainRequest struct {
 	// Reentrancy is the Grain's async request policy, carried so that remote
 	// activation reconstructs it. Nil when the Grain has no policy.
 	Reentrancy *reentrancy.Reentrancy
+
+	// Role is the node role required to host the Grain (WithActivationRole),
+	// carried so that remote activation and relocation preserve role-constrained
+	// placement. Empty when the Grain has no role constraint.
+	Role string
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

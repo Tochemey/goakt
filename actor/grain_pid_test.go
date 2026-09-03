@@ -340,6 +340,30 @@ func TestToWireGrainDisableRelocation(t *testing.T) {
 	require.True(t, wire.GetDisableRelocation())
 }
 
+func TestToWireGrainActivationRole(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	// a grain without an activation role carries none on the wire
+	identity := newGrainIdentity(&MockGrain{}, "wire-no-role")
+	pid := newGrainPID(identity, &MockGrain{}, sys, newGrainConfig())
+	wire, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.False(t, wire.HasRole())
+
+	// the activation role survives serialization so relocation and remote
+	// activation preserve role-constrained placement
+	identity = newGrainIdentity(&MockGrain{}, "wire-role")
+	pid = newGrainPID(identity, &MockGrain{}, sys, newGrainConfig(WithActivationRole("game-worker")))
+	wire, err = pid.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, wire.HasRole())
+	require.Equal(t, "game-worker", wire.GetRole())
+}
+
 // reentrantRecordingGrain records what its OnReceive handles so the pause and
 // envelope tests can assert exactly which messages were processed, in which
 // order, and with which request metadata.

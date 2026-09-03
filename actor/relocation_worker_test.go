@@ -1622,3 +1622,308 @@ func TestRelocationWorkerFinishToleratesResetStore(t *testing.T) {
 	_, inflight := sys.relocationJob("127.0.0.1:9000")
 	require.False(t, inflight)
 }
+
+// TestGrainPlacementRole verifies only eager grains carry a placement
+// constraint: a lazy grain's relocation is a directory release any node can
+// perform, so its role never constrains the relocation target.
+func TestGrainPlacementRole(t *testing.T) {
+	role := "game-worker"
+
+	eager := internalpb.Grain_builder{
+		GrainId:         internalpb.GrainId_builder{Value: "kind/eager"}.Build(),
+		EagerRelocation: true,
+		Role:            &role,
+	}.Build()
+	assert.Equal(t, "game-worker", grainPlacementRole(eager))
+
+	lazy := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
+		Role:    &role,
+	}.Build()
+	assert.Empty(t, grainPlacementRole(lazy))
+
+	roleless := internalpb.Grain_builder{
+		GrainId:         internalpb.GrainId_builder{Value: "kind/roleless"}.Build(),
+		EagerRelocation: true,
+	}.Build()
+	assert.Empty(t, grainPlacementRole(roleless))
+}
+
+// TestAllocateGrainsByRole verifies the role-aware grain allocation used by the
+// relocation worker: grains without a placement constraint keep the historical
+// even split of allocateGrains, eager role-constrained grains land only on
+// targets advertising their role (leader included), and a grain no surviving
+// target can host is returned as unplaceable.
+func TestAllocateGrainsByRole(t *testing.T) {
+	newGrain := func(name, role string, eager bool) *internalpb.Grain {
+		builder := internalpb.Grain_builder{
+			GrainId:         internalpb.GrainId_builder{Value: name}.Build(),
+			EagerRelocation: eager,
+		}
+		if role != "" {
+			builder.Role = &role
+		}
+		return builder.Build()
+	}
+
+	t.Run("role-less grains keep the even split", func(t *testing.T) {
+		grains := make([]*internalpb.Grain, 5)
+		for i := range grains {
+			grains[i] = newGrain(fmt.Sprintf("grain-%d", i), "", false)
+		}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.1", RemotingPort: 1},
+			{Host: "10.0.0.2", RemotingPort: 2},
+		}
+
+		wantLeader, wantPeers := allocateGrains(len(peers)+1, grains)
+		leader, peersShares, unplaceable := allocateGrainsByRole(nil, peers, grains)
+
+		assert.Equal(t, wantLeader, leader)
+		assert.Equal(t, wantPeers, peersShares)
+		assert.Empty(t, unplaceable)
+	})
+
+	t.Run("eager role-constrained grains land only on eligible targets", func(t *testing.T) {
+		grains := []*internalpb.Grain{
+			newGrain("kind/eager-worker-1", "game-worker", true),
+			newGrain("kind/eager-worker-2", "game-worker", true),
+			newGrain("kind/eager-leader-only", "gpu", true),
+			newGrain("kind/lazy-worker", "game-worker", false),
+			newGrain("kind/eager-unplaceable", "missing", true),
+		}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.1", RemotingPort: 1, Roles: []string{"game-worker"}},
+			{Host: "10.0.0.2", RemotingPort: 2},
+		}
+
+		leader, peersShares, unplaceable := allocateGrainsByRole([]string{"gpu"}, peers, grains)
+		require.Len(t, peersShares, len(peers)+1)
+
+		// both eager game-worker grains land on the game-worker peer
+		workerIDs := grainIDs(peersShares[1])
+		assert.Contains(t, workerIDs, "kind/eager-worker-1")
+		assert.Contains(t, workerIDs, "kind/eager-worker-2")
+
+		// the gpu grain goes to the leader, the only target advertising gpu,
+		// and the leader share stays in sync with its fan-out slot
+		leaderIDs := grainIDs(leader)
+		assert.Contains(t, leaderIDs, "kind/eager-leader-only")
+		assert.Subset(t, leaderIDs, grainIDs(peersShares[0]))
+
+		// the lazy grain is unconstrained: it lands somewhere, never nowhere
+		total := len(leader)
+		for i := 1; i < len(peersShares); i++ {
+			total += len(peersShares[i])
+		}
+		assert.Equal(t, 4, total)
+
+		// the grain whose role nobody advertises is unplaceable
+		require.Len(t, unplaceable, 1)
+		assert.Equal(t, "kind/eager-unplaceable", unplaceable[0].GetGrainId().GetValue())
+	})
+
+	t.Run("widens the fan-out when only constrained grains exist", func(t *testing.T) {
+		grains := []*internalpb.Grain{newGrain("kind/eager-worker", "game-worker", true)}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.1", RemotingPort: 1},
+			{Host: "10.0.0.2", RemotingPort: 2, Roles: []string{"game-worker"}},
+		}
+
+		leader, peersShares, unplaceable := allocateGrainsByRole(nil, peers, grains)
+		assert.Empty(t, leader)
+		assert.Empty(t, unplaceable)
+
+		// the even split saw no grains, yet the constrained grain must still
+		// reach the second peer fan-out slot
+		require.Len(t, peersShares, len(peers)+1)
+		require.Len(t, peersShares[2], 1)
+		assert.Equal(t, "kind/eager-worker", peersShares[2][0].GetGrainId().GetValue())
+	})
+}
+
+// grainIDs flattens grain identities for containment assertions.
+func grainIDs(grains []*internalpb.Grain) []string {
+	ids := make([]string, 0, len(grains))
+	for _, grain := range grains {
+		ids = append(ids, grain.GetGrainId().GetValue())
+	}
+	return ids
+}
+
+// TestRelocationWorkerHonorsEagerGrainRole verifies the whole relocation flow
+// for issue #1334: an eager grain created with WithActivationRole is relocated
+// only to a surviving node advertising that role, and an eager grain whose
+// role no survivor advertises is reported in a RelocationFailed event instead
+// of being reactivated on an ineligible node.
+func TestRelocationWorkerHonorsEagerGrainRole(t *testing.T) {
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	workerRole := "game-worker"
+	missingRole := "missing"
+
+	workerPeer := &cluster.Peer{Host: "127.0.0.2", RemotingPort: 9002, Roles: []string{"game-worker"}}
+	plainPeer := &cluster.Peer{Host: "127.0.0.3", RemotingPort: 9003}
+
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{workerPeer, plainPeer}, nil).Once()
+	// the lazy grain is the leader share of the even split and is released locally
+	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
+		Return(internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
+			Host:    "127.0.0.1",
+			Port:    8080,
+		}.Build(), nil).Once()
+	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+
+	// the eager game-worker grain travels only to the game-worker peer; the
+	// role-less peer must receive nothing
+	var batched []*internalpb.Grain
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.2", 9002, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+			batched = append(batched, request.GetGrains()...)
+			return new(internalpb.RelocateBatchResponse), nil
+		}).Once()
+
+	store := &recordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := internalpb.PeerState_builder{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Grains: map[string]*internalpb.Grain{
+			"worker-bound": internalpb.Grain_builder{
+				GrainId:         internalpb.GrainId_builder{Kind: "kind", Name: "worker-bound", Value: "kind/worker-bound"}.Build(),
+				EagerRelocation: true,
+				Role:            &workerRole,
+			}.Build(),
+			"unplaceable": internalpb.Grain_builder{
+				GrainId:         internalpb.GrainId_builder{Kind: "kind", Name: "unplaceable", Value: "kind/unplaceable"}.Build(),
+				EagerRelocation: true,
+				Role:            &missingRole,
+			}.Build(),
+			"lazy": internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Kind: "kind", Name: "lazy", Value: "kind/lazy"}.Build(),
+			}.Build(),
+		},
+	}.Build()
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+
+	worker := &relocationWorker{
+		remoting: remotingMock,
+		pid: &PID{
+			actorSystem:  system,
+			logger:       log.DiscardLogger,
+			eventsStream: stream,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
+	worker.relocate(receiveCtx, peerState)
+
+	// the game-worker grain reached the game-worker peer with its role intact
+	require.Len(t, batched, 1)
+	assert.Equal(t, "kind/worker-bound", batched[0].GetGrainId().GetValue())
+	assert.Equal(t, "game-worker", batched[0].GetRole())
+	assert.True(t, batched[0].GetEagerRelocation())
+
+	// the grain whose role no survivor advertises is reported, not reactivated
+	events := collectRelocationFailedEvents(consumer)
+	require.Len(t, events, 1)
+	assert.Equal(t, []string{"kind/unplaceable"}, events[0].Grains())
+	assert.Empty(t, events[0].Actors())
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+}
+
+// TestRelocationWorkerRedistributesEagerGrainByRole verifies the redistribution
+// path taken when a share target peer is unreachable: an eager role-constrained
+// grain moves to a survivor advertising its role, an unconstrained lazy grain
+// moves to any survivor, and an eager grain no survivor can host is recorded as
+// a failure.
+func TestRelocationWorkerRedistributesEagerGrainByRole(t *testing.T) {
+	ctx := context.Background()
+
+	workerRole := "game-worker"
+	missingRole := "missing"
+
+	transportErr := stdErrors.New("connection refused")
+	remotingMock := mocksremote.NewClient(t)
+	// the original target fails all attempts, forcing redistribution
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.1", 9001, mock.Anything).
+		Return(nil, transportErr).Times(relocationBatchMaxAttempts)
+
+	// the role-less survivor takes the lazy grain
+	var plainBatched []*internalpb.Grain
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.2", 9002, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+			plainBatched = append(plainBatched, request.GetGrains()...)
+			return new(internalpb.RelocateBatchResponse), nil
+		}).Once()
+
+	// the game-worker survivor takes the eager role-constrained grain
+	var workerBatched []*internalpb.Grain
+	remotingMock.EXPECT().RelocateBatch(mock.Anything, "127.0.0.3", 9003, mock.Anything).
+		RunAndReturn(func(_ context.Context, _ string, _ int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error) {
+			workerBatched = append(workerBatched, request.GetGrains()...)
+			return new(internalpb.RelocateBatchResponse), nil
+		}).Once()
+
+	worker := &relocationWorker{remoting: remotingMock, logger: log.DiscardLogger}
+	peers := []*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 9001},
+		{Host: "127.0.0.2", RemotingPort: 9002},
+		{Host: "127.0.0.3", RemotingPort: 9003, Roles: []string{"game-worker"}},
+	}
+	requests := buildRelocateBatchRequests("127.0.0.1:8080", nil,
+		[]*internalpb.Grain{
+			internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build()}.Build(),
+			internalpb.Grain_builder{
+				GrainId:         internalpb.GrainId_builder{Value: "kind/worker-bound"}.Build(),
+				EagerRelocation: true,
+				Role:            &workerRole,
+			}.Build(),
+			internalpb.Grain_builder{
+				GrainId:         internalpb.GrainId_builder{Value: "kind/unplaceable"}.Build(),
+				EagerRelocation: true,
+				Role:            &missingRole,
+			}.Build(),
+		})
+	failures := &relocationFailures{}
+
+	worker.relocateShare(ctx, requests, peers[0], peers, failures)
+
+	require.Len(t, plainBatched, 1)
+	assert.Equal(t, "kind/lazy", plainBatched[0].GetGrainId().GetValue())
+
+	require.Len(t, workerBatched, 1)
+	assert.Equal(t, "kind/worker-bound", workerBatched[0].GetGrainId().GetValue())
+	assert.Equal(t, "game-worker", workerBatched[0].GetRole())
+
+	// with no system (test double), the leader qualifies for no role: the
+	// missing-role grain is recorded as a failure
+	items := failures.items()
+	require.Len(t, items, 1)
+	assert.True(t, items[0].GetGrain())
+	assert.Equal(t, "kind/unplaceable", items[0].GetId())
+	assert.Contains(t, items[0].GetMessage(), "missing")
+}
