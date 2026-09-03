@@ -4267,6 +4267,14 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 		sup.WithAnyErrorDirective(sup.EscalateDirective),
 	)
 
+	// a failed cluster-registry cleanup (clusterCleanupError) is usually a
+	// transient hiccup while the cluster digests a membership change, so
+	// DeathWatch resumes and keeps processing terminations instead of
+	// escalating and stopping an otherwise healthy node (issue #1337). The
+	// rule is registered after construction because a catch-all directive
+	// passed as an option supersedes every specific rule set alongside it.
+	supervisor.SetDirectiveByType(errorType(new(clusterCleanupError)), sup.ResumeDirective)
+
 	x.deathWatch, _ = x.configPID(ctx,
 		actorName,
 		newDeathWatch(),
