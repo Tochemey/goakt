@@ -1002,6 +1002,21 @@ func TestFindActivationPeer(t *testing.T) {
 		require.Nil(t, peer)
 	})
 
+	t.Run("returns the sole peer matching the required role", func(t *testing.T) {
+		ctx := t.Context()
+		clmock := mocks.NewCluster(t)
+		sys := &actorSystem{cluster: clmock, logger: log.DiscardLogger}
+		eligible := &cluster.Peer{Host: "10.0.0.2", Roles: []string{"worker"}}
+		clmock.EXPECT().Members(ctx).Return([]*cluster.Peer{
+			{Host: "10.0.0.1", Roles: []string{"gateway"}},
+			eligible,
+		}, nil)
+
+		peer, err := sys.findActivationPeer(ctx, newGrainConfig(WithActivationRole("worker")))
+		require.NoError(t, err)
+		require.Same(t, eligible, peer)
+	})
+
 	t.Run("random activation picks a remote peer", func(t *testing.T) {
 		ctx := t.Context()
 		clmock := mocks.NewCluster(t)

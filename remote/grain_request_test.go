@@ -40,11 +40,13 @@ func TestGrainActivationRequestValidateAndSanitize(t *testing.T) {
 			Dependencies:      []extension.Dependency{mockDependency{id: "dep"}},
 			ActivationTimeout: 0,
 			ActivationRetries: 0,
+			Role:              " worker ",
 		}
 		require.NoError(t, req.Validate())
 		req.Sanitize()
 		assert.Equal(t, "grain", req.Name)
 		assert.Equal(t, "kind", req.Kind)
+		assert.Equal(t, "worker", req.Role)
 		assert.Equal(t, time.Second, req.ActivationTimeout)
 		assert.Equal(t, 5, req.ActivationRetries)
 	})

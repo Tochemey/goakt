@@ -230,7 +230,7 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	}
 
 	leaderActors, peerActors, unplaceableActors := allocateActors(system.getNodeRoles(), peers, peerState, loads)
-	leaderGrains, peerGrains := allocateGrains(len(peers)+1, grains)
+	leaderGrains, peerGrains, unplaceableGrains := allocateGrains(system.getNodeRoles(), peers, grains)
 
 	// Role-constrained actors with no surviving eligible node cannot be
 	// relocated; record them so subscribers observe the loss via RelocationFailed
@@ -239,6 +239,12 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by actor %s", wireActor.GetRole(), wireActor.GetAddress()))
 		w.logger.Errorf("cannot relocate actor=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", wireActor.GetAddress(), rerr)
 		failures.record(wireActor.GetAddress(), false, rerr)
+	}
+	for _, wireGrain := range unplaceableGrains {
+		identity := wireGrain.GetGrainId().GetValue()
+		rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by grain %s", wireGrain.GetRole(), identity))
+		w.logger.Errorf("cannot relocate grain=%s: %v (hint: add a node advertising the required role, or remove the role constraint)", identity, rerr)
+		failures.record(identity, true, rerr)
 	}
 
 	eg := new(errgroup.Group)
@@ -440,16 +446,14 @@ func retryRelocationItem(ctx context.Context, recreate func() error) error {
 
 // relocateShare delivers one peer's share, batch by batch, to its target. When
 // the target becomes unreachable the unsent remainder is redistributed across
-// the remaining survivors: each actor moves to a survivor that advertises its
-// required role and grains (which carry no role) move to a survivor, so a
-// role-constrained actor is not dropped merely because one ring-neighbor lacks
-// its role. The leader (this node) counts as a surviving host too: an actor
-// only it can host by role is recreated locally, and when no peer survives the
-// whole remainder is taken locally instead of being reported lost. An actor
-// that no surviving node (leader included) can host is recorded once with an
-// accurate message; items a chosen survivor also fails to accept are recorded
-// as failed (eager grains and actors) or have their lazy directory entry
-// released.
+// the remaining survivors: each actor or grain moves to a survivor that
+// advertises its required role. The leader (this node) counts as a surviving
+// host too: an item only it can host by role is recreated locally, and when no
+// peer survives the whole eligible remainder is taken locally instead of being
+// reported lost. An item that no surviving node (leader included) can host is
+// recorded once with an accurate message. Items a chosen survivor also fails
+// to accept are recorded as failed (eager grains and actors) or have their lazy
+// directory entry released.
 func (w *relocationWorker) relocateShare(ctx context.Context, requests []*internalpb.RelocateBatchRequest, target *cluster.Peer, peers []*cluster.Peer, failures *relocationFailures) {
 	remaining, err := w.sendBatches(ctx, target, requests, failures)
 	if err == nil {
@@ -474,15 +478,7 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 	}
 
 	departedNode := departedNodeOf(remaining)
-	actorShares, leaderActors, grains := reassignByRole(remaining, survivors, leaderRoles, failures)
-
-	// With no peer left standing the leader is the last surviving node, so it
-	// also takes the grains (eager reactivated locally, lazy released).
-	var leaderGrains []*internalpb.Grain
-	if len(survivors) == 0 {
-		leaderGrains = grains
-		grains = nil
-	}
+	actorShares, leaderActors, grainShares, leaderGrains := reassignByRole(remaining, survivors, leaderRoles, failures)
 
 	if len(leaderActors) > 0 || len(leaderGrains) > 0 {
 		system := w.pid.ActorSystem()
@@ -490,14 +486,6 @@ func (w *relocationWorker) relocateShare(ctx context.Context, requests []*intern
 		eg.SetLimit(defaultRelocationConcurrency)
 		enqueueRelocation(ctx, eg, system, w.logger, departedNode, leaderActors, leaderGrains, failures.record)
 		_ = eg.Wait()
-	}
-
-	// Grains carry no role, so they spread round-robin across the survivors
-	// instead of piling onto one ring-neighbor; a share whose target is
-	// unreachable is released (lazy) or recorded (eager) below.
-	grainShares := make([][]*internalpb.Grain, len(survivors))
-	for i, grain := range grains {
-		grainShares[i%len(survivors)] = append(grainShares[i%len(survivors)], grain)
 	}
 
 	for i, survivor := range survivors {
@@ -538,21 +526,36 @@ func departedNodeOf(requests []*internalpb.RelocateBatchRequest) string {
 	return ""
 }
 
-// reassignByRole distributes the unsent actors across survivors, assigning each
-// actor to the least-loaded survivor advertising its required role (ties break
-// on the lower index) so the redistributed share spreads out instead of piling
-// onto one ring-neighbor. An actor no peer can host falls back to the leader
-// (this node) when leaderRoles qualify it, so an actor whose only remaining
-// eligible host is the leader is recovered locally instead of being dropped;
-// only an actor that no surviving node (leader included) can host is recorded
-// as failed. It returns the per-survivor actor shares (aligned to survivors),
-// the leader's local share, and the flattened grains, which carry no role and
-// are placed by the caller.
-func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cluster.Peer, leaderRoles []string, failures *relocationFailures) (actorShares [][]*internalpb.Actor, leaderActors []*internalpb.Actor, grains []*internalpb.Grain) {
+// reassignByRole distributes the unsent actors and grains across survivors,
+// assigning each actor or grain to the least-loaded survivor advertising its
+// required role (ties break on the lower index) so the redistributed share
+// spreads out instead of piling onto one ring-neighbor. An actor no peer can
+// host falls back to the leader (this node) when leaderRoles qualify it. An
+// actor whose only remaining eligible host is the leader is recovered locally
+// instead of being dropped;
+// only an item that no surviving node (leader included) can host is recorded
+// as failed. Returned peer shares are aligned to survivors.
+func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cluster.Peer, leaderRoles []string, failures *relocationFailures) (actorShares [][]*internalpb.Actor, leaderActors []*internalpb.Actor, grainShares [][]*internalpb.Grain, leaderGrains []*internalpb.Grain) {
 	actorShares = make([][]*internalpb.Actor, len(survivors))
+	grainShares = make([][]*internalpb.Grain, len(survivors))
 
 	for _, request := range requests {
-		grains = append(grains, request.GetGrains()...)
+		for _, wireGrain := range request.GetGrains() {
+			role := grainRelocationRole(wireGrain)
+			if idx := leastLoadedEligibleGrainSurvivor(survivors, grainShares, role); idx >= 0 {
+				grainShares[idx] = append(grainShares[idx], wireGrain)
+				continue
+			}
+
+			if eligibleForRole(leaderRoles, role) {
+				leaderGrains = append(leaderGrains, wireGrain)
+				continue
+			}
+
+			identity := wireGrain.GetGrainId().GetValue()
+			rerr := errors.NewRebalancingError(fmt.Errorf("no surviving node advertises role %q required by grain %s", role, identity))
+			failures.record(identity, true, rerr)
+		}
 
 		for _, wireActor := range request.GetActors() {
 			if idx := leastLoadedEligibleSurvivor(survivors, actorShares, wireActor.GetRole()); idx >= 0 {
@@ -570,7 +573,31 @@ func reassignByRole(requests []*internalpb.RelocateBatchRequest, survivors []*cl
 		}
 	}
 
-	return actorShares, leaderActors, grains
+	return actorShares, leaderActors, grainShares, leaderGrains
+}
+
+func leastLoadedEligibleGrainSurvivor(survivors []*cluster.Peer, shares [][]*internalpb.Grain, role string) int {
+	best := -1
+	for i, survivor := range survivors {
+		if !eligibleForRole(survivor.Roles, role) {
+			continue
+		}
+		if best < 0 || len(shares[i]) < len(shares[best]) {
+			best = i
+		}
+	}
+	return best
+}
+
+// grainRelocationRole applies placement constraints only when relocation
+// actually activates the Grain. Lazy relocation merely removes a stale
+// directory entry, so that cleanup can run on any survivor; the next explicit
+// activation still applies the caller's Grain options.
+func grainRelocationRole(grain *internalpb.Grain) string {
+	if grain.GetEagerRelocation() {
+		return grain.GetRole()
+	}
+	return ""
 }
 
 // leastLoadedEligibleSurvivor returns the index of the eligible survivor with
@@ -937,32 +964,41 @@ func relocatableGrains(grains map[string]*internalpb.Grain) []*internalpb.Grain 
 	return relocatable
 }
 
-// allocateGrains distributes grains among the leader and peers for rebalancing.
+// allocateGrains distributes grains among eligible relocation targets while
+// preserving each Grain's activation-role constraint.
 //
-// It returns two values:
+// It returns three values:
 //   - leaderShares: grains to be created on the leader node
 //   - peersShares: a slice of grain slices; the first entry belongs to the
 //     leader and entries 1..n map to peers 0..n-1
-func allocateGrains(totalPeers int, grains []*internalpb.Grain) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain) {
-	grainCount := len(grains)
-
-	// Collect all grains to be rebalanced
-	toRebalances := make([]*internalpb.Grain, 0, grainCount)
-	toRebalances = append(toRebalances, grains...)
-
-	quotient := grainCount / totalPeers
-	remainder := grainCount % totalPeers
-
-	// Assign the remainder grains to the leader
-	leaderShares = append(leaderShares, toRebalances[:remainder]...)
-
-	// Chunk the remaining grains for peers
-	peersShares = chunk.Chunkify(toRebalances[remainder:], quotient)
-
-	// Ensure leader takes the first chunk
-	if len(peersShares) > 0 {
-		leaderShares = append(leaderShares, peersShares[0]...)
+//   - unplaceable: grains whose required role is not advertised by any target
+func allocateGrains(leaderRoles []string, peers []*cluster.Peer, grains []*internalpb.Grain) (leaderShares []*internalpb.Grain, peersShares [][]*internalpb.Grain, unplaceable []*internalpb.Grain) {
+	targetRoles := make([][]string, 0, len(peers)+1)
+	targetRoles = append(targetRoles, leaderRoles)
+	for _, peer := range peers {
+		targetRoles = append(targetRoles, peer.Roles)
 	}
 
-	return leaderShares, peersShares
+	peersShares = make([][]*internalpb.Grain, len(targetRoles))
+	loads := make([]int, len(targetRoles))
+	for _, grain := range grains {
+		role := grainRelocationRole(grain)
+		best := -1
+		for idx := range targetRoles {
+			if !eligibleForRole(targetRoles[idx], role) {
+				continue
+			}
+			if best == -1 || loads[idx] < loads[best] {
+				best = idx
+			}
+		}
+		if best == -1 {
+			unplaceable = append(unplaceable, grain)
+			continue
+		}
+		peersShares[best] = append(peersShares[best], grain)
+		loads[best]++
+	}
+	leaderShares = append(leaderShares, peersShares[0]...)
+	return leaderShares, peersShares, unplaceable
 }

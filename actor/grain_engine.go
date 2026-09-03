@@ -534,6 +534,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		DisableRelocation: grain.GetDisableRelocation(),
 		EagerRelocation:   grain.GetEagerRelocation(),
 		Reentrancy:        codec.DecodeReentrancy(grain.GetReentrancy()),
+		Role:              grain.GetRole(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1469,6 +1470,9 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
 			WithGrainDependencies(dependencies...),
 		}
+		if serializedGrain.GetRole() != "" {
+			options = append(options, WithActivationRole(serializedGrain.GetRole()))
+		}
 
 		if serializedGrain.HasMailboxCapacity() {
 			capacity := serializedGrain.GetMailboxCapacity()
@@ -1539,7 +1543,16 @@ func (x *actorSystem) findActivationPeer(ctx context.Context, config *grainConfi
 		return nil, err
 	}
 
-	if len(peers) <= 1 {
+	if len(peers) == 0 {
+		return nil, nil
+	}
+	if len(peers) == 1 {
+		// Role filtering may remove the local node and leave one eligible remote
+		// node. Returning nil here would incorrectly activate on the ineligible
+		// caller instead of selecting that sole candidate.
+		if config.role != nil {
+			return peers[0], nil
+		}
 		return nil, nil
 	}
 

@@ -2128,6 +2128,31 @@ func TestWireGrainDisableRelocation(t *testing.T) {
 	require.True(t, wire.GetDisableRelocation())
 }
 
+func TestWireAndRecreateGrainPreserveActivationRole(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+	identity := newGrainIdentity(&MockGrain{}, "recreate-role")
+	wire, err := wireGrain(identity, newGrainConfig(WithActivationRole("worker")), as.Host(), as.Port())
+	require.NoError(t, err)
+	require.Equal(t, "worker", wire.GetRole())
+
+	require.NoError(t, as.recreateGrain(ctx, wire))
+	pid, ok := as.grains.Get(identity.String())
+	require.True(t, ok)
+	require.NotNil(t, pid.config.role)
+	assert.Equal(t, "worker", *pid.config.role)
+
+	republished, err := pid.toWireGrain()
+	require.NoError(t, err)
+	assert.Equal(t, "worker", republished.GetRole())
+}
+
 func TestRecreateGrainPreservesDisableRelocation(t *testing.T) {
 	ctx := t.Context()
 	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -2259,8 +2284,8 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	ctx := t.Context()
 	name := "remote-config-grain"
 	identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
-	remotePeer := &cluster.Peer{Host: "192.0.2.30", PeersPort: 15030, RemotingPort: 16030}
-	alternatePeer := &cluster.Peer{Host: "192.0.2.31", PeersPort: 15031, RemotingPort: 16031}
+	remotePeer := &cluster.Peer{Host: "192.0.2.30", PeersPort: 15030, RemotingPort: 16030, Roles: []string{"worker"}}
+	alternatePeer := &cluster.Peer{Host: "192.0.2.31", PeersPort: 15031, RemotingPort: 16031, Roles: []string{"worker"}}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14030, RemotingPort: 8095}
 
 	cl := mockcluster.NewCluster(t)
@@ -2280,7 +2305,8 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 			actual.GetDisableRelocation() &&
 			actual.GetActivationTimeout().AsDuration() == 9*time.Second &&
 			actual.GetActivationRetries() == 3 &&
-			actual.GetMailboxCapacity() == 64
+			actual.GetMailboxCapacity() == 64 &&
+			actual.GetRole() == "worker"
 	})).Return(nil).Once()
 
 	// the remote activation request must carry the same configuration instead of defaults
@@ -2290,7 +2316,8 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 			req.DisableRelocation &&
 			req.ActivationTimeout == 9*time.Second &&
 			req.ActivationRetries == 3 &&
-			req.MailboxCapacity == 64
+			req.MailboxCapacity == 64 &&
+			req.Role == "worker"
 	})).Return(nil)
 
 	got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name,
@@ -2298,7 +2325,8 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 		WithGrainDisableRelocation(),
 		WithGrainInitTimeout(9*time.Second),
 		WithGrainInitMaxRetries(3),
-		WithGrainMailboxCapacity(64))
+		WithGrainMailboxCapacity(64),
+		WithActivationRole("worker"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())

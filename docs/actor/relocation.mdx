@@ -200,11 +200,12 @@ of the departed node's actors.
 
 ### Role-aware allocation
 
-When an actor is spawned with `WithRole`, relocation only considers nodes that advertise that role (the same constraint
-that governs initial placement). The worker assigns each role-constrained actor to the **least-loaded eligible target**
-among the leader and surviving peers; role-less actors are eligible everywhere.
+When an actor is spawned with `WithRole`, or an eager grain is activated with `WithActivationRole`, relocation only
+considers nodes that advertise that role (the same constraint that governs initial placement). The worker serializes
+the constraint with the actor or grain and assigns each role-constrained item to the **least-loaded eligible target**
+among the leader and surviving peers; role-less items are eligible everywhere.
 
-If **no surviving node advertises the required role**, the actor cannot be relocated. It is reported in the
+If **no surviving node advertises the required role**, the item cannot be relocated. It is reported in the
 `RelocationFailed` event rather than being silently dropped, so you can subscribe and react (add capacity for that role,
 or relax the constraint). Singletons are always routed to the leader share, where the cluster singleton spawn path
 re-arbitrates their placement (including any role constraint).
@@ -282,8 +283,9 @@ next time it is addressed (`TellGrain`/`AskGrain`). This avoids an `OnActivate` 
 never be called again. The cleanup work itself is distributed like any other relocation item (remainder to the leader,
 then chunks to peers), so it does not funnel through a single node.
 
-Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node,
-the same way actors are. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
+Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on an eligible target
+node, the same way actors are. Their `WithActivationRole` constraint is preserved across relocation. Grains with
+`WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
 
 ## Configuration
 

@@ -1262,6 +1262,16 @@ func TestRemoteActivateGrain_InvalidRequest(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestGetGrainFromRequestPreservesRole(t *testing.T) {
+	wire, err := getGrainFromRequest("127.0.0.1", 9000, &remote.GrainRequest{
+		Kind: "kind",
+		Name: "name",
+		Role: " worker ",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "worker", wire.GetRole())
+}
+
 func TestRemoteBatchTell_NoSerializer(t *testing.T) {
 	r := NewClient()
 	from := address.New("from", "sys", "127.0.0.1", 1000)

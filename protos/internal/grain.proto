@@ -32,4 +32,7 @@ message Grain {
   // relocation and remote activation reconstruct it. Absent when the grain has
   // no policy.
   internalpb.ReentrancyConfig reentrancy = 10;
+  // role retains the node-role constraint across remote activation and
+  // relocation. Empty means the grain may be hosted by any node.
+  string role = 11;
 }

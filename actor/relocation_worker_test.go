@@ -820,7 +820,7 @@ func testReassignByRoleSpreadsLoad(t *testing.T) {
 	}
 
 	failures := &relocationFailures{}
-	actorShares, leaderActors, _ := reassignByRole(requests, survivors, nil, failures)
+	actorShares, leaderActors, _, _ := reassignByRole(requests, survivors, nil, failures)
 
 	// role-less actors must spread evenly instead of piling onto survivors[0]
 	require.Len(t, actorShares, 3)
@@ -863,7 +863,7 @@ func testReassignByRoleDistribution(t *testing.T) {
 	}
 
 	failures := &relocationFailures{}
-	actorShares, leaderActors, grains := reassignByRole(requests, survivors, nil, failures)
+	actorShares, leaderActors, grainShares, leaderGrains := reassignByRole(requests, survivors, nil, failures)
 
 	require.Len(t, actorShares, 3)
 	// role-less actor lands on the first survivor
@@ -879,8 +879,10 @@ func testReassignByRoleDistribution(t *testing.T) {
 	// a role-less leader takes nothing while survivors can host every actor
 	assert.Empty(t, leaderActors)
 
-	// grains are flattened out for the caller to place
-	require.Len(t, grains, 1)
+	// the role-less grain is assigned to the least-loaded grain survivor
+	require.Len(t, grainShares, 3)
+	require.Len(t, grainShares[0], 1)
+	assert.Empty(t, leaderGrains)
 
 	// the actor requiring a role no survivor advertises is recorded once
 	items := failures.items()
@@ -909,7 +911,7 @@ func testReassignByRoleLeaderFallback(t *testing.T) {
 	survivors := []*cluster.Peer{{Host: "10.0.0.1", RemotingPort: 1}}
 
 	failures := &relocationFailures{}
-	actorShares, leaderActors, grains := reassignByRole(requests, survivors, []string{"gpu"}, failures)
+	actorShares, leaderActors, grainShares, leaderGrains := reassignByRole(requests, survivors, []string{"gpu"}, failures)
 
 	require.Len(t, actorShares, 1)
 	require.Len(t, actorShares[0], 1)
@@ -918,7 +920,8 @@ func testReassignByRoleLeaderFallback(t *testing.T) {
 	require.Len(t, leaderActors, 1)
 	assert.Contains(t, leaderActors[0].GetAddress(), "gpu-actor")
 
-	assert.Empty(t, grains)
+	assert.Empty(t, grainShares[0])
+	assert.Empty(t, leaderGrains)
 
 	// only the actor no surviving node (leader included) can host is a failure
 	items := failures.items()
@@ -927,7 +930,7 @@ func testReassignByRoleLeaderFallback(t *testing.T) {
 
 	// with no survivors at all, every leader-eligible actor goes local
 	failures = &relocationFailures{}
-	actorShares, leaderActors, _ = reassignByRole(requests, nil, []string{"gpu"}, failures)
+	actorShares, leaderActors, _, _ = reassignByRole(requests, nil, []string{"gpu"}, failures)
 	assert.Empty(t, actorShares)
 	require.Len(t, leaderActors, 2)
 	require.Len(t, failures.items(), 1)
@@ -1222,22 +1225,54 @@ func TestRelocatableGrains(t *testing.T) {
 // slice across the leader and peer shares.
 func TestAllocateGrainsSlice(t *testing.T) {
 	t.Run("empty slice yields no shares", func(t *testing.T) {
-		leader, peers := allocateGrains(3, nil)
+		leader, peers, unplaceable := allocateGrains(nil, nil, nil)
 		assert.Empty(t, leader)
-		assert.Empty(t, peers)
+		require.Len(t, peers, 1)
+		assert.Empty(t, peers[0])
+		assert.Empty(t, unplaceable)
 	})
 
-	t.Run("distributes remainder and first chunk to the leader", func(t *testing.T) {
+	t.Run("distributes role-less grains evenly", func(t *testing.T) {
 		grains := make([]*internalpb.Grain, 5)
 		for i := range grains {
 			grains[i] = internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: fmt.Sprintf("grain-%d", i)}.Build()}.Build()
 		}
 
-		// totalPeers = leader + 2 peers = 3; quotient 1, remainder 2
-		leader, peers := allocateGrains(3, grains)
-		// remainder (2) + first chunk (1) go to the leader
-		assert.Len(t, leader, 3)
+		peersMeta := []*cluster.Peer{{Roles: []string{"worker"}}, {Roles: []string{"gateway"}}}
+		leader, peers, unplaceable := allocateGrains(nil, peersMeta, grains)
+		assert.Len(t, leader, 2)
 		require.Len(t, peers, 3)
+		assert.Len(t, peers[0], 2)
+		assert.Len(t, peers[1], 2)
+		assert.Len(t, peers[2], 1)
+		assert.Empty(t, unplaceable)
+	})
+
+	t.Run("honors grain role and reports missing role", func(t *testing.T) {
+		workerRole := "worker"
+		missingRole := "missing"
+		workerGrain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "worker-grain"}.Build(), Role: workerRole, EagerRelocation: true}.Build()
+		missingGrain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "missing-grain"}.Build(), Role: missingRole, EagerRelocation: true}.Build()
+		peersMeta := []*cluster.Peer{{Roles: []string{"worker"}}, {Roles: []string{"gateway"}}}
+
+		leader, peers, unplaceable := allocateGrains([]string{"gateway"}, peersMeta, []*internalpb.Grain{workerGrain, missingGrain})
+
+		assert.Empty(t, leader)
+		require.Len(t, peers, 3)
+		assert.Empty(t, peers[0], "gateway leader must not host worker grain")
+		require.Len(t, peers[1], 1)
+		assert.Equal(t, "worker-grain", peers[1][0].GetGrainId().GetValue())
+		assert.Empty(t, peers[2])
+		require.Len(t, unplaceable, 1)
+		assert.Equal(t, "missing-grain", unplaceable[0].GetGrainId().GetValue())
+	})
+
+	t.Run("lazy grain cleanup is not role constrained", func(t *testing.T) {
+		grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "lazy"}.Build(), Role: "missing"}.Build()
+		leader, peers, unplaceable := allocateGrains([]string{"gateway"}, nil, []*internalpb.Grain{grain})
+		require.Len(t, leader, 1)
+		require.Len(t, peers, 1)
+		assert.Empty(t, unplaceable)
 	})
 }
 

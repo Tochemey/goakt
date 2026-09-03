@@ -216,6 +216,10 @@ that carries them. A grain that passivated and is later reactivated by a bare `T
 identity comes back with the default configuration. When placement must be enforced on every activation, resolve the
 identity through `GrainOf` with your options before messaging.
 
+Eager relocation is the exception to call-site reactivation: the runtime retains the serialized activation role and
+only recreates the grain on a surviving node that advertises it. If no eligible node survives, relocation reports the
+grain through `RelocationFailed` instead of activating it on an unsuitable node.
+
 ### Kind registration on host nodes
 
 Remote activation, recreation, and relocation construct the grain as a zero value from its registered kind. Every node
