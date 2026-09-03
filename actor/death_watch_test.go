@@ -25,6 +25,7 @@ package actor
 import (
 	"context"
 	stdErrors "errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -32,11 +33,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 
-	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	sup "github.com/tochemey/goakt/v4/supervisor"
 )
 
 func TestDeathWatch(t *testing.T) {
@@ -78,7 +80,7 @@ func TestDeathWatch(t *testing.T) {
 		consumer.Shutdown()
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("System stops when RemoveActor call failed in cluster mode", func(t *testing.T) {
+	t.Run("System keeps running when RemoveActor call failed in cluster mode", func(t *testing.T) {
 		ctx := context.Background()
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
@@ -91,9 +93,6 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().ActorExists(mock.Anything, actorID).Return(false, nil)
 		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 		clmock.EXPECT().RemoveActor(mock.Anything, actorID).Return(stdErrors.New("removal failed"))
-		// The RemoveActor failure escalates to the system guardian which stops
-		// the whole system, so the shutdown path stops the cluster engine.
-		clmock.EXPECT().Stop(mock.Anything).Return(nil).Maybe()
 
 		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
 		// asynchronously during Start) picks it up via getCluster() without racing.
@@ -114,6 +113,17 @@ func TestDeathWatch(t *testing.T) {
 		sys.remotingEnabled.Store(true)
 		sys.relocationEnabled.Store(false)
 
+		t.Cleanup(func() {
+			// Detach the mocked cluster before stopping the system to avoid
+			// background shutdown workflows calling into unexpected mock methods.
+			sys.clusterEnabled.Store(false)
+			sys.remotingEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
 		cid, err := actorSys.Spawn(ctx, actorID, NewMockActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
@@ -127,9 +137,12 @@ func TestDeathWatch(t *testing.T) {
 
 		pause.For(time.Second)
 
+		// The removal failure is a resumable cluster cleanup error (issue #1337):
+		// DeathWatch resumes and the node keeps running instead of shutting down.
 		pid := actorSys.getDeathWatch()
-		require.False(t, pid.IsRunning())
-		require.False(t, actorSys.Running())
+		require.True(t, pid.IsRunning())
+		require.False(t, pid.IsSuspended())
+		require.True(t, actorSys.Running())
 	})
 	t.Run("With Terminated when PID not found return no error", func(t *testing.T) {
 		ctx := context.Background()
@@ -154,7 +167,7 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(time.Second)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
-	t.Run("With Terminated when cluster removal fails returns internal error", func(t *testing.T) {
+	t.Run("With Terminated when cluster removal fails returns cluster cleanup error", func(t *testing.T) {
 		ctx := context.Background()
 
 		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -211,8 +224,8 @@ func TestDeathWatch(t *testing.T) {
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
 		require.Error(t, err)
-		var internalErr *gerrors.InternalError
-		require.ErrorAs(t, err, &internalErr)
+		var cleanupErr *clusterCleanupError
+		require.ErrorAs(t, err, &cleanupErr)
 		require.Contains(t, err.Error(), clusterErr.Error())
 
 		require.NoError(t, cid.Shutdown(ctx))
@@ -461,6 +474,690 @@ func TestDeathWatch(t *testing.T) {
 
 		require.NoError(t, cid.Shutdown(ctx))
 		require.NoError(t, actorSys.Stop(ctx))
+	})
+}
+
+func TestDeathWatchClusterCleanupFailure(t *testing.T) {
+	t.Run("With transient removal failure DeathWatch resumes and keeps processing", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		firstActor := "first-actor"
+		secondActor := "second-actor"
+
+		// mock the cluster interface: the first removal fails the way issue
+		// #1337 observed it (a bare "canceled" surfaced while the cluster
+		// digests a membership change) and succeeds on the scheduled retry;
+		// the second actor's removal succeeds outright, proving DeathWatch
+		// resumed and kept processing terminations.
+		clmock := mockscluster.NewCluster(t)
+		clmock.EXPECT().ActorExists(mock.Anything, firstActor).Return(false, nil)
+		clmock.EXPECT().ActorExists(mock.Anything, secondActor).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Twice()
+		clmock.EXPECT().RemoveActor(mock.Anything, firstActor).Return(stdErrors.New("canceled")).Once()
+		clmock.EXPECT().RemoveActor(mock.Anything, firstActor).Return(nil).Once()
+		clmock.EXPECT().RemoveActor(mock.Anything, secondActor).Return(nil).Once()
+
+		// Set the cluster mock BEFORE Start so that handlePostStart (which runs
+		// asynchronously during Start) picks it up via getCluster() without racing.
+		// Leave clusterEnabled false so setupCluster is skipped during Start.
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		// wait for the system to start properly
+		pause.For(500 * time.Millisecond)
+
+		// Now enable cluster flags — after Start and handlePostStart have completed.
+		sys.clusterEnabled.Store(true)
+		sys.remotingEnabled.Store(true)
+		sys.relocationEnabled.Store(false)
+
+		t.Cleanup(func() {
+			// Detach the mocked cluster before stopping the system to avoid
+			// background shutdown workflows calling into unexpected mock methods.
+			sys.clusterEnabled.Store(false)
+			sys.remotingEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		first, err := actorSys.Spawn(ctx, firstActor, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, first)
+
+		pause.For(500 * time.Millisecond)
+
+		require.NoError(t, first.Shutdown(ctx))
+
+		pause.For(time.Second)
+
+		// the failed cleanup left the node untouched
+		deathWatchPID := actorSys.getDeathWatch()
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+		require.True(t, actorSys.Running())
+
+		// DeathWatch keeps processing: the next termination is cleaned up
+		// normally (the mock's Once assertion proves the removal happened)
+		second, err := actorSys.Spawn(ctx, secondActor, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, second)
+
+		pause.For(500 * time.Millisecond)
+
+		require.NoError(t, second.Shutdown(ctx))
+
+		pause.For(time.Second)
+
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+		require.True(t, actorSys.Running())
+	})
+	t.Run("With DeathWatch supervisor resuming on ClusterCleanupError only", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		t.Cleanup(func() {
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+
+		// the cleanup error resumes DeathWatch
+		directive, ok := deathWatchPID.supervisor.Directive(newClusterCleanupError(stdErrors.New("boom")))
+		require.True(t, ok)
+		require.Equal(t, sup.ResumeDirective, directive)
+
+		// any other error still escalates through the catch-all rule
+		_, ok = deathWatchPID.supervisor.Directive(stdErrors.New("boom"))
+		require.False(t, ok)
+		directive, ok = deathWatchPID.supervisor.AnyErrorDirective()
+		require.True(t, ok)
+		require.Equal(t, sup.EscalateDirective, directive)
+	})
+	t.Run("With handleTerminated returns cluster cleanup error on removal failure", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		// Set the cluster mock BEFORE Start so handlePostStart picks it up
+		// via getCluster() without racing. Leave clusterEnabled false so
+		// setupCluster is skipped during Start.
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		// Enable cluster flags after Start and handlePostStart have completed.
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		const actorName = "actor-to-free"
+		// Spawn checks ActorExists on the cluster when InCluster() is true.
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+
+		// allow the spawned actor to register with the tree
+		pause.For(500 * time.Millisecond)
+
+		clusterErr := stdErrors.New("canceled")
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(clusterErr).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		terminated := NewTerminated(cid.Path())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.Error(t, err)
+		var cleanupErr *clusterCleanupError
+		require.ErrorAs(t, err, &cleanupErr)
+		require.ErrorIs(t, err, clusterErr)
+		require.Contains(t, err.Error(), "cluster cleanup error")
+		require.Contains(t, err.Error(), clusterErr.Error())
+
+		require.NoError(t, cid.Shutdown(ctx))
+	})
+	t.Run("With removal retry rescheduling until success", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// the retry handler only touches the cluster registry, so no live
+		// actor is needed: the first attempt fails and must reschedule itself
+		// through the system scheduler; the rescheduled attempt succeeds.
+		const actorName = "dead-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(stdErrors.New("canceled")).Once()
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		// attempt 2 is scheduled with a 1s backoff and delivered through the
+		// real scheduler and mailbox; the mock's Once assertions prove both
+		// attempts ran and the second one succeeded
+		pause.For(2 * time.Second)
+
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+	})
+	t.Run("With removal retry giving up once the budget is exhausted", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// the final attempt in the budget fails: no further retry may be
+		// scheduled, which the strict mock enforces (a rescheduled attempt
+		// would surface as an unexpected RemoveActor call below)
+		const actorName = "dead-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(stdErrors.New("canceled")).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		retry := &retryDeadActorRemoval{actorName: actorName, attempt: deathWatchRemovalMaxRetries}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		pause.For(time.Second)
+
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+	})
+	t.Run("With removal retry not scheduled when the engine is not running", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		const actorName = "actor-to-free"
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+
+		pause.For(500 * time.Millisecond)
+
+		// a stopped engine is the one failure no retry can outlive: DeathWatch
+		// must still resume through the cleanup error but never book a retry,
+		// which the strict mock enforces (a scheduled retry would surface as
+		// an unexpected second RemoveActor call within the wait below)
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(cluster.ErrEngineNotRunning).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		terminated := NewTerminated(cid.Path())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		err = deathWatchActor.handleTerminated(receiveCtx)
+		require.Error(t, err)
+		var cleanupErr *clusterCleanupError
+		require.ErrorAs(t, err, &cleanupErr)
+		require.ErrorIs(t, err, cluster.ErrEngineNotRunning)
+
+		pause.For(time.Second)
+
+		require.NoError(t, cid.Shutdown(ctx))
+	})
+	t.Run("With removal retry skipped when the system is stopping", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		// a stopping system abandons the retry: the shutdown path reconciles
+		// the node's registry records itself. The strict mock (no RemoveActor
+		// expectation) enforces that the registry is left untouched.
+		sys.shuttingDown.Store(true)
+
+		retry := &retryDeadActorRemoval{actorName: "dead-actor", attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		// undo the simulated stopping state so the deferred Stop runs normally
+		sys.shuttingDown.Store(false)
+	})
+	t.Run("With removal retry skipped when cluster mode is disabled", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		// the cluster mock stays attached but cluster mode is never enabled:
+		// the strict mock (no expectations) enforces that the retry handler
+		// returns before touching the registry
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		t.Cleanup(func() {
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		retry := &retryDeadActorRemoval{actorName: "dead-actor", attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+	})
+	t.Run("With removal retry abandoned when the engine stops mid-retries", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// the engine reports itself stopped mid-budget: no further retry may
+		// be booked, which the strict mock enforces (a rescheduled attempt
+		// would surface as an unexpected RemoveActor call within the wait)
+		const actorName = "dead-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(cluster.ErrEngineNotRunning).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		pause.For(1500 * time.Millisecond)
+
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+	})
+	t.Run("With removal retry succeeding on first attempt", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// a successful retry books nothing further, which the strict mock
+		// enforces during the wait below
+		const actorName = "dead-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		pause.For(time.Second)
+
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+	})
+	t.Run("With removal retry scheduling failure only logged", func(t *testing.T) {
+		ctx := context.Background()
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.ErrorLevel, buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// with the scheduler stopped, booking the follow-up retry fails; the
+		// failure must only be logged — DeathWatch keeps running and the
+		// registry is left to the exhausted-budget report
+		sys.scheduler.Stop(ctx)
+
+		const actorName = "dead-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, actorName).Return(stdErrors.New("canceled")).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		buf.Reset()
+		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, "failed to schedule removal retry", "scheduling failure should be logged")
+		require.True(t, deathWatchPID.IsRunning())
+		require.False(t, deathWatchPID.IsSuspended())
+	})
+	t.Run("With Terminated skipping cluster removal when the system is stopping", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		const actorName = "actor-to-free"
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, cid)
+
+		pause.For(500 * time.Millisecond)
+
+		// a stopping system never attempts the registry removal at all: the
+		// shutdown path reconciles its records wholesale. The strict mock (no
+		// RemoveActor expectation) enforces that the registry is untouched.
+		sys.shuttingDown.Store(true)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		terminated := NewTerminated(cid.Path())
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+
+		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
+
+		// undo the simulated stopping state so the deferred Stop runs normally
+		sys.shuttingDown.Store(false)
+
+		require.NoError(t, cid.Shutdown(ctx))
+	})
+	t.Run("Logging removal retry warning, success and give-up messages", func(t *testing.T) {
+		ctx := context.Background()
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+		require.NotNil(t, actorSys)
+
+		clmock := mockscluster.NewCluster(t)
+
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		err = actorSys.Start(ctx)
+		require.NoError(t, err)
+
+		pause.For(500 * time.Millisecond)
+
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		// retriedActor fails its first attempt (warning) and succeeds on the
+		// rescheduled one (debug); doomedActor fails its final attempt (error)
+		const retriedActor = "retried-actor"
+		const doomedActor = "doomed-actor"
+		clmock.EXPECT().RemoveActor(mock.Anything, retriedActor).Return(stdErrors.New("canceled")).Once()
+		clmock.EXPECT().RemoveActor(mock.Anything, retriedActor).Return(nil).Once()
+		clmock.EXPECT().RemoveActor(mock.Anything, doomedActor).Return(stdErrors.New("canceled")).Once()
+
+		deathWatchPID := actorSys.getDeathWatch()
+		require.NotNil(t, deathWatchPID)
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		buf.Reset()
+
+		retry := &retryDeadActorRemoval{actorName: retriedActor, attempt: 1}
+		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		doomed := &retryDeadActorRemoval{actorName: doomedActor, attempt: deathWatchRemovalMaxRetries}
+		receiveCtx = newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, doomed)
+		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
+
+		// the rescheduled attempt for retriedActor fires after a 1s backoff
+		pause.For(2 * time.Second)
+
+		_ = logger.Flush()
+		logContent := buf.String()
+		require.Contains(t, logContent, fmt.Sprintf("removal retry=1/%d failed", deathWatchRemovalMaxRetries), "a failed attempt within the budget should log a warning")
+		require.Contains(t, logContent, "removed dead actor resource from cluster on retry=2", "a successful retry should log at debug level")
+		require.Contains(t, logContent, fmt.Sprintf("failed to remove dead actor from cluster after %d retries", deathWatchRemovalMaxRetries), "an exhausted budget should log an error")
 	})
 }
 
