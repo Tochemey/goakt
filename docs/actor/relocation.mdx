@@ -19,9 +19,10 @@ other nodes so the cluster remains available.
 
 Relocation is triggered when:
 
-1. **A node leaves the cluster**: The cluster membership layer (Hashicorp Memberlist) detects the departure and emits a
-   `NodeLeft` event. The event is published once the cluster's routing table has converged on the departure, bounded by
-   a 30 second fallback, so relocation runs against a table that no longer routes to the departed node.
+1. **A node leaves the cluster**: The cluster confirms the departure (see `WithNetworkProfile` for how quickly an
+   abrupt failure is confirmed) and emits a `NodeLeft` event. The event is published once every node routes on the new
+   membership, bounded by the convergence timeout, 10 seconds by default (see `WithConvergenceTimeout`), so relocation
+   runs against a cluster that no longer routes to the departed node.
 2. **The departed node had relocatable actors or grains**: Only actors spawned with relocation enabled (the default) and
    grains without `WithGrainDisableRelocation` are eligible.
 
@@ -69,7 +70,7 @@ sequenceDiagram
    cluster store (e.g. BoltDB). The oldest peers are chosen because leadership is determined by node age (the oldest
    nodes are most likely to remain or become leader when the departing node leaves), so the new leader will have the
    state when it handles `NodeLeft`.
-3. **cleanupCluster**: The departing node removes its actors and grains from the cluster map (Olric). This runs after
+3. **cleanupCluster**: The departing node removes its actors and grains from the cluster registry. This runs after
    persist and before leaving membership.
 4. **NodeLeft**: The cluster emits a `NodeLeft` event. The **leader** node handles it: it fetches the departed node's
    `PeerState` from its local cluster store (the leader must have been one of the up-to-3 peers that received the

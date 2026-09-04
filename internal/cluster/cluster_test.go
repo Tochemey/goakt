@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/memberlist"
 	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/redis/go-redis/v9"
@@ -2977,6 +2978,15 @@ func TestHandleClusterEventInvalidNodeLeft(t *testing.T) {
 }
 
 // nolint
+func TestHandleClusterEventInvalidMembershipChange(t *testing.T) {
+	cl := &cluster{}
+	payload := `{"kind":"` + events.KindMembershipChangeEvent + `","node":123}`
+
+	err := cl.handleClusterEvent(payload)
+	require.ErrorContains(t, err, "unmarshal membership change")
+}
+
+// nolint
 func TestPeersReturnsClientError(t *testing.T) {
 	expectedErr := errors.New("members failure")
 	cl := &cluster{
@@ -3027,7 +3037,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		require.Empty(t, cl.events)
 
 		// converged at the generation the join was observed at: that table
@@ -3046,18 +3056,22 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	t.Run("ignores self", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 
-		trackJoin(cl, cl.node.PeersAddress(), testCoordinator, 1)
+		trackJoin(cl, cl.node.PeersAddress(), 1)
 		require.Empty(t, cl.pendingJoins)
 	})
 
-	t.Run("deduplicates copies and keeps the coordinator's placement", func(t *testing.T) {
+	t.Run("the announcement overrides the placement of the local observation", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 6000)
 		node := "127.0.0.1:7000"
 		converge(cl, 1)
 
-		trackJoin(cl, node, "127.0.0.1:7100", 9)
-		trackJoin(cl, node, testCoordinator, 1)
-		trackJoin(cl, node, "127.0.0.1:7200", 9)
+		// the local observation arrives first and carries this node's own
+		// generation, which does not compare with the coordinator's
+		trackJoin(cl, node, 9)
+		require.Equal(t, cl.node.PeersAddress(), cl.pendingJoins[node].source)
+
+		announceJoin(cl, node, 1)
+		trackJoin(cl, node, 9)
 		require.Len(t, cl.pendingJoins, 1)
 		require.Equal(t, testCoordinator, cl.pendingJoins[node].source)
 		require.Equal(t, uint64(1), cl.pendingJoins[node].generation)
@@ -3071,7 +3085,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 		node := "127.0.0.1:5100"
 		cl.nodeJoinedEventsFilter.Add(node)
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		require.Empty(t, cl.pendingJoins)
 	})
 
@@ -3080,8 +3094,8 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 		node := "127.0.0.1:5200"
 		cl.nodeJoinedEventsFilter.Add(node)
 
-		trackLeft(cl, node, testCoordinator, 1)
-		trackJoin(cl, node, testCoordinator, 2)
+		announceLeft(cl, node, 1)
+		announceJoin(cl, node, 2)
 		require.Contains(t, cl.pendingJoins, node)
 	})
 }
@@ -3091,7 +3105,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		trackLeft(cl, node, testCoordinator, 1)
+		announceLeft(cl, node, 1)
 		require.Empty(t, cl.events)
 
 		converge(cl, 1, node)
@@ -3101,13 +3115,16 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		requireEmitted(t, cl, NodeLeft, node)
 	})
 
-	t.Run("deduplicates copies", func(t *testing.T) {
+	t.Run("the local observation does not override the placement of the announcement", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:6000"
 
-		trackLeft(cl, node, testCoordinator, 1)
-		trackLeft(cl, node, "127.0.0.1:6100", 1)
+		// the announcement arrives before this node observes the departure
+		announceLeft(cl, node, 1)
+		trackLeft(cl, node, 9)
 		require.Len(t, cl.pendingLeaves, 1)
+		require.Equal(t, testCoordinator, cl.pendingLeaves[node].source)
+		require.Equal(t, uint64(1), cl.pendingLeaves[node].generation)
 
 		converge(cl, 2)
 		requireEmitted(t, cl, NodeLeft, node)
@@ -3118,7 +3135,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		node := "127.0.0.1:9200"
 		cl.nodeLeftEventsFilter.Add(node)
 
-		trackLeft(cl, node, testCoordinator, 1)
+		announceLeft(cl, node, 1)
 		require.Empty(t, cl.pendingLeaves)
 	})
 
@@ -3127,9 +3144,54 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 		node := "127.0.0.1:9300"
 		cl.nodeLeftEventsFilter.Add(node)
 
-		trackJoin(cl, node, testCoordinator, 1)
-		trackLeft(cl, node, testCoordinator, 2)
+		announceJoin(cl, node, 1)
+		announceLeft(cl, node, 2)
 		require.Contains(t, cl.pendingLeaves, node)
+	})
+}
+
+func TestTrackMembershipChangeEvent(t *testing.T) {
+	t.Run("places a departure against the announcing coordinator's convergences", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9100"
+
+		announceLeft(cl, node, 4)
+		require.Equal(t, testCoordinator, cl.pendingLeaves[node].source)
+		require.Equal(t, uint64(4), cl.pendingLeaves[node].generation)
+
+		// converged at the generation the coordinator observed the departure
+		// at: that table predates the departure
+		converge(cl, 4)
+		require.Empty(t, cl.events)
+
+		converge(cl, 5)
+		requireEmitted(t, cl, NodeLeft, node)
+	})
+
+	t.Run("ignores the join of this node", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+
+		announceJoin(cl, cl.node.PeersAddress(), 1)
+		require.Empty(t, cl.pendingJoins)
+	})
+
+	t.Run("ignores an update", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		node := "127.0.0.1:9110"
+
+		announceChange(cl, events.MembershipChangeUpdate, node, 1)
+		require.Empty(t, cl.pendingJoins)
+		require.Empty(t, cl.pendingLeaves)
+	})
+
+	t.Run("is ignored after the engine stopped", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl.events = nil
+
+		announceJoin(cl, "127.0.0.1:9120", 1)
+		announceLeft(cl, "127.0.0.1:9121", 1)
+		require.Empty(t, cl.pendingJoins)
+		require.Empty(t, cl.pendingLeaves)
 	})
 }
 
@@ -3139,7 +3201,7 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Source: testCoordinator, Epoch: 7, Members: []string{node}})
 		require.Zero(t, cl.converged.generation)
 		require.Empty(t, cl.events)
@@ -3149,7 +3211,7 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		converge(cl, 3)
 		converge(cl, 2, node)
 		converge(cl, 3, node)
@@ -3166,7 +3228,7 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 		node := "127.0.0.1:5000"
 		converge(cl, 5)
 
-		trackJoin(cl, node, testCoordinator, 5)
+		announceJoin(cl, node, 5)
 		cl.processRebalanceComplete(events.RebalanceCompleteEvent{Source: "127.0.0.1:4200", Epoch: 1, Generation: 1, Members: []string{node}})
 		require.Equal(t, "127.0.0.1:4200", cl.converged.source)
 		requireEmitted(t, cl, NodeJoined, node)
@@ -3177,13 +3239,15 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 func TestHandleClusterEventSuccessCases(t *testing.T) {
 	now := time.Now().UnixNano()
 
-	t.Run("node join", func(t *testing.T) {
+	t.Run("membership change join", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:7000"
-		payload, err := json.Marshal(events.NodeJoinEvent{
-			Kind:       events.KindNodeJoinEvent,
+		payload, err := json.Marshal(events.MembershipChangeEvent{
+			Kind:       events.KindMembershipChangeEvent,
 			Source:     testCoordinator,
-			NodeJoin:   node,
+			Change:     events.MembershipChangeJoin,
+			Node:       node,
+			Members:    []string{cl.node.PeersAddress(), node},
 			Generation: 1,
 			Timestamp:  now,
 		})
@@ -3227,13 +3291,15 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		}
 	})
 
-	t.Run("node left", func(t *testing.T) {
+	t.Run("membership change left", func(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:8000"
-		payload, err := json.Marshal(events.NodeLeftEvent{
-			Kind:       events.KindNodeLeftEvent,
+		payload, err := json.Marshal(events.MembershipChangeEvent{
+			Kind:       events.KindMembershipChangeEvent,
 			Source:     testCoordinator,
-			NodeLeft:   node,
+			Change:     events.MembershipChangeLeft,
+			Node:       node,
+			Members:    []string{cl.node.PeersAddress()},
 			Generation: 1,
 			Timestamp:  now,
 		})
@@ -3263,6 +3329,40 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 		default:
 			t.Fatalf("expected node left event")
 		}
+	})
+
+	t.Run("node join observed by this node", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 6000)
+		node := "127.0.0.1:7100"
+		payload, err := json.Marshal(events.NodeJoinEvent{
+			Kind:       events.KindNodeJoinEvent,
+			Source:     cl.node.PeersAddress(),
+			NodeJoin:   node,
+			Generation: 1,
+			Timestamp:  now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+		require.Contains(t, cl.pendingJoins, node)
+		require.Equal(t, cl.node.PeersAddress(), cl.pendingJoins[node].source)
+	})
+
+	t.Run("node left observed by this node", func(t *testing.T) {
+		cl := newEventTestCluster("127.0.0.1", 6100)
+		node := "127.0.0.1:8100"
+		payload, err := json.Marshal(events.NodeLeftEvent{
+			Kind:       events.KindNodeLeftEvent,
+			Source:     cl.node.PeersAddress(),
+			NodeLeft:   node,
+			Generation: 1,
+			Timestamp:  now,
+		})
+		require.NoError(t, err)
+
+		require.NoError(t, cl.handleClusterEvent(string(payload)))
+		require.Contains(t, cl.pendingLeaves, node)
+		require.Equal(t, cl.node.PeersAddress(), cl.pendingLeaves[node].source)
 	})
 }
 
@@ -3602,17 +3702,102 @@ func TestSetupMemberlistConfigWithTLS(t *testing.T) {
 		ClientConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 		ServerConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 	}
-	cl := &cluster{
-		logger:  log.DiscardLogger,
-		node:    &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
-		tlsInfo: info,
+
+	// the TLS transport binds its listener, so every profile needs its own port
+	newTLSCluster := func(profile NetworkProfile) *cluster {
+		ports := dynaport.Get(2)
+		return &cluster{
+			logger:         log.DiscardLogger,
+			node:           &discovery.Node{Host: "127.0.0.1", PeersPort: ports[0], DiscoveryPort: ports[1]},
+			tlsInfo:        info,
+			networkProfile: profile,
+		}
 	}
 
-	cfg := &oconfig.Config{}
-	err = cl.setupMemberlistConfig(cfg)
-	require.NoError(t, err)
-	require.NotNil(t, cfg.MemberlistConfig)
-	require.NotNil(t, cfg.MemberlistConfig.Transport)
+	// the TLS transport carries packets over TCP, so the fallback ping only
+	// double-pings a dead node and stays off for every profile
+	t.Run("the default profile probes on the TLS overrides", func(t *testing.T) {
+		cl := newTLSCluster(NetworkProfileLAN)
+
+		cfg := &oconfig.Config{}
+		require.NoError(t, cl.setupMemberlistConfig(cfg))
+		require.NotNil(t, cfg.MemberlistConfig)
+		require.NotNil(t, cfg.MemberlistConfig.Transport)
+		require.True(t, cfg.MemberlistConfig.DisableTcpPings)
+		require.Equal(t, 2*time.Second, cfg.MemberlistConfig.ProbeInterval)
+		require.Equal(t, time.Second, cfg.MemberlistConfig.ProbeTimeout)
+	})
+
+	t.Run("the local profile probes on the TLS overrides", func(t *testing.T) {
+		cl := newTLSCluster(NetworkProfileLocal)
+
+		cfg := &oconfig.Config{}
+		require.NoError(t, cl.setupMemberlistConfig(cfg))
+		require.True(t, cfg.MemberlistConfig.DisableTcpPings)
+		require.Equal(t, 2*time.Second, cfg.MemberlistConfig.ProbeInterval)
+		require.Equal(t, time.Second, cfg.MemberlistConfig.ProbeTimeout)
+	})
+
+	t.Run("the wan profile keeps its own slower probes", func(t *testing.T) {
+		cl := newTLSCluster(NetworkProfileWAN)
+
+		cfg := &oconfig.Config{}
+		require.NoError(t, cl.setupMemberlistConfig(cfg))
+		require.True(t, cfg.MemberlistConfig.DisableTcpPings)
+		require.Equal(t, memberlist.DefaultWANConfig().ProbeInterval, cfg.MemberlistConfig.ProbeInterval)
+		require.Equal(t, memberlist.DefaultWANConfig().ProbeTimeout, cfg.MemberlistConfig.ProbeTimeout)
+	})
+}
+
+func TestSetupMemberlistConfigNetworkProfile(t *testing.T) {
+	testCases := []struct {
+		name    string
+		profile NetworkProfile
+		preset  *memberlist.Config
+	}{
+		{name: "local", profile: NetworkProfileLocal, preset: memberlist.DefaultLocalConfig()},
+		{name: "lan", profile: NetworkProfileLAN, preset: memberlist.DefaultLANConfig()},
+		{name: "wan", profile: NetworkProfileWAN, preset: memberlist.DefaultWANConfig()},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cl := &cluster{
+				logger:         log.DiscardLogger,
+				node:           &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+				networkProfile: tc.profile,
+			}
+
+			cfg := &oconfig.Config{}
+			require.NoError(t, cl.setupMemberlistConfig(cfg))
+			require.NotNil(t, cfg.MemberlistConfig)
+			require.Equal(t, tc.preset.ProbeInterval, cfg.MemberlistConfig.ProbeInterval)
+			require.Equal(t, tc.preset.ProbeTimeout, cfg.MemberlistConfig.ProbeTimeout)
+			require.False(t, cfg.MemberlistConfig.DisableTcpPings)
+		})
+	}
+
+	t.Run("unknown profile", func(t *testing.T) {
+		cl := &cluster{
+			logger:         log.DiscardLogger,
+			node:           &discovery.Node{Host: "127.0.0.1", PeersPort: 3322, DiscoveryPort: 3323},
+			networkProfile: NetworkProfile(7),
+		}
+
+		cfg := &oconfig.Config{}
+		require.ErrorContains(t, cl.setupMemberlistConfig(cfg), "unknown network profile")
+		require.Nil(t, cfg.MemberlistConfig)
+	})
+}
+
+func TestNewAppliesTheConvergenceTimeout(t *testing.T) {
+	node := &discovery.Node{Name: "test-node", Host: "127.0.0.1"}
+
+	engine := New("test", new(mocksdiscovery.Provider), node, WithLogger(log.DiscardLogger), WithConvergenceTimeout(25*time.Second))
+	require.Equal(t, 25*time.Second, engine.(*cluster).pendingEmitTimeout)
+
+	engine = New("test", new(mocksdiscovery.Provider), node, WithLogger(log.DiscardLogger))
+	require.Equal(t, pendingEventEmitTimeout, engine.(*cluster).pendingEmitTimeout)
 }
 
 func newOlricMember(t *testing.T, host string, peersPort int, coordinator bool) olric.Member {
@@ -4059,7 +4244,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 		node := "127.0.0.1:9400"
 		converge(cl, 2, node)
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		requireEmitted(t, cl, NodeJoined, node)
 	})
 
@@ -4068,7 +4253,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 		node := "127.0.0.1:9410"
 		converge(cl, 2, node)
 
-		trackJoin(cl, node, testCoordinator, 2)
+		announceJoin(cl, node, 2)
 		require.Empty(t, cl.events)
 
 		converge(cl, 3, node)
@@ -4080,7 +4265,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 		node := "127.0.0.1:9420"
 		converge(cl, 2, node)
 
-		trackJoin(cl, node, "127.0.0.1:7000", 9)
+		trackJoin(cl, node, 9)
 		require.Empty(t, cl.events)
 
 		converge(cl, 3, node)
@@ -4092,7 +4277,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 		node := "127.0.0.1:9430"
 		converge(cl, 2)
 
-		trackLeft(cl, node, testCoordinator, 1)
+		announceLeft(cl, node, 1)
 		requireEmitted(t, cl, NodeLeft, node)
 	})
 }
@@ -4102,8 +4287,8 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9500"
 
-		trackLeft(cl, node, testCoordinator, 1)
-		trackJoin(cl, node, testCoordinator, 2)
+		announceLeft(cl, node, 1)
+		announceJoin(cl, node, 2)
 		converge(cl, 3, node)
 
 		require.Len(t, cl.events, 2)
@@ -4115,8 +4300,8 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9510"
 
-		trackJoin(cl, node, testCoordinator, 1)
-		trackLeft(cl, node, testCoordinator, 2)
+		announceJoin(cl, node, 1)
+		announceLeft(cl, node, 2)
 		converge(cl, 3)
 
 		require.Len(t, cl.events, 2)
@@ -4128,8 +4313,8 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9520"
 
-		trackJoin(cl, node, testCoordinator, 1)
-		trackLeft(cl, node, testCoordinator, 2)
+		announceJoin(cl, node, 1)
+		announceLeft(cl, node, 2)
 		converge(cl, 2, node)
 		requireEmitted(t, cl, NodeJoined, node)
 		require.Contains(t, cl.pendingLeaves, node)
@@ -4142,8 +4327,8 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9530"
 
-		trackLeft(cl, node, testCoordinator, 1)
-		trackJoin(cl, node, testCoordinator, 2)
+		announceLeft(cl, node, 1)
+		announceJoin(cl, node, 2)
 		converge(cl, 2)
 		requireEmitted(t, cl, NodeLeft, node)
 		require.Contains(t, cl.pendingJoins, node)
@@ -4161,7 +4346,7 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	node := "127.0.0.1:9600"
 	converge(cl, 1, node)
 
-	trackLeft(cl, node, testCoordinator, 1)
+	announceLeft(cl, node, 1)
 	timer := cl.pendingLeaves[node].timer
 	converge(cl, 2, node)
 	require.Empty(t, cl.pendingLeaves)
@@ -4170,7 +4355,7 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 
 	// the same departure known only from another node's copy cannot be placed
 	// and is kept
-	trackLeft(cl, node, "127.0.0.1:7000", 9)
+	trackLeft(cl, node, 9)
 	converge(cl, 3, node)
 	require.Contains(t, cl.pendingLeaves, node)
 	require.Empty(t, cl.events)
@@ -4182,15 +4367,15 @@ func TestRestartedNodeDepartsAgain(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9700"
 
-	trackLeft(cl, node, testCoordinator, 1)
+	announceLeft(cl, node, 1)
 	converge(cl, 2)
 	requireEmitted(t, cl, NodeLeft, node)
 
-	trackJoin(cl, node, testCoordinator, 2)
+	announceJoin(cl, node, 2)
 	converge(cl, 3, node)
 	requireEmitted(t, cl, NodeJoined, node)
 
-	trackLeft(cl, node, testCoordinator, 3)
+	announceLeft(cl, node, 3)
 	converge(cl, 4)
 	requireEmitted(t, cl, NodeLeft, node)
 }
@@ -4199,13 +4384,13 @@ func TestSecondDepartureWhileRestartIsPending(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9710"
 
-	trackLeft(cl, node, testCoordinator, 1)
+	announceLeft(cl, node, 1)
 	converge(cl, 2)
 	requireEmitted(t, cl, NodeLeft, node)
 
 	// restarted, then crashed again before the table converged on the restart
-	trackJoin(cl, node, testCoordinator, 2)
-	trackLeft(cl, node, testCoordinator, 3)
+	announceJoin(cl, node, 2)
+	announceLeft(cl, node, 3)
 	require.Contains(t, cl.pendingLeaves, node)
 
 	converge(cl, 4)
@@ -4219,8 +4404,8 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9800"
 
-		trackJoin(cl, node, testCoordinator, 1)
-		trackLeft(cl, node, testCoordinator, 2)
+		announceJoin(cl, node, 1)
+		announceLeft(cl, node, 2)
 		joinTimer := cl.pendingJoins[node].timer
 		leftTimer := cl.pendingLeaves[node].timer
 
@@ -4236,8 +4421,8 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9810"
 
-		trackLeft(cl, node, testCoordinator, 1)
-		trackJoin(cl, node, testCoordinator, 2)
+		announceLeft(cl, node, 1)
+		announceJoin(cl, node, 2)
 
 		cl.emitOverdueNodeJoined(node)
 		require.Len(t, cl.events, 2)
@@ -4249,7 +4434,7 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9820"
 
-		trackLeft(cl, node, testCoordinator, 1)
+		announceLeft(cl, node, 1)
 		converge(cl, 2)
 		requireEmitted(t, cl, NodeLeft, node)
 
@@ -4267,8 +4452,8 @@ func TestPendingEventIsAnnouncedAfterTheBoundedWait(t *testing.T) {
 	leaver := "127.0.0.1:9920"
 	joiner := "127.0.0.1:9921"
 
-	trackLeft(cl, leaver, testCoordinator, 1)
-	trackJoin(cl, joiner, testCoordinator, 1)
+	announceLeft(cl, leaver, 1)
+	announceJoin(cl, joiner, 1)
 
 	require.Eventually(t, func() bool {
 		cl.eventsLock.Lock()
@@ -4294,7 +4479,7 @@ func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9850"
 
-		trackLeft(cl, node, testCoordinator, 1)
+		announceLeft(cl, node, 1)
 		timer := cl.pendingLeaves[node].timer
 		require.NotNil(t, timer)
 
@@ -4309,7 +4494,7 @@ func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
 		cl := newEventTestCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9860"
 
-		trackJoin(cl, node, testCoordinator, 1)
+		announceJoin(cl, node, 1)
 		timer := cl.pendingJoins[node].timer
 		require.NotNil(t, timer)
 
@@ -4326,8 +4511,8 @@ func TestCancelPendingEventsLocked(t *testing.T) {
 	leaver := "127.0.0.1:9901"
 	converge(cl, 1, leaver)
 
-	trackJoin(cl, joiner, testCoordinator, 1)
-	trackLeft(cl, leaver, testCoordinator, 1)
+	announceJoin(cl, joiner, 1)
+	announceLeft(cl, leaver, 1)
 	joinTimer := cl.pendingJoins[joiner].timer
 	leftTimer := cl.pendingLeaves[leaver].timer
 
@@ -4349,8 +4534,8 @@ func TestTrackingIsIgnoredAfterStop(t *testing.T) {
 	cl := newEventTestCluster("127.0.0.1", 4000)
 	cl.events = nil
 
-	trackJoin(cl, "127.0.0.1:9910", testCoordinator, 1)
-	trackLeft(cl, "127.0.0.1:9911", testCoordinator, 1)
+	trackJoin(cl, "127.0.0.1:9910", 1)
+	trackLeft(cl, "127.0.0.1:9911", 1)
 	require.Empty(t, cl.pendingJoins)
 	require.Empty(t, cl.pendingLeaves)
 }

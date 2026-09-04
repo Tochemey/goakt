@@ -1,0 +1,11 @@
+# Build context exclusions for this Dockerfile. The repository root doubles as
+# a local workspace: without these the build context would carry the Go build
+# and module caches, which are orders of magnitude larger than the sources.
+.git
+.gocache
+.gomodcache
+.cache
+.local
+.idea
+.vscode
+.trunk

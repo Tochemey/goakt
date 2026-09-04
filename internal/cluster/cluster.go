@@ -67,14 +67,28 @@ const (
 	actorScanConcurrency = 16
 	// pendingEventEmitTimeout bounds how long a tracked join or departure may
 	// wait for the routing table to converge on it before its NodeJoined or
-	// NodeLeft event is announced anyway. Waiting for convergence orders the
-	// event after olric's partition redistribution, but it is an ordering
-	// optimization, not a correctness requirement: memberlist has already
-	// confirmed the change, and a rebalance can fail to complete (a lost ack,
-	// or after an abrupt kill endless fragment moves to the dead member), which
-	// would otherwise suppress the event forever and, with it, a crashed node's
-	// relocation or a restarted node's recovery.
-	pendingEventEmitTimeout = 30 * time.Second
+	// NodeLeft event is announced anyway. The wait starts once memberlist has
+	// confirmed the change, and olric retries a rejected routing table push, so
+	// the table converges within a second normally and within a few seconds
+	// when a push had to be retried: ten seconds is a generous bound. Waiting
+	// for convergence orders the event after olric's partition redistribution,
+	// but it is an ordering optimization, not a correctness requirement, and a
+	// rebalance can still fail to complete (a lost ack, or after an abrupt kill
+	// endless fragment moves to the dead member), which would otherwise
+	// suppress the event forever and, with it, a crashed node's relocation or a
+	// restarted node's recovery.
+	pendingEventEmitTimeout = 10 * time.Second
+	// tlsProbeInterval and tlsProbeTimeout override the network profile's
+	// failure detection settings when the memberlist traffic is carried over
+	// TLS. GoAkt's TLS transport carries packets over TCP, so the TCP fallback
+	// ping only double-pings a dead node and stays off. Memberlist runs the
+	// whole probe, direct, indirect and fallback, under one deadline of a single
+	// probe interval, and a per-packet TLS dial makes the LAN preset's one
+	// second tight, so the interval is raised to two seconds and the timeout to
+	// one. The previous overrides of five and two seconds put failure
+	// confirmation at about 27 seconds on a cluster of ten nodes.
+	tlsProbeInterval = 2 * time.Second
+	tlsProbeTimeout  = time.Second
 )
 
 // defaultBootstrapMaxAttempts and defaultBootstrapRetryBackoff bound the in-process
@@ -134,10 +148,12 @@ func (x convergence) contains(node string) bool {
 
 // pendingEvent is a membership event waiting for a routing table convergence
 // that reflects it: the event timestamp, the order in which this node observed
-// it, the copy of the event used to place it against the convergence (the
-// coordinator's copy when one was seen, otherwise the first copy), and the
-// timer of the bounded wait after which the event is announced anyway. The
-// timer is stopped once the event is announced or the cluster stops.
+// it, the placement it is compared with the convergence by, and the timer of
+// the bounded wait after which the event is announced anyway. The placement
+// comes from the coordinator's membership change announcement once it arrives
+// and from the first copy until then; a copy this node observed itself only
+// places the event when this node is the coordinator. The timer is stopped once
+// the event is announced or the cluster stops.
 type pendingEvent struct {
 	timestamp  int64
 	sequence   uint64
@@ -250,6 +266,9 @@ type cluster struct {
 	routingTableInterval    time.Duration
 	triggerBalancerInterval time.Duration
 	tlsInfo                 *gtls.Info
+	// networkProfile is the network the cluster nodes share. It tunes how often
+	// peers are probed and how many missed probes confirm a departure.
+	networkProfile NetworkProfile
 
 	server *olric.Olric
 	client olric.Client
@@ -276,8 +295,9 @@ type cluster struct {
 	// pendingSequence numbers pending events in the order this node observed
 	// them, an order that does not depend on the publishers' clocks.
 	pendingSequence uint64
-	// pendingEmitTimeout bounds the wait of a pending event. It is
-	// pendingEventEmitTimeout, shortened only by tests that exercise the wait.
+	// pendingEmitTimeout bounds the wait of a pending event. It is the
+	// configured convergence timeout, pendingEventEmitTimeout by default and
+	// shortened by tests that exercise the wait.
 	pendingEmitTimeout time.Duration
 	// converged is the newest routing table convergence announced. Pending
 	// events are announced once a convergence reflects them.
@@ -324,12 +344,13 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		routingTableInterval:    config.routingTableInterval,
 		triggerBalancerInterval: config.triggerBalancerInterval,
 		tlsInfo:                 config.tlsInfo,
+		networkProfile:          config.networkProfile,
 		events:                  make(chan *Event, defaultEventsBufSize),
 		nodeJoinedEventsFilter:  goset.NewSet[string](),
 		nodeLeftEventsFilter:    goset.NewSet[string](),
 		pendingJoins:            make(map[string]pendingEvent),
 		pendingLeaves:           make(map[string]pendingEvent),
-		pendingEmitTimeout:      pendingEventEmitTimeout,
+		pendingEmitTimeout:      config.convergenceTimeout,
 		running:                 atomic.NewBool(false),
 	}
 }
@@ -1129,9 +1150,17 @@ func (x *cluster) buildConfig() (*oconfig.Config, error) {
 }
 
 // setupMemberlistConfig applies memberlist specific configuration to the
-// provided Olric config instance.
+// provided Olric config instance. The failure detection settings come from the
+// preset of the configured network profile, and the TLS transport overrides
+// them for every profile but WAN, whose preset is already slower than the
+// overrides.
 func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
-	mconfig, err := oconfig.NewMemberlistConfig(oconfig.MemberlistEnvLAN)
+	env, err := memberlistEnv(x.networkProfile)
+	if err != nil {
+		return err
+	}
+
+	mconfig, err := oconfig.NewMemberlistConfig(env)
 	if err != nil {
 		return err
 	}
@@ -1164,10 +1193,14 @@ func (x *cluster) setupMemberlistConfig(cfg *oconfig.Config) error {
 
 		mconfig.Transport = transport
 		mconfig.UDPBufferSize = 10 * 1024 * 1024
-		mconfig.ProbeInterval = 5 * time.Second
-		mconfig.ProbeTimeout = 2 * time.Second
 		mconfig.DisableTcpPings = true
+
+		if x.networkProfile != NetworkProfileWAN {
+			mconfig.ProbeInterval = tlsProbeInterval
+			mconfig.ProbeTimeout = tlsProbeTimeout
+		}
 	}
+
 	cfg.MemberlistConfig = mconfig
 	return nil
 }
@@ -1302,6 +1335,12 @@ func (x *cluster) handleClusterEvent(payload string) error {
 			return fmt.Errorf("unmarshal node left: %w", err)
 		}
 		x.trackNodeLeftEvent(ev)
+	case events.KindMembershipChangeEvent:
+		var ev events.MembershipChangeEvent
+		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
+			return fmt.Errorf("unmarshal membership change: %w", err)
+		}
+		x.trackMembershipChangeEvent(ev)
 	case events.KindRebalanceStartEvent:
 		var ev events.RebalanceStartEvent
 		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
@@ -1320,68 +1359,109 @@ func (x *cluster) handleClusterEvent(payload string) error {
 	return nil
 }
 
-// trackNodeJoinEvent records a peer join and defers the NodeJoined event until
-// the routing table converges on a member set that includes the peer, so
-// cluster events describe a converged topology. A copy of a join already
-// announced is ignored unless a departure of the same peer is pending, in
-// which case the peer came back.
+// trackNodeJoinEvent records this node's own observation of a peer join and
+// defers the NodeJoined event until the routing table converges on a member set
+// that includes the peer, so cluster events describe a converged topology. The
+// observation reaches this node alone and carries this node's own generation,
+// which compares with the announced convergences only when this node is the
+// coordinator; the coordinator's membership change announcement carries the
+// authoritative placement.
 func (x *cluster) trackNodeJoinEvent(ev events.NodeJoinEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
-	// ignore self
-	if x.node.PeersAddress() == ev.NodeJoin {
-		return
-	}
-
-	if x.events == nil {
-		return
-	}
-
-	if _, leaving := x.pendingLeaves[ev.NodeJoin]; !leaving && x.nodeJoinedEventsFilter.Contains(ev.NodeJoin) {
-		return
-	}
-
-	x.trackLocked(ev.NodeJoin, ev.Source, ev.Generation, ev.Timestamp, x.pendingJoins, x.emitOverdueNodeJoined)
+	x.trackJoinLocked(ev.NodeJoin, ev.Source, ev.Generation, ev.Timestamp, false)
 }
 
-// trackNodeLeftEvent records a peer departure and defers the NodeLeft event
-// until the routing table converges on a member set without the peer, keeping
-// relocation aligned with routing table convergence while preserving the
-// original departure timestamp. A copy of a departure already announced is
-// ignored unless a join of the same peer is pending, in which case the peer
-// restarted and departed again.
+// trackNodeLeftEvent records this node's own observation of a peer departure
+// and defers the NodeLeft event until the routing table converges on a member
+// set without the peer, keeping relocation aligned with routing table
+// convergence while preserving the original departure timestamp. The
+// observation reaches this node alone and carries this node's own generation,
+// which compares with the announced convergences only when this node is the
+// coordinator; the coordinator's membership change announcement carries the
+// authoritative placement.
 func (x *cluster) trackNodeLeftEvent(ev events.NodeLeftEvent) {
 	x.eventsLock.Lock()
 	defer x.eventsLock.Unlock()
 
+	x.trackLeftLocked(ev.NodeLeft, ev.Source, ev.Generation, ev.Timestamp, false)
+}
+
+// trackMembershipChangeEvent records the coordinator's announcement of a
+// membership change, published once per change before the routing table is
+// recomputed for it. Its generation compares with the convergences the same
+// coordinator announces, so it is the authoritative placement of the join or
+// departure it names: it overrides the placement of this node's own
+// observation, and creates the pending event when it arrives first. An update
+// leaves the member set unchanged and is ignored.
+func (x *cluster) trackMembershipChangeEvent(ev events.MembershipChangeEvent) {
+	x.eventsLock.Lock()
+	defer x.eventsLock.Unlock()
+
+	switch ev.Change {
+	case events.MembershipChangeJoin:
+		x.trackJoinLocked(ev.Node, ev.Source, ev.Generation, ev.Timestamp, true)
+	case events.MembershipChangeLeft:
+		x.trackLeftLocked(ev.Node, ev.Source, ev.Generation, ev.Timestamp, true)
+	}
+}
+
+// trackJoinLocked records one copy of the join of node, which authoritative
+// marks as the coordinator's announcement. This node's own join is ignored, and
+// so is a copy of a join already announced unless a departure of the same node
+// is pending, in which case the node came back. It must be called while holding
+// eventsLock.
+func (x *cluster) trackJoinLocked(node string, source string, generation uint64, timestamp int64, authoritative bool) {
+	// ignore self
+	if x.node.PeersAddress() == node {
+		return
+	}
+
 	if x.events == nil {
 		return
 	}
 
-	x.nodeJoinedEventsFilter.Remove(ev.NodeLeft)
-	if _, joining := x.pendingJoins[ev.NodeLeft]; !joining && x.nodeLeftEventsFilter.Contains(ev.NodeLeft) {
+	if _, leaving := x.pendingLeaves[node]; !leaving && x.nodeJoinedEventsFilter.Contains(node) {
 		return
 	}
 
-	x.trackLocked(ev.NodeLeft, ev.Source, ev.Generation, ev.Timestamp, x.pendingLeaves, x.emitOverdueNodeLeft)
+	x.trackLocked(node, source, generation, timestamp, authoritative, x.pendingJoins, x.emitOverdueNodeJoined)
+}
+
+// trackLeftLocked records one copy of the departure of node, which
+// authoritative marks as the coordinator's announcement. A copy of a departure
+// already announced is ignored unless a join of the same node is pending, in
+// which case the node restarted and departed again. It must be called while
+// holding eventsLock.
+func (x *cluster) trackLeftLocked(node string, source string, generation uint64, timestamp int64, authoritative bool) {
+	if x.events == nil {
+		return
+	}
+
+	x.nodeJoinedEventsFilter.Remove(node)
+	if _, joining := x.pendingJoins[node]; !joining && x.nodeLeftEventsFilter.Contains(node) {
+		return
+	}
+
+	x.trackLocked(node, source, generation, timestamp, authoritative, x.pendingLeaves, x.emitOverdueNodeLeft)
 }
 
 // trackLocked records one copy of a membership event of node in pending. The
-// first copy creates the pending event and arms its bounded wait, which
-// overdue ends; every copy from the coordinator refreshes the generation the
-// event is placed with, since only the coordinator's generations compare with
-// the convergence it announces. The event is announced right away when the
-// newest convergence is known to reflect it. It must be called while holding
-// eventsLock.
-func (x *cluster) trackLocked(node string, source string, generation uint64, timestamp int64, pending map[string]pendingEvent, overdue func(string)) {
+// first copy creates the pending event, arms its bounded wait, which overdue
+// ends, and places the event against the announced convergences; an
+// authoritative copy overrides that placement, since only the coordinator's
+// generations compare with the convergences it announces. The event is
+// announced right away when the newest convergence is known to reflect it. It
+// must be called while holding eventsLock.
+func (x *cluster) trackLocked(node string, source string, generation uint64, timestamp int64, authoritative bool, pending map[string]pendingEvent, overdue func(string)) {
 	event, exists := pending[node]
 	if !exists {
 		x.pendingSequence++
 		event = pendingEvent{timestamp: timestamp, sequence: x.pendingSequence, timer: time.AfterFunc(x.pendingEmitTimeout, func() { overdue(node) })}
 	}
 
-	if event.source == "" || source == x.converged.source {
+	if !exists || authoritative {
 		event.source = source
 		event.generation = generation
 	}
@@ -1390,8 +1470,8 @@ func (x *cluster) trackLocked(node string, source string, generation uint64, tim
 	x.announceConvergedLocked(node, false)
 }
 
-// emitOverdueNodeLeft announces the departure of node still pending after
-// pendingEventEmitTimeout, meaning no convergence reflected it, together with
+// emitOverdueNodeLeft announces the departure of node still pending after the
+// convergence timeout, meaning no convergence reflected it, together with
 // any pending join of the same node in the order both were observed. A
 // departure already announced is a no-op.
 func (x *cluster) emitOverdueNodeLeft(node string) {
@@ -1406,8 +1486,8 @@ func (x *cluster) emitOverdueNodeLeft(node string) {
 	x.releaseNodeLocked(node)
 }
 
-// emitOverdueNodeJoined announces the join of node still pending after
-// pendingEventEmitTimeout, meaning no convergence reflected it, together with
+// emitOverdueNodeJoined announces the join of node still pending after the
+// convergence timeout, meaning no convergence reflected it, together with
 // any pending departure of the same node in the order both were observed. A
 // join already announced is a no-op.
 func (x *cluster) emitOverdueNodeJoined(node string) {

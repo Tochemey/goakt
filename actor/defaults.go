@@ -68,6 +68,40 @@ const (
 	// DefaultClusterBalancerInterval defines the default cluster balancer interval
 	DefaultClusterBalancerInterval = time.Second
 
+	// DefaultClusterConvergenceTimeout defines the default cluster convergence
+	// timeout, the bound applied by [ClusterConfig.WithConvergenceTimeout] to the
+	// wait for the cluster to converge on a confirmed join or departure before
+	// the membership event is published anyway.
+	//
+	// A shorter value is not advisable. Compare ten seconds with a shorter
+	// value such as five, case by case:
+	//
+	//   - Normal departure. Confirming the failure is set by the network
+	//     profile (see [NetworkProfile]) and ends before this timeout starts;
+	//     convergence then completes within a second. NodeLeft arrives at the
+	//     same moment with ten seconds or with five: the shorter value gains
+	//     nothing.
+	//   - Departure of the oldest member, the node that also coordinates the
+	//     cluster state. A node whose view lags rejects the new membership and
+	//     it has to be sent again, so convergence takes two to four seconds,
+	//     longer on large clusters or under load. With ten seconds the event
+	//     waits for it and is published to a consistent cluster. With five the
+	//     timeout can expire first: the event is published while some node
+	//     still routes to the departed one, relocation and cluster lookups run
+	//     against a stale view, and the fallback warning is logged, which is
+	//     the failure the wait exists to prevent.
+	//   - Convergence stalled for good, for example a node that stopped
+	//     acknowledging. Both values end in the fallback; ten seconds costs
+	//     five more seconds, once per stalled departure, on a path that is
+	//     already degraded.
+	//
+	// Ten seconds is about three times the slow case, the customary margin for
+	// a stability window: the shorter value only ever trades a rare five second
+	// saving on an already broken path for a stale view on a healthy one. Raise
+	// it for large clusters or slow networks; to detect failures sooner, choose
+	// a faster network profile instead.
+	DefaultClusterConvergenceTimeout = 10 * time.Second
+
 	// remoteSendCoalescingMaxBatch caps the number of fire-and-forget RemoteTell
 	// messages the internal outbound coalescer packs into a single
 	// RemoteTellRequest. Internal tuning; not exposed on remote.Config.

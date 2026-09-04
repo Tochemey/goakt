@@ -149,9 +149,38 @@ writes succeeding while a node is down. For a majority configuration, use `repli
   Default: 1m.
 - **WithClusterBalancerInterval**: How often the balancer evaluates placement and acknowledges rebalance epochs. Keep it
   shorter than the state sync interval so epochs do not stack. Default: 1s.
+- **WithNetworkProfile**: Describes the network the cluster nodes share and tunes failure detection for it.
+  `NetworkProfileLAN` (default) is for nodes in one data center or availability zone. `NetworkProfileLocal` is for nodes
+  on one host or a low-latency test cluster; it confirms failures fastest and is the most likely to mistake a long pause
+  for a crash. `NetworkProfileWAN` is for nodes spread across regions or reached over the public internet; it tolerates
+  latency and loss and confirms failures slowly.
+- **WithConvergenceTimeout**: Bounds how long the cluster waits, after it confirmed that a node joined or left, for
+  every node to route on the same membership before it publishes `NodeJoined` or `NodeLeft` anyway. Default: 10s.
+  This is not the failure confirmation time, which the network profile sets and which ends before this wait starts;
+  it bounds the convergence that follows, normally under a second and up to a few seconds when the departed node was
+  the oldest member. A shorter bound does not make failures visible sooner and can publish the event while a node
+  still routes to the departed one; to detect failures sooner, pick a faster network profile.
 
 Recommended starting points: small and medium clusters run well with a 1s to 5s balancer interval and 30s to 1m state
 sync; large or busy clusters should increase both together (for example 5s balancer with 1m to 2m state sync).
+
+## Failure detection
+
+When a node stops abruptly, the survivors confirm its loss after several missed probes, then converge on the new
+membership, then publish `NodeLeft` and relocate its actors. Confirmation time depends on the network profile and grows
+slowly with the cluster size; convergence normally takes under a second; relocation starts about three seconds later,
+once the cluster store has settled. Expected time from the crash to `NodeLeft`:
+
+| Profile        | 10 nodes | 60 nodes | 300 nodes |
+| -------------- | -------- | -------- | --------- |
+| Local          | ~5s      | ~7s      | ~10s      |
+| LAN (default)  | ~6s      | ~9s      | ~12s      |
+| WAN            | ~38s     | ~61s     | ~82s      |
+
+Faster confirmation means a higher chance that a garbage collection pause or CPU throttling is mistaken for a crash,
+which relocates a healthy node's actors for nothing. Keep the default unless the deployment matches another profile.
+
+<Note>With TLS enabled, the Local and LAN rows are about 11s, 15s and 19s.</Note>
 
 ## Registry consistency
 

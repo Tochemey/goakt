@@ -1,0 +1,13 @@
+# The nodes discover each other through the A records of one domain name: each
+# node resolves it and finds the addresses of the whole cluster, its own
+# included.
+nodes.issue1340.local:53 {
+  hosts {
+    172.29.0.11 nodes.issue1340.local
+    172.29.0.12 nodes.issue1340.local
+    172.29.0.13 nodes.issue1340.local
+    fallthrough
+  }
+  log
+  errors
+}
