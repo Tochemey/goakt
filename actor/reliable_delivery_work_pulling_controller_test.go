@@ -1227,3 +1227,34 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		})
 	})
 }
+
+// TestWorkPullingControllerPublishFailure verifies that the work-pulling
+// producer controller reports a terminal failure through its endpoint's actor
+// system event stream, and that a controller whose endpoint has no system
+// stays silent instead of panicking.
+func TestWorkPullingControllerPublishFailure(t *testing.T) {
+	ctx, system := newCompanionTestSystem(t)
+
+	producer, err := system.Spawn(ctx, "jobs-producer", &deliveryRecorder{})
+	require.NoError(t, err)
+
+	subscriber, err := system.Subscribe()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = system.Unsubscribe(subscriber) })
+
+	controller := newWorkPullingProducerController(producer, testWorkPullingConfig(1, time.Millisecond, time.Millisecond), nil)
+	cause := errors.New("load failed")
+	controller.publishFailure(ReliableDeliveryStageLoad, cause)
+
+	failure := awaitFailure(t, subscriber)
+	assert.Equal(t, "jobs-producer", failure.EndpointName())
+	assert.Equal(t, ReliableControllerRoleProducer, failure.ControllerRole())
+	assert.Equal(t, ReliableDeliveryStageLoad, failure.Stage())
+	assert.ErrorIs(t, failure.Err(), cause)
+
+	// an endpoint without a system has no stream to report through
+	addr := address.New("orphan-producer", system.Name(), "127.0.0.1", 0)
+	orphan := &PID{address: addr, path: newPath(addr)}
+	silent := newWorkPullingProducerController(orphan, testWorkPullingConfig(1, time.Millisecond, time.Millisecond), nil)
+	require.NotPanics(t, func() { silent.publishFailure(ReliableDeliveryStageLoad, cause) })
+}

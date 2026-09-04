@@ -298,8 +298,8 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 		err := errors.NewRebalancingError(fmt.Errorf("relocation of node=%s completed with %d failed actors and %d failed grains", peersAddress, len(failedActors), len(failedGrains)))
 		w.logger.Errorf("%v (hint: subscribe to RelocationFailed events for the affected actors and grains)", err)
 
-		if w.pid.eventsStream != nil {
-			w.pid.eventsStream.Publish(eventsTopic, NewRelocationFailed(peersAddress, time.Now().UTC(), failedActors, failedGrains, err))
+		if w.pid.getEventsStream() != nil {
+			w.pid.getEventsStream().Publish(eventsTopic, NewRelocationFailed(peersAddress, time.Now().UTC(), failedActors, failedGrains, err))
 		}
 	}
 

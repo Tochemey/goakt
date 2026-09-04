@@ -84,6 +84,47 @@ func TestNewPath(t *testing.T) {
 	})
 }
 
+func TestPathViewOverAddress(t *testing.T) {
+	t.Run("accessors read through the address", func(t *testing.T) {
+		addr := address.New("actor1", "system1", "127.0.0.1", 9000)
+		p := newPath(addr)
+		require.NotNil(t, p)
+
+		assert.Equal(t, addr.Host(), p.Host())
+		assert.Equal(t, addr.Port(), p.Port())
+		assert.Equal(t, addr.HostPort(), p.HostPort())
+		assert.Equal(t, addr.Name(), p.Name())
+		assert.Equal(t, addr.System(), p.System())
+		assert.Equal(t, addr.IncarnationID(), p.incarnationID())
+		assert.Equal(t, addr.String(), p.String())
+	})
+
+	t.Run("parent chain reflects the parent address", func(t *testing.T) {
+		parentAddr := address.New("parent", "system1", "127.0.0.1", 9000)
+		childAddr := address.NewWithParent("child", "system1", "127.0.0.1", 9000, parentAddr)
+
+		p := newPath(childAddr)
+		require.NotNil(t, p)
+
+		parent := p.Parent()
+		require.NotNil(t, parent)
+		assert.Equal(t, parentAddr.Name(), parent.Name())
+		assert.Equal(t, parentAddr.String(), parent.String())
+	})
+
+	t.Run("equals matches on equal string forms from distinct addresses", func(t *testing.T) {
+		addr1 := address.New("actor1", "system1", "127.0.0.1", 9000)
+		addr2 := address.New("actor1", "system1", "127.0.0.1", 9000)
+		require.NotSame(t, addr1, addr2)
+
+		p1 := newPath(addr1)
+		p2 := newPath(addr2)
+		require.NotNil(t, p1)
+		require.NotNil(t, p2)
+		assert.True(t, p1.Equals(p2))
+	})
+}
+
 func TestPath_Equals(t *testing.T) {
 	t.Run("same path returns true", func(t *testing.T) {
 		addr := address.New("actor1", "system1", "127.0.0.1", 9000)

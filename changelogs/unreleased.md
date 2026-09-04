@@ -1,5 +1,17 @@
 # Unreleased
 
+## ⚡ Performance
+
+- **Smaller idle-actor memory footprint.** A spawned, started, idle actor now holds about 1,268 B of live heap, down from about 2,124 B, roughly 40 percent less, with fewer heap objects each (18 to 13). At one million idle actors on a node that is roughly 1.18 GB of live heap instead of 1.98 GB, and long-lived actors (`WithLongLived`) drop from about 1,966 B to about 1,110 B, making dense deployments of many light actors cheaper to keep resident. The savings come from:
+  - Moving spawn settings most actors never set (reliable-delivery configuration, durable queues, singleton spec, role, metrics identity) off the PID into a companion allocated only when one of them is used.
+  - Looking the logger and event stream up from the actor system on demand instead of copying them onto every actor.
+  - Replacing each actor's system-message mailbox with a sentinel-free inline queue, so an idle actor holds no control-plane node.
+  - Embedding the default user mailbox in the PID rather than in a separate heap object.
+  - Holding each actor's watchers in a small slice instead of a map, which for the usual two watchers cost a header and a bucket group plus a copy of each watcher's ID.
+  - Making the actor path a thin view over its address instead of a struct that re-copied the host, port, name, system, and cached strings the address already holds.
+
+  Actor behavior is unchanged: one message at a time, system messages ahead of user messages, and send order preserved. Throughput is unchanged and `Tell` remains allocation-free. Custom mailboxes set with `WithMailbox` are unaffected.
+
 ## 🔧 Fixes
 
 - **Cluster membership events follow routing table convergence** ([#1331](https://github.com/Tochemey/goakt/issues/1331)). `NodeLeft` and `NodeJoined` are now published once the cluster's routing table has converged on the membership change, using the member set olric announces with each convergence, instead of waiting for the single rebalance epoch started for the change. A departure whose epoch was superseded by a later routing table push used to surface only through the 30s fallback timer, and a join in the same situation could go unreported until the next join. A node that joins and departs, or departs and restarts, before the table converges is announced in the order the converged member set implies. A member that departs, restarts at the same address and departs again is announced each time, where the second departure was previously lost. A join whose convergence never comes is announced after the same 30s bound as a departure, and that wait is cancelled as soon as the event is announced or the actor system stops.

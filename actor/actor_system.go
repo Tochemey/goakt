@@ -862,6 +862,12 @@ type ActorSystem interface {
 	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
 	getRemoting() remoteclient.Client
+	// getLogger returns the system logger without taking the system lock. The
+	// logger is set at construction and never replaced, so a PID can read it
+	// from any path, including ones that run under the system lock.
+	getLogger() log.Logger
+	// getEventsStream returns the system's event stream, set at construction.
+	getEventsStream() eventstream.Stream
 	// resolveReliableCompanion returns the live reliable-delivery controller
 	// bound to the named endpoint's current incarnation using local-first
 	// resolution, falling back to the explicitly addressed peer node when peer
@@ -1915,7 +1921,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		// was restarted with the subtree and is left untouched, while one that
 		// stopped terminally is recreated here, which is the supported
 		// recovery path after correcting a terminal delivery failure
-		if pid.reliableDelivery != nil {
+		if pid.reliableDelivery() != nil {
 			if err := x.ensureReliableCompanion(ctx, pid); err != nil {
 				return nil, err
 			}
@@ -2564,6 +2570,16 @@ func (x *actorSystem) getRemoting() remoteclient.Client {
 	return remoting
 }
 
+// getLogger returns the system logger without locking; see ActorSystem.getLogger.
+func (x *actorSystem) getLogger() log.Logger {
+	return x.logger
+}
+
+// getEventsStream returns the system's event stream.
+func (x *actorSystem) getEventsStream() eventstream.Stream {
+	return x.eventsStream
+}
+
 // getDataCenterController returns the data center controller
 func (x *actorSystem) getDataCenterController() *datacentercontroller.Controller {
 	x.locker.RLock()
@@ -2700,7 +2716,7 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 		return spawned, err
 	}
 
-	if pid.reliableDelivery != nil {
+	if pid.reliableDelivery() != nil {
 		if err := x.ensureReliableCompanion(ctx, pid); err != nil {
 			x.rollbackReliableSpawn(ctx, pid)
 			return nil, err
@@ -2765,7 +2781,7 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 // every other actor keeps the plain publication path, whose overwrite
 // semantics restarts and relocation rely on.
 func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
-	if pid.reliableDelivery == nil || !x.clusterEnabled.Load() {
+	if pid.reliableDelivery() == nil || !x.clusterEnabled.Load() {
 		return x.putActorOnCluster(ctx, pid)
 	}
 
@@ -2825,7 +2841,7 @@ func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string
 // any node. Their records carry the ownership spec and leave the registry
 // through the same metadata gate in the death watch.
 func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
-	if !x.clusterEnabled.Load() || (isSystemName(pid.Name()) && pid.reliableCompanion == nil) {
+	if !x.clusterEnabled.Load() || (isSystemName(pid.Name()) && pid.reliableCompanion() == nil) {
 		return nil
 	}
 
@@ -4042,9 +4058,7 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// pid inherit the actor system settings defined during instantiation
 	pidOpts := []pidOption{
 		withInitMaxRetries(x.actorInitMaxRetries),
-		withCustomLogger(x.logger),
 		withActorSystem(x),
-		withEventsStream(x.eventsStream),
 		withInitTimeout(spawnConfig.initTimeout),
 		withRemoting(x.remoting),
 		withPassivationManager(x.passivator),
@@ -4369,8 +4383,8 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 			// name, so it is absent from pids and the per-actor death watch
 			// removal is disabled while the system stops. Withdraw its record
 			// here or it outlives the node in the registry.
-			if pid.reliableDelivery != nil {
-				companionName := reliableCompanionName(pid.reliableDelivery.role(), pid.incarnationID())
+			if pid.reliableDelivery() != nil {
+				companionName := reliableCompanionName(pid.reliableDelivery().role(), pid.incarnationID())
 				if err := x.cluster.RemoveActor(ctx, companionName); err != nil {
 					x.logger.Errorf("failed to remove reliable controller=%s of endpoint=%s from cluster: %v (hint: check cluster connectivity)", companionName, actorName, err)
 					return err
@@ -4934,7 +4948,7 @@ func (x *actorSystem) deadletterSnapshot(ctx context.Context) map[string][]comma
 func (x *actorSystem) observeEachActor(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
 	for _, node := range x.actors.nodes() {
 		pid := node.value()
-		if pid == nil || pid.observeOptions == nil {
+		if pid == nil || pid.observeOptions() == nil {
 			continue
 		}
 
@@ -4944,7 +4958,7 @@ func (x *actorSystem) observeEachActor(observer otelmetric.Observer, metrics *me
 		// it. System actors stay out of it, mirroring their exclusion from the
 		// per-kind mode.
 		if !pid.isStateSet(systemState) {
-			observer.ObserveInt64(metrics.MailboxSize(), pid.observedMailboxSize(), pid.observeOptions...)
+			observer.ObserveInt64(metrics.MailboxSize(), pid.observedMailboxSize(), pid.observeOptions()...)
 		}
 
 		if !pid.IsRunning() {
@@ -4959,15 +4973,15 @@ func (x *actorSystem) observeEachActor(observer otelmetric.Observer, metrics *me
 			continue
 		}
 
-		observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions...)
-		observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), pid.observeOptions...)
-		observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions...)
-		observer.ObserveInt64(metrics.ProcessedCount(), processed-1, pid.observeOptions...)
-		observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions...)
-		observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), pid.observeOptions...)
-		observer.ObserveInt64(metrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions...)
-		observer.ObserveInt64(metrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions...)
-		observer.ObserveInt64(metrics.UnhandledCount(), pid.unhandledCount.Load(), pid.observeOptions...)
+		observer.ObserveInt64(metrics.ChildrenCount(), int64(pid.ChildrenCount()), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.StashSize(), int64(pid.StashSize()), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.RestartCount(), int64(pid.RestartCount()), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.ProcessedCount(), processed-1, pid.observeOptions()...)
+		observer.ObserveInt64(metrics.LastReceivedDuration(), pid.LatestProcessedDuration().Milliseconds(), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.Uptime(), pid.Uptime(), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.FailureCount(), int64(pid.failureCount.Load()), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.ReinstateCount(), int64(pid.reinstateCount.Load()), pid.observeOptions()...)
+		observer.ObserveInt64(metrics.UnhandledCount(), pid.unhandledCount.Load(), pid.observeOptions()...)
 		observeDeadletters(observer, metrics.DeadlettersCount(), pid, deadletterCounts[pid.address.String()])
 	}
 }
@@ -5071,10 +5085,10 @@ func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *m
 			continue
 		}
 
-		aggregate, ok := aggregates[pid.metricKind]
+		aggregate, ok := aggregates[pid.metricKind()]
 		if !ok {
 			aggregate = &actorKindAggregate{}
-			aggregates[pid.metricKind] = aggregate
+			aggregates[pid.metricKind()] = aggregate
 		}
 
 		// the backlog counts whatever the actor's lifecycle state, which is what
@@ -5154,15 +5168,15 @@ func observeKindDeadletters(observer otelmetric.Observer, instrument otelmetric.
 // attribute, which keeps every live actor present in the series.
 func observeDeadletters(observer otelmetric.Observer, instrument otelmetric.Int64ObservableCounter, pid *PID, entries []commands.DeadletterCount) {
 	if len(entries) == 0 {
-		observer.ObserveInt64(instrument, 0, pid.observeOptions...)
+		observer.ObserveInt64(instrument, 0, pid.observeOptions()...)
 		return
 	}
 
 	// the actor's cached options are reused for every entry; only the trailing
 	// message.type attribute changes, so the scrape builds one slice per actor
 	// instead of one per message type.
-	options := make([]otelmetric.ObserveOption, len(pid.observeOptions)+1)
-	copy(options, pid.observeOptions)
+	options := make([]otelmetric.ObserveOption, len(pid.observeOptions())+1)
+	copy(options, pid.observeOptions())
 
 	for _, entry := range entries {
 		options[len(options)-1] = otelmetric.WithAttributes(attribute.String("message.type", entry.MessageType))

@@ -131,10 +131,12 @@ go test -run=^$ -bench=^BenchmarkGrainAskPairwise$ -count=10 ./benchmark/
 go test -run=^$ -bench='Throughput$' -count=5 ./benchmark/
 ```
 
-### ActorMemoryFootprint — bytes per spawned actor
+### ActorMemoryFootprint: live heap bytes per idle actor
+
+Spawns 100,000 empty actors into a started actor system, waits for their PostStart to drain, forces a collection and reports the live-heap growth per actor against the empty system's collected baseline. The system's fixed cost is excluded, so the number is the term a million-actor node scales with; the report also extrapolates it to one million actors. Runs twice: the default spawn, which registers every actor with the passivation manager, and a long-lived spawn, which does not. The difference between the two is the passivation bookkeeping per actor. The run fails when the live heap per actor exceeds the ceiling pinned in `memory_test.go`.
 
 ```
-go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchmem ./benchmark/
+go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchtime=1x ./benchmark/
 ```
 
 ### RemoteTellThroughput — one shared client fans TCP tells over 10 systems for 10 s

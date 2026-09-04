@@ -1533,7 +1533,6 @@ func MockPassivationPID(t *testing.T, name string, strategy passivation.Strategy
 		address:             addr,
 		path:                newPath(addr),
 		passivationStrategy: strategy,
-		logger:              log.DiscardLogger,
 	}
 	return pid
 }

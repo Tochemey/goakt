@@ -1287,11 +1287,11 @@ func (x *producerController) terminate(ctx *ReceiveContext, stage ReliableDelive
 // failure, where no ReceiveContext exists yet.
 func (x *producerController) publishFailure(stage ReliableDeliveryStage, cause error) {
 	event, err := newReliableDeliveryFailed(x.producer.Name(), ReliableControllerRoleProducer, stage, cause)
-	if err != nil || x.producer.eventsStream == nil {
+	if err != nil || x.producer.getEventsStream() == nil {
 		return
 	}
 
-	x.producer.eventsStream.Publish(eventsTopic, event)
+	x.producer.getEventsStream().Publish(eventsTopic, event)
 }
 
 // tell sends a protocol message and classifies a send failure as transient

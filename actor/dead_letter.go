@@ -101,7 +101,7 @@ func (x *deadLetter) PostStop(ctx *Context) error {
 }
 
 func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
-	x.eventsStream = ctx.Self().eventsStream
+	x.eventsStream = ctx.Self().getEventsStream()
 	x.logger = ctx.Logger()
 	x.pid = ctx.Self()
 	x.letters = xsync.NewMap[string, *Deadletter]()

@@ -25,12 +25,10 @@ package actor
 import (
 	"time"
 
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/metric"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/xsync"
-	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -42,7 +40,7 @@ type pidOption func(pid *PID)
 // withReliableDelivery records immutable reliable-delivery settings.
 func withReliableDelivery(config *reliableDeliveryConfig) pidOption {
 	return func(pid *PID) {
-		pid.reliableDelivery = config.clone()
+		pid.attachCompanion().reliableDelivery = config.clone()
 	}
 }
 
@@ -50,7 +48,7 @@ func withReliableDelivery(config *reliableDeliveryConfig) pidOption {
 // controller described by spec.
 func withReliableCompanion(spec *reliableCompanionSpec) pidOption {
 	return func(pid *PID) {
-		pid.reliableCompanion = spec
+		pid.attachCompanion().reliableCompanion = spec
 	}
 }
 
@@ -59,7 +57,7 @@ func withReliableCompanion(spec *reliableCompanionSpec) pidOption {
 // fresh producer controller.
 func withDurableQueue(queue DurableProducerQueue) pidOption {
 	return func(pid *PID) {
-		pid.durableQueue = queue
+		pid.attachCompanion().durableQueue = queue
 	}
 }
 
@@ -68,7 +66,7 @@ func withDurableQueue(queue DurableProducerQueue) pidOption {
 // to a fresh work-pulling producer controller.
 func withDurableWorkQueue(queue DurableWorkQueue) pidOption {
 	return func(pid *PID) {
-		pid.durableWorkQueue = queue
+		pid.attachCompanion().durableWorkQueue = queue
 	}
 }
 
@@ -76,13 +74,6 @@ func withDurableWorkQueue(queue DurableWorkQueue) pidOption {
 func withInitMaxRetries(value int) pidOption {
 	return func(pid *PID) {
 		pid.initMaxRetries.Store(int32(value))
-	}
-}
-
-// withCustomLogger sets the log
-func withCustomLogger(logger log.Logger) pidOption {
-	return func(pid *PID) {
-		pid.logger = logger
 	}
 }
 
@@ -120,13 +111,6 @@ func withMailbox(box Mailbox) pidOption {
 	}
 }
 
-// withEventsStream set the events stream
-func withEventsStream(stream eventstream.Stream) pidOption {
-	return func(pid *PID) {
-		pid.eventsStream = stream
-	}
-}
-
 // withInitTimeout sets an explicit init timeout override on the actor. A nil
 // override leaves the actor inheriting the actor system's default, resolved at
 // initialization; a non-nil override is carried through relocation.
@@ -160,7 +144,9 @@ func asSingleton() pidOption {
 // withSingletonSpec records the singleton configuration on the PID.
 func withSingletonSpec(spec *singletonSpec) pidOption {
 	return func(pid *PID) {
-		pid.singletonSpec = spec
+		if spec != nil {
+			pid.attachCompanion().singletonSpec = spec
+		}
 	}
 }
 
@@ -212,7 +198,7 @@ func asSystemActor() pidOption {
 func withRole(role string) pidOption {
 	return func(pid *PID) {
 		if role != "" {
-			pid.role = new(role)
+			pid.attachCompanion().role = new(role)
 		}
 	}
 }
@@ -221,7 +207,7 @@ func withRole(role string) pidOption {
 func withMetricProvider(metricProvider *metric.Provider) pidOption {
 	return func(pid *PID) {
 		if metricProvider != nil {
-			pid.metricProvider = metricProvider
+			pid.attachCompanion().metricProvider = metricProvider
 		}
 	}
 }

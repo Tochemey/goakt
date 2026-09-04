@@ -43,9 +43,7 @@ func TestDiscoverActor(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("returns ErrDead when PID is not running", func(t *testing.T) {
-		pid := &PID{
-			logger: log.DiscardLogger,
-		}
+		pid := &PID{}
 		// PID is not running by default (state is 0)
 
 		addr, err := pid.DiscoverActor(ctx, "actor-1", time.Second)
@@ -57,7 +55,6 @@ func TestDiscoverActor(t *testing.T) {
 	t.Run("returns ErrActorNotFound when actor system is nil", func(t *testing.T) {
 		pid := &PID{
 			actorSystem: nil,
-			logger:      log.DiscardLogger,
 		}
 		pid.setState(runningState, true)
 
@@ -74,7 +71,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -93,7 +89,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -123,7 +118,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -153,7 +147,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -183,7 +176,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -214,7 +206,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -255,7 +246,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -290,7 +280,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -320,7 +309,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -350,7 +338,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -374,7 +361,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)
@@ -411,7 +397,6 @@ func TestDiscoverActor(t *testing.T) {
 
 		pid := &PID{
 			actorSystem: sys,
-			logger:      log.DiscardLogger,
 			remoting:    remotingMock,
 		}
 		pid.setState(runningState, true)

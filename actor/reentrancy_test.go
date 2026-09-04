@@ -828,7 +828,6 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 
 	pid := &PID{
 		actorSystem: sys,
-		logger:      log.DiscardLogger,
 	}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	pid.setState(runningState, true)
@@ -843,10 +842,8 @@ func TestProcessStashErrorPath(t *testing.T) {
 	t.Cleanup(d.signalStop)
 
 	pid := &PID{
-		mailbox:       NewUnboundedMailbox(),
-		systemMailbox: NewUnboundedMailbox(),
-		logger:        log.DiscardLogger,
-		dispatcher:    d,
+		mailbox:    NewUnboundedMailbox(),
+		dispatcher: d,
 	}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	pid.reentrancy.Load().blockingCount.Store(1)
@@ -861,7 +858,7 @@ func TestProcessStashErrorPath(t *testing.T) {
 }
 
 func TestHandleAsyncRequestValidationErrors(t *testing.T) {
-	pid := &PID{logger: log.DiscardLogger}
+	pid := &PID{}
 
 	t.Run("nil request", func(t *testing.T) {
 		pid.handleAsyncRequest(nil, nil, time.Now())
@@ -875,12 +872,12 @@ func TestHandleAsyncRequestValidationErrors(t *testing.T) {
 
 func TestHandleAsyncResponsePaths(t *testing.T) {
 	t.Run("nil response", func(t *testing.T) {
-		pid := &PID{logger: log.DiscardLogger}
+		pid := &PID{}
 		pid.handleAsyncResponse(nil, nil)
 	})
 
 	t.Run("empty correlation", func(t *testing.T) {
-		pid := &PID{logger: log.DiscardLogger}
+		pid := &PID{}
 		pid.handleAsyncResponse(nil, &commands.AsyncResponse{CorrelationID: "  "})
 	})
 
@@ -1173,9 +1170,7 @@ func TestDeregisterRequestStateNoop(t *testing.T) {
 }
 
 func TestDeregisterRequestStateUnstashOnLastBlocking(t *testing.T) {
-	pid := &PID{
-		logger: log.DiscardLogger,
-	}
+	pid := &PID{}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	state := newRequestState("id", reentrancy.StashNonReentrant, pid)
 	pid.reentrancy.Load().requestStates.Set(state.id, state)
@@ -1214,9 +1209,7 @@ func TestCompleteRequest(t *testing.T) {
 	})
 
 	t.Run("completes and invokes callback", func(t *testing.T) {
-		pid := &PID{
-			logger: log.DiscardLogger,
-		}
+		pid := &PID{}
 		pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 		state := newRequestState("done", reentrancy.AllowAll, pid)
 		require.NoError(t, pid.registerRequestState(state))
@@ -1317,10 +1310,8 @@ func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight
 	t.Cleanup(d.signalStop)
 
 	pid := &PID{
-		logger:        log.DiscardLogger,
-		mailbox:       NewUnboundedMailbox(),
-		systemMailbox: NewUnboundedMailbox(),
-		dispatcher:    d,
+		mailbox:    NewUnboundedMailbox(),
+		dispatcher: d,
 	}
 	pid.reentrancy.Store(newReentrancyState(mode, maxInFlight))
 	pid.setState(runningState, true)

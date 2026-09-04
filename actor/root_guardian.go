@@ -62,8 +62,8 @@ func (x *rootGuardian) Receive(ctx *ReceiveContext) {
 		x.handlePanicSignal(ctx)
 	case *Terminated:
 		actorID := msg.ActorPath()
-		if x.pid.logger.Enabled(log.DebugLevel) {
-			x.pid.logger.Debugf("actor=%s terminated", actorID)
+		if x.pid.getLogger().Enabled(log.DebugLevel) {
+			x.pid.getLogger().Debugf("actor=%s terminated", actorID)
 		}
 		// TODO: decide what to do the actor
 	default:

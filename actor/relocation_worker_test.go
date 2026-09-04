@@ -111,13 +111,12 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remoteclient.NewClient(),
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -177,13 +176,12 @@ func TestRelocationWorkerAbortsWhenSystemStopping(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -243,13 +241,12 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remoteclient.NewClient(),
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -312,13 +309,12 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remoteclient.NewClient(),
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -412,13 +408,12 @@ func TestRelocationRPCScaling(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -500,13 +495,12 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}
@@ -666,7 +660,7 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
-		pid:      &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:      &PID{actorSystem: system},
 		logger:   log.DiscardLogger,
 	}
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
@@ -707,7 +701,7 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
-		pid:      &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:      &PID{actorSystem: system},
 		logger:   log.DiscardLogger,
 	}
 	peers := []*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}
@@ -762,7 +756,7 @@ func TestRelocationWorkerToleratesDeletePeerStateError(t *testing.T) {
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", new(internalpb.PeerState)))
 
 	worker := &relocationWorker{
-		pid:    &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:    &PID{actorSystem: system},
 		logger: log.DiscardLogger,
 	}
 
@@ -973,7 +967,8 @@ func TestReportAbortedRelocation(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
-	pid := &PID{actorSystem: system, logger: log.DiscardLogger, eventsStream: stream}
+	system.eventsStream = stream
+	pid := &PID{actorSystem: system}
 
 	peerState := internalpb.PeerState_builder{
 		Host:         host,
@@ -1131,7 +1126,7 @@ func TestRelocationWorkerShareFailsOnFallbackPeer(t *testing.T) {
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
-		pid:      &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:      &PID{actorSystem: system},
 		logger:   log.DiscardLogger,
 	}
 	peers := []*cluster.Peer{
@@ -1174,7 +1169,8 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
-	pid := &PID{actorSystem: system, logger: log.DiscardLogger, eventsStream: stream}
+	system.eventsStream = stream
+	pid := &PID{actorSystem: system}
 
 	peerState := internalpb.PeerState_builder{
 		Host:         host,
@@ -1613,7 +1609,7 @@ func TestRelocationWorkerFinishToleratesResetStore(t *testing.T) {
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", new(internalpb.PeerState)))
 
 	worker := &relocationWorker{
-		pid:    &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:    &PID{actorSystem: system},
 		logger: log.DiscardLogger,
 	}
 
@@ -1824,13 +1820,12 @@ func TestRelocationWorkerHonorsEagerGrainRole(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	worker := &relocationWorker{
 		remoting: remotingMock,
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger: log.DiscardLogger,
 	}

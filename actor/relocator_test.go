@@ -58,11 +58,10 @@ func TestRelocatorPublishRelocationFailedIncludesActorsAndGrains(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	system.(*actorSystem).eventsStream = stream
 
 	pid := &PID{
-		actorSystem:  system,
-		logger:       log.DiscardLogger,
-		eventsStream: stream,
+		actorSystem: system,
 	}
 
 	actors := map[string]*internalpb.Actor{
@@ -108,7 +107,7 @@ func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
 
 	manager := &relocator{
-		pid:    &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:    &PID{actorSystem: system},
 		logger: log.DiscardLogger,
 	}
 
@@ -161,13 +160,12 @@ func TestRelocatorTerminatedAbortsInflightJob(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	workerName := reservedName(relocationWorkerType) + "-1"
 	manager := &relocator{
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger:  log.DiscardLogger,
 		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: peerState}},
@@ -217,13 +215,12 @@ func TestRelocatorTerminatedAfterNormalCompletionIsNoOp(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	workerName := reservedName(relocationWorkerType) + "-1"
 	manager := &relocator{
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger:  log.DiscardLogger,
 		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()}},
@@ -255,7 +252,7 @@ func TestRelocatorTerminatedIgnoresUnknownWorker(t *testing.T) {
 	require.NoError(t, err)
 
 	manager := &relocator{
-		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:     &PID{actorSystem: system},
 		logger:  log.DiscardLogger,
 		workers: make(map[string]workerJob),
 	}
@@ -290,13 +287,12 @@ func TestRelocatorStaleTerminatedDoesNotAbortNewerJob(t *testing.T) {
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
 	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
 
 	workerName := reservedName(relocationWorkerType) + "-1"
 	manager := &relocator{
 		pid: &PID{
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			eventsStream: stream,
+			actorSystem: system,
 		},
 		logger:  log.DiscardLogger,
 		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
@@ -346,7 +342,7 @@ func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
 
 	workerName := reservedName(relocationWorkerType) + "-1"
 	manager := &relocator{
-		pid:     &PID{actorSystem: system, logger: log.DiscardLogger},
+		pid:     &PID{actorSystem: system},
 		logger:  log.DiscardLogger,
 		workers: map[string]workerJob{workerName: {address: "127.0.0.1:9000", peerState: oldPeerState}},
 	}
