@@ -61,6 +61,8 @@ func TestClusterConfig(t *testing.T) {
 			WithClusterStateSyncInterval(10*time.Second).
 			WithGrainActivationBarrier(5*time.Second).
 			WithClusterBalancerInterval(5*time.Second).
+			WithConvergenceTimeout(20*time.Second).
+			WithNetworkProfile(NetworkProfileLocal).
 			WithDiscovery(provider).
 			WithDataCenter(func() *datacenter.Config {
 				dc := datacenter.NewConfig()
@@ -84,6 +86,8 @@ func TestClusterConfig(t *testing.T) {
 		assert.Equal(t, 10*time.Second, config.shutdownTimeout)
 		assert.Equal(t, 10*time.Second, config.bootstrapTimeout)
 		assert.Equal(t, 10*time.Second, config.clusterStateSyncInterval)
+		assert.Equal(t, 20*time.Second, config.convergenceTimeout)
+		assert.Equal(t, NetworkProfileLocal, config.networkProfile)
 		assert.True(t, config.grainActivationBarrierEnabled())
 		assert.Equal(t, 5*time.Second, config.grainActivationBarrierTimeout())
 		assert.ElementsMatch(t, []string{"role1", "role2"}, config.getRoles())
@@ -163,6 +167,37 @@ func TestClusterConfig(t *testing.T) {
 
 		assert.False(t, config.grainActivationBarrierEnabled())
 		assert.Zero(t, config.grainActivationBarrierTimeout())
+	})
+
+	t.Run("With invalid convergence timeout", func(t *testing.T) {
+		for _, timeout := range []time.Duration{0, -time.Second} {
+			config := NewClusterConfig().
+				WithKinds(new(exchanger), new(MockActor)).
+				WithDiscoveryPort(3220).
+				WithPeersPort(3222).
+				WithConvergenceTimeout(timeout).
+				WithDiscovery(new(testkit.Provider))
+
+			require.ErrorContains(t, config.Validate(), "cluster convergence timeout is invalid")
+		}
+	})
+
+	t.Run("With unknown network profile", func(t *testing.T) {
+		config := NewClusterConfig().
+			WithKinds(new(exchanger), new(MockActor)).
+			WithDiscoveryPort(3220).
+			WithPeersPort(3222).
+			WithNetworkProfile(NetworkProfile(7)).
+			WithDiscovery(new(testkit.Provider))
+
+		require.ErrorContains(t, config.Validate(), "cluster network profile is invalid")
+	})
+
+	t.Run("With default failure detection settings", func(t *testing.T) {
+		config := NewClusterConfig()
+
+		assert.Equal(t, DefaultClusterConvergenceTimeout, config.convergenceTimeout)
+		assert.Equal(t, NetworkProfileLAN, config.networkProfile)
 	})
 
 	t.Run("With default replication settings", func(t *testing.T) {

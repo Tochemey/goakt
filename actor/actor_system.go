@@ -2915,6 +2915,8 @@ func (x *actorSystem) setupCluster() error {
 		cluster.WithBootstrapTimeout(x.clusterConfig.bootstrapTimeout),
 		cluster.WithRoutingTableInterval(x.clusterConfig.clusterStateSyncInterval),
 		cluster.WithBalancerInterval(x.clusterConfig.clusterBalancerInterval),
+		cluster.WithConvergenceTimeout(x.clusterConfig.convergenceTimeout),
+		cluster.WithNetworkProfile(x.clusterConfig.networkProfile),
 	)
 
 	var err error

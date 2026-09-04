@@ -1,0 +1,107 @@
+# Three nodes of one cluster, started one after the other so that node1 is the
+# oldest member: the cluster leader and the host of the relocatable singleton.
+# The demo kills node1 and measures how long the survivors take to report the
+# departure and to reach the singleton again.
+#
+# restart is off on purpose: the issue is about a node that is killed and does
+# not come back.
+
+x-node: &node
+  image: issue1340:dev
+  build:
+    context: ../..
+    dockerfile: playground/issue-1340/Dockerfile
+  restart: "no"
+  dns:
+    - 172.29.0.10
+  expose:
+    - "8080"
+    - "50052"
+    - "3322"
+    - "3320"
+  healthcheck:
+    test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+    interval: 2s
+    timeout: 3s
+    retries: 60
+    start_period: 3s
+
+x-environment: &environment
+  DOMAIN_NAME: nodes.issue1340.local
+  DISCOVERY_PORT: "3322"
+  PEERS_PORT: "3320"
+  REMOTING_PORT: "50052"
+  HTTP_PORT: "8080"
+  LOG_LEVEL: info
+  # the two settings the scenarios vary, passed through from the host
+  # environment. Empty means the node keeps the framework default.
+  CONVERGENCE_TIMEOUT: "${CONVERGENCE_TIMEOUT:-}"
+  NETWORK_PROFILE: "${NETWORK_PROFILE:-}"
+
+services:
+  coredns:
+    image: coredns/coredns:1.11.1
+    container_name: issue1340-coredns
+    command: ["-conf", "/etc/coredns/Corefile"]
+    restart: "no"
+    volumes:
+      - ./coredns.Corefile:/etc/coredns/Corefile:ro
+    networks:
+      cluster:
+        ipv4_address: 172.29.0.10
+
+  node1:
+    <<: *node
+    hostname: node1
+    container_name: node1
+    depends_on:
+      coredns:
+        condition: service_started
+    networks:
+      cluster:
+        ipv4_address: 172.29.0.11
+    environment:
+      <<: *environment
+      NODE_NAME: node1
+      SPAWN_SINGLETON: "true"
+
+  node2:
+    <<: *node
+    hostname: node2
+    container_name: node2
+    depends_on:
+      node1:
+        condition: service_healthy
+    networks:
+      cluster:
+        ipv4_address: 172.29.0.12
+    ports:
+      - "18082:8080"
+    environment:
+      <<: *environment
+      NODE_NAME: node2
+      SPAWN_SINGLETON: "false"
+
+  node3:
+    <<: *node
+    hostname: node3
+    container_name: node3
+    depends_on:
+      node2:
+        condition: service_healthy
+    networks:
+      cluster:
+        ipv4_address: 172.29.0.13
+    ports:
+      - "18083:8080"
+    environment:
+      <<: *environment
+      NODE_NAME: node3
+      SPAWN_SINGLETON: "false"
+
+networks:
+  cluster:
+    name: issue1340
+    ipam:
+      config:
+        - subnet: 172.29.0.0/16

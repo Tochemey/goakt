@@ -23,14 +23,63 @@
 package cluster
 
 import (
+	"fmt"
 	"os"
 	"time"
+
+	oconfig "github.com/tochemey/olric/config"
 
 	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/log"
 	gtls "github.com/tochemey/goakt/v4/tls"
 )
+
+// NetworkProfile describes the network the cluster nodes share. It sets how
+// often the cluster probes its peers and how many missed probes confirm that a
+// node is gone, which decides how quickly NodeLeft and relocation follow an
+// abrupt failure and how likely the cluster is to mistake a slow but healthy
+// node for a dead one.
+type NetworkProfile int
+
+const (
+	// NetworkProfileLAN is the default: nodes in one data center or
+	// availability zone with sub-millisecond round trips. An abrupt failure is
+	// confirmed in about six seconds on a cluster of up to ten nodes; the
+	// window grows slowly with the cluster size.
+	NetworkProfileLAN NetworkProfile = iota
+	// NetworkProfileLocal suits nodes on one host or a low-latency test
+	// cluster. It confirms failures fastest, about five seconds on a cluster
+	// of up to ten nodes, and is the most sensitive to pauses such as garbage
+	// collection or CPU throttling, which it can mistake for a crash.
+	NetworkProfileLocal
+	// NetworkProfileWAN suits nodes spread across regions or reached over the
+	// public internet. It tolerates high latency and packet loss at the cost
+	// of slow failure confirmation, about forty seconds on a cluster of up to
+	// ten nodes.
+	NetworkProfileWAN
+)
+
+// Valid reports whether the profile is one of the defined network profiles.
+func (x NetworkProfile) Valid() bool {
+	return x >= NetworkProfileLAN && x <= NetworkProfileWAN
+}
+
+// memberlistEnv returns the memberlist environment whose failure detection
+// preset implements the given network profile, and an error for a profile that
+// is not defined.
+func memberlistEnv(profile NetworkProfile) (string, error) {
+	switch profile {
+	case NetworkProfileLocal:
+		return oconfig.MemberlistEnvLocal, nil
+	case NetworkProfileLAN:
+		return oconfig.MemberlistEnvLAN, nil
+	case NetworkProfileWAN:
+		return oconfig.MemberlistEnvWAN, nil
+	default:
+		return "", fmt.Errorf("unknown network profile: %d", profile)
+	}
+}
 
 type config struct {
 	shardCount              uint64
@@ -48,6 +97,13 @@ type config struct {
 	logger                  log.Logger
 	shardHasher             hash.Hasher
 	tlsInfo                 *gtls.Info
+	// convergenceTimeout bounds how long a confirmed join or departure waits
+	// for the routing table to converge on it before the cluster announces it
+	// anyway.
+	convergenceTimeout time.Duration
+	// networkProfile is the network the cluster nodes share. It selects the
+	// failure detection preset applied to the memberlist configuration.
+	networkProfile NetworkProfile
 }
 
 func defaultConfig() *config {
@@ -67,6 +123,8 @@ func defaultConfig() *config {
 		logger:                  log.NewZap(log.ErrorLevel, os.Stderr),
 		shardHasher:             hash.DefaultHasher(),
 		tlsInfo:                 nil,
+		convergenceTimeout:      pendingEventEmitTimeout,
+		networkProfile:          NetworkProfileLAN,
 	}
 }
 
@@ -199,6 +257,25 @@ func WithBalancerInterval(interval time.Duration) ConfigOption {
 		if interval > 0 {
 			cfg.triggerBalancerInterval = interval
 		}
+	}
+}
+
+// WithConvergenceTimeout bounds how long a confirmed join or departure waits
+// for the routing table to converge on it before the cluster announces the
+// membership event anyway.
+func WithConvergenceTimeout(timeout time.Duration) ConfigOption {
+	return func(cfg *config) {
+		if timeout > 0 {
+			cfg.convergenceTimeout = timeout
+		}
+	}
+}
+
+// WithNetworkProfile sets the network the cluster nodes share, which selects
+// the failure detection preset applied to the memberlist configuration.
+func WithNetworkProfile(profile NetworkProfile) ConfigOption {
+	return func(cfg *config) {
+		cfg.networkProfile = profile
 	}
 }
 

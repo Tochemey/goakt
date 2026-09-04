@@ -28,6 +28,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	oconfig "github.com/tochemey/olric/config"
 
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/log"
@@ -146,6 +148,20 @@ func TestConfigOptions(t *testing.T) {
 			},
 		},
 		{
+			name:   "WithConvergenceTimeout",
+			option: WithConvergenceTimeout(20 * time.Second),
+			assert: func(t *testing.T, cfg *config) {
+				assert.Equal(t, 20*time.Second, cfg.convergenceTimeout)
+			},
+		},
+		{
+			name:   "WithNetworkProfile",
+			option: WithNetworkProfile(NetworkProfileWAN),
+			assert: func(t *testing.T, cfg *config) {
+				assert.Equal(t, NetworkProfileWAN, cfg.networkProfile)
+			},
+		},
+		{
 			name:   "WithTLS",
 			option: WithTLS(tlsInfo),
 			assert: func(t *testing.T, cfg *config) {
@@ -181,6 +197,7 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	WithBootstrapTimeout(0)(cfg)
 	WithRoutingTableInterval(0)(cfg)
 	WithBalancerInterval(0)(cfg)
+	WithConvergenceTimeout(0)(cfg)
 
 	assert.Equal(t, original.logger, cfg.logger)
 	assert.Equal(t, original.shardHasher, cfg.shardHasher)
@@ -196,5 +213,42 @@ func TestConfigOptionsIgnoreZeroOrNil(t *testing.T) {
 	assert.Equal(t, original.bootstrapTimeout, cfg.bootstrapTimeout)
 	assert.Equal(t, original.routingTableInterval, cfg.routingTableInterval)
 	assert.Equal(t, original.triggerBalancerInterval, cfg.triggerBalancerInterval)
+	assert.Equal(t, original.convergenceTimeout, cfg.convergenceTimeout)
 	assert.Nil(t, cfg.tlsInfo)
+}
+
+func TestDefaultConfigFailureDetection(t *testing.T) {
+	cfg := defaultConfig()
+
+	assert.Equal(t, pendingEventEmitTimeout, cfg.convergenceTimeout)
+	assert.Equal(t, NetworkProfileLAN, cfg.networkProfile)
+}
+
+func TestMemberlistEnv(t *testing.T) {
+	testCases := []struct {
+		name    string
+		profile NetworkProfile
+		env     string
+	}{
+		{name: "local", profile: NetworkProfileLocal, env: oconfig.MemberlistEnvLocal},
+		{name: "lan", profile: NetworkProfileLAN, env: oconfig.MemberlistEnvLAN},
+		{name: "wan", profile: NetworkProfileWAN, env: oconfig.MemberlistEnvWAN},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			env, err := memberlistEnv(tc.profile)
+			require.NoError(t, err)
+			assert.Equal(t, tc.env, env)
+			assert.True(t, tc.profile.Valid())
+		})
+	}
+
+	t.Run("unknown profile", func(t *testing.T) {
+		profile := NetworkProfile(7)
+
+		_, err := memberlistEnv(profile)
+		require.ErrorContains(t, err, "unknown network profile")
+		assert.False(t, profile.Valid())
+	})
 }

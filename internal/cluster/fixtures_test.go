@@ -327,16 +327,34 @@ func requireEmitted(t *testing.T, cl *cluster, eventType EventType, node string)
 	requireNextEvent(t, cl, eventType, node)
 }
 
-// trackJoin delivers to cl the copy of a join of node published by source,
-// which observed the join at generation.
-func trackJoin(cl *cluster, node string, source string, generation uint64) {
-	cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Source: source, Generation: generation, Timestamp: time.Now().UnixNano()})
+// trackJoin delivers to cl its own observation of a join of node, made while
+// cl held the routing table of generation.
+func trackJoin(cl *cluster, node string, generation uint64) {
+	cl.trackNodeJoinEvent(events.NodeJoinEvent{NodeJoin: node, Source: cl.node.PeersAddress(), Generation: generation, Timestamp: time.Now().UnixNano()})
 }
 
-// trackLeft delivers to cl the copy of a departure of node published by
-// source, which observed the departure at generation.
-func trackLeft(cl *cluster, node string, source string, generation uint64) {
-	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Source: source, Generation: generation, Timestamp: time.Now().UnixNano()})
+// trackLeft delivers to cl its own observation of a departure of node, made
+// while cl held the routing table of generation.
+func trackLeft(cl *cluster, node string, generation uint64) {
+	cl.trackNodeLeftEvent(events.NodeLeftEvent{NodeLeft: node, Source: cl.node.PeersAddress(), Generation: generation, Timestamp: time.Now().UnixNano()})
+}
+
+// announceJoin delivers to cl the test coordinator's announcement that node
+// joined, observed at generation.
+func announceJoin(cl *cluster, node string, generation uint64) {
+	announceChange(cl, events.MembershipChangeJoin, node, generation)
+}
+
+// announceLeft delivers to cl the test coordinator's announcement that node
+// left, observed at generation.
+func announceLeft(cl *cluster, node string, generation uint64) {
+	announceChange(cl, events.MembershipChangeLeft, node, generation)
+}
+
+// announceChange delivers to cl the test coordinator's announcement of change
+// for node, observed at generation.
+func announceChange(cl *cluster, change string, node string, generation uint64) {
+	cl.trackMembershipChangeEvent(events.MembershipChangeEvent{Change: change, Node: node, Source: testCoordinator, Generation: generation, Timestamp: time.Now().UnixNano()})
 }
 
 // converge delivers to cl the test coordinator's announcement that its routing

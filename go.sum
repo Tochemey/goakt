@@ -361,8 +361,8 @@ github.com/tklauser/go-sysconf v0.4.0 h1:7H0uAN+7RkwWRaxhYXDLqa5V3LPrJeV8wmD9dRU
 github.com/tklauser/go-sysconf v0.4.0/go.mod h1:8mTNWyog7H+MpKijp4VmKJAd2bbYQ2zuUwkYRbUArPI=
 github.com/tklauser/numcpus v0.12.0 h1:NR85qdvHA9pFse3x3weVZ0r0ST8R6l5RHbZrlRaqob4=
 github.com/tklauser/numcpus v0.12.0/go.mod h1:ABHeXzJnr/qqwguhClkZKT1/8VABcYrsyUiUGobwWJg=
-github.com/tochemey/olric v0.3.19 h1:aJgHzYXaX0/77mzndF+ut8YI2jgn2oAn+omma1s7bG4=
-github.com/tochemey/olric v0.3.19/go.mod h1:Ok8mMnA1v3lZr3QZMXBKoD+ETqI/N/ZQ6x+mgn8qock=
+github.com/tochemey/olric v0.3.20-0.20260904151102-6489f2fdc551 h1:n2/v2uCUmuMlit905tAQv0gJaUnI7zUJqinHp5V7lmM=
+github.com/tochemey/olric v0.3.20-0.20260904151102-6489f2fdc551/go.mod h1:Ok8mMnA1v3lZr3QZMXBKoD+ETqI/N/ZQ6x+mgn8qock=
 github.com/ttacon/chalk v0.0.0-20160626202418-22c06c80ed31/go.mod h1:onvgF043R+lC5RZ8IT9rBXDaEDnpnw/Cl+HFiw+v/7Q=
 github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926/go.mod h1:9ESjWnEqriFuLhtthL60Sar/7RFoluCcXsuvEwTV5KM=
 github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS4MhqMhdFk5YI=

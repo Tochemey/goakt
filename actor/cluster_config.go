@@ -32,10 +32,39 @@ import (
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/hash"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
 	"github.com/tochemey/goakt/v4/internal/xsync"
+)
+
+// NetworkProfile describes the network the cluster nodes share. It sets how
+// often the cluster probes its peers and how many missed probes confirm that a
+// node is gone, which decides how quickly [NodeLeft] and relocation follow an
+// abrupt failure and how likely the cluster is to mistake a slow but healthy
+// node for a dead one. The profiles are the failure detection presets every
+// clustered system ships per network, local, LAN and WAN, chosen once for the
+// deployment; see [NetworkProfileLAN], [NetworkProfileLocal] and
+// [NetworkProfileWAN], and [ClusterConfig.WithNetworkProfile] to select one.
+type NetworkProfile = cluster.NetworkProfile
+
+const (
+	// NetworkProfileLAN is the default: nodes in one data center or
+	// availability zone with sub-millisecond round trips. An abrupt failure is
+	// confirmed in about six seconds on a cluster of up to ten nodes; the
+	// window grows slowly with the cluster size.
+	NetworkProfileLAN = cluster.NetworkProfileLAN
+	// NetworkProfileLocal suits nodes on one host or a low-latency test
+	// cluster. It confirms failures fastest, about five seconds on a cluster
+	// of up to ten nodes, and is the most sensitive to pauses such as garbage
+	// collection or CPU throttling, which it can mistake for a crash.
+	NetworkProfileLocal = cluster.NetworkProfileLocal
+	// NetworkProfileWAN suits nodes spread across regions or reached over the
+	// public internet. It tolerates high latency and packet loss at the cost
+	// of slow failure confirmation, about forty seconds on a cluster of up to
+	// ten nodes.
+	NetworkProfileWAN = cluster.NetworkProfileWAN
 )
 
 // ClusterConfig defines the cluster mode settings
@@ -62,6 +91,13 @@ type ClusterConfig struct {
 	dataCenterConfig         *datacenter.Config
 	crdtConfig               *crdt.Config
 	partitionHasher          hash.Hasher
+	// convergenceTimeout bounds how long the cluster waits, after it confirmed
+	// that a node joined or left, for the cluster state to converge on the
+	// change before it publishes the membership event anyway.
+	convergenceTimeout time.Duration
+	// networkProfile is the network the cluster nodes share. It tunes failure
+	// detection for that network.
+	networkProfile NetworkProfile
 }
 
 type grainActivationBarrierConfig struct {
@@ -90,6 +126,8 @@ func NewClusterConfig() *ClusterConfig {
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
 		roles:                    goset.NewSet[string](),
 		clusterBalancerInterval:  DefaultClusterBalancerInterval,
+		convergenceTimeout:       DefaultClusterConvergenceTimeout,
+		networkProfile:           NetworkProfileLAN,
 	}
 
 	fnActor := new(FuncActor)
@@ -453,6 +491,48 @@ func (x *ClusterConfig) WithClusterBalancerInterval(interval time.Duration) *Clu
 	return x
 }
 
+// WithConvergenceTimeout bounds how long the cluster waits, after it has
+// confirmed that a node joined or left, for the cluster state to converge on
+// the change before it publishes the [NodeJoined] or [NodeLeft] event anyway.
+// Convergence means every node routes on the same view of the membership, so
+// relocation and event subscribers act on a stable cluster.
+//
+// This is the membership stability window that clustered systems place between
+// confirming a change and acting on it, the role the stable-after setting plays
+// in Akka's split brain resolver and the node timeout in Redis Cluster: a flat,
+// configurable bound sized as a small multiple of the expected convergence
+// time, never the mechanism that normally releases the event. The wait
+// normally ends within a second; the timeout only matters when convergence
+// stalls, for example because a node stopped acknowledging. The default is
+// [DefaultClusterConvergenceTimeout], ten seconds, several times the
+// convergence time measured after an abrupt failure. [ClusterConfig.Validate]
+// rejects a value of zero or less.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().WithConvergenceTimeout(20 * time.Second)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithConvergenceTimeout(timeout time.Duration) *ClusterConfig {
+	x.convergenceTimeout = timeout
+	return x
+}
+
+// WithNetworkProfile sets the network profile the cluster nodes share, which
+// tunes failure detection for that network. The default is [NetworkProfileLAN].
+// See [NetworkProfile] for the trade-off between detection speed and false
+// positives. [ClusterConfig.Validate] rejects an unknown profile.
+//
+// Example usage:
+//
+//	cfg := NewClusterConfig().WithNetworkProfile(NetworkProfileWAN)
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithNetworkProfile(profile NetworkProfile) *ClusterConfig {
+	x.networkProfile = profile
+	return x
+}
+
 // WithDataCenter configures multi–data center (multi-DC) support for the cluster.
 //
 // This option is only meaningful when cluster mode is enabled. The supplied config
@@ -532,6 +612,8 @@ func (x *ClusterConfig) Validate() error {
 		AddAssertion(x.writeQuorum >= 1, "cluster writeQuorum is invalid").
 		AddAssertion(x.readQuorum >= 1, "cluster readQuorum is invalid").
 		AddAssertion(x.grainActivationBarrier == nil || x.grainActivationBarrier.timeout >= 0, "grain activation barrier timeout is invalid").
+		AddAssertion(x.convergenceTimeout > 0, "cluster convergence timeout is invalid").
+		AddAssertion(x.networkProfile.Valid(), "cluster network profile is invalid").
 		AddValidator(validation.NewConditionalValidator(x.dataCenterConfig != nil, x.dataCenterConfig)).
 		Validate()
 }
