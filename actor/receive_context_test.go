@@ -1050,7 +1050,6 @@ func TestReceiveContext(t *testing.T) {
 			NewMockSupervisor(),
 			withInitMaxRetries(1),
 			withActorSystem(actorSystem),
-			withCustomLogger(log.DiscardLogger),
 		)
 
 		require.NoError(t, err)

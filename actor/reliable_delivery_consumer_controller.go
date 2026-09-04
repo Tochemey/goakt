@@ -760,8 +760,8 @@ func (x *consumerController) fail(ctx *ReceiveContext, stage ReliableDeliverySta
 
 	x.failed = true
 
-	if event, err := newReliableDeliveryFailed(x.consumer.Name(), ReliableControllerRoleConsumer, stage, cause); err == nil && x.consumer.eventsStream != nil {
-		x.consumer.eventsStream.Publish(eventsTopic, event)
+	if event, err := newReliableDeliveryFailed(x.consumer.Name(), ReliableControllerRoleConsumer, stage, cause); err == nil && x.consumer.getEventsStream() != nil {
+		x.consumer.getEventsStream().Publish(eventsTopic, event)
 	}
 
 	ctx.Shutdown()

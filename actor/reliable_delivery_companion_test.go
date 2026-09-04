@@ -484,10 +484,10 @@ func TestEnsureReliableCompanionEdges(t *testing.T) {
 
 		addr := address.NewReference("orders", system.Name(), "127.0.0.1", 0)
 		endpoint := &PID{
-			address:          addr,
-			path:             newPath(addr),
-			actorSystem:      system,
-			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+			address:     addr,
+			path:        newPath(addr),
+			actorSystem: system,
+			companion:   &pidCompanion{reliableDelivery: producerDeliveryConfig("orders-consumer")},
 		}
 
 		err := system.ensureReliableCompanion(ctx, endpoint)
@@ -499,11 +499,10 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 	newStoppedEndpoint := func(system *actorSystem) *PID {
 		addr := address.New("orders", system.name, "127.0.0.1", 8080)
 		endpoint := &PID{
-			address:          addr,
-			path:             newPath(addr),
-			actorSystem:      system,
-			logger:           log.DiscardLogger,
-			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+			address:     addr,
+			path:        newPath(addr),
+			actorSystem: system,
+			companion:   &pidCompanion{reliableDelivery: producerDeliveryConfig("orders-consumer")},
 		}
 		endpoint.setState(runningState, false)
 		return endpoint
@@ -615,8 +614,8 @@ func TestReliableEndpointDefaults(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.IsType(t, new(passivation.LongLivedStrategy), endpoint.passivationStrategy)
-	assert.Equal(t, config, endpoint.reliableDelivery)
-	assert.NotSame(t, config, endpoint.reliableDelivery)
+	assert.Equal(t, config, endpoint.reliableDelivery())
+	assert.NotSame(t, config, endpoint.reliableDelivery())
 
 	// the spawn transaction created the controller companion automatically
 	companion, err := system.resolveReliableCompanion(ctx, "endpoint", ReliableControllerRoleProducer, nil)
@@ -905,7 +904,7 @@ func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
 	companions := 0
 
 	for _, child := range system.tree().children(respawned) {
-		if child.reliableCompanion != nil {
+		if child.reliableCompanion() != nil {
 			companions++
 		}
 	}

@@ -47,52 +47,60 @@ type Path interface {
 	incarnationID() string
 }
 
+// path is a thin, read-only view over an actor's address. It duplicates none of
+// the address components: every accessor reads them back through the shared
+// address pointer.
 type path struct {
-	host           string
-	port           int
-	name           string
-	system         string
-	incarnation    string
-	parent         Path
-	cachedStr      string
-	cachedHostPort string
+	// addr is the actor's address. Address is immutable once constructed, so the
+	// view shares it by pointer and every accessor reads through it.
+	addr *address.Address
+	// parent is the pre-built view of the parent actor's path, or nil for a root
+	// or otherwise parentless actor.
+	parent Path
 }
 
+// Host returns the host component of the underlying address.
 func (x *path) Host() string {
 	if x == nil {
 		return ""
 	}
-	return x.host
+	return x.addr.Host()
 }
 
+// Port returns the port component of the underlying address.
 func (x *path) Port() int {
 	if x == nil {
 		return 0
 	}
-	return x.port
+	return x.addr.Port()
 }
 
+// HostPort returns the "host:port" endpoint of the underlying address.
 func (x *path) HostPort() string {
 	if x == nil {
 		return ""
 	}
-	return x.cachedHostPort
+	return x.addr.HostPort()
 }
 
+// incarnationID returns the incarnation identifier of the underlying address.
 func (x *path) incarnationID() string {
 	if x == nil {
 		return ""
 	}
-	return x.incarnation
+	return x.addr.IncarnationID()
 }
 
+// Name returns the actor name component of the underlying address.
 func (x *path) Name() string {
 	if x == nil {
 		return ""
 	}
-	return x.name
+	return x.addr.Name()
 }
 
+// Parent returns the pre-built view of the parent actor's path, or nil when
+// there is no parent.
 func (x *path) Parent() Path {
 	if x == nil {
 		return nil
@@ -100,46 +108,47 @@ func (x *path) Parent() Path {
 	return x.parent
 }
 
+// String returns the canonical string representation of the underlying address.
 func (x *path) String() string {
 	if x == nil {
 		return ""
 	}
-	return x.cachedStr
+	return x.addr.String()
 }
 
+// System returns the actor system name component of the underlying address.
 func (x *path) System() string {
 	if x == nil {
 		return ""
 	}
-	return x.system
+	return x.addr.System()
 }
 
+// Equals reports whether this path and other share the same canonical string
+// form. It returns false when either receiver or argument is nil.
 func (x *path) Equals(other Path) bool {
 	if x == nil || other == nil {
 		return false
 	}
-	return x.cachedStr == other.String()
+	return x.String() == other.String()
 }
 
+// newPath builds a read-only view over addr, recursively building the parent
+// view when addr carries a real parent. It returns nil when addr is nil.
 func newPath(addr *address.Address) Path {
 	if addr == nil {
 		return nil
 	}
+
 	var parent Path
 	if p := addr.Parent(); p != nil && !p.Equals(address.NoSender()) {
 		parent = newPath(p)
 	}
-	p := &path{
-		host:           addr.Host(),
-		port:           addr.Port(),
-		name:           addr.Name(),
-		system:         addr.System(),
-		incarnation:    addr.IncarnationID(),
-		parent:         parent,
-		cachedStr:      addr.String(),
-		cachedHostPort: addr.HostPort(),
+
+	return &path{
+		addr:   addr,
+		parent: parent,
 	}
-	return p
 }
 
 // pathString returns p.String() when p is non-nil, otherwise "".

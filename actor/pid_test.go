@@ -44,7 +44,6 @@ import (
 
 	"github.com/tochemey/goakt/v4/breaker"
 	"github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
@@ -730,17 +729,17 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender = &PID{actorSystem: system}
 		system.noSender.setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
-		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system))
 		require.NoError(t, err)
 
 		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
-		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system))
 		require.NoError(t, err)
 
 		tree := system.tree()
@@ -771,17 +770,17 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+		system.noSender = &PID{actorSystem: system}
 		system.noSender.setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
-		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system))
 		require.NoError(t, err)
 
 		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
-		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system))
 		require.NoError(t, err)
 
 		tree := system.tree()
@@ -2361,7 +2360,6 @@ func TestPIDRemotingEnabledGuard(t *testing.T) {
 	t.Run("Actor system nil", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		pid := &PID{
-			logger:   log.DiscardLogger,
 			remoting: remotingMock,
 			address:  address.New("pid", "sys", "127.0.0.1", 9000),
 		}
@@ -2379,7 +2377,6 @@ func TestPIDRemotingEnabledGuard(t *testing.T) {
 		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
 
 		pid := &PID{
-			logger:      log.DiscardLogger,
 			actorSystem: &actorSystemWrapper{actorSystem: sys.(*actorSystem)},
 			remoting:    remotingMock,
 			address:     address.New("pid", "sys", "127.0.0.1", 9000),
@@ -4732,8 +4729,7 @@ func TestNewPID(t *testing.T) {
 			ctx,
 			nil,
 			NewMockActor(),
-			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger))
+			withInitMaxRetries(1))
 
 		require.Error(t, err)
 		assert.Nil(t, pid)
@@ -4803,12 +4799,11 @@ func TestNewPID(t *testing.T) {
 			withMetricProvider(metric.NewProvider()),
 			asSystemActor(),
 			withInitMaxRetries(1),
-			withCustomLogger(log.DiscardLogger),
 		)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid)
-		require.Len(t, pid.observeOptions, 4)
+		require.Len(t, pid.observeOptions(), 4)
 	})
 	t.Run("With RegisterMetrics callback", func(t *testing.T) {
 		ctx := context.Background()
@@ -4890,10 +4885,7 @@ func TestNewPID(t *testing.T) {
 func TestLogger(t *testing.T) {
 	buffer := new(bytes.Buffer)
 
-	pid := &PID{
-		logger:       log.NewZap(log.InfoLevel, buffer),
-		fieldsLocker: sync.RWMutex{},
-	}
+	pid := &PID{actorSystem: &actorSystem{logger: log.NewZap(log.InfoLevel, buffer)}}
 
 	pid.getLogger().Info("test debug")
 	actual, err := extractMessage(buffer.Bytes())
@@ -5296,7 +5288,6 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
-		withCustomLogger(log.DiscardLogger),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, cid)
@@ -5334,7 +5325,6 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 		NewMockSupervisor(),
 		withInitMaxRetries(1),
 		withActorSystem(actorSystem),
-		withCustomLogger(log.DiscardLogger),
 	)
 	require.NoError(t, err)
 	require.NotNil(t, cid)
@@ -5670,18 +5660,12 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 		if actualSys, ok := sys.(interface{ NoSender() *PID }); ok {
 			mockSys.noSender = actualSys.NoSender()
 		}
-		// Copy eventsStream to allow deadletter publishing
-		if actualSys, ok := sys.(interface{ EventsStream() eventstream.Stream }); ok {
-			mockSys.eventsStream = actualSys.EventsStream()
-		}
+		// the PID publishes deadletters through its system's event stream
+		mockSys.eventsStream = sys.getEventsStream()
 		// Set the mock system on the PID
 		pid.fieldsLocker.Lock()
 		originalSys := pid.actorSystem
 		pid.actorSystem = mockSys
-		// Ensure PID has eventsStream set (it's needed for handleReceivedError)
-		if pid.eventsStream == nil && mockSys.eventsStream != nil {
-			pid.eventsStream = mockSys.eventsStream
-		}
 		pid.fieldsLocker.Unlock()
 
 		// Create a user message (non-system message)
@@ -6707,7 +6691,7 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 		address: address.New("singleton", "test-system", "127.0.0.1", 0),
 	}
 	pid.setState(singletonState, true)
-	pid.singletonSpec = spec
+	pid.attachCompanion().singletonSpec = spec
 
 	wire, err := pid.toSerialize()
 	require.NoError(t, err)
@@ -7604,9 +7588,9 @@ func TestSupervisorExponentialBackoffDelaysRestart(t *testing.T) {
 	require.NoError(t, actorSystem.Stop(ctx))
 }
 
-// TestNewPIDDefaultLogger verifies that PIDs constructed without a logger
-// option share the package-level default logger and that a custom logger
-// still takes precedence.
+// TestNewPIDDefaultLogger verifies that a PID reports through its actor
+// system's logger, that PIDs of one system share it, and that a PID without a
+// system falls back to the package default.
 func TestNewPIDDefaultLogger(t *testing.T) {
 	ctx := context.TODO()
 
@@ -7614,22 +7598,20 @@ func TestNewPIDDefaultLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender = &PID{actorSystem: system}
 	system.noSender.setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
 	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
 	require.NoError(t, err)
-	require.Same(t, defaultLogger, first.logger)
+	require.Equal(t, log.DiscardLogger, first.getLogger())
 
 	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
 	require.NoError(t, err)
-	require.Same(t, first.logger, second.logger)
+	require.Equal(t, first.getLogger(), second.getLogger())
 
-	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.Equal(t, log.DiscardLogger, third.logger)
+	require.Same(t, defaultLogger, (&PID{}).getLogger())
 }
 
 // TestNewPIDDefaultSupervisorAndStrategy verifies that PIDs constructed
@@ -7642,24 +7624,24 @@ func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender = &PID{actorSystem: system}
 	system.noSender.setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
-	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
 	require.NoError(t, err)
 	require.Same(t, defaultSupervisor, first.supervisor)
 	require.Same(t, defaultPassivationStrategy, first.passivationStrategy)
 
-	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
 	require.NoError(t, err)
 	require.Same(t, first.supervisor, second.supervisor)
 	require.Same(t, first.passivationStrategy, second.passivationStrategy)
 
 	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
 	strategy := passivation.NewTimeBasedStrategy(time.Minute)
-	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withSupervisor(custom), withPassivationStrategy(strategy))
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withSupervisor(custom), withPassivationStrategy(strategy))
 	require.NoError(t, err)
 	require.Same(t, custom, third.supervisor)
 	require.Same(t, strategy, third.passivationStrategy)
@@ -7707,23 +7689,23 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system, logger: log.DiscardLogger}
+	system.noSender = &PID{actorSystem: system}
 	system.noSender.setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
-	plain, err := newPID(ctx, system.actorAddress("plain"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger))
+	plain, err := newPID(ctx, system.actorAddress("plain"), NewMockActor(), withActorSystem(system))
 	require.NoError(t, err)
-	require.Nil(t, plain.observeOptions)
+	require.Nil(t, plain.observeOptions())
 
-	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), withActorSystem(system), withCustomLogger(log.DiscardLogger), withMetricProvider(metric.NewProvider()))
+	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), withActorSystem(system), withMetricProvider(metric.NewProvider()))
 	require.NoError(t, err)
-	require.Len(t, metered.observeOptions, 4)
+	require.Len(t, metered.observeOptions(), 4)
 
 	// the kind is cached whenever metrics are enabled, so no scrape ever pays
 	// for the reflection that resolves it.
-	require.Empty(t, plain.metricKind)
-	require.Equal(t, types.Name(NewMockActor()), metered.metricKind)
+	require.Empty(t, plain.metricKind())
+	require.Equal(t, types.Name(NewMockActor()), metered.metricKind())
 
 	// under the low cardinality mode the callback reports one series per kind,
 	// so a PID caches its kind and no per-actor attribute set at all.
@@ -7731,15 +7713,15 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	aggregating := lowCardinality.(*actorSystem)
-	aggregating.noSender = &PID{actorSystem: aggregating, logger: log.DiscardLogger}
+	aggregating.noSender = &PID{actorSystem: aggregating}
 	aggregating.noSender.setState(runningState, true)
 	aggregating.dispatcher.start()
 	t.Cleanup(func() { aggregating.dispatcher.signalStop() })
 
-	aggregated, err := newPID(ctx, aggregating.actorAddress("aggregated"), NewMockActor(), withActorSystem(aggregating), withCustomLogger(log.DiscardLogger), withMetricProvider(metric.NewProvider()))
+	aggregated, err := newPID(ctx, aggregating.actorAddress("aggregated"), NewMockActor(), withActorSystem(aggregating), withMetricProvider(metric.NewProvider()))
 	require.NoError(t, err)
-	require.Nil(t, aggregated.observeOptions)
-	require.Equal(t, types.Name(NewMockActor()), aggregated.metricKind)
+	require.Nil(t, aggregated.observeOptions())
+	require.Equal(t, types.Name(NewMockActor()), aggregated.metricKind())
 }
 
 // restartMarkerActor records whether the restarting state bit was raised on its

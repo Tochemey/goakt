@@ -154,7 +154,7 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 		// system actors never publish registry records, with one exception:
 		// reliable-delivery controller companions do through their private
 		// publication path, so their records must leave the registry with them
-		removable := !pid.isStateSet(systemState) || pid.reliableCompanion != nil
+		removable := !pid.isStateSet(systemState) || pid.reliableCompanion() != nil
 		removeFromCluster := actorSys.InCluster() && removable && !actorSys.isStopping()
 
 		if removeFromCluster {

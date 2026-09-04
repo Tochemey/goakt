@@ -918,3 +918,99 @@ func TestLazyMapsReattachExistingNode(t *testing.T) {
 	}
 	require.Contains(t, names, "first")
 }
+
+// TestPutWatcher covers the watchers-slice insert helper: distinct watchers
+// append, and re-adding an entry with the same ID overwrites in place rather
+// than duplicating, reproducing the old watchers map's overwrite-by-key.
+func TestPutWatcher(t *testing.T) {
+	ports := dynaport.Get(1)
+	system, _ := NewActorSystem("TestSys")
+	a := MockPID(system, "a", ports[0])
+	b := MockPID(system, "b", ports[0])
+
+	var list []*PID
+
+	// Distinct watchers append in order.
+	putWatcher(&list, a)
+	putWatcher(&list, b)
+	require.Len(t, list, 2)
+	require.Equal(t, a.ID(), list[0].ID())
+	require.Equal(t, b.ID(), list[1].ID())
+
+	// Re-adding the same instance overwrites its slot, no duplicate.
+	putWatcher(&list, a)
+	require.Len(t, list, 2)
+
+	// A different *PID that shares a's ID replaces the stored element.
+	aClone := &PID{address: a.address, path: a.path, actorSystem: system}
+	require.Equal(t, a.ID(), aClone.ID())
+	putWatcher(&list, aClone)
+	require.Len(t, list, 2)
+	require.Same(t, aClone, list[0])
+}
+
+// TestDeleteWatcher covers the watchers-slice removal helper: the matching
+// entry is removed, an absent ID is a no-op, and removing the last entry resets
+// the slice to nil rather than leaving an empty backing array.
+func TestDeleteWatcher(t *testing.T) {
+	ports := dynaport.Get(1)
+	system, _ := NewActorSystem("TestSys")
+	a := MockPID(system, "a", ports[0])
+	b := MockPID(system, "b", ports[0])
+	c := MockPID(system, "c", ports[0])
+
+	var list []*PID
+	putWatcher(&list, a)
+	putWatcher(&list, b)
+
+	// An absent ID leaves the slice untouched.
+	deleteWatcher(&list, c.ID())
+	require.Len(t, list, 2)
+
+	// Removing a present entry drops exactly that one.
+	deleteWatcher(&list, a.ID())
+	require.Len(t, list, 1)
+	require.Equal(t, b.ID(), list[0].ID())
+
+	// Removing the last entry resets the slice to nil, not an empty slice.
+	deleteWatcher(&list, b.ID())
+	require.Nil(t, list)
+}
+
+// TestWatchersSliceLifecycle drives the watchers slice through the tree: two
+// watchers register on one node, watchers() returns both, and removing them one
+// at a time leaves the node with a nil watchers slice and no backing array.
+func TestWatchersSliceLifecycle(t *testing.T) {
+	ports := dynaport.Get(1)
+	system, _ := NewActorSystem("TestSys")
+	root := MockPID(system, "root", ports[0])
+	watched := MockPID(system, "watched", ports[0])
+	watcher := MockPID(system, "watcher", ports[0])
+
+	tree := newTree()
+	t.Cleanup(tree.reset)
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, watched))
+	require.NoError(t, tree.addNode(root, watcher))
+
+	// watched carries root as its parent-watcher; add a second watcher.
+	tree.addWatcher(watched, watcher)
+
+	names := make([]string, 0, 2)
+	for _, w := range tree.watchers(watched) {
+		names = append(names, w.Name())
+	}
+	require.ElementsMatch(t, []string{"root", "watcher"}, names)
+
+	node, ok := tree.node(watched.ID())
+	require.True(t, ok)
+	require.Len(t, node.watchers, 2)
+
+	// Remove the two watchers one at a time; the slice empties back to nil.
+	tree.removeWatcher(watched, watcher)
+	require.Len(t, tree.watchers(watched), 1)
+
+	tree.removeWatcher(watched, root)
+	require.Empty(t, tree.watchers(watched))
+	require.Nil(t, node.watchers)
+}

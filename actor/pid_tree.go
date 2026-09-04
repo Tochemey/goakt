@@ -43,7 +43,7 @@ type pidNode struct {
 	parentNode  *pidNode            // Parent node; nil if root.
 	id          string              // Cached pid.ID() — avoids repeated string building.
 	name        string              // Cached pid.Name().
-	watchers    map[string]*PID     // Actors watching this node (key = watcher ID). Nil until the first watcher; use putLazy to insert.
+	watchers    []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
 	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
 	descendants map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
 }
@@ -56,8 +56,8 @@ func (n *pidNode) value() *PID {
 
 // newPidNode creates a pidNode with cached id/name fields.
 // If pid is nil the cached strings remain empty (used for the initial root node).
-// The watchers, watchees, and descendants maps stay nil until their first
-// insert via putLazy; all read paths treat the nil maps as empty.
+// The watchers slice and the watchees and descendants maps stay nil until
+// their first insert; all read paths treat the nil values as empty.
 func newPidNode(pid *PID) *pidNode {
 	n := &pidNode{}
 	n.pid.Store(pid)
@@ -78,6 +78,50 @@ func putLazy[V any](m *map[string]V, key string, value V) {
 	}
 
 	(*m)[key] = value
+}
+
+// putWatcher records w as a watcher in the slice pointed to by list, allocating
+// the backing array on first use. If an entry with the same w.ID() is already
+// present it replaces that element, reproducing the old watchers map's
+// overwrite-by-key so a re-added watcher never duplicates; otherwise it appends.
+// PID.ID() returns a cached string, so the linear scan allocates nothing.
+func putWatcher(list *[]*PID, w *PID) {
+	id := w.ID()
+	for i, existing := range *list {
+		if existing.ID() == id {
+			(*list)[i] = w
+			return
+		}
+	}
+
+	*list = append(*list, w)
+}
+
+// deleteWatcher removes the watcher whose ID() equals id from the slice pointed
+// to by list. Watcher order is irrelevant (the old map kept none), so it removes
+// the match by swapping the last element into its place and truncating. It nils
+// out the vacated tail slot so the removed *PID is not retained, and sets the
+// slice back to nil once it becomes empty so an actor with no watchers holds no
+// backing array. Absent id is a no-op.
+func deleteWatcher(list *[]*PID, id string) {
+	s := *list
+	for i, w := range s {
+		if w.ID() != id {
+			continue
+		}
+
+		last := len(s) - 1
+		s[i] = s[last]
+		s[last] = nil
+
+		if last == 0 {
+			*list = nil
+			return
+		}
+
+		*list = s[:last]
+		return
+	}
 }
 
 // tree maintains actor relationships in a concurrency-safe structure.
@@ -190,7 +234,7 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	putLazy(&parentNode.descendants, id, childNode)
 	putLazy(&parentNode.watchees, id, pid)
-	putLazy(&childNode.watchers, parentID, parent)
+	putWatcher(&childNode.watchers, parent)
 
 	x.pids[id] = childNode
 	x.names[name] = childNode
@@ -230,7 +274,7 @@ func (x *tree) attachNodeLocked(parent, pid *PID) error {
 	childNode.parentNode = parentNode
 	putLazy(&parentNode.descendants, childID, childNode)
 	putLazy(&parentNode.watchees, childID, pid)
-	putLazy(&childNode.watchers, parentID, parent)
+	putWatcher(&childNode.watchers, parent)
 	return nil
 }
 
@@ -278,7 +322,7 @@ func (x *tree) removeWatcher(watchee, watcher *PID) {
 	}
 	// Remove watcher from watchee's watchers list.
 	if watcheeNode, ok := x.pids[watcheeID]; ok {
-		delete(watcheeNode.watchers, watcherID)
+		deleteWatcher(&watcheeNode.watchers, watcherID)
 	}
 }
 
@@ -330,7 +374,7 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 		return
 	}
 
-	putLazy(&pidNode.watchers, watcherID, watcher)
+	putWatcher(&pidNode.watchers, watcher)
 	putLazy(&watcherNode.watchees, pidID, pid)
 }
 
@@ -388,9 +432,9 @@ func (x *tree) deleteNode(pid *PID) {
 		}
 
 		// Clean watchers: remove this node from each watcher's watchees.
-		// Use map keys directly (they are the watcher IDs), avoiding PID.ID() allocations.
-		for watcherID := range n.watchers {
-			if watcherNode, exists := x.pids[watcherID]; exists {
+		// w.ID() is cached, so the scan allocates nothing.
+		for _, w := range n.watchers {
+			if watcherNode, exists := x.pids[w.ID()]; exists {
 				delete(watcherNode.watchees, n.id)
 			}
 		}
@@ -399,7 +443,7 @@ func (x *tree) deleteNode(pid *PID) {
 		// Clean watchees: remove this node from each watchee's watchers.
 		for watcheeID := range n.watchees {
 			if watcheeNode, exists := x.pids[watcheeID]; exists {
-				delete(watcheeNode.watchers, n.id)
+				deleteWatcher(&watcheeNode.watchers, n.id)
 			}
 		}
 		n.watchees = nil
@@ -658,10 +702,8 @@ func (x *tree) watchers(pid *PID) []*PID {
 		return nil
 	}
 
-	list := make([]*PID, 0, len(node.watchers))
-	for _, w := range node.watchers {
-		list = append(list, w)
-	}
+	list := make([]*PID, len(node.watchers))
+	copy(list, node.watchers)
 	return list
 }
 

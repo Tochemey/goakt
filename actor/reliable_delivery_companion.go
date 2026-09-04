@@ -305,7 +305,7 @@ func reliableCompanionSupervisor() *supervisor.Supervisor {
 // carry the controller with them. The caller owns endpoint rollback when
 // creation fails.
 func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID) error {
-	role := endpoint.reliableDelivery.role()
+	role := endpoint.reliableDelivery().role()
 
 	name := reliableCompanionName(role, endpoint.incarnationID())
 	if node, ok := x.actors.nodeByName(name); ok {
@@ -346,7 +346,7 @@ func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) 
 	}
 
 	ctx = context.WithoutCancel(ctx)
-	name := reliableCompanionName(endpoint.reliableDelivery.role(), endpoint.incarnationID())
+	name := reliableCompanionName(endpoint.reliableDelivery().role(), endpoint.incarnationID())
 
 	if err := x.getCluster().RemoveActor(ctx, name); err != nil {
 		x.logger.Errorf("failed to remove registry record for reliable controller of endpoint=%s during rollback: %v", endpoint.Name(), err)
@@ -384,14 +384,14 @@ func (x *actorSystem) releaseDepartedReliableCompanion(ctx context.Context, prop
 // queue instance and retry policy (or the work-pulling multiplexer when that
 // pattern is selected), the consumer side carries flow control.
 func newReliableController(endpoint *PID) Actor {
-	config := endpoint.reliableDelivery
+	config := endpoint.reliableDelivery()
 
 	if producerConfig := config.producer; producerConfig != nil {
 		if producerConfig.workPulling {
-			return newWorkPullingProducerController(endpoint, producerConfig, endpoint.durableWorkQueue)
+			return newWorkPullingProducerController(endpoint, producerConfig, endpoint.durableWorkQueue())
 		}
 
-		return newProducerController(endpoint, producerConfig, endpoint.durableQueue)
+		return newProducerController(endpoint, producerConfig, endpoint.durableQueue())
 	}
 
 	return newConsumerController(endpoint, config.consumer)
@@ -422,7 +422,7 @@ func (x *actorSystem) authenticateWorkPullingWorker(ctx context.Context, sender 
 // authenticateLocalWorkPullingWorker fences a local registration sender against
 // the local actor tree and the owning endpoint's consumer configuration.
 func (x *actorSystem) authenticateLocalWorkPullingWorker(sender *PID, producerName string) (*PID, string, error) {
-	spec := sender.reliableCompanion
+	spec := sender.reliableCompanion()
 	if spec == nil || spec.role != ReliableControllerRoleConsumer {
 		return nil, "", fmt.Errorf("%w: sender=%s is not a consumer companion", errReliableCompanionUnavailable, sender.Name())
 	}
@@ -441,7 +441,7 @@ func (x *actorSystem) authenticateLocalWorkPullingWorker(sender *PID, producerNa
 		return nil, "", err
 	}
 
-	consumer := endpoint.reliableDelivery
+	consumer := endpoint.reliableDelivery()
 	if consumer == nil || consumer.consumer == nil || consumer.consumer.producerName != producerName {
 		return nil, "", fmt.Errorf("%w: worker endpoint=%s does not name producer=%s", errReliableCompanionUnavailable, spec.endpointName, producerName)
 	}
@@ -507,7 +507,7 @@ func (x *actorSystem) authenticateRemoteWorkPullingWorker(ctx context.Context, s
 // incarnation, and liveness must all match the endpoint. Any mismatch is the
 // transient mixed-pair condition.
 func validateReliableCompanion(endpoint, companion *PID, role ReliableControllerRole) error {
-	spec := companion.reliableCompanion
+	spec := companion.reliableCompanion()
 
 	switch {
 	case spec == nil:

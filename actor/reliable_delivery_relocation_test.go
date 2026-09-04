@@ -292,9 +292,9 @@ func TestWorkPullingProducerRelocation(t *testing.T) {
 	stopNode(0)
 
 	relocated := awaitLocalEndpoint(t, []*actorSystem{node2, node3}, "jobs-producer")
-	require.NotNil(t, relocated.reliableDelivery)
-	require.True(t, relocated.reliableDelivery.producer.workPulling)
-	require.NotNil(t, relocated.durableWorkQueue)
+	require.NotNil(t, relocated.reliableDelivery())
+	require.True(t, relocated.reliableDelivery().producer.workPulling)
+	require.NotNil(t, relocated.durableWorkQueue())
 	assert.NotEqual(t, oldIncarnation, relocated.incarnationID())
 
 	// the relocated controller reloaded the durable work queue under a new
@@ -380,8 +380,8 @@ func TestReliableProducerRelocation(t *testing.T) {
 	stopNode(0)
 
 	relocated := awaitLocalEndpoint(t, []*actorSystem{node2, node3}, "orders-producer")
-	require.NotNil(t, relocated.reliableDelivery)
-	require.NotNil(t, relocated.durableQueue)
+	require.NotNil(t, relocated.reliableDelivery())
+	require.NotNil(t, relocated.durableQueue())
 	assert.NotEqual(t, oldIncarnation, relocated.incarnationID())
 
 	// the relocated controller reloaded the durable state under a new epoch,
@@ -435,7 +435,7 @@ func TestReliableConsumerRelocation(t *testing.T) {
 	stopNode(1)
 
 	relocated := awaitLocalEndpoint(t, []*actorSystem{node1, node3}, "orders-consumer")
-	require.NotNil(t, relocated.reliableDelivery)
+	require.NotNil(t, relocated.reliableDelivery())
 
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: testpb.Reply_builder{Content: "ord-2"}.Build()}))
 

@@ -30,9 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/metric"
-	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
@@ -51,24 +49,11 @@ func TestPIDOptions(t *testing.T) {
 		assert.Equal(t, int32(5), pid.initMaxRetries.Load())
 	})
 
-	t.Run("WithLogger", func(t *testing.T) {
-		pid := &PID{}
-		withCustomLogger(log.DebugLogger)(pid)
-		assert.Equal(t, log.DebugLogger, pid.logger)
-	})
-
 	t.Run("WithSupervisor", func(t *testing.T) {
 		supervisor := supervisor.NewSupervisor()
 		pid := &PID{}
 		withSupervisor(supervisor)(pid)
 		assert.Equal(t, supervisor, pid.supervisor)
-	})
-
-	t.Run("withEventsStream", func(t *testing.T) {
-		stream := eventstream.New()
-		pid := &PID{}
-		withEventsStream(stream)(pid)
-		assert.Equal(t, stream, pid.eventsStream)
 	})
 
 	t.Run("withInitTimeout stores no override when nil", func(t *testing.T) {
@@ -114,7 +99,7 @@ func TestPIDOptions(t *testing.T) {
 		pid := &PID{}
 		metricProvider := metric.NewProvider()
 		withMetricProvider(metricProvider)(pid)
-		assert.Equal(t, metricProvider, pid.metricProvider)
+		assert.Equal(t, metricProvider, pid.metricProvider())
 	})
 }
 
@@ -146,5 +131,5 @@ func TestWithSingletonSpec(t *testing.T) {
 	}
 	option := withSingletonSpec(spec)
 	option(pid)
-	require.Equal(t, spec, pid.singletonSpec)
+	require.Equal(t, spec, pid.singletonSpec())
 }

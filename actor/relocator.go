@@ -211,7 +211,7 @@ func (r *relocator) abortRelocation(ctx *ReceiveContext, address string, peerSta
 // publishRelocationFailed emits a RelocationFailed event describing the
 // departed node and the actors and grains that could not be relocated.
 func publishRelocationFailed(pid *PID, address string, actors map[string]*internalpb.Actor, grains map[string]*internalpb.Grain, err error) {
-	if pid.eventsStream == nil {
+	if pid.getEventsStream() == nil {
 		return
 	}
 
@@ -225,5 +225,5 @@ func publishRelocationFailed(pid *PID, address string, actors map[string]*intern
 		grainIDs = append(grainIDs, grain.GetGrainId().GetValue())
 	}
 
-	pid.eventsStream.Publish(eventsTopic, NewRelocationFailed(address, time.Now().UTC(), actorNames, grainIDs, err))
+	pid.getEventsStream().Publish(eventsTopic, NewRelocationFailed(address, time.Now().UTC(), actorNames, grainIDs, err))
 }

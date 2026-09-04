@@ -983,11 +983,11 @@ func (x *workPullingProducerController) terminate(ctx *ReceiveContext, stage Rel
 // publishFailure emits the terminal failure event on the actor event stream.
 func (x *workPullingProducerController) publishFailure(stage ReliableDeliveryStage, cause error) {
 	event, err := newReliableDeliveryFailed(x.producer.Name(), ReliableControllerRoleProducer, stage, cause)
-	if err != nil || x.producer.eventsStream == nil {
+	if err != nil || x.producer.getEventsStream() == nil {
 		return
 	}
 
-	x.producer.eventsStream.Publish(eventsTopic, event)
+	x.producer.getEventsStream().Publish(eventsTopic, event)
 }
 
 // tell sends a protocol message and classifies a send failure as transient

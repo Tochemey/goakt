@@ -5798,7 +5798,6 @@ func TestPutActorOnCluster(t *testing.T) {
 			address:      addr,
 			path:         newPath(addr),
 			dependencies: xsync.NewMap[string, extension.Dependency](),
-			logger:       log.DiscardLogger,
 			actorSystem:  system,
 		}
 		pid.setState(runningState, true)
@@ -5810,7 +5809,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 
 		pid := newTestPID(system, "singleton")
-		pid.singletonSpec = &singletonSpec{
+		pid.attachCompanion().singletonSpec = &singletonSpec{
 			SpawnTimeout: time.Second,
 			WaitInterval: 500 * time.Millisecond,
 			MaxRetries:   int32(3),
@@ -5841,12 +5840,12 @@ func TestPutActorOnCluster(t *testing.T) {
 		system := MockReplicationTestSystem(clusterMock)
 
 		pid := newTestPID(system, "role-singleton")
-		pid.singletonSpec = &singletonSpec{
+		pid.attachCompanion().singletonSpec = &singletonSpec{
 			SpawnTimeout: time.Second,
 			WaitInterval: 500 * time.Millisecond,
 			MaxRetries:   int32(3),
 		}
-		pid.role = new("worker")
+		pid.attachCompanion().role = new("worker")
 		pid.setState(singletonState, true)
 
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
@@ -6169,7 +6168,6 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("resync-actor", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
-		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.dependencies.Set("dep", dependency)
@@ -6246,7 +6244,6 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("resync-skip", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
-		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.setState(runningState, true)
@@ -6277,7 +6274,6 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("resync-run", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
-		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.setState(runningState, true)
@@ -6312,7 +6308,6 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("resync-correlated", system.name, "127.0.0.1", int(system.remoteConfig.BindPort())),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
-		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.setState(runningState, true)
@@ -6401,7 +6396,6 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 		actor:        NewMockActor(),
 		address:      address.New("actor", system.name, "127.0.0.1", 8080),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
-		logger:       log.DiscardLogger,
 		actorSystem:  system,
 	}
 	pid.setState(runningState, true)
@@ -7915,10 +7909,10 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 	newEndpointPID := func(system *actorSystem, name string) *PID {
 		addr := address.New(name, system.name, "127.0.0.1", 8080)
 		return &PID{
-			address:          addr,
-			path:             newPath(addr),
-			actorSystem:      system,
-			reliableDelivery: producerDeliveryConfig("orders-consumer"),
+			address:     addr,
+			path:        newPath(addr),
+			actorSystem: system,
+			companion:   &pidCompanion{reliableDelivery: producerDeliveryConfig("orders-consumer")},
 		}
 	}
 

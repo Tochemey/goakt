@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
@@ -53,7 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/future"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
-	"github.com/tochemey/goakt/v4/internal/metric"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
@@ -161,18 +161,15 @@ type PID struct {
 	// remote hold; local-only actors never allocate one.
 	remoteHolds atomic.Pointer[remoteHoldRegistry]
 
-	// systemMailbox is the priority queue for control-plane messages
-	// (PoisonPill, Panicking, Pause/ResumePassivation,
-	// Terminated, PanicSignal, SendDeadletter). runTurn consults it
-	// before the user mailbox so shutdown and supervision signals never
-	// queue behind a user backlog.
-	systemMailbox Mailbox
+	// systemQueue holds the control-plane messages (PoisonPill, Panicking,
+	// Pause/ResumePassivation, Terminated, PanicSignal, SendDeadletter).
+	// runTurn drains it before the user mailbox so shutdown and supervision
+	// signals never queue behind a user backlog. It is embedded, two words
+	// and no sentinel, so an idle actor pays nothing for it; see systemQueue.
+	systemQueue systemQueue
 
 	// the actor actorSystem
 	actorSystem ActorSystem
-
-	// specifies the logger to use
-	logger log.Logger
 
 	// various lockers to protect the PID fields
 	// in a concurrent environment
@@ -191,8 +188,20 @@ type PID struct {
 	// flips the state's default mode to Off instead.
 	reentrancy atomic.Pointer[reentrancyState]
 
-	// define an events stream
-	eventsStream eventstream.Stream
+	// mailboxHead and mailboxTail are the two ends of the default user
+	// mailbox's lock-free MPSC list, embedded in the PID so an ordinary actor
+	// holds no separate UnboundedMailbox object. Both are *ReceiveContext held
+	// as unsafe.Pointer so the same sync/atomic pointer operations the standalone
+	// mailbox uses apply unchanged; see embedded_mailbox.go.
+	//
+	// The consumer, the processing turn, advances mailboxHead on every dequeue
+	// and no producer ever reads it, so it sits here at the head of the
+	// consumer-written line beside processedCount and mailboxDequeued, a line no
+	// producer reads per message. The mailbox interface field above points at
+	// (*embeddedMailbox)(pid), so the hot path stays an ordinary interface call
+	// into these words. A PID given a custom mailbox leaves mailboxHead and
+	// mailboxTail nil and never touches them.
+	mailboxHead unsafe.Pointer // *ReceiveContext
 
 	// set the metrics settings
 	restartCount   atomic.Int64
@@ -210,12 +219,20 @@ type PID struct {
 	//
 	// It is maintained only when metricsEnabled is set, and zeroed by reset().
 	mailboxDequeued atomic.Int64
-	failureCount    atomic.Int64
-	reinstateCount  atomic.Int64
-	// unhandledCount counts the messages the actor explicitly rejected through
-	// ReceiveContext.Unhandled. It accumulates for the lifetime of one actor
-	// incarnation and is zeroed by reset(), exactly like processedCount.
-	unhandledCount atomic.Int64
+
+	// passivationManager, msgCountPassivation and metricsEnabled are read by
+	// the processing turn for every message and written only on lifecycle
+	// paths. They sit on the line the consumer already writes for every
+	// message (processedCount, mailboxDequeued), which no producer reads, so
+	// the reads always hit and never interact with the producer's per-message
+	// reads of schedState and ctxShard or with its writes to mailboxEnqueued.
+	passivationManager  *passivationManager
+	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
+	// metricsEnabled records whether a metric provider is wired to this actor.
+	// It is written once in newPID and only read afterwards, which is what lets
+	// the message path gate the mailbox counters on a plain field read instead
+	// of on a provider lookup.
+	metricsEnabled bool
 
 	// consecutiveFaults counts the faults handled by the parent's restart
 	// directive without a fault-free period in between; lastFaultAtNano records
@@ -247,11 +264,29 @@ type PID struct {
 
 	remoting remoteclient.Client
 
+	// failureCount, reinstateCount and unhandledCount are written only on
+	// failures and explicit rejections, so they share the read-mostly line of
+	// schedState, ctxShard and dispatcher without disturbing it per message.
+	failureCount   atomic.Int64
+	reinstateCount atomic.Int64
+	// unhandledCount counts the messages the actor explicitly rejected through
+	// ReceiveContext.Unhandled. It accumulates for the lifetime of one actor
+	// incarnation and is zeroed by reset(), exactly like processedCount.
+	unhandledCount atomic.Int64
+
 	startedAt atomic.Int64
 	state     atomic.Uint32
 
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
+
+	// mailboxTail is the producer end of the embedded user mailbox's MPSC list;
+	// see mailboxHead. Producers swap it in on every enqueue and the consumer
+	// never reads it, so it is parked here beside mailboxEnqueued on the
+	// producer-written line, away from every field the processing turn touches
+	// per message, exactly as the standalone mailbox padded its tail onto its
+	// own cache line. It is a *ReceiveContext, and nil for a custom mailbox.
+	mailboxTail unsafe.Pointer // *ReceiveContext
 
 	// mailboxEnqueued counts the user messages producers have put into the
 	// mailbox. It is the producer half of actor.mailbox.size, the counterpart of
@@ -270,52 +305,15 @@ type PID struct {
 	// It is maintained only when metricsEnabled is set, and zeroed by reset().
 	mailboxEnqueued atomic.Int64
 
-	// reliableDelivery contains the endpoint's reliable-delivery settings.
-	reliableDelivery *reliableDeliveryConfig
-
-	// reliableCompanion marks an endpoint-owned reliable-delivery controller
-	// and pins it to its endpoint incarnation. It is nil for ordinary actors.
-	reliableCompanion *reliableCompanionSpec
-
-	// durableQueue is the point-to-point producer endpoint's durable queue
-	// instance, retained so ReSpawn can recreate a terminally stopped producer
-	// controller with its storage. It is nil for consumers, work-pulling
-	// producers, and volatile point-to-point producers.
-	durableQueue DurableProducerQueue
-
-	// durableWorkQueue is the work-pulling producer endpoint's durable work
-	// queue instance, retained for the same recovery path as durableQueue.
-	durableWorkQueue DurableWorkQueue
-
 	passivationStrategy passivation.Strategy
-	passivationManager  *passivationManager
-	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
 
-	// this is used to specify a role the actor belongs to
-	// this field is optional and will be set when the actor is created with a given role
-	role *string
-
-	// only set this when the actor is a singleton
-	singletonSpec *singletonSpec
-
-	metricProvider *metric.Provider
-
-	// observeOptions caches the OTel attribute set identifying this actor in
-	// observations made by the actor system's metrics callback. Built once at
-	// construction when metrics are enabled; nil otherwise. It stays nil in the
-	// low cardinality mode, where the callback reports one series per actor kind
-	// and no actor is named individually.
-	observeOptions []otelmetric.ObserveOption
-	// metricKind caches the actor kind reported by the metrics callback, so a
-	// scrape never pays for the reflection that resolves it. Set once at
-	// construction when metrics are enabled, in both metric modes; empty
-	// otherwise.
-	metricKind string
-	// metricsEnabled records whether a metric provider is wired to this actor.
-	// It is written once in newPID and only read afterwards, which is what lets
-	// the message path gate the mailbox counters on a plain field read instead
-	// of on a provider lookup.
-	metricsEnabled bool
+	// companion holds the spawn-time settings most actors never set: reliable
+	// delivery, durable queues, metrics identity, singleton specification and
+	// placement role. It stays nil for an ordinary actor, which keeps those
+	// fields off the idle footprint (see pidCompanion), and it is read only on
+	// lifecycle and scrape paths, so it can share a cache line with
+	// mailboxEnqueued.
+	companion *pidCompanion
 }
 
 var (
@@ -339,8 +337,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		actor:                 actor,
 		latestReceiveTimeNano: atomic.Int64{},
 		address:               address,
-		mailbox:               NewUnboundedMailbox(),
-		systemMailbox:         NewUnboundedMailbox(),
 		path:                  newPath(address),
 	}
 
@@ -361,13 +357,22 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 		opt(pid)
 	}
 
+	// Install the default user mailbox unless a spawn option supplied a custom
+	// one. The default runs on the PID's own mailboxHead and mailboxTail words
+	// through (*embeddedMailbox)(pid), so no separate mailbox object is
+	// allocated; one shared sentinel node seeds both ends exactly as
+	// NewUnboundedMailbox does. A custom mailbox leaves the two words nil.
+	if pid.mailbox == nil {
+		sentinel := new(ReceiveContext)
+		pid.mailboxHead = unsafe.Pointer(sentinel)
+		pid.mailboxTail = unsafe.Pointer(sentinel)
+		pid.mailbox = (*embeddedMailbox)(pid)
+	}
+
 	// resolved once, right after the options wired the provider, so the message
 	// path never inspects the provider itself.
-	pid.metricsEnabled = pid.metricProvider != nil && pid.metricProvider.Meter() != nil
-
-	if pid.logger == nil {
-		pid.logger = defaultLogger
-	}
+	provider := pid.metricProvider()
+	pid.metricsEnabled = provider != nil && provider.Meter() != nil
 
 	if pid.supervisor == nil {
 		pid.supervisor = defaultSupervisor
@@ -449,7 +454,7 @@ func (pid *PID) Role() *string {
 	}
 
 	pid.fieldsLocker.RLock()
-	role := pid.role
+	role := pid.placementRole()
 	pid.fieldsLocker.RUnlock()
 	return role
 }
@@ -896,7 +901,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return nil
 	}
 
-	pid.logger.Debugf("restarting actor=%s", pid.Name())
+	pid.getLogger().Debugf("restarting actor=%s", pid.Name())
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
 	deathWatch := actorSystem.getDeathWatch()
@@ -950,20 +955,6 @@ func (pid *PID) ProcessedCount() int {
 
 	count := pid.processedCount.Load()
 	return int(count)
-}
-
-// observedMailboxSize returns the number of user messages currently waiting in
-// this actor's mailbox, the value reported as actor.mailbox.size.
-//
-// The queue depth is the difference between the two counters the producers and
-// the processing turn keep on their own cache lines. Neither is read on the
-// message path, so the subtraction happens here, once per scrape. The counts are
-// maintained only when metrics are enabled, so the difference reads zero
-// otherwise. The two loads are not atomic with respect to each other and the
-// consumer can advance between them, so the result is clamped at zero rather
-// than surfacing a transient negative value.
-func (pid *PID) observedMailboxSize() int64 {
-	return max(pid.mailboxEnqueued.Load()-pid.mailboxDequeued.Load(), 0)
 }
 
 // LatestProcessedDuration returns the elapsed time since the most recent message was processed.
@@ -1191,7 +1182,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 
 		result, err := runTask()
 		if err != nil {
-			pid.logger.Errorf("request/request-name task failed: %v", err)
+			pid.getLogger().Errorf("request/request-name task failed: %v", err)
 			pid.toDeadletter(ctx, pid.address, pid.address, new(NoMessage), err)
 			return
 		}
@@ -1199,7 +1190,7 @@ func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (a
 		// send the result to the actor identified by its name
 		actorSystem := pid.ActorSystem()
 		if err := actorSystem.NoSender().SendAsync(ctx, actorName, result); err != nil {
-			pid.logger.Errorf("request/request-name send async failed: %v", err)
+			pid.getLogger().Errorf("request/request-name send async failed: %v", err)
 			pid.toDeadletter(ctx, pid.address, pid.address, result, err)
 			return
 		}
@@ -1403,7 +1394,7 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 		}
 		// Best-effort routing: proceed with stale cache but log warning
 		// Stale cache may miss newly registered DCs or include inactive ones
-		pid.logger.Warn("DC cache is stale, proceeding with best-effort cross-DC routing")
+		pid.getLogger().Warn("DC cache is stale, proceeding with best-effort cross-DC routing")
 	}
 
 	if len(dataCenterRecords) == 0 {
@@ -1631,17 +1622,17 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	// spawn rollback, endpoint subtree shutdown, and their own terminal
 	// self-stop must all be able to stop them while the system keeps running.
 	if actoryStem := pid.ActorSystem(); actoryStem != nil {
-		if !actoryStem.isStopping() && isSystemName(pid.Name()) && pid.reliableCompanion == nil {
-			pid.logger.Warnf("attempt to shutdown system actor=%s", pid.Name())
+		if !actoryStem.isStopping() && isSystemName(pid.Name()) && pid.reliableCompanion() == nil {
+			pid.getLogger().Warnf("attempt to shutdown system actor=%s", pid.Name())
 			return gerrors.ErrShutdownForbidden
 		}
 	}
 
 	pid.stopLocker.Lock()
-	pid.logger.Debugf("shutdown started for actor=%s", pid.Name())
+	pid.getLogger().Debugf("shutdown started for actor=%s", pid.Name())
 
 	if !pid.isStateSet(runningState) {
-		pid.logger.Debugf("actor=%s is offline, maybe passivated or stopped already", pid.Name())
+		pid.getLogger().Debugf("actor=%s is offline, maybe passivated or stopped already", pid.Name())
 		pid.stopLocker.Unlock()
 		return nil
 	}
@@ -1650,13 +1641,13 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	pid.unregisterPassivation()
 
 	if err := pid.doStop(ctx); err != nil {
-		pid.logger.Errorf("actor=%s failed to cleanly stop (hint: check PostStop cleanup)", pid.Name())
+		pid.getLogger().Errorf("actor=%s failed to cleanly stop (hint: check PostStop cleanup)", pid.Name())
 		pid.stopLocker.Unlock()
 		return err
 	}
 
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorStopped(pid.Path()))
+	if pid.getEventsStream() != nil {
+		pid.getEventsStream().Publish(eventsTopic, NewActorStopped(pid.Path()))
 	}
 
 	if actorSystem := pid.ActorSystem(); actorSystem != nil {
@@ -1664,7 +1655,7 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Unlock()
-	pid.logger.Debugf("actor=%s successfully shutdown", pid.Name())
+	pid.getLogger().Debugf("actor=%s successfully shutdown", pid.Name())
 	return nil
 }
 
@@ -1692,7 +1683,7 @@ func (pid *PID) Watch(cid *PID) {
 		}
 
 		if r == nil {
-			pid.logger.Debugf("watch: cannot register remote watch for %s: remoting disabled", cidAddr)
+			pid.getLogger().Debugf("watch: cannot register remote watch for %s: remoting disabled", cidAddr)
 			return
 		}
 
@@ -1700,7 +1691,7 @@ func (pid *PID) Watch(cid *PID) {
 		defer cancel()
 
 		if err := r.RemoteWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
-			pid.logger.Debugf("watch: RemoteWatch to %s failed: %v", cidAddr, err)
+			pid.getLogger().Debugf("watch: RemoteWatch to %s failed: %v", cidAddr, err)
 			return
 		}
 
@@ -1745,7 +1736,7 @@ func (pid *PID) UnWatch(cid *PID) {
 		defer cancel()
 
 		if err := r.RemoteUnWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
-			pid.logger.Debugf("unwatch: RemoteUnWatch to %s failed: %v", cidAddr, err)
+			pid.getLogger().Debugf("unwatch: RemoteUnWatch to %s failed: %v", cidAddr, err)
 		}
 		return
 	}
@@ -1753,12 +1744,51 @@ func (pid *PID) UnWatch(cid *PID) {
 	pid.ActorSystem().tree().removeWatcher(cid, pid)
 }
 
-// logger returns the logger set when creating the PID.
+// getEventsStream returns the actor system's event stream, or nil for a PID
+// that has no system. Publishers check for nil before emitting. The system
+// pointer is read under the field lock for the same reason as in getLogger.
+func (pid *PID) getEventsStream() eventstream.Stream {
+	pid.fieldsLocker.RLock()
+	system := pid.actorSystem
+	pid.fieldsLocker.RUnlock()
+
+	if system == nil {
+		return nil
+	}
+
+	return system.getEventsStream()
+}
+
+// observedMailboxSize returns the number of user messages currently waiting in
+// this actor's mailbox, the value reported as actor.mailbox.size.
+//
+// The queue depth is the difference between the two counters the producers and
+// the processing turn keep on their own cache lines. Neither is read on the
+// message path, so the subtraction happens here, once per scrape. The counts are
+// maintained only when metrics are enabled, so the difference reads zero
+// otherwise. The two loads are not atomic with respect to each other and the
+// consumer can advance between them, so the result is clamped at zero rather
+// than surfacing a transient negative value.
+func (pid *PID) observedMailboxSize() int64 {
+	return max(pid.mailboxEnqueued.Load()-pid.mailboxDequeued.Load(), 0)
+}
+
+// getLogger returns the logger the actor reports through: the actor system's
+// logger, or the package default for a PID that has no system, such as a
+// remote handle. It is a lookup rather than a field so the PID does not carry
+// a copy of what the system already holds. The system pointer is read under
+// the field lock, like every other reader of it, so a caller that swaps the
+// system under that lock never races with an actor that is logging.
 func (pid *PID) getLogger() log.Logger {
 	pid.fieldsLocker.RLock()
-	l := pid.logger
+	system := pid.actorSystem
 	pid.fieldsLocker.RUnlock()
-	return l
+
+	if system == nil {
+		return defaultLogger
+	}
+
+	return system.getLogger()
 }
 
 // LatestActivityTime returns the timestamp of the last message received by this actor.
@@ -2014,7 +2044,7 @@ func (pid *PID) trackRemoteHold(share *inet.CreditShare) {
 	}
 }
 
-// doReceive enqueues a message onto the actor's user or system mailbox
+// doReceive enqueues a message onto the actor's user mailbox or system queue
 // and schedules the actor onto the dispatcher if it is not already in
 // flight. This is the entry point for internal message delivery that
 // may carry control-plane messages (PoisonPill, Panicking, etc.).
@@ -2033,10 +2063,10 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 	}
 
 	if isControlMessage(msg) {
-		_ = pid.systemMailbox.Enqueue(receiveCtx)
+		pid.systemQueue.push(receiveCtx)
 	} else {
 		if err := pid.mailbox.Enqueue(receiveCtx); err != nil {
-			pid.logger.Warn(err)
+			pid.getLogger().Warn(err)
 			pid.handleReceivedError(receiveCtx, err)
 			// The refused context never enters the mailbox, so no dequeue or
 			// recycle will ever release its remote credit share.
@@ -2046,7 +2076,7 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 
 		if pid.metricsEnabled {
 			// the message is queued and waiting: count it for actor.mailbox.size.
-			// The system mailbox is deliberately outside the reported size.
+			// The system queue is deliberately outside the reported size.
 			pid.mailboxEnqueued.Add(1)
 		}
 	}
@@ -2072,7 +2102,7 @@ func (pid *PID) runTurn(w *worker) {
 	now := time.Now()
 	budget := w.dispatcher.throughput
 	for range budget {
-		if sysMsg := pid.systemMailbox.Dequeue(); sysMsg != nil {
+		if sysMsg := pid.systemQueue.pop(); sysMsg != nil {
 			pid.dispatchOne(sysMsg, now)
 			continue
 		}
@@ -2106,7 +2136,7 @@ func (pid *PID) runTurn(w *worker) {
 // does not allocate a method-bound closure on every turn end.
 func (pid *PID) finishOrReclaim() bool {
 	pid.schedState.reset()
-	if pid.mailbox.IsEmpty() && pid.systemMailbox.IsEmpty() {
+	if pid.mailbox.IsEmpty() && pid.systemQueue.isEmpty() {
 		return true
 	}
 
@@ -2116,10 +2146,10 @@ func (pid *PID) finishOrReclaim() bool {
 	return !pid.schedState.TakeForProcessing()
 }
 
-// dispatchOne routes a single message to its handler. Release is owned
-// by UnboundedMailbox.Dequeue, which reclaims the previous sentinel;
-// dispatchOne must not return the context here or the mailbox would
-// hand out an in-use head.
+// dispatchOne routes a single message to its handler. Release is owned by
+// the queues: UnboundedMailbox.Dequeue reclaims the previous sentinel and
+// systemQueue.pop the previously popped message. dispatchOne must not return
+// the context here or the mailbox would hand out an in-use head.
 func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 	// The message has left the mailbox: grant back any remote credit share
 	// now, so flow control tracks mailbox residency rather than processing
@@ -2135,7 +2165,7 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 
 	if pid.enableReentrancyStash(received) {
 		if err := pid.stash(received); err != nil {
-			pid.logger.Warn(err)
+			pid.getLogger().Warn(err)
 			pid.handleReceivedError(received, err)
 		}
 		return
@@ -2230,7 +2260,7 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 
 	if resp.Error != "" {
 		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) {
-			pid.logger.Warnf("async response dropped: unknown correlation id=%s", correlationID)
+			pid.getLogger().Warnf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
@@ -2238,7 +2268,7 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 	// A response without a payload and without an error is a successful reply
 	// with nothing to return: a grain answered the request with NoErr.
 	if !pid.completeRequest(correlationID, resp.Message, nil) {
-		pid.logger.Warnf("Async response dropped: unknown correlation id=%s", correlationID)
+		pid.getLogger().Warnf("Async response dropped: unknown correlation id=%s", correlationID)
 	}
 }
 
@@ -2317,7 +2347,7 @@ func (pid *PID) deregisterRequestState(state *requestState) {
 		remaining := reentrant.blockingCount.Dec()
 		if remaining == 0 {
 			if err := pid.unstashAll(); err != nil {
-				pid.logger.Warn(err)
+				pid.getLogger().Warn(err)
 			}
 		}
 	}
@@ -2531,7 +2561,7 @@ func (pid *PID) effectiveInitTimeout() time.Duration {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.logger.Debugf("initialization process started for actor %s", pid.Name())
+	pid.getLogger().Debugf("initialization process started for actor %s", pid.Name())
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
@@ -2544,7 +2574,7 @@ func (pid *PID) init(ctx context.Context) error {
 	}); err != nil {
 		e := gerrors.NewErrInitFailure(err)
 		cancel()
-		pid.logger.Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
+		pid.getLogger().Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
 		return e
 	}
 
@@ -2553,10 +2583,10 @@ func (pid *PID) init(ctx context.Context) error {
 	// live actor parks inbound remote credit again.
 	pid.setState(remoteHoldsClosedState, false)
 	pid.setState(runningState, true)
-	pid.logger.Debugf("actor=%s initialization successful", pid.Name())
+	pid.getLogger().Debugf("actor=%s initialization successful", pid.Name())
 
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorStarted(pid.Path()))
+	if pid.getEventsStream() != nil {
+		pid.getEventsStream().Publish(eventsTopic, NewActorStarted(pid.Path()))
 	}
 
 	cancel()
@@ -2634,7 +2664,7 @@ func (pid *PID) reset() {
 // type regardless of locality. No synchronous liveness probe is issued, so
 // the shutdown path is not gated on the reachability of any remote peer.
 func (pid *PID) freeWatchers(ctx context.Context) {
-	logger := pid.logger
+	logger := pid.getLogger()
 	logger.Debugf("freeing all actor %s's watchers", pid.Name())
 
 	tree := pid.ActorSystem().tree()
@@ -2678,7 +2708,7 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 // watch registry is then cleared in one shot for this pid, so neither direction
 // keeps stale entries after the actor has terminated.
 func (pid *PID) freeWatchees(ctx context.Context) error {
-	logger := pid.logger
+	logger := pid.getLogger()
 	logger.Debugf("freeing all actor %s's watched actors", pid.Name())
 
 	tree := pid.ActorSystem().tree()
@@ -2720,13 +2750,13 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
-	logger := pid.logger
+	logger := pid.getLogger()
 	logger.Debugf("actor=%s freeing all descendant actors", pid.Name())
 
 	tree := pid.ActorSystem().tree()
 	node, ok := tree.node(pid.ID())
 	if !ok {
-		pid.logger.Debugf("actor=%s node not found in actors tree", pid.Name())
+		pid.getLogger().Debugf("actor=%s node not found in actors tree", pid.Name())
 		return nil
 	}
 
@@ -2762,7 +2792,7 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		logger.Debugf("actor=%s successfully freed all descendant actors", pid.Name())
 		return nil
 	}
-	pid.logger.Debugf("actor=%s has no children, maybe already freed", pid.Name())
+	pid.getLogger().Debugf("actor=%s has no children, maybe already freed", pid.Name())
 	return nil
 }
 
@@ -2782,18 +2812,18 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.logger.Debugf("passivation decision skipped once for actor %s due to recent reinstate", pid.Name())
+		pid.getLogger().Debugf("passivation decision skipped once for actor %s due to recent reinstate", pid.Name())
 		return false
 	}
 
 	if pid.isStateSet(stoppingState) ||
 		pid.isStateSet(suspendedState) ||
 		pid.isStateSet(passivationPausedState) {
-		pid.logger.Debugf("no need to passivate actor=%s", pid.Name())
+		pid.getLogger().Debugf("no need to passivate actor=%s", pid.Name())
 		return false
 	}
 
-	pid.logger.Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
+	pid.getLogger().Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
 	pid.setState(passivatingState, true)
 	defer pid.setState(passivatingState, false)
 
@@ -2801,7 +2831,7 @@ func (pid *PID) tryPassivation(reason string) bool {
 	defer pid.stopLocker.Unlock()
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.logger.Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		pid.getLogger().Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
 		return false
 	}
 
@@ -2809,19 +2839,19 @@ func (pid *PID) tryPassivation(reason string) bool {
 
 	ctx := context.Background()
 	if err := pid.doStop(ctx); err != nil {
-		pid.logger.Errorf("failed to passivate actor=%s: %v (hint: check OnPassivate implementation)", pid.Name(), err)
+		pid.getLogger().Errorf("failed to passivate actor=%s: %v (hint: check OnPassivate implementation)", pid.Name(), err)
 		return false
 	}
 
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorPassivated(pid.Path()))
+	if pid.getEventsStream() != nil {
+		pid.getEventsStream().Publish(eventsTopic, NewActorPassivated(pid.Path()))
 	}
 
 	if actorSystem := pid.ActorSystem(); actorSystem != nil {
 		actorSystem.recordActorPassivated(pid)
 	}
 
-	pid.logger.Debugf("actor=%s successfully passivated", pid.Name())
+	pid.getLogger().Debugf("actor=%s successfully passivated", pid.Name())
 	return true
 }
 
@@ -2884,7 +2914,7 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	pid.logger.Debugf("shutdown process completed for actor %s", pid.Name())
+	pid.getLogger().Debugf("shutdown process completed for actor %s", pid.Name())
 	return nil
 }
 
@@ -2901,13 +2931,13 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// let us check whether we have all errors directive
 		directive, ok = pid.supervisor.Directive(new(gerrors.AnyError))
 		if !ok {
-			pid.logger.Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+			pid.getLogger().Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
 			pid.suspend(signal.Err().Error())
 			return
 		}
 	}
 
-	pid.logger.Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
+	pid.getLogger().Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
 
 	// create the message to send to the parent
 	msg := &commands.Panicking{
@@ -2921,8 +2951,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
-		pid.logger.Warnf("actor=%s child=%s failing: err=%s", parent.Name(), pid.Name(), msg.Err.Error())
-		pid.logger.Debugf("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
+		pid.getLogger().Warnf("actor=%s child=%s failing: err=%s", parent.Name(), pid.Name(), msg.Err.Error())
+		pid.getLogger().Debugf("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
 			parent.Name(),
 			pid.supervisor.Strategy(),
 			directive,
@@ -2949,7 +2979,7 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	}
 
 	// no parent found, just suspend the actor
-	pid.logger.Warnf("actor=%s has no parent to notify about failure: err=%s", pid.Name(), msg.Err.Error())
+	pid.getLogger().Warnf("actor=%s has no parent to notify about failure: err=%s", pid.Name(), msg.Err.Error())
 	pid.suspend(msg.Err.Error())
 }
 
@@ -2963,7 +2993,7 @@ func (pid *PID) handleReceivedError(receiveCtx *ReceiveContext, err error) {
 
 func (pid *PID) handleReceivedErrorWithMessage(senderPID *PID, message any, err error) {
 	// the message is lost
-	if pid.eventsStream == nil {
+	if pid.getEventsStream() == nil {
 		return
 	}
 
@@ -3025,7 +3055,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 		completion.Receiver == nil ||
 		completion.Receiver == pid.ActorSystem().NoSender() ||
 		completion.Task == nil {
-		pid.logger.Errorf("undefined task: %v", gerrors.ErrUndefinedTask)
+		pid.getLogger().Errorf("undefined task: %v", gerrors.ErrUndefinedTask)
 		return
 	}
 
@@ -3059,7 +3089,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 
 	result, err := runTask()
 	if err != nil {
-		pid.logger.Errorf("pipe task failed: %v", err)
+		pid.getLogger().Errorf("pipe task failed: %v", err)
 		pid.toDeadletter(ctx, pid.address, pid.address, new(NoMessage), err)
 		return
 	}
@@ -3067,7 +3097,7 @@ func (pid *PID) handleCompletion(ctx context.Context, config *pipeConfig, comple
 	// make sure that the receiver is still alive
 	to := completion.Receiver
 	if !to.IsRunning() {
-		pid.logger.Errorf("unable to pipe message to actor=%s: not started", to.Name())
+		pid.getLogger().Errorf("unable to pipe message to actor=%s: not started", to.Name())
 		pid.toDeadletter(ctx, pid.address, pid.address, result, gerrors.ErrDead)
 		return
 	}
@@ -3120,7 +3150,7 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 			// TODO: revisit this
 			//pid.UnWatch(spid)
 			if err := spid.Shutdown(ctx); err != nil {
-				pid.logger.Error(fmt.Errorf("failed to shutdown Actor (%s): %w", spid.Name(), err))
+				pid.getLogger().Error(fmt.Errorf("failed to shutdown Actor (%s): %w", spid.Name(), err))
 				// we need to suspend the actor since its shutdown is the result of
 				// one of its faulty siblings
 				spid.suspend(err.Error())
@@ -3194,7 +3224,7 @@ func (pid *PID) handleRestartDirective(cid *PID, sup *supervisor.Supervisor, inc
 // strategy its still-running siblings are suspended too so the group stops as
 // one unit. Suspended actors can be revived with Reinstate.
 func (pid *PID) suspendGroup(cid *PID, pids []*PID, faults int64, maxRetries uint32) {
-	pid.logger.Warnf("restart budget exhausted for actor=%s: %d consecutive failures with maxRetries=%d", cid.Name(), faults, maxRetries)
+	pid.getLogger().Warnf("restart budget exhausted for actor=%s: %d consecutive failures with maxRetries=%d", cid.Name(), faults, maxRetries)
 	reason := fmt.Sprintf("restart budget exhausted: %d consecutive failures", faults)
 
 	for _, spid := range pids {
@@ -3246,9 +3276,9 @@ func (pid *PID) restartChild(spid *PID, sup *supervisor.Supervisor, delay time.D
 	}
 
 	if err != nil {
-		pid.logger.Errorf("restart directive failed for actor=%s: %v (hint: check PreStart/Receive for panics)", spid.Name(), err)
+		pid.getLogger().Errorf("restart directive failed for actor=%s: %v (hint: check PreStart/Receive for panics)", spid.Name(), err)
 		if err := spid.Shutdown(ctx); err != nil {
-			pid.logger.Errorf("shutdown after restart failure: %v", err)
+			pid.getLogger().Errorf("shutdown after restart failure: %v", err)
 			// we need to suspend the actor since it is faulty
 			spid.suspend(err.Error())
 		}
@@ -3306,14 +3336,14 @@ func (pid *PID) childAddress(name string) *address.Address {
 
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
-	pid.logger.Debugf("actor=%s going into suspension mode", pid.Name())
+	pid.getLogger().Debugf("actor=%s going into suspension mode", pid.Name())
 	pid.setState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
 	// pause passivation loop
 	pid.pausePassivation()
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
+	pid.getEventsStream().Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
 }
 
 // getDeadlettersCount gets deadletter
@@ -3353,7 +3383,7 @@ func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
 }
 
 func (pid *PID) doReinstate() {
-	pid.logger.Debugf("actor=%s reinstated", pid.Name())
+	pid.getLogger().Debugf("actor=%s reinstated", pid.Name())
 	// if we're already running and not suspended, nothing to do
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
@@ -3372,7 +3402,7 @@ func (pid *PID) doReinstate() {
 	pid.resumePassivation()
 
 	// publish an event to the events stream
-	pid.eventsStream.Publish(eventsTopic, NewActorReinstated(pid.Path()))
+	pid.getEventsStream().Publish(eventsTopic, NewActorReinstated(pid.Path()))
 }
 
 func (pid *PID) shouldAutoPassivate() bool {
@@ -3459,11 +3489,11 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	}
 
 	var singletonSpec *internalpb.SingletonSpec
-	if pid.IsSingleton() && pid.singletonSpec != nil {
+	if pid.IsSingleton() && pid.singletonSpec() != nil {
 		singletonSpec = &internalpb.SingletonSpec{}
-		singletonSpec.SetSpawnTimeout(durationpb.New(pid.singletonSpec.SpawnTimeout))
-		singletonSpec.SetWaitInterval(durationpb.New(pid.singletonSpec.WaitInterval))
-		singletonSpec.SetMaxRetries(pid.singletonSpec.MaxRetries)
+		singletonSpec.SetSpawnTimeout(durationpb.New(pid.singletonSpec().SpawnTimeout))
+		singletonSpec.SetWaitInterval(durationpb.New(pid.singletonSpec().WaitInterval))
+		singletonSpec.SetMaxRetries(pid.singletonSpec().MaxRetries)
 	}
 
 	var reentrancy *internalpb.ReentrancyConfig
@@ -3494,8 +3524,8 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	actor.SetReentrancy(reentrancy)
 	actor.SetInitTimeout(initTimeout)
 	actor.SetIncarnationId(pid.incarnationID())
-	actor.SetReliableDelivery(pid.reliableDelivery.toProto())
-	actor.SetReliableCompanion(pid.reliableCompanion.toProto())
+	actor.SetReliableDelivery(pid.reliableDelivery().toProto())
+	actor.SetReliableCompanion(pid.reliableCompanion().toProto())
 	return actor, nil
 }
 
@@ -3508,19 +3538,22 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 // mode reports one series per kind and never names an individual actor, so it
 // leaves observeOptions nil.
 func (pid *PID) buildObserveOptions() {
-	if pid.metricProvider == nil || pid.metricProvider.Meter() == nil {
+	provider := pid.metricProvider()
+	if provider == nil || provider.Meter() == nil {
 		return
 	}
 
-	pid.metricKind = types.Name(pid.Actor())
+	// the provider lives in the companion, so it exists whenever it is set
+	companion := pid.companion
+	companion.metricKind = types.Name(pid.Actor())
 	if pid.actorSystem.lowCardinalityMetrics() {
 		return
 	}
 
-	pid.observeOptions = []otelmetric.ObserveOption{
+	companion.observeOptions = []otelmetric.ObserveOption{
 		otelmetric.WithAttributes(attribute.String("actor.system", pid.actorSystem.Name())),
 		otelmetric.WithAttributes(attribute.String("actor.name", pid.Name())),
-		otelmetric.WithAttributes(attribute.String("actor.kind", pid.metricKind)),
+		otelmetric.WithAttributes(attribute.String("actor.kind", companion.metricKind)),
 		otelmetric.WithAttributes(attribute.String("actor.address", pid.ID())),
 	}
 }
@@ -3632,7 +3665,7 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 
 		// the event is published only after successful cluster publication, so it
 		// means durable creation
-		eventsStream := pid.eventsStream
+		eventsStream := pid.getEventsStream()
 		if eventsStream != nil {
 			eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
 		}
@@ -3665,13 +3698,11 @@ func (pid *PID) findRunningChild(tree *tree, childAddress string) (*PID, bool) {
 func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
 	pidOptions := []pidOption{
 		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withCustomLogger(pid.logger),
 		withActorSystem(pid.actorSystem),
-		withEventsStream(pid.eventsStream),
 		withInitTimeout(config.initTimeout),
 		withRemoting(pid.remoting),
 		withPassivationManager(pid.passivationManager),
-		withMetricProvider(pid.metricProvider),
+		withMetricProvider(pid.metricProvider()),
 		withRelocationDisabled(), // by default child is not relocatable
 	}
 
@@ -3818,15 +3849,15 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	pid.restartCount.Inc()
 	pid.fireSystemMessage(ctx, new(PostStart))
-	if pid.eventsStream != nil {
-		pid.eventsStream.Publish(eventsTopic, NewActorRestarted(pid.Path()))
+	if pid.getEventsStream() != nil {
+		pid.getEventsStream().Publish(eventsTopic, NewActorRestarted(pid.Path()))
 	}
 
 	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
 		actorSystem.increaseActorsCounter()
 	}
 
-	pid.logger.Debugf("actor=%s restarted", pid.Name())
+	pid.getLogger().Debugf("actor=%s restarted", pid.Name())
 	return nil
 }
 
@@ -3839,7 +3870,7 @@ func isLongLivedPassivationStrategy(strategy passivation.Strategy) bool {
 }
 
 // isControlMessage identifies messages that bypass the user-message
-// backlog and route to the actor's system mailbox. Shutdown,
+// backlog and route to the actor's system queue. Shutdown,
 // supervision, lifecycle and observability signals must not queue
 // behind a user-message burst.
 //
