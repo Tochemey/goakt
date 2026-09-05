@@ -23,7 +23,7 @@
   "logo": {
     "light": "/assets/goakt-wordmark-light.svg",
     "dark": "/assets/goakt-wordmark-dark.svg",
-    "href": "https://docs.goakt.dev"
+    "href": "https://goakt.dev"
   },
   "fonts": {
     "heading": {

@@ -29,7 +29,7 @@ New to the actor model? Actors are isolated units of computation that share no m
 
 [![Carl Hewitt on the actor model](https://img.youtube.com/vi/7erJ1DV_Tlo/hqdefault.jpg)](https://www.youtube.com/watch?v=7erJ1DV_Tlo)
 
-See the [documentation](https://docs.goakt.dev) for the full feature reference.
+See [goakt.dev](https://goakt.dev) for an overview and the [documentation](https://docs.goakt.dev) for the full feature reference.
 
 ## Installation
 
