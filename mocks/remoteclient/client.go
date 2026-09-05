@@ -78,7 +78,7 @@ func (_c *Client_Close_Call) RunAndReturn(run func()) *Client_Close_Call {
 	return _c
 }
 
-// ClosePeer provides a mock function for the type Client.
+// ClosePeer provides a mock function for the type Client
 func (_mock *Client) ClosePeer(host string, port int) {
 	_mock.Called(host, port)
 	return
@@ -92,7 +92,7 @@ type Client_ClosePeer_Call struct {
 // ClosePeer is a helper method to define mock.On call
 //   - host string
 //   - port int
-func (_e *Client_Expecter) ClosePeer(host interface{}, port interface{}) *Client_ClosePeer_Call {
+func (_e *Client_Expecter) ClosePeer(host any, port any) *Client_ClosePeer_Call {
 	return &Client_ClosePeer_Call{Call: _e.mock.On("ClosePeer", host, port)}
 }
 
@@ -309,6 +309,75 @@ func (_c *Client_NetClient_Call) Return(client *net.Client) *Client_NetClient_Ca
 }
 
 func (_c *Client_NetClient_Call) RunAndReturn(run func(host string, port int) *net.Client) *Client_NetClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// PersistPeerState provides a mock function for the type Client
+func (_mock *Client) PersistPeerState(ctx context.Context, host string, port int, peerState *internalpb.PeerState) error {
+	ret := _mock.Called(ctx, host, port, peerState)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PersistPeerState")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, int, *internalpb.PeerState) error); ok {
+		r0 = returnFunc(ctx, host, port, peerState)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Client_PersistPeerState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PersistPeerState'
+type Client_PersistPeerState_Call struct {
+	*mock.Call
+}
+
+// PersistPeerState is a helper method to define mock.On call
+//   - ctx context.Context
+//   - host string
+//   - port int
+//   - peerState *internalpb.PeerState
+func (_e *Client_Expecter) PersistPeerState(ctx any, host any, port any, peerState any) *Client_PersistPeerState_Call {
+	return &Client_PersistPeerState_Call{Call: _e.mock.On("PersistPeerState", ctx, host, port, peerState)}
+}
+
+func (_c *Client_PersistPeerState_Call) Run(run func(ctx context.Context, host string, port int, peerState *internalpb.PeerState)) *Client_PersistPeerState_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 int
+		if args[2] != nil {
+			arg2 = args[2].(int)
+		}
+		var arg3 *internalpb.PeerState
+		if args[3] != nil {
+			arg3 = args[3].(*internalpb.PeerState)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+			arg3,
+		)
+	})
+	return _c
+}
+
+func (_c *Client_PersistPeerState_Call) Return(err error) *Client_PersistPeerState_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Client_PersistPeerState_Call) RunAndReturn(run func(ctx context.Context, host string, port int, peerState *internalpb.PeerState) error) *Client_PersistPeerState_Call {
 	_c.Call.Return(run)
 	return _c
 }

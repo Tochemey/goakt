@@ -44,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
+	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -524,6 +525,68 @@ func TestRelocation(t *testing.T) {
 	assert.NoError(t, node3.Stop(ctx))
 	assert.NoError(t, sd1.Close())
 	assert.NoError(t, sd3.Close())
+	srv.Shutdown()
+}
+
+// TestRelocationWithDuplexProtocolPin proves that a node leaving a cluster whose
+// remoting is pinned to the duplex protocol still hands its peer state snapshot
+// to the surviving peers, so the leader can relocate the departed node's actors.
+// The snapshot travels on the same protocol-pinned control path as every other
+// internal RPC; sending it over the legacy unary path leaves the leader without
+// a snapshot and the actors are never relocated.
+func TestRelocationWithDuplexProtocolPin(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+
+	node1, sd1 := testNATs(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
+	require.NotNil(t, node1)
+	require.NotNil(t, sd1)
+
+	node2, sd2 := testNATs(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
+	require.NotNil(t, node2)
+	require.NotNil(t, sd2)
+
+	senderName := "Sender-Actor"
+	senderPID, err := node1.Spawn(ctx, senderName, NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, senderPID)
+
+	actorName := "Relocated-Actor"
+	pid, err := node2.Spawn(ctx, actorName, NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	node2Address := net.JoinHostPort(node2.Host(), strconv.Itoa(node2.Port()))
+	actorPID, err := node1.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.NotNil(t, actorPID)
+	require.Equal(t, node2Address, actorPID.Path().HostPort(), "Actor %s should be on node2 before shutdown", actorName)
+
+	require.NoError(t, node2.Stop(ctx))
+	require.NoError(t, sd2.Close())
+
+	require.Eventually(t, func() bool {
+		relocatedPID, err := node1.ActorOf(ctx, actorName)
+		if err != nil || relocatedPID == nil {
+			return false
+		}
+
+		return relocatedPID.Path().HostPort() != node2Address
+	}, 2*time.Minute, 500*time.Millisecond, "Actor %s should be relocated from node2 (was %s) to a live node", actorName, node2Address)
+
+	require.Eventually(t, func() bool {
+		sender, err := node1.ActorOf(ctx, senderName)
+		if err != nil || sender == nil {
+			return false
+		}
+
+		return sender.SendAsync(ctx, actorName, new(testpb.TestSend)) == nil
+	}, 30*time.Second, 500*time.Millisecond, "Should be able to send to relocated actor %s", actorName)
+
+	assert.NoError(t, node1.Stop(ctx))
+	assert.NoError(t, sd1.Close())
 	srv.Shutdown()
 }
 

@@ -5372,19 +5372,6 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	rpcCtx, cancelRPCs := context.WithCancel(ctx)
 	defer cancelRPCs()
 
-	// Create a custom remoting client for replication with compression enabled
-	remotingOpts := []remoteclient.ClientOption{
-		remoteclient.WithClientCompression(x.remoteConfig.Compression()),
-		remoteclient.WithClientContextPropagator(x.remoteConfig.ContextPropagator()),
-	}
-
-	if x.tlsInfo != nil {
-		remotingOpts = append(remotingOpts, remoteclient.WithClientTLS(x.tlsInfo.ClientConfig))
-	}
-
-	remoting := remoteclient.NewClient(remotingOpts...)
-	defer remoting.Close()
-
 	// Channel to collect results from all goroutines
 	// Each goroutine sends exactly one result (nil for success, error for failure)
 	results := make(chan error, totalPeers)
@@ -5392,31 +5379,14 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	// Launch parallel RPCs to all selected peers
 	for _, peer := range peers {
 		go func() {
-			// Get pooled proto TCP client
-			client := remoting.NetClient(peer.Host, peer.RemotingPort)
-			request := &internalpb.PersistPeerStateRequest{}
-			request.SetPeerState(peerState)
-
-			// Send request using proto TCP
-			resp, err := client.SendProto(rpcCtx, request)
-			if err != nil {
-				x.logger.Errorf("node=%s failed to persist peer state to peer=%s:%d: %v (hint: check peer reachability)",
-					peerAddr, peer.Host, peer.RemotingPort, err)
-				results <- err
-				return
-			}
-
-			// Check for proto errors
-			if errResp, ok := resp.(*internalpb.Error); ok {
-				err := fmt.Errorf("proto error: code=%s, msg=%s", errResp.GetCode(), errResp.GetMessage())
-				x.logger.Errorf("node=%s failed to persist peer state to peer=%s:%d: %v (hint: check remote handler)",
-					peerAddr, peer.Host, peer.RemotingPort, err)
+			if err := x.remoting.PersistPeerState(rpcCtx, peer.Host, peer.RemotingPort, peerState); err != nil {
+				x.logger.Errorf("node=%s failed to persist peer state to peer=%s:%d: %v (hint: check peer reachability)", peerAddr, peer.Host, peer.RemotingPort, err)
 				results <- err
 				return
 			}
 
 			x.logger.Debugf("node=%s persisted peer state to peer=%s:%d", peerAddr, peer.Host, peer.RemotingPort)
-			results <- nil // Success
+			results <- nil
 		}()
 	}
 

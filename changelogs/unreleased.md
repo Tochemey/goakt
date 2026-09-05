@@ -20,6 +20,8 @@
 
 - **Actors and grains carry their role constraint through relocation and remote activation** ([#1334](https://github.com/Tochemey/goakt/issues/1334)). Actors spawned with `WithRole` and grains activated with `WithActivationRole` lost their role when recreated on another node, because `SpawnOn`, the grain cluster record, and the remote activation request did not carry it. All three paths now transport the role, and eager grain relocation honors it: a role-constrained eager grain is reassigned to the least-loaded surviving node advertising its role, and reported in `RelocationFailed` when no surviving node qualifies. Lazy grains stay unconstrained during relocation; their role is re-applied at the next activation.
 
+- **Peer state replication honors the remoting protocol pin** ([#1343](https://github.com/Tochemey/goakt/issues/1343)). The peer state snapshot a node replicates to its peers during graceful shutdown was sent over the legacy unary remoting path regardless of the configured protocol pin. With `remote.WithProtocolPin(remote.ProtocolPinDuplex)` every peer refused the connection, the leader found no snapshot, and the departing node's actors and grains were never relocated. The snapshot now travels through the actor system's own remoting client, on the same protocol-pinned control path as every other internal RPC.
+
 ## 📦 Dependencies
 
 - Updated Go to v1.26.6 (`go.mod` and the build Dockerfile).

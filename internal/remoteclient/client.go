@@ -344,6 +344,23 @@ type Client interface {
 	//     not as an error.
 	RelocateBatch(ctx context.Context, host string, port int, request *internalpb.RelocateBatchRequest) (*internalpb.RelocateBatchResponse, error)
 
+	// PersistPeerState hands a departing node's peer state snapshot to one peer
+	// before that node leaves the cluster, so the leader can relocate its actors
+	// and grains. It is an internal control RPC and follows the client's
+	// protocol pin like every other control RPC.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the peer that stores the snapshot.
+	//   - peerState: The departing node's actors and grains, with its own host and ports.
+	//
+	// Errors:
+	//   - Transport and context errors.
+	//   - Server-side failures surfaced as proto errors: FailedPrecondition when remoting
+	//     or clustering is disabled on the peer, Internal when its cluster store rejects
+	//     the snapshot.
+	PersistPeerState(ctx context.Context, host string, port int, peerState *internalpb.PeerState) error
+
 	// RemoteTellGrain sends a one-way (fire-and-forget) message to a grain.
 	//
 	// Parameters:
@@ -1668,6 +1685,46 @@ func (r *client) RelocateBatch(ctx context.Context, host string, port int, reque
 	}
 
 	return response, nil
+}
+
+// PersistPeerState hands a departing node's peer state snapshot to one peer
+// before that node leaves the cluster, so the leader can relocate its actors
+// and grains. It is an internal control RPC and follows the client's
+// protocol pin like every other control RPC.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the peer that stores the snapshot.
+//   - peerState: The departing node's actors and grains, with its own host and ports.
+//
+// Errors:
+//   - Transport and context errors.
+//   - Server-side failures surfaced as proto errors: FailedPrecondition when remoting
+//     or clustering is disabled on the peer, Internal when its cluster store rejects
+//     the snapshot.
+func (r *client) PersistPeerState(ctx context.Context, host string, port int, peerState *internalpb.PeerState) error {
+	ctx, err := r.enrichContext(ctx)
+	if err != nil {
+		return err
+	}
+
+	request := &internalpb.PersistPeerStateRequest{}
+	request.SetPeerState(peerState)
+
+	resp, err := r.sendControl(ctx, host, port, request)
+	if err != nil {
+		return err
+	}
+
+	if err := checkProtoError(resp); err != nil {
+		return err
+	}
+
+	if _, ok := resp.(*internalpb.PersistPeerStateResponse); !ok {
+		return fmt.Errorf("unexpected response type %T", resp)
+	}
+
+	return nil
 }
 
 // RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
