@@ -2734,3 +2734,132 @@ func TestSerializePayload(t *testing.T) {
 		assert.False(t, pooled, "non-proto serializers must not hand out pooled frames")
 	})
 }
+
+// --- PersistPeerState tests ---
+
+// testPeerState builds the snapshot the PersistPeerState tests send, and whose
+// host and peers port the server-side handler asserts on.
+func testPeerState() *internalpb.PeerState {
+	return internalpb.PeerState_builder{
+		Host:         "127.0.0.1",
+		RemotingPort: 8080,
+		PeersPort:    9000,
+	}.Build()
+}
+
+// persistPeerStateHandler answers a PersistPeerStateRequest after checking that
+// the snapshot built by testPeerState survived the round trip intact.
+func persistPeerStateHandler(t *testing.T) inet.ProtoHandler {
+	t.Helper()
+	return func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
+		req := msg.(*internalpb.PersistPeerStateRequest)
+		assert.Equal(t, "127.0.0.1", req.GetPeerState().GetHost())
+		assert.EqualValues(t, 9000, req.GetPeerState().GetPeersPort())
+		return new(internalpb.PersistPeerStateResponse), nil
+	}
+}
+
+func TestPersistPeerState_Success(t *testing.T) {
+	ps := startRemotingServer(t,
+		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", persistPeerStateHandler(t)),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient()
+	defer r.Close()
+
+	require.NoError(t, r.PersistPeerState(context.Background(), host, port, testPeerState()))
+}
+
+// TestPersistPeerState_DuplexPinnedPeer is the regression test for the snapshot
+// never reaching a duplex-pinned peer: the listener accepts only duplex, so a
+// client that sends the snapshot on the legacy unary path is refused.
+func TestPersistPeerState_DuplexPinnedPeer(t *testing.T) {
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolDuplex),
+		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", persistPeerStateHandler(t)),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinDuplex),
+	)
+	defer r.Close()
+
+	c := r.(*client)
+	p := c.peerFor(host, port)
+
+	require.NoError(t, r.PersistPeerState(context.Background(), host, port, testPeerState()))
+	assert.Equal(t, peerProtocolDuplex, p.cachedProtocol())
+}
+
+func TestPersistPeerState_LegacyPinnedPeer(t *testing.T) {
+	ps := startRemotingServer(t,
+		inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolLegacy),
+		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", persistPeerStateHandler(t)),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient(
+		WithClientCompression(remote.NoCompression),
+		WithClientProtocolPin(remote.ProtocolPinLegacy),
+	)
+	defer r.Close()
+
+	require.NoError(t, r.PersistPeerState(context.Background(), host, port, testPeerState()))
+}
+
+func TestPersistPeerState_ProtoError(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return internalpb.Error_builder{
+			Code:    internalpb.Code_CODE_FAILED_PRECONDITION,
+			Message: gerrors.ErrClusterDisabled.Error(),
+		}.Build(), nil
+	}
+
+	ps := startRemotingServer(t,
+		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", handler),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	err := r.PersistPeerState(context.Background(), host, port, testPeerState())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+}
+
+func TestPersistPeerState_InvalidResponseType(t *testing.T) {
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		return &internalpb.RemoteLookupResponse{}, nil
+	}
+
+	ps := startRemotingServer(t,
+		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", handler),
+	)
+	host, port := serverHostPort(t, ps)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	err := r.PersistPeerState(context.Background(), host, port, testPeerState())
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "unexpected response type")
+}
+
+func TestPersistPeerState_ConnectionRefused(t *testing.T) {
+	r := NewClient()
+	err := r.PersistPeerState(context.Background(), "host", 1000, testPeerState())
+	assert.Error(t, err)
+}
+
+func TestPersistPeerState_EnrichContextError(t *testing.T) {
+	r := NewClient(WithClientContextPropagator(errInjectPropagator{}))
+	defer r.Close()
+
+	err := r.PersistPeerState(context.Background(), "host", 1000, testPeerState())
+	require.Error(t, err)
+	assert.EqualError(t, err, "inject error")
+}

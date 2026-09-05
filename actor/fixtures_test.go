@@ -2085,6 +2085,7 @@ type testClusterConfig struct {
 	writeQuorum       uint32
 	readQuorum        uint32
 	bootstrapTimeout  time.Duration
+	protocolPin       remote.ProtocolPin
 }
 
 type testClusterOption func(*testClusterConfig)
@@ -2128,6 +2129,15 @@ func withTestReplication(replicaCount, writeQuorum, readQuorum uint32) testClust
 func withTestBootstrapTimeout(timeout time.Duration) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.bootstrapTimeout = timeout
+	}
+}
+
+// withTestProtocolPin pins the remoting wire protocol of every node built by
+// the fixture, so a test can exercise a cluster that speaks only duplex or only
+// legacy remoting.
+func withTestProtocolPin(pin remote.ProtocolPin) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.protocolPin = pin
 	}
 }
 
@@ -2318,7 +2328,7 @@ func buildTestSystem(t *testing.T, providerFactory providerFactory, opts ...test
 		options = append(options, WithExtensions(cfg.extension))
 	}
 
-	remoteOpts := []remote.Option{remote.WithCompression(cfg.compression)}
+	remoteOpts := []remote.Option{remote.WithCompression(cfg.compression), remote.WithProtocolPin(cfg.protocolPin)}
 	if cfg.contextPropagator != nil {
 		remoteOpts = append(remoteOpts, remote.WithContextPropagator(cfg.contextPropagator))
 	}
