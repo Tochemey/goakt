@@ -29,10 +29,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type supervisionSignalTestError struct{}
-
-func (supervisionSignalTestError) Error() string { return "supervision-signal" }
-
 func TestSupervisionSignalAccessors(t *testing.T) {
 	expectedErr := errors.New("boom")
 	expectedMsg := new(PostStart)
@@ -50,9 +46,9 @@ func TestErrorTypeNil(t *testing.T) {
 }
 
 func TestErrorTypePointerAndValue(t *testing.T) {
-	valueErr := supervisionSignalTestError{}
+	valueErr := MockSupervisionSignalError{}
 	require.Equal(t, errorType(valueErr), errorType(&valueErr))
 
-	var nilPtr *supervisionSignalTestError
+	var nilPtr *MockSupervisionSignalError
 	require.Equal(t, errorType(valueErr), errorType(nilPtr))
 }

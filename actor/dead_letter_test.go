@@ -25,14 +25,12 @@ package actor
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -62,7 +60,7 @@ func TestDeadletter(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -114,7 +112,7 @@ func TestDeadletter(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the black hole actor
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorName := "actorName"
 		actorRef, err := sys.Spawn(ctx, actorName, actor)
 		assert.NoError(t, err)
@@ -152,7 +150,7 @@ func TestDeadletter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorRef, err := sys.Spawn(ctx, "actorName", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -257,7 +255,7 @@ func TestDeadletter(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorRef, err := sys.Spawn(ctx, "actor", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -310,52 +308,6 @@ func TestDeadletter(t *testing.T) {
 	})
 }
 
-// countingTestActor handles testpb.TestSend by incrementing an internal
-// counter. Used by remote-tell dead-letter tests to verify that valid
-// sibling messages in a batch are still delivered when other siblings fail.
-type countingTestActor struct {
-	mu      sync.Mutex
-	count   int
-	lastCtx context.Context
-}
-
-func (*countingTestActor) PreStart(*Context) error { return nil }
-func (*countingTestActor) PostStop(*Context) error { return nil }
-func (a *countingTestActor) Count() int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.count
-}
-
-func (a *countingTestActor) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		a.mu.Lock()
-		a.count++
-		a.lastCtx = ctx.Context()
-		a.mu.Unlock()
-	default:
-	}
-}
-
-// deadlettersFor collects dead-letter payloads currently queued on a stream
-// consumer and returns only those whose Receiver.Name matches the given
-// name. The consumer's Iterator yields the full event-stream replay, so
-// filtering lets a test focus on the failure it triggered.
-func deadlettersFor(consumer eventstream.Subscriber, receiverName string) []*Deadletter {
-	var out []*Deadletter
-	for message := range consumer.Iterator() {
-		dl, ok := message.Payload().(*Deadletter)
-		if !ok {
-			continue
-		}
-		if dl.Receiver().Name() == receiverName {
-			out = append(out, dl)
-		}
-	}
-	return out
-}
-
 // TestRemoteTellHandlerPerMessageDeadlettering asserts that per-message
 // failures inside a coalesced RemoteTellRequest are dead-lettered locally
 // on the server while healthy siblings are still delivered. The batch
@@ -384,8 +336,8 @@ func TestRemoteTellHandlerPerMessageDeadlettering(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
 
-	alice := &countingTestActor{}
-	bob := &countingTestActor{}
+	alice := &MockCountingActor{}
+	bob := &MockCountingActor{}
 	_, err = sys.Spawn(ctx, "alice", alice)
 	require.NoError(t, err)
 	_, err = sys.Spawn(ctx, "bob", bob)
@@ -498,7 +450,7 @@ func TestRemoteTellHandlerMetadataErrorDeadlettered(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
 
-	alice := &countingTestActor{}
+	alice := &MockCountingActor{}
 	_, err = sys.Spawn(ctx, "alice", alice)
 	require.NoError(t, err)
 
@@ -557,7 +509,7 @@ func TestRemoteTellHandlerStoppedActorDeadlettered(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
 
-	target := &countingTestActor{}
+	target := &MockCountingActor{}
 	ref, err := sys.Spawn(ctx, "ephemeral", target)
 	require.NoError(t, err)
 	require.NoError(t, ref.Shutdown(ctx))
@@ -797,8 +749,8 @@ func TestRemoteTellHandlerAllValidNoDeadletters(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
 
-	actorA := &countingTestActor{}
-	actorB := &countingTestActor{}
+	actorA := &MockCountingActor{}
+	actorB := &MockCountingActor{}
 	_, err = sys.Spawn(ctx, "a", actorA)
 	require.NoError(t, err)
 	_, err = sys.Spawn(ctx, "b", actorB)

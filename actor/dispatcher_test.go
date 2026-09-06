@@ -32,21 +32,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// countingSchedulable records turns and optionally reschedules itself a
-// bounded number of times via the worker that ran it.
-type countingSchedulable struct {
-	remaining atomic.Int32
-	done      atomic.Int32
-	resume    func(w *worker)
-}
-
-func (c *countingSchedulable) runTurn(w *worker) {
-	c.done.Add(1)
-	if c.remaining.Add(-1) > 0 && c.resume != nil {
-		c.resume(w)
-	}
-}
-
 func TestDispatcherWorkerCountFloor(t *testing.T) {
 	// Cannot portably set GOMAXPROCS very low, but we can at least confirm
 	// the function returns a sane positive value >= 2.
@@ -68,7 +53,7 @@ func TestDispatcherScheduleProcessesItem(t *testing.T) {
 	d.start()
 	defer d.signalStop()
 
-	c := &countingSchedulable{}
+	c := &MockCountingSchedulable{}
 	c.remaining.Store(1)
 	d.schedule(c)
 
@@ -82,7 +67,7 @@ func TestDispatcherReschedulesViaWorkerLocalQueue(t *testing.T) {
 	d.start()
 	defer d.signalStop()
 
-	c := &countingSchedulable{}
+	c := &MockCountingSchedulable{}
 	c.remaining.Store(10)
 	// Capture the worker by deriving it at runTurn time from the dispatcher.
 	// Simpler: always reschedule via the global schedule path for this test.
@@ -101,7 +86,7 @@ func TestWorkerRescheduleUsesLocalQueue(t *testing.T) {
 
 	w := d.workers[0]
 	var turns atomic.Int32
-	item := &reschedSchedulable{
+	item := &MockReschedulingSchedulable{
 		onRun: func(self schedulable, running *worker) {
 			if turns.Add(1) < 5 {
 				running.reschedule(self)
@@ -124,9 +109,9 @@ func TestDispatcherHighFanout(t *testing.T) {
 	defer d.signalStop()
 
 	const N = 5000
-	items := make([]*countingSchedulable, N)
+	items := make([]*MockCountingSchedulable, N)
 	for i := range items {
-		c := &countingSchedulable{}
+		c := &MockCountingSchedulable{}
 		c.remaining.Store(1)
 		items[i] = c
 		d.schedule(c)
@@ -141,14 +126,3 @@ func TestDispatcherHighFanout(t *testing.T) {
 		return true
 	}, 5*time.Second, 5*time.Millisecond)
 }
-
-// reschedSchedulable is a schedulable whose behaviour is supplied by a
-// callback that receives the schedulable itself plus the worker that is
-// running it, so the callback can re-push via either the local queue or
-// the dispatcher.
-type reschedSchedulable struct {
-	self  schedulable
-	onRun func(self schedulable, w *worker)
-}
-
-func (r *reschedSchedulable) runTurn(w *worker) { r.onRun(r.self, w) }

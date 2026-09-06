@@ -23,14 +23,11 @@
 package actor
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
-
-var errSupervisionTest = errors.New("supervision test failure")
 
 func TestSupervision(t *testing.T) {
 	t.Run("start and stop are idempotent and the consumer exits", func(t *testing.T) {

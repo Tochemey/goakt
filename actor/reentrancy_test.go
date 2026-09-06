@@ -29,7 +29,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -39,19 +38,10 @@ import (
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
-)
-
-const (
-	reentrancyReplyTimeout = time.Second
-	reentrancyShortWait    = 50 * time.Millisecond
-	reentrancyProcessWait  = 120 * time.Millisecond
-	reentrancyDelay        = 200 * time.Millisecond
-	reentrancyDispatchWait = 20 * time.Millisecond
 )
 
 func TestReentrancyCycleAllowAll(t *testing.T) {
@@ -131,14 +121,14 @@ func TestRequestNameAcrossNodes(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 
 	pause.For(time.Second)
 
-	_, err := node2.Spawn(ctx, "remote-responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+	_, err := node2.Spawn(ctx, "remote-responder", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
 		switch rctx.Message().(type) {
 		case *testpb.TestPing:
 			rctx.Response(testpb.TestCount_builder{Value: 42}.Build())
@@ -151,7 +141,7 @@ func TestRequestNameAcrossNodes(t *testing.T) {
 	replyCh := make(chan *testpb.TestCount, 1)
 	errCh := make(chan error, 1)
 
-	requester, err := node1.Spawn(ctx, "remote-requester", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+	requester, err := node1.Spawn(ctx, "remote-requester", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
 		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
 			return
 		}
@@ -205,14 +195,14 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 
 	pause.For(time.Second)
 
-	targetGrain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	targetGrain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestPing:
 			gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
@@ -225,7 +215,7 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = node2.Spawn(ctx, "edge-target-actor", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+	_, err = node2.Spawn(ctx, "edge-target-actor", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
 		switch rctx.Message().(type) {
 		case *testpb.TestPing:
 			rctx.Response(testpb.TestCount_builder{Value: 42}.Build())
@@ -252,7 +242,7 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	}
 
 	// TestSend drives the grain edge, TestBye the actor edge.
-	requesterGrain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	requesterGrain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestSend:
 			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(5*time.Second)).Then(forward)
@@ -288,7 +278,7 @@ func TestGrainRequestEdgesAcrossNodes(t *testing.T) {
 	require.NoError(t, node1.TellGrain(ctx, requesterID, new(testpb.TestBye)))
 	expectCount("grain-to-actor")
 
-	requester, err := node1.Spawn(ctx, "edge-requester-actor", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+	requester, err := node1.Spawn(ctx, "edge-requester-actor", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
 		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
 			return
 		}
@@ -820,7 +810,7 @@ func TestRequestNameTellErrorOnStoppedTarget(t *testing.T) {
 
 func TestRequestNameRemoteTellError(t *testing.T) {
 	clusterMock := mockcluster.NewCluster(t)
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.actors = newTree()
 
 	remoteAddr := address.New("remote-actor", "remote-system", "127.0.0.1", 9001).String()
@@ -1027,29 +1017,9 @@ func TestHandleAsyncResponsePaths(t *testing.T) {
 	})
 }
 
-// recordingErrorSink is a minimal asyncErrorSink that is not a process. It
-// proves the request machinery depends only on the sink contract, which is what
-// lets grains own in-flight requests without duplicating any of this state.
-type recordingErrorSink struct {
-	errs chan error
-	ret  error
-}
-
-func newRecordingErrorSink(ret error) *recordingErrorSink {
-	return &recordingErrorSink{errs: make(chan error, 1), ret: ret}
-}
-
-func (s *recordingErrorSink) enqueueAsyncError(_ context.Context, _ string, err error) error {
-	select {
-	case s.errs <- err:
-	default:
-	}
-	return s.ret
-}
-
 func TestRequestStateRequesterContract(t *testing.T) {
 	t.Run("cancel routes through the requester", func(t *testing.T) {
-		sink := newRecordingErrorSink(nil)
+		sink := NewMockRecordingErrorSink(nil)
 		state := newRequestState("corr", reentrancy.AllowAll, sink)
 
 		require.NoError(t, state.cancel())
@@ -1063,14 +1033,14 @@ func TestRequestStateRequesterContract(t *testing.T) {
 	})
 
 	t.Run("cancel surfaces the requester error", func(t *testing.T) {
-		sink := newRecordingErrorSink(gerrors.ErrDead)
+		sink := NewMockRecordingErrorSink(gerrors.ErrDead)
 		state := newRequestState("corr", reentrancy.AllowAll, sink)
 
 		require.ErrorIs(t, state.cancel(), gerrors.ErrDead)
 	})
 
 	t.Run("timeout routes through the requester", func(t *testing.T) {
-		sink := newRecordingErrorSink(nil)
+		sink := NewMockRecordingErrorSink(nil)
 		state := newRequestState("corr", reentrancy.AllowAll, sink)
 
 		state.startTimeout(10 * time.Millisecond)
@@ -1084,7 +1054,7 @@ func TestRequestStateRequesterContract(t *testing.T) {
 	})
 
 	t.Run("stopped timeout never reaches the requester", func(t *testing.T) {
-		sink := newRecordingErrorSink(nil)
+		sink := NewMockRecordingErrorSink(nil)
 		state := newRequestState("corr", reentrancy.AllowAll, sink)
 
 		state.startTimeout(time.Hour)
@@ -1293,162 +1263,6 @@ func TestCancelInFlightRequestsBranches(t *testing.T) {
 	})
 }
 
-func reportScenarioError(errCh chan<- error, err error) {
-	if err == nil {
-		return
-	}
-	select {
-	case errCh <- err:
-	default:
-	}
-}
-
-func newRunningPIDWithReentrancy(t *testing.T, mode reentrancy.Mode, maxInFlight int) *PID {
-	t.Helper()
-	d := newDispatcher(dispatcherWorkerCount(), dispatcherThroughput)
-	d.start()
-	t.Cleanup(d.signalStop)
-
-	pid := &PID{
-		mailbox:    NewUnboundedMailbox(),
-		dispatcher: d,
-	}
-	pid.reentrancy.Store(newReentrancyState(mode, maxInFlight))
-	pid.setState(runningState, true)
-	return pid
-}
-
-type reentrancyTestActor struct {
-	receive func(*ReceiveContext)
-}
-
-func (x *reentrancyTestActor) PreStart(*Context) error { return nil }
-
-func (x *reentrancyTestActor) Receive(ctx *ReceiveContext) {
-	if x.receive != nil {
-		x.receive(ctx)
-	}
-}
-
-func (x *reentrancyTestActor) PostStop(*Context) error { return nil }
-
-// newReentrancySystem starts a minimal actor system for reentrancy tests.
-func newReentrancySystem(t *testing.T) (ActorSystem, context.Context) {
-	t.Helper()
-	ctx := context.Background()
-	sys, err := NewActorSystem("reentrancy-"+uuid.NewString(), WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, sys.Start(ctx))
-	t.Cleanup(func() { _ = sys.Stop(ctx) })
-	return sys, ctx
-}
-
-// spawnReentrancyActor creates a test actor with a custom Receive handler.
-func spawnReentrancyActor(t *testing.T, sys ActorSystem, ctx context.Context, name string, receive func(*ReceiveContext), opts ...SpawnOption) *PID {
-	t.Helper()
-	pid, err := sys.Spawn(ctx, name, &reentrancyTestActor{receive: receive}, opts...)
-	require.NoError(t, err)
-	require.NotNil(t, pid)
-	return pid
-}
-
-// responderWithDelay replies after a delay or remains silent for timeout tests.
-func responderWithDelay(delay time.Duration, corrCh chan string) func(*ReceiveContext) {
-	return func(ctx *ReceiveContext) {
-		switch msg := ctx.Message().(type) {
-		case *testpb.TestWait:
-			if corrCh != nil {
-				select {
-				case corrCh <- ctx.CorrelationID():
-				default:
-				}
-			}
-			wait := delay
-			if msg.GetDuration() > 0 {
-				wait = time.Duration(msg.GetDuration()) * time.Millisecond
-			}
-			if wait > 0 {
-				pause.For(wait)
-			}
-			ctx.Response(testpb.Reply_builder{Content: "ok"}.Build())
-		case *testpb.TestTimeout:
-			// intentionally no response
-		default:
-			ctx.Response(testpb.Reply_builder{Content: "ok"}.Build())
-		}
-	}
-}
-
-func waitForError(t *testing.T, errCh <-chan error, expected error, timeout time.Duration) {
-	t.Helper()
-	select {
-	case err := <-errCh:
-		require.ErrorIs(t, err, expected)
-	case <-time.After(timeout):
-		t.Fatalf("expected error: %v", expected)
-	}
-}
-
-func waitForReply(t *testing.T, replyCh <-chan any, errCh <-chan error, timeout time.Duration) {
-	t.Helper()
-	select {
-	case <-replyCh:
-		return
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		t.Fatal("expected async reply")
-	}
-}
-
-func waitForSignal(t *testing.T, sigCh <-chan struct{}, timeout time.Duration, message string) {
-	t.Helper()
-	select {
-	case <-sigCh:
-		return
-	case <-time.After(timeout):
-		t.Fatal(message)
-	}
-}
-
-func assertNoSignal(t *testing.T, sigCh <-chan struct{}, errCh <-chan error, timeout time.Duration, message string) {
-	t.Helper()
-	select {
-	case <-sigCh:
-		t.Fatal(message)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		return
-	}
-}
-
-func waitForProcessedBeforeReply(t *testing.T, processedCh <-chan struct{}, replyCh <-chan any, errCh <-chan error, timeout time.Duration) {
-	t.Helper()
-	select {
-	case <-processedCh:
-		return
-	case resp := <-replyCh:
-		t.Fatalf("reply arrived before other message processed: %T", resp)
-	case err := <-errCh:
-		t.Fatalf("unexpected error: %v", err)
-	case <-time.After(timeout):
-		t.Fatal("expected other message to be processed while awaiting response")
-	}
-}
-
-func waitForCorrelationID(t *testing.T, corrCh <-chan string, timeout time.Duration) string {
-	t.Helper()
-	select {
-	case id := <-corrCh:
-		require.NotEmpty(t, id)
-		return id
-	case <-time.After(timeout):
-		t.Fatal("expected correlation id to be set")
-	}
-	return ""
-}
-
 // TestActorRequestGrain covers the actor-to-grain request edge: the actor's
 // request travels as an envelope into the grain, and the grain's reply comes
 // back through the actor's mailbox like any other async response.
@@ -1456,7 +1270,7 @@ func TestActorRequestGrain(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	system := sys.(*actorSystem)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.Response(testpb.TestCount_builder{Value: 21}.Build())
 	}}
 	identity := activateReentrantGrain(t, system, grain, "answering-grain")
@@ -1502,7 +1316,7 @@ func TestActorRequestGrainRequiresReentrancy(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	system := sys.(*actorSystem)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
 	identity := activateReentrantGrain(t, system, grain, "gated-grain")
 
 	failures := make(chan error, 1)
@@ -1582,7 +1396,7 @@ func TestRequestGrainValidationFailures(t *testing.T) {
 func TestActorRequestGrainDeliveryFailure(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 
-	unknown := newGrainIdentity(&MockGrainActivationFailure{}, "never-registered")
+	unknown := newGrainIdentity(&MockActivationFailingGrain{}, "never-registered")
 	failures := make(chan error, 1)
 
 	requester := spawnReentrancyActor(t, sys, ctx, "orphan-requester", func(rctx *ReceiveContext) {

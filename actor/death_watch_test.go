@@ -410,7 +410,7 @@ func TestDeathWatch(t *testing.T) {
 		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil)
 		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
-		cid, err := actorSys.Spawn(ctx, actorName, &noLogActor{})
+		cid, err := actorSys.Spawn(ctx, actorName, &MockNoLogActor{})
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 		pause.For(500 * time.Millisecond)
@@ -452,7 +452,7 @@ func TestDeathWatch(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		const actorName = "actor-to-remove"
-		cid, err := actorSys.Spawn(ctx, actorName, &noLogActor{})
+		cid, err := actorSys.Spawn(ctx, actorName, &MockNoLogActor{})
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 		pause.For(500 * time.Millisecond)
@@ -1160,11 +1160,3 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.Contains(t, logContent, fmt.Sprintf("failed to remove dead actor from cluster after %d retries", deathWatchRemovalMaxRetries), "an exhausted budget should log an error")
 	})
 }
-
-// noLogActor is a minimal actor that never logs. Used in tests that capture log
-// output to avoid data races from concurrent writes to a shared buffer.
-type noLogActor struct{}
-
-func (n *noLogActor) PreStart(*Context) error { return nil }
-func (n *noLogActor) Receive(*ReceiveContext) {}
-func (n *noLogActor) PostStop(*Context) error { return nil }

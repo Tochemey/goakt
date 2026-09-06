@@ -33,12 +33,25 @@ Run `make help` to list every target. The common ones are:
 |------------------|------------------------------------------------------|
 | `make test`      | Run lint and the full test suite                     |
 | `make lint`      | Run `golangci-lint`                                  |
-| `make unit-test` | Run tests with coverage (writes `coverage.out`)      |
+| `make unit-test` | Run the test suite as the CI shards, in parallel pristine containers (`SHARD=<name>` runs one) |
 | `make vendor`    | `go mod tidy` and `go mod vendor`                    |
 | `make mock`      | Regenerate mocks under `mocks/`                      |
 | `make protogen`  | Regenerate protobuf Go code                          |
 | `make certs`     | Regenerate test TLS fixtures under `test/data/certs` |
-| `make clean`     | Remove the tools image                               |
+| `make clean`     | Remove the tools image and its cache volume          |
+
+### Test shards
+
+`make unit-test` runs the test suite as the same shards CI uses, each in its own pristine container, in parallel. It needs only Docker and the checkout: dependencies come from the tools image, the build cache lives on a volume created for the run, and the Docker socket is shared so the tests that start consul and etcd containers work. Per-shard logs land in `.unit-test/` and coverage in `coverage-<shard>.out`.
+
+| Shard                           | Runs                                                                                                     |
+|---------------------------------|----------------------------------------------------------------------------------------------------------|
+| `actor-0`, `actor-1`, `actor-2` | One third each of the `actor` package, assigned round-robin over its sorted top-level test list, serially |
+| `infra`                         | `internal/cluster`, `internal/net`, `internal/remoteclient`, `remote`, `client`, `testkit`, `discovery`, `datacenter`, serially |
+| `core`                          | Every other package                                                                                      |
+| `memory`                        | The `memory` package, without the race detector                                                          |
+
+`make unit-test SHARD=core` runs a single shard. The shard definitions live in `scripts/test-shard.sh` and mirror the matrix in `.github/workflows`; change both together.
 
 ### Making Contributions
 

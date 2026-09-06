@@ -30,22 +30,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// systemQueueMessage builds a context carrying message for the queue tests.
-func systemQueueMessage(message any) *ReceiveContext {
-	return &ReceiveContext{message: message}
-}
-
-// popMessages pops until the queue reports nothing and returns the messages
-// in the order they came out.
-func popMessages(queue *systemQueue) []any {
-	var out []any
-	for ctx := queue.pop(); ctx != nil; ctx = queue.pop() {
-		out = append(out, ctx.Message())
-	}
-
-	return out
-}
-
 // TestSystemQueueSendOrder verifies that messages come out in the order they
 // were pushed, both within one drained batch and across pushes that land
 // while the consumer still holds part of an earlier batch.

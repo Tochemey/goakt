@@ -28,7 +28,6 @@ import (
 	"net"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,54 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// grainTestCtxKey is a custom type for context keys in grain tests (avoids SA1029 empty struct key).
-type grainTestCtxKey struct{}
-
-func newActivationTestSystem(t *testing.T, grain Grain, name string, register bool) (*actorSystem, *mockcluster.Cluster, *mockremote.Client, *GrainIdentity) {
-	t.Helper()
-
-	cl := mockcluster.NewCluster(t)
-	rem := mockremote.NewClient(t)
-	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 15000}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
-	if register {
-		sys.registry.Register(grain)
-	}
-
-	return sys, cl, rem, newGrainIdentity(grain, name)
-}
-
-type activationProbe struct {
-	started chan struct{}
-	release chan struct{}
-	count   atomic.Int32
-}
-
-var activationProbePtr atomic.Pointer[activationProbe]
-
-type activationProbeGrain struct{}
-
-func (g *activationProbeGrain) OnActivate(ctx context.Context, props *GrainProps) error {
-	probe := activationProbePtr.Load()
-	if probe != nil {
-		probe.count.Add(1)
-		select {
-		case probe.started <- struct{}{}:
-		default:
-		}
-		<-probe.release
-	}
-	return nil
-}
-
-func (g *activationProbeGrain) OnReceive(ctx *GrainContext) {
-	ctx.NoErr()
-}
-
-func (g *activationProbeGrain) OnDeactivate(ctx context.Context, props *GrainProps) error {
-	return nil
-}
-
 func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	ctx := t.Context()
 	grain := NewMockGrain()
@@ -115,7 +66,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -151,7 +102,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithBrotliCompression(t *
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.BrotliCompression))
+	actorSystem := newClusterReadySystem(rem, cl, node, remote.WithCompression(remote.BrotliCompression))
 
 	// Assert the system's remote config has the expected compression.
 	require.Equal(t, remote.BrotliCompression, actorSystem.remoteConfig.Compression())
@@ -190,7 +141,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithZstandardCompression(
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.ZstdCompression))
+	actorSystem := newClusterReadySystem(rem, cl, node, remote.WithCompression(remote.ZstdCompression))
 
 	// Assert the system's remote config has the expected compression.
 	require.Equal(t, remote.ZstdCompression, actorSystem.remoteConfig.Compression())
@@ -229,7 +180,7 @@ func TestGrainIdentity_RemoteActivationOnDifferentPeer_WithGzipCompression(t *te
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	actorSystem := MockSimpleClusterReadyActorSystem(rem, cl, node, remote.WithCompression(remote.GzipCompression))
+	actorSystem := newClusterReadySystem(rem, cl, node, remote.WithCompression(remote.GzipCompression))
 
 	// Assert the system's remote config has the expected compression.
 	require.Equal(t, remote.GzipCompression, actorSystem.remoteConfig.Compression())
@@ -268,7 +219,7 @@ func TestGrainIdentity_RemoteActivationErrorPropagates(t *testing.T) {
 	rem := mockremote.NewClient(t)
 	clientErr := errors.New("remote activate failed")
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -303,7 +254,7 @@ func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -581,7 +532,7 @@ func TestActivateGrainLocally(t *testing.T) {
 
 	t.Run("activation failure cleans up claim", func(t *testing.T) {
 		ctx := t.Context()
-		grain := NewMockGrainActivationFailure()
+		grain := NewMockActivationFailingGrain()
 		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-activate-fail", true)
 		config := newGrainConfig(
 			WithGrainInitMaxRetries(1),
@@ -695,13 +646,13 @@ func TestActivateGrainLocalActiveFastPath(t *testing.T) {
 	t.Run("repeat GrainOf resolves without registry traffic", func(t *testing.T) {
 		ctx := t.Context()
 		name := "fast-path-grainof"
-		identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
+		identity := newGrainIdentity((*MockActivationCountingGrain)(nil), name)
 		localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14040, RemotingPort: 8100}
 
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 
 		// the slow path runs exactly once; any repeat run would exceed these counts
 		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
@@ -710,21 +661,21 @@ func TestActivateGrainLocalActiveFastPath(t *testing.T) {
 			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
 		})).Return(nil).Twice()
 
-		grainOfCounterActivations.Store(0)
+		activationCount.Store(0)
 
-		first, err := GrainOf[*grainOfCounterGrain](ctx, sys, name)
+		first, err := GrainOf[*MockActivationCountingGrain](ctx, sys, name)
 		require.NoError(t, err)
 		require.NotNil(t, first)
 
 		// the issue's repro: resolving the same identity in a loop from the
 		// same node must produce no further registry traffic
 		for range 10 {
-			got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name)
+			got, err := GrainOf[*MockActivationCountingGrain](ctx, sys, name)
 			require.NoError(t, err)
 			require.True(t, first.Equal(got))
 		}
 
-		require.EqualValues(t, 1, grainOfCounterActivations.Load())
+		require.EqualValues(t, 1, activationCount.Load())
 	})
 
 	t.Run("deactivated grain reactivates through the slow path", func(t *testing.T) {
@@ -811,7 +762,7 @@ func TestFindActivationPeer_ErrorsWhenRoleMissingEverywhere(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080, Roles: []string{"api"}}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	role := "analytics"
 	cl.EXPECT().Members(ctx).Return([]*cluster.Peer{{Host: "198.51.100.5", Roles: []string{"billing"}}}, nil)
@@ -827,7 +778,7 @@ func TestAskGrain_ClusterFallbackAutoProvisions(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9003, RemotingPort: 9103}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	grain := NewMockGrain()
 	sys.registry.Register(grain)
@@ -925,10 +876,10 @@ func TestRecreateGrain_SingleflightActivation(t *testing.T) {
 	t.Cleanup(func() { _ = sys.Stop(ctx) })
 
 	as := sys.(*actorSystem)
-	as.registry.Register(&activationProbeGrain{})
+	as.registry.Register(&MockActivationProbeGrain{})
 
-	identity := newGrainIdentity(&activationProbeGrain{}, "singleflight")
-	pid := newGrainPID(identity, &activationProbeGrain{}, sys, newGrainConfig())
+	identity := newGrainIdentity(&MockActivationProbeGrain{}, "singleflight")
+	pid := newGrainPID(identity, &MockActivationProbeGrain{}, sys, newGrainConfig())
 	wire, err := pid.toWireGrain()
 	require.NoError(t, err)
 
@@ -1201,7 +1152,7 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9012, RemotingPort: 9112}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	resp, err := sys.sendToGrainOwner(ctx, nil, &testpb.TestReply{}, time.Second, true)
 	require.Error(t, err)
@@ -1254,7 +1205,7 @@ func TestTellGrain(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9015, RemotingPort: 9115}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "tell-cluster-grain")
@@ -1276,7 +1227,7 @@ func TestTellGrain(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9017, RemotingPort: 9117}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "tell-local-owner-grain")
@@ -1353,7 +1304,7 @@ func TestAskGrain(t *testing.T) {
 
 		started := make(chan struct{})
 		release := make(chan struct{})
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			switch gctx.Message().(type) {
 			case *testpb.TestTimeout:
 				close(started)
@@ -1392,7 +1343,7 @@ func TestAskGrain(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9016, RemotingPort: 9116}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "ask-cluster-grain")
@@ -1415,7 +1366,7 @@ func TestAskGrain(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9018, RemotingPort: 9118}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "ask-local-owner-grain")
@@ -1443,7 +1394,7 @@ func TestSelectActivationPeer_LeastLoadActivation(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
 	peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
@@ -1482,7 +1433,7 @@ func TestSelectActivationPeer_LeastLoadActivation_Success(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14003, RemotingPort: 8083}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	peer1 := &cluster.Peer{Host: host, PeersPort: port, RemotingPort: port}
 	netClient := internalnet.NewClient(addr)
@@ -1500,7 +1451,7 @@ func TestSelectActivationPeer_RandomActivation(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
 	peer2 := &cluster.Peer{Host: "192.0.2.2", PeersPort: 15001, RemotingPort: 16001}
@@ -1519,7 +1470,7 @@ func TestSelectActivationPeer_DefaultStrategy(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14000, RemotingPort: 8080}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
 	// selectActivationPeer is called directly with peers - no Members call
@@ -1534,7 +1485,7 @@ func TestSendToGrainOwner_TellMode(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9013, RemotingPort: 9113}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	owner := internalpb.Grain_builder{
 		GrainId: internalpb.GrainId_builder{Value: "grain|test", Kind: "TestGrain"}.Build(),
@@ -1557,7 +1508,7 @@ func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9017, RemotingPort: 9117}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "tell-err-grain")
@@ -1570,7 +1521,7 @@ func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
 
 	t.Run("GetGrain ErrGrainNotFound then tellGrainAcrossDataCenters succeeds", func(t *testing.T) {
 		rem := mockremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID: "dc-1", State: datacenter.DataCenterActive,
 				Endpoints: []string{"127.0.0.1:9000"},
@@ -1596,7 +1547,7 @@ func TestRemoteAskGrain_FallbackPaths(t *testing.T) {
 		cl := mockcluster.NewCluster(t)
 		rem := mockremote.NewClient(t)
 		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9018, RemotingPort: 9118}
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.registry.Register(NewMockGrain())
 
 		identity := newGrainIdentity(NewMockGrain(), "ask-err-grain")
@@ -1610,7 +1561,7 @@ func TestRemoteAskGrain_FallbackPaths(t *testing.T) {
 
 	t.Run("GetGrain ErrGrainNotFound then askGrainAcrossDataCenters succeeds", func(t *testing.T) {
 		rem := mockremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID: "dc-1", State: datacenter.DataCenterActive,
 				Endpoints: []string{"127.0.0.1:9000"},
@@ -1636,7 +1587,7 @@ func TestSendToGrainOwner_AskMode(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9014, RemotingPort: 9114}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	owner := internalpb.Grain_builder{
 		GrainId: internalpb.GrainId_builder{Value: "grain|test", Kind: "TestGrain"}.Build(),
@@ -1659,28 +1610,28 @@ func TestSetupGrainActivationBarrier(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14001, RemotingPort: 8081}
 
 	t.Run("no-op when cluster disabled", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterEnabled.Store(false)
 		sys.setupGrainActivationBarrier(ctx)
 		require.Nil(t, sys.grainBarrier)
 	})
 
 	t.Run("no-op when clusterConfig nil", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = nil
 		sys.setupGrainActivationBarrier(ctx)
 		require.Nil(t, sys.grainBarrier)
 	})
 
 	t.Run("no-op when barrier disabled", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig()
 		sys.setupGrainActivationBarrier(ctx)
 		require.Nil(t, sys.grainBarrier)
 	})
 
 	t.Run("opens immediately when minPeers <= 1", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().
 			WithMinimumPeersQuorum(1).
 			WithGrainActivationBarrier(5 * time.Second)
@@ -1691,7 +1642,7 @@ func TestSetupGrainActivationBarrier(t *testing.T) {
 	})
 
 	t.Run("calls tryOpenGrainActivationBarrier when minPeers > 1", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().
 			WithMinimumPeersQuorum(2).
 			WithGrainActivationBarrier(5 * time.Second)
@@ -1712,13 +1663,13 @@ func TestTryOpenGrainActivationBarrier(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14002, RemotingPort: 8082}
 
 	t.Run("no-op when barrier nil", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.grainBarrier = nil
 		sys.tryOpenGrainActivationBarrier(ctx)
 	})
 
 	t.Run("no-op when cluster nil", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
 		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
 		sys.cluster = nil
@@ -1726,7 +1677,7 @@ func TestTryOpenGrainActivationBarrier(t *testing.T) {
 	})
 
 	t.Run("opens when Members returns enough peers", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
 		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
 		peer1 := &cluster.Peer{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}
@@ -1738,7 +1689,7 @@ func TestTryOpenGrainActivationBarrier(t *testing.T) {
 	})
 
 	t.Run("does not open when Members returns too few peers", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
 		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
 		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "192.0.2.1", PeersPort: 15000, RemotingPort: 16000}}, nil).Once()
@@ -1750,7 +1701,7 @@ func TestTryOpenGrainActivationBarrier(t *testing.T) {
 	})
 
 	t.Run("no-op when Members returns error", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.clusterConfig = NewClusterConfig().WithMinimumPeersQuorum(2).WithGrainActivationBarrier(5 * time.Second)
 		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
 		cl.EXPECT().Members(mock.Anything).Return(nil, errors.New("members error")).Once()
@@ -1762,7 +1713,7 @@ func TestTryOpenGrainActivationBarrier(t *testing.T) {
 	})
 
 	t.Run("no-op when barrier already open", func(t *testing.T) {
-		sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+		sys := newClusterReadySystem(rem, cl, node)
 		sys.grainBarrier = newGrainActivationBarrier(2, 5*time.Second)
 		sys.grainBarrier.open()
 		sys.tryOpenGrainActivationBarrier(ctx)
@@ -1880,15 +1831,15 @@ func TestGrainContextPropagation(t *testing.T) {
 		ctx := context.Background()
 		srv := startNatsServer(t)
 
-		propagator := &headerPropagator{headerKey: headerKey, ctxKey: ctxKey}
-		grain := &contextEchoGrain{key: ctxKey}
+		propagator := &MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}
+		grain := &MockContextEchoGrain{key: ctxKey}
 
-		node1, sd1 := testNATs(t, srv.Addr().String(),
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestContextPropagator(propagator),
 			withTestExtraGrains(grain))
-		node2, sd2 := testNATs(t, srv.Addr().String(),
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestContextPropagator(propagator),
-			withTestExtraGrains(&contextEchoGrain{key: ctxKey}))
+			withTestExtraGrains(&MockContextEchoGrain{key: ctxKey}))
 
 		defer func() {
 			assert.NoError(t, node2.Stop(ctx))
@@ -1929,15 +1880,15 @@ func TestGrainContextPropagation(t *testing.T) {
 		ctx := context.Background()
 		srv := startNatsServer(t)
 
-		propagator := &headerPropagator{headerKey: headerKey, ctxKey: ctxKey}
-		grain := &contextEchoGrain{key: ctxKey}
+		propagator := &MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}
+		grain := &MockContextEchoGrain{key: ctxKey}
 
-		node1, sd1 := testNATs(t, srv.Addr().String(),
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestContextPropagator(propagator),
 			withTestExtraGrains(grain))
-		node2, sd2 := testNATs(t, srv.Addr().String(),
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestContextPropagator(propagator),
-			withTestExtraGrains(&contextEchoGrain{key: ctxKey}))
+			withTestExtraGrains(&MockContextEchoGrain{key: ctxKey}))
 
 		defer func() {
 			assert.NoError(t, node2.Stop(ctx))
@@ -2072,50 +2023,6 @@ func TestRemoteAskGrainLocalShortCircuit(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	cl.AssertNotCalled(t, "GetGrain", mock.Anything, mock.Anything)
-}
-
-// benchmarkNodeLocalGrainSystem starts a single-node clustered system with an
-// activated grain and returns it for node-local Tell/Ask benchmarks.
-func benchmarkNodeLocalGrainSystem(b *testing.B) (ActorSystem, *GrainIdentity) {
-	b.Helper()
-	ctx := context.TODO()
-	nodePorts := internalnet.Get(3)
-	host := "127.0.0.1"
-	addrs := []string{net.JoinHostPort(host, strconv.Itoa(nodePorts[0]))}
-
-	provider := new(mockdiscovery.Provider)
-	provider.EXPECT().ID().Return("bench").Maybe()
-	provider.EXPECT().Initialize().Return(nil).Maybe()
-	provider.EXPECT().Register().Return(nil).Maybe()
-	provider.EXPECT().Deregister().Return(nil).Maybe()
-	provider.EXPECT().DiscoverPeers().Return(addrs, nil).Maybe()
-	provider.EXPECT().Close().Return(nil).Maybe()
-
-	system, err := NewActorSystem(
-		"bench",
-		WithLogger(log.DiscardLogger),
-		WithRemote(remote.NewConfig(host, nodePorts[2])),
-		WithCluster(
-			NewClusterConfig().
-				WithGrains(new(MockGrain)).
-				WithPartitionCount(9).
-				WithReplicaCount(1).
-				WithPeersPort(nodePorts[1]).
-				WithMinimumPeersQuorum(1).
-				WithDiscoveryPort(nodePorts[0]).
-				WithDiscovery(provider)),
-	)
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	pause.For(time.Second)
-
-	identity, err := system.GrainIdentity(ctx, "bench-grain", func(context.Context) (Grain, error) {
-		return NewMockGrain(), nil
-	})
-	require.NoError(b, err)
-
-	b.Cleanup(func() { _ = system.Stop(ctx) })
-	return system, identity
 }
 
 // BenchmarkTellGrainNodeLocal measures node-local TellGrain throughput, where
@@ -2294,7 +2201,7 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	ctx := t.Context()
 	name := "remote-config-grain"
-	identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
+	identity := newGrainIdentity((*MockActivationCountingGrain)(nil), name)
 	remotePeer := &cluster.Peer{Host: "192.0.2.30", PeersPort: 15030, RemotingPort: 16030}
 	alternatePeer := &cluster.Peer{Host: "192.0.2.31", PeersPort: 15031, RemotingPort: 16031}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14030, RemotingPort: 8095}
@@ -2302,7 +2209,7 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -2329,7 +2236,7 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 			req.MailboxCapacity == 64
 	})).Return(nil)
 
-	got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name,
+	got, err := GrainOf[*MockActivationCountingGrain](ctx, sys, name,
 		WithActivationStrategy(RoundRobinActivation),
 		WithGrainDisableRelocation(),
 		WithGrainInitTimeout(9*time.Second),
@@ -2345,9 +2252,9 @@ func TestFinalizeGrainActivation(t *testing.T) {
 
 	t.Run("publish failure with failed deactivation still leaves nothing behind", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
-		grain := NewMockGrainDeactivationFailure()
+		grain := NewMockDeactivationFailingGrain()
 		identity := newGrainIdentity(grain, "finalize-deactivate-failure")
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
@@ -2368,7 +2275,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 
 	t.Run("publish failure releases the claim without disturbing an already-active grain", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		grain := NewMockGrain()
 		identity := newGrainIdentity(grain, "finalize-claim-release")
@@ -2390,7 +2297,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 
 	t.Run("publish failure without claim or activation only returns the error", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		grain := NewMockGrain()
 		identity := newGrainIdentity(grain, "finalize-no-rollback")
@@ -2410,115 +2317,8 @@ func TestFinalizeGrainActivation(t *testing.T) {
 	})
 }
 
-// envelopeReplyingGrain answers envelope asks from within the turn by routing
-// the reply the way the public reply API will: through the system, from the
-// metadata stamped on the context. TestPing replies with a payload, TestBye
-// replies with a failure, and anything else never replies.
-type envelopeReplyingGrain struct{}
-
-var _ Grain = (*envelopeReplyingGrain)(nil)
-
-func (g *envelopeReplyingGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (g *envelopeReplyingGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-func (g *envelopeReplyingGrain) OnReceive(gctx *GrainContext) {
-	if gctx.requestID == "" {
-		if gctx.err != nil {
-			gctx.NoErr()
-		}
-		return
-	}
-
-	system := gctx.ActorSystem()
-
-	switch gctx.Message().(type) {
-	case *testpb.TestPing:
-		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, testpb.Reply_builder{Content: "in-turn"}.Build(), nil)
-	case *testpb.TestBye:
-		_ = system.routeAsyncReply(context.Background(), nil, gctx.requestReplyTo, gctx.requestID, nil, errors.New("grain boom"))
-	}
-}
-
-// envelopeDeferringGrain answers envelope asks from a later turn: it stores
-// the request's correlation ID, signals the test, and replies only when a
-// flush message arrives. The reply outliving the turn (and the recycled
-// context) is the property under test.
-type envelopeDeferringGrain struct {
-	mu       sync.Mutex
-	pending  []string
-	requests chan string
-}
-
-var _ Grain = (*envelopeDeferringGrain)(nil)
-
-func (g *envelopeDeferringGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (g *envelopeDeferringGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-func (g *envelopeDeferringGrain) OnReceive(gctx *GrainContext) {
-	if gctx.requestID != "" {
-		g.mu.Lock()
-		g.pending = append(g.pending, gctx.requestID)
-		g.mu.Unlock()
-
-		select {
-		case g.requests <- gctx.requestID:
-		default:
-		}
-		return
-	}
-
-	if _, ok := gctx.Message().(*testpb.TestSend); ok {
-		system := gctx.ActorSystem()
-
-		g.mu.Lock()
-		pending := g.pending
-		g.pending = nil
-		g.mu.Unlock()
-
-		for _, correlationID := range pending {
-			_ = system.routeAsyncReply(context.Background(), nil, nil, correlationID, testpb.Reply_builder{Content: "deferred"}.Build(), nil)
-		}
-	}
-
-	if gctx.err != nil {
-		gctx.NoErr()
-	}
-}
-
-// startEnvelopeGrainFixture starts a system, activates the given grain and
-// equips its pid with reentrancy state the way the config plumbing will, so
-// asks against it take the envelope path.
-func startEnvelopeGrainFixture(t *testing.T, grain Grain, name string) (*actorSystem, *grainPID, *GrainIdentity) {
-	t.Helper()
-	ctx := context.Background()
-
-	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, system.Start(ctx))
-
-	t.Cleanup(func() {
-		_ = system.Stop(context.Background())
-	})
-
-	identity, err := system.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
-		return grain, nil
-	})
-	require.NoError(t, err)
-
-	sys := system.(*actorSystem)
-	pid, ok := sys.grains.Get(identity.String())
-	require.True(t, ok)
-
-	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
-
-	return sys, pid, identity
-}
-
 func TestEnvelopeAskCompletesInTurn(t *testing.T) {
-	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+	sys, _, identity := startEnvelopeGrainFixture(t, &MockEnvelopeReplyingGrain{}, "envelopeGrain")
 
 	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestPing), time.Second)
 	require.NoError(t, err)
@@ -2530,7 +2330,7 @@ func TestEnvelopeAskCompletesInTurn(t *testing.T) {
 }
 
 func TestEnvelopeAskCarriesFailure(t *testing.T) {
-	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+	sys, _, identity := startEnvelopeGrainFixture(t, &MockEnvelopeReplyingGrain{}, "envelopeGrain")
 
 	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestBye), time.Second)
 	require.Nil(t, response)
@@ -2539,7 +2339,7 @@ func TestEnvelopeAskCarriesFailure(t *testing.T) {
 }
 
 func TestEnvelopeAskDeferredReply(t *testing.T) {
-	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	grain := &MockEnvelopeDeferringGrain{requests: make(chan string, 1)}
 	sys, _, identity := startEnvelopeGrainFixture(t, grain, "deferringGrain")
 	ctx := context.Background()
 
@@ -2578,7 +2378,7 @@ func TestEnvelopeAskDeferredReply(t *testing.T) {
 
 func TestEnvelopeAskTimeoutAbandons(t *testing.T) {
 	// TestReply hits the replying grain's default arm: no reply ever comes.
-	sys, _, identity := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+	sys, _, identity := startEnvelopeGrainFixture(t, &MockEnvelopeReplyingGrain{}, "envelopeGrain")
 
 	response, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), 200*time.Millisecond)
 	require.Nil(t, response)
@@ -2587,7 +2387,7 @@ func TestEnvelopeAskTimeoutAbandons(t *testing.T) {
 }
 
 func TestEnvelopeAskCanceledContext(t *testing.T) {
-	sys, pid, _ := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+	sys, pid, _ := startEnvelopeGrainFixture(t, &MockEnvelopeReplyingGrain{}, "envelopeGrain")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -2600,7 +2400,7 @@ func TestEnvelopeAskCanceledContext(t *testing.T) {
 }
 
 func TestEnvelopeAskEnqueueFailureAbandons(t *testing.T) {
-	sys, pid, _ := startEnvelopeGrainFixture(t, &envelopeReplyingGrain{}, "envelopeGrain")
+	sys, pid, _ := startEnvelopeGrainFixture(t, &MockEnvelopeReplyingGrain{}, "envelopeGrain")
 
 	pid.activated.Store(false)
 	response, err := sys.envelopeAsk(context.Background(), pid, new(testpb.TestPing), time.Second)
@@ -2612,7 +2412,7 @@ func TestEnvelopeAskEnqueueFailureAbandons(t *testing.T) {
 }
 
 func TestEnvelopeAskEmptyResponseCompletesWithNil(t *testing.T) {
-	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	grain := &MockEnvelopeDeferringGrain{requests: make(chan string, 1)}
 	sys, _, identity := startEnvelopeGrainFixture(t, grain, "deferringGrain")
 
 	type askResult struct {
@@ -2700,13 +2500,13 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 		sys, _, _, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 		// An identity whose kind was never registered cannot activate.
-		unknown := newGrainIdentity(&MockGrainActivationFailure{}, "never-registered")
+		unknown := newGrainIdentity(&MockActivationFailingGrain{}, "never-registered")
 		err := sys.deliverAsyncEnvelope(ctx, unknown, &commands.AsyncRequest{CorrelationID: "corr", Message: new(testpb.TestReply)})
 		require.Error(t, err)
 	})
 
 	t.Run("owner mismatch forwards to the owning node", func(t *testing.T) {
-		grain := &reentrantRecordingGrain{}
+		grain := &MockReentrantRecordingGrain{}
 		sys, cl, rem, identity := newActivationTestSystem(t, grain, "away", true)
 
 		owner := internalpb.Grain_builder{
@@ -2781,7 +2581,7 @@ func TestSendRemoteActivateGrainCarriesReentrancy(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9031, RemotingPort: 9131}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	grain := NewMockGrain()
 	sys.registry.Register(grain)
@@ -2801,19 +2601,6 @@ func TestSendRemoteActivateGrainCarriesReentrancy(t *testing.T) {
 	require.NoError(t, sys.sendRemoteActivateGrain(ctx, wire))
 }
 
-// reactivationGrain survives reflective re-instantiation: a bare send on a
-// stored identity recreates the grain as a zero value, so it must handle
-// messages without any wiring.
-type reactivationGrain struct{}
-
-var _ Grain = (*reactivationGrain)(nil)
-
-func (*reactivationGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (*reactivationGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-func (*reactivationGrain) OnReceive(gctx *GrainContext) { gctx.NoErr() }
-
 // TestGrainReactivationUsesDefaultConfig pins the documented lifecycle
 // property: reentrancy is an activation-time option, so a grain that
 // passivated on idleness comes back from a bare send with default config and
@@ -2828,7 +2615,7 @@ func TestGrainReactivationUsesDefaultConfig(t *testing.T) {
 	sys := system.(*actorSystem)
 
 	identity, err := system.GrainIdentity(ctx, "reactivated-grain", func(context.Context) (Grain, error) {
-		return new(reactivationGrain), nil
+		return new(MockReactivationGrain), nil
 	},
 		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
 		WithGrainDeactivateAfter(200*time.Millisecond))
@@ -2865,7 +2652,7 @@ func TestNonReentrantAskSkipsPendingAsks(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		entered <- struct{}{}
 		<-release
 		gctx.Response(testpb.Reply_builder{Content: "legacy"}.Build())

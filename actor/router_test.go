@@ -330,7 +330,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		summationActor, err := system.Spawn(ctx, "summation", NewMockSum())
+		summationActor, err := system.Spawn(ctx, "summation", NewMockSummingRoutee())
 		require.NoError(t, err)
 		require.NotNil(t, summationActor)
 
@@ -377,7 +377,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		probe := NewTailChopProbe()
+		probe := NewMockTailChopRoutee()
 		summationActor, err := system.Spawn(ctx, "summation", probe)
 		require.NoError(t, err)
 		require.NotNil(t, summationActor)
@@ -421,14 +421,14 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		probe := NewTailChopProbe()
+		probe := NewMockTailChopRoutee()
 		summationActor, err := system.Spawn(ctx, "summation", probe)
 		require.NoError(t, err)
 		require.NotNil(t, summationActor)
 
 		poolSize := 2
 		routerName := "scatterGatherRouter"
-		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(BlockingRoutee), AsScatterGatherFirst(2*time.Second))
+		router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockBlockingRoutee), AsScatterGatherFirst(2*time.Second))
 		require.NoError(t, err)
 		require.NotNil(t, router)
 
@@ -459,7 +459,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		probe := NewTailChopProbe()
+		probe := NewMockTailChopRoutee()
 		summationActor, err := system.Spawn(ctx, "scatterErrorProbe", probe)
 		require.NoError(t, err)
 		require.NotNil(t, summationActor)
@@ -494,7 +494,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		probe := NewTailChopProbe()
+		probe := NewMockTailChopRoutee()
 		pid, err := system.Spawn(ctx, "summation", probe)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -533,7 +533,7 @@ func TestRouter(t *testing.T) {
 
 		pause.For(time.Second)
 
-		probe := NewTailChopProbe()
+		probe := NewMockTailChopRoutee()
 		pid, err := system.Spawn(ctx, "tailDeadlineProbe", probe)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -1287,19 +1287,4 @@ func TestConsistentHashRing(t *testing.T) {
 		cv := stddev / mean
 		assert.Less(t, cv, 0.15, "coefficient of variation should be small")
 	})
-}
-
-func waitForRouteeCount(t *testing.T, ctx context.Context, router *PID, expected int) {
-	t.Helper()
-	require.Eventually(t, func() bool {
-		response, err := Ask(ctx, router, new(GetRoutees), time.Second)
-		if err != nil || response == nil {
-			return false
-		}
-		routeesResponse, ok := response.(*Routees)
-		if !ok || routeesResponse == nil {
-			return false
-		}
-		return len(routeesResponse.Names()) == expected
-	}, 5*time.Second, 100*time.Millisecond, "expected %d routees", expected)
 }

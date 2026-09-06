@@ -97,7 +97,7 @@ func TestRelocatorAbortToleratesDeletePeerStateError(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{deleteErr: stdErrors.New("store down")}
+	store := &MockRecordingPeerStateStore{deleteErr: stdErrors.New("store down")}
 	sys.clusterStore = store
 
 	peerState := internalpb.PeerState_builder{
@@ -143,7 +143,7 @@ func TestRelocatorTerminatedAbortsInflightJob(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.clusterStore = store
 
 	peerState := internalpb.PeerState_builder{
@@ -210,7 +210,7 @@ func TestRelocatorTerminatedAfterNormalCompletionIsNoOp(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.clusterStore = store
 
 	stream := eventstream.New()
@@ -278,7 +278,7 @@ func TestRelocatorStaleTerminatedDoesNotAbortNewerJob(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.clusterStore = store
 
 	oldPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
@@ -334,7 +334,7 @@ func TestRelocatorRebalanceForReDepartedAddressIsNotSkipped(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.clusterStore = store
 
 	oldPeerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
@@ -366,17 +366,17 @@ func TestRelocation(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -538,11 +538,11 @@ func TestRelocationWithDuplexProtocolPin(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	node1, sd1 := testNATs(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
+	node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	node2, sd2 := testNATs(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
+	node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestProtocolPin(remote.ProtocolPinDuplex))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
@@ -629,7 +629,7 @@ func TestRelocationWithReplicasReReplicatesSurvivorRegistry(t *testing.T) {
 	// the three nodes are started concurrently so they sync from each other
 	// right away instead of each waiting out the empty-partition escape (half
 	// the bootstrap timeout) that lets a lone replicaCount>1 node bootstrap.
-	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 3,
+	systems, providers := startNATsSystems(t, srv.Addr().String(), 3,
 		withTestReplication(replicaCount, writeQuorum, readQuorum),
 		withTestBootstrapTimeout(20*time.Second),
 	)
@@ -764,7 +764,7 @@ func TestRelocationWithReplicasRelocatesDepartedActors(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// replicaCount>1 clusters cannot bootstrap a lone node, so start concurrently.
-	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 3,
+	systems, providers := startNATsSystems(t, srv.Addr().String(), 3,
 		withTestReplication(2, 1, 1),
 		withTestBootstrapTimeout(20*time.Second),
 	)
@@ -873,11 +873,11 @@ func TestRelocationWithCustomSupervisor(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
@@ -994,17 +994,17 @@ func TestRelocationWithTLS(t *testing.T) {
 	clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
+	node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestTLS(serverConfig, clientConfig))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1079,17 +1079,17 @@ func TestRelocationWithSingletonActor(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1160,17 +1160,17 @@ func TestRelocationWithActorRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1241,17 +1241,17 @@ func TestRelocationWithSystemRelocationDisabled(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withoutTestRelocation())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String(), withoutTestRelocation())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1325,24 +1325,24 @@ func TestRelocationWithExtension(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
 	// let us create 4 entities on each node
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node1-entity-%d", j)
-		pid, err := node1.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
+		pid, err := node1.Spawn(ctx, entityID, NewMockPersistentActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1357,7 +1357,7 @@ func TestRelocationWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node2-entity-%d", j)
-		pid, err := node2.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
+		pid, err := node2.Spawn(ctx, entityID, NewMockPersistentActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1372,7 +1372,7 @@ func TestRelocationWithExtension(t *testing.T) {
 
 	for j := 1; j <= 4; j++ {
 		entityID := fmt.Sprintf("node3-entity-%d", j)
-		pid, err := node3.Spawn(ctx, entityID, NewMockEntity(), WithLongLived())
+		pid, err := node3.Spawn(ctx, entityID, NewMockPersistentActor(), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1470,12 +1470,12 @@ func TestRelocationWithDependency(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
@@ -1582,17 +1582,17 @@ func TestRelocationIssue781(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1670,17 +1670,17 @@ func TestGrainsRelocation(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -1775,15 +1775,15 @@ func TestGrainsRelocationWithActivationRole(t *testing.T) {
 
 	// the gateway starts first so it becomes the oldest node and relocation
 	// leader; it never advertises the game-worker role
-	gateway, sd1 := testNATs(t, srv.Addr().String(), withMockRoles("gateway"))
+	gateway, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles("gateway"))
 	require.NotNil(t, gateway)
 	require.NotNil(t, sd1)
 
-	worker1, sd2 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	worker1, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"))
 	require.NotNil(t, worker1)
 	require.NotNil(t, sd2)
 
-	worker2, sd3 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	worker2, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"))
 	require.NotNil(t, worker2)
 	require.NotNil(t, sd3)
 
@@ -1870,15 +1870,15 @@ func TestRelocationWithActorRole(t *testing.T) {
 
 	// the gateway starts first so it becomes the oldest node and relocation
 	// leader; it never advertises the game-worker role
-	gateway, sd1 := testNATs(t, srv.Addr().String(), withMockRoles("gateway"))
+	gateway, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles("gateway"))
 	require.NotNil(t, gateway)
 	require.NotNil(t, sd1)
 
-	worker1, sd2 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	worker1, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"))
 	require.NotNil(t, worker1)
 	require.NotNil(t, sd2)
 
-	worker2, sd3 := testNATs(t, srv.Addr().String(), withMockRoles("game-worker"))
+	worker2, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"))
 	require.NotNil(t, worker2)
 	require.NotNil(t, sd3)
 
@@ -1961,23 +1961,23 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 	stateStoreExtension := NewMockExtension()
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String(), withMockExtension(stateStoreExtension))
+	node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestExtension(stateStoreExtension))
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
 	for j := range 4 {
 		identity, err := node1.GrainIdentity(ctx, fmt.Sprintf("Grain-1%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockPersistenceGrain(), nil
+			return NewMockPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -1993,7 +1993,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 
 	for j := range 5 {
 		identity, err := node2.GrainIdentity(ctx, fmt.Sprintf("Grain-2%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockPersistenceGrain(), nil
+			return NewMockPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -2008,7 +2008,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 
 	for j := range 4 {
 		identity, err := node3.GrainIdentity(ctx, fmt.Sprintf("Grain-3%d", j), func(ctx context.Context) (Grain, error) {
-			return NewMockPersistenceGrain(), nil
+			return NewMockPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -2046,7 +2046,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 		// Step 1: wait until grain is accessible with its pre-relocation balance.
 		require.Eventually(t, func() bool {
 			identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
-				return NewMockPersistenceGrain(), nil
+				return NewMockPersistentGrain(), nil
 			})
 			if err != nil {
 				return false
@@ -2061,7 +2061,7 @@ func TestPersistenceGrainsRelocation(t *testing.T) {
 
 		// Step 2: credit exactly once and verify the final balance.
 		identity, err := gc.node.GrainIdentity(ctx, gc.name, func(ctx context.Context) (Grain, error) {
-			return NewMockPersistenceGrain(), nil
+			return NewMockPersistentGrain(), nil
 		})
 		require.NotNil(t, identity)
 		require.NoError(t, err)
@@ -2087,17 +2087,17 @@ func TestGrainsWithDependenciesRelocation(t *testing.T) {
 	srv := startNatsServer(t)
 
 	// create and start a system cluster
-	node1, sd1 := testNATs(t, srv.Addr().String())
+	node1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testNATs(t, srv.Addr().String())
+	node2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testNATs(t, srv.Addr().String())
+	node3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -2200,17 +2200,17 @@ func TestRelocationWithConsulProvider(t *testing.T) {
 	require.NotEmpty(t, endpoint)
 
 	// create and start a system cluster
-	node1, sd1 := testConsul(t, endpoint)
+	node1, sd1 := startConsulSystem(t, endpoint)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testConsul(t, endpoint)
+	node2, sd2 := startConsulSystem(t, endpoint)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testConsul(t, endpoint)
+	node3, sd3 := startConsulSystem(t, endpoint)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -2285,15 +2285,15 @@ func TestRelocationWithSelfManagedProvider(t *testing.T) {
 	ctx := t.Context()
 	broadcastPort := dynaport.Get(1)[0]
 
-	node1, sd1 := testSelfManaged(t, broadcastPort)
+	node1, sd1 := startSelfManagedSystem(t, broadcastPort)
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
-	node2, sd2 := testSelfManaged(t, broadcastPort)
+	node2, sd2 := startSelfManagedSystem(t, broadcastPort)
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
-	node3, sd3 := testSelfManaged(t, broadcastPort)
+	node3, sd3 := startSelfManagedSystem(t, broadcastPort)
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 
@@ -2389,17 +2389,17 @@ func TestRelocationWithEtcdProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	// create and start a system cluster
-	node1, sd1 := testEtcd(t, endpoints[0])
+	node1, sd1 := startEtcdSystem(t, endpoints[0])
 	require.NotNil(t, node1)
 	require.NotNil(t, sd1)
 
 	// create and start a system cluster
-	node2, sd2 := testEtcd(t, endpoints[0])
+	node2, sd2 := startEtcdSystem(t, endpoints[0])
 	require.NotNil(t, node2)
 	require.NotNil(t, sd2)
 
 	// create and start a system cluster
-	node3, sd3 := testEtcd(t, endpoints[0])
+	node3, sd3 := startEtcdSystem(t, endpoints[0])
 	require.NotNil(t, node3)
 	require.NotNil(t, sd3)
 

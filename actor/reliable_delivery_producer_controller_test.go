@@ -28,7 +28,6 @@ import (
 	"math"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -37,587 +36,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// mockDurableQueue models an external linearizable store. Unlike actors it is
-// shared with the controller's asynchronous task goroutines, so it guards its
-// state with a mutex exactly as a real storage client would.
-type mockDurableQueue struct {
-	mu           sync.Mutex
-	epoch        QueueEpoch
-	currentSeq   int64
-	confirmedSeq int64
-	stored       []UnconfirmedMessage
-	loads        int
-	operations   []string
-	storeErr     error
-	acceptErr    error
-	confirmErr   error
-	loadErr      error
-	storeDelay   time.Duration
-	confirmDelay time.Duration
-	// retainConfirmed keeps confirmed entries in the MessageID index, which
-	// the contract permits until Accept and Confirm both cover a message, so
-	// first-write-wins still answers a resubmission of a confirmed MessageID.
-	retainConfirmed bool
-}
-
-func (x *mockDurableQueue) ID() string                     { return "mockDurableQueue" }
-func (x *mockDurableQueue) MarshalBinary() ([]byte, error) { return []byte(x.ID()), nil }
-func (x *mockDurableQueue) UnmarshalBinary([]byte) error   { return nil }
-
-func (x *mockDurableQueue) Load(context.Context) (DurableQueueState, QueueEpoch, error) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	x.loads++
-
-	if x.loadErr != nil {
-		return DurableQueueState{}, 0, x.loadErr
-	}
-
-	x.epoch++
-
-	unconfirmed := make([]UnconfirmedMessage, 0, len(x.stored))
-
-	for _, message := range x.stored {
-		if message.Seq() > x.confirmedSeq {
-			unconfirmed = append(unconfirmed, message)
-		}
-	}
-
-	state, err := NewDurableQueueState(x.currentSeq, x.confirmedSeq, unconfirmed)
-	if err != nil {
-		return DurableQueueState{}, 0, err
-	}
-
-	return state, x.epoch, nil
-}
-
-func (x *mockDurableQueue) Store(_ context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error) {
-	x.mu.Lock()
-	delay, storeErr := x.storeDelay, x.storeErr
-	x.mu.Unlock()
-
-	if delay > 0 {
-		pause.For(delay)
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if storeErr != nil {
-		return StoreResult{}, storeErr
-	}
-
-	if epoch != x.epoch {
-		return StoreResult{}, gerrors.ErrQueueFenced
-	}
-
-	for _, message := range x.stored {
-		if message.MessageID() == request.MessageID() {
-			return NewStoreResult(message.Seq(), true, message.Payload())
-		}
-	}
-
-	for _, message := range x.stored {
-		if strings.HasPrefix(message.MessageID(), durableChunkIDPrefix) && idFrom(message.MessageID()) == request.MessageID() {
-			// the business MessageID is owned by a stored chunked batch that a
-			// single StoreResult cannot carry: the contract directs the caller
-			// to recover it through a StoreChunked retry
-			return StoreResult{}, gerrors.ErrQueueChunkedBatch
-		}
-	}
-
-	if request.ProposedSeq() != x.currentSeq+1 {
-		return StoreResult{}, gerrors.ErrQueueConflict
-	}
-
-	message, err := NewUnconfirmedMessage(request.MessageID(), request.ProposedSeq(), request.Payload())
-	if err != nil {
-		return StoreResult{}, err
-	}
-
-	x.currentSeq = request.ProposedSeq()
-	x.stored = append(x.stored, message)
-	x.operations = append(x.operations, "store:"+request.MessageID())
-	return NewStoreResult(request.ProposedSeq(), false, request.Payload())
-}
-
-func (x *mockDurableQueue) StoreChunked(_ context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error) {
-	x.mu.Lock()
-	delay, storeErr := x.storeDelay, x.storeErr
-	x.mu.Unlock()
-
-	if delay > 0 {
-		pause.For(delay)
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if storeErr != nil {
-		return nil, storeErr
-	}
-
-	if epoch != x.epoch {
-		return nil, gerrors.ErrQueueFenced
-	}
-
-	if len(requests) == 0 {
-		return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requires at least one chunk"))
-	}
-
-	businessID, index, count, ok := parseDurableChunkMessageID(requests[0].MessageID())
-	if !ok || index != 1 || count != len(requests) {
-		return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requests must be a complete derived-ID batch"))
-	}
-
-	for position, request := range requests {
-		requestBusiness, requestIndex, requestCount, requestOK := parseDurableChunkMessageID(request.MessageID())
-		if !requestOK || requestBusiness != businessID || requestIndex != position+1 || requestCount != count {
-			return nil, gerrors.NewErrInvalidMessage(errors.New("chunked store requests must share one business MessageID and contiguous positions"))
-		}
-	}
-
-	existing := make([]UnconfirmedMessage, 0, count)
-
-	for _, message := range x.stored {
-		if idFrom(message.MessageID()) == businessID {
-			existing = append(existing, message)
-		}
-	}
-
-	if len(existing) > 0 {
-		// first-write-wins for the business MessageID: return the original
-		// batch even when the retry proposes a different chunk count or bytes
-		results := make([]StoreResult, 0, len(existing))
-
-		for _, message := range existing {
-			result, err := NewStoreResult(message.Seq(), true, message.Payload())
-			if err != nil {
-				return nil, err
-			}
-
-			results = append(results, result)
-		}
-
-		x.operations = append(x.operations, "storechunked:"+businessID)
-		return results, nil
-	}
-
-	if requests[0].ProposedSeq() != x.currentSeq+1 {
-		return nil, gerrors.ErrQueueConflict
-	}
-
-	for position, request := range requests {
-		if request.ProposedSeq() != x.currentSeq+int64(position)+1 {
-			return nil, gerrors.ErrQueueConflict
-		}
-	}
-
-	results := make([]StoreResult, 0, count)
-	appended := make([]UnconfirmedMessage, 0, count)
-
-	for position, request := range requests {
-		entry, err := newChunkUnconfirmedMessage(request.MessageID(), request.ProposedSeq(), request.Payload(), position == 0, position == count-1)
-		if err != nil {
-			return nil, err
-		}
-
-		result, err := NewStoreResult(request.ProposedSeq(), false, request.Payload())
-		if err != nil {
-			return nil, err
-		}
-
-		appended = append(appended, entry)
-		results = append(results, result)
-	}
-
-	x.stored = append(x.stored, appended...)
-	x.currentSeq = requests[len(requests)-1].ProposedSeq()
-	x.operations = append(x.operations, "storechunked:"+businessID)
-	return results, nil
-}
-
-func (x *mockDurableQueue) Accept(_ context.Context, epoch QueueEpoch, messageID string) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if x.acceptErr != nil {
-		return x.acceptErr
-	}
-
-	if epoch != x.epoch {
-		return gerrors.ErrQueueFenced
-	}
-
-	x.operations = append(x.operations, "accept:"+messageID)
-	return nil
-}
-
-func (x *mockDurableQueue) Confirm(_ context.Context, epoch QueueEpoch, upToSeq int64) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	delay, confirmErr := x.confirmDelay, x.confirmErr
-
-	if delay > 0 {
-		pause.For(delay)
-	}
-
-	if confirmErr != nil {
-		return confirmErr
-	}
-
-	if epoch != x.epoch {
-		return gerrors.ErrQueueFenced
-	}
-
-	x.confirmedSeq = max(x.confirmedSeq, upToSeq)
-	x.operations = append(x.operations, "confirm")
-
-	if !x.retainConfirmed {
-		cut := 0
-
-		for cut < len(x.stored) && x.stored[cut].Seq() <= x.confirmedSeq {
-			cut++
-		}
-
-		x.stored = x.stored[cut:]
-	}
-
-	return nil
-}
-
-// snapshot returns copies of the observable queue state.
-func (x *mockDurableQueue) snapshot() (int, []string, int64) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.loads, append([]string(nil), x.operations...), x.confirmedSeq
-}
-
-// testProducerConfig builds the producer settings a directly constructed
-// controller needs, so a test states only the values it cares about.
-func testProducerConfig(consumerName string, retryAttempts int, retryBackoff, localRetryInterval time.Duration) *reliableProducerConfig {
-	return &reliableProducerConfig{
-		consumerName:  consumerName,
-		retryInterval: localRetryInterval,
-		queueRetry: &reliableQueueRetryConfig{
-			maxAttempts:    retryAttempts,
-			initialBackoff: retryBackoff,
-		},
-	}
-}
-
-// producerControllerHarness wires a producer controller under test to a recording producer
-// endpoint and a recording consumer controller stand-in.
-type producerControllerHarness struct {
-	ctx                       context.Context
-	system                    *actorSystem
-	producer                  *PID
-	consumerControllerStandIn *PID
-	producerController        *PID
-	// usedTokens tracks credits already answered; only the test goroutine
-	// touches it.
-	usedTokens map[string]bool
-}
-
-// newProducerControllerHarness starts a cluster-disabled system with the
-// producer endpoint, the consumer endpoint plus its registered controller
-// stand-in, and the producer controller under test.
-func newProducerControllerHarness(t *testing.T, queue DurableProducerQueue) *producerControllerHarness {
-	t.Helper()
-	return newProducerControllerHarnessWith(t, queue, false)
-}
-
-// newProducerControllerHarnessWith builds the harness with the endpoint's
-// delivery-confirmation setting, which the spawn options would otherwise carry.
-func newProducerControllerHarnessWith(t *testing.T, queue DurableProducerQueue, deliveryConfirmation bool) *producerControllerHarness {
-	t.Helper()
-	return newProducerControllerHarnessFor(t, queue, deliveryConfirmation, 0)
-}
-
-// newProducerControllerHarnessChunked builds the harness with chunking enabled
-// at the given size on a volatile flow.
-func newProducerControllerHarnessChunked(t *testing.T, maxChunkBytes uint32) *producerControllerHarness {
-	t.Helper()
-	return newProducerControllerHarnessFor(t, nil, false, maxChunkBytes)
-}
-
-// newProducerControllerHarnessFor builds the harness from the endpoint
-// settings the spawn options would otherwise carry.
-func newProducerControllerHarnessFor(t *testing.T, queue DurableProducerQueue, deliveryConfirmation bool, maxChunkBytes uint32) *producerControllerHarness {
-	t.Helper()
-
-	ctx, system := newCompanionTestSystem(t)
-
-	producer, err := system.Spawn(ctx, "producer", &deliveryRecorder{})
-	require.NoError(t, err)
-
-	consumer, err := system.Spawn(ctx, "consumer", NewMockActor())
-	require.NoError(t, err)
-
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "consumer", consumer.incarnationID())
-	require.NoError(t, err)
-
-	consumerControllerName := reliableCompanionName(ReliableControllerRoleConsumer, consumer.incarnationID())
-	consumerControllerStandIn, err := system.Spawn(ctx, consumerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
-	require.NoError(t, err)
-
-	config := testProducerConfig("consumer", 2, 20*time.Millisecond, 150*time.Millisecond)
-	config.deliveryConfirmation = deliveryConfirmation
-	config.maxChunkBytes = maxChunkBytes
-
-	producerController, err := system.Spawn(ctx, "producer-controller", newProducerController(producer, config, queue))
-	require.NoError(t, err)
-
-	return &producerControllerHarness{ctx: ctx, system: system, producer: producer, consumerControllerStandIn: consumerControllerStandIn, producerController: producerController, usedTokens: map[string]bool{}}
-}
-
-// recordedOf asks a recorder double for its message snapshot.
-func (x *producerControllerHarness) recordedOf(pid *PID) []any {
-	response, err := Ask(x.ctx, pid, &getRecorded{}, time.Second)
-	if err != nil {
-		return nil
-	}
-
-	snapshot, _ := response.([]any)
-	return snapshot
-}
-
-// fromConsumerController sends a message to the producer controller from the consumer
-// controller stand-in.
-func (x *producerControllerHarness) fromConsumerController(t *testing.T, message any) {
-	t.Helper()
-	require.NoError(t, Tell(x.ctx, x.consumerControllerStandIn, &deliveryForward{to: x.producerController, message: message}))
-}
-
-// fromProducer sends a message to the producer controller from the producer.
-func (x *producerControllerHarness) fromProducer(t *testing.T, message any) {
-	t.Helper()
-	require.NoError(t, Tell(x.ctx, x.producer, &deliveryForward{to: x.producerController, message: message}))
-}
-
-// register performs the registration handshake and returns the session ID.
-func (x *producerControllerHarness) register(t *testing.T) string {
-	t.Helper()
-
-	registerConsumer, err := commands.NewRegisterConsumer(uuid.NewString())
-	require.NoError(t, err)
-	x.fromConsumerController(t, registerConsumer)
-
-	var sessionID string
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.consumerControllerStandIn) {
-			if ack, ok := message.(*commands.RegistrationAck); ok && ack.Nonce() == registerConsumer.Nonce() {
-				sessionID = ack.SessionID()
-				return true
-			}
-		}
-		return false
-	}, 3*time.Second, 10*time.Millisecond)
-
-	return sessionID
-}
-
-// nonceOf extracts the nonce of the latest acknowledged registration.
-func (x *producerControllerHarness) nonceOf(t *testing.T) string {
-	t.Helper()
-
-	var nonce string
-
-	for _, message := range x.recordedOf(x.consumerControllerStandIn) {
-		if ack, ok := message.(*commands.RegistrationAck); ok {
-			nonce = ack.Nonce()
-		}
-	}
-
-	require.NotEmpty(t, nonce)
-	return nonce
-}
-
-// latestRequestNext waits for the latest credit granted to the producer.
-func (x *producerControllerHarness) latestRequestNext(t *testing.T) *RequestNext {
-	t.Helper()
-
-	var latest *RequestNext
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.producer) {
-			if request, ok := message.(*RequestNext); ok {
-				latest = request
-			}
-		}
-		return latest != nil
-	}, 3*time.Second, 10*time.Millisecond)
-
-	return latest
-}
-
-// latestStored waits for the latest storage acknowledgement to the producer.
-func (x *producerControllerHarness) latestStored(t *testing.T) *Stored {
-	t.Helper()
-
-	var latest *Stored
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.producer) {
-			if stored, ok := message.(*Stored); ok {
-				latest = stored
-			}
-		}
-		return latest != nil
-	}, 3*time.Second, 10*time.Millisecond)
-
-	return latest
-}
-
-// deliveryConfirmations returns the confirmation notices the producer received.
-func (x *producerControllerHarness) deliveryConfirmations() []*DeliveryConfirmed {
-	var notices []*DeliveryConfirmed
-
-	for _, message := range x.recordedOf(x.producer) {
-		if notice, ok := message.(*DeliveryConfirmed); ok {
-			notices = append(notices, notice)
-		}
-	}
-
-	return notices
-}
-
-// sequencedEmissions returns the sequenced messages the stand-in received.
-func (x *producerControllerHarness) sequencedEmissions() []*commands.SequencedMessage {
-	var emissions []*commands.SequencedMessage
-
-	for _, message := range x.recordedOf(x.consumerControllerStandIn) {
-		if sequenced, ok := message.(*commands.SequencedMessage); ok {
-			emissions = append(emissions, sequenced)
-		}
-	}
-
-	return emissions
-}
-
-// produceOne drives one full producer handshake for messageID, waiting for a
-// fresh credit and the storage acknowledgement of exactly this message.
-func (x *producerControllerHarness) produceOne(t *testing.T, messageID string) {
-	t.Helper()
-	x.produceOneWith(t, messageID, testpb.Reply_builder{Content: messageID}.Build())
-}
-
-// produceOneWith drives one full producer handshake handing over payload.
-func (x *producerControllerHarness) produceOneWith(t *testing.T, messageID string, payload *testpb.Reply) {
-	t.Helper()
-
-	request := x.freshRequestNext(t)
-	produced, err := NewProduced(request, messageID, payload)
-	require.NoError(t, err)
-	x.fromProducer(t, produced)
-
-	var stored *Stored
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.producer) {
-			if candidate, ok := message.(*Stored); ok && candidate.MessageID() == messageID {
-				stored = candidate
-				return true
-			}
-		}
-		return false
-	}, 3*time.Second, 10*time.Millisecond)
-
-	ack, err := NewStoredAck(stored)
-	require.NoError(t, err)
-	x.fromProducer(t, ack)
-}
-
-// produceAgainWith drives a full resubmission handshake for a messageID the
-// producer already completed once, waiting for a Stored beyond the ones
-// already recorded, and returns that fresh acknowledgement.
-func (x *producerControllerHarness) produceAgainWith(t *testing.T, messageID string, payload *testpb.Reply) *Stored {
-	t.Helper()
-
-	before := 0
-
-	for _, message := range x.recordedOf(x.producer) {
-		if stored, ok := message.(*Stored); ok && stored.MessageID() == messageID {
-			before++
-		}
-	}
-
-	request := x.freshRequestNext(t)
-	produced, err := NewProduced(request, messageID, payload)
-	require.NoError(t, err)
-	x.fromProducer(t, produced)
-
-	var stored *Stored
-
-	require.Eventually(t, func() bool {
-		count := 0
-
-		for _, message := range x.recordedOf(x.producer) {
-			if candidate, ok := message.(*Stored); ok && candidate.MessageID() == messageID {
-				count++
-				stored = candidate
-			}
-		}
-
-		return count > before
-	}, 3*time.Second, 10*time.Millisecond)
-
-	ack, err := NewStoredAck(stored)
-	require.NoError(t, err)
-	x.fromProducer(t, ack)
-	return stored
-}
-
-// freshRequestNext waits for a credit the test has not answered yet and marks
-// it used.
-func (x *producerControllerHarness) freshRequestNext(t *testing.T) *RequestNext {
-	t.Helper()
-
-	var request *RequestNext
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.recordedOf(x.producer) {
-			if candidate, ok := message.(*RequestNext); ok && !x.usedTokens[candidate.Token()] {
-				request = candidate
-				return true
-			}
-		}
-		return false
-	}, 3*time.Second, 10*time.Millisecond)
-
-	x.usedTokens[request.Token()] = true
-	return request
-}
-
-// awaitFailure polls the event stream until a terminal failure arrives; the
-// subscriber iterator drains a snapshot per call.
-func awaitFailure(t *testing.T, subscriber eventstream.Subscriber) *ReliableDeliveryFailed {
-	t.Helper()
-
-	var failure *ReliableDeliveryFailed
-
-	require.Eventually(t, func() bool {
-		for message := range subscriber.Iterator() {
-			if candidate, ok := message.Payload().(*ReliableDeliveryFailed); ok {
-				failure = candidate
-				return true
-			}
-		}
-		return false
-	}, 3*time.Second, 50*time.Millisecond)
-
-	return failure
-}
 
 func TestProducerControllerVolatileFlow(t *testing.T) {
 	harness := newProducerControllerHarness(t, nil)
@@ -719,7 +142,7 @@ func TestProducerControllerDuplicateHandshake(t *testing.T) {
 }
 
 func TestProducerControllerDurableFlow(t *testing.T) {
-	queue := &mockDurableQueue{}
+	queue := &MockDurableQueue{}
 	harness := newProducerControllerHarness(t, queue)
 	sessionID := harness.register(t)
 	nonce := harness.nonceOf(t)
@@ -851,7 +274,7 @@ func TestProducerControllerDeliveryConfirmation(t *testing.T) {
 	})
 
 	t.Run("With a durable restart reports the redelivered message again", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessWith(t, queue, true)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1140,7 +563,7 @@ func TestProducerControllerChunkedFlow(t *testing.T) {
 
 func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	t.Run("With StoreChunked then Accept under one business MessageID", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1185,7 +608,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a restart while unconfirmed chunks reload and resend", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1240,7 +663,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With resubmit under a tight window reuses the stored batch", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1330,7 +753,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 			stored = append(stored, entry)
 		}
 
-		queue := &mockDurableQueue{currentSeq: int64(chunks), stored: stored}
+		queue := &MockDurableQueue{currentSeq: int64(chunks), stored: stored}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1378,7 +801,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With delivery confirmation reports one notice at the last chunk seq", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, true, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1416,7 +839,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a whole-stored resubmission re-encoded above the chunk size reuses the stored message", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1455,7 +878,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a chunk-stored resubmission re-encoded below the chunk size reuses the stored batch", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1508,7 +931,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a confirmed retained business MessageID resubmission completes benignly", func(t *testing.T) {
-		queue := &mockDurableQueue{retainConfirmed: true}
+		queue := &MockDurableQueue{retainConfirmed: true}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1565,7 +988,7 @@ func TestProducerControllerDurableChunkedFlow(t *testing.T) {
 	})
 
 	t.Run("With a confirmed retained chunked MessageID resubmitted below the chunk threshold reuses the batch", func(t *testing.T) {
-		queue := &mockDurableQueue{retainConfirmed: true}
+		queue := &MockDurableQueue{retainConfirmed: true}
 		harness := newProducerControllerHarnessFor(t, queue, false, MinReliableChunkSize)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -1635,7 +1058,7 @@ func TestProducerControllerFirstWriteWins(t *testing.T) {
 	original, err := NewUnconfirmedMessage("m-1", 1, payload)
 	require.NoError(t, err)
 
-	queue := &mockDurableQueue{currentSeq: 1, stored: []UnconfirmedMessage{original}}
+	queue := &MockDurableQueue{currentSeq: 1, stored: []UnconfirmedMessage{original}}
 	harness := newProducerControllerHarness(t, queue)
 	sessionID := harness.register(t)
 	nonce := harness.nonceOf(t)
@@ -1675,7 +1098,7 @@ func TestProducerControllerFirstWriteWins(t *testing.T) {
 
 func TestProducerControllerTerminalFailures(t *testing.T) {
 	t.Run("With queue fencing", func(t *testing.T) {
-		queue := &mockDurableQueue{storeErr: gerrors.ErrQueueFenced}
+		queue := &MockDurableQueue{storeErr: gerrors.ErrQueueFenced}
 		harness := newProducerControllerHarness(t, queue)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -2039,7 +1462,7 @@ func TestProducerControllerResendCappedByDemand(t *testing.T) {
 
 func TestProducerControllerDurableQueueFailures(t *testing.T) {
 	t.Run("With accept fencing", func(t *testing.T) {
-		queue := &mockDurableQueue{acceptErr: gerrors.ErrQueueFenced}
+		queue := &MockDurableQueue{acceptErr: gerrors.ErrQueueFenced}
 		harness := newProducerControllerHarness(t, queue)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -2066,7 +1489,7 @@ func TestProducerControllerDurableQueueFailures(t *testing.T) {
 	})
 
 	t.Run("With confirm conflict", func(t *testing.T) {
-		queue := &mockDurableQueue{confirmErr: gerrors.ErrQueueConflict}
+		queue := &MockDurableQueue{confirmErr: gerrors.ErrQueueConflict}
 		harness := newProducerControllerHarness(t, queue)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -2089,7 +1512,7 @@ func TestProducerControllerDurableQueueFailures(t *testing.T) {
 	})
 
 	t.Run("With load failure after restart publishes failure", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		harness := newProducerControllerHarness(t, queue)
 
 		subscriber, err := harness.system.Subscribe()
@@ -2108,7 +1531,7 @@ func TestProducerControllerDurableQueueFailures(t *testing.T) {
 	})
 
 	t.Run("With deferred store behind slow confirm", func(t *testing.T) {
-		queue := &mockDurableQueue{confirmDelay: 300 * time.Millisecond}
+		queue := &MockDurableQueue{confirmDelay: 300 * time.Millisecond}
 		harness := newProducerControllerHarness(t, queue)
 		sessionID := harness.register(t)
 		nonce := harness.nonceOf(t)
@@ -2142,7 +1565,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	// test goroutine with stand-in PIDs, so no actor turn touches its state
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "producer", &deliveryRecorder{})
+	producer, err := system.Spawn(ctx, "producer", &MockDeliveryRecorder{})
 	require.NoError(t, err)
 
 	consumer, err := system.Spawn(ctx, "consumer", NewMockActor())
@@ -2152,7 +1575,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	consumerControllerName := reliableCompanionName(ReliableControllerRoleConsumer, consumer.incarnationID())
-	consumerControllerStandIn, err := system.Spawn(ctx, consumerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+	consumerControllerStandIn, err := system.Spawn(ctx, consumerControllerName, &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 
 	payload, err := NewReliablePayload([]byte("frame"))
@@ -2160,7 +1583,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	spawnControllerHost := func(t *testing.T, name string) *PID {
 		t.Helper()
-		host, err := system.Spawn(ctx, name, &deliveryRecorder{})
+		host, err := system.Spawn(ctx, name, &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		return host
 	}
@@ -2175,7 +1598,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 	})
 
 	t.Run("With load failure on first incarnation", func(t *testing.T) {
-		queue := &mockDurableQueue{loadErr: errors.New("unreachable")}
+		queue := &MockDurableQueue{loadErr: errors.New("unreachable")}
 		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), queue)
 		pctx := newContext(ctx, "producerController", system)
 		err := controller.PreStart(pctx)
@@ -2370,7 +1793,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), nil)
 		require.NoError(t, controller.PreStart(nil))
 
-		dead, err := system.Spawn(ctx, "dead-peer", &deliveryRecorder{})
+		dead, err := system.Spawn(ctx, "dead-peer", &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		require.NoError(t, dead.Shutdown(ctx))
 
@@ -2387,7 +1810,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With pumpLane deferred handshake op", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-pump-deferred")
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Hour), queue)
 		pctx := newContext(ctx, "producerController", system)
 		require.NoError(t, controller.PreStart(pctx))
@@ -2404,7 +1827,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With launchOp deferral while lane busy", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-launch-defer")
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Hour), queue)
 		pctx := newContext(ctx, "producerController", system)
 		require.NoError(t, controller.PreStart(pctx))
@@ -2428,7 +1851,7 @@ func TestProducerControllerEdgeBranches(t *testing.T) {
 
 	t.Run("With handleQueueFailure non-fencing escalation", func(t *testing.T) {
 		host := spawnControllerHost(t, "host-queue-failure")
-		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), &mockDurableQueue{})
+		controller := newProducerController(producer, testProducerConfig("consumer", 1, time.Millisecond, time.Millisecond), &MockDurableQueue{})
 		require.NoError(t, controller.PreStart(newContext(ctx, "producerController", system)))
 
 		rctx := newReceiveContext(context.Background(), system.NoSender(), host, &PostStart{})

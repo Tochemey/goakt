@@ -1,22 +1,24 @@
 # All targets run inside a Docker image built from Dockerfile.tools, so
 # contributors only need Docker + Make. No local installs of Go, buf, mockery,
-# golangci-lint, openssl, etc. are required.
+# golangci-lint, openssl, etc. are required, and nothing is cached on the host:
+# tool state persists in a Docker volume, test runs start from nothing.
 
-IMAGE   := goakt-tools
-WORKDIR := /src
+IMAGE       := goakt-tools
+WORKDIR     := /src
+DOCKER_SOCK ?= /var/run/docker.sock
 
 UID := $(shell id -u)
 GID := $(shell id -g)
 
-# Cache dirs live under the repo (gitignored) so they are owned by the host
-# user and backed by host disk — avoids the container's small tmpfs.
-_ := $(shell mkdir -p .cache/home .gocache .gomodcache)
-
+# Build and module caches persist in a named volume so lint and code
+# generation stay fast across runs.
+TOOLS_VOLUME := goakt-tools-cache
 DOCKER_RUN := docker run --rm \
 	--user $(UID):$(GID) \
-	-e HOME=$(WORKDIR)/.cache/home \
-	-e GOCACHE=$(WORKDIR)/.gocache \
-	-e GOMODCACHE=$(WORKDIR)/.gomodcache \
+	-v $(TOOLS_VOLUME):/cache \
+	-e HOME=/cache/home \
+	-e GOCACHE=/cache/go-build \
+	-e GOMODCACHE=/cache/mod \
 	-v "$(CURDIR)":$(WORKDIR) \
 	-w $(WORKDIR) \
 	$(IMAGE)
@@ -37,10 +39,8 @@ vendor: image ## Refresh vendored modules (go mod tidy && go mod vendor)
 lint: image ## Run golangci-lint
 	$(DOCKER_RUN) golangci-lint run --timeout 10m
 
-unit-test: image vendor ## Run unit tests with coverage
-	$(DOCKER_RUN) sh -c 'go test -tags=hashicorpmetrics -p 1 -timeout 0 -race -v \
-		-coverprofile=coverage.out -covermode=atomic -coverpkg=./... \
-		$$(go list ./... | grep -v -E "(goaktpb|mocks|internal/internalpb)")'
+unit-test: image ## Run the test suite as the CI shards in parallel pristine containers (SHARD=<name> runs one, V=1 streams every test)
+	@IMAGE=$(IMAGE) DOCKER_SOCK=$(DOCKER_SOCK) SHARD=$(SHARD) V=$(V) scripts/unit-test.sh
 
 mock: image ## Regenerate mocks (config in .mockery.yml)
 	$(DOCKER_RUN) mockery
@@ -78,5 +78,6 @@ certs: image ## Regenerate TLS test fixtures under test/data/certs
 		openssl x509 -req -days 3650 -in client-auth.req -CA client-auth-ca.pem -CAkey client-auth-ca.key -set_serial 3 -passin pass:test -out client-auth.pem && \
 		openssl x509 -extfile client-auth.conf -extensions ssl_client -req -days 3650 -in client-auth.req -CA client-auth-ca.pem -CAkey client-auth-ca.key -set_serial 4 -passin pass:test -out client-auth.pem'
 
-clean: ## Remove the tools image
+clean: ## Remove the tools image and its cache volume
 	docker rmi -f $(IMAGE)
+	docker volume rm -f $(TOOLS_VOLUME)

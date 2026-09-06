@@ -236,12 +236,12 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -330,22 +330,22 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
 		actorName := "actorName"
-		actor := newExchanger()
+		actor := NewMockExchanger()
 
 		// define the spawn options
 		opts := []SpawnOption{
@@ -391,7 +391,7 @@ func TestSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actorName"
-		actor := newExchanger()
+		actor := NewMockExchanger()
 		opts := []SpawnOption{
 			WithHostAndPort(sys.Host(), sys.Port()),
 		}
@@ -782,7 +782,7 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node, sd := testNATs(t, srv.Addr().String())
+		node, sd := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd)
@@ -807,19 +807,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -900,7 +900,7 @@ func TestSpawn(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := new(mockcluster.Cluster)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remoteclient.NewClient()
 		system.remotingEnabled.Store(true)
 
@@ -925,7 +925,7 @@ func TestSpawn(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mocksremote.NewClient(t)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		actor := NewMockActor()
@@ -1049,19 +1049,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1100,19 +1100,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1151,19 +1151,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1228,19 +1228,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.BrotliCompression))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.BrotliCompression))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.BrotliCompression))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.BrotliCompression))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1301,19 +1301,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.ZstdCompression))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.ZstdCompression))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.ZstdCompression))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.ZstdCompression))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1374,19 +1374,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.GzipCompression))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.GzipCompression))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockCompression(remote.GzipCompression))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestCompression(remote.GzipCompression))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1449,19 +1449,19 @@ func TestSpawn(t *testing.T) {
 		roles := []string{"backend", "api", "worker"}
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1506,19 +1506,19 @@ func TestSpawn(t *testing.T) {
 		roles := []string{"backend", "api", "worker"}
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1559,19 +1559,19 @@ func TestSpawn(t *testing.T) {
 		roles := []string{"backend", "api", "worker"}
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1619,19 +1619,19 @@ func TestSpawn(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		peerAddress3 := node3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 		require.NotNil(t, sd3)
@@ -1666,7 +1666,7 @@ func TestSpawn(t *testing.T) {
 	t.Run("SpawnOn with round-robin when getting next value failed", func(t *testing.T) {
 		ctx := t.Context()
 		clmock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clmock)
+		system := newReplicationSystem(clmock)
 		system.remoting = remoteclient.NewClient()
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(true)
@@ -1691,7 +1691,7 @@ func TestSpawn(t *testing.T) {
 		ctx := context.Background()
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -1719,7 +1719,7 @@ func TestSpawn(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		clusterMock := mockcluster.NewCluster(t)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 		system.remotingEnabled.Store(true)
 
@@ -1890,7 +1890,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		dcConfig.ControlPlane = &MockControlPlane{}
 		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
-		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
+		sys := newReplicationSystem(mockcluster.NewCluster(t))
 		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
@@ -1934,7 +1934,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		// Wait until cache is stale (past MaxCacheStaleness)
 		pause.For(5 * time.Millisecond)
 
-		sys := MockReplicationTestSystem(mockcluster.NewCluster(t))
+		sys := newReplicationSystem(mockcluster.NewCluster(t))
 		sys.remoting = mocksremote.NewClient(t)
 		sys.remotingEnabled.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
@@ -1950,7 +1950,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 
 	t.Run("returns ErrDataCenterRecordNotFound when target DC not in active records", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        "dc-other",
 				State:     datacenter.DataCenterActive,
@@ -1968,7 +1968,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 
 	t.Run("returns ErrDataCenterRecordNotFound when no active records", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
 
@@ -1983,7 +1983,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("returns ErrDataCenterRecordNotFound when target DC record exists but state is not ACTIVE", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterDraining,
@@ -2002,7 +2002,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("returns error when endpoint has invalid host:port format", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -2021,7 +2021,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("returns error when endpoint port is not numeric", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -2040,7 +2040,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("returns RemoteSpawn error when remoting fails", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -2066,7 +2066,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 	t.Run("succeeds and calls RemoteSpawn with correct request", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -2096,7 +2096,7 @@ func TestSpawnOnDatacenter(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
 		targetDC := datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
 		passivationStrategy := passivation.NewTimeBasedStrategy(30 * time.Second)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{
 				ID:        targetDC.ID(),
 				State:     datacenter.DataCenterActive,
@@ -2132,7 +2132,7 @@ func TestRecreateActorFromWireRestoresRecordOnFailure(t *testing.T) {
 	// the respawn then fails, the record must be restored so the actor stays
 	// recoverable instead of being silently lost
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.registry = types.NewRegistry()
 	system.reflection = newReflection(system.registry)
 
@@ -2157,7 +2157,7 @@ func TestRecreateActorFromWireRestoreFailureKeepsRespawnError(t *testing.T) {
 	// a failed restore is logged, not propagated: the caller reports the
 	// respawn error itself
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.registry = types.NewRegistry()
 	system.reflection = newReflection(system.registry)
 
@@ -2182,7 +2182,7 @@ func TestRecreateActorFromWireRestoresRecordOnSpawnOptionsFailure(t *testing.T) 
 	// the actor type is registered but its serialized dependencies cannot be
 	// rebuilt: the record must be restored so the actor stays recoverable
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.registry = types.NewRegistry()
 	system.registry.Register(new(MockActor))
 	system.reflection = newReflection(system.registry)
@@ -2314,7 +2314,7 @@ func TestSpawnOnImmediateCrossNodeVisibility(t *testing.T) {
 	srv := startNatsServer(t)
 	t.Cleanup(srv.Shutdown)
 
-	systems, providers := testNATsConcurrent(t, srv.Addr().String(), 2)
+	systems, providers := startNATsSystems(t, srv.Addr().String(), 2)
 	node1, node2 := systems[0], systems[1]
 	sd1, sd2 := providers[0], providers[1]
 
@@ -2359,7 +2359,7 @@ func TestConcurrentSpawnSameNameCreatesSingleActor(t *testing.T) {
 
 	starts := &atomic.Int64{}
 	pids, errs := spawnConcurrently(t, 64, func() (*PID, error) {
-		return sys.Spawn(ctx, "concurrent", &countingActor{starts: starts})
+		return sys.Spawn(ctx, "concurrent", &MockInstanceCountingActor{starts: starts})
 	})
 
 	requireSamePID(t, pids, errs)
@@ -2406,7 +2406,7 @@ func TestConcurrentSpawnChildCreatesSingleChild(t *testing.T) {
 
 	starts := &atomic.Int64{}
 	pids, errs := spawnConcurrently(t, 64, func() (*PID, error) {
-		return parent.SpawnChild(ctx, "child", &countingActor{starts: starts})
+		return parent.SpawnChild(ctx, "child", &MockInstanceCountingActor{starts: starts})
 	})
 
 	requireSamePID(t, pids, errs)
@@ -2564,48 +2564,15 @@ func TestRunSpawnActivationRetriesInheritedCancellation(t *testing.T) {
 	require.True(t, reran.Load(), "the waiter must re-run the spawn after inheriting the winner's cancellation")
 }
 
-// spawnConcurrently runs spawn from n goroutines released simultaneously and
-// returns their results.
-func spawnConcurrently(t *testing.T, n int, spawn func() (*PID, error)) ([]*PID, []error) {
-	t.Helper()
-	var wg sync.WaitGroup
-	gate := make(chan struct{})
-	pids := make([]*PID, n)
-	errs := make([]error, n)
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			<-gate
-			pids[i], errs[i] = spawn()
-		}(i)
-	}
-	close(gate)
-	wg.Wait()
-	return pids, errs
-}
-
-// requireSamePID asserts every spawn succeeded, is running, and returned the
-// same PID.
-func requireSamePID(t *testing.T, pids []*PID, errs []error) {
-	t.Helper()
-	for i, pid := range pids {
-		require.NoErrorf(t, errs[i], "call %d failed", i)
-		require.NotNilf(t, pid, "call %d returned a nil pid", i)
-		require.Truef(t, pid.IsRunning(), "call %d returned a non-running pid", i)
-		require.Truef(t, pids[0].Equals(pid), "call %d returned a different pid", i)
-	}
-}
-
 func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 	t.Run("With a producer and its durable queue", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.registry = types.NewRegistry()
-		system.registry.Register(&mockDurableQueue{})
+		system.registry.Register(&MockDurableQueue{})
 		system.reflection = newReflection(system.registry)
 
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		dependencies, err := codec.EncodeDependencies(queue)
 		require.NoError(t, err)
 
@@ -2627,17 +2594,17 @@ func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 		require.NotNil(t, config.reliableDelivery)
 		assert.Equal(t, "orders-consumer", config.reliableDelivery.producer.consumerName)
 		require.NotNil(t, config.durableQueue)
-		assert.IsType(t, &mockDurableQueue{}, config.durableQueue)
+		assert.IsType(t, &MockDurableQueue{}, config.durableQueue)
 		require.NoError(t, config.Validate())
 	})
 
 	t.Run("With the queue type unregistered", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.registry = types.NewRegistry()
 		system.reflection = newReflection(system.registry)
 
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		dependencies, err := codec.EncodeDependencies(queue)
 		require.NoError(t, err)
 
@@ -2658,7 +2625,7 @@ func TestWireSpawnOptionsRestoresReliableDelivery(t *testing.T) {
 
 	t.Run("With the queue dependency missing from the record", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.registry = types.NewRegistry()
 		system.reflection = newReflection(system.registry)
 
@@ -2692,8 +2659,8 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 
 	pause.For(time.Second)
 
-	require.NoError(t, actorSystem.Register(ctx, &reliableProducerMock{}))
-	require.NoError(t, actorSystem.Inject(&mockDurableQueue{}))
+	require.NoError(t, actorSystem.Register(ctx, &MockReliableProducer{}))
+	require.NoError(t, actorSystem.Inject(&MockDurableQueue{}))
 
 	clusterMock := mockcluster.NewCluster(t)
 
@@ -2714,7 +2681,7 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 	oldIncarnation := uuid.NewString()
 	oldCompanion := reliableCompanionName(ReliableControllerRoleProducer, oldIncarnation)
 
-	queue := &mockDurableQueue{}
+	queue := &MockDurableQueue{}
 	dependencies, err := codec.EncodeDependencies(queue)
 	require.NoError(t, err)
 
@@ -2723,7 +2690,7 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 
 	record := internalpb.Actor_builder{
 		Address:          address.New("orders-producer", actorSystem.name, "127.0.0.1", 7777).String(),
-		Type:             types.Name(&reliableProducerMock{}),
+		Type:             types.Name(&MockReliableProducer{}),
 		Relocatable:      true,
 		IncarnationId:    oldIncarnation,
 		Dependencies:     dependencies,
@@ -2769,7 +2736,7 @@ func TestRecreateActorFromWireNonRelocatableReliableEndpoint(t *testing.T) {
 	// with if-absent semantics, so a leaked record would block the name
 	// cluster-wide
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	departedNode := "127.0.0.1:7777"
 	incarnation := uuid.NewString()
@@ -2804,7 +2771,7 @@ func TestRecreateActorFromWireNonRelocatableOrdinaryActorUntouched(t *testing.T)
 	// ordinary non-relocatable actors keep their historical semantics: no
 	// registry mutation at all
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	record := internalpb.Actor_builder{
 		Address:     address.New("worker", system.name, "127.0.0.1", 7777).String(),
@@ -2818,7 +2785,7 @@ func TestRecreateActorFromWireNonRelocatableOrdinaryActorUntouched(t *testing.T)
 
 func TestSpawnSingletonRetryClassification(t *testing.T) {
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	// retry.Stop wraps without exposing Unwrap, so terminal classifications
 	// are asserted through the preserved message rather than errors.Is
@@ -2872,7 +2839,7 @@ func TestSpawnSingletonRetryClassification(t *testing.T) {
 
 func TestSpawnOnReliableRejections(t *testing.T) {
 	clusterMock := mockcluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	t.Run("With a data center placement", func(t *testing.T) {
 		target := &datacenter.DataCenter{Name: "dc-west", Region: "r", Zone: "z"}
@@ -2891,7 +2858,7 @@ func TestSpawnOnReliableRejections(t *testing.T) {
 func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 	t.Run("With an invalid record address", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		err := system.recreateActorFromWire(context.Background(), internalpb.Actor_builder{Address: "not-an-address"}.Build(), "10.0.0.2:9000")
 		require.Error(t, err)
@@ -2899,7 +2866,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 
 	t.Run("With a system actor skipped", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/GoAktSystemHelper"}.Build()
 		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
@@ -2907,7 +2874,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 
 	t.Run("With a singleton skipped", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/lonely", Singleton: &internalpb.SingletonSpec{}}.Build()
 		require.NoError(t, system.recreateActorFromWire(context.Background(), record, "10.0.0.2:9000"))
@@ -2915,7 +2882,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 
 	t.Run("With a non-relocatable reliable endpoint withdrawing records", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		record := internalpb.Actor_builder{
 			Address:          "goakt://test-replication@10.0.0.2:9000/orders",
@@ -2939,7 +2906,7 @@ func TestRecreateActorFromWireEarlyBranches(t *testing.T) {
 func TestReleaseDepartedEntryBranches(t *testing.T) {
 	t.Run("With the record owned by another node", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "keeper").Return(internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.9:9000/keeper"}.Build(), nil).Once()
 
 		proceed, err := system.releaseDepartedEntry(context.Background(), "keeper", "10.0.0.2:9000")
@@ -2949,7 +2916,7 @@ func TestReleaseDepartedEntryBranches(t *testing.T) {
 
 	t.Run("With a remove failure", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/goner"}.Build(), nil).Once()
 		clusterMock.EXPECT().RemoveActor(mock.Anything, "goner").Return(errors.New("registry down")).Once()
 
@@ -2962,7 +2929,7 @@ func TestReleaseDepartedEntryBranches(t *testing.T) {
 func TestSpawnRemotePlacementAddressHandling(t *testing.T) {
 	t.Run("With a malformed confirmation from a host-and-port spawn", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 		system.remotingEnabled.Store(true)
@@ -2976,7 +2943,7 @@ func TestSpawnRemotePlacementAddressHandling(t *testing.T) {
 
 	t.Run("With a remote placement failure on SpawnOn", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 
@@ -2990,7 +2957,7 @@ func TestSpawnRemotePlacementAddressHandling(t *testing.T) {
 
 	t.Run("With a malformed confirmation on SpawnOn", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 
@@ -3009,7 +2976,7 @@ func TestSpawnSingletonWithRoleOnRemoteLeader(t *testing.T) {
 
 	t.Run("With a remote spawn failure", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 
@@ -3022,7 +2989,7 @@ func TestSpawnSingletonWithRoleOnRemoteLeader(t *testing.T) {
 
 	t.Run("With a malformed confirmation", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 
@@ -3036,7 +3003,7 @@ func TestSpawnSingletonWithRoleOnRemoteLeader(t *testing.T) {
 
 	t.Run("With a confirmed remote singleton", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		remotingMock := mocksremote.NewClient(t)
 		system.remoting = remotingMock
 

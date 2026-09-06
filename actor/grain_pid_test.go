@@ -63,7 +63,7 @@ func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:             log.DiscardLogger,
-		grain:              &MockGrainDeactivationFailure{},
+		grain:              &MockDeactivationFailingGrain{},
 		dependencies:       xsync.NewMap[string, extension.Dependency](),
 		passivationManager: nil,
 	}
@@ -173,7 +173,7 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivatePanic(t *testing.T) {
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{activatePanicValue: "activate panic"},
+		grain:        &MockLifecyclePanickingGrain{activatePanic: "activate panic"},
 		dependencies: config.dependencies,
 		config:       config,
 	}
@@ -194,7 +194,7 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivateErrorPanic(t *testing.T) {
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{activatePanicValue: panicErr},
+		grain:        &MockLifecyclePanickingGrain{activatePanic: panicErr},
 		dependencies: config.dependencies,
 		config:       config,
 	}
@@ -213,7 +213,7 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivatePanicError(t *testing.T) {
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{activatePanicValue: panicErr},
+		grain:        &MockLifecyclePanickingGrain{activatePanic: panicErr},
 		dependencies: config.dependencies,
 		config:       config,
 	}
@@ -232,7 +232,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{},
+		grain:        &MockLifecyclePanickingGrain{},
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.onPoisonPill.Store(false)
@@ -253,7 +253,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivateErrorPanic(t *testing.T)
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
+		grain:        &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.onPoisonPill.Store(false)
@@ -272,7 +272,7 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanicError(t *testing.T)
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{panicValue: panicErr},
+		grain:        &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.onPoisonPill.Store(false)
@@ -291,7 +291,7 @@ func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 	pid := &grainPID{
 		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
 		logger:       log.DiscardLogger,
-		grain:        &MockPanickingActivateDeactivateGrain{},
+		grain:        &MockLifecyclePanickingGrain{},
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 	}
 	pid.onPoisonPill.Store(false)
@@ -362,106 +362,6 @@ func TestToWireGrainActivationRole(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, wire.HasRole())
 	require.Equal(t, "game-worker", wire.GetRole())
-}
-
-// reentrantRecordingGrain records what its OnReceive handles so the pause and
-// envelope tests can assert exactly which messages were processed, in which
-// order, and with which request metadata.
-type reentrantRecordingGrain struct {
-	mu      sync.Mutex
-	records []recordedGrainMessage
-}
-
-type recordedGrainMessage struct {
-	message   any
-	requestID string
-	replyTo   *commands.AsyncReplyTo
-}
-
-var _ Grain = (*reentrantRecordingGrain)(nil)
-
-func (g *reentrantRecordingGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (g *reentrantRecordingGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-func (g *reentrantRecordingGrain) OnReceive(gctx *GrainContext) {
-	g.mu.Lock()
-	g.records = append(g.records, recordedGrainMessage{
-		message:   gctx.Message(),
-		requestID: gctx.requestID,
-		replyTo:   gctx.requestReplyTo,
-	})
-	g.mu.Unlock()
-
-	// Envelope contexts carry no channels; only ordinary messages ack.
-	if gctx.err != nil {
-		gctx.NoErr()
-	}
-}
-
-func (g *reentrantRecordingGrain) recorded() []recordedGrainMessage {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return append([]recordedGrainMessage(nil), g.records...)
-}
-
-func (g *reentrantRecordingGrain) messages() []any {
-	recorded := g.recorded()
-	messages := make([]any, 0, len(recorded))
-
-	for _, record := range recorded {
-		messages = append(messages, record.message)
-	}
-	return messages
-}
-
-// startReentrantGrainFixture starts a system, activates a recording grain and
-// equips its pid with reentrancy state the way the config plumbing will. The
-// logger discards but stays enabled so the debug and warning paths execute.
-func startReentrantGrainFixture(t *testing.T, mode reentrancy.Mode) (*actorSystem, *grainPID, *reentrantRecordingGrain, *GrainIdentity) {
-	t.Helper()
-	ctx := context.Background()
-
-	system, err := NewActorSystem("testSys", WithLogger(log.NewSlog(log.DebugLevel, io.Discard)))
-	require.NoError(t, err)
-	require.NoError(t, system.Start(ctx))
-
-	t.Cleanup(func() {
-		_ = system.Stop(context.Background())
-	})
-
-	grain := &reentrantRecordingGrain{}
-	identity, err := system.GrainIdentity(ctx, "reentrantGrain", func(context.Context) (Grain, error) {
-		return grain, nil
-	})
-	require.NoError(t, err)
-
-	sys := system.(*actorSystem)
-	pid, ok := sys.grains.Get(identity.String())
-	require.True(t, ok)
-
-	pid.reentrancy.Store(newReentrancyState(mode, 0))
-	pid.responses = newGrainMailbox(0)
-
-	return sys, pid, grain, identity
-}
-
-// registerGrainRequestState mirrors the admission bookkeeping the public
-// request API will perform on-turn: Step 5 owns completion and teardown, so
-// these tests seed in-flight states directly.
-func registerGrainRequestState(pid *grainPID, correlationID string, mode reentrancy.Mode, callback func(any, error)) *requestState {
-	state := newRequestState(correlationID, mode, pid)
-	if callback != nil {
-		state.setCallback(callback)
-	}
-
-	pid.reentrancy.Load().requestStates.Set(correlationID, state)
-	pid.reentrancy.Load().inFlightCount.Inc()
-
-	if mode == reentrancy.StashNonReentrant {
-		pid.reentrancy.Load().blockingCount.Inc()
-	}
-	return state
 }
 
 func TestGrainAsyncResponseCompletesRequest(t *testing.T) {
@@ -729,7 +629,7 @@ func TestGrainShutdownCancelsInFlightRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, system.Start(ctx))
 
-	grain := &reentrantRecordingGrain{}
+	grain := &MockReentrantRecordingGrain{}
 	identity, err := system.GrainIdentity(ctx, "reentrantGrain", func(context.Context) (Grain, error) {
 		return grain, nil
 	})
@@ -970,7 +870,7 @@ func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
 	// A throughput of one forces the budget-exhaustion tail: the turn yields
 	// after the first message and the worker reschedules the grain for the
 	// second.
-	grain := &reentrantRecordingGrain{}
+	grain := &MockReentrantRecordingGrain{}
 	d := newDispatcher(1, 1)
 	d.start()
 	t.Cleanup(d.signalStop)
@@ -1108,37 +1008,6 @@ func TestGrainRegisterRequestStateValidation(t *testing.T) {
 	require.ErrorIs(t, pid.registerRequestState(nil), gerrors.ErrInvalidMessage)
 }
 
-// deactivationCountingGrain counts OnDeactivate invocations so the tests can
-// assert it runs exactly once.
-type deactivationCountingGrain struct {
-	deactivations atomic.Int32
-}
-
-var _ Grain = (*deactivationCountingGrain)(nil)
-
-func (g *deactivationCountingGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (g *deactivationCountingGrain) OnDeactivate(context.Context, *GrainProps) error {
-	g.deactivations.Inc()
-	return nil
-}
-
-func (g *deactivationCountingGrain) OnReceive(gctx *GrainContext) { gctx.NoErr() }
-
-// passivationEntryState reports whether the manager tracks the grain and
-// whether its entry is paused.
-func passivationEntryState(system *actorSystem, pid *grainPID) (exists, paused bool) {
-	manager := system.passivationManager()
-	manager.mu.Lock()
-	defer manager.mu.Unlock()
-
-	entry, ok := manager.entries[pid.passivationID()]
-	if !ok {
-		return false, false
-	}
-	return true, entry.paused
-}
-
 // TestGrainPassivationWaitsForInFlight is the end-to-end Step 9 flow: a
 // pending request pauses the passivation manager past the idle deadline
 // without deactivation or spinning, and completion resumes the lifecycle so
@@ -1147,7 +1016,7 @@ func TestGrainPassivationWaitsForInFlight(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	silent := &scriptedGrain{receive: func(gctx *GrainContext) {
+	silent := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		if gctx.CorrelationID() != "" {
 			return // never reply to requests; completion comes from cancellation
 		}
@@ -1159,7 +1028,7 @@ func TestGrainPassivationWaitsForInFlight(t *testing.T) {
 	require.NoError(t, err)
 
 	calls := make(chan RequestCall, 1)
-	requester := &scriptedGrain{receive: func(gctx *GrainContext) {
+	requester := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		calls <- gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(0))
 		gctx.NoErr()
 	}}
@@ -1201,7 +1070,7 @@ func TestGrainPassivationPillChecks(t *testing.T) {
 		t.Helper()
 		system := newRequestTestSystem(t)
 
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
 		identity, err := system.GrainIdentity(context.Background(), "pill-grain", func(context.Context) (Grain, error) {
 			return grain, nil
 		},
@@ -1293,7 +1162,7 @@ func TestGrainPassivationPillChecks(t *testing.T) {
 func TestGrainResumePassivationFallback(t *testing.T) {
 	system := newRequestTestSystem(t)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) { gctx.NoErr() }}
 	identity, err := system.GrainIdentity(context.Background(), "fallback-grain", func(context.Context) (Grain, error) {
 		return grain, nil
 	},
@@ -1321,7 +1190,7 @@ func TestGrainPassivationPillThenPoisonPillDeactivatesOnce(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	grain := &deactivationCountingGrain{}
+	grain := &MockDeactivationCountingGrain{}
 	identity, err := system.GrainIdentity(ctx, "counting-grain", func(context.Context) (Grain, error) {
 		return grain, nil
 	},
@@ -1375,7 +1244,7 @@ func TestGrainPassivationPillDeactivationFailureLogged(t *testing.T) {
 	system := newRequestTestSystem(t)
 
 	identity, err := system.GrainIdentity(context.Background(), "failing-grain", func(context.Context) (Grain, error) {
-		return &MockGrainDeactivationFailure{}, nil
+		return &MockDeactivationFailingGrain{}, nil
 	},
 		WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
 		WithGrainDeactivateAfter(time.Minute))
@@ -1412,7 +1281,7 @@ func TestGrainStashHoldsTimerTicksDuringPause(t *testing.T) {
 	ctx := context.Background()
 
 	replies := make(chan *GrainReply, 1)
-	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		replies <- gctx.DeferResponse()
 	}}
 
@@ -1425,7 +1294,7 @@ func TestGrainStashHoldsTimerTicksDuringPause(t *testing.T) {
 	completions := make(chan error, 1)
 	failures := make(chan error, 1)
 
-	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+	stasher := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestSend:
 			if _, err := gctx.Schedule(new(testpb.TestBye), 50*time.Millisecond); err != nil {
@@ -1487,7 +1356,7 @@ func TestGrainTellAgainstPausedGrain(t *testing.T) {
 	ctx := context.Background()
 
 	replies := make(chan *GrainReply, 1)
-	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		replies <- gctx.DeferResponse()
 	}}
 
@@ -1497,7 +1366,7 @@ func TestGrainTellAgainstPausedGrain(t *testing.T) {
 	require.NoError(t, err)
 
 	processed := make(chan struct{}, 1)
-	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+	stasher := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestPing:
 			gctx.RequestGrain(targetID, new(testpb.TestSend), WithRequestTimeout(0))
@@ -1554,7 +1423,7 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	silent := &scriptedGrain{receive: func(*GrainContext) {}}
+	silent := &MockScriptedGrain{receive: func(*GrainContext) {}}
 	silentID, err := system.GrainIdentity(ctx, "repause-silent", func(context.Context) (Grain, error) {
 		return silent, nil
 	})
@@ -1564,7 +1433,7 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 	release := make(chan struct{})
 	outcomes := make(chan error, 1)
 
-	stasher := &scriptedGrain{receive: func(gctx *GrainContext) {
+	stasher := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		if _, ok := gctx.Message().(*testpb.TestPing); !ok {
 			return
 		}

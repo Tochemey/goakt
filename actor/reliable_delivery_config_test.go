@@ -35,31 +35,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// producerDeliveryConfig builds a complete producer endpoint configuration.
-func producerDeliveryConfig(consumerName string) *reliableDeliveryConfig {
-	return &reliableDeliveryConfig{
-		producer: &reliableProducerConfig{
-			consumerName:  consumerName,
-			retryInterval: DefaultReliableProducerRetryInterval,
-			queueRetry: &reliableQueueRetryConfig{
-				maxAttempts:    DefaultReliableQueueRetryAttempts,
-				initialBackoff: DefaultReliableQueueRetryBackoff,
-			},
-		},
-	}
-}
-
-// consumerDeliveryConfig builds a complete consumer endpoint configuration.
-func consumerDeliveryConfig(producerName string) *reliableDeliveryConfig {
-	return &reliableDeliveryConfig{
-		consumer: &reliableConsumerConfig{
-			producerName:      producerName,
-			flowControlWindow: 50,
-			resendInterval:    DefaultReliableResendInterval,
-		},
-	}
-}
-
 func TestReliableDeliveryConfigValidate(t *testing.T) {
 	tests := map[string]struct {
 		config  *reliableDeliveryConfig
@@ -121,7 +96,7 @@ func TestReliableDeliveryConfigValidate(t *testing.T) {
 		"point-to-point producer with durable work queue": {
 			config: func() *reliableDeliveryConfig {
 				config := producerDeliveryConfig("consumer")
-				config.producer.workQueue = &mockDurableWorkQueue{}
+				config.producer.workQueue = &MockDurableWorkQueue{}
 				return config
 			}(),
 			invalid: true,
@@ -465,7 +440,7 @@ func TestReliableDeliveryConfigToRemoteSpec(t *testing.T) {
 
 func TestReliableSpawnOptionFromWire(t *testing.T) {
 	t.Run("With a producer and its durable queue", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		wire := producerDeliveryConfig("consumer")
 		wire.producer.durableQueueID = queue.ID()
 		wire.producer.deliveryConfirmation = true
@@ -494,7 +469,7 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 	})
 
 	t.Run("With a work-pulling producer and its durable work queue", func(t *testing.T) {
-		queue := &mockDurableWorkQueue{}
+		queue := &MockDurableWorkQueue{}
 		wire := workPullingProducerConfig()
 		wire.producer.durableQueueID = queue.ID()
 
@@ -551,7 +526,7 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 	})
 
 	t.Run("With a nil dependency entry skipped", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		wire := producerDeliveryConfig("consumer")
 		wire.producer.durableQueueID = queue.ID()
 
@@ -567,13 +542,13 @@ func TestReliableSpawnOptionFromWire(t *testing.T) {
 		wire.producer.durableQueueID = "jobsQueue"
 
 		// the non-matching entry is skipped before the miss is reported
-		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{nil, &mockDurableWorkQueue{}})
+		option, err := reliableSpawnOptionFromWire(wire.toProto(), []extension.Dependency{nil, &MockDurableWorkQueue{}})
 		require.ErrorContains(t, err, "durable work queue dependency=jobsQueue is missing")
 		assert.Nil(t, option)
 	})
 
 	t.Run("With a mistyped work queue dependency", func(t *testing.T) {
-		dependency := &mockDurableQueue{}
+		dependency := &MockDurableQueue{}
 		wire := workPullingProducerConfig()
 		wire.producer.durableQueueID = dependency.ID()
 

@@ -32,45 +32,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeSchedulable is a schedulable used exclusively by scheduler tests.
-type fakeSchedulable struct {
-	id    int
-	turns atomic.Int32
-}
-
-func (f *fakeSchedulable) runTurn(*worker) { f.turns.Add(1) }
-
-func newFake(id int) *fakeSchedulable { return &fakeSchedulable{id: id} }
-
 func TestLocalQueuePushPop(t *testing.T) {
 	q := &localQueue{}
 	require.Equal(t, 0, q.length())
 
-	a, b, c := newFake(1), newFake(2), newFake(3)
+	a, b, c := NewMockSchedulable(1), NewMockSchedulable(2), NewMockSchedulable(3)
 	require.True(t, q.pushBack(a))
 	require.True(t, q.pushBack(b))
 	require.True(t, q.pushBack(c))
 	require.Equal(t, 3, q.length())
 
-	require.Same(t, a, q.popFront().(*fakeSchedulable))
-	require.Same(t, b, q.popFront().(*fakeSchedulable))
-	require.Same(t, c, q.popFront().(*fakeSchedulable))
+	require.Same(t, a, q.popFront().(*MockSchedulable))
+	require.Same(t, b, q.popFront().(*MockSchedulable))
+	require.Same(t, c, q.popFront().(*MockSchedulable))
 	require.Nil(t, q.popFront())
 }
 
 func TestLocalQueueFull(t *testing.T) {
 	q := &localQueue{}
 	for i := range localQueueCap {
-		require.True(t, q.pushBack(newFake(i)))
+		require.True(t, q.pushBack(NewMockSchedulable(i)))
 	}
 	// Next push must fail.
-	require.False(t, q.pushBack(newFake(-1)))
+	require.False(t, q.pushBack(NewMockSchedulable(-1)))
 	// Drain and refill to exercise wraparound.
 	for range localQueueCap / 2 {
 		require.NotNil(t, q.popFront())
 	}
 	for range localQueueCap / 2 {
-		require.True(t, q.pushBack(newFake(0)))
+		require.True(t, q.pushBack(NewMockSchedulable(0)))
 	}
 	require.Equal(t, localQueueCap, q.length())
 }
@@ -83,12 +73,12 @@ func TestLocalQueueStealHalf(t *testing.T) {
 	require.Nil(t, src.stealHalf(dst))
 
 	for i := range 10 {
-		require.True(t, src.pushBack(newFake(i)))
+		require.True(t, src.pushBack(NewMockSchedulable(i)))
 	}
 
 	first := src.stealHalf(dst)
 	require.NotNil(t, first)
-	require.Equal(t, 0, first.(*fakeSchedulable).id)
+	require.Equal(t, 0, first.(*MockSchedulable).id)
 	// 10 items total, (10+1)/2 = 5 stolen: 1 returned directly + 4 in dst.
 	require.Equal(t, 4, dst.length())
 	require.Equal(t, 5, src.length())
@@ -99,11 +89,11 @@ func TestLocalQueueStealHalfDstFull(t *testing.T) {
 	dst := &localQueue{}
 	// Fill dst completely.
 	for i := range localQueueCap {
-		require.True(t, dst.pushBack(newFake(i)))
+		require.True(t, dst.pushBack(NewMockSchedulable(i)))
 	}
 	// Put many items in src to force the dst-full branch.
 	for i := range 10 {
-		require.True(t, src.pushBack(newFake(100+i)))
+		require.True(t, src.pushBack(NewMockSchedulable(100+i)))
 	}
 	first := src.stealHalf(dst)
 	require.NotNil(t, first)
@@ -124,39 +114,39 @@ func TestLocalQueuePopFrontStaleAtomicSize(t *testing.T) {
 
 func TestReadyQueuePushTake(t *testing.T) {
 	rq := newReadyQueue(2)
-	a, b := newFake(1), newFake(2)
+	a, b := NewMockSchedulable(1), NewMockSchedulable(2)
 	rq.push(a)
 	rq.push(b)
 	require.Equal(t, 2, rq.globalLen())
 
 	got, ok := rq.take(0)
 	require.True(t, ok)
-	require.Same(t, a, got.(*fakeSchedulable))
+	require.Same(t, a, got.(*MockSchedulable))
 
 	got, ok = rq.take(1)
 	require.True(t, ok)
-	require.Same(t, b, got.(*fakeSchedulable))
+	require.Same(t, b, got.(*MockSchedulable))
 }
 
 func TestReadyQueuePushLocalFastPath(t *testing.T) {
 	rq := newReadyQueue(2)
-	a := newFake(1)
+	a := NewMockSchedulable(1)
 	rq.pushLocal(0, a)
 	require.Equal(t, 1, rq.locals[0].length())
 	require.Equal(t, 0, rq.globalLen())
 
 	got, ok := rq.take(0)
 	require.True(t, ok)
-	require.Same(t, a, got.(*fakeSchedulable))
+	require.Same(t, a, got.(*MockSchedulable))
 }
 
 func TestReadyQueuePushLocalSpillsToGlobal(t *testing.T) {
 	rq := newReadyQueue(1)
 	for i := range localQueueCap {
-		rq.pushLocal(0, newFake(i))
+		rq.pushLocal(0, NewMockSchedulable(i))
 	}
 	// Local full: next push spills to global.
-	overflow := newFake(999)
+	overflow := NewMockSchedulable(999)
 	rq.pushLocal(0, overflow)
 	require.Equal(t, localQueueCap, rq.locals[0].length())
 	require.Equal(t, 1, rq.globalLen())
@@ -165,14 +155,14 @@ func TestReadyQueuePushLocalSpillsToGlobal(t *testing.T) {
 func TestReadyQueueStealWhenLocalAndGlobalEmpty(t *testing.T) {
 	rq := newReadyQueue(3)
 	// Seed worker 2's local queue.
-	a, b := newFake(1), newFake(2)
+	a, b := NewMockSchedulable(1), NewMockSchedulable(2)
 	rq.pushLocal(2, a)
 	rq.pushLocal(2, b)
 
 	// Worker 0 has nothing locally, global is empty, must steal from worker 2.
 	got, ok := rq.take(0)
 	require.True(t, ok)
-	require.Contains(t, []*fakeSchedulable{a, b}, got.(*fakeSchedulable))
+	require.Contains(t, []*MockSchedulable{a, b}, got.(*MockSchedulable))
 }
 
 func TestReadyQueueStealSingleWorker(t *testing.T) {
@@ -202,10 +192,10 @@ func TestReadyQueueParkAndWake(t *testing.T) {
 	}()
 	waitParked(t, rq, 1)
 
-	a := newFake(42)
+	a := NewMockSchedulable(42)
 	rq.push(a)
 	<-done
-	require.Same(t, a, got.Load().(*fakeSchedulable))
+	require.Same(t, a, got.Load().(*MockSchedulable))
 }
 
 func TestReadyQueueNilHandoffRescans(t *testing.T) {
@@ -227,14 +217,14 @@ func TestReadyQueueNilHandoffRescans(t *testing.T) {
 	// queued item. This is the wake path push uses when an item lands in
 	// the global queue while a worker is publishing its idle flag.
 	rq.parkMu.Lock()
-	a := newFake(7)
+	a := NewMockSchedulable(7)
 	rq.global.push(a)
 	rq.globalCount.Store(int32(rq.global.size))
 	rq.parkMu.Unlock()
 
 	require.True(t, rq.claimIdleWorker(nil))
 	<-done
-	require.Same(t, a, got.Load().(*fakeSchedulable))
+	require.Same(t, a, got.Load().(*MockSchedulable))
 }
 
 func TestReadyQueueCloseWakesParkedWorkers(t *testing.T) {
@@ -261,18 +251,18 @@ func TestReadyQueueCloseBeforeTake(t *testing.T) {
 func TestReadyQueueClaimIdleWorkerWithoutPublishedFlag(t *testing.T) {
 	rq := newReadyQueue(1)
 	rq.idleCount.Store(1)
-	require.False(t, rq.claimIdleWorker(newFake(1)))
+	require.False(t, rq.claimIdleWorker(NewMockSchedulable(1)))
 }
 
 func TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing(t *testing.T) {
 	rq := newReadyQueue(1)
-	item := newFake(1)
+	item := NewMockSchedulable(1)
 	rq.push(item)
 
 	got, ok := rq.parkAndTake(0)
 	require.True(t, ok)
 	require.Nil(t, got)
-	require.Same(t, item, rq.popGlobal().(*fakeSchedulable))
+	require.Same(t, item, rq.popGlobal().(*MockSchedulable))
 }
 
 func TestReadyQueueCloseIsIdempotent(t *testing.T) {
@@ -289,12 +279,12 @@ func TestReadyQueueTakeDrainsGlobalAfterPark(t *testing.T) {
 	// two-worker setup means worker 0 will steal from worker 1 first; we
 	// keep worker 1 empty so the scan goes: local -> global -> steal -> park.
 	rq := newReadyQueue(2)
-	a := newFake(1)
+	a := NewMockSchedulable(1)
 	// Prepopulate global before take to avoid park path; exercises success path.
 	rq.push(a)
 	got, ok := rq.take(0)
 	require.True(t, ok)
-	require.Same(t, a, got.(*fakeSchedulable))
+	require.Same(t, a, got.(*MockSchedulable))
 }
 
 func TestReadyQueueMultiProducerConsumer(t *testing.T) {
@@ -321,7 +311,7 @@ func TestReadyQueueMultiProducerConsumer(t *testing.T) {
 	for range producers {
 		producersWG.Go(func() {
 			for j := range perProducer {
-				rq.push(newFake(j))
+				rq.push(NewMockSchedulable(j))
 			}
 		})
 	}
@@ -367,7 +357,7 @@ func TestReadyQueueClosePushRace(t *testing.T) {
 					case <-stop:
 						return
 					default:
-						rq.push(newFake(j))
+						rq.push(NewMockSchedulable(j))
 					}
 				}
 			})
@@ -384,11 +374,4 @@ func TestGlobalQueueGrowFromEmpty(t *testing.T) {
 	var q globalQueue
 	q.grow()
 	require.Equal(t, globalQueueInitialCap, len(q.buf))
-}
-
-func waitParked(t *testing.T, rq *readyQueue, n int) {
-	t.Helper()
-	assert.Eventually(t, func() bool {
-		return rq.parkedCount() >= n
-	}, 2*time.Second, 1*time.Millisecond, "expected at least %d parked workers", n)
 }

@@ -63,12 +63,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-const (
-	receivingDelay = 1 * time.Second
-	replyTimeout   = 100 * time.Millisecond
-	passivateAfter = 200 * time.Millisecond
-)
-
 func TestReceive(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -148,7 +142,7 @@ func TestReceive(t *testing.T) {
 
 		// this mailbox cannot enqueue messages, so any message sent to the actor
 		// is turned into a deadletter
-		mailbox := NewMockErrorMailbox()
+		mailbox := NewMockFailingMailbox()
 		pid, err := actorSystem.Spawn(ctx, "name", NewMockActor(), WithMailbox(mailbox))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -191,7 +185,7 @@ func TestMessageOrdering(t *testing.T) {
 	defer func() { _ = actorSystem.Stop(ctx) }()
 
 	expected := 128
-	fifoActor := NewMockFIFO(expected)
+	fifoActor := NewMockOrderRecordingActor(expected)
 	pidName := "fifo-" + uuid.NewString()
 	pid, err := actorSystem.Spawn(ctx, pidName, fifoActor)
 	require.NoError(t, err)
@@ -233,7 +227,7 @@ func TestPassivation(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		pid, err := actorSystem.Spawn(ctx, "test", &MockPostStop{},
+		pid, err := actorSystem.Spawn(ctx, "test", &MockPostStopFailingActor{},
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(passivateAfter)),
 		)
 		require.NoError(t, err)
@@ -463,6 +457,7 @@ func TestPassivation(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestRestart(t *testing.T) {
 	t.Run("With restart a stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -711,7 +706,7 @@ func TestRestart(t *testing.T) {
 		require.NotNil(t, child)
 		pause.For(500 * time.Millisecond)
 
-		grandchild, err := child.SpawnChild(ctx, "grandchild", NewMockRestart())
+		grandchild, err := child.SpawnChild(ctx, "grandchild", NewMockRestartFailingActor())
 		require.NoError(t, err)
 		require.NotNil(t, grandchild)
 		pause.For(500 * time.Millisecond)
@@ -812,7 +807,7 @@ func TestRestart(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a Ping actor
-		actor := NewMockRestart()
+		actor := NewMockRestartFailingActor()
 		assert.NotNil(t, actor)
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor,
@@ -862,7 +857,7 @@ func TestRestart(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a Ping actor
-		actor := &MockPostStop{}
+		actor := &MockPostStopFailingActor{}
 		assert.NotNil(t, actor)
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor,
@@ -908,7 +903,7 @@ func TestRestart(t *testing.T) {
 
 		pause.For(time.Second)
 
-		cid, err := pid.SpawnChild(ctx, "child", NewMockRestart())
+		cid, err := pid.SpawnChild(ctx, "child", NewMockRestartFailingActor())
 		require.NoError(t, err)
 		require.NotNil(t, cid)
 		pause.For(500 * time.Millisecond)
@@ -940,13 +935,13 @@ func TestRestart(t *testing.T) {
 
 		pause.For(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "test", NewMockPostStart())
+		pid, err := actorSystem.Spawn(ctx, "test", NewMockPostStartCountingActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		pause.For(time.Second)
 
-		require.EqualValues(t, 1, postStarCount.Load())
+		require.EqualValues(t, 1, postStartCount.Load())
 		// restart the actor
 		err = pid.Restart(ctx)
 		require.NoError(t, err)
@@ -954,7 +949,7 @@ func TestRestart(t *testing.T) {
 
 		require.True(t, pid.IsRunning())
 
-		require.EqualValues(t, 2, postStarCount.Load())
+		require.EqualValues(t, 2, postStartCount.Load())
 
 		assert.EqualValues(t, 1, pid.RestartCount())
 
@@ -964,6 +959,7 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestSupervisorStrategy(t *testing.T) {
 	t.Run("With stop as supervisor directive", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1302,7 +1298,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		// create the child actor
 		stopStrategy := supervisor.NewSupervisor(supervisor.WithDirective(&errors.PanicError{}, DefaultSupervisorDirective))
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{}, WithSupervisor(stopStrategy))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStopFailingActor{}, WithSupervisor(stopStrategy))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 
@@ -1697,7 +1693,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		pause.For(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "test", NewMockEscalation())
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockStopOnPanicSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -1739,7 +1735,7 @@ func TestSupervisorStrategy(t *testing.T) {
 
 		pause.For(time.Second)
 
-		parent, err := actorSystem.Spawn(ctx, "supervisor", NewMockReinstate())
+		parent, err := actorSystem.Spawn(ctx, "supervisor", NewMockReinstatingSupervisor())
 		require.NoError(t, err)
 		require.NotNil(t, parent)
 
@@ -1938,6 +1934,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		}
 	})
 }
+
 func TestMessaging(t *testing.T) {
 	t.Run("With happy", func(t *testing.T) {
 		ctx := context.TODO()
@@ -1955,11 +1952,11 @@ func TestMessaging(t *testing.T) {
 
 		pause.For(time.Second)
 
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -2011,13 +2008,13 @@ func TestMessaging(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2048,12 +2045,12 @@ func TestMessaging(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2094,12 +2091,12 @@ func TestMessaging(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2137,7 +2134,7 @@ func TestMessaging(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -2189,7 +2186,7 @@ func TestMessaging(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -2228,6 +2225,7 @@ func TestMessaging(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestRemoting(t *testing.T) {
 	t.Run("When remoting is enabled", func(t *testing.T) {
 		// create the context
@@ -2253,13 +2251,13 @@ func TestRemoting(t *testing.T) {
 
 		// create an exchanger one
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
@@ -2315,13 +2313,13 @@ func TestRemoting(t *testing.T) {
 
 		// create an exchanger one
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
@@ -2352,6 +2350,7 @@ func TestRemoting(t *testing.T) {
 		})
 	})
 }
+
 func TestPIDRemotingEnabledGuard(t *testing.T) {
 	type actorSystemWrapper struct {
 		*actorSystem
@@ -2404,12 +2403,12 @@ func TestActorHandle(t *testing.T) {
 	pause.For(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "Exchanger", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchanger", &MockExchanger{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 	actorHandle := pid.Actor()
-	assert.IsType(t, &exchanger{}, actorHandle)
+	assert.IsType(t, &MockExchanger{}, actorHandle)
 	var p any = actorHandle
 	_, ok := p.(Actor)
 	assert.True(t, ok)
@@ -2419,6 +2418,7 @@ func TestActorHandle(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestPIDActorSystem(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -2436,7 +2436,7 @@ func TestPIDActorSystem(t *testing.T) {
 	pause.For(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "Exchanger", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchanger", &MockExchanger{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -2448,6 +2448,7 @@ func TestPIDActorSystem(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestSpawnChild(t *testing.T) {
 	t.Run("With restarting child actor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -2687,7 +2688,7 @@ func TestSpawnChild(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPreStart{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPreStartFailingActor{})
 		assert.Error(t, err)
 		assert.Nil(t, child)
 
@@ -3130,6 +3131,7 @@ func TestPoisonPill(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestRemoteLookup(t *testing.T) {
 	t.Run("With actor address not found", func(t *testing.T) {
 		// create the context
@@ -3155,7 +3157,7 @@ func TestRemoteLookup(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -3193,7 +3195,7 @@ func TestRemoteLookup(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -3232,7 +3234,7 @@ func TestRemoteLookup(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -3251,6 +3253,7 @@ func TestRemoteLookup(t *testing.T) {
 		})
 	})
 }
+
 func TestFailedPreStart(t *testing.T) {
 	// create the context
 	ctx := context.TODO()
@@ -3270,7 +3273,7 @@ func TestFailedPreStart(t *testing.T) {
 
 	// create an exchanger 1
 	actorName1 := "Exchange1"
-	pid, err := sys.Spawn(ctx, actorName1, &MockPreStart{})
+	pid, err := sys.Spawn(ctx, actorName1, &MockPreStartFailingActor{})
 	require.Error(t, err)
 	require.ErrorIs(t, err, errors.ErrInitFailure)
 	require.Nil(t, pid)
@@ -3279,6 +3282,7 @@ func TestFailedPreStart(t *testing.T) {
 		assert.NoError(t, sys.Stop(ctx))
 	})
 }
+
 func TestFailedPostStop(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -3294,7 +3298,7 @@ func TestFailedPostStop(t *testing.T) {
 	require.NoError(t, actorSystem.Start(ctx))
 
 	pause.For(time.Second)
-	pid, err := actorSystem.Spawn(ctx, "PostStop", &MockPostStop{})
+	pid, err := actorSystem.Spawn(ctx, "PostStop", &MockPostStopFailingActor{})
 
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
@@ -3303,6 +3307,7 @@ func TestFailedPostStop(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestShutdown(t *testing.T) {
 	t.Run("With Shutdown panic to child stop failure", func(t *testing.T) {
 		// create a test context
@@ -3326,7 +3331,7 @@ func TestShutdown(t *testing.T) {
 		assert.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStop{})
+		child, err := parent.SpawnChild(ctx, "SpawnChild", &MockPostStopFailingActor{})
 		assert.NoError(t, err)
 		assert.NotNil(t, child)
 
@@ -3338,6 +3343,7 @@ func TestShutdown(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestBatchTell(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -3437,6 +3443,7 @@ func TestBatchTell(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestBatchAsk(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		ctx := context.TODO()
@@ -3454,7 +3461,7 @@ func TestBatchAsk(t *testing.T) {
 
 		pause.For(time.Second)
 		// create the actor path
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
@@ -3494,7 +3501,7 @@ func TestBatchAsk(t *testing.T) {
 
 		pause.For(time.Second)
 		// create the actor path
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 
 		pid, err := actorSystem.Spawn(ctx, "test", actor)
 		require.NoError(t, err)
@@ -3546,6 +3553,7 @@ func TestBatchAsk(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestRemoteReSpawn(t *testing.T) {
 	t.Run("With actor not found returns ErrActorNotFound", func(t *testing.T) {
 		ctx := context.TODO()
@@ -3561,7 +3569,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -3588,7 +3596,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -3615,7 +3623,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		actorRef.remoting = nil
 
@@ -3638,7 +3646,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		actorRef, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		actorRef, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 
 		remotePID, err := actorRef.RemoteReSpawn(ctx, host, remotingPort, "Exchange2")
@@ -3648,6 +3656,7 @@ func TestRemoteReSpawn(t *testing.T) {
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 	})
 }
+
 func TestRemoteStop(t *testing.T) {
 	t.Run("With actor address not found", func(t *testing.T) {
 		// create the context
@@ -3673,7 +3682,7 @@ func TestRemoteStop(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
@@ -3711,13 +3720,13 @@ func TestRemoteStop(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
 		// create an exchanger 1
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
@@ -3752,7 +3761,7 @@ func TestRemoteStop(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
@@ -3788,7 +3797,7 @@ func TestRemoteStop(t *testing.T) {
 
 		// create an exchanger 1
 		actorName1 := "Exchange1"
-		actorRef1, err := sys.Spawn(ctx, actorName1, &exchanger{})
+		actorRef1, err := sys.Spawn(ctx, actorName1, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef1)
 
@@ -3804,6 +3813,7 @@ func TestRemoteStop(t *testing.T) {
 		})
 	})
 }
+
 func TestEquals(t *testing.T) {
 	ctx := context.TODO()
 	logger := log.DiscardLogger
@@ -3818,7 +3828,7 @@ func TestEquals(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, pid1)
 
-	pid2, err := sys.Spawn(ctx, "exchange", &exchanger{})
+	pid2, err := sys.Spawn(ctx, "exchange", &MockExchanger{})
 	require.NoError(t, err)
 	assert.NotNil(t, pid2)
 
@@ -3830,6 +3840,7 @@ func TestEquals(t *testing.T) {
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
 }
+
 func TestName(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -3847,7 +3858,7 @@ func TestName(t *testing.T) {
 	pause.For(time.Second)
 
 	// create the actor ref
-	pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 	require.NoError(t, err)
 	assert.NotNil(t, pid)
 
@@ -3861,6 +3872,7 @@ func TestName(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestPipeTo(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		askTimeout := time.Minute
@@ -3880,12 +3892,12 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -3942,12 +3954,12 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -3987,12 +3999,12 @@ func TestPipeTo(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4035,12 +4047,12 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4119,12 +4131,12 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4185,12 +4197,12 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4260,12 +4272,12 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4335,12 +4347,12 @@ func TestPipeTo(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -4398,6 +4410,7 @@ func TestPipeTo(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestSendAsync(t *testing.T) {
 	t.Run("With local actor", func(t *testing.T) {
 		ctx := context.Background()
@@ -4470,12 +4483,12 @@ func TestSendAsync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -4509,12 +4522,12 @@ func TestSendAsync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -4537,6 +4550,7 @@ func TestSendAsync(t *testing.T) {
 		})
 	})
 }
+
 func TestSendSync(t *testing.T) {
 	t.Run("With local actor", func(t *testing.T) {
 		ctx := context.Background()
@@ -4613,12 +4627,12 @@ func TestSendSync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -4657,12 +4671,12 @@ func TestSendSync(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
@@ -4686,6 +4700,7 @@ func TestSendSync(t *testing.T) {
 		})
 	})
 }
+
 func TestStopChild(t *testing.T) {
 	t.Run("With Stop failure", func(t *testing.T) {
 		ctx := context.TODO()
@@ -4708,7 +4723,7 @@ func TestStopChild(t *testing.T) {
 		require.NotNil(t, parent)
 
 		// create the child actor
-		child, err := parent.SpawnChild(ctx, "SpawnChild", new(MockPostStop))
+		child, err := parent.SpawnChild(ctx, "SpawnChild", new(MockPostStopFailingActor))
 		require.NoError(t, err)
 		require.NotNil(t, child)
 		require.Len(t, parent.Children(), 1)
@@ -4722,6 +4737,7 @@ func TestStopChild(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
 func TestNewPID(t *testing.T) {
 	t.Run("With actor path not defined", func(t *testing.T) {
 		ctx := context.Background()
@@ -4743,7 +4759,7 @@ func TestNewPID(t *testing.T) {
 		baseProvider := noopmetric.NewMeterProvider()
 		otel.SetMeterProvider(&MockMeterProvider{
 			MeterProvider: baseProvider,
-			meter: &nthCallbackFailingMeter{
+			meter: &MockNthCallbackFailingMeter{
 				Meter:  baseProvider.Meter("test"),
 				failOn: 2,
 				err:    errRegister,
@@ -4768,7 +4784,7 @@ func TestNewPID(t *testing.T) {
 		baseProvider := noopmetric.NewMeterProvider()
 		otel.SetMeterProvider(&MockMeterProvider{
 			MeterProvider: baseProvider,
-			meter: instrumentFailingMeter{
+			meter: MockInstrumentFailingMeter{
 				Meter: baseProvider.Meter("test"),
 				failures: map[string]error{
 					"actor.children.count": errInstrument,
@@ -4809,7 +4825,7 @@ func TestNewPID(t *testing.T) {
 		ctx := context.Background()
 
 		prevProvider := otel.GetMeterProvider()
-		meterProvider := newManualMeterProvider()
+		meterProvider := NewMockManualMeterProvider()
 		otel.SetMeterProvider(meterProvider)
 		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
 
@@ -4826,11 +4842,11 @@ func TestNewPID(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		manual, ok := meterProvider.meter.(*manualMeter)
+		manual, ok := meterProvider.meter.(*MockManualMeter)
 		require.True(t, ok)
 		require.NotEmpty(t, manual.callbacks)
 
-		observer := &manualObserver{}
+		observer := &MockManualObserver{}
 		for _, cb := range manual.callbacks {
 			require.NoError(t, cb(ctx, observer))
 		}
@@ -4840,7 +4856,7 @@ func TestNewPID(t *testing.T) {
 		ctx := context.Background()
 
 		prevProvider := otel.GetMeterProvider()
-		meterProvider := newRecordingMeterProvider()
+		meterProvider := NewMockRecordingMeterProvider()
 		otel.SetMeterProvider(meterProvider)
 		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
 
@@ -4862,7 +4878,7 @@ func TestNewPID(t *testing.T) {
 		recording := meterProvider.meter
 		require.Len(t, recording.callbacks, 3)
 
-		observer := &attrObserver{}
+		observer := &MockAttrObserver{}
 		for _, cb := range recording.callbacks {
 			require.NoError(t, cb(ctx, observer))
 		}
@@ -4874,7 +4890,7 @@ func TestNewPID(t *testing.T) {
 		// the aggregated callback stops observing the actor once the death
 		// watch removes it from the tree; no per-actor registration exists, so
 		// nothing needs unregistering on shutdown.
-		observer = &attrObserver{}
+		observer = &MockAttrObserver{}
 		for _, cb := range recording.callbacks {
 			require.NoError(t, cb(ctx, observer))
 		}
@@ -4899,6 +4915,7 @@ func TestLogger(t *testing.T) {
 		buffer.Reset()
 	})
 }
+
 func TestDeadletterCountMetric(t *testing.T) {
 	ctx := context.TODO()
 	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -4911,7 +4928,7 @@ func TestDeadletterCountMetric(t *testing.T) {
 	pause.For(time.Second)
 
 	// create the black hole actor
-	actor := &MockUnhandled{}
+	actor := &MockUnhandledActor{}
 	actorName := "actorName"
 	actorRef, err := sys.Spawn(ctx, actorName, actor)
 	assert.NoError(t, err)
@@ -4961,7 +4978,7 @@ func TestDeadletterCountNoPanicWhenAskFails(t *testing.T) {
 
 	// an unexpected reply type from the deadletter actor must also report 0
 	// rather than panicking on the type assertion.
-	wrongResponder, err := sys.Spawn(ctx, "wrongResponder", &wrongDeadletterResponder{})
+	wrongResponder, err := sys.Spawn(ctx, "wrongResponder", &MockMismatchedReplyActor{})
 	require.NoError(t, err)
 
 	system, ok := sys.(*actorSystem)
@@ -5026,6 +5043,7 @@ func TestWatch(t *testing.T) {
 	pause.For(time.Second)
 	assert.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestWatchUnWatchRemote(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -5303,6 +5321,7 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	require.NoError(t, cid.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -5333,6 +5352,7 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	require.NoError(t, cid.Shutdown(ctx))
 	require.NoError(t, actorSystem.Stop(ctx))
 }
+
 func TestReinstate(t *testing.T) {
 	t.Run("When PID is not started", func(t *testing.T) {
 		ctx := context.TODO()
@@ -5588,7 +5608,7 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 }
 
 func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
-	pid := MockPassivationPID(t, "system-stopping", passivation.NewTimeBasedStrategy(time.Second))
+	pid := newPassivationPID(t, "system-stopping", passivation.NewTimeBasedStrategy(time.Second))
 
 	sys := &actorSystem{}
 	sys.shuttingDown.Store(true)
@@ -5601,7 +5621,7 @@ func TestPIDTryPassivationSkipsWhenSystemStopping(t *testing.T) {
 }
 
 func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
-	pid := MockPassivationPID(t, "skip-flag", passivation.NewTimeBasedStrategy(time.Second))
+	pid := newPassivationPID(t, "skip-flag", passivation.NewTimeBasedStrategy(time.Second))
 	pid.setState(passivationSkipNextState, true)
 
 	require.True(t, pid.isStateSet(passivationSkipNextState))
@@ -5610,7 +5630,7 @@ func TestPIDTryPassivationSkipsWhenSkipFlagSet(t *testing.T) {
 }
 
 func TestPIDTryPassivationSkipsWhenStoppingFlagRaised(t *testing.T) {
-	pid := MockPassivationPID(t, "stopping-flag", passivation.NewTimeBasedStrategy(time.Second))
+	pid := newPassivationPID(t, "stopping-flag", passivation.NewTimeBasedStrategy(time.Second))
 	pid.setState(stoppingState, true)
 
 	require.False(t, pid.tryPassivation("already stopping"))
@@ -6076,6 +6096,7 @@ func TestReinstateNamed(t *testing.T) {
 		provider.AssertExpectations(t)
 	})
 }
+
 func TestPipeToName(t *testing.T) {
 	t.Run("With happy path", func(t *testing.T) {
 		askTimeout := time.Minute
@@ -6085,27 +6106,27 @@ func TestPipeToName(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
 		// create actor1
-		pid1, err := node1.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := node1.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := node3.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := node3.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6164,12 +6185,12 @@ func TestPipeToName(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6212,12 +6233,12 @@ func TestPipeToName(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6260,12 +6281,12 @@ func TestPipeToName(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6330,17 +6351,17 @@ func TestPipeToName(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -6350,12 +6371,12 @@ func TestPipeToName(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := node1.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := node1.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := node2.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := node2.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6403,17 +6424,17 @@ func TestPipeToName(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -6423,12 +6444,12 @@ func TestPipeToName(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := node1.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := node1.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := node2.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := node2.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6499,12 +6520,12 @@ func TestPipeToName(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -6574,12 +6595,12 @@ func TestPipeToName(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &exchanger{})
+		pid2, err := actorSystem.Spawn(ctx, "Exchange2", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
 
@@ -7296,13 +7317,6 @@ func TestPIDMethodsWithTwoActorSystems(t *testing.T) {
 	})
 }
 
-func newBareSupervisor(strategy supervisor.Strategy) *supervisor.Supervisor {
-	supv := supervisor.NewSupervisor()
-	supv.Reset()
-	supervisor.WithStrategy(strategy)(supv)
-	return supv
-}
-
 func TestSpawnChildPublishFailure(t *testing.T) {
 	// a child spawn whose cluster publication fails must return the error,
 	// leave no child behind and publish no ActorChildCreated event
@@ -7724,31 +7738,6 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.Equal(t, types.Name(NewMockActor()), aggregated.metricKind())
 }
 
-// restartMarkerActor records whether the restarting state bit was raised on its
-// own PID at the moment PostStop ran. The teardown embedded in a restart runs
-// PostStop, so that is the observation point for the marker restartSubtree
-// installs.
-type restartMarkerActor struct {
-	self         atomic.Pointer[PID]
-	markedAtStop atomic.Bool
-}
-
-var _ Actor = (*restartMarkerActor)(nil)
-
-// PreStart is a no-op: the actor carries no state to initialize.
-func (a *restartMarkerActor) PreStart(*Context) error { return nil }
-
-// Receive ignores every message; the actor exists only for its stop hook.
-func (a *restartMarkerActor) Receive(*ReceiveContext) {}
-
-// PostStop samples the restarting bit on the PID the test handed the actor.
-func (a *restartMarkerActor) PostStop(*Context) error {
-	if pid := a.self.Load(); pid != nil {
-		a.markedAtStop.Store(pid.isStateSet(restartingState))
-	}
-	return nil
-}
-
 // TestRestartMarker asserts that restartSubtree flags the PID as restarting for
 // the duration of the restart, so the teardown it performs is distinguishable
 // from a plain stop, and that the flag is cleared once the restart returns.
@@ -7761,7 +7750,7 @@ func TestRestartMarker(t *testing.T) {
 
 	pause.For(time.Second)
 
-	marker := &restartMarkerActor{}
+	marker := &MockRestartMarkerActor{}
 	pid, err := actorSystem.Spawn(ctx, "marker", marker, WithLongLived())
 	require.NoError(t, err)
 	require.NotNil(t, pid)
@@ -7790,7 +7779,7 @@ func TestUnhandledCount(t *testing.T) {
 
 	pause.For(time.Second)
 
-	pid, err := actorSystem.Spawn(ctx, "unhandled", &MockUnhandled{}, WithLongLived())
+	pid, err := actorSystem.Spawn(ctx, "unhandled", &MockUnhandledActor{}, WithLongLived())
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -7822,46 +7811,6 @@ func TestUnhandledCount(t *testing.T) {
 	require.NoError(t, actorSystem.Stop(ctx))
 }
 
-// mailboxBlockingActor holds the processing turn hostage on the first user
-// message it receives, until the test releases it. Every message sent after that
-// one stays queued behind it, which is what lets a test read the mailbox size
-// counter at rest instead of racing the dispatcher for it.
-type mailboxBlockingActor struct {
-	entered chan struct{}
-	release chan struct{}
-	once    sync.Once
-}
-
-var _ Actor = (*mailboxBlockingActor)(nil)
-
-// newMailboxBlockingActor creates a blocking actor with both of its
-// synchronization channels ready.
-func newMailboxBlockingActor() *mailboxBlockingActor {
-	return &mailboxBlockingActor{
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-	}
-}
-
-// PreStart is a no-op: the actor carries no state to initialize.
-func (a *mailboxBlockingActor) PreStart(*Context) error { return nil }
-
-// Receive parks the turn on the first user message and lets every later one
-// through untouched.
-func (a *mailboxBlockingActor) Receive(ctx *ReceiveContext) {
-	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
-		return
-	}
-
-	a.once.Do(func() {
-		close(a.entered)
-		<-a.release
-	})
-}
-
-// PostStop is a no-op: the actor owns no resource to release.
-func (a *mailboxBlockingActor) PostStop(*Context) error { return nil }
-
 // TestMailboxSize asserts the semantics of the per-PID mailbox counters that
 // back actor.mailbox.size: one enqueue counted per accepted user message, one
 // dequeue counted per message the turn takes out, nothing counted for a refused
@@ -7878,7 +7827,7 @@ func TestMailboxSize(t *testing.T) {
 
 		pause.For(time.Second)
 
-		blocking := newMailboxBlockingActor()
+		blocking := NewMockMailboxBlockingActor()
 		pid, err := actorSystem.Spawn(ctx, "blocking", blocking, WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -7922,7 +7871,7 @@ func TestMailboxSize(t *testing.T) {
 
 		pause.For(time.Second)
 
-		blocking := newMailboxBlockingActor()
+		blocking := NewMockMailboxBlockingActor()
 		pid, err := actorSystem.Spawn(ctx, "suspended", blocking, WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -7965,7 +7914,7 @@ func TestMailboxSize(t *testing.T) {
 
 		// this mailbox accepts nothing, so every message is refused and turned
 		// into a deadletter instead of waiting in a queue.
-		pid, err := actorSystem.Spawn(ctx, "refusing", NewMockActor(), WithLongLived(), WithMailbox(NewMockErrorMailbox()))
+		pid, err := actorSystem.Spawn(ctx, "refusing", NewMockActor(), WithLongLived(), WithMailbox(NewMockFailingMailbox()))
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -8031,7 +7980,7 @@ func TestMailboxSize(t *testing.T) {
 
 		pause.For(time.Second)
 
-		blocking := newMailboxBlockingActor()
+		blocking := NewMockMailboxBlockingActor()
 		pid, err := actorSystem.Spawn(ctx, "unmetered", blocking, WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)

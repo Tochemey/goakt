@@ -31,7 +31,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	otelmetric "go.opentelemetry.io/otel/metric"
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -39,31 +38,6 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// callbackCapturingMeter records the metric callbacks a metrics-enabled system
-// registers so a test can drive a full scrape by invoking them directly.
-type callbackCapturingMeter struct {
-	otelmetric.Meter
-	callbacks []otelmetric.Callback
-}
-
-// RegisterCallback captures the callback and returns a no-op registration.
-func (m *callbackCapturingMeter) RegisterCallback(cb otelmetric.Callback, _ ...otelmetric.Observable) (otelmetric.Registration, error) {
-	m.callbacks = append(m.callbacks, cb)
-	return noopmetric.Registration{}, nil
-}
-
-// callbackCapturingMeterProvider hands out its callbackCapturingMeter regardless
-// of the requested meter name.
-type callbackCapturingMeterProvider struct {
-	otelmetric.MeterProvider
-	meter *callbackCapturingMeter
-}
-
-// Meter implements otelmetric.MeterProvider.
-func (p *callbackCapturingMeterProvider) Meter(string, ...otelmetric.MeterOption) otelmetric.Meter {
-	return p.meter
-}
 
 // TestRegisterMetricsAsksDeadletterOncePerScrape guards the fix for issue #1322:
 // the per-actor metrics callback must ask the deadletter actor for its counts
@@ -74,9 +48,9 @@ func TestRegisterMetricsAsksDeadletterOncePerScrape(t *testing.T) {
 	ctx := context.TODO()
 
 	delegate := noopmetric.NewMeterProvider()
-	meter := &callbackCapturingMeter{Meter: delegate.Meter("capture")}
+	meter := &MockCallbackCapturingMeter{Meter: delegate.Meter("capture")}
 	previous := otel.GetMeterProvider()
-	otel.SetMeterProvider(&callbackCapturingMeterProvider{MeterProvider: delegate, meter: meter})
+	otel.SetMeterProvider(&MockCallbackCapturingMeterProvider{MeterProvider: delegate, meter: meter})
 	defer otel.SetMeterProvider(previous)
 
 	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
@@ -126,7 +100,7 @@ func TestRegisterMetricsObservesRuntimeCounters(t *testing.T) {
 	ctx := context.Background()
 
 	previous := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 
@@ -134,7 +108,7 @@ func TestRegisterMetricsObservesRuntimeCounters(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sys.Start(ctx))
 
-	pid, err := sys.Spawn(ctx, "blackhole", &MockUnhandled{}, WithLongLived())
+	pid, err := sys.Spawn(ctx, "blackhole", &MockUnhandledActor{}, WithLongLived())
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -167,7 +141,7 @@ func TestRegisterMetricsObservesRuntimeCounters(t *testing.T) {
 		types.NameOf(new(testpb.TestReply)): 2,
 	}, deadlettersByMessageType(observer.records, "blackhole"))
 
-	kind := types.Name(&MockUnhandled{})
+	kind := types.Name(&MockUnhandledActor{})
 	lifecycle := lifecycleCountsByKind(observer.records, kind)
 	require.EqualValues(t, 1, lifecycle["actor.spawned.count"])
 	require.EqualValues(t, 0, lifecycle["actor.stopped.count"])
@@ -199,7 +173,7 @@ func TestRegisterMetricsObservesSubsystemCounters(t *testing.T) {
 	ctx := context.Background()
 
 	previous := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 
@@ -247,18 +221,6 @@ func TestRegisterMetricsObservesSubsystemCounters(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 }
 
-// recordValue returns the value the scrape observed for the named instrument,
-// and whether the instrument was observed at all.
-func recordValue(records []attrObserveRecord, instrument string) (int64, bool) {
-	for _, record := range records {
-		if record.instrument == instrument {
-			return record.value, true
-		}
-	}
-
-	return 0, false
-}
-
 // TestRegisterMetricsAggregatesPerActorKind drives one full collection over a
 // system started with WithLowCardinalityMetrics and asserts that the per-actor
 // instruments are reported once per actor kind: the counters summed over the
@@ -270,7 +232,7 @@ func TestRegisterMetricsAggregatesPerActorKind(t *testing.T) {
 	ctx := context.Background()
 
 	previous := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 
@@ -299,7 +261,7 @@ func TestRegisterMetricsAggregatesPerActorKind(t *testing.T) {
 	// unhandled total and the dead-letter breakdown.
 	blackholes := make([]*PID, 0, 2)
 	for i := range 2 {
-		blackhole, err := sys.Spawn(ctx, fmt.Sprintf("blackhole-%d", i), &MockUnhandled{}, WithLongLived())
+		blackhole, err := sys.Spawn(ctx, fmt.Sprintf("blackhole-%d", i), &MockUnhandledActor{}, WithLongLived())
 		require.NoError(t, err)
 		blackholes = append(blackholes, blackhole)
 	}
@@ -372,7 +334,7 @@ func TestRegisterMetricsAggregatesPerActorKind(t *testing.T) {
 	require.Zero(t, deadletters)
 	require.Empty(t, deadlettersByKindAndMessageType(observer.records, workerKind))
 
-	blackholeKind := types.Name(&MockUnhandled{})
+	blackholeKind := types.Name(&MockUnhandledActor{})
 	blackholeCounts := aggregatedCountsByKind(observer.records, blackholeKind)
 
 	require.EqualValues(t, 4, blackholeCounts["actor.processed.count"])
@@ -423,7 +385,7 @@ func TestRegisterMetricsObservesMailboxSize(t *testing.T) {
 	ctx := context.Background()
 
 	previous := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 
@@ -433,11 +395,11 @@ func TestRegisterMetricsObservesMailboxSize(t *testing.T) {
 
 	// both actors park their turn on their first message, so everything sent
 	// after it stays queued and the scrape reads a backlog at rest.
-	backlogged := newMailboxBlockingActor()
+	backlogged := NewMockMailboxBlockingActor()
 	backloggedPID, err := sys.Spawn(ctx, "backlogged", backlogged, WithLongLived())
 	require.NoError(t, err)
 
-	halted := newMailboxBlockingActor()
+	halted := NewMockMailboxBlockingActor()
 	haltedPID, err := sys.Spawn(ctx, "halted", halted, WithLongLived())
 	require.NoError(t, err)
 
@@ -501,7 +463,7 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 	ctx := context.Background()
 
 	previous := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(previous) })
 
@@ -511,11 +473,11 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sys.Start(ctx))
 
-	running := newMailboxBlockingActor()
+	running := NewMockMailboxBlockingActor()
 	runningPID, err := sys.Spawn(ctx, "worker-0", running, WithLongLived())
 	require.NoError(t, err)
 
-	halted := newMailboxBlockingActor()
+	halted := NewMockMailboxBlockingActor()
 	haltedPID, err := sys.Spawn(ctx, "worker-1", halted, WithLongLived())
 	require.NoError(t, err)
 
@@ -539,7 +501,7 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 
 	// a second kind whose only actor ends up suspended, so no member of it
 	// passes the full gate
-	idlePID, err := sys.Spawn(ctx, "blackhole", &MockUnhandled{}, WithLongLived())
+	idlePID, err := sys.Spawn(ctx, "blackhole", &MockUnhandledActor{}, WithLongLived())
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
@@ -555,7 +517,7 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 
 	observer := scrapeOnce(t, ctx, meterProvider)
 
-	workerKind := types.Name(newMailboxBlockingActor())
+	workerKind := types.Name(NewMockMailboxBlockingActor())
 	workerCounts := aggregatedCountsByKind(observer.records, workerKind)
 
 	// the suspended member's backlog folds into the kind's total even though the
@@ -565,7 +527,7 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 	require.Contains(t, workerCounts, "actor.processed.count")
 
 	// the kind with no live actor left reports its mailbox and nothing else
-	idleCounts := aggregatedCountsByKind(observer.records, types.Name(&MockUnhandled{}))
+	idleCounts := aggregatedCountsByKind(observer.records, types.Name(&MockUnhandledActor{}))
 	require.Contains(t, idleCounts, "actor.mailbox.size")
 	require.NotContains(t, idleCounts, "actor.processed.count")
 	require.NotContains(t, idleCounts, "actor.uptime")
@@ -574,169 +536,4 @@ func TestRegisterMetricsAggregatesMailboxSizePerKind(t *testing.T) {
 	close(halted.release)
 
 	require.NoError(t, sys.Stop(ctx))
-}
-
-// mailboxSizesByActor returns the actor.mailbox.size observations of a default
-// mode scrape, indexed by the actor they name.
-func mailboxSizesByActor(records []attrObserveRecord) map[string]int64 {
-	sizes := make(map[string]int64)
-
-	for _, record := range records {
-		if record.instrument != "actor.mailbox.size" {
-			continue
-		}
-
-		if name, ok := record.attrs.Value(attribute.Key("actor.name")); ok {
-			sizes[name.AsString()] = record.value
-		}
-	}
-
-	return sizes
-}
-
-// scrapeOnce invokes every registered metrics callback once and returns the
-// observer that captured the resulting observations.
-func scrapeOnce(t *testing.T, ctx context.Context, provider *recordingMeterProvider) *attrObserver {
-	t.Helper()
-
-	observer := &attrObserver{}
-	for _, callback := range provider.meter.callbacks {
-		require.NoError(t, callback(ctx, observer))
-	}
-
-	return observer
-}
-
-// deadlettersByMessageType returns the actor.deadletters.count observations
-// made for the named actor, indexed by their message.type attribute.
-func deadlettersByMessageType(records []attrObserveRecord, actorName string) map[string]int64 {
-	counts := make(map[string]int64)
-
-	for _, record := range records {
-		if record.instrument != "actor.deadletters.count" {
-			continue
-		}
-
-		name, ok := record.attrs.Value(attribute.Key("actor.name"))
-		if !ok || name.AsString() != actorName {
-			continue
-		}
-
-		if messageType, ok := record.attrs.Value(attribute.Key("message.type")); ok {
-			counts[messageType.AsString()] = record.value
-		}
-	}
-
-	return counts
-}
-
-// aggregatedRecords returns the observations a low cardinality scrape made for
-// the given actor kind, excluding the dead-letter observations broken down by
-// message type, whose values would otherwise overwrite one another.
-func aggregatedRecords(records []attrObserveRecord, kind string) []attrObserveRecord {
-	out := make([]attrObserveRecord, 0, len(records))
-
-	for _, record := range records {
-		value, ok := record.attrs.Value(attribute.Key("actor.kind"))
-		if !ok || value.AsString() != kind {
-			continue
-		}
-
-		if _, typed := record.attrs.Value(attribute.Key("message.type")); typed {
-			continue
-		}
-
-		out = append(out, record)
-	}
-
-	return out
-}
-
-// aggregatedCountsByKind indexes a kind's aggregated observations by instrument
-// name. In the low cardinality mode the per-actor instruments carry the same
-// actor.system and actor.kind attribute set as the lifecycle counters, so both
-// land in the same index under their own instrument names.
-func aggregatedCountsByKind(records []attrObserveRecord, kind string) map[string]int64 {
-	counts := make(map[string]int64)
-	for _, record := range aggregatedRecords(records, kind) {
-		counts[record.instrument] = record.value
-	}
-
-	return counts
-}
-
-// aggregatedAttributes returns the attribute set carried by a kind's aggregated
-// observations.
-func aggregatedAttributes(records []attrObserveRecord, kind string) attribute.Set {
-	for _, record := range aggregatedRecords(records, kind) {
-		return record.attrs
-	}
-
-	return *attribute.EmptySet()
-}
-
-// deadlettersByKindAndMessageType returns the actor.deadletters.count
-// observations made for the given actor kind, indexed by their message.type
-// attribute.
-func deadlettersByKindAndMessageType(records []attrObserveRecord, kind string) map[string]int64 {
-	counts := make(map[string]int64)
-
-	for _, record := range records {
-		if record.instrument != "actor.deadletters.count" {
-			continue
-		}
-
-		value, ok := record.attrs.Value(attribute.Key("actor.kind"))
-		if !ok || value.AsString() != kind {
-			continue
-		}
-
-		if messageType, ok := record.attrs.Value(attribute.Key("message.type")); ok {
-			counts[messageType.AsString()] = record.value
-		}
-	}
-
-	return counts
-}
-
-// lifecycleRecords returns the observations carrying the given actor.kind and
-// no actor.name, which is exactly the system-level per-kind lifecycle series.
-func lifecycleRecords(records []attrObserveRecord, kind string) []attrObserveRecord {
-	out := make([]attrObserveRecord, 0, len(records))
-
-	for _, record := range records {
-		value, ok := record.attrs.Value(attribute.Key("actor.kind"))
-		if !ok || value.AsString() != kind {
-			continue
-		}
-
-		if _, named := record.attrs.Value(attribute.Key("actor.name")); named {
-			continue
-		}
-
-		out = append(out, record)
-	}
-
-	return out
-}
-
-// lifecycleCountsByKind indexes the per-kind lifecycle observations by
-// instrument name.
-func lifecycleCountsByKind(records []attrObserveRecord, kind string) map[string]int64 {
-	counts := make(map[string]int64)
-	for _, record := range lifecycleRecords(records, kind) {
-		counts[record.instrument] = record.value
-	}
-
-	return counts
-}
-
-// lifecycleAttributes returns the attribute set carried by the per-kind
-// lifecycle observations of the given kind.
-func lifecycleAttributes(records []attrObserveRecord, kind string) attribute.Set {
-	for _, record := range lifecycleRecords(records, kind) {
-		return record.attrs
-	}
-
-	return *attribute.EmptySet()
 }

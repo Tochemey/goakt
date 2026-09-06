@@ -45,17 +45,17 @@ func TestTopicActor(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		cl2, sd2 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		cl3, sd3 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
@@ -123,17 +123,17 @@ func TestTopicActor(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
 		// create and start system cluster
-		cl2, sd2 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 
 		// create and start system cluster
-		cl3, sd3 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
@@ -219,7 +219,7 @@ func TestTopicActor(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
@@ -723,13 +723,13 @@ func TestTopicActor(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl1)
 
-		cl2, sd2 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl2)
 
-		cl3, sd3 := testNATs(t, srv.Addr().String(), withTestPubSub())
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
 		require.NotNil(t, cl3)
 
 		actor1, err := cl1.Spawn(ctx, "actor1", NewMockSubscriber())

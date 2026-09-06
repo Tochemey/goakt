@@ -31,17 +31,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 )
 
-const (
-	testRegistrySystemName = "TestSys"
-	testRegistryPidA       = "goakt://TestSys@local-host:0/a"
-	testRegistryPidB       = "goakt://TestSys@local-host:0/b"
-)
-
-func newTestAddress(t *testing.T, name, host string, port int) *address.Address {
-	t.Helper()
-	return address.New(name, testRegistrySystemName, host, port)
-}
-
 func TestRemoteWatchRegistry_New(t *testing.T) {
 	r := newRemoteWatchRegistry()
 	require.NotNil(t, r)

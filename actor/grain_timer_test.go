@@ -36,61 +36,6 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// everySecondCron fires on every second, the smallest granularity the Quartz
-// cron format supports.
-const everySecondCron = "* * * ? * *"
-
-// newTestGrainTimers returns a registry whose deliveries land on the returned
-// channel. The channel is buffered so a stray late fire can never block a timer
-// goroutine after a test finishes.
-func newTestGrainTimers() (*grainTimers, chan *grainTimerEntry) {
-	deliveries := make(chan *grainTimerEntry, 16)
-	timers := newGrainTimers(func(entry *grainTimerEntry) {
-		deliveries <- entry
-	})
-	return timers, deliveries
-}
-
-// entryOf fetches the live entry registered under reference.
-func entryOf(t *testing.T, timers *grainTimers, reference string) *grainTimerEntry {
-	t.Helper()
-	timers.mu.Lock()
-	defer timers.mu.Unlock()
-
-	entry, ok := timers.entries[reference]
-	require.True(t, ok)
-	return entry
-}
-
-// entriesLen reports the number of registered entries.
-func entriesLen(timers *grainTimers) int {
-	timers.mu.Lock()
-	defer timers.mu.Unlock()
-	return len(timers.entries)
-}
-
-// expectDelivery waits for one delivery.
-func expectDelivery(t *testing.T, deliveries chan *grainTimerEntry) *grainTimerEntry {
-	t.Helper()
-	select {
-	case entry := <-deliveries:
-		return entry
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected a timer tick delivery")
-		return nil
-	}
-}
-
-// expectNoDelivery asserts that nothing is delivered within the given window.
-func expectNoDelivery(t *testing.T, deliveries chan *grainTimerEntry, window time.Duration) {
-	t.Helper()
-	select {
-	case entry := <-deliveries:
-		t.Fatalf("unexpected timer tick delivery: reference=%s", entry.reference)
-	case <-time.After(window):
-	}
-}
-
 func TestGrainTimersScheduleOnce(t *testing.T) {
 	timers, deliveries := newTestGrainTimers()
 	timers.start()
@@ -346,150 +291,6 @@ func TestGrainTimersKeepAlivePropagates(t *testing.T) {
 	require.False(t, entryOf(t, timers, reference).keepAlive)
 }
 
-// timerProbeGrain records every message OnReceive sees. The messages "panic" and
-// "fail" make the handler panic and report an error respectively, to exercise the
-// tick failure paths. The optional hooks run inside OnActivate and OnDeactivate to
-// exercise timer registration from the lifecycle methods.
-type timerProbeGrain struct {
-	received     chan any
-	onActivate   func(*GrainProps) error
-	onDeactivate func(*GrainProps) error
-	// onReceive, when set and returning true, handles the message in place of
-	// the default behavior.
-	onReceive func(*GrainContext) bool
-}
-
-var _ Grain = (*timerProbeGrain)(nil)
-
-func newTimerProbeGrain() *timerProbeGrain {
-	return &timerProbeGrain{received: make(chan any, 64)}
-}
-
-func (g *timerProbeGrain) OnActivate(_ context.Context, props *GrainProps) error {
-	if g.onActivate != nil {
-		return g.onActivate(props)
-	}
-	return nil
-}
-
-func (g *timerProbeGrain) OnDeactivate(_ context.Context, props *GrainProps) error {
-	if g.onDeactivate != nil {
-		return g.onDeactivate(props)
-	}
-	return nil
-}
-
-func (g *timerProbeGrain) OnReceive(ctx *GrainContext) {
-	message := ctx.Message()
-
-	select {
-	case g.received <- message:
-	default:
-	}
-
-	if g.onReceive != nil && g.onReceive(ctx) {
-		return
-	}
-
-	switch message {
-	case "panic":
-		panic("boom")
-	case "fail":
-		ctx.Err(errors.New("boom"))
-	default:
-		ctx.NoErr()
-	}
-}
-
-// expectGrainMessage waits for the grain to receive one message.
-func expectGrainMessage(t *testing.T, grain *timerProbeGrain) any {
-	t.Helper()
-	select {
-	case message := <-grain.received:
-		return message
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected the grain to receive a message")
-		return nil
-	}
-}
-
-// expectNoGrainMessage asserts the grain receives nothing within the given window.
-func expectNoGrainMessage(t *testing.T, grain *timerProbeGrain, window time.Duration) {
-	t.Helper()
-	select {
-	case message := <-grain.received:
-		t.Fatalf("unexpected message received by the grain: %v", message)
-	case <-time.After(window):
-	}
-}
-
-// grainTimerFixture bundles everything the grain timer end-to-end tests interact with.
-type grainTimerFixture struct {
-	system   ActorSystem
-	identity *GrainIdentity
-	grain    *timerProbeGrain
-	pid      *grainPID
-	// props exposes the public scheduling API against the spawned grain, the
-	// same surface OnActivate and OnDeactivate receive.
-	props *GrainProps
-}
-
-// spawnTimerProbeGrain starts a standalone actor system and activates a probe
-// grain with the given options.
-func spawnTimerProbeGrain(t *testing.T, opts ...GrainOption) *grainTimerFixture {
-	t.Helper()
-	ctx := context.Background()
-
-	sys, err := NewActorSystem("grainTimersSys", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, sys.Start(ctx))
-	t.Cleanup(func() { _ = sys.Stop(context.Background()) })
-
-	grain := newTimerProbeGrain()
-	identity, err := sys.GrainIdentity(ctx, "timer-probe", func(context.Context) (Grain, error) {
-		return grain, nil
-	}, opts...)
-	require.NoError(t, err)
-
-	pid, ok := sys.(*actorSystem).grains.Get(identity.String())
-	require.True(t, ok)
-	require.True(t, pid.isActive())
-
-	return &grainTimerFixture{
-		system:   sys,
-		identity: identity,
-		grain:    grain,
-		pid:      pid,
-		props:    newGrainProps(identity, sys, nil, pid),
-	}
-}
-
-// newTestGrainPID builds a minimal grainPID whose activate/deactivate can be
-// driven directly, with a single fast activation attempt.
-func newTestGrainPID(grain Grain, name string) *grainPID {
-	config := newGrainConfig()
-	config.initMaxRetries.Store(1)
-	config.initTimeout.Store(100 * time.Millisecond)
-
-	return &grainPID{
-		grain:        grain,
-		identity:     newGrainIdentity(grain, name),
-		logger:       log.DiscardLogger,
-		config:       config,
-		dependencies: config.dependencies,
-	}
-}
-
-// entryTimerStarted reports whether the entry registered under reference has its
-// fire trigger armed.
-func entryTimerStarted(timers *grainTimers, reference string) bool {
-	timers.mu.Lock()
-	defer timers.mu.Unlock()
-
-	entry, ok := timers.entries[reference]
-	return ok && entry.timer != nil
-}
-
 func TestGrainTimerScheduleOnceDeliversToGrain(t *testing.T) {
 	fx := spawnTimerProbeGrain(t)
 
@@ -587,7 +388,7 @@ func TestGrainTimerTickErrorKeepsTimerRunning(t *testing.T) {
 
 func TestGrainActivationFailureClosesTimers(t *testing.T) {
 	ctx := context.Background()
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := newTestGrainPID(grain, "activation-failure")
 
 	// OnActivate registers a timer and then fails: the timer must never fire
@@ -608,7 +409,7 @@ func TestGrainActivationFailureClosesTimers(t *testing.T) {
 
 func TestGrainActivationPanicClosesTimers(t *testing.T) {
 	ctx := context.Background()
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := newTestGrainPID(grain, "activation-panic")
 
 	grain.onActivate = func(props *GrainProps) error {
@@ -627,7 +428,7 @@ func TestGrainActivationPanicClosesTimers(t *testing.T) {
 
 func TestGrainTimerRegisteredInOnActivateStaysDormantUntilActive(t *testing.T) {
 	ctx := context.Background()
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := newTestGrainPID(grain, "dormant-until-active")
 
 	// registered from OnActivate the timer must stay dormant: were it started
@@ -709,7 +510,7 @@ func TestGrainTimerScheduledFromOnActivate(t *testing.T) {
 	t.Cleanup(func() { _ = sys.Stop(context.Background()) })
 
 	// the canonical heartbeat pattern: OnActivate starts the periodic timer
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	grain.onActivate = func(props *GrainProps) error {
 		_, err := props.Schedule("activate-beat", 30*time.Millisecond)
 		return err
@@ -810,7 +611,7 @@ func TestGrainContextTimersOnDeactivatedGrain(t *testing.T) {
 }
 
 func TestGrainContextTimersOnNeverActivatedGrain(t *testing.T) {
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := newTestGrainPID(grain, "never-activated")
 
 	// a grain process that never activated has no registry to schedule into
@@ -837,7 +638,7 @@ func TestGrainPIDDeliverTimerTickInactiveGrain(t *testing.T) {
 }
 
 func TestGrainPIDDeliverTimerTickMailboxFull(t *testing.T) {
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
 		grain:    grain,
 		identity: newGrainIdentity(grain, "mailbox-full"),
@@ -853,7 +654,7 @@ func TestGrainPIDDeliverTimerTickMailboxFull(t *testing.T) {
 }
 
 func TestGrainPIDReportTimerTickFailure(t *testing.T) {
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
 		grain:    grain,
 		identity: newGrainIdentity(grain, "tick-failure"),
@@ -873,7 +674,7 @@ func TestGrainPIDReportTimerTickFailure(t *testing.T) {
 }
 
 func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
 		grain:    grain,
 		identity: newGrainIdentity(grain, "drops"),
@@ -901,7 +702,7 @@ func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
 }
 
 func TestGrainPIDHandleTimerTickActivityMarking(t *testing.T) {
-	grain := newTimerProbeGrain()
+	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
 		grain:    grain,
 		identity: newGrainIdentity(grain, "activity"),

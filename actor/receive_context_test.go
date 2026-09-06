@@ -46,7 +46,7 @@ func TestReceiveContext(t *testing.T) {
 	t.Run("With behaviors handling", func(t *testing.T) {
 		ctx := context.TODO()
 		// create the actor path
-		actor := &MockBehavior{}
+		actor := &MockBehaviorActor{}
 		ports := dynaport.Get(1)
 
 		actorSystem, err := NewActorSystem("sys",
@@ -130,7 +130,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -144,7 +144,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -169,7 +169,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -183,7 +183,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -210,7 +210,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -224,7 +224,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -252,7 +252,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -266,7 +266,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -306,12 +306,12 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &MockExchanger{})
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -371,7 +371,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -422,13 +422,13 @@ func TestReceiveContext(t *testing.T) {
 
 		// create an exchanger two
 		actorName2 := "Exchange2"
-		actorRef2, err := sys.Spawn(ctx, actorName2, &exchanger{})
+		actorRef2, err := sys.Spawn(ctx, actorName2, &MockExchanger{})
 
 		require.NoError(t, err)
 		assert.NotNil(t, actorRef2)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		sys2, err := NewActorSystem("sys", WithLogger(logger),
 			WithRemote(remote.NewConfig(host, nodePorts[1])))
 
@@ -491,7 +491,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		ports := dynaport.Get(1)
 		sys2, err := NewActorSystem("sys", WithLogger(logger),
 			WithRemote(remote.NewConfig(host, ports[0])))
@@ -554,7 +554,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		ports := dynaport.Get(1)
 		sys2, err := NewActorSystem("sys", WithLogger(logger),
 			WithRemote(remote.NewConfig(host, ports[0])))
@@ -616,7 +616,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		ports := dynaport.Get(1)
 
 		sys2, err := NewActorSystem("sys", WithLogger(logger),
@@ -664,7 +664,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -1123,7 +1123,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &MockPostStop{}
+		actor1 := &MockPostStopFailingActor{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1154,19 +1154,19 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actorA
-		actorA := &exchanger{}
+		actorA := &MockExchanger{}
 		pidA, err := actorSystem.Spawn(ctx, "actorA", actorA)
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// create actorC
-		actorC := &exchanger{}
+		actorC := &MockExchanger{}
 		pidC, err := actorSystem.Spawn(ctx, "actorC", actorC)
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &MockForward{
+		actorB := &MockForwardingActor{
 			actorRef: pidC,
 		}
 
@@ -1208,7 +1208,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1281,13 +1281,13 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		// nolint
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 
@@ -1351,7 +1351,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -1402,7 +1402,7 @@ func TestReceiveContext(t *testing.T) {
 
 		pause.For(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+		pid, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -1438,7 +1438,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1452,7 +1452,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1479,7 +1479,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -1494,7 +1494,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1521,7 +1521,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1535,7 +1535,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1565,7 +1565,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1579,7 +1579,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1613,7 +1613,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
@@ -1628,7 +1628,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -1835,7 +1835,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 
 		require.NoError(t, err)
@@ -1949,7 +1949,7 @@ func TestReceiveContext(t *testing.T) {
 		actorName2 := "Exchange2"
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := sys.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -1988,7 +1988,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -2024,7 +2024,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -2057,7 +2057,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 
-		pid1, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+		pid1, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
@@ -2092,13 +2092,13 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -2159,14 +2159,14 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -2211,14 +2211,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -2275,7 +2275,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2289,7 +2289,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2314,7 +2314,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2328,7 +2328,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2356,7 +2356,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2370,7 +2370,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2394,7 +2394,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2408,7 +2408,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2440,7 +2440,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor := &MockStash{}
+		actor := &MockStashingActor{}
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -2478,7 +2478,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor := &MockStash{}
+		actor := &MockStashingActor{}
 
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
@@ -2517,7 +2517,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create the actor path
-		actor := &MockStash{}
+		actor := &MockStashingActor{}
 
 		pid, err := actorSystem.Spawn(ctx, "stashQA", actor)
 		require.NoError(t, err)
@@ -2565,16 +2565,16 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, actorSystem2.Start(ctx))
 
 		// create actorA
-		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockForwardTargetActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &MockForward{
+		actorB := &MockForwardingActor{
 			remoteRef: pidC,
 		}
 
@@ -2620,16 +2620,16 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, actorSystem2.Start(ctx))
 
 		// create actorA
-		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockForwardTargetActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &MockForward{
+		actorB := &MockForwardingActor{
 			remoteRef: pidC,
 		}
 
@@ -2682,16 +2682,16 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, actorSystem2.Start(ctx))
 
 		// create actorA
-		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockForwardTargetActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &MockForward{
+		actorB := &MockForwardingActor{
 			remoteRef: pidC,
 		}
 
@@ -2723,27 +2723,27 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testNATs(t, srv.Addr().String())
+		actorSystem, provider1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testNATs(t, srv.Addr().String())
+		actorSystem2, provider2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
 		// create actorA
-		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// create actorC
-		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
+		pidC, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockForwardTargetActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidC)
 
 		// create actorB
-		actorB := &MockForward{
+		actorB := &MockForwardingActor{
 			remoteRef: pidC,
 		}
 
@@ -2783,23 +2783,23 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testNATs(t, srv.Addr().String())
+		actorSystem, provider1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testNATs(t, srv.Addr().String())
+		actorSystem2, provider2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
 		// create actorA
-		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem2.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		// actorB's target was never spawned. ForwardTo must surface the
 		// lookup failure via the context's error channel.
-		actorB := &MockForward{remoteRef: nil}
+		actorB := &MockForwardingActor{remoteRef: nil}
 
 		pidB, err := actorSystem2.Spawn(ctx, "ExchangeB", actorB)
 		require.NoError(t, err)
@@ -2837,7 +2837,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2851,7 +2851,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2901,7 +2901,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2938,7 +2938,7 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -2952,7 +2952,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -2996,7 +2996,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -3010,7 +3010,7 @@ func TestReceiveContext(t *testing.T) {
 		}
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -3035,12 +3035,12 @@ func TestReceiveContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		actorSystem, provider1 := testNATs(t, srv.Addr().String())
+		actorSystem, provider1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem)
 		require.NotNil(t, provider1)
 
 		// create and start system cluster
-		actorSystem2, provider2 := testNATs(t, srv.Addr().String())
+		actorSystem2, provider2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, actorSystem2)
 		require.NotNil(t, provider2)
 
@@ -3049,14 +3049,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actorA
-		pidA, err := actorSystem.Spawn(ctx, "ExchangeA", &exchanger{})
+		pidA, err := actorSystem.Spawn(ctx, "ExchangeA", &MockExchanger{})
 		require.NoError(t, err)
 		require.NotNil(t, pidA)
 
 		pause.For(time.Second)
 
 		// create actorB
-		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockRemote{})
+		pidB, err := actorSystem2.Spawn(ctx, "ExchangeC", &MockForwardTargetActor{})
 		require.NoError(t, err)
 		require.NotNil(t, pidB)
 
@@ -3116,13 +3116,13 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -3183,14 +3183,14 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -3235,14 +3235,14 @@ func TestReceiveContext(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
@@ -3302,7 +3302,7 @@ func TestReceiveContext(t *testing.T) {
 		pause.For(time.Second)
 
 		// create actor1
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid1, err := actorSystem.Spawn(ctx, "Exchange1", actor1)
 		require.NoError(t, err)
 		require.NotNil(t, pid1)
@@ -3324,7 +3324,7 @@ func TestReceiveContext(t *testing.T) {
 		require.True(t, receiverAddr.Equals(pathToAddress(pid1.Path())))
 
 		// create actor2
-		actor2 := &exchanger{}
+		actor2 := &MockExchanger{}
 		pid2, err := actorSystem.Spawn(ctx, "Exchange2", actor2)
 		require.NoError(t, err)
 		require.NotNil(t, pid2)
@@ -3374,7 +3374,7 @@ func TestReceiveContext(t *testing.T) {
 
 		dependencyID := "dependency"
 		dependency := NewMockDependency(dependencyID, "some-test", "some-test")
-		actor1 := &exchanger{}
+		actor1 := &MockExchanger{}
 		pid, err := actorSystem.Spawn(ctx, "Exchange1", actor1, WithDependencies(dependency), WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)

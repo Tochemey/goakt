@@ -35,19 +35,6 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 )
 
-// registryLen counts live entries; test-only, single-threaded.
-func registryLen(x *remoteHoldRegistry) int {
-	count := 0
-	head := (*remoteHoldNode)(atomic.LoadPointer(&x.head))
-
-	for current := (*remoteHoldNode)(atomic.LoadPointer(&head.next)); current != nil; {
-		count++
-		current = (*remoteHoldNode)(atomic.LoadPointer(&current.next))
-	}
-
-	return count
-}
-
 // TestRemoteHoldRegistryReleaseAll verifies the teardown walk: every tracked
 // share is released whatever mailbox held its message, and the registry ends
 // empty but reusable.

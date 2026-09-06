@@ -34,12 +34,6 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/tochemey/goakt/v4/internal/address"
-	"github.com/tochemey/goakt/v4/internal/remoteclient"
-)
-
-var (
-	// sharedRemotingForTests is used by makeReceiveContextFromAddress so remote PIDs have non-nil remoting.
-	sharedRemotingForTests = remoteclient.NewClient()
 )
 
 func TestUnboundedFairMailboxNoStarvation(t *testing.T) {
@@ -271,7 +265,7 @@ func TestUnboundedFairMailboxEnqueueHandlesLoadOrStoreRace(t *testing.T) {
 func TestUnboundedFairMailboxDequeueHandlesDrainedSender(t *testing.T) {
 	mailbox := NewUnboundedFairMailbox()
 
-	sq := &senderBox{mailbox: MockNopMailbox{}}
+	sq := &senderBox{mailbox: MockNoopMailbox{}}
 	sq.active.Store(true)
 	atomic.StoreInt64(&sq.pending, 1)
 	mailbox.active.enqueue(sq)
@@ -375,31 +369,4 @@ func BenchmarkUnboundedFairMailbox_DistinctSendersPreallocated(b *testing.B) {
 
 	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(opsPerSec, "ops/sec")
-}
-
-// nolint
-func withSenderLoadOrStoreStub(t *testing.T, stub func(*sync.Map, string, any) (any, bool)) {
-	t.Helper()
-	original := senderLoadOrStoreFn.Load()
-	senderLoadOrStoreFn.Store(&stub)
-	t.Cleanup(func() {
-		senderLoadOrStoreFn.Store(original)
-	})
-}
-
-func makeReceiveContext(sender string) *ReceiveContext {
-	return makeReceiveContextWithPayload(sender, "")
-}
-
-func makeReceiveContextWithPayload(sender, payload string) *ReceiveContext {
-	addr := address.New(sender, "test-system", "localhost", 0)
-	return makeReceiveContextFromAddress(addr, payload)
-}
-
-func makeReceiveContextFromAddress(addr *address.Address, payload string) *ReceiveContext {
-	ctx := &ReceiveContext{sender: newRemotePID(addr, sharedRemotingForTests)}
-	if payload != "" {
-		ctx.message = &anypb.Any{TypeUrl: "test/payload", Value: []byte(payload)}
-	}
-	return ctx
 }

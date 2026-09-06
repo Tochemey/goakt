@@ -43,16 +43,8 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 )
 
-// timeoutError is a net.Error whose Timeout reports true, used to exercise the
-// network-timeout branch of isHandoffRetryable.
-type timeoutError struct{}
-
-func (timeoutError) Error() string   { return "i/o timeout" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
-
 func TestIsHandoffRetryable(t *testing.T) {
-	var netTimeout net.Error = timeoutError{}
+	var netTimeout net.Error = MockTimeoutError{}
 
 	testCases := []struct {
 		name string
@@ -176,45 +168,10 @@ func TestRecordRelocationHandoff(t *testing.T) {
 	})
 }
 
-// fakeHandoffSystem is a minimal ActorSystem test double that implements only
-// the methods deliverAcrossHandoff consults. Unimplemented methods panic via
-// the nil embedded interface, so any accidental extra dependency is caught.
-type fakeHandoffSystem struct {
-	ActorSystem
-	inCluster  bool
-	resolve    func(attempt int) (*PID, error)
-	relocating map[string]bool
-	inFlight   bool
-	handoffs   int
-	attempts   int
-}
-
-func (f *fakeHandoffSystem) InCluster() bool { return f.inCluster }
-
-func (f *fakeHandoffSystem) ActorOf(context.Context, string) (*PID, error) {
-	f.attempts++
-	return f.resolve(f.attempts)
-}
-
-func (f *fakeHandoffSystem) isEndpointRelocating(addr *address.Address) bool {
-	if addr == nil {
-		return false
-	}
-	return f.relocating[address.FormatHostPort(addr.Host(), addr.Port())]
-}
-
-func (f *fakeHandoffSystem) relocationInFlight() bool { return f.inFlight }
-
-func (f *fakeHandoffSystem) recordRelocationHandoff(context.Context) { f.handoffs++ }
-
-func remotePIDAt(host string, port int) *PID {
-	return newRemotePID(address.New("target", "test", host, port), nil)
-}
-
 func TestDeliverAcrossHandoff(t *testing.T) {
 	t.Run("not clustered delivers once and returns the result", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: false,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}
@@ -233,7 +190,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 	})
 
 	t.Run("not clustered surfaces the resolution error", func(t *testing.T) {
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: false,
 			resolve:   func(int) (*PID, error) { return nil, gerrors.NewErrActorNotFound("target") },
 		}
@@ -248,7 +205,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("clustered live target delivers once without buffering", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}
@@ -265,7 +222,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 	t.Run("buffers a target pinned to a departing endpoint until it re-registers", func(t *testing.T) {
 		departing := remotePIDAt("127.0.0.9", 7000)
 		survivor := remotePIDAt("127.0.0.2", 9002)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster:  true,
 			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
 			resolve: func(attempt int) (*PID, error) {
@@ -294,7 +251,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("buffers a not-found resolution while a relocation is in flight", func(t *testing.T) {
 		survivor := remotePIDAt("127.0.0.2", 9002)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			inFlight:  true,
 			resolve: func(attempt int) (*PID, error) {
@@ -315,7 +272,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 	})
 
 	t.Run("fails fast on not-found when no relocation is in flight", func(t *testing.T) {
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			inFlight:  false,
 			resolve:   func(int) (*PID, error) { return nil, gerrors.NewErrActorNotFound("target") },
@@ -332,7 +289,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("fails fast on a terminal (non-retryable) resolution error", func(t *testing.T) {
 		boom := stderrors.New("boom")
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			inFlight:  true, // in flight, but the error is not handoff-retryable
 			resolve:   func(int) (*PID, error) { return nil, boom },
@@ -348,7 +305,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 	})
 
 	t.Run("surfaces not-found when the window closes with the target still missing", func(t *testing.T) {
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			inFlight:  true,
 			resolve:   func(int) (*PID, error) { return nil, gerrors.NewErrActorNotFound("target") },
@@ -369,7 +326,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("returns ErrRelocationInProgress when the window closes with the target still departing", func(t *testing.T) {
 		departing := remotePIDAt("127.0.0.9", 7000)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster:  true,
 			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
 			resolve:    func(int) (*PID, error) { return departing, nil },
@@ -390,7 +347,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 	t.Run("terminal delivery error short-circuits", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
 		boom := stderrors.New("boom")
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}
@@ -405,7 +362,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("delivery is bounded by the caller budget after masking", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}
@@ -432,7 +389,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 
 	t.Run("caller timeout caps the handoff window", func(t *testing.T) {
 		departing := remotePIDAt("127.0.0.9", 7000)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster:  true,
 			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
 			resolve:    func(int) (*PID, error) { return departing, nil },
@@ -458,7 +415,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 		survivor := remotePIDAt("127.0.0.2", 9002)
 		start := time.Now()
 		var sawNotFound atomic.Bool
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster:  true,
 			inFlight:   true,
 			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
@@ -492,7 +449,7 @@ func TestDeliverAcrossHandoff(t *testing.T) {
 func TestDeliverBypassingHandoff(t *testing.T) {
 	t.Run("not clustered delivers once and returns the result", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: false,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}
@@ -507,7 +464,7 @@ func TestDeliverBypassingHandoff(t *testing.T) {
 	})
 
 	t.Run("surfaces the resolution error without retrying", func(t *testing.T) {
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			inFlight:  true, // even mid-relocation there is no masking here
 			resolve:   func(int) (*PID, error) { return nil, gerrors.NewErrActorNotFound("target") },
@@ -525,7 +482,7 @@ func TestDeliverBypassingHandoff(t *testing.T) {
 
 	t.Run("fails fast with ErrRelocationInProgress on a departing endpoint", func(t *testing.T) {
 		departing := remotePIDAt("127.0.0.9", 7000)
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster:  true,
 			relocating: map[string]bool{address.FormatHostPort("127.0.0.9", 7000): true},
 			resolve:    func(int) (*PID, error) { return departing, nil },
@@ -546,7 +503,7 @@ func TestDeliverBypassingHandoff(t *testing.T) {
 	t.Run("clustered live target delivers and surfaces the outcome", func(t *testing.T) {
 		to := remotePIDAt("127.0.0.1", 9001)
 		boom := stderrors.New("boom")
-		sys := &fakeHandoffSystem{
+		sys := &MockHandoffSystem{
 			inCluster: true,
 			resolve:   func(int) (*PID, error) { return to, nil },
 		}

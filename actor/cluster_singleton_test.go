@@ -59,15 +59,15 @@ func TestSingletonActor(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 
-		cl1, sd1 := testNATs(t, srv.Addr().String())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
-		cl2, sd2 := testNATs(t, srv.Addr().String())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 
-		cl3, sd3 := testNATs(t, srv.Addr().String())
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
@@ -115,7 +115,7 @@ func TestSingletonActor(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		clusterMock := mockcluster.NewCluster(t)
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -163,7 +163,7 @@ func TestSingletonActor(t *testing.T) {
 		// start the NATS server
 		srv := startNatsServer(t)
 
-		cl1, sd1 := testNATs(t, srv.Addr().String())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
@@ -327,7 +327,7 @@ func TestSingletonActor(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -376,7 +376,7 @@ func TestSingletonActor(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		singletonSpec := &remote.SingletonSpec{
@@ -406,7 +406,7 @@ func TestSingletonActor(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -448,7 +448,7 @@ func TestSingletonActor(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -519,7 +519,7 @@ func TestSingletonActor(t *testing.T) {
 		ports := dynaport.Get(3)
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -583,15 +583,15 @@ func TestSingletonActor(t *testing.T) {
 
 		roles := []string{"backend", "api", "worker"}
 
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
-		cl2, sd2 := testNATs(t, srv.Addr().String(), withMockRoles(roles...))
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles(roles...))
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 
-		cl3, sd3 := testNATs(t, srv.Addr().String())
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl3)
 		require.NotNil(t, sd3)
 
@@ -639,7 +639,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -676,7 +676,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 	t.Run("returns non-nil local PID when spawning locally as coordinator", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -710,7 +710,7 @@ func TestSpawnSingletonReturnsPID(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -752,7 +752,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries on quorum errors", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -782,7 +782,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("already exists under the same name short-circuits retries", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -820,7 +820,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		cancel()
 
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -851,7 +851,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("returns actor already exists when name is taken", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -887,7 +887,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries when name conflict metadata is not yet visible", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -928,7 +928,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("fails when ActorExists returns a non-retryable error", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -964,7 +964,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1024,7 +1024,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("name collision is treated as success when it is the same singleton", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1062,7 +1062,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1110,7 +1110,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("never returns ErrActorNotFound to the caller on the idempotent path", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1153,7 +1153,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries when GetActor returns retryable error during name conflict", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1194,7 +1194,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("fails when GetActor returns non-retryable error during name conflict", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1227,7 +1227,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("name conflict fails when existing actor is a different singleton", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1265,7 +1265,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 	t.Run("retries when cluster engine is not running", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1289,7 +1289,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 		ports := dynaport.Get(3)
 
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1329,7 +1329,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1409,7 +1409,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1503,7 +1503,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 				clusterMock := mockcluster.NewCluster(t)
 				remotingMock := mockremote.NewClient(t)
-				system := MockSingletonClusterReadyActorSystem(t)
+				system := newSingletonClusterSystem(t)
 				system.remoting = remotingMock
 
 				system.locker.Lock()
@@ -1581,7 +1581,7 @@ func TestSpawnSingletonRetryBehavior(t *testing.T) {
 
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1647,7 +1647,7 @@ func TestResolveExistingSingleton(t *testing.T) {
 	t.Run("builds a remote PID from the confirmed address when not hosted locally", func(t *testing.T) {
 		ctx := context.Background()
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		const confirmedAddr = "goakt://test@127.0.0.1:9000/remote-singleton"
@@ -1662,7 +1662,7 @@ func TestResolveExistingSingleton(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
 		remotingMock := mockremote.NewClient(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		system.remoting = remotingMock
 
 		system.locker.Lock()
@@ -1686,7 +1686,7 @@ func TestResolveExistingSingleton(t *testing.T) {
 	t.Run("never surfaces ErrActorNotFound when the fallback lookup 404s", func(t *testing.T) {
 		ctx := context.Background()
 		clusterMock := mockcluster.NewCluster(t)
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 
 		system.locker.Lock()
 		system.cluster = clusterMock
@@ -1744,11 +1744,11 @@ func TestConcurrentSpawnSingletonSingleInstance(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
 
-	cl1, sd1 := testNATs(t, srv.Addr().String())
+	cl1, sd1 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, cl1)
-	cl2, sd2 := testNATs(t, srv.Addr().String())
+	cl2, sd2 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, cl2)
-	cl3, sd3 := testNATs(t, srv.Addr().String())
+	cl3, sd3 := startNATsSystem(t, srv.Addr().String())
 	require.NotNil(t, cl3)
 
 	// let the cluster settle
@@ -1831,7 +1831,7 @@ func TestConcurrentSpawnSingletonSingleInstance(t *testing.T) {
 func TestSingletonSupervisor(t *testing.T) {
 	t.Run("With default supervisor when none is provided", func(t *testing.T) {
 		ctx := context.Background()
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		clusterMock := mockcluster.NewCluster(t)
 
 		system.locker.Lock()
@@ -1862,7 +1862,7 @@ func TestSingletonSupervisor(t *testing.T) {
 	})
 	t.Run("With custom supervisor on local spawn", func(t *testing.T) {
 		ctx := context.Background()
-		system := MockSingletonClusterReadyActorSystem(t)
+		system := newSingletonClusterSystem(t)
 		clusterMock := mockcluster.NewCluster(t)
 
 		system.locker.Lock()
@@ -1885,11 +1885,11 @@ func TestSingletonSupervisor(t *testing.T) {
 
 		role := "singleton-host"
 
-		cl1, sd1 := testNATs(t, srv.Addr().String(), withMockRoles(role))
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles(role))
 		require.NotNil(t, cl1)
 		require.NotNil(t, sd1)
 
-		cl2, sd2 := testNATs(t, srv.Addr().String())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, cl2)
 		require.NotNil(t, sd2)
 

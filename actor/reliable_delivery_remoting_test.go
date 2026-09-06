@@ -37,25 +37,8 @@ import (
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// newRemotingOnlySystem starts a cluster-disabled, remoting-enabled actor
-// system bound to the given local port and stops it when the test finishes.
-func newRemotingOnlySystem(t *testing.T, ctx context.Context, name string, port int) *actorSystem {
-	system, err := NewActorSystem(name,
-		WithLogger(log.DiscardLogger),
-		WithRemote(remote.NewConfig("127.0.0.1", port)))
-	require.NoError(t, err)
-	require.NoError(t, system.Start(ctx))
-
-	t.Cleanup(func() {
-		assert.NoError(t, system.Stop(context.WithoutCancel(ctx)))
-	})
-
-	return system.(*actorSystem)
-}
 
 func TestReliablePeerTopologyGuard(t *testing.T) {
 	t.Run("peer address without remoting is rejected at spawn", func(t *testing.T) {
@@ -68,12 +51,12 @@ func TestReliablePeerTopologyGuard(t *testing.T) {
 			assert.NoError(t, system.Stop(ctx))
 		})
 
-		pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		pid, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 			AsReliableProducer("orders-consumer", WithReliableRemoteConsumer("127.0.0.1", 2280)))
 		require.ErrorIs(t, err, gerrors.ErrReliablePeerRemotingRequired)
 		assert.Nil(t, pid)
 
-		pid, err = system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{},
+		pid, err = system.Spawn(ctx, "orders-consumer", &MockReliableConsumer{},
 			AsReliableConsumer("orders-producer", WithReliableRemoteProducer("127.0.0.1", 2280)))
 		require.ErrorIs(t, err, gerrors.ErrReliablePeerRemotingRequired)
 		assert.Nil(t, pid)
@@ -91,7 +74,7 @@ func TestReliablePeerTopologyGuard(t *testing.T) {
 			system.clusterEnabled.Store(false)
 		})
 
-		pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+		pid, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 			AsReliableProducer("orders-consumer", WithReliableRemoteConsumer("127.0.0.1", 2280)),
 			WithHostAndPort("127.0.0.1", ports[0]))
 		require.ErrorIs(t, err, gerrors.ErrReliablePeerClusterConflict)
@@ -126,7 +109,7 @@ func TestGetReliableCompanionHandler(t *testing.T) {
 
 	system := newRemotingOnlySystem(t, ctx, "handler-node", port)
 
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
@@ -210,7 +193,7 @@ func TestReliableDeliveryRemotingOnlyFlow(t *testing.T) {
 	producerNode := newRemotingOnlySystem(t, ctx, "producer-node", producerPort)
 	consumerNode := newRemotingOnlySystem(t, ctx, "consumer-node", consumerPort)
 
-	producer, err := producerNode.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := producerNode.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer",
 			WithReliableRetryInterval(200*time.Millisecond),
 			WithReliableRemoteConsumer("127.0.0.1", consumerPort)))
@@ -221,7 +204,7 @@ func TestReliableDeliveryRemotingOnlyFlow(t *testing.T) {
 	// consumer endpoint appears on the addressed node
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
-	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
+	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true},
 		AsReliableConsumer("orders-producer",
 			WithReliableResendInterval(200*time.Millisecond),
 			WithReliableRemoteProducer("127.0.0.1", producerPort)))
@@ -264,7 +247,7 @@ func TestReliableDeliveryRemotingOnlyConsumerRestartResync(t *testing.T) {
 	producerNode := newRemotingOnlySystem(t, ctx, "producer-node", producerPort)
 	consumerNode := newRemotingOnlySystem(t, ctx, "consumer-node", consumerPort)
 
-	producer, err := producerNode.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := producerNode.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer",
 			WithReliableRetryInterval(200*time.Millisecond),
 			WithReliableRemoteConsumer("127.0.0.1", consumerPort)))
@@ -276,7 +259,7 @@ func TestReliableDeliveryRemotingOnlyConsumerRestartResync(t *testing.T) {
 			WithReliableRemoteProducer("127.0.0.1", producerPort)),
 	}
 
-	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, consumerOptions...)
+	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true}, consumerOptions...)
 	require.NoError(t, err)
 
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
@@ -290,7 +273,7 @@ func TestReliableDeliveryRemotingOnlyConsumerRestartResync(t *testing.T) {
 	require.NoError(t, consumer.Shutdown(ctx))
 	pause.For(time.Second)
 
-	restarted, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, consumerOptions...)
+	restarted, err := consumerNode.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true}, consumerOptions...)
 	require.NoError(t, err)
 
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-2", payload: testpb.Reply_builder{Content: "ord-2"}.Build()}))
@@ -309,7 +292,7 @@ func TestReliableDeliveryRemotingOnlyUnreachablePeerRetries(t *testing.T) {
 
 	// the producer node is not up yet: registration attempts fail transiently
 	// while the consumer endpoint stays alive and keeps retrying on tick
-	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
+	consumer, err := consumerNode.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true},
 		AsReliableConsumer("orders-producer",
 			WithReliableResendInterval(200*time.Millisecond),
 			WithReliableRemoteProducer("127.0.0.1", producerPort)))
@@ -320,7 +303,7 @@ func TestReliableDeliveryRemotingOnlyUnreachablePeerRetries(t *testing.T) {
 
 	producerNode := newRemotingOnlySystem(t, ctx, "producer-node", producerPort)
 
-	producer, err := producerNode.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := producerNode.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer",
 			WithReliableRetryInterval(200*time.Millisecond),
 			WithReliableRemoteConsumer("127.0.0.1", consumerPort)))

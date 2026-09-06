@@ -75,9 +75,6 @@ import (
 	gtls "github.com/tochemey/goakt/v4/tls"
 )
 
-// remoteTestCtxKey is a custom type for context keys in remote context propagation tests (avoids SA1029).
-type remoteTestCtxKey struct{}
-
 // nolint
 func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults", func(t *testing.T) {
@@ -171,7 +168,7 @@ func TestActorSystem(t *testing.T) {
 		baseProvider := noopmetric.NewMeterProvider()
 		otel.SetMeterProvider(&MockMeterProvider{
 			MeterProvider: baseProvider,
-			meter: instrumentFailingMeter{
+			meter: MockInstrumentFailingMeter{
 				Meter: baseProvider.Meter("test"),
 				failures: map[string]error{
 					"actorsystem.deadletters.count": errInstrument,
@@ -200,7 +197,7 @@ func TestActorSystem(t *testing.T) {
 		baseProvider := noopmetric.NewMeterProvider()
 		otel.SetMeterProvider(&MockMeterProvider{
 			MeterProvider: baseProvider,
-			meter: registerCallbackFailingMeter{
+			meter: MockRegisterCallbackFailingMeter{
 				Meter: baseProvider.Meter("test"),
 				err:   errRegister,
 			},
@@ -227,15 +224,15 @@ func TestActorSystem(t *testing.T) {
 		sysImpl.cluster = clusterMock
 		sysImpl.clusterEnabled.Store(true)
 
-		immediate := &immediateMeter{
-			manualMeter: &manualMeter{
+		immediate := &MockImmediateMeter{
+			MockManualMeter: &MockManualMeter{
 				Meter: noopmetric.NewMeterProvider().Meter("test"),
 			},
 			system:  sysImpl,
 			cluster: clusterMock,
 		}
 
-		otel.SetMeterProvider(&manualMeterProvider{
+		otel.SetMeterProvider(&MockManualMeterProvider{
 			MeterProvider: noopmetric.NewMeterProvider(),
 			meter:         immediate,
 		})
@@ -464,7 +461,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := uuid.NewString()
 
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -546,7 +543,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := sys.Spawn(ctx, actorName, &MockExchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -608,7 +605,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "actor"
-		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestart(),
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestartFailingActor(),
 			WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Minute)))
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -640,7 +637,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := sys.Spawn(ctx, actorName, &MockExchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -685,7 +682,7 @@ func TestActorSystem(t *testing.T) {
 		remoteHost := "10.0.0.1"
 		remotePort := 9090
 
-		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
+		clusterMock, remotingMock, system := newReSpawnClusterSystem(t)
 
 		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
@@ -703,7 +700,7 @@ func TestActorSystem(t *testing.T) {
 		ctx := context.TODO()
 		actorName := "remoteActor"
 
-		clusterMock, _, system := setupReSpawnClusterTest(t)
+		clusterMock, _, system := newReSpawnClusterSystem(t)
 
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, cluster.ErrActorNotFound)
 
@@ -719,7 +716,7 @@ func TestActorSystem(t *testing.T) {
 		remoteHost := "10.0.0.1"
 		remotePort := 9090
 
-		clusterMock, remotingMock, system := setupReSpawnClusterTest(t)
+		clusterMock, remotingMock, system := newReSpawnClusterSystem(t)
 
 		addr := address.New(actorName, "test-replication", remoteHost, remotePort)
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
@@ -753,7 +750,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		actorName := "exchanger"
-		actorRef, err := newActorSystem.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := newActorSystem.Spawn(ctx, actorName, &MockExchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -794,7 +791,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		actorName := "exchanger"
-		actorRef, err := sys.Spawn(ctx, actorName, &exchanger{})
+		actorRef, err := sys.Spawn(ctx, actorName, &MockExchanger{})
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
 
@@ -877,7 +874,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := uuid.NewString()
 
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(nil, assert.AnError)
 		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
@@ -893,7 +890,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "remoteActor"
 
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -919,7 +916,7 @@ func TestActorSystem(t *testing.T) {
 
 		// create an actor
 		actorName := "exchanger"
-		ref, err := sys.Spawn(ctx, actorName, &exchanger{})
+		ref, err := sys.Spawn(ctx, actorName, &MockExchanger{})
 		assert.NoError(t, err)
 		require.NotNil(t, ref)
 
@@ -1006,7 +1003,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "remoteActor"
 
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -1023,7 +1020,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "remoteActor"
 
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -1041,7 +1038,7 @@ func TestActorSystem(t *testing.T) {
 		actorName := "remoteActor"
 
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -1064,7 +1061,7 @@ func TestActorSystem(t *testing.T) {
 
 		clusterMock := mockscluster.NewCluster(t)
 		remotingMock := mocksremote.NewClient(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -1087,17 +1084,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -1246,17 +1243,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -1305,7 +1302,7 @@ func TestActorSystem(t *testing.T) {
 		err := sys.Start(ctx)
 		assert.NoError(t, err)
 
-		actor := &MockPostStop{}
+		actor := &MockPostStopFailingActor{}
 		actorRef, err := sys.Spawn(ctx, "Test", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1336,7 +1333,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -1491,7 +1488,7 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		cl1, sd1 := testNATs(t, srv.Addr().String())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := cl1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
@@ -1501,7 +1498,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber1)
 
 		// create and start system cluster
-		cl2, sd2 := testNATs(t, srv.Addr().String())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := cl2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1570,7 +1567,7 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// cl1 starts first and is therefore the sole coordinator
-		cl1, sd1 := testNATs(t, srv.Addr().String())
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := cl1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
@@ -1579,7 +1576,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, subscriber1)
 
 		// cl2 joins an already-formed cluster; it must not become coordinator
-		cl2, sd2 := testNATs(t, srv.Addr().String())
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := cl2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1644,7 +1641,7 @@ func TestActorSystem(t *testing.T) {
 		broadcastPort := dynaport.Get(1)[0]
 
 		// create and start system cluster (mirrors "With cluster events subscription" but uses selfmanaged discovery)
-		cl1, sd1 := testSelfManaged(t, broadcastPort)
+		cl1, sd1 := startSelfManagedSystem(t, broadcastPort)
 		peerAddress1 := cl1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
@@ -1652,7 +1649,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, subscriber1)
 
-		cl2, sd2 := testSelfManaged(t, broadcastPort)
+		cl2, sd2 := startSelfManagedSystem(t, broadcastPort)
 		peerAddress2 := cl2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
@@ -1660,7 +1657,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, subscriber2)
 
-		cl3, sd3 := testSelfManaged(t, broadcastPort)
+		cl3, sd3 := startSelfManagedSystem(t, broadcastPort)
 		peerAddress3 := cl3.PeersAddress()
 		require.NotEmpty(t, peerAddress3)
 
@@ -1767,7 +1764,7 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = sys.Register(ctx, &MockExchanger{})
 		require.NoError(t, err)
 
 		err = sys.Stop(ctx)
@@ -1786,7 +1783,7 @@ func TestActorSystem(t *testing.T) {
 		require.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = sys.Register(ctx, &MockExchanger{})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
@@ -1810,10 +1807,10 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 
 		// register the actor
-		err = sys.Register(ctx, &exchanger{})
+		err = sys.Register(ctx, &MockExchanger{})
 		require.NoError(t, err)
 
-		err = sys.Deregister(ctx, &exchanger{})
+		err = sys.Deregister(ctx, &MockExchanger{})
 		require.NoError(t, err)
 
 		t.Cleanup(
@@ -1835,7 +1832,7 @@ func TestActorSystem(t *testing.T) {
 		// assert there are no error
 		require.NoError(t, err)
 
-		err = sys.Deregister(ctx, &exchanger{})
+		err = sys.Deregister(ctx, &MockExchanger{})
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
 
@@ -1869,7 +1866,7 @@ func TestActorSystem(t *testing.T) {
 			WithRemote(remote.NewConfig(host, remotingPort)),
 			WithCluster(
 				NewClusterConfig().
-					WithKinds(new(exchanger)).
+					WithKinds(new(MockExchanger)).
 					WithPartitionCount(9).
 					WithReplicaCount(1).
 					WithPeersPort(clusterPort).
@@ -1904,7 +1901,7 @@ func TestActorSystem(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: true,
 		}
@@ -2236,17 +2233,17 @@ func TestActorSystem(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		peerAddress1 := node1.PeersAddress()
 		require.NotEmpty(t, peerAddress1)
 
 		// create and start system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		peerAddress2 := node2.PeersAddress()
 		require.NotEmpty(t, peerAddress2)
 
 		// create and start system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -2285,7 +2282,7 @@ func TestActorSystem(t *testing.T) {
 	t.Run("Actors returns error when cluster scan fails", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -2472,7 +2469,7 @@ func TestActorSystem(t *testing.T) {
 		require.NotNil(t, consumer)
 
 		// create the black hole actor
-		actor := &MockUnhandled{}
+		actor := &MockUnhandledActor{}
 		actorRef, err := sys.Spawn(ctx, "unhandledQA", actor)
 		assert.NoError(t, err)
 		assert.NotNil(t, actorRef)
@@ -2907,20 +2904,20 @@ func TestRemoteContextPropagation(t *testing.T) {
 			"ctx-extract-ask",
 			WithLogger(log.DiscardLogger),
 			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
-				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+				remote.WithContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
 		)
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 		pause.For(200 * time.Millisecond)
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 
-		actor := &contextEchoActor{key: ctxKey}
+		actor := &MockContextEchoActor{key: ctxKey}
 		actorName := "context-ask"
 		pid, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		rem := remoteclient.NewClient(remoteclient.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		rem := remoteclient.NewClient(remoteclient.WithClientContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}))
 		t.Cleanup(rem.Close)
 
 		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -2947,20 +2944,20 @@ func TestRemoteContextPropagation(t *testing.T) {
 			"ctx-extract-tell",
 			WithLogger(log.DiscardLogger),
 			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
-				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+				remote.WithContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
 		)
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 		pause.For(200 * time.Millisecond)
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 
-		actor := &contextEchoActor{key: ctxKey}
+		actor := &MockContextEchoActor{key: ctxKey}
 		actorName := "context-tell"
 		pid, err := sys.Spawn(ctx, actorName, actor)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		rem := remoteclient.NewClient(remoteclient.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))
+		rem := remoteclient.NewClient(remoteclient.WithClientContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}))
 		t.Cleanup(rem.Close)
 
 		addr, err := rem.RemoteLookup(ctx, sys.Host(), int(sys.Port()), actorName)
@@ -2987,21 +2984,21 @@ func TestRemoteContextPropagation(t *testing.T) {
 			"ctx-extract-tell-coalesced",
 			WithLogger(log.DiscardLogger),
 			WithRemote(remote.NewConfig("127.0.0.1", dynaport.Get(1)[0],
-				remote.WithContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
+				remote.WithContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}))),
 		)
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
 		pause.For(200 * time.Millisecond)
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 
-		recorder := &contextRecordingActor{key: ctxKey}
+		recorder := &MockContextRecordingActor{key: ctxKey}
 		actorName := "context-tell-coalesced"
 		pid, err := sys.Spawn(ctx, actorName, recorder)
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
 		rem := remoteclient.NewClient(
-			remoteclient.WithClientContextPropagator(&headerPropagator{headerKey: headerKey, ctxKey: ctxKey}),
+			remoteclient.WithClientContextPropagator(&MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}),
 			// Large batch + long flush so every send enters the same batch.
 			remoteclient.WithSendCoalescing(64),
 		)
@@ -3032,7 +3029,7 @@ func TestRemotingRecover(t *testing.T) {
 		sys, err := NewActorSystem(
 			"remoting-recover",
 			WithLogger(log.DiscardLogger),
-			WithRemote(remote.NewConfig(host, remotingPort, remote.WithContextPropagator(&MockPanicContextPropagator{}))),
+			WithRemote(remote.NewConfig(host, remotingPort, remote.WithContextPropagator(&MockPanickingContextPropagator{}))),
 		)
 		require.NoError(t, err)
 		require.NoError(t, sys.Start(ctx))
@@ -3340,7 +3337,7 @@ func TestRemotingReSpawn(t *testing.T) {
 		pause.For(time.Second)
 
 		actorName := uuid.NewString()
-		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestart())
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockRestartFailingActor())
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -3795,7 +3792,7 @@ func TestRemotingStop(t *testing.T) {
 		pause.For(time.Second)
 
 		actorName := uuid.NewString()
-		actorRef, err := sys.Spawn(ctx, actorName, &MockPostStop{})
+		actorRef, err := sys.Spawn(ctx, actorName, &MockPostStopFailingActor{})
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
@@ -4251,7 +4248,7 @@ func TestClusterSingleNodeStartsWithDefaultReplication(t *testing.T) {
 	require.NoError(t, sys.Start(ctx))
 
 	// the cluster is functional: spawning writes to the registry
-	pid, err := sys.Spawn(ctx, "Exchange1", &exchanger{})
+	pid, err := sys.Spawn(ctx, "Exchange1", &MockExchanger{})
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -4267,7 +4264,7 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 	// to the recovery goroutine: the entry must still be resolvable when the
 	// quiescence gate opens, and must be pruned once recovery completes
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.eventsStream = eventstream.New()
 
 	peer := "127.0.0.1:3320"
@@ -4288,7 +4285,7 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 	// member while the cluster churns: the quiesce-then-derive cycle must be
 	// retried instead of permanently skipping the crashed node's rebalance
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.eventsStream = eventstream.New()
 
 	consumer := system.eventsStream.AddSubscriber()
@@ -4321,7 +4318,7 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 
 func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.eventsStream = eventstream.New()
 
 	peer := "127.0.0.1:3320"
@@ -4614,7 +4611,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient()
@@ -4630,7 +4627,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -4688,7 +4685,7 @@ func TestRemotingSpawn(t *testing.T) {
 			Host:      "10.0.0.1",
 			Port:      int32(as.Port()),
 			ActorName: uuid.NewString(),
-			ActorType: "actor.exchanger",
+			ActorType: "actor.mockexchanger",
 		}.Build())
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
@@ -4725,7 +4722,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &MockPreStart{}
+		actor := &MockPreStartFailingActor{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient()
@@ -4787,7 +4784,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient()
@@ -4803,7 +4800,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -4851,7 +4848,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: false,
 		}
@@ -4961,7 +4958,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
 
-		require.NoError(t, sys.Register(ctx, &exchanger{}))
+		require.NoError(t, sys.Register(ctx, &MockExchanger{}))
 
 		remoting := remoteclient.NewClient()
 		t.Cleanup(remoting.Close)
@@ -4969,7 +4966,7 @@ func TestRemotingSpawn(t *testing.T) {
 
 		request := &remote.SpawnRequest{
 			Name: "actorName",
-			Kind: "actor.exchanger",
+			Kind: "actor.mockexchanger",
 			Role: &role,
 			Dependencies: []extension.Dependency{
 				NewMockDependency("dep-id", "test", "test"),
@@ -5008,7 +5005,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: false,
 		}
@@ -5055,7 +5052,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: false,
 		}
@@ -5120,7 +5117,7 @@ func TestRemotingSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient(remoteclient.WithClientTLS(clientConfig))
@@ -5137,7 +5134,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        actorName,
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: false,
 		}
@@ -5193,7 +5190,7 @@ func TestRemotingSpawn(t *testing.T) {
 		assert.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient()
@@ -5209,7 +5206,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:        "",
-			Kind:        "actor.exchanger",
+			Kind:        "actor.mockexchanger",
 			Singleton:   nil,
 			Relocatable: false,
 		}
@@ -5254,7 +5251,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -5297,7 +5294,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.BrotliCompression))
@@ -5313,7 +5310,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -5377,7 +5374,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.ZstdCompression))
@@ -5393,7 +5390,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -5457,7 +5454,7 @@ func TestRemotingSpawn(t *testing.T) {
 		require.NoError(t, err)
 
 		// create an actor implementation and register it
-		actor := &exchanger{}
+		actor := &MockExchanger{}
 		actorName := uuid.NewString()
 
 		remoting := remoteclient.NewClient(remoteclient.WithClientCompression(remote.GzipCompression))
@@ -5473,7 +5470,7 @@ func TestRemotingSpawn(t *testing.T) {
 		// spawn the remote actor
 		request := &remote.SpawnRequest{
 			Name:           actorName,
-			Kind:           "actor.exchanger",
+			Kind:           "actor.mockexchanger",
 			Singleton:      nil,
 			Relocatable:    false,
 			EnableStashing: false,
@@ -5806,7 +5803,7 @@ func TestPutActorOnCluster(t *testing.T) {
 
 	t.Run("singleton publishes its registry record", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		pid := newTestPID(system, "singleton")
 		pid.attachCompanion().singletonSpec = &singletonSpec{
@@ -5824,7 +5821,7 @@ func TestPutActorOnCluster(t *testing.T) {
 
 	t.Run("PutActor failure is returned", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		pid := newTestPID(system, "regular")
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
@@ -5837,7 +5834,7 @@ func TestPutActorOnCluster(t *testing.T) {
 
 	t.Run("singleton with role publishes its registry record", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		pid := newTestPID(system, "role-singleton")
 		pid.attachCompanion().singletonSpec = &singletonSpec{
@@ -5856,7 +5853,7 @@ func TestPutActorOnCluster(t *testing.T) {
 
 	t.Run("system actors are never published", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		pid := newTestPID(system, reservedNames[deathWatchType])
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
@@ -5865,7 +5862,7 @@ func TestPutActorOnCluster(t *testing.T) {
 
 	t.Run("no-op when clustering is disabled", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
 		pid := newTestPID(system, "no-cluster")
@@ -5907,7 +5904,7 @@ func TestCompleteSpawnStopFailureAfterFailedPublication(t *testing.T) {
 	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
 
 	// MockPostStop fails its PostStop hook, so the rollback Shutdown errors too
-	pid, err := actorSystem.Spawn(ctx, actorName, &MockPostStop{})
+	pid, err := actorSystem.Spawn(ctx, actorName, &MockPostStopFailingActor{})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.Nil(t, pid)
@@ -5929,7 +5926,7 @@ func TestPutGrainOnCluster(t *testing.T) {
 
 	t.Run("PutGrain failure is returned", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		grain := newTestGrainPID(system, "grain")
 		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
@@ -5942,7 +5939,7 @@ func TestPutGrainOnCluster(t *testing.T) {
 
 	t.Run("system grains are never published", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		grain := newTestGrainPID(system, reservedNames[deathWatchType])
 		require.NoError(t, system.putGrainOnCluster(ctx, grain))
@@ -5951,7 +5948,7 @@ func TestPutGrainOnCluster(t *testing.T) {
 
 	t.Run("no-op when clustering is disabled", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
 		grain := newTestGrainPID(system, "no-cluster")
@@ -5963,7 +5960,7 @@ func TestPutGrainOnCluster(t *testing.T) {
 func TestCleanupStaleLocalActors(t *testing.T) {
 	t.Run("returns nil when clustering disabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 		system.clusterEnabled.Store(false)
 		system.cluster = nil
@@ -5973,7 +5970,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 	t.Run("returns nil when cluster is nil", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 		system.cluster = nil
 
@@ -5982,7 +5979,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 	t.Run("returns error when cluster actors lookup fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(nil, assert.AnError).Once()
@@ -5994,7 +5991,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 	t.Run("skips non-stale entries and removes stale local actors", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		addPIDNode := func(pid *PID) {
@@ -6026,7 +6023,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 	t.Run("removal failure does not fail cleanup", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
@@ -6042,7 +6039,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		// singletons are re-arbitrated by the leader on demand: a stale
 		// singleton record is dropped, never respawned locally
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		staleAddr := address.New("stale-singleton", system.name, "127.0.0.1", 8080)
@@ -6060,7 +6057,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 	t.Run("respawn failure does not fail cleanup and restores the record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 		system.registry = types.NewRegistry()
 		system.reflection = newReflection(system.registry)
@@ -6153,7 +6150,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 func TestResyncActors_ErrorPaths(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	system.locker.Lock()
 	system.actors = newTree()
@@ -6185,7 +6182,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 
 func TestResyncGrains_Success(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	grain := NewMockGrain()
 	identity := newGrainIdentity(grain, "resync-grain")
@@ -6200,7 +6197,7 @@ func TestResyncGrains_Success(t *testing.T) {
 
 func TestResyncGrains_ErrorPaths(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	system.locker.Lock()
 	system.grains = xsync.NewMap[string, *grainPID]()
@@ -6231,7 +6228,7 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 
 func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.clusterConfig = &ClusterConfig{replicaCount: 2}
 
 	system.locker.Lock()
@@ -6261,7 +6258,7 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 
 func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.clusterConfig = &ClusterConfig{replicaCount: 1}
 
 	system.locker.Lock()
@@ -6295,7 +6292,7 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 
 func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.clusterConfig = &ClusterConfig{replicaCount: 2}
 
 	system.locker.Lock()
@@ -6335,7 +6332,7 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 
 func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
 	pid := &PID{
@@ -6353,7 +6350,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 
 func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
 	pid := &PID{
@@ -6375,7 +6372,7 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 
 func TestStopReturnsCleanupClusterError(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors = newTree()
@@ -6493,7 +6490,7 @@ func TestActorSystemRun(t *testing.T) {
 func TestGetNodeMetric(t *testing.T) {
 	t.Run("When cluster is not enabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
 		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
@@ -6506,7 +6503,7 @@ func TestGetNodeMetric(t *testing.T) {
 	})
 	t.Run("When node address does not match", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
@@ -6518,7 +6515,7 @@ func TestGetNodeMetric(t *testing.T) {
 	})
 	t.Run("When request type is invalid", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getNodeMetricHandler(context.Background(), nil, request)
@@ -6529,7 +6526,7 @@ func TestGetNodeMetric(t *testing.T) {
 	})
 	t.Run("When successful", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actorsCounter.Store(5)
 		system.grains = xsync.NewMap[string, *grainPID]()
 		system.grains.Set("grain1", &grainPID{})
@@ -6616,7 +6613,7 @@ func TestGetNodeMetric(t *testing.T) {
 func TestGetKinds(t *testing.T) {
 	t.Run("When cluster is not enabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
 		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
@@ -6629,7 +6626,7 @@ func TestGetKinds(t *testing.T) {
 	})
 	t.Run("When node address does not match", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		request := internalpb.GetKindsRequest_builder{NodeAddress: "10.0.0.1:9999"}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
@@ -6641,7 +6638,7 @@ func TestGetKinds(t *testing.T) {
 	})
 	t.Run("When request type is invalid", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		request := internalpb.GetNodeMetricRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
 		resp, err := system.getKindsHandler(context.Background(), nil, request)
@@ -6652,7 +6649,7 @@ func TestGetKinds(t *testing.T) {
 	})
 	t.Run("When successful", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterConfig = NewClusterConfig().
 			WithKinds(new(MockActor)).
 			WithPartitionCount(9).
@@ -6737,7 +6734,7 @@ func TestGetKinds(t *testing.T) {
 func TestPersistPeerState(t *testing.T) {
 	t.Run("When remoting is not enabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remotingEnabled.Store(false)
 
 		request := internalpb.PersistPeerStateRequest_builder{
@@ -6752,7 +6749,7 @@ func TestPersistPeerState(t *testing.T) {
 	})
 	t.Run("When cluster is not enabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remotingEnabled.Store(true)
 		system.clusterEnabled.Store(false)
 
@@ -6768,7 +6765,7 @@ func TestPersistPeerState(t *testing.T) {
 	})
 	t.Run("When request type is invalid", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remotingEnabled.Store(true)
 
 		request := internalpb.GetKindsRequest_builder{NodeAddress: "127.0.0.1:8080"}.Build()
@@ -6780,9 +6777,9 @@ func TestPersistPeerState(t *testing.T) {
 	})
 	t.Run("When store returns error", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remotingEnabled.Store(true)
-		system.clusterStore = &recordingPeerStateStore{err: assert.AnError}
+		system.clusterStore = &MockRecordingPeerStateStore{err: assert.AnError}
 
 		request := internalpb.PersistPeerStateRequest_builder{
 			PeerState: internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build(),
@@ -6795,9 +6792,9 @@ func TestPersistPeerState(t *testing.T) {
 	})
 	t.Run("When successful", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remotingEnabled.Store(true)
-		store := &recordingPeerStateStore{}
+		store := &MockRecordingPeerStateStore{}
 		system.clusterStore = store
 
 		peerState := internalpb.PeerState_builder{Host: "10.0.0.1", PeersPort: 7070}.Build()
@@ -6969,7 +6966,7 @@ func TestPeers(t *testing.T) {
 		ctx := context.TODO()
 
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		system.locker.Lock()
 		system.actors = newTree()
@@ -7030,17 +7027,17 @@ func TestIsLeader(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -7096,17 +7093,17 @@ func TestLeader(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -7135,7 +7132,7 @@ func TestLeader(t *testing.T) {
 	t.Run("When cluster members lookup fails", func(t *testing.T) {
 		ctx := t.Context()
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError)
 
@@ -7185,7 +7182,7 @@ func TestLeader(t *testing.T) {
 		ctx := context.Background()
 
 		prevProvider := otel.GetMeterProvider()
-		meterProvider := newManualMeterProvider()
+		meterProvider := NewMockManualMeterProvider()
 		otel.SetMeterProvider(meterProvider)
 		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
 
@@ -7202,11 +7199,11 @@ func TestLeader(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, actorRef)
 
-		manual, ok := meterProvider.meter.(*manualMeter)
+		manual, ok := meterProvider.meter.(*MockManualMeter)
 		require.True(t, ok)
 		require.NotEmpty(t, manual.callbacks)
 
-		observer := &manualObserver{}
+		observer := &MockManualObserver{}
 		for _, cb := range manual.callbacks {
 			require.NoError(t, cb(ctx, observer))
 		}
@@ -7220,7 +7217,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{}, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.NoError(t, err)
@@ -7233,7 +7230,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		expectedErr := errors.New("cluster unavailable")
 		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.Error(t, err)
@@ -7252,7 +7249,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		}
 		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.NoError(t, err)
@@ -7277,7 +7274,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		}
 		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.NoError(t, err)
@@ -7301,7 +7298,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		}
 		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.NoError(t, err)
@@ -7322,7 +7319,7 @@ func TestSelectOldestPeers(t *testing.T) {
 		}
 		clusterMock.EXPECT().Peers(mock.Anything).Return(inputPeers, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		peers, err := system.selectOldestPeers(ctx, 3)
 		require.NoError(t, err)
@@ -7334,7 +7331,7 @@ func TestSelectOldestPeers(t *testing.T) {
 func TestPreShutdown(t *testing.T) {
 	t.Run("returns nil when relocation is disabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.relocationEnabled.Store(false)
 
 		peerState, err := system.preShutdown()
@@ -7344,7 +7341,7 @@ func TestPreShutdown(t *testing.T) {
 
 	t.Run("returns nil when cluster is not enabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.relocationEnabled.Store(true)
 		system.clusterEnabled.Store(false)
 
@@ -7355,7 +7352,7 @@ func TestPreShutdown(t *testing.T) {
 
 	t.Run("returns nil when cluster is nil", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.relocationEnabled.Store(true)
 		system.cluster = nil
 
@@ -7387,7 +7384,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 	t.Run("returns nil when peerState is nil", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		err := system.persistPeerStateToPeers(ctx, nil)
 		require.NoError(t, err)
@@ -7398,7 +7395,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{}, nil)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
 		require.NoError(t, err)
@@ -7410,7 +7407,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		expectedErr := errors.New("cluster unavailable")
 		clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
 		require.Error(t, err)
@@ -7429,7 +7426,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(nil).Maybe()
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(nil).Maybe()
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
@@ -7447,7 +7444,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(expectedErr)
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(expectedErr)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
@@ -7465,7 +7462,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(expectedErr)
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(expectedErr)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
@@ -7486,7 +7483,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(context.Canceled)
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(context.Canceled)
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		err := system.persistPeerStateToPeers(ctx, newPeerState())
@@ -7520,7 +7517,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 			remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", port, mock.Anything).RunAndReturn(block).Maybe()
 		}
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		go func() {
@@ -7558,7 +7555,7 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).RunAndReturn(block).Maybe()
 		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).RunAndReturn(block).Maybe()
 
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.remoting = remotingMock
 
 		go func() {
@@ -7573,30 +7570,6 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		require.NoError(t, err)
 	})
 }
-
-type terminatedProbeActor struct {
-	received chan *Terminated
-}
-
-var _ Actor = (*terminatedProbeActor)(nil)
-
-func newTerminatedProbeActor() *terminatedProbeActor {
-	return &terminatedProbeActor{received: make(chan *Terminated, 64)}
-}
-
-func (a *terminatedProbeActor) PreStart(*Context) error { return nil }
-
-func (a *terminatedProbeActor) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *Terminated:
-		a.received <- msg
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *terminatedProbeActor) PostStop(*Context) error { return nil }
 
 func TestPruneRemoteWatchesForHost(t *testing.T) {
 	ctx := context.Background()
@@ -7644,7 +7617,7 @@ func TestPruneRemoteWatchesForHost(t *testing.T) {
 
 	t.Run("watchee entries deliver synthesized Terminated with deathTime", func(t *testing.T) {
 		sys := newSystem(t)
-		probe := newTerminatedProbeActor()
+		probe := NewMockTerminatedProbeActor()
 		pid, err := sys.Spawn(ctx, "watcher-actor", probe)
 		require.NoError(t, err)
 
@@ -7681,7 +7654,7 @@ func TestPruneRemoteWatchesForHost(t *testing.T) {
 		sys := newSystem(t)
 		// Register a watchee with host == the literal string used as nodeAddress.
 		watcheeAddr := address.New("x", "remoteSys", "weirdhost", 9000)
-		probe := newTerminatedProbeActor()
+		probe := NewMockTerminatedProbeActor()
 		pid, err := sys.Spawn(ctx, "fallback-watcher", probe)
 		require.NoError(t, err)
 		sys.remoteWatches.addWatchee(pid.ID(), watcheeAddr)
@@ -7760,7 +7733,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("derives only relocatable actors and grains hosted on the departed node", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		// ActorsByHost/GrainsByHost already filter to the departed node's
@@ -7805,7 +7778,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false when a port does not fit int32", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		// a peers port beyond math.MaxInt32 parses as an int but must be
 		// rejected by the bounds-checked conversion instead of truncating
@@ -7824,7 +7797,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false when the remoting port is not cached", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		// no cache entry for the departed peer address
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
@@ -7834,7 +7807,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false on an unparseable peer address", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "not-an-address")
 		assert.False(t, ok)
@@ -7843,7 +7816,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false when the peer port is not numeric", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:notaport")
 		assert.False(t, ok)
@@ -7852,7 +7825,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("floors the scan budget at the recovery timeout", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		// a lookup-sized read timeout must not abandon the crash-recovery scan:
@@ -7869,7 +7842,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("honors a configured read timeout above the recovery floor", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		readTimeout := relocationDeriveScanTimeout + time.Minute
@@ -7885,7 +7858,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("skips actors with unparseable addresses", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		actors := []*internalpb.Actor{
@@ -7903,7 +7876,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false when the actor scan fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, assert.AnError).Once()
@@ -7915,7 +7888,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("returns false when the grain scan fails", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
@@ -7928,7 +7901,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 	t.Run("derives an empty set when no records match the departed node", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
@@ -7948,7 +7921,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 // helpers used by crash recovery.
 func TestPeerRemotingPortsCache(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	_, ok := system.peerRemotingPort("127.0.0.9:9000")
 	assert.False(t, ok)
@@ -7972,7 +7945,7 @@ func TestResetSynchronizesWithGuardedGetters(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	sys.clusterStore = &recordingPeerStateStore{}
+	sys.clusterStore = &MockRecordingPeerStateStore{}
 
 	done := make(chan struct{})
 
@@ -8062,7 +8035,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 
 	t.Run("removes the endpoint and its controller record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		endpoint := newEndpointPID(system, "orders-producer")
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
@@ -8076,7 +8049,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 
 	t.Run("controller record removal failure surfaces", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		endpoint := newEndpointPID(system, "orders-producer")
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
@@ -8089,7 +8062,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 
 	t.Run("ordinary actors remove only their own record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		addr := address.New("worker", system.name, "127.0.0.1", 8080)
 		plain := &PID{address: addr, path: newPath(addr), actorSystem: system}
@@ -8106,7 +8079,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		// a companion record of a previous incarnation has no live local
 		// controller: companions are never recovered, so the record is removed
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString())
@@ -8128,7 +8101,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 
 	t.Run("keeps the record of a live controller", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, uuid.NewString())
@@ -8159,7 +8132,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		// recovered from a record: a tampered relocatable flag must not route
 		// the record into the recovery branch where it would silently leak
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.actors = newTree()
 
 		companionName := reliableCompanionName(ReliableControllerRoleConsumer, uuid.NewString())
@@ -8186,7 +8159,7 @@ func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
 	// relocation worker can withdraw its registry records; ordinary
 	// non-relocatable actors and companion records stay excluded
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	peerAddress := "127.0.0.1:9100"
 	system.peerRemotingPorts.Set(peerAddress, 7777)
@@ -8238,7 +8211,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	ctx := context.Background()
 
 	prevProvider := otel.GetMeterProvider()
-	meterProvider := newRecordingMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
 	otel.SetMeterProvider(meterProvider)
 	t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
 
@@ -8261,7 +8234,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	recording := meterProvider.meter
 	require.Len(t, recording.callbacks, 3)
 
-	observer := &attrObserver{}
+	observer := &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8326,7 +8299,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 
 	require.Len(t, recording.callbacks, 3)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8334,10 +8307,10 @@ func TestActorMetricsAggregation(t *testing.T) {
 
 	// a tree node whose PID has no cached attributes is skipped
 	sysImpl := sys.(*actorSystem)
-	bare := MockPID(sys, "bare", 0)
+	bare := newPIDAt(sys, "bare", 0)
 	require.NoError(t, sysImpl.tree().addNode(parent, bare))
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8350,7 +8323,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	stored := childNode.value()
 	childNode.pid.Store(nil)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8363,7 +8336,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	// that stopped consuming stays visible.
 	child.setState(suspendedState, true)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8371,7 +8344,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 
 	child.setState(suspendedState, false)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8384,7 +8357,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 	storedProcessed := child.processedCount.Load()
 	child.processedCount.Store(0)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8392,7 +8365,7 @@ func TestActorMetricsAggregation(t *testing.T) {
 
 	child.processedCount.Store(storedProcessed)
 
-	observer = &attrObserver{}
+	observer = &MockAttrObserver{}
 	for _, cb := range recording.callbacks {
 		require.NoError(t, cb(ctx, observer))
 	}
@@ -8487,7 +8460,7 @@ func TestActorLifecycleCountersExcludeSystemActors(t *testing.T) {
 // change moves neither.
 func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	system.eventsStream = eventstream.New()
 	system.remoteWatches = newRemoteWatchRegistry()
 

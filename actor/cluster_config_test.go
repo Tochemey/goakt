@@ -38,7 +38,7 @@ import (
 func TestClusterConfig(t *testing.T) {
 	t.Run("With happy path with Kinds", func(t *testing.T) {
 		provider := new(testkit.Provider)
-		exchanger := new(exchanger)
+		exchanger := new(MockExchanger)
 		tester := new(MockActor)
 		kinds := []Actor{tester, exchanger}
 
@@ -137,7 +137,7 @@ func TestClusterConfig(t *testing.T) {
 	})
 	t.Run("With invalid config setting", func(t *testing.T) {
 		config := NewClusterConfig().
-			WithKinds(new(exchanger), new(MockActor)).
+			WithKinds(new(MockExchanger), new(MockActor)).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).
@@ -150,7 +150,7 @@ func TestClusterConfig(t *testing.T) {
 
 	t.Run("With grain activation barrier invalid timeout", func(t *testing.T) {
 		config := NewClusterConfig().
-			WithKinds(new(exchanger), new(MockActor)).
+			WithKinds(new(MockExchanger), new(MockActor)).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithMinimumPeersQuorum(1).
@@ -172,7 +172,7 @@ func TestClusterConfig(t *testing.T) {
 	t.Run("With invalid convergence timeout", func(t *testing.T) {
 		for _, timeout := range []time.Duration{0, -time.Second} {
 			config := NewClusterConfig().
-				WithKinds(new(exchanger), new(MockActor)).
+				WithKinds(new(MockExchanger), new(MockActor)).
 				WithDiscoveryPort(3220).
 				WithPeersPort(3222).
 				WithConvergenceTimeout(timeout).
@@ -184,7 +184,7 @@ func TestClusterConfig(t *testing.T) {
 
 	t.Run("With unknown network profile", func(t *testing.T) {
 		config := NewClusterConfig().
-			WithKinds(new(exchanger), new(MockActor)).
+			WithKinds(new(MockExchanger), new(MockActor)).
 			WithDiscoveryPort(3220).
 			WithPeersPort(3222).
 			WithNetworkProfile(NetworkProfile(7)).

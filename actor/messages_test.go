@@ -60,7 +60,7 @@ func TestActorStarted(t *testing.T) {
 	require.NotNil(t, consumer)
 
 	// create actor1
-	pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -100,7 +100,7 @@ func TestActorStopped(t *testing.T) {
 	require.NotNil(t, consumer)
 
 	// create actor1
-	pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 
@@ -317,7 +317,7 @@ func TestActorSuspended(t *testing.T) {
 	require.NotNil(t, consumer)
 
 	// create actor1
-	pid, err := actorSystem.Spawn(ctx, "Exchange1", &exchanger{})
+	pid, err := actorSystem.Spawn(ctx, "Exchange1", &MockExchanger{})
 	require.NoError(t, err)
 	require.NotNil(t, pid)
 

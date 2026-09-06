@@ -35,48 +35,14 @@ import (
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
-	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
-	"github.com/tochemey/goakt/v4/internal/datacentercontroller"
 	"github.com/tochemey/goakt/v4/internal/ddata"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
-	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
-	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 )
-
-// spawnTestReplicator registers the CRDT config extension on the actor system
-// and spawns a Replicator actor. This mirrors what spawnReplicator does in production.
-func spawnTestReplicator(t *testing.T, sys ActorSystem) *PID {
-	t.Helper()
-	ctx := context.TODO()
-	config := crdt.NewConfig()
-	impl := sys.(*actorSystem)
-	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
-	repl, err := sys.Spawn(ctx, "replicator", newReplicatorActor(), WithLongLived())
-	require.NoError(t, err)
-	require.NotNil(t, repl)
-	pause.For(500 * time.Millisecond)
-	return repl
-}
-
-// newTestReplicator creates a replicatorActor with config set directly for unit tests
-// that don't go through the actor system.
-func newTestReplicator() *replicatorActor {
-	r := newReplicatorActor()
-	r.config = crdt.NewConfig()
-	r.store = make(map[string]crdt.ReplicatedData)
-	r.keyTypes = make(map[string]crdt.DataType)
-	r.subscriptions = make(map[string]types.Unit)
-	r.watchers = make(map[string][]*PID)
-	r.tombstones = make(map[string]*tombstone)
-	r.versions = make(map[string]uint64)
-	return r
-}
 
 func TestReplicatorActor(t *testing.T) {
 	t.Run("constructor", func(t *testing.T) {
@@ -923,72 +889,6 @@ func TestReplicatorVersionTracking(t *testing.T) {
 	})
 }
 
-// crdtCluster is a test helper that manages a 3-node cluster with CRDT enabled.
-type crdtCluster struct {
-	nodes [3]ActorSystem
-	sds   [3]discovery.Provider
-	repls [3]*PID
-	srv   interface{ Shutdown() }
-}
-
-// setupCRDTCluster creates and starts a 3-node CRDT-enabled cluster.
-func setupCRDTCluster(t *testing.T) *crdtCluster {
-	t.Helper()
-	srv := startNatsServer(t)
-	c := &crdtCluster{srv: srv}
-	for i := range 3 {
-		node, sd := testNATs(t, srv.Addr().String(), withTestCRDT())
-		require.NotNil(t, node)
-		c.nodes[i] = node
-		c.sds[i] = sd
-	}
-	pause.For(3 * time.Second)
-	for i := range 3 {
-		c.repls[i] = c.nodes[i].Replicator()
-		require.NotNil(t, c.repls[i], "replicator should be running on node %d", i+1)
-	}
-	return c
-}
-
-// shutdown stops all nodes and closes discovery providers.
-func (c *crdtCluster) shutdown(t *testing.T) {
-	t.Helper()
-	ctx := context.TODO()
-	for i := range 3 {
-		require.NoError(t, c.nodes[i].Stop(ctx))
-	}
-	for i := range 3 {
-		require.NoError(t, c.sds[i].Close())
-	}
-	c.srv.Shutdown()
-}
-
-// getPNCounter reads a PNCounter from a node's replicator.
-func getPNCounter(t *testing.T, repl *PID, key crdt.Key) *crdt.PNCounter {
-	t.Helper()
-	ctx := context.TODO()
-	resp, err := Ask(ctx, repl, &crdt.Get{Key: key}, time.Second)
-	require.NoError(t, err)
-	data := resp.(*crdt.GetResponse).Data
-	if data == nil {
-		return nil
-	}
-	return data.(*crdt.PNCounter)
-}
-
-// getORSet reads an ORSet from a node's replicator.
-func getORSet(t *testing.T, repl *PID, key crdt.Key) *crdt.ORSet {
-	t.Helper()
-	ctx := context.TODO()
-	resp, err := Ask(ctx, repl, &crdt.Get{Key: key}, time.Second)
-	require.NoError(t, err)
-	data := resp.(*crdt.GetResponse).Data
-	if data == nil {
-		return nil
-	}
-	return data.(*crdt.ORSet)
-}
-
 func TestReplicatorCluster(t *testing.T) {
 	t.Run("replicator is spawned on all nodes when CRDT is enabled", func(t *testing.T) {
 		c := setupCRDTCluster(t)
@@ -1003,9 +903,9 @@ func TestReplicatorCluster(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		node1, sd1 := testNATs(t, srv.Addr().String())
-		node2, sd2 := testNATs(t, srv.Addr().String())
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 
 		pause.For(3 * time.Second)
 
@@ -1026,17 +926,17 @@ func TestReplicatorCluster(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		node1, sd1 := testNATs(t, srv.Addr().String(),
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("crdt-node"),
+			withTestRoles("crdt-node"),
 		)
-		node2, sd2 := testNATs(t, srv.Addr().String(),
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("crdt-node"),
+			withTestRoles("crdt-node"),
 		)
-		node3, sd3 := testNATs(t, srv.Addr().String(),
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("crdt-node"),
+			withTestRoles("crdt-node"),
 		)
 
 		pause.For(3 * time.Second)
@@ -1058,15 +958,15 @@ func TestReplicatorCluster(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		node1, sd1 := testNATs(t, srv.Addr().String(),
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("web-server"),
+			withTestRoles("web-server"),
 		)
-		node2, sd2 := testNATs(t, srv.Addr().String(),
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("web-server"),
+			withTestRoles("web-server"),
 		)
-		node3, sd3 := testNATs(t, srv.Addr().String(),
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
 		)
 
@@ -1089,15 +989,15 @@ func TestReplicatorCluster(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		node1, sd1 := testNATs(t, srv.Addr().String(),
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(),
-			withMockRoles("web-server"),
+			withTestRoles("web-server"),
 		)
-		node2, sd2 := testNATs(t, srv.Addr().String(),
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(),
-			withMockRoles("api-server"),
+			withTestRoles("api-server"),
 		)
-		node3, sd3 := testNATs(t, srv.Addr().String(),
+		node3, sd3 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(),
 		)
 
@@ -1120,15 +1020,15 @@ func TestReplicatorCluster(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
 
-		nodeWithRole, sd1 := testNATs(t, srv.Addr().String(),
+		nodeWithRole, sd1 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("crdt-node", "web-server"),
+			withTestRoles("crdt-node", "web-server"),
 		)
-		nodeWithoutRole, sd2 := testNATs(t, srv.Addr().String(),
+		nodeWithoutRole, sd2 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
-			withMockRoles("web-server"),
+			withTestRoles("web-server"),
 		)
-		nodeNoRoles, sd3 := testNATs(t, srv.Addr().String(),
+		nodeNoRoles, sd3 := startNATsSystem(t, srv.Addr().String(),
 			withTestCRDT(crdt.WithRole("crdt-node")),
 		)
 
@@ -2259,28 +2159,6 @@ func TestReplicatorPostStopWithSnapshot(t *testing.T) {
 	assert.NotNil(t, loaded["snap-counter"].GetData().GetPnCounter())
 	assert.True(t, loaded["snap-counter"].GetVersion() > 0)
 	require.NoError(t, store.Close())
-}
-
-// spawnTestReplicatorWithDC registers the CRDT config extension with DC identity
-// and spawns a Replicator actor configured for cross-DC replication.
-func spawnTestReplicatorWithDC(t *testing.T, sys ActorSystem, dcName, dcRegion, dcZone string) *PID {
-	t.Helper()
-	ctx := context.TODO()
-	config := crdt.NewConfig(crdt.WithDataCenterReplication())
-	impl := sys.(*actorSystem)
-	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{
-		config: config,
-		dc: datacenter.DataCenter{
-			Name:   dcName,
-			Region: dcRegion,
-			Zone:   dcZone,
-		},
-	})
-	repl, err := sys.Spawn(ctx, "replicator", newReplicatorActor(), WithLongLived())
-	require.NoError(t, err)
-	require.NotNil(t, repl)
-	pause.For(500 * time.Millisecond)
-	return repl
 }
 
 func TestReplicatorDataCenterExtension(t *testing.T) {
@@ -3936,101 +3814,6 @@ func TestReplicatorDeltaForTombstonedKeyViaProtoDelta(t *testing.T) {
 // Data center controller test helpers
 // ---------------------------------------------------------------------------
 
-// spawnReplicatorWithDCController creates a replicator with DC capabilities,
-// injecting cluster mock, remoting mock, and a real DC controller backed by
-// a mock control plane. Returns the system, PID, replicator actor reference,
-// and the two mocks so callers can set expectations and inspect counters.
-func spawnReplicatorWithDCController(
-	t *testing.T,
-	listActive func(context.Context) ([]datacenter.DataCenterRecord, error),
-	dcCfgOverride *datacenter.Config,
-) (ActorSystem, *PID, *replicatorActor, *mockcluster.Cluster, *mocksremote.Client) {
-	t.Helper()
-	ctx := context.TODO()
-
-	// WithPubSub ensures the TopicActor is created during Start so
-	// publishDelta can buffer deltas for cross-DC forwarding.
-	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
-	err := sys.Start(ctx)
-	require.NoError(t, err)
-	pause.For(time.Second)
-
-	impl := sys.(*actorSystem)
-
-	dcConfig := dcCfgOverride
-	if dcConfig == nil {
-		dcConfig = datacenter.NewConfig()
-		dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
-		dcConfig.MaxCacheStaleness = 5 * time.Second
-		dcConfig.CacheRefreshInterval = 500 * time.Millisecond
-	}
-	dcConfig.ControlPlane = &MockControlPlane{listActive: listActive}
-
-	controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
-	require.NoError(t, err)
-	startCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	err = controller.Start(startCtx)
-	cancel()
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
-		_ = controller.Stop(stopCtx)
-		stopCancel()
-	})
-
-	clusterMock := mockcluster.NewCluster(t)
-	remotingMock := mocksremote.NewClient(t)
-
-	// ActorExists and PutActor are called during Spawn when clusterEnabled is
-	// true: the spawned replicator is synchronously published to the cluster
-	clusterMock.EXPECT().ActorExists(mock.Anything, mock.Anything).Return(false, nil).Maybe()
-	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Maybe()
-	// Close is called during actor system shutdown
-	remotingMock.EXPECT().Close().Maybe()
-
-	impl.locker.Lock()
-	impl.cluster = clusterMock
-	impl.remoting = remotingMock
-	impl.locker.Unlock()
-	impl.clusterEnabled.Store(true)
-	impl.remotingEnabled.Store(true)
-	impl.dataCenterController = controller
-	impl.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
-
-	config := crdt.NewConfig(
-		crdt.WithDataCenterReplication(),
-		crdt.WithDataCenterReplicationInterval(time.Hour),
-		crdt.WithDataCenterSendTimeout(2*time.Second),
-	)
-	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{
-		config: config,
-		dc:     datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"},
-	})
-
-	replActor := newReplicatorActor()
-	repl, err := sys.Spawn(ctx, "replicator", replActor, WithLongLived())
-	require.NoError(t, err)
-	require.NotNil(t, repl)
-	pause.For(500 * time.Millisecond)
-
-	// Disable cluster flag to prevent shutdown from trying to access
-	// cluster-only fields (clusterNode, etc.) that aren't set up here.
-	impl.clusterEnabled.Store(false)
-
-	return sys, repl, replActor, clusterMock, remotingMock
-}
-
-// remoteRecords returns a ListActive function that produces the given records.
-func remoteRecords(records []datacenter.DataCenterRecord) func(context.Context) ([]datacenter.DataCenterRecord, error) {
-	return func(context.Context) ([]datacenter.DataCenterRecord, error) {
-		return records, nil
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Data center flush tests
-// ---------------------------------------------------------------------------
-
 func TestReplicatorDataCenterFlushNonLeaderSkips(t *testing.T) {
 	records := []datacenter.DataCenterRecord{
 		{
@@ -5169,24 +4952,6 @@ func TestReplicatorDataCenterFlushDrainsPendingBuffers(t *testing.T) {
 
 	err = sys.Stop(context.TODO())
 	assert.NoError(t, err)
-}
-
-// spawnBenchReplicator creates a replicator for benchmarks.
-func spawnBenchReplicator(b *testing.B) (ActorSystem, *PID) {
-	b.Helper()
-	ctx := context.TODO()
-	sys, err := NewActorSystem("benchSys", WithLogger(log.DiscardLogger))
-	require.NoError(b, err)
-	require.NoError(b, sys.Start(ctx))
-
-	config := crdt.NewConfig()
-	impl := sys.(*actorSystem)
-	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
-	repl, err := sys.Spawn(ctx, "replicator", newReplicatorActor(), WithLongLived())
-	require.NoError(b, err)
-	require.NotNil(b, repl)
-	pause.For(500 * time.Millisecond)
-	return sys, repl
 }
 
 func BenchmarkReplicatorUpdatePNCounter(b *testing.B) {

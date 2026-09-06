@@ -33,5 +33,14 @@ RUN GOBIN=/usr/local/bin go install google.golang.org/protobuf/cmd/protoc-gen-go
  && curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
         | sh -s -- -b /usr/local/bin ${GOLANGCI_VERSION}
 
-ENV GOFLAGS=-mod=vendor
 WORKDIR /src
+
+# Pre-fetch the module graph so test runs need neither the network nor a host cache.
+# The layer is rebuilt only when go.mod or go.sum change.
+COPY go.mod go.sum ./
+RUN go mod download && chmod -R a+rX /go/pkg/mod
+
+# Mount point for the per-run build cache used by `make unit-test`.
+RUN mkdir -m 1777 /cache
+
+ENV GOFLAGS=-mod=vendor

@@ -49,34 +49,6 @@ import (
 	"github.com/tochemey/goakt/v4/supervisor"
 )
 
-type spawnSingletonSpy struct {
-	*actorSystem
-	called    bool
-	actorName string
-	actor     Actor
-	config    *clusterSingletonConfig
-}
-
-func (s *spawnSingletonSpy) SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error) {
-	s.called = true
-	s.actorName = name
-	s.actor = actor
-	s.config = newClusterSingletonConfig(opts...)
-	return nil, nil
-}
-
-// collectRelocationFailedEvents drains the consumer and returns the
-// RelocationFailed events it received.
-func collectRelocationFailedEvents(consumer eventstream.Subscriber) []*RelocationFailed {
-	var events []*RelocationFailed
-	for message := range consumer.Iterator() {
-		if event, ok := message.Payload().(*RelocationFailed); ok {
-			events = append(events, event)
-		}
-	}
-	return events
-}
-
 // TestRelocationWorkerPeersError verifies that a failure to fetch the cluster
 // peers aborts the whole relocation: every actor and grain of the departed node
 // is reported in a RelocationFailed event, the peer state snapshot is removed,
@@ -93,7 +65,7 @@ func TestRelocationWorkerPeersError(t *testing.T) {
 	expectedErr := stdErrors.New("cluster failure")
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, expectedErr).Once()
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -155,7 +127,7 @@ func TestRelocationWorkerAbortsWhenSystemStopping(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	remotingMock := mocksremote.NewClient(t)
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -217,7 +189,7 @@ func TestRelocationWorkerPartialFailureListsExactlyFailedItems(t *testing.T) {
 	// the leader tallies actors per node once to seed load-aware placement
 	clusterMock.EXPECT().CountActorsByHost(mock.Anything, mock.Anything).Return(nil, nil).Once()
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -291,7 +263,7 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 		}.Build(), nil).Once()
 	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -383,7 +355,7 @@ func TestRelocationRPCScaling(t *testing.T) {
 			return new(internalpb.RelocateBatchResponse), nil
 		})
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -476,7 +448,7 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 			return new(internalpb.RelocateBatchResponse), nil
 		}).Once()
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
@@ -750,7 +722,7 @@ func TestRelocationWorkerToleratesDeletePeerStateError(t *testing.T) {
 	require.NoError(t, err)
 
 	sys := system.(*actorSystem)
-	store := &recordingPeerStateStore{deleteErr: stdErrors.New("store down")}
+	store := &MockRecordingPeerStateStore{deleteErr: stdErrors.New("store down")}
 	sys.clusterStore = store
 
 	require.True(t, sys.beginRelocation("127.0.0.1:9000", new(internalpb.PeerState)))
@@ -800,133 +772,6 @@ func TestReassignByRole(t *testing.T) {
 	t.Run("spreads role-less actors across eligible survivors", testReassignByRoleSpreadsLoad)
 }
 
-func testReassignByRoleSpreadsLoad(t *testing.T) {
-	actors := make([]*internalpb.Actor, 6)
-	for i := range actors {
-		actors[i] = internalpb.Actor_builder{Address: address.New(fmt.Sprintf("actor-%d", i), "test", "127.0.0.9", 7000).String()}.Build()
-	}
-	requests := []*internalpb.RelocateBatchRequest{internalpb.RelocateBatchRequest_builder{DepartedNode: "127.0.0.9:7000", Actors: actors}.Build()}
-
-	survivors := []*cluster.Peer{
-		{Host: "10.0.0.1", RemotingPort: 1},
-		{Host: "10.0.0.2", RemotingPort: 2},
-		{Host: "10.0.0.3", RemotingPort: 3},
-	}
-
-	failures := &relocationFailures{}
-	actorShares, leaderActors, _ := reassignByRole(requests, survivors, nil, failures)
-
-	// role-less actors must spread evenly instead of piling onto survivors[0]
-	require.Len(t, actorShares, 3)
-	for i := range actorShares {
-		assert.Len(t, actorShares[i], 2, "survivor %d must receive an even share", i)
-	}
-
-	assert.Empty(t, leaderActors)
-	assert.Empty(t, failures.items())
-}
-
-func testReassignByRoleDistribution(t *testing.T) {
-	gpu := "gpu"
-	blue := "blue"
-	missing := "missing"
-	requests := []*internalpb.RelocateBatchRequest{
-		internalpb.RelocateBatchRequest_builder{
-			DepartedNode: "127.0.0.9:7000",
-			Actors: []*internalpb.Actor{
-				internalpb.Actor_builder{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()}.Build(),
-				internalpb.Actor_builder{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu}.Build(),
-				internalpb.Actor_builder{Address: address.New("blue-actor", "test", "127.0.0.9", 7000).String(), Role: &blue}.Build(),
-			},
-			Grains: []*internalpb.Grain{internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "grain-1"}.Build()}.Build()},
-		}.Build(),
-		internalpb.RelocateBatchRequest_builder{
-			DepartedNode: "127.0.0.9:7000",
-			Actors: []*internalpb.Actor{
-				internalpb.Actor_builder{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing}.Build(),
-			},
-		}.Build(),
-	}
-
-	// survivor 0 advertises no role (hosts role-less), survivor 1 advertises gpu,
-	// survivor 2 advertises blue; none advertises "missing".
-	survivors := []*cluster.Peer{
-		{Host: "10.0.0.1", RemotingPort: 1},
-		{Host: "10.0.0.2", RemotingPort: 2, Roles: []string{"gpu"}},
-		{Host: "10.0.0.3", RemotingPort: 3, Roles: []string{"blue"}},
-	}
-
-	failures := &relocationFailures{}
-	actorShares, leaderActors, grains := reassignByRole(requests, survivors, nil, failures)
-
-	require.Len(t, actorShares, 3)
-	// role-less actor lands on the first survivor
-	require.Len(t, actorShares[0], 1)
-	assert.Contains(t, actorShares[0][0].GetAddress(), "no-role")
-	// gpu actor lands on the gpu survivor
-	require.Len(t, actorShares[1], 1)
-	assert.Contains(t, actorShares[1][0].GetAddress(), "gpu-actor")
-	// blue actor lands on the blue survivor
-	require.Len(t, actorShares[2], 1)
-	assert.Contains(t, actorShares[2][0].GetAddress(), "blue-actor")
-
-	// a role-less leader takes nothing while survivors can host every actor
-	assert.Empty(t, leaderActors)
-
-	// grains are flattened out for the caller to place
-	require.Len(t, grains, 1)
-
-	// the actor requiring a role no survivor advertises is recorded once
-	items := failures.items()
-	require.Len(t, items, 1)
-	assert.False(t, items[0].GetGrain())
-	assert.Contains(t, items[0].GetId(), "unplaceable")
-	assert.Contains(t, items[0].GetMessage(), "missing")
-}
-
-func testReassignByRoleLeaderFallback(t *testing.T) {
-	gpu := "gpu"
-	missing := "missing"
-	requests := []*internalpb.RelocateBatchRequest{
-		internalpb.RelocateBatchRequest_builder{
-			DepartedNode: "127.0.0.9:7000",
-			Actors: []*internalpb.Actor{
-				internalpb.Actor_builder{Address: address.New("no-role", "test", "127.0.0.9", 7000).String()}.Build(),
-				internalpb.Actor_builder{Address: address.New("gpu-actor", "test", "127.0.0.9", 7000).String(), Role: &gpu}.Build(),
-				internalpb.Actor_builder{Address: address.New("unplaceable", "test", "127.0.0.9", 7000).String(), Role: &missing}.Build(),
-			},
-		}.Build(),
-	}
-
-	// no survivor advertises gpu, but the leader does: the gpu actor must be
-	// recovered locally instead of being reported as unplaceable
-	survivors := []*cluster.Peer{{Host: "10.0.0.1", RemotingPort: 1}}
-
-	failures := &relocationFailures{}
-	actorShares, leaderActors, grains := reassignByRole(requests, survivors, []string{"gpu"}, failures)
-
-	require.Len(t, actorShares, 1)
-	require.Len(t, actorShares[0], 1)
-	assert.Contains(t, actorShares[0][0].GetAddress(), "no-role")
-
-	require.Len(t, leaderActors, 1)
-	assert.Contains(t, leaderActors[0].GetAddress(), "gpu-actor")
-
-	assert.Empty(t, grains)
-
-	// only the actor no surviving node (leader included) can host is a failure
-	items := failures.items()
-	require.Len(t, items, 1)
-	assert.Contains(t, items[0].GetId(), "unplaceable")
-
-	// with no survivors at all, every leader-eligible actor goes local
-	failures = &relocationFailures{}
-	actorShares, leaderActors, _ = reassignByRole(requests, nil, []string{"gpu"}, failures)
-	assert.Empty(t, actorShares)
-	require.Len(t, leaderActors, 2)
-	require.Len(t, failures.items(), 1)
-}
-
 // TestSurvivingPeersExcept verifies the failed target is removed from the peer
 // set while order is preserved.
 func TestSurvivingPeersExcept(t *testing.T) {
@@ -957,7 +802,7 @@ func TestReportAbortedRelocation(t *testing.T) {
 	)
 
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	// the lazy grain still points at the departed node, so it is released
 	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
@@ -1018,29 +863,6 @@ func TestDepartedNodeOf(t *testing.T) {
 	})
 }
 
-// enqueueSpySystem is a minimal ActorSystem test double that intercepts only the
-// three recreation/release calls enqueueRelocation makes, so each dispatch
-// branch (actor, singleton, eager grain, lazy grain) and its failure path can be
-// exercised without a live cluster.
-type enqueueSpySystem struct {
-	ActorSystem
-	recreateActorFn func(*internalpb.Actor) error
-	recreateGrainFn func(*internalpb.Grain) error
-	releaseLazyFn   func(*internalpb.Grain) error
-}
-
-func (s *enqueueSpySystem) recreateActorFromWire(_ context.Context, a *internalpb.Actor, _ string) error {
-	return s.recreateActorFn(a)
-}
-
-func (s *enqueueSpySystem) recreateGrainFromWire(_ context.Context, g *internalpb.Grain, _ string) error {
-	return s.recreateGrainFn(g)
-}
-
-func (s *enqueueSpySystem) releaseGrainForLazyRelocation(_ context.Context, g *internalpb.Grain, _ string) error {
-	return s.releaseLazyFn(g)
-}
-
 // TestEnqueueRelocation verifies the shared dispatch rule used by the leader's
 // local share and the peer-side RelocateBatch handler: a plain actor is
 // recreated (failures recorded), a singleton is routed through the singleton
@@ -1048,7 +870,7 @@ func (s *enqueueSpySystem) releaseGrainForLazyRelocation(_ context.Context, g *i
 // has its directory entry released, becoming a failure solely when the release
 // fails.
 func TestEnqueueRelocation(t *testing.T) {
-	spy := &enqueueSpySystem{
+	spy := &MockEnqueueSpySystem{
 		recreateActorFn: func(a *internalpb.Actor) error {
 			if a.GetAddress() == "bad-actor" {
 				return stdErrors.New("spawn failed")
@@ -1159,7 +981,7 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 	)
 
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 
 	// the lazy grain still points at the departed node, but its release fails
 	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
@@ -1450,19 +1272,12 @@ func TestRelocationWorkerTargetLoads(t *testing.T) {
 	})
 }
 
-func mustName(t *testing.T, actor *internalpb.Actor) string {
-	t.Helper()
-	addr, err := address.Parse(actor.GetAddress())
-	require.NoError(t, err)
-	return addr.Name()
-}
-
 // TestRecreateSingletonFromWireUsesSingletonSpec verifies a relocated singleton
 // actor is respawned through the cluster singleton spawn path with its
 // serialized singleton configuration restored.
 func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	ctx := context.Background()
-	system := MockSingletonClusterReadyActorSystem(t)
+	system := newSingletonClusterSystem(t)
 	clusterMock := mockscluster.NewCluster(t)
 	system.locker.Lock()
 	system.cluster = clusterMock
@@ -1494,7 +1309,7 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
 
-	spy := &spawnSingletonSpy{actorSystem: system}
+	spy := &MockSpawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)
 	require.NoError(t, err)
 
@@ -1522,7 +1337,7 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 // the departed one, the relocation is a no-op (no RemoveActor/spawn).
 func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 	ctx := context.Background()
-	system := MockSingletonClusterReadyActorSystem(t)
+	system := newSingletonClusterSystem(t)
 	clusterMock := mockscluster.NewCluster(t)
 	system.locker.Lock()
 	system.cluster = clusterMock
@@ -1543,7 +1358,7 @@ func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 			Address: address.New("singleton", system.Name(), "127.0.0.2", 9002).String(),
 		}.Build(), nil).Once()
 
-	spy := &spawnSingletonSpy{actorSystem: system}
+	spy := &MockSpawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)
 	require.NoError(t, err)
 
@@ -1741,15 +1556,6 @@ func TestAllocateGrainsByRole(t *testing.T) {
 	})
 }
 
-// grainIDs flattens grain identities for containment assertions.
-func grainIDs(grains []*internalpb.Grain) []string {
-	ids := make([]string, 0, len(grains))
-	for _, grain := range grains {
-		ids = append(ids, grain.GetGrainId().GetValue())
-	}
-	return ids
-}
-
 // TestRelocationWorkerHonorsEagerGrainRole verifies the whole relocation flow
 // for issue #1334: an eager grain created with WithActivationRole is relocated
 // only to a surviving node advertising that role, and an eager grain whose
@@ -1790,7 +1596,7 @@ func TestRelocationWorkerHonorsEagerGrainRole(t *testing.T) {
 			return new(internalpb.RelocateBatchResponse), nil
 		}).Once()
 
-	store := &recordingPeerStateStore{}
+	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
 	sys.clusterStore = store
 	sys.relocationEnabled.Store(true)
