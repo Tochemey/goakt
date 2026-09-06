@@ -44,12 +44,6 @@
         "label": "GitHub",
         "href": "https://github.com/tochemey/goakt",
         "icon": "github"
-      },
-      {
-        "label": "Install",
-        "href": "/getting-started/installation",
-        "icon": "download",
-        "primary": true
       }
     ]
   },
@@ -71,6 +65,18 @@
     {
       "source": "/actor/first-actor",
       "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/installation",
+      "destination": "/getting-started/quickstart"
+    },
+    {
+      "source": "/getting-started/production-usage",
+      "destination": "https://goakt.dev/#production"
+    },
+    {
+      "source": "/getting-started/use-cases",
+      "destination": "https://goakt.dev"
     },
     {
       "source": "/getting-started/migration-v3",
@@ -96,26 +102,16 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Get Started",
-        "icon": "rocket",
-        "groups": [
-          {
-            "group": "Get Started",
-            "icon": "rocket",
-            "pages": [
-              "/index",
-              "/getting-started/installation",
-              "/getting-started/quickstart",
-              "/getting-started/use-cases",
-              "/getting-started/production-usage"
-            ]
-          }
-        ]
-      },
-      {
         "tab": "Guides",
         "icon": "book-open",
         "groups": [
+          {
+            "group": "Quickstart",
+            "icon": "play",
+            "pages": [
+              "/getting-started/quickstart"
+            ]
+          },
           {
             "group": "Actors",
             "icon": "users",

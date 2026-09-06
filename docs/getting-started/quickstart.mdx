@@ -4,8 +4,20 @@ description: Build and run your first GoAkt actor in a few minutes.
 sidebarTitle: "Quickstart"
 ---
 
-This guide creates an actor system, spawns an actor, and exchanges messages with it, all in one file. You need
-[GoAkt installed](/getting-started/installation) and nothing else; standalone mode has no external dependencies.
+This guide creates an actor system, spawns an actor, and exchanges messages with it, all in one file. You need Go 1.26
+or higher and nothing else; standalone mode has no external dependencies.
+
+## Install
+
+Create a module and add GoAkt to it:
+
+```bash Terminal
+go mod init quickstart
+go get github.com/tochemey/goakt/v4
+```
+
+The `v4` module path pins you to v4.x releases. The framework follows semantic versioning; patch releases within v4 are
+backward compatible.
 
 ## The complete program
 
@@ -86,7 +98,7 @@ func main() {
 Run it:
 
 ```bash Terminal
-go run main.go
+go run .
 ```
 
 The log shows the actor system starting, then `Hello, World!`. Press Ctrl+C to shut down cleanly.
