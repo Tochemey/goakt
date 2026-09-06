@@ -165,7 +165,7 @@ func TestSpawnConfig(t *testing.T) {
 	})
 	t.Run("With invalid passivation strategy", func(t *testing.T) {
 		config := newSpawnConfig()
-		option := WithPassivationStrategy(&MockFakePassivationStrategy{})
+		option := WithPassivationStrategy(&MockPassivationStrategy{})
 		option.Apply(config)
 		err := config.Validate()
 		require.Error(t, err)
@@ -342,7 +342,7 @@ func TestSpawnConfigReliableDeliveryValidation(t *testing.T) {
 
 func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 	t.Run("With durable queue absent from dependencies", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		config := newSpawnConfig(AsReliableProducer("consumer", WithReliableDurableQueue(queue)))
 
 		require.Len(t, config.dependencies, 1)
@@ -350,7 +350,7 @@ func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 	})
 
 	t.Run("With durable queue already among dependencies", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		config := newSpawnConfig(
 			WithDependencies(queue),
 			AsReliableProducer("consumer", WithReliableDurableQueue(queue)),
@@ -361,7 +361,7 @@ func TestSpawnConfigNormalizeDurableQueue(t *testing.T) {
 	})
 
 	t.Run("With option order reversed", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		config := newSpawnConfig(
 			AsReliableProducer("consumer", WithReliableDurableQueue(queue)),
 			WithDependencies(queue),

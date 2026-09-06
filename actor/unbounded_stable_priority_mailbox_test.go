@@ -31,14 +31,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// highestPriority orders messages so that a larger Priority value is served
-// first.
-func highestPriority(msg1, msg2 any) bool {
-	p1 := msg1.(*testpb.TestMessage)
-	p2 := msg2.(*testpb.TestMessage)
-	return p1.GetPriority() > p2.GetPriority()
-}
-
 func TestUnboundedStablePriorityMailbox(t *testing.T) {
 	t.Run("With priority ordering", func(t *testing.T) {
 		mailbox := NewUnboundedStablePriorityMailbox(highestPriority)

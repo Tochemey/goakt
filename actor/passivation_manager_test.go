@@ -52,7 +52,7 @@ func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 
 	timeout := 25 * time.Millisecond
 	strategy := passivation.NewTimeBasedStrategy(timeout)
-	pid := MockPassivationPID(t, "time-based", strategy)
+	pid := newPassivationPID(t, "time-based", strategy)
 	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Minute).UnixNano())
 
 	manager.Register(pid, strategy)
@@ -81,7 +81,7 @@ func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 	manager.Start(context.Background())
 
 	strategy := passivation.NewMessageCountBasedStrategy(2)
-	pid := MockPassivationPID(t, "message-based", strategy)
+	pid := newPassivationPID(t, "message-based", strategy)
 	manager.Register(pid, strategy)
 
 	// Simulate the actor having processed enough messages to cross the threshold.
@@ -109,7 +109,7 @@ func TestPassivationManager_MessageProcessedGuards(t *testing.T) {
 		manager.started.Store(true)
 
 		strategy := passivation.NewMessageCountBasedStrategy(1)
-		pid := MockPassivationPID(t, "paused-entry", strategy)
+		pid := newPassivationPID(t, "paused-entry", strategy)
 		manager.Register(pid, strategy)
 
 		manager.mu.Lock()
@@ -134,7 +134,7 @@ func TestPassivationManager_MessageProcessedGuards(t *testing.T) {
 		manager.started.Store(true)
 
 		strategy := passivation.NewMessageCountBasedStrategy(1)
-		pid := MockPassivationPID(t, "enqueued-entry", strategy)
+		pid := newPassivationPID(t, "enqueued-entry", strategy)
 		manager.Register(pid, strategy)
 
 		manager.mu.Lock()
@@ -286,7 +286,7 @@ func TestPassivationManager_RegisterStrategies(t *testing.T) {
 		defer manager.Stop(context.Background())
 
 		strategy := passivation.NewTimeBasedStrategy(time.Minute)
-		pid := MockPassivationPID(t, "time-entry", strategy)
+		pid := newPassivationPID(t, "time-entry", strategy)
 		pid.latestReceiveTimeNano.Store(time.Now().UnixNano())
 
 		manager.Register(pid, strategy)
@@ -331,7 +331,7 @@ func TestPassivationManager_RegisterStrategies(t *testing.T) {
 		defer manager.Stop(context.Background())
 
 		participant := &MockPassivationParticipant{id: "fake", last: time.Now()}
-		manager.Register(participant, &MockFakePassivationStrategy{})
+		manager.Register(participant, &MockPassivationStrategy{})
 
 		manager.mu.Lock()
 		_, ok := manager.entries[participant.id]
@@ -370,7 +370,7 @@ func TestPassivationManager_ResumeMessageStrategy(t *testing.T) {
 	manager.messageTriggers = make(chan *passivationEntry, 1)
 
 	strategy := passivation.NewMessageCountBasedStrategy(1)
-	pid := MockPassivationPID(t, "resume-message", strategy)
+	pid := newPassivationPID(t, "resume-message", strategy)
 	manager.Register(pid, strategy)
 
 	manager.mu.Lock()
@@ -403,7 +403,7 @@ func TestPassivationManager_ResumeSignalsWhenChannelFull(t *testing.T) {
 	manager.messageTriggers = make(chan *passivationEntry, 1)
 
 	strategy := passivation.NewMessageCountBasedStrategy(1)
-	pid := MockPassivationPID(t, "resume-message-full-channel", strategy)
+	pid := newPassivationPID(t, "resume-message-full-channel", strategy)
 	manager.Register(pid, strategy)
 
 	manager.mu.Lock()
@@ -555,12 +555,12 @@ func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 	})
 
 	timeStrategy := passivation.NewTimeBasedStrategy(2 * time.Second)
-	timePID := MockPassivationPID(t, "timer", timeStrategy)
+	timePID := newPassivationPID(t, "timer", timeStrategy)
 	timePID.latestReceiveTimeNano.Store(time.Now().UnixNano())
 	manager.Register(timePID, timeStrategy)
 
 	msgStrategy := passivation.NewMessageCountBasedStrategy(1)
-	msgPID := MockPassivationPID(t, "message", msgStrategy)
+	msgPID := newPassivationPID(t, "message", msgStrategy)
 	manager.Register(msgPID, msgStrategy)
 
 	msgPID.processedCount.Store(2)

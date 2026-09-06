@@ -25,7 +25,6 @@ package actor
 import (
 	"context"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,49 +43,6 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// grainOfCounterActivations counts OnActivate calls of grainOfCounterGrain across a test.
-var grainOfCounterActivations atomic.Int32
-
-// grainOfCounterGrain is a zero-value constructible grain that records its activations.
-type grainOfCounterGrain struct{}
-
-func (g *grainOfCounterGrain) OnActivate(context.Context, *GrainProps) error {
-	grainOfCounterActivations.Add(1)
-	return nil
-}
-
-func (g *grainOfCounterGrain) OnReceive(ctx *GrainContext) {
-	ctx.NoErr()
-}
-
-func (g *grainOfCounterGrain) OnDeactivate(context.Context, *GrainProps) error {
-	return nil
-}
-
-// collisionGrain and CollisionGrain deliberately differ only in case: the kind
-// registry lowercases type names, so both map to the kind "actor.collisiongrain".
-// They exercise the kind-conflict detection in GrainOf.
-type collisionGrain struct{}
-
-func (g *collisionGrain) OnActivate(context.Context, *GrainProps) error   { return nil }
-func (g *collisionGrain) OnReceive(ctx *GrainContext)                     { ctx.NoErr() }
-func (g *collisionGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-// CollisionGrain collides by kind name with collisionGrain.
-type CollisionGrain struct{}
-
-func (g *CollisionGrain) OnActivate(context.Context, *GrainProps) error   { return nil }
-func (g *CollisionGrain) OnReceive(ctx *GrainContext)                     { ctx.NoErr() }
-func (g *CollisionGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-// valueKindGrain implements Grain with value receivers so the non-pointer
-// type itself satisfies the Grain interface.
-type valueKindGrain struct{}
-
-func (valueKindGrain) OnActivate(context.Context, *GrainProps) error   { return nil }
-func (valueKindGrain) OnReceive(ctx *GrainContext)                     { ctx.NoErr() }
-func (valueKindGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
 
 func TestGrainOf_LocalActivation(t *testing.T) {
 	ctx := t.Context()
@@ -123,18 +79,18 @@ func TestGrainOf_Idempotent(t *testing.T) {
 	require.NoError(t, testSystem.Start(ctx))
 	pause.For(time.Second)
 
-	grainOfCounterActivations.Store(0)
+	activationCount.Store(0)
 
-	first, err := GrainOf[*grainOfCounterGrain](ctx, testSystem, "grainof-idempotent")
+	first, err := GrainOf[*MockActivationCountingGrain](ctx, testSystem, "grainof-idempotent")
 	require.NoError(t, err)
 	require.NotNil(t, first)
 
-	second, err := GrainOf[*grainOfCounterGrain](ctx, testSystem, "grainof-idempotent")
+	second, err := GrainOf[*MockActivationCountingGrain](ctx, testSystem, "grainof-idempotent")
 	require.NoError(t, err)
 	require.NotNil(t, second)
 
 	require.True(t, first.Equal(second))
-	require.EqualValues(t, 1, grainOfCounterActivations.Load())
+	require.EqualValues(t, 1, activationCount.Load())
 
 	require.NoError(t, testSystem.Stop(ctx))
 }
@@ -166,7 +122,7 @@ func TestGrainOf_OptionsHonored(t *testing.T) {
 func TestGrainOf_RemoteActivationDoesNotConstructInstance(t *testing.T) {
 	ctx := t.Context()
 	name := "grainof-remote"
-	identity := newGrainIdentity((*grainOfCounterGrain)(nil), name)
+	identity := newGrainIdentity((*MockActivationCountingGrain)(nil), name)
 	remotePeer := &cluster.Peer{Host: "192.0.2.20", PeersPort: 15020, RemotingPort: 16020}
 	alternatePeer := &cluster.Peer{Host: "192.0.2.21", PeersPort: 15021, RemotingPort: 16021}
 	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 14020, RemotingPort: 8090}
@@ -174,7 +130,7 @@ func TestGrainOf_RemoteActivationDoesNotConstructInstance(t *testing.T) {
 	cl := mockcluster.NewCluster(t)
 	rem := mockremote.NewClient(t)
 	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
-	sys := MockSimpleClusterReadyActorSystem(rem, cl, node)
+	sys := newClusterReadySystem(rem, cl, node)
 
 	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
 	cl.EXPECT().GetGrain(ctx, identity.String()).Return(nil, cluster.ErrGrainNotFound)
@@ -188,20 +144,20 @@ func TestGrainOf_RemoteActivationDoesNotConstructInstance(t *testing.T) {
 		return req != nil && req.Name == identity.Name() && req.Kind == identity.Kind()
 	})).Return(nil)
 
-	grainOfCounterActivations.Store(0)
+	activationCount.Store(0)
 
-	got, err := GrainOf[*grainOfCounterGrain](ctx, sys, name, WithActivationStrategy(RoundRobinActivation))
+	got, err := GrainOf[*MockActivationCountingGrain](ctx, sys, name, WithActivationStrategy(RoundRobinActivation))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Equal(t, identity.String(), got.String())
 
 	// remote activation never constructs nor activates a local instance
-	require.EqualValues(t, 0, grainOfCounterActivations.Load())
+	require.EqualValues(t, 0, activationCount.Load())
 	_, ok := sys.grains.Get(identity.String())
 	require.False(t, ok)
 
 	// the kind is registered locally so this node can host the grain later
-	require.True(t, sys.registry.Exists((*grainOfCounterGrain)(nil)))
+	require.True(t, sys.registry.Exists((*MockActivationCountingGrain)(nil)))
 }
 
 func TestGrainOf_ExistingPidSkipsProvider(t *testing.T) {
@@ -268,14 +224,14 @@ func TestGrainOf_KindConflict(t *testing.T) {
 	require.NoError(t, testSystem.Start(ctx))
 	pause.For(time.Second)
 
-	// registers the kind "actor.collisiongrain" for collisionGrain
-	identity, err := GrainOf[*collisionGrain](ctx, testSystem, "conflict-original")
+	// registers the kind "actor.mockcollisiongrain" for MockCollisionGrain
+	identity, err := GrainOf[*MockCollisionGrain](ctx, testSystem, "conflict-original")
 	require.NoError(t, err)
 	require.NotNil(t, identity)
 
 	// a different type mapping to the same kind must be rejected instead of
 	// silently instantiating the registered type
-	conflicting, err := GrainOf[*CollisionGrain](ctx, testSystem, "conflict-other")
+	conflicting, err := GrainOf[*MockCollisiongrain](ctx, testSystem, "conflict-other")
 	require.Error(t, err)
 	require.ErrorIs(t, err, gerrors.ErrGrainKindConflict)
 	require.Nil(t, conflicting)
@@ -292,7 +248,7 @@ func TestGrainOf_NonPointerKind(t *testing.T) {
 	require.NoError(t, testSystem.Start(ctx))
 	pause.For(time.Second)
 
-	identity, err := GrainOf[valueKindGrain](ctx, testSystem, "grainof-value-kind")
+	identity, err := GrainOf[MockValueKindGrain](ctx, testSystem, "grainof-value-kind")
 	require.Error(t, err)
 	require.ErrorIs(t, err, gerrors.ErrInvalidGrainKind)
 	require.Nil(t, identity)

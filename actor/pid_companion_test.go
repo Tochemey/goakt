@@ -32,18 +32,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/metric"
 )
 
-// pidMaxSizeBytes is the size class the PID must stay in. The PID is the one
-// object every actor allocates, so a field that pushes it over this boundary
-// costs the whole class step on every actor in the process. Raise it only
-// with a measurement from BenchmarkActorMemoryFootprint that justifies it.
-//
-// It is class 416. Embedding the default user mailbox added the 16 bytes of
-// mailboxHead and mailboxTail, moving the PID from 376 bytes (class 384) to 392
-// bytes (class 416). BenchmarkActorMemoryFootprint justifies the step: dropping
-// the separate 144-byte UnboundedMailbox object nets a per-idle-actor decrease
-// well past the 32 bytes of size class the PID takes on.
-const pidMaxSizeBytes = 416
-
 // TestPIDStaysInItsSizeClass guards the PID's size class.
 func TestPIDStaysInItsSizeClass(t *testing.T) {
 	require.LessOrEqual(t, unsafe.Sizeof(PID{}), uintptr(pidMaxSizeBytes), "PID grew past its size class; rarely set fields belong in pidCompanion")
@@ -83,8 +71,8 @@ func TestPIDCompanionAccessors(t *testing.T) {
 
 	config := producerDeliveryConfig("orders-consumer")
 	spec := &reliableCompanionSpec{}
-	queue := &mockDurableQueue{}
-	workQueue := &mockDurableWorkQueue{}
+	queue := &MockDurableQueue{}
+	workQueue := &MockDurableWorkQueue{}
 	singleton := &singletonSpec{
 		SpawnTimeout: time.Second,
 		WaitInterval: 500 * time.Millisecond,

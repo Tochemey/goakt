@@ -29,35 +29,12 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
-
-// newEmbeddedMailbox builds a standalone embedded mailbox seeded exactly as
-// newPID seeds a default actor's: one shared sentinel node on both ends of an
-// otherwise blank PID, reinterpreted through (*embeddedMailbox).
-func newEmbeddedMailbox() *embeddedMailbox {
-	pid := &PID{}
-	sentinel := new(ReceiveContext)
-	pid.mailboxHead = unsafe.Pointer(sentinel)
-	pid.mailboxTail = unsafe.Pointer(sentinel)
-	return (*embeddedMailbox)(pid)
-}
-
-// embeddedMailboxMessage builds a context carrying message for the mailbox tests.
-func embeddedMailboxMessage(message any) *ReceiveContext {
-	return &ReceiveContext{message: message}
-}
-
-// embeddedMailboxHead atomically reads the mailbox's current head, the node the
-// release protocol keeps as the sentinel.
-func embeddedMailboxHead(mailbox *embeddedMailbox) *ReceiveContext {
-	return (*ReceiveContext)(atomic.LoadPointer(&mailbox.mailboxHead))
-}
 
 // TestEmbeddedMailboxFIFOOrder verifies that messages come out in the order they
 // were enqueued and that each dequeue returns the very context that was put in.

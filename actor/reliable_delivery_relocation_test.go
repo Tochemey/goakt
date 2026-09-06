@@ -23,10 +23,8 @@
 package actor
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 
@@ -37,235 +35,26 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
-	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// sharedQueueStates backs sharedDurableQueue instances across the in-process
-// cluster nodes, modeling an external durable store every node can reach.
-// Instances resolve their backing state by queue ID, so an instance
-// reconstructed on another node observes the same sequences, confirmations,
-// and writer epoch.
-var (
-	sharedQueueStatesMu sync.Mutex
-	sharedQueueStates   = map[string]*mockDurableQueue{}
-)
-
-// sharedDurableQueue is a relocatable DurableProducerQueue: only its ID
-// crosses the wire, and every instance delegates to the process-global state
-// registered under that ID.
-type sharedDurableQueue struct {
-	id string
-}
-
-// newSharedDurableQueue creates a queue handle and its backing state.
-func newSharedDurableQueue(id string) *sharedDurableQueue {
-	queue := &sharedDurableQueue{id: id}
-	queue.backing()
-	return queue
-}
-
-// backing resolves the process-global state of this queue, creating it on
-// first use so a reconstructed instance attaches to the same store.
-func (x *sharedDurableQueue) backing() *mockDurableQueue {
-	sharedQueueStatesMu.Lock()
-	defer sharedQueueStatesMu.Unlock()
-
-	state, ok := sharedQueueStates[x.id]
-	if !ok {
-		state = &mockDurableQueue{}
-		sharedQueueStates[x.id] = state
-	}
-
-	return state
-}
-
-func (x *sharedDurableQueue) ID() string                     { return x.id }
-func (x *sharedDurableQueue) MarshalBinary() ([]byte, error) { return []byte(x.id), nil }
-
-func (x *sharedDurableQueue) UnmarshalBinary(data []byte) error {
-	x.id = string(data)
-	return nil
-}
-
-func (x *sharedDurableQueue) Load(ctx context.Context) (DurableQueueState, QueueEpoch, error) {
-	return x.backing().Load(ctx)
-}
-
-func (x *sharedDurableQueue) Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error) {
-	return x.backing().Store(ctx, epoch, request)
-}
-
-func (x *sharedDurableQueue) StoreChunked(ctx context.Context, epoch QueueEpoch, requests []StoreRequest) ([]StoreResult, error) {
-	return x.backing().StoreChunked(ctx, epoch, requests)
-}
-
-func (x *sharedDurableQueue) Accept(ctx context.Context, epoch QueueEpoch, messageID string) error {
-	return x.backing().Accept(ctx, epoch, messageID)
-}
-
-func (x *sharedDurableQueue) Confirm(ctx context.Context, epoch QueueEpoch, upToSeq int64) error {
-	return x.backing().Confirm(ctx, epoch, upToSeq)
-}
-
-// sharedWorkQueueStates backs sharedDurableWorkQueue instances across the
-// in-process cluster nodes, modeling an external durable work store.
-var (
-	sharedWorkQueueStatesMu sync.Mutex
-	sharedWorkQueueStates   = map[string]*mockDurableWorkQueue{}
-)
-
-// sharedDurableWorkQueue is a relocatable DurableWorkQueue: only its ID
-// crosses the wire, and every instance delegates to the process-global state
-// registered under that ID.
-type sharedDurableWorkQueue struct {
-	id string
-}
-
-// newSharedDurableWorkQueue creates a work-queue handle and its backing state.
-func newSharedDurableWorkQueue(id string) *sharedDurableWorkQueue {
-	queue := &sharedDurableWorkQueue{id: id}
-	queue.backing()
-	return queue
-}
-
-// backing resolves the process-global state of this work queue, creating it on
-// first use so a reconstructed instance attaches to the same store.
-func (x *sharedDurableWorkQueue) backing() *mockDurableWorkQueue {
-	sharedWorkQueueStatesMu.Lock()
-	defer sharedWorkQueueStatesMu.Unlock()
-
-	state, ok := sharedWorkQueueStates[x.id]
-	if !ok {
-		state = &mockDurableWorkQueue{}
-		sharedWorkQueueStates[x.id] = state
-	}
-
-	return state
-}
-
-func (x *sharedDurableWorkQueue) ID() string                     { return x.id }
-func (x *sharedDurableWorkQueue) MarshalBinary() ([]byte, error) { return []byte(x.id), nil }
-
-func (x *sharedDurableWorkQueue) UnmarshalBinary(data []byte) error {
-	x.id = string(data)
-	return nil
-}
-
-func (x *sharedDurableWorkQueue) Load(ctx context.Context) (WorkQueueState, QueueEpoch, error) {
-	return x.backing().Load(ctx)
-}
-
-func (x *sharedDurableWorkQueue) Store(ctx context.Context, epoch QueueEpoch, request StoreRequest) (StoreResult, error) {
-	return x.backing().Store(ctx, epoch, request)
-}
-
-func (x *sharedDurableWorkQueue) Accept(ctx context.Context, epoch QueueEpoch, messageID string) error {
-	return x.backing().Accept(ctx, epoch, messageID)
-}
-
-func (x *sharedDurableWorkQueue) ConfirmMessage(ctx context.Context, epoch QueueEpoch, messageID string) error {
-	return x.backing().ConfirmMessage(ctx, epoch, messageID)
-}
-
-// reliableRelocationConsumerMock is a reliableConsumerMock whose zero value
-// confirms deliveries, so the fresh instance a relocation creates behaves
-// like the original spawn.
-type reliableRelocationConsumerMock struct {
-	reliableConsumerMock
-}
-
-func (x *reliableRelocationConsumerMock) PreStart(*Context) error {
-	x.autoConfirm = true
-	return nil
-}
-
-// newReliableRelocationFixture starts a three-node NATS-backed cluster whose
-// nodes register the reliable endpoint kinds, and returns a stopNode function
-// that gracefully stops one node mid-test; the cleanup stops the remainder.
-// The registry runs with a backup replica: with replicaCount 1 the partitions
-// primaried on the departed node are lost with it, and a lost peer-endpoint
-// record would wedge companion resolution instead of exercising relocation.
-func newReliableRelocationFixture(t *testing.T) (context.Context, []*actorSystem, func(index int)) {
-	t.Helper()
-
-	ctx := context.TODO()
-	server := startNatsServer(t)
-	built, providers := testNATsConcurrent(t, server.Addr().String(), 3,
-		withTestExtraKinds(&reliableProducerMock{}, &reliableRelocationConsumerMock{}),
-		withTestReplication(2, 1, 1),
-		withTestBootstrapTimeout(20*time.Second))
-
-	systems := make([]*actorSystem, len(built))
-
-	for i, system := range built {
-		systems[i] = system.(*actorSystem)
-	}
-
-	pause.For(time.Second)
-
-	stopped := make([]bool, len(built))
-	stopNode := func(index int) {
-		t.Helper()
-		require.NoError(t, built[index].Stop(context.WithoutCancel(ctx)))
-		stopped[index] = true
-	}
-
-	t.Cleanup(func() {
-		for i, system := range built {
-			if !stopped[i] {
-				assert.NoError(t, system.Stop(context.WithoutCancel(ctx)))
-			}
-
-			assert.NoError(t, providers[i].Close())
-		}
-
-		server.Shutdown()
-	})
-
-	return ctx, systems, stopNode
-}
-
-// awaitLocalEndpoint waits for name to be respawned on one of the given nodes
-// and returns its local PID.
-func awaitLocalEndpoint(t *testing.T, nodes []*actorSystem, name string) *PID {
-	t.Helper()
-
-	var relocated *PID
-
-	require.Eventually(t, func() bool {
-		for _, node := range nodes {
-			if pidNode, ok := node.actors.nodeByName(name); ok {
-				if pid := pidNode.value(); pid != nil && pid.IsRunning() {
-					relocated = pid
-					return true
-				}
-			}
-		}
-
-		return false
-	}, 30*time.Second, 100*time.Millisecond, "endpoint %s must be respawned on a survivor", name)
-
-	return relocated
-}
 
 func TestWorkPullingProducerRelocation(t *testing.T) {
 	ctx, systems, stopNode := newReliableRelocationFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	queue := newSharedDurableWorkQueue("jobs-queue-" + uuid.NewString())
+	queue := NewMockSharedDurableWorkQueue("jobs-queue-" + uuid.NewString())
 
 	for _, node := range systems {
 		require.NoError(t, node.Inject(queue))
 	}
 
-	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "jobs-producer", &MockReliableProducer{},
 		AsReliableWorkPullingProducer(
 			WithReliableDurableWorkQueue(queue),
 			WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableRelocationConsumerMock{},
+	worker, err := node2.Spawn(ctx, "jobs-worker", &MockReliableRelocationConsumer{},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -338,19 +127,19 @@ func TestReliableProducerRelocation(t *testing.T) {
 	ctx, systems, stopNode := newReliableRelocationFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	queue := newSharedDurableQueue("orders-queue-" + uuid.NewString())
+	queue := NewMockSharedDurableQueue("orders-queue-" + uuid.NewString())
 
 	for _, node := range systems {
 		require.NoError(t, node.Inject(queue))
 	}
 
-	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer",
 			WithReliableDurableQueue(queue),
 			WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
+	consumer, err := node2.Spawn(ctx, "orders-consumer", &MockReliableRelocationConsumer{},
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -418,11 +207,11 @@ func TestReliableConsumerRelocation(t *testing.T) {
 	ctx, systems, stopNode := newReliableRelocationFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer", WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
+	consumer, err := node2.Spawn(ctx, "orders-consumer", &MockReliableRelocationConsumer{},
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -452,9 +241,9 @@ func TestReliableRelocationMissingQueueTypeRestoresRecord(t *testing.T) {
 	// the queue type is never injected on the survivors: reconstruction on
 	// any survivor must fail and restore the departed record for a later
 	// relocation retry instead of silently spawning a volatile endpoint
-	queue := newSharedDurableQueue("orders-queue-" + uuid.NewString())
+	queue := NewMockSharedDurableQueue("orders-queue-" + uuid.NewString())
 
-	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue)))
 	require.NoError(t, err)
 
@@ -484,7 +273,7 @@ func TestReliableNonRelocatableEndpointRecordsWithdrawnOnShutdown(t *testing.T) 
 	ctx, systems, stopNode := newReliableRelocationFixture(t)
 	node1, node2 := systems[0], systems[1]
 
-	consumer, err := node1.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
+	consumer, err := node1.Spawn(ctx, "orders-consumer", &MockReliableRelocationConsumer{},
 		AsReliableConsumer("orders-producer"), WithRelocationDisabled())
 	require.NoError(t, err)
 
@@ -509,20 +298,8 @@ func TestReliableNonRelocatableEndpointRecordsWithdrawnOnShutdown(t *testing.T) 
 	}, 20*time.Second, 100*time.Millisecond, "the endpoint and controller records must be withdrawn")
 
 	// the name is immediately reusable on a survivor
-	fresh, err := node2.Spawn(ctx, "orders-consumer", &reliableRelocationConsumerMock{},
+	fresh, err := node2.Spawn(ctx, "orders-consumer", &MockReliableRelocationConsumer{},
 		AsReliableConsumer("orders-producer"))
 	require.NoError(t, err)
 	assert.True(t, fresh.IsRunning())
-}
-
-// mustStoreRequest builds a store request for fencing assertions.
-func mustStoreRequest(t *testing.T, messageID string, seq int64) StoreRequest {
-	t.Helper()
-
-	reliablePayload, err := NewReliablePayload([]byte(messageID))
-	require.NoError(t, err)
-
-	request, err := NewStoreRequest(messageID, seq, reliablePayload)
-	require.NoError(t, err)
-	return request
 }

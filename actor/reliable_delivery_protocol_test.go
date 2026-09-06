@@ -32,14 +32,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/log"
 )
-
-// reliableDeliveryBenchmarkWindow is the largest supported demand window.
-const reliableDeliveryBenchmarkWindow = 10_000
 
 // TestReliablePayload verifies immutable payload snapshots and equality.
 func TestReliablePayload(t *testing.T) {
@@ -752,24 +748,4 @@ func TestReliableDeliveryStageString(t *testing.T) {
 
 	// the stage renders by name wherever a failure event is formatted
 	assert.Equal(t, "stage=protocol", fmt.Sprintf("stage=%s", ReliableDeliveryStageProtocol))
-}
-
-type reliableProtocolMessage struct {
-	value string
-}
-
-// reliableProtocolPIDs creates distinct local PIDs for authorization tests.
-func reliableProtocolPIDs() (endpoint, controller, other *PID) {
-	return reliableProtocolPID("endpoint", 9000),
-		reliableProtocolPID("controller", 9001),
-		reliableProtocolPID("other", 9002)
-}
-
-// reliableProtocolPID creates a local PID without starting an actor system.
-func reliableProtocolPID(name string, port int) *PID {
-	addr := address.New(name, "reliable-protocol", "127.0.0.1", port)
-	return &PID{
-		address: addr,
-		path:    newPath(addr),
-	}
 }

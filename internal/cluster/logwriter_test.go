@@ -24,8 +24,6 @@ package cluster
 
 import (
 	"bytes"
-	"encoding/json"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -280,40 +278,4 @@ func TestLogWriter(t *testing.T) {
 		require.EqualValues(t, len(message), res)
 		require.Zero(t, buffer.Len())
 	})
-}
-
-// TODO: move this utility into some package
-func extractMessage(bytes []byte) (string, error) {
-	// a map container to decode the JSON structure into
-	c := make(map[string]json.RawMessage)
-
-	// unmarshal JSON
-	if err := json.Unmarshal(bytes, &c); err != nil {
-		return "", err
-	}
-	for k, v := range c {
-		if k == "msg" {
-			return strconv.Unquote(string(v))
-		}
-	}
-
-	return "", nil
-}
-
-// TODO: move this utility into some package
-func extractLevel(bytes []byte) (string, error) {
-	// a map container to decode the JSON structure into
-	c := make(map[string]json.RawMessage)
-
-	// unmarshal JSON
-	if err := json.Unmarshal(bytes, &c); err != nil {
-		return "", err
-	}
-	for k, v := range c {
-		if k == "level" {
-			return strconv.Unquote(string(v))
-		}
-	}
-
-	return "", nil
 }

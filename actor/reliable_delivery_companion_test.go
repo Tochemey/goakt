@@ -52,23 +52,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// newCompanionTestSystem starts a cluster-disabled actor system for
-// companion-resolution tests and stops it when the test finishes.
-func newCompanionTestSystem(t *testing.T) (context.Context, *actorSystem) {
-	t.Helper()
-
-	ctx := context.TODO()
-	system, err := NewActorSystem("companionTest", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, system.Start(ctx))
-
-	t.Cleanup(func() {
-		require.NoError(t, system.Stop(context.WithoutCancel(ctx)))
-	})
-
-	return ctx, system.(*actorSystem)
-}
-
 func TestReliableCompanionName(t *testing.T) {
 	incarnationID := uuid.NewString()
 
@@ -333,7 +316,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With no registry endpoint", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, cluster.ErrActorNotFound)
 
 		resolved, err := system.resolveRemoteReliableCompanion(context.Background(), "endpoint", ReliableControllerRoleProducer, nil)
@@ -344,7 +327,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With no published companion", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound)
 
@@ -356,7 +339,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With missing companion spec", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, nil), nil)
 
@@ -368,7 +351,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With wrong companion role", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		wrongSpec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "endpoint", incarnationID)
 		require.NoError(t, err)
 
@@ -383,7 +366,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With wrong owner endpoint", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		wrongOwner, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "other", incarnationID)
 		require.NoError(t, err)
 
@@ -398,7 +381,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With incarnation mismatch", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		staleSpec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "endpoint", uuid.NewString())
 		require.NoError(t, err)
 
@@ -413,7 +396,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With invalid registry address", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(internalpb.Actor_builder{
 			Address:       "not-an-address",
 			IncarnationId: incarnationID,
@@ -428,7 +411,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With split nodes", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord("10.0.0.1:9000"), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
@@ -440,7 +423,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With self-reference", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(localHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(localHostPort, validSpec.toProto()), nil)
 
@@ -452,7 +435,7 @@ func TestResolveRemoteReliableCompanion(t *testing.T) {
 
 	t.Run("With happy remote path", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(endpointRecord(remoteHostPort), nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord(remoteHostPort, validSpec.toProto()), nil)
 
@@ -468,7 +451,7 @@ func TestEnsureReliableCompanionEdges(t *testing.T) {
 	t.Run("With terminating companion", func(t *testing.T) {
 		ctx, system := newCompanionTestSystem(t)
 
-		endpoint, err := system.Spawn(ctx, "orders", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+		endpoint, err := system.Spawn(ctx, "orders", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 		require.NoError(t, err)
 
 		companion, err := system.resolveReliableCompanion(ctx, "orders", ReliableControllerRoleProducer, nil)
@@ -516,7 +499,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 
 	t.Run("With cluster remove failure", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		endpoint := newStoppedEndpoint(system)
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
@@ -528,7 +511,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 
 	t.Run("With cluster remove success", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		endpoint := newStoppedEndpoint(system)
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
@@ -542,7 +525,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 func TestReleaseDepartedReliableCompanion(t *testing.T) {
 	t.Run("With producer role and release error", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		incarnationID := uuid.NewString()
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, incarnationID)
@@ -560,7 +543,7 @@ func TestReleaseDepartedReliableCompanion(t *testing.T) {
 
 	t.Run("With consumer role", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 
 		incarnationID := uuid.NewString()
 		companionName := reliableCompanionName(ReliableControllerRoleConsumer, incarnationID)
@@ -629,140 +612,13 @@ func TestReliableEndpointDefaults(t *testing.T) {
 	assert.False(t, companion.IsRelocatable())
 }
 
-// produceSubmission commands the reliable producer mock to submit one
-// application message through its controller.
-type produceSubmission struct {
-	messageID string
-	payload   any
-}
-
-// askSubmission is a produce submission sent with Ask. The producer answers
-// it from local knowledge only, before any storage or delivery work happens.
-type askSubmission struct {
-	messageID string
-	payload   any
-}
-
-// submissionAccepted is the producer's reply to askSubmission: the message
-// was accepted into its buffer. It deliberately cannot say anything about
-// storage or delivery.
-type submissionAccepted struct {
-	queued int
-}
-
-// reliableProducerMock is a producer endpoint that answers the controller
-// handshake the way a real application producer would: it queues submissions,
-// spends one RequestNext grant per submission, idempotently resends the same
-// Produced when a grant is retried, and acknowledges Stored. All state lives
-// in the actor and is only touched inside its own mailbox turns.
-type reliableProducerMock struct {
-	controller   *PID
-	request      *RequestNext
-	pending      []*produceSubmission
-	lastToken    string
-	lastProduced *Produced
-}
-
-func (x *reliableProducerMock) PreStart(*Context) error { return nil }
-func (x *reliableProducerMock) PostStop(*Context) error { return nil }
-
-func (x *reliableProducerMock) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *RequestNext:
-		if !msg.IsAuthorizedFor(ctx.Self(), ctx.Sender()) {
-			return
-		}
-
-		x.controller = ctx.Sender()
-
-		if msg.Token() == x.lastToken && x.lastProduced != nil {
-			ctx.Tell(x.controller, x.lastProduced)
-			return
-		}
-
-		x.request = msg
-		x.flush(ctx)
-	case *Stored:
-		ack, err := NewStoredAck(msg)
-		if err != nil {
-			ctx.Err(err)
-			return
-		}
-
-		ctx.Tell(ctx.Sender(), ack)
-	case *produceSubmission:
-		x.pending = append(x.pending, msg)
-		x.flush(ctx)
-	case *askSubmission:
-		x.pending = append(x.pending, &produceSubmission{messageID: msg.messageID, payload: msg.payload})
-		ctx.Response(&submissionAccepted{queued: len(x.pending)})
-		x.flush(ctx)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-// flush spends the held grant on the oldest queued submission.
-func (x *reliableProducerMock) flush(ctx *ReceiveContext) {
-	if x.request == nil || len(x.pending) == 0 {
-		return
-	}
-
-	submission := x.pending[0]
-	produced, err := NewProduced(x.request, submission.messageID, submission.payload)
-	if err != nil {
-		ctx.Err(err)
-		return
-	}
-
-	x.pending = x.pending[1:]
-	x.lastToken = x.request.Token()
-	x.lastProduced = produced
-	x.request = nil
-	ctx.Tell(x.controller, produced)
-}
-
-// awaitDeliveries polls the consumer mock until it has recorded at least
-// count deliveries and returns them collapsed to their first occurrence per
-// sequence, since a slow confirmation legitimately allows a redelivery.
-func awaitDeliveries(t *testing.T, ctx context.Context, consumer *PID, count int) []*Delivery {
-	t.Helper()
-
-	var distinct []*Delivery
-
-	require.Eventually(t, func() bool {
-		response, err := Ask(ctx, consumer, &getDeliveries{}, time.Second)
-		if err != nil {
-			return false
-		}
-
-		recorded, _ := response.([]*Delivery)
-		seen := make(map[int64]bool, len(recorded))
-		distinct = distinct[:0]
-
-		for _, delivery := range recorded {
-			if seen[delivery.Seq()] {
-				continue
-			}
-
-			seen[delivery.Seq()] = true
-			distinct = append(distinct, delivery)
-		}
-
-		return len(distinct) >= count
-	}, 20*time.Second, 20*time.Millisecond)
-
-	return distinct
-}
-
 func TestReliableDeliveryEndToEnd(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
-	consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
+	consumer, err := system.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	// both controller companions were created by the spawn transaction
@@ -797,11 +653,11 @@ func TestReliableDeliveryEndToEnd(t *testing.T) {
 func TestReliableDeliveryEndToEndDurable(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	queue := &mockDurableQueue{}
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue)))
+	queue := &MockDurableQueue{}
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue)))
 	require.NoError(t, err)
 
-	consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
+	consumer, err := system.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	for i := 1; i <= 2; i++ {
@@ -820,22 +676,11 @@ func TestReliableDeliveryEndToEndDurable(t *testing.T) {
 	}, 10*time.Second, 20*time.Millisecond)
 }
 
-// containsAllOperations reports whether every wanted operation appears in order.
-func containsAllOperations(operations []string, wanted ...string) bool {
-	index := 0
-	for _, operation := range operations {
-		if index < len(wanted) && operation == wanted[index] {
-			index++
-		}
-	}
-	return index == len(wanted)
-}
-
 func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
 	t.Run("With producer endpoint", func(t *testing.T) {
 		ctx, system := newCompanionTestSystem(t)
 
-		producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+		producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 		require.NoError(t, err)
 
 		companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
@@ -853,7 +698,7 @@ func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
 	t.Run("With consumer endpoint", func(t *testing.T) {
 		ctx, system := newCompanionTestSystem(t)
 
-		consumer, err := system.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer("orders-producer"))
+		consumer, err := system.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true}, AsReliableConsumer("orders-producer"))
 		require.NoError(t, err)
 
 		companion, err := system.resolveReliableCompanion(ctx, "orders-consumer", ReliableControllerRoleConsumer, nil)
@@ -872,7 +717,7 @@ func TestReliableEndpointShutdownStopsCompanion(t *testing.T) {
 func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
 	companion, err := system.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
@@ -915,8 +760,8 @@ func TestReliableEndpointReSpawnRecreatesCompanion(t *testing.T) {
 func TestReliableEndpointSpawnRollback(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	queue := &mockDurableQueue{loadErr: errors.New("backing store is unreachable")}
-	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	queue := &MockDurableQueue{loadErr: errors.New("backing store is unreachable")}
+	pid, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue), WithReliableQueueRetry(1, time.Millisecond)))
 	require.Error(t, err)
 	require.Nil(t, pid)
@@ -928,7 +773,7 @@ func TestReliableEndpointSpawnRollback(t *testing.T) {
 		return !ok
 	}, 3*time.Second, 10*time.Millisecond)
 
-	fresh, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	fresh, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 	assert.True(t, fresh.IsRunning())
 }
@@ -938,7 +783,7 @@ func TestReliableEndpointDataCenterRejected(t *testing.T) {
 	// the local cluster registry, so the placement is rejected up front
 	ctx, system := newCompanionTestSystem(t)
 
-	pid, err := system.SpawnOn(ctx, "orders-producer", &reliableProducerMock{},
+	pid, err := system.SpawnOn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer"), WithDataCenter(&datacenter.DataCenter{Name: "dc-west", Region: "us", Zone: "a"}))
 	require.ErrorContains(t, err, "data center")
 	assert.Nil(t, pid)
@@ -949,7 +794,7 @@ func TestReliableEndpointRemoteChildSpawnRejected(t *testing.T) {
 	// so the options are rejected instead of silently dropped
 	remoteParent := newRemotePID(address.New("parent", "remote-system", "127.0.0.1", 8080), nil)
 
-	pid, err := remoteParent.SpawnChild(context.TODO(), "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	pid, err := remoteParent.SpawnChild(context.TODO(), "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.ErrorContains(t, err, "remote children")
 	assert.Nil(t, pid)
 }
@@ -971,14 +816,14 @@ func TestReliableEndpointRemotingOnlyRemotePlacementRejected(t *testing.T) {
 		assert.NoError(t, system.Stop(ctx))
 	})
 
-	pid, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	pid, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer"),
 		WithHostAndPort(host, ports[0]))
 	require.ErrorIs(t, err, gerrors.ErrReliableClusterRequired)
 	assert.Nil(t, pid)
 
 	// single-node local placement remains valid without a cluster
-	local, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	local, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 	assert.NotNil(t, local)
@@ -1069,17 +914,17 @@ func TestReliableEndpointRemoteSpawn(t *testing.T) {
 
 	pause.For(time.Second)
 
-	require.NoError(t, sys.Register(ctx, &reliableProducerMock{}))
-	require.NoError(t, sys.Inject(&mockDurableQueue{}))
+	require.NoError(t, sys.Register(ctx, &MockReliableProducer{}))
+	require.NoError(t, sys.Inject(&MockDurableQueue{}))
 
-	queue := &mockDurableQueue{}
+	queue := &MockDurableQueue{}
 	remoting := remoteclient.NewClient()
 
 	t.Cleanup(remoting.Close)
 
 	_, err = remoting.RemoteSpawn(ctx, host, ports[0], &remote.SpawnRequest{
 		Name:         "orders-producer",
-		Kind:         types.Name(&reliableProducerMock{}),
+		Kind:         types.Name(&MockReliableProducer{}),
 		Relocatable:  true,
 		Dependencies: []extension.Dependency{queue},
 		ReliableDelivery: &remote.ReliableDeliverySpec{
@@ -1100,136 +945,6 @@ func TestReliableEndpointRemoteSpawn(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// getDeliverySenders asks senderRecordingConsumerMock for the sender of each
-// recorded delivery.
-type getDeliverySenders struct{}
-
-// senderRecordingConsumerMock confirms every delivery and records which PID
-// delivered it, so tests can assert that deliveries come only from the
-// consumer's own controller.
-type senderRecordingConsumerMock struct {
-	deliveries []*Delivery
-	senders    []*PID
-}
-
-func (x *senderRecordingConsumerMock) PreStart(*Context) error { return nil }
-func (x *senderRecordingConsumerMock) PostStop(*Context) error { return nil }
-
-func (x *senderRecordingConsumerMock) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *Delivery:
-		x.deliveries = append(x.deliveries, msg)
-		x.senders = append(x.senders, ctx.Sender())
-
-		confirmed, err := NewConfirmed(msg)
-		if err != nil {
-			ctx.Err(err)
-			return
-		}
-
-		ctx.Tell(ctx.Sender(), confirmed)
-	case *getDeliveries:
-		ctx.Response(append([]*Delivery(nil), x.deliveries...))
-	case *getDeliverySenders:
-		ctx.Response(append([]*PID(nil), x.senders...))
-	default:
-		ctx.Unhandled()
-	}
-}
-
-// startCheckout commands the checkout actor to hand one finished order to the
-// reliable flow.
-type startCheckout struct {
-	orderID string
-}
-
-// processedNotice is the consumer's business-level notification to the
-// checkout actor, sent through ordinary messaging.
-type processedNotice struct {
-	orderID string
-}
-
-// getNotices asks the checkout actor which orders were confirmed processed.
-type getNotices struct{}
-
-// checkoutMock is an ordinary actor that feeds the reliable flow the same way
-// it would message any other actor: the producer PID is plain constructor
-// state and the handoff is a plain Tell from its own Receive.
-type checkoutMock struct {
-	producer *PID
-	notices  []string
-}
-
-func (x *checkoutMock) PreStart(*Context) error { return nil }
-func (x *checkoutMock) PostStop(*Context) error { return nil }
-
-func (x *checkoutMock) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *startCheckout:
-		// the payload carries the reply-to actor name because Delivery's
-		// sender is the controller, never the business origin
-		ctx.Tell(x.producer, &produceSubmission{
-			messageID: msg.orderID,
-			payload:   testpb.Reply_builder{Content: ctx.Self().Name()}.Build(),
-		})
-	case *processedNotice:
-		x.notices = append(x.notices, msg.orderID)
-	case *getNotices:
-		ctx.Response(append([]string(nil), x.notices...))
-	default:
-		ctx.Unhandled()
-	}
-}
-
-// replyingConsumerMock processes deliveries idempotently and notifies the
-// origin actor named in the payload through ordinary messaging before
-// confirming.
-type replyingConsumerMock struct {
-	seen map[string]bool
-}
-
-func (x *replyingConsumerMock) PreStart(*Context) error {
-	x.seen = make(map[string]bool)
-	return nil
-}
-
-func (x *replyingConsumerMock) PostStop(*Context) error { return nil }
-
-func (x *replyingConsumerMock) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *Delivery:
-		if !x.seen[msg.MessageID()] {
-			reply, ok := msg.Payload().(*testpb.Reply)
-			if !ok {
-				ctx.Err(fmt.Errorf("unexpected payload type %T", msg.Payload()))
-				return
-			}
-
-			origin, err := ctx.ActorSystem().ActorOf(ctx.Context(), reply.GetContent())
-			if err != nil {
-				ctx.Err(err)
-				return
-			}
-
-			x.seen[msg.MessageID()] = true
-			ctx.Tell(origin, &processedNotice{orderID: msg.MessageID()})
-		}
-
-		confirmed, err := NewConfirmed(msg)
-		if err != nil {
-			ctx.Err(err)
-			return
-		}
-
-		ctx.Tell(ctx.Sender(), confirmed)
-	default:
-		ctx.Unhandled()
-	}
-}
-
 // TestReliableDeliveryAskAnswersFromLocalKnowledge verifies the documented
 // Ask boundary: a caller may Ask the producer, but the answer reflects only
 // acceptance into the producer's buffer, never delivery, and every Delivery
@@ -1238,7 +953,7 @@ func (x *replyingConsumerMock) Receive(ctx *ReceiveContext) {
 func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
 	// the consumer endpoint does not exist yet, so delivery is impossible;
@@ -1253,7 +968,7 @@ func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
 
 	// once the consumer exists, the flow completes the delivery the Ask
 	// could not speak for
-	consumer, err := system.Spawn(ctx, "orders-consumer", &senderRecordingConsumerMock{}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
+	consumer, err := system.Spawn(ctx, "orders-consumer", &MockSenderRecordingConsumer{}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
 	deliveries := awaitDeliveries(t, ctx, consumer, 1)
@@ -1283,13 +998,13 @@ func TestReliableDeliveryAskAnswersFromLocalKnowledge(t *testing.T) {
 func TestReliableDeliveryFedByOrdinaryActor(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	producer, err := system.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
-	_, err = system.Spawn(ctx, "orders-consumer", &replyingConsumerMock{}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
+	_, err = system.Spawn(ctx, "orders-consumer", &MockReplyingConsumer{}, AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	checkout, err := system.Spawn(ctx, "checkout", &checkoutMock{producer: producer})
+	checkout, err := system.Spawn(ctx, "checkout", &MockCheckout{producer: producer})
 	require.NoError(t, err)
 
 	require.NoError(t, Tell(ctx, checkout, &startCheckout{orderID: "ord-1"}))
@@ -1325,7 +1040,7 @@ func TestAuthenticateWorkPullingWorkerLocalEdges(t *testing.T) {
 		spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "ghost-worker", uuid.NewString())
 		require.NoError(t, err)
 
-		orphan, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleConsumer, spec.endpointIncarnationID), &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+		orphan, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleConsumer, spec.endpointIncarnationID), &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
 		_, _, err = system.authenticateWorkPullingWorker(ctx, orphan, "jobs-producer")
@@ -1340,7 +1055,7 @@ func TestAuthenticateWorkPullingWorkerLocalEdges(t *testing.T) {
 		spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "edge-worker", uuid.NewString())
 		require.NoError(t, err)
 
-		stale, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleConsumer, spec.endpointIncarnationID), &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+		stale, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleConsumer, spec.endpointIncarnationID), &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 		require.NoError(t, err)
 
 		_, _, err = system.authenticateWorkPullingWorker(ctx, stale, "jobs-producer")
@@ -1376,7 +1091,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With cluster mode disabled", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		system.clusterEnabled.Store(false)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1386,7 +1101,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With no companion registry record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(nil, cluster.ErrActorNotFound)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1396,7 +1111,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With a record that is not a runtime companion", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord("goakt://test-replication@"+remoteHostPort+"/"+companionName, nil), nil)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1409,7 +1124,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord("goakt://test-replication@"+remoteHostPort+"/"+companionName, wrongRole.toProto()), nil)
 
 		_, _, err = system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1419,7 +1134,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With an invalid companion address", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord("not-an-address", spec.toProto()), nil)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1429,7 +1144,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With a companion address not matching the sender", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord("goakt://test-replication@10.0.0.9:9000/"+companionName, spec.toProto()), nil)
 
 		_, _, err := system.authenticateWorkPullingWorker(context.Background(), sender, "jobs-producer")
@@ -1439,7 +1154,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With no endpoint registry record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(nil, cluster.ErrActorNotFound)
 
@@ -1450,7 +1165,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With an invalid endpoint address", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(internalpb.Actor_builder{Address: "not-an-address", IncarnationId: incarnationID}.Build(), nil)
 
@@ -1461,7 +1176,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With the endpoint on another node", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(endpointRecord("10.0.0.9:9000", incarnationID, nil), nil)
 
@@ -1472,7 +1187,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With a stale endpoint incarnation", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(endpointRecord(remoteHostPort, uuid.NewString(), nil), nil)
 
@@ -1483,7 +1198,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With no consumer configuration", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(endpointRecord(remoteHostPort, incarnationID, nil), nil)
 
@@ -1494,7 +1209,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With a worker naming another producer", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(endpointRecord(remoteHostPort, incarnationID, consumerDeliveryConfig("other-producer").toProto()), nil)
 
@@ -1505,7 +1220,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 	t.Run("With a fully verified remote worker", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		system := MockReplicationTestSystem(clusterMock)
+		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(validCompanion, nil)
 		clusterMock.EXPECT().GetActor(mock.Anything, "remote-worker").Return(endpointRecord(remoteHostPort, incarnationID, consumerDeliveryConfig("jobs-producer").toProto()), nil)
 
@@ -1518,7 +1233,7 @@ func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {
 
 func TestResolvePeerReliableCompanionNoLivePair(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
-	system := MockReplicationTestSystem(clusterMock)
+	system := newReplicationSystem(clusterMock)
 	remotingMock := mocksremote.NewClient(t)
 	system.remoting = remotingMock
 

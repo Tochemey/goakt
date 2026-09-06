@@ -37,7 +37,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/memberlist"
 	"github.com/kapetan-io/tackle/autotls"
-	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -215,25 +214,9 @@ func TestRetryBootstrap(t *testing.T) {
 	})
 }
 
-// fakeInitialSyncer stubs the initialSyncer surface to drive the initial-sync
-// failure paths that need a multi-replica cluster mid-redistribution to occur
-// for real.
-type fakeInitialSyncer struct {
-	syncErr     error
-	shutdownErr error
-	shutdowns   int
-}
-
-func (f *fakeInitialSyncer) WaitForInitialSync(context.Context) error { return f.syncErr }
-
-func (f *fakeInitialSyncer) Shutdown(context.Context) error {
-	f.shutdowns++
-	return f.shutdownErr
-}
-
 func TestWaitForInitialSync(t *testing.T) {
 	t.Run("success leaves the server running", func(t *testing.T) {
-		server := &fakeInitialSyncer{}
+		server := &MockInitialSyncer{}
 		err := waitForInitialSync(context.Background(), time.Second, server)
 		require.NoError(t, err)
 		assert.Zero(t, server.shutdowns)
@@ -241,7 +224,7 @@ func TestWaitForInitialSync(t *testing.T) {
 
 	t.Run("sync failure tears the started server down", func(t *testing.T) {
 		syncErr := errors.New("sync timed out")
-		server := &fakeInitialSyncer{syncErr: syncErr}
+		server := &MockInitialSyncer{syncErr: syncErr}
 		err := waitForInitialSync(context.Background(), time.Second, server)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, syncErr)
@@ -251,7 +234,7 @@ func TestWaitForInitialSync(t *testing.T) {
 	t.Run("failed teardown is joined to the sync error", func(t *testing.T) {
 		syncErr := errors.New("sync timed out")
 		shutdownErr := errors.New("shutdown failed")
-		server := &fakeInitialSyncer{syncErr: syncErr, shutdownErr: shutdownErr}
+		server := &MockInitialSyncer{syncErr: syncErr, shutdownErr: shutdownErr}
 		err := waitForInitialSync(context.Background(), time.Second, server)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, syncErr)
@@ -2016,126 +1999,6 @@ func TestMultipleNodes(t *testing.T) {
 	})
 }
 
-func startNatsServer(t *testing.T) *natsserver.Server {
-	t.Helper()
-	serv, err := natsserver.NewServer(&natsserver.Options{
-		Host: "127.0.0.1",
-		Port: -1,
-	})
-
-	require.NoError(t, err)
-
-	ready := make(chan bool)
-	go func() {
-		ready <- true
-		serv.Start()
-	}()
-	<-ready
-
-	if !serv.ReadyForConnections(2 * time.Second) {
-		t.Fatalf("nats-io server failed to start")
-	}
-
-	return serv
-}
-
-func startEngine(t *testing.T, serverAddr string, opts ...ConfigOption) (Cluster, discovery.Provider) {
-	// create a context
-	ctx := context.TODO()
-
-	// generate the ports for the single node
-	nodePorts := dynaport.Get(3)
-	gossipPort := nodePorts[0]
-	clusterPort := nodePorts[1]
-	remotingPort := nodePorts[2]
-
-	// create a Cluster node
-	host := "127.0.0.1"
-	// create the various config option
-	actorSystemName := "testSystem"
-	natsSubject := "some-subject"
-
-	// create the config
-	config := nats.Config{
-		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:   natsSubject,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-	}
-
-	hostNode := discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
-	}
-
-	// create the instance of provider
-	provider := nats.NewDiscovery(&config)
-
-	// create the node
-	engine := New(actorSystemName, provider, &hostNode, append([]ConfigOption{WithLogger(log.DiscardLogger)}, opts...)...)
-	require.NotNil(t, engine)
-
-	// start the node
-	require.NoError(t, engine.Start(ctx))
-
-	// return the cluster node
-	return engine, provider
-}
-
-func startEngineWithTLS(t *testing.T, serverAddr string, server, client *tls.Config) (Cluster, discovery.Provider) {
-	// create a context
-	ctx := context.TODO()
-
-	// generate the ports for the single node
-	nodePorts := dynaport.Get(3)
-	gossipPort := nodePorts[0]
-	clusterPort := nodePorts[1]
-	remotingPort := nodePorts[2]
-
-	// create a Cluster node
-	host := "127.0.0.1"
-	// create the various config option
-	actorSystemName := "testSystem"
-	natsSubject := "some-subject"
-
-	// create the config
-	config := nats.Config{
-		NatsServer:    fmt.Sprintf("nats://%s", serverAddr),
-		NatsSubject:   natsSubject,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-	}
-
-	hostNode := discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: gossipPort,
-		PeersPort:     clusterPort,
-		RemotingPort:  remotingPort,
-	}
-
-	// create the instance of provider
-	provider := nats.NewDiscovery(&config)
-
-	// create the node
-	engine := New(actorSystemName, provider, &hostNode,
-		WithTLS(&gtls.Info{
-			ClientConfig: client,
-			ServerConfig: server,
-		}),
-		WithLogger(log.DiscardLogger))
-	require.NotNil(t, engine)
-
-	// start the node
-	require.NoError(t, engine.Start(ctx))
-
-	// return the cluster node
-	return engine, provider
-}
-
 func TestPutGrainReturnsErrorWhenIDMissing(t *testing.T) {
 	cl := &cluster{
 		running: atomic.NewBool(true),
@@ -2453,7 +2316,7 @@ func TestActorsPropagatesGetError(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+				return &MockIterator{keys: []string{composeKey(namespaceActors, "actor")}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, composeKey(namespaceActors, "actor"), key)
@@ -2474,7 +2337,7 @@ func TestActorsPropagatesByteError(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+				return &MockIterator{keys: []string{composeKey(namespaceActors, "actor")}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, composeKey(namespaceActors, "actor"), key)
@@ -2518,7 +2381,7 @@ func TestCountActorsByHostTalliesPerHost(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: keys}, nil
+				return &MockIterator{keys: keys}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				value, ok := encoded[key]
@@ -2566,7 +2429,7 @@ func TestCountActorsByHostPropagatesGetError(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: []string{composeKey(namespaceActors, "actor")}}, nil
+				return &MockIterator{keys: []string{composeKey(namespaceActors, "actor")}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, composeKey(namespaceActors, "actor"), key)
@@ -2604,7 +2467,7 @@ func TestActorsByHostReturnsOnlyMatchingHost(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: keys}, nil
+				return &MockIterator{keys: keys}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				return newGetResponseWithValue(encoded[key]), nil
@@ -2648,7 +2511,7 @@ func TestGrainsByHostReturnsOnlyMatchingHost(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: keys}, nil
+				return &MockIterator{keys: keys}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				return newGetResponseWithValue(encoded[key]), nil
@@ -2711,7 +2574,7 @@ func TestGrainsPropagatesGetError(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+				return &MockIterator{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
@@ -2732,7 +2595,7 @@ func TestGrainsPropagatesByteError(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) {
-				return &iteratorStub{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
+				return &MockIterator{keys: []string{composeKey(namespaceGrains, "grain")}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, composeKey(namespaceGrains, "grain"), key)
@@ -3034,7 +2897,7 @@ func TestEventsReturnsChannel(t *testing.T) {
 
 func TestTrackNodeJoinEvent(t *testing.T) {
 	t.Run("waits for a convergence that lists the node", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
 		announceJoin(cl, node, 1)
@@ -3054,14 +2917,14 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	})
 
 	t.Run("ignores self", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 5000)
+		cl := newEventCluster("127.0.0.1", 5000)
 
 		trackJoin(cl, cl.node.PeersAddress(), 1)
 		require.Empty(t, cl.pendingJoins)
 	})
 
 	t.Run("the announcement overrides the placement of the local observation", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 6000)
+		cl := newEventCluster("127.0.0.1", 6000)
 		node := "127.0.0.1:7000"
 		converge(cl, 1)
 
@@ -3081,7 +2944,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	})
 
 	t.Run("ignores a copy of an announced join", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5100"
 		cl.nodeJoinedEventsFilter.Add(node)
 
@@ -3090,7 +2953,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	})
 
 	t.Run("records a join while the departure of the node is pending", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5200"
 		cl.nodeJoinedEventsFilter.Add(node)
 
@@ -3102,7 +2965,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 
 func TestTrackNodeLeftEvent(t *testing.T) {
 	t.Run("waits for a convergence without the node", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
 		announceLeft(cl, node, 1)
@@ -3116,7 +2979,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 	})
 
 	t.Run("the local observation does not override the placement of the announcement", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 5000)
+		cl := newEventCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:6000"
 
 		// the announcement arrives before this node observes the departure
@@ -3131,7 +2994,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 	})
 
 	t.Run("ignores a copy of an announced departure", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9200"
 		cl.nodeLeftEventsFilter.Add(node)
 
@@ -3140,7 +3003,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 	})
 
 	t.Run("records a departure while the restart of the node is pending", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9300"
 		cl.nodeLeftEventsFilter.Add(node)
 
@@ -3152,7 +3015,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 
 func TestTrackMembershipChangeEvent(t *testing.T) {
 	t.Run("places a departure against the announcing coordinator's convergences", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9100"
 
 		announceLeft(cl, node, 4)
@@ -3169,14 +3032,14 @@ func TestTrackMembershipChangeEvent(t *testing.T) {
 	})
 
 	t.Run("ignores the join of this node", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 
 		announceJoin(cl, cl.node.PeersAddress(), 1)
 		require.Empty(t, cl.pendingJoins)
 	})
 
 	t.Run("ignores an update", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9110"
 
 		announceChange(cl, events.MembershipChangeUpdate, node, 1)
@@ -3185,7 +3048,7 @@ func TestTrackMembershipChangeEvent(t *testing.T) {
 	})
 
 	t.Run("is ignored after the engine stopped", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		cl.events = nil
 
 		announceJoin(cl, "127.0.0.1:9120", 1)
@@ -3198,7 +3061,7 @@ func TestTrackMembershipChangeEvent(t *testing.T) {
 func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 	t.Run("ignores a completion without a generation", func(t *testing.T) {
 		// a coordinator running an olric that announces no convergence
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
 		announceJoin(cl, node, 1)
@@ -3208,7 +3071,7 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 	})
 
 	t.Run("ignores stale and duplicate completions from the same coordinator", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 
 		announceJoin(cl, node, 1)
@@ -3224,7 +3087,7 @@ func TestProcessRebalanceCompleteKeepsTheNewestConvergence(t *testing.T) {
 	})
 
 	t.Run("accepts a lower generation from a new coordinator", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5000"
 		converge(cl, 5)
 
@@ -3240,7 +3103,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 	now := time.Now().UnixNano()
 
 	t.Run("membership change join", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:7000"
 		payload, err := json.Marshal(events.MembershipChangeEvent{
 			Kind:       events.KindMembershipChangeEvent,
@@ -3292,7 +3155,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 	})
 
 	t.Run("membership change left", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 5000)
+		cl := newEventCluster("127.0.0.1", 5000)
 		node := "127.0.0.1:8000"
 		payload, err := json.Marshal(events.MembershipChangeEvent{
 			Kind:       events.KindMembershipChangeEvent,
@@ -3332,7 +3195,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 	})
 
 	t.Run("node join observed by this node", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 6000)
+		cl := newEventCluster("127.0.0.1", 6000)
 		node := "127.0.0.1:7100"
 		payload, err := json.Marshal(events.NodeJoinEvent{
 			Kind:       events.KindNodeJoinEvent,
@@ -3349,7 +3212,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 	})
 
 	t.Run("node left observed by this node", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 6100)
+		cl := newEventCluster("127.0.0.1", 6100)
 		node := "127.0.0.1:8100"
 		payload, err := json.Marshal(events.NodeLeftEvent{
 			Kind:       events.KindNodeLeftEvent,
@@ -3368,7 +3231,7 @@ func TestHandleClusterEventSuccessCases(t *testing.T) {
 
 // nolint
 func TestHandleClusterEventUnknownKind(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 
 	require.NoError(t, cl.handleClusterEvent(`{"kind":"noop"}`))
 
@@ -3381,7 +3244,7 @@ func TestHandleClusterEventUnknownKind(t *testing.T) {
 
 // nolint
 func TestConsumeDispatchesClusterEvents(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	msgs := make(chan *redis.Message, 1)
 	cl.messages = msgs
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
@@ -3439,7 +3302,7 @@ func TestConsumeDispatchesClusterEvents(t *testing.T) {
 
 // nolint
 func TestStopWaitsForConsume(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 	msgs := make(chan *redis.Message, 10)
 	cl.messages = msgs
@@ -3483,7 +3346,7 @@ func TestStopWaitsForConsume(t *testing.T) {
 
 // nolint
 func TestStopNoPanicOnClosedChannel(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 	msgs := make(chan *redis.Message)
 	cl.messages = msgs
@@ -3514,7 +3377,7 @@ func TestStopNoPanicOnClosedChannel(t *testing.T) {
 
 // nolint
 func TestConsumeRespectsContextCancellation(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 	msgs := make(chan *redis.Message, 10)
 	cl.messages = msgs
@@ -3541,7 +3404,7 @@ func TestConsumeRespectsContextCancellation(t *testing.T) {
 
 // nolint
 func TestConsumeHandlesChannelClose(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 	msgs := make(chan *redis.Message, 10)
 	cl.messages = msgs
@@ -3574,7 +3437,7 @@ func TestConsumeHandlesChannelClose(t *testing.T) {
 
 // nolint
 func TestStopTimeoutHandling(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
 	msgs := make(chan *redis.Message)
 	cl.messages = msgs
@@ -3613,7 +3476,7 @@ func TestStopTimeoutHandling(t *testing.T) {
 
 // nolint
 func TestSendEventLockedHandlesNilChannel(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.events = nil
 
 	// Should not panic
@@ -3636,7 +3499,7 @@ func TestPeersFiltersSelfAndParsesMeta(t *testing.T) {
 	otherMeta, err := json.Marshal(other)
 	require.NoError(t, err)
 
-	cl.client = &MockOlricClient{
+	cl.client = &MockMembersClient{
 		MockClient: &MockClient{},
 		members: []olric.Member{
 			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(selfMeta)},
@@ -3666,7 +3529,7 @@ func TestIsLeaderReturnsTrueWhenCoordinator(t *testing.T) {
 	meta, err := json.Marshal(cl.node)
 	require.NoError(t, err)
 
-	cl.client = &MockOlricClient{
+	cl.client = &MockMembersClient{
 		MockClient: &MockClient{},
 		members: []olric.Member{
 			{Name: cl.node.PeersAddress(), Coordinator: true, Meta: string(meta)},
@@ -3800,24 +3663,6 @@ func TestNewAppliesTheConvergenceTimeout(t *testing.T) {
 	require.Equal(t, pendingEventEmitTimeout, engine.(*cluster).pendingEmitTimeout)
 }
 
-func newOlricMember(t *testing.T, host string, peersPort int, coordinator bool) olric.Member {
-	t.Helper()
-	node := &discovery.Node{
-		Name:          host,
-		Host:          host,
-		DiscoveryPort: 1,
-		PeersPort:     peersPort,
-		RemotingPort:  2,
-	}
-	meta, err := json.Marshal(node)
-	require.NoError(t, err)
-	return olric.Member{
-		Name:        net.JoinHostPort(host, strconv.Itoa(peersPort)),
-		Meta:        string(meta),
-		Coordinator: coordinator,
-	}
-}
-
 func TestCoordinatorAddress(t *testing.T) {
 	t.Run("returns the coordinator peers address", func(t *testing.T) {
 		leader := newOlricMember(t, "127.0.0.1", 3001, true)
@@ -3825,7 +3670,7 @@ func TestCoordinatorAddress(t *testing.T) {
 		cl := &cluster{
 			running: atomic.NewBool(true),
 			logger:  log.DiscardLogger,
-			client:  &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{follower, leader}},
+			client:  &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{follower, leader}},
 		}
 
 		require.Equal(t, "127.0.0.1:3001", cl.coordinatorAddress(context.Background()))
@@ -3835,7 +3680,7 @@ func TestCoordinatorAddress(t *testing.T) {
 		cl := &cluster{
 			running: atomic.NewBool(true),
 			logger:  log.DiscardLogger,
-			client:  &MockOlricClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
+			client:  &MockMembersClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
 		}
 
 		require.Empty(t, cl.coordinatorAddress(context.Background()))
@@ -3847,7 +3692,7 @@ func TestCoordinatorAddress(t *testing.T) {
 		cl := &cluster{
 			running: atomic.NewBool(true),
 			logger:  log.DiscardLogger,
-			client:  &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{m1, m2}},
+			client:  &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{m1, m2}},
 		}
 
 		require.Empty(t, cl.coordinatorAddress(context.Background()))
@@ -3871,7 +3716,7 @@ func TestDetectLeaderChange(t *testing.T) {
 			logger:              log.DiscardLogger,
 			readTimeout:         time.Second,
 			lastCoordinatorAddr: "127.0.0.1:3001",
-			client:              &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
+			client:              &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
 			events:              make(chan *Event, 1),
 		}
 
@@ -3897,7 +3742,7 @@ func TestDetectLeaderChange(t *testing.T) {
 			logger:              log.DiscardLogger,
 			readTimeout:         time.Second,
 			lastCoordinatorAddr: "127.0.0.1:3001",
-			client:              &MockOlricClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
+			client:              &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{leader}},
 			events:              make(chan *Event, 1),
 		}
 
@@ -3913,7 +3758,7 @@ func TestDetectLeaderChange(t *testing.T) {
 			logger:              log.DiscardLogger,
 			readTimeout:         time.Second,
 			lastCoordinatorAddr: "127.0.0.1:3001",
-			client:              &MockOlricClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
+			client:              &MockMembersClient{MockClient: &MockClient{membersErr: errors.New("boom")}},
 			events:              make(chan *Event, 1),
 		}
 
@@ -3922,27 +3767,6 @@ func TestDetectLeaderChange(t *testing.T) {
 		require.Equal(t, "127.0.0.1:3001", cl.lastCoordinatorAddr)
 		require.Empty(t, cl.events)
 	})
-}
-
-// collectLeaderChanges drains a node's event stream for up to timeout, returning
-// every LeaderChanged event observed in that window.
-func collectLeaderChanges(t *testing.T, node Cluster, timeout time.Duration) []*LeaderChangedEvent {
-	t.Helper()
-	var changes []*LeaderChangedEvent
-	deadline := time.After(timeout)
-	for {
-		select {
-		case event, ok := <-node.Events():
-			if !ok {
-				return changes
-			}
-			if changed, ok := event.Payload.(*LeaderChangedEvent); ok {
-				changes = append(changes, changed)
-			}
-		case <-deadline:
-			return changes
-		}
-	}
 }
 
 func TestLeaderChangedEvent(t *testing.T) {
@@ -4104,7 +3928,7 @@ func TestCountActorsByHostSkipsMalformedAddress(t *testing.T) {
 		logger:  log.DiscardLogger,
 		dmap: &MockDMap{
 			scanFn: func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error) { // nolint
-				return &iteratorStub{keys: []string{goodKey, badKey}}, nil
+				return &MockIterator{keys: []string{goodKey, badKey}}, nil
 			},
 			getFn: func(ctx context.Context, key string) (*olric.GetResponse, error) { // nolint
 				return newGetResponseWithValue(values[key]), nil
@@ -4188,7 +4012,7 @@ func TestBootstrapReturnsEngineConstructionError(t *testing.T) {
 }
 
 func TestConsumeToleratesHandlerErrorsAndForeignChannels(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	msgs := make(chan *redis.Message, 3)
 	cl.messages = msgs
 	cl.consumeCtx, cl.consumeCancel = context.WithCancel(context.Background())
@@ -4226,13 +4050,13 @@ func TestConsumeToleratesHandlerErrorsAndForeignChannels(t *testing.T) {
 }
 
 func TestHandleClusterEventInvalidRebalanceStart(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	payload := fmt.Sprintf(`{"kind":%q,"epoch":{}}`, events.KindRebalanceStartEvent)
 	require.ErrorContains(t, cl.handleClusterEvent(payload), "unmarshal rebalance start")
 }
 
 func TestHandleClusterEventInvalidRebalanceComplete(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	payload := fmt.Sprintf(`{"kind":%q,"epoch":{}}`, events.KindRebalanceCompleteEvent)
 	require.ErrorContains(t, cl.handleClusterEvent(payload), "unmarshal rebalance complete")
 }
@@ -4240,7 +4064,7 @@ func TestHandleClusterEventInvalidRebalanceComplete(t *testing.T) {
 func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 	// the convergence reflecting a change can be delivered before the change
 	t.Run("coordinator copy observed before the convergence is announced right away", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9400"
 		converge(cl, 2, node)
 
@@ -4249,7 +4073,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 	})
 
 	t.Run("coordinator copy observed at the converged generation waits", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9410"
 		converge(cl, 2, node)
 
@@ -4261,7 +4085,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 	})
 
 	t.Run("copy from another node waits for the next convergence", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9420"
 		converge(cl, 2, node)
 
@@ -4273,7 +4097,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 	})
 
 	t.Run("departure", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9430"
 		converge(cl, 2)
 
@@ -4284,7 +4108,7 @@ func TestMembershipEventTrackedAfterConvergence(t *testing.T) {
 
 func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 	t.Run("departed then restarted is a member", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9500"
 
 		announceLeft(cl, node, 1)
@@ -4297,7 +4121,7 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 	})
 
 	t.Run("joined then departed is not a member", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9510"
 
 		announceJoin(cl, node, 1)
@@ -4310,7 +4134,7 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 	})
 
 	t.Run("convergence reflecting only the join", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9520"
 
 		announceJoin(cl, node, 1)
@@ -4324,7 +4148,7 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 	})
 
 	t.Run("convergence reflecting only the departure of a restart", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9530"
 
 		announceLeft(cl, node, 1)
@@ -4342,7 +4166,7 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	// a lagging member can replay a dead notification for a node that already
 	// restarted; the coordinator observed that departure and still converged
 	// with the node as a member
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9600"
 	converge(cl, 1, node)
 
@@ -4364,7 +4188,7 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 func TestRestartedNodeDepartsAgain(t *testing.T) {
 	// a member that departs, restarts at the same address and departs again
 	// must be announced each time
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9700"
 
 	announceLeft(cl, node, 1)
@@ -4381,7 +4205,7 @@ func TestRestartedNodeDepartsAgain(t *testing.T) {
 }
 
 func TestSecondDepartureWhileRestartIsPending(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9710"
 
 	announceLeft(cl, node, 1)
@@ -4401,7 +4225,7 @@ func TestSecondDepartureWhileRestartIsPending(t *testing.T) {
 
 func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 	t.Run("joined then departed", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9800"
 
 		announceJoin(cl, node, 1)
@@ -4418,7 +4242,7 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 	})
 
 	t.Run("departed then restarted", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9810"
 
 		announceLeft(cl, node, 1)
@@ -4431,7 +4255,7 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 	})
 
 	t.Run("already announced is a no-op", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9820"
 
 		announceLeft(cl, node, 1)
@@ -4447,7 +4271,7 @@ func TestOverdueReleasesNodeEventsInObservationOrder(t *testing.T) {
 func TestPendingEventIsAnnouncedAfterTheBoundedWait(t *testing.T) {
 	// with no convergence reflecting them, a departure and a join are announced
 	// once the bounded wait elapses
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.pendingEmitTimeout = 20 * time.Millisecond
 	leaver := "127.0.0.1:9920"
 	joiner := "127.0.0.1:9921"
@@ -4476,7 +4300,7 @@ func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
 	// the bounded-wait timer is a safety net; once the event is announced the
 	// timer must not linger for the remainder of the wait
 	t.Run("node left", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9850"
 
 		announceLeft(cl, node, 1)
@@ -4491,7 +4315,7 @@ func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
 	})
 
 	t.Run("node joined", func(t *testing.T) {
-		cl := newEventTestCluster("127.0.0.1", 4000)
+		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9860"
 
 		announceJoin(cl, node, 1)
@@ -4506,7 +4330,7 @@ func TestPendingEventTimerIsCancelledOnAnnounce(t *testing.T) {
 
 func TestCancelPendingEventsLocked(t *testing.T) {
 	// stopping the engine drops every pending event and its timer
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	joiner := "127.0.0.1:9900"
 	leaver := "127.0.0.1:9901"
 	converge(cl, 1, leaver)
@@ -4531,7 +4355,7 @@ func TestCancelPendingEventsLocked(t *testing.T) {
 func TestTrackingIsIgnoredAfterStop(t *testing.T) {
 	// a membership event processed after the engine closed its events channel
 	// must not arm a timer that outlives the engine
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	cl.events = nil
 
 	trackJoin(cl, "127.0.0.1:9910", 1)
@@ -4541,7 +4365,7 @@ func TestTrackingIsIgnoredAfterStop(t *testing.T) {
 }
 
 func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9500"
 	cl.nodeLeftEventsFilter.Add(node)
 
@@ -4551,7 +4375,7 @@ func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
 }
 
 func TestEmitNodeJoinedLockedDeduplicates(t *testing.T) {
-	cl := newEventTestCluster("127.0.0.1", 4000)
+	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9600"
 	cl.nodeJoinedEventsFilter.Add(node)
 

@@ -24,12 +24,12 @@ Run `make help` to list every target. The common ones are:
 
 - **make test**: Run lint and the full test suite.
 - **make lint**: Run `golangci-lint`.
-- **make unit-test**: Run tests with coverage (writes `coverage.out`).
+- **make unit-test**: Run the test suite the way CI does, with the race detector, as parallel shards in pristine containers that need only Docker and the checkout. `make unit-test SHARD=core` runs one shard; the shards mirror the CI matrix and are defined in `scripts/test-shard.sh`. Per-shard logs land in `.unit-test/` and coverage in `coverage-<shard>.out`.
 - **make vendor**: `go mod tidy` and `go mod vendor`.
 - **make mock**: Regenerate mocks under `mocks/`.
 - **make protogen**: Regenerate protobuf Go code.
 - **make certs**: Regenerate test TLS fixtures under `test/data/certs`.
-- **make clean**: Remove the tools image.
+- **make clean**: Remove the tools image and its cache volume.
 
 ## Local Go commands
 

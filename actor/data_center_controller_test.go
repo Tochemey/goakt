@@ -77,7 +77,7 @@ func TestDataCenterReady(t *testing.T) {
 
 	t.Run("returns false when multi-DC enabled but controller is nil", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(datacenter.NewConfig())
 		sys.dataCenterController = nil
 
@@ -87,7 +87,7 @@ func TestDataCenterReady(t *testing.T) {
 
 	t.Run("returns true when multi-DC enabled and controller is ready", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive}}, nil
 		}, remotingMock)
 
@@ -107,7 +107,7 @@ func TestDataCenterReady(t *testing.T) {
 		// Do NOT start the controller - Ready() will be false
 
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = controller
 
@@ -149,7 +149,7 @@ func TestDataCenterLastRefresh(t *testing.T) {
 
 	t.Run("returns zero time when multi-DC enabled but controller is nil", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(datacenter.NewConfig())
 		sys.dataCenterController = nil
 
@@ -158,7 +158,7 @@ func TestDataCenterLastRefresh(t *testing.T) {
 
 	t.Run("returns non-zero when multi-DC enabled and controller has refreshed", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{{ID: "dc-1", State: datacenter.DataCenterActive}}, nil
 		}, remotingMock)
 
@@ -170,7 +170,7 @@ func TestDataCenterLastRefresh(t *testing.T) {
 func TestStopDataCenterController(t *testing.T) {
 	t.Run("returns nil when controller is nil", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.dataCenterController = nil
 
 		err := sys.stopDataCenterController(context.Background())
@@ -193,7 +193,7 @@ func TestStopDataCenterController(t *testing.T) {
 		require.NoError(t, err)
 
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.dataCenterController = controller
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -214,7 +214,7 @@ func TestStopDataCenterController(t *testing.T) {
 		require.NoError(t, err)
 
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.dataCenterController = controller
 
 		err = sys.stopDataCenterController(context.Background())
@@ -237,7 +237,7 @@ func TestStartDataCenterController(t *testing.T) {
 
 	t.Run("returns nil when stopping", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.shuttingDown.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(validDCConfig())
 		sys.cluster = clusterMock
@@ -248,7 +248,7 @@ func TestStartDataCenterController(t *testing.T) {
 
 	t.Run("returns nil when reconcile already in flight", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.dataCenterReconcileInFlight.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(validDCConfig())
 		sys.cluster = clusterMock
@@ -258,7 +258,7 @@ func TestStartDataCenterController(t *testing.T) {
 	})
 
 	t.Run("returns nil when data center not enabled", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = nil
 		sys.cluster = nil
 		sys.clusterEnabled.Store(false)
@@ -284,7 +284,7 @@ func TestStartDataCenterController(t *testing.T) {
 			stopCancel()
 		})
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = controller
 		sys.shutdownTimeout = 5 * time.Second
@@ -315,7 +315,7 @@ func TestStartDataCenterController(t *testing.T) {
 			stopCancel()
 		})
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = controller
 
@@ -332,7 +332,7 @@ func TestStartDataCenterController(t *testing.T) {
 		invalidConfig.ControlPlane = &MockControlPlane{}
 		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
 		sys.dataCenterController = nil
 
@@ -349,7 +349,7 @@ func TestStartDataCenterController(t *testing.T) {
 		cfg.ControlPlane = &MockFailingRegisterControlPlane{}
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 		sys.dataCenterController = nil
 
@@ -364,7 +364,7 @@ func TestStartDataCenterController(t *testing.T) {
 		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 8080}}, nil)
 
 		dcConfig := validDCConfig()
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.dataCenterController = nil
 		sys.shutdownTimeout = 5 * time.Second
@@ -383,7 +383,7 @@ func TestStartDataCenterController(t *testing.T) {
 func TestTriggerDataCentersReconciliation(t *testing.T) {
 	t.Run("returns early when stopping", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.shuttingDown.Store(true)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(datacenter.NewConfig())
 
@@ -393,7 +393,7 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 
 	t.Run("returns early when reconcile in flight", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.dataCenterReconcileInFlight.Store(true)
 
 		sys.triggerDataCentersReconciliation()
@@ -412,7 +412,7 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 		dcConfig.CacheRefreshInterval = 10 * time.Millisecond
 		dcConfig.LeaderCheckInterval = 50 * time.Millisecond
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(dcConfig)
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -429,7 +429,7 @@ func TestTriggerDataCentersReconciliation(t *testing.T) {
 		invalidConfig.ControlPlane = &MockControlPlane{}
 		invalidConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(invalidConfig)
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -448,7 +448,7 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 	}
 
 	t.Run("returns nil when data center not enabled", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = nil
 
 		err := sys.startDataCenterLeaderWatch(context.Background())
@@ -456,7 +456,7 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 	})
 
 	t.Run("returns nil when ticker already exists", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(validDCConfig())
 
 		err := sys.startDataCenterLeaderWatch(context.Background())
@@ -469,7 +469,7 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 	})
 
 	t.Run("starts leader watch successfully", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(validDCConfig())
 
 		err := sys.startDataCenterLeaderWatch(context.Background())
@@ -482,7 +482,7 @@ func TestStartDataCenterLeaderWatch(t *testing.T) {
 
 func TestStopDataCenterLeaderWatch(t *testing.T) {
 	t.Run("returns early when ticker is nil", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.dataCenterLeaderTicker = nil
 		sys.dataCenterLeaderStopWatch = nil
 
@@ -495,7 +495,7 @@ func TestStopDataCenterLeaderWatch(t *testing.T) {
 		cfg.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
 		cfg.LeaderCheckInterval = 50 * time.Millisecond
 
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 		require.NoError(t, sys.startDataCenterLeaderWatch(context.Background()))
 
@@ -505,7 +505,7 @@ func TestStopDataCenterLeaderWatch(t *testing.T) {
 	})
 
 	t.Run("handles full stop channel gracefully", func(t *testing.T) {
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		clock := ticker.New(50 * time.Millisecond)
 		stopSig := make(chan types.Unit, 1)
 		stopSig <- types.Unit{} // pre-fill so next send would block
@@ -527,7 +527,7 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 		clock := ticker.New(10 * time.Millisecond)
 		stopSig := make(chan types.Unit, 1)
 
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -543,7 +543,7 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 		clock := ticker.New(10 * time.Millisecond)
 		stopSig := make(chan types.Unit, 1)
 
-		sys := MockReplicationTestSystem(mockscluster.NewCluster(t))
+		sys := newReplicationSystem(mockscluster.NewCluster(t))
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(datacenter.NewConfig())
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -571,7 +571,7 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 		clock := ticker.New(5 * time.Millisecond)
 		stopSig := make(chan types.Unit, 1)
 
-		sys := MockReplicationTestSystem(clusterMock)
+		sys := newReplicationSystem(clusterMock)
 		sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 		sys.shutdownTimeout = 5 * time.Second
 
@@ -586,7 +586,7 @@ func TestDataCenterLeaderWatchLoop(t *testing.T) {
 
 func TestMaybeUpdateEndpointsNoController(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.dataCenterController = nil
 
 	err := sys.maybeUpdateEndpoints(context.Background())
@@ -601,7 +601,7 @@ func TestMaybeUpdateEndpointsMembersFetchError(t *testing.T) {
 	cfg.ControlPlane = &MockControlPlane{}
 	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create a controller
@@ -622,7 +622,7 @@ func TestMaybeUpdateEndpointsNoMembers(t *testing.T) {
 	cfg.ControlPlane = &MockControlPlane{}
 	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create a controller
@@ -649,7 +649,7 @@ func TestMaybeUpdateEndpointsUnchanged(t *testing.T) {
 
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create a controller with the same endpoints as current members
@@ -676,7 +676,7 @@ func TestMaybeUpdateEndpointsChanged(t *testing.T) {
 
 	var registeredRecords []datacenter.DataCenterRecord
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registeredRecords = append(registeredRecords, record)
 			return "dc1", uint64(len(registeredRecords)), nil
@@ -692,7 +692,7 @@ func TestMaybeUpdateEndpointsChanged(t *testing.T) {
 
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create and start controller with initial endpoints
@@ -730,7 +730,7 @@ func TestMaybeUpdateEndpointsUpdateFails(t *testing.T) {
 	updateErr := errors.New("control plane update failed")
 	var registerCallCount int
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registerCallCount++
 			// First call (initial registration) succeeds
@@ -751,7 +751,7 @@ func TestMaybeUpdateEndpointsUpdateFails(t *testing.T) {
 
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create and start controller with initial endpoints
@@ -783,7 +783,7 @@ func TestMaybeUpdateEndpointsOrderMatters(t *testing.T) {
 
 	var registeredRecords []datacenter.DataCenterRecord
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registeredRecords = append(registeredRecords, record)
 			return "dc1", uint64(len(registeredRecords)), nil
@@ -800,7 +800,7 @@ func TestMaybeUpdateEndpointsOrderMatters(t *testing.T) {
 	// Initial endpoints in different order than cluster will report
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	// Create and start controller
@@ -829,12 +829,12 @@ func TestMaybeUpdateEndpointsSingleMember(t *testing.T) {
 	clusterMock.EXPECT().Members(mock.Anything).Return(singleMember, nil)
 
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{}
+	cfg.ControlPlane = &MockScriptedControlPlane{}
 	cfg.DataCenter = datacenter.DataCenter{Name: "dc1"}
 
 	initialEndpoints := []string{"127.0.0.1:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
@@ -859,7 +859,7 @@ func TestMaybeUpdateEndpointsDifferentPorts(t *testing.T) {
 
 	var registeredRecords []datacenter.DataCenterRecord
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registeredRecords = append(registeredRecords, record)
 			return "dc1", uint64(len(registeredRecords)), nil
@@ -875,7 +875,7 @@ func TestMaybeUpdateEndpointsDifferentPorts(t *testing.T) {
 
 	initialEndpoints := []string{"127.0.0.1:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
@@ -904,7 +904,7 @@ func TestMaybeUpdateEndpointsMemberRemoved(t *testing.T) {
 
 	var registeredRecords []datacenter.DataCenterRecord
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registeredRecords = append(registeredRecords, record)
 			return "dc1", uint64(len(registeredRecords)), nil
@@ -921,7 +921,7 @@ func TestMaybeUpdateEndpointsMemberRemoved(t *testing.T) {
 	// Initial endpoints include a member that will be removed
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 
 	controller, err := datacentercontroller.NewController(cfg, initialEndpoints)
@@ -959,7 +959,7 @@ func TestStartDataCenterControllerUpdatesEndpoints(t *testing.T) {
 
 	var registeredRecords []datacenter.DataCenterRecord
 	cfg := datacenter.NewConfig()
-	cfg.ControlPlane = &testControlPlane{
+	cfg.ControlPlane = &MockScriptedControlPlane{
 		registerFn: func(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
 			registeredRecords = append(registeredRecords, record)
 			return "dc1", uint64(len(registeredRecords)), nil
@@ -975,7 +975,7 @@ func TestStartDataCenterControllerUpdatesEndpoints(t *testing.T) {
 
 	initialEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080"}
 
-	sys := MockReplicationTestSystem(clusterMock)
+	sys := newReplicationSystem(clusterMock)
 	sys.clusterConfig = NewClusterConfig().WithDataCenter(cfg)
 	sys.shutdownTimeout = 5 * time.Second
 
@@ -997,106 +997,4 @@ func TestStartDataCenterControllerUpdatesEndpoints(t *testing.T) {
 	// Verify endpoints were updated to include the new member
 	expectedEndpoints := []string{"127.0.0.1:8080", "127.0.0.2:8080", "127.0.0.3:8080"}
 	require.Equal(t, expectedEndpoints, controller.Endpoints())
-}
-
-// testControlPlane is a flexible mock control plane for testing endpoint updates.
-type testControlPlane struct {
-	registerFn   func(context.Context, datacenter.DataCenterRecord) (string, uint64, error)
-	heartbeatFn  func(context.Context, string, uint64) (uint64, time.Time, error)
-	setStateFn   func(context.Context, string, datacenter.DataCenterState, uint64) (uint64, error)
-	listActiveFn func(context.Context) ([]datacenter.DataCenterRecord, error)
-}
-
-func (m *testControlPlane) Register(ctx context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
-	if m.registerFn != nil {
-		return m.registerFn(ctx, record)
-	}
-	return record.ID, 1, nil
-}
-
-func (m *testControlPlane) Heartbeat(ctx context.Context, id string, version uint64) (uint64, time.Time, error) {
-	if m.heartbeatFn != nil {
-		return m.heartbeatFn(ctx, id, version)
-	}
-	return version + 1, time.Now().Add(time.Hour), nil
-}
-
-func (m *testControlPlane) SetState(ctx context.Context, id string, state datacenter.DataCenterState, version uint64) (uint64, error) {
-	if m.setStateFn != nil {
-		return m.setStateFn(ctx, id, state, version)
-	}
-	return version + 1, nil
-}
-
-func (m *testControlPlane) ListActive(ctx context.Context) ([]datacenter.DataCenterRecord, error) {
-	if m.listActiveFn != nil {
-		return m.listActiveFn(ctx)
-	}
-	return nil, nil
-}
-
-func (*testControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlaneEvent, error) {
-	return nil, nil
-}
-
-func (*testControlPlane) Deregister(_ context.Context, _ string) error {
-	return nil
-}
-
-// MockFailingSetStateControlPlane makes Controller.Stop fail by returning error from SetState
-// when transitioning to DRAINING/INACTIVE. SetState succeeds for ACTIVE (during register).
-type MockFailingSetStateControlPlane struct{}
-
-func (*MockFailingSetStateControlPlane) Register(_ context.Context, record datacenter.DataCenterRecord) (string, uint64, error) {
-	return record.ID, 1, nil
-}
-
-func (*MockFailingSetStateControlPlane) Heartbeat(_ context.Context, _ string, version uint64) (uint64, time.Time, error) {
-	return version + 1, time.Now().Add(time.Hour), nil
-}
-
-func (*MockFailingSetStateControlPlane) SetState(_ context.Context, _ string, state datacenter.DataCenterState, version uint64) (uint64, error) {
-	if state == datacenter.DataCenterActive {
-		return version + 1, nil
-	}
-	return 0, errors.New("set state failed")
-}
-
-func (*MockFailingSetStateControlPlane) ListActive(_ context.Context) ([]datacenter.DataCenterRecord, error) {
-	return nil, nil
-}
-
-func (*MockFailingSetStateControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlaneEvent, error) {
-	return nil, nil
-}
-
-func (*MockFailingSetStateControlPlane) Deregister(_ context.Context, _ string) error {
-	return nil
-}
-
-// MockFailingRegisterControlPlane makes Controller.Start fail by returning error from Register.
-type MockFailingRegisterControlPlane struct{}
-
-func (*MockFailingRegisterControlPlane) Register(_ context.Context, _ datacenter.DataCenterRecord) (string, uint64, error) {
-	return "", 0, errors.New("register failed")
-}
-
-func (*MockFailingRegisterControlPlane) Heartbeat(_ context.Context, _ string, version uint64) (uint64, time.Time, error) {
-	return version + 1, time.Now().Add(time.Hour), nil
-}
-
-func (*MockFailingRegisterControlPlane) SetState(_ context.Context, _ string, _ datacenter.DataCenterState, version uint64) (uint64, error) {
-	return version + 1, nil
-}
-
-func (*MockFailingRegisterControlPlane) ListActive(_ context.Context) ([]datacenter.DataCenterRecord, error) {
-	return nil, nil
-}
-
-func (*MockFailingRegisterControlPlane) Watch(_ context.Context) (<-chan datacenter.ControlPlaneEvent, error) {
-	return nil, nil
-}
-
-func (*MockFailingRegisterControlPlane) Deregister(_ context.Context, _ string) error {
-	return nil
 }

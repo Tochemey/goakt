@@ -47,7 +47,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
-	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	mockscluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/passivation"
@@ -55,79 +54,6 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// newRemoteServerTestSystem builds the minimal actorSystem needed to unit-test
-// the proto TCP handler methods in remote_server.go.
-// It does NOT start the actor system; handlers are called directly. A real
-// remoting client is attached so the handler's upfront payload decode
-// (which needs access to the serializer registry) works against an
-// environment that mirrors production wiring.
-func newRemoteServerTestSystem(host string, port int) *actorSystem {
-	sys := &actorSystem{
-		actors:                newTree(),
-		logger:                log.DiscardLogger,
-		remoteConfig:          remote.NewConfig(host, port),
-		name:                  "testSys",
-		grains:                xsync.NewMap[string, *grainPID](),
-		askTimeout:            DefaultAskTimeout,
-		remoting:              remoteclient.NewClient(),
-		remoteWatches:         newRemoteWatchRegistry(),
-		remoteHostPort:        fmt.Sprintf("%s:%d", host, port),
-		remoteSenderAddresses: xsync.NewMap[string, *address.Address](),
-	}
-	sys.remotingEnabled.Store(true)
-	return sys
-}
-
-// requireProtoError asserts that the returned proto message is an *internalpb.Error
-// with the expected code.
-func requireProtoError(t *testing.T, msg any, code internalpb.Code) {
-	t.Helper()
-	protoErr, ok := msg.(*internalpb.Error)
-	require.True(t, ok, "expected *internalpb.Error, got %T", msg)
-	assert.Equal(t, code, protoErr.GetCode())
-}
-
-// nullConn is a no-op Connection implementation used where the handler ignores conn.
-var nullConn inet.Connection
-
-// newRemoteServerTestSystemWithStoppedActor creates a minimal actorSystem with a stopped
-// actor in the tree. Used to test handlers that return CODE_NOT_FOUND when pid is not running.
-func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port int, name string) *actorSystem {
-	t.Helper()
-	sys := newRemoteServerTestSystem(host, port)
-	sys.noSender = MockPID(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
-	addr := address.New(name, sys.Name(), host, port)
-	stoppedPID := &PID{
-		address:     addr,
-		path:        newPath(addr),
-		actorSystem: sys,
-	}
-	require.NoError(t, sys.actors.addRootNode(stoppedPID))
-	return sys
-}
-
-// newRemoteServerTestSystemWithZombieNode creates a minimal actorSystem with a "zombie" node
-// in the tree: a node that exists in the map but has nil pid. This simulates the race where
-// deleteNode has cleared the pid but a handler still holds a reference to the node.
-// Used to verify handlers return CODE_NOT_FOUND instead of panicking.
-func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int, name string) *actorSystem {
-	t.Helper()
-	sys := newRemoteServerTestSystem(host, port)
-	sys.noSender = MockPID(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
-	addr := address.New(name, sys.Name(), host, port)
-	addrStr := addr.String()
-	n := newPidNode(nil)
-	n.id = addrStr
-	n.name = name
-	sys.actors.mu.Lock()
-	sys.actors.pids[addrStr] = n
-	sys.actors.names[name] = n
-	sys.actors.mu.Unlock()
-	return sys
-}
 
 func TestToProtoError(t *testing.T) {
 	err := gerrors.ErrRemotingDisabled
@@ -173,7 +99,7 @@ func TestExtractContextWithPropagator(t *testing.T) {
 		// headerPropagator only adds a value when the header key is present in
 		// the metadata. With no metadata attached to the context, Extract is
 		// never called, so the returned context must equal the original.
-		propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
+		propagator := &MockHeaderPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
 		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
 		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(propagator))
 
@@ -187,7 +113,7 @@ func TestExtractContextWithPropagator(t *testing.T) {
 		// request metadata into the context under the "trace" key. Verifying
 		// that key appears on the returned context confirms Extract was invoked.
 		type traceKey = string
-		propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
+		propagator := &MockHeaderPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
 		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
 		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(propagator))
 
@@ -298,7 +224,7 @@ func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {
 	host := "127.0.0.1"
 	ctx := context.Background()
 
-	propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
+	propagator := &MockHeaderPropagator{headerKey: "x-trace-id", ctxKey: "trace"}
 
 	md := inet.NewMetadata()
 	md.Set("x-trace-id", "trace-456")
@@ -388,7 +314,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("empty sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = MockPID(sys, "nosender", 0)
+		sys.noSender = newPIDAt(sys, "nosender", 0)
 
 		pid := sys.newRemoteSenderPID("")
 		assert.Equal(t, sys.NoSender(), pid)
@@ -396,7 +322,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("malformed sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = MockPID(sys, "nosender", 0)
+		sys.noSender = newPIDAt(sys, "nosender", 0)
 
 		pid := sys.newRemoteSenderPID("not-an-address")
 		assert.Equal(t, sys.NoSender(), pid)
@@ -1931,23 +1857,6 @@ func TestRemoteReinstateHandler(t *testing.T) {
 	})
 }
 
-// slowReplyActor answers a TestReply only after a fixed delay, long enough to
-// prove the ask server honors a caller deadline beyond the system askTimeout.
-type slowReplyActor struct {
-	delay time.Duration
-}
-
-func (x *slowReplyActor) PreStart(*Context) error { return nil }
-
-func (x *slowReplyActor) PostStop(*Context) error { return nil }
-
-func (x *slowReplyActor) Receive(ctx *ReceiveContext) {
-	if _, ok := ctx.Message().(*testpb.TestReply); ok {
-		pause.For(x.delay)
-		ctx.Response(testpb.Reply_builder{Content: "slow reply"}.Build())
-	}
-}
-
 // TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout pins the
 // wire-deadline fix: a caller timeout longer than the server's askTimeout must
 // govern the duplex ask wait. Before the fix duplexRemoteAsk clamped the wait
@@ -1968,7 +1877,7 @@ func TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout(t *testing.T) {
 	require.NoError(t, sys.Start(ctx))
 	t.Cleanup(func() { _ = sys.Stop(ctx) })
 
-	pid, err := sys.Spawn(ctx, "slow-replier", &slowReplyActor{delay: 900 * time.Millisecond})
+	pid, err := sys.Spawn(ctx, "slow-replier", &MockSlowReplyActor{delay: 900 * time.Millisecond})
 	require.NoError(t, err)
 
 	remoting := remoteclient.NewClient()
@@ -2208,8 +2117,8 @@ func TestRemoteAskGrainHandlerDeserializationError(t *testing.T) {
 	t.Run("deserialization failure returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 
-		mockSerializer := &testSerializer{err: fmt.Errorf("bad bytes")}
-		mockClient := &testRemoteClient{serializer: mockSerializer}
+		mockSerializer := &MockSerializer{err: fmt.Errorf("bad bytes")}
+		mockClient := &MockRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
 		req := internalpb.RemoteAskGrainRequest_builder{
@@ -2228,8 +2137,8 @@ func TestRemoteAskGrainHandlerDeserializationError(t *testing.T) {
 	t.Run("invalid grain identity returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 
-		mockSerializer := &testSerializer{msg: new(internalpb.RemoteAskGrainResponse)}
-		mockClient := &testRemoteClient{serializer: mockSerializer}
+		mockSerializer := &MockSerializer{msg: new(internalpb.RemoteAskGrainResponse)}
+		mockClient := &MockRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
 		req := internalpb.RemoteAskGrainRequest_builder{
@@ -2254,8 +2163,8 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 	t.Run("deserialization failure returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 
-		mockSerializer := &testSerializer{err: fmt.Errorf("bad bytes")}
-		mockClient := &testRemoteClient{serializer: mockSerializer}
+		mockSerializer := &MockSerializer{err: fmt.Errorf("bad bytes")}
+		mockClient := &MockRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
 		req := internalpb.RemoteTellGrainRequest_builder{
@@ -2274,8 +2183,8 @@ func TestRemoteTellGrainHandlerDeserializationError(t *testing.T) {
 	t.Run("invalid grain identity returns CODE_INVALID_ARGUMENT", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
 
-		mockSerializer := &testSerializer{msg: new(internalpb.RemoteTellGrainResponse)}
-		mockClient := &testRemoteClient{serializer: mockSerializer}
+		mockSerializer := &MockSerializer{msg: new(internalpb.RemoteTellGrainResponse)}
+		mockClient := &MockRemoteClient{serializer: mockSerializer}
 		sys.remoting = mockClient
 
 		req := internalpb.RemoteTellGrainRequest_builder{
@@ -2437,38 +2346,6 @@ func TestRemoteServerHandlersIntegration(t *testing.T) {
 	})
 }
 
-// testSerializer is a minimal remote.Serializer test double.
-// If err is non-nil, Deserialize returns it. Otherwise it returns msg.
-type testSerializer struct {
-	msg any
-	err error
-}
-
-func (s *testSerializer) Serialize(_ any) ([]byte, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return []byte("serialized"), nil
-}
-
-func (s *testSerializer) Deserialize(_ []byte) (any, error) {
-	if s.err != nil {
-		return nil, s.err
-	}
-	return s.msg, nil
-}
-
-// testRemoteClient is a minimal remote.Client test double that returns a
-// configured testSerializer from Serializer(). All other methods are no-ops.
-type testRemoteClient struct {
-	remoteclient.Client // embed to avoid implementing all interface methods
-	serializer          remote.Serializer
-}
-
-func (c *testRemoteClient) Serializer(_ any) remote.Serializer {
-	return c.serializer
-}
-
 // TestApplyPerMessageMetadata exercises every branch of the helper that
 // overlays per-RemoteMessage metadata onto the dispatch context.
 func TestApplyPerMessageMetadata(t *testing.T) {
@@ -2477,7 +2354,7 @@ func TestApplyPerMessageMetadata(t *testing.T) {
 	t.Run("empty metadata returns context unchanged", func(t *testing.T) {
 		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
 		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000,
-			remote.WithContextPropagator(&headerPropagator{headerKey: "x-trace-id", ctxKey: "trace"}))
+			remote.WithContextPropagator(&MockHeaderPropagator{headerKey: "x-trace-id", ctxKey: "trace"}))
 
 		got, err := sys.messageMetadata(ctx, nil)
 		require.NoError(t, err)
@@ -2498,7 +2375,7 @@ func TestApplyPerMessageMetadata(t *testing.T) {
 
 	t.Run("metadata with propagator enriches context", func(t *testing.T) {
 		type traceKey = string
-		propagator := &headerPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
+		propagator := &MockHeaderPropagator{headerKey: "x-trace-id", ctxKey: traceKey("trace")}
 		sys := newRemoteServerTestSystem("127.0.0.1", 9000)
 		sys.remoteConfig = remote.NewConfig("127.0.0.1", 9000, remote.WithContextPropagator(propagator))
 
@@ -2933,7 +2810,7 @@ func TestRemoteGrainEnvelopeDelivery(t *testing.T) {
 	require.NoError(t, node2.Start(ctx))
 	t.Cleanup(func() { _ = node2.Stop(context.Background()) })
 
-	grain := &reentrantRecordingGrain{}
+	grain := &MockReentrantRecordingGrain{}
 	identity, err := node2.GrainIdentity(ctx, "remoteEnvelopeGrain", func(context.Context) (Grain, error) {
 		return grain, nil
 	})
@@ -2988,7 +2865,7 @@ func TestRemoteEnvelopeAskDeferredAcrossNodes(t *testing.T) {
 	require.NoError(t, node2.Start(ctx))
 	t.Cleanup(func() { _ = node2.Stop(context.Background()) })
 
-	grain := &envelopeDeferringGrain{requests: make(chan string, 1)}
+	grain := &MockEnvelopeDeferringGrain{requests: make(chan string, 1)}
 	identity, err := node2.GrainIdentity(ctx, "remoteDeferringGrain", func(context.Context) (Grain, error) {
 		return grain, nil
 	})
@@ -3045,7 +2922,7 @@ func TestRemoteTellGrainHandlerEnvelopeFailure(t *testing.T) {
 	require.NoError(t, system.Start(ctx))
 	t.Cleanup(func() { _ = system.Stop(context.Background()) })
 
-	grain := &reentrantRecordingGrain{}
+	grain := &MockReentrantRecordingGrain{}
 	identity, err := system.GrainIdentity(ctx, "envelopeFailureGrain", func(context.Context) (Grain, error) {
 		return grain, nil
 	})
@@ -3085,31 +2962,6 @@ func TestCopyDuplexPayloadRetainsIndependently(t *testing.T) {
 	require.Empty(t, copyDuplexPayload([]byte{}))
 }
 
-// blockerActor parks on gate for every remote payload so its mailbox
-// accumulates inbound remote tells; received counts messages that made it
-// past the gate.
-type blockerActor struct {
-	gate     chan struct{}
-	received *atomic.Int64
-}
-
-// PreStart implements the Actor contract.
-func (x *blockerActor) PreStart(*Context) error { return nil }
-
-// PostStop implements the Actor contract.
-func (x *blockerActor) PostStop(*Context) error { return nil }
-
-// Receive parks on the gate for every remote payload, simulating a stalled
-// consumer, and counts the messages that get through once the gate opens.
-func (x *blockerActor) Receive(ctx *ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *structpb.Value:
-		<-x.gate
-		x.received.Add(1)
-	default:
-	}
-}
-
 // TestRemoteTellStalledConsumerBackpressure is the end-to-end gate for
 // consumption-time credit grants: a stalled remote actor must exhaust the
 // sender's credit window (instead of absorbing messages at wire speed into
@@ -3143,7 +2995,7 @@ func TestRemoteTellStalledConsumerBackpressure(t *testing.T) {
 
 	gate := make(chan struct{})
 	received := new(atomic.Int64)
-	blocker, err := receiverSys.Spawn(ctx, "blocker", &blockerActor{gate: gate, received: received})
+	blocker, err := receiverSys.Spawn(ctx, "blocker", &MockBlockerActor{gate: gate, received: received})
 	require.NoError(t, err)
 	pause.For(100 * time.Millisecond)
 

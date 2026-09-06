@@ -23,7 +23,6 @@
 package actor
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -38,53 +37,19 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
-
-// newReliableClusterFixture starts a three-node NATS-backed cluster for
-// reliable-delivery tests and stops every node when the test finishes. Three
-// nodes place the endpoint pair on two members with one uninvolved member, so
-// registry records regularly live on partitions owned by nodes that host
-// neither endpoint.
-func newReliableClusterFixture(t *testing.T) (context.Context, []*actorSystem) {
-	t.Helper()
-
-	ctx := context.TODO()
-	server := startNatsServer(t)
-	built, providers := testNATsConcurrent(t, server.Addr().String(), 3)
-
-	systems := make([]*actorSystem, len(built))
-
-	for i, system := range built {
-		systems[i] = system.(*actorSystem)
-	}
-
-	// let membership settle before tests place actors
-	pause.For(time.Second)
-
-	t.Cleanup(func() {
-		for i, system := range built {
-			assert.NoError(t, system.Stop(context.WithoutCancel(ctx)))
-			assert.NoError(t, providers[i].Close())
-		}
-
-		server.Shutdown()
-	})
-
-	return ctx, systems
-}
 
 func TestWorkPullingDurableClusterFlow(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2 := systems[0], systems[1]
-	queue := &mockDurableWorkQueue{}
+	queue := &MockDurableWorkQueue{}
 
-	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "jobs-producer", &MockReliableProducer{},
 		AsReliableWorkPullingProducer(WithReliableDurableWorkQueue(queue), WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker, err := node2.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
+	worker, err := node2.Spawn(ctx, "jobs-worker", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -104,15 +69,15 @@ func TestWorkPullingDeliveryClusterFlow(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	producer, err := node1.Spawn(ctx, "jobs-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "jobs-producer", &MockReliableProducer{},
 		AsReliableWorkPullingProducer(WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker1, err := node2.Spawn(ctx, "jobs-worker-1", &reliableConsumerMock{autoConfirm: true},
+	worker1, err := node2.Spawn(ctx, "jobs-worker-1", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker2, err := node3.Spawn(ctx, "jobs-worker-2", &reliableConsumerMock{autoConfirm: true},
+	worker2, err := node3.Spawn(ctx, "jobs-worker-2", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -143,7 +108,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	producer, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer", WithReliableRetryInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -152,7 +117,7 @@ func TestReliableDeliveryClusterFlow(t *testing.T) {
 	// unresolvable, and the recurring tick recovers once it appears
 	require.NoError(t, Tell(ctx, producer, &produceSubmission{messageID: "ord-1", payload: testpb.Reply_builder{Content: "ord-1"}.Build()}))
 
-	consumer, err := node2.Spawn(ctx, "orders-consumer", &reliableConsumerMock{autoConfirm: true},
+	consumer, err := node2.Spawn(ctx, "orders-consumer", &MockReliableConsumer{autoConfirm: true},
 		AsReliableConsumer("orders-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -210,7 +175,7 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
-	producer, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	producer, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 
 	companionName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
@@ -286,8 +251,8 @@ func TestReliableClusterSpawnRollback(t *testing.T) {
 	ctx, systems := newReliableClusterFixture(t)
 	node1, node2 := systems[0], systems[1]
 
-	queue := &mockDurableQueue{loadErr: errors.New("backing store is unreachable")}
-	pid, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{},
+	queue := &MockDurableQueue{loadErr: errors.New("backing store is unreachable")}
+	pid, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{},
 		AsReliableProducer("orders-consumer", WithReliableDurableQueue(queue), WithReliableQueueRetry(1, time.Millisecond)))
 	require.Error(t, err)
 	require.Nil(t, pid)
@@ -314,12 +279,12 @@ func TestReliableClusterSpawnRollback(t *testing.T) {
 		return !ok
 	}, 5*time.Second, 100*time.Millisecond)
 
-	fresh, err := node1.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	fresh, err := node1.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.NoError(t, err)
 	assert.True(t, fresh.IsRunning())
 
 	// a second reliable endpoint under the same name is rejected cluster-wide
-	duplicate, err := node2.Spawn(ctx, "orders-producer", &reliableProducerMock{}, AsReliableProducer("orders-consumer"))
+	duplicate, err := node2.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.Error(t, err)
 	assert.Nil(t, duplicate)
 }

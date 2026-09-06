@@ -218,14 +218,14 @@ func TestPathToAddress(t *testing.T) {
 
 	t.Run("invalid path string returns NoSender", func(t *testing.T) {
 		// mockPath returns a string that address.Parse will reject
-		invalidPath := &mockPathForTest{s: "invalid-address"}
+		invalidPath := &MockPath{s: "invalid-address"}
 		addr := pathToAddress(invalidPath)
 		require.NotNil(t, addr)
 		assert.True(t, addr.Equals(address.NoSender()))
 	})
 
 	t.Run("empty incarnation falls back to Parse", func(t *testing.T) {
-		pathWithoutIncarnation := &mockPathForTest{s: "goakt://system1@127.0.0.1:9000/actor1"}
+		pathWithoutIncarnation := &MockPath{s: "goakt://system1@127.0.0.1:9000/actor1"}
 		addr := pathToAddress(pathWithoutIncarnation)
 		require.NotNil(t, addr)
 		assert.Equal(t, "actor1", addr.Name())
@@ -233,7 +233,7 @@ func TestPathToAddress(t *testing.T) {
 	})
 
 	t.Run("invalid incarnation falls back to Parse", func(t *testing.T) {
-		pathWithBadIncarnation := &mockPathForTest{
+		pathWithBadIncarnation := &MockPath{
 			s:           "goakt://system1@127.0.0.1:9000/actor1",
 			incarnation: "not-a-uuid",
 		}
@@ -243,19 +243,3 @@ func TestPathToAddress(t *testing.T) {
 		assert.Equal(t, "system1", addr.System())
 	})
 }
-
-// mockPathForTest implements Path for testing pathToAddress parse-failure path.
-type mockPathForTest struct {
-	s           string
-	incarnation string
-}
-
-func (m *mockPathForTest) Host() string           { return "" }
-func (m *mockPathForTest) HostPort() string       { return "" }
-func (m *mockPathForTest) incarnationID() string  { return m.incarnation }
-func (m *mockPathForTest) Port() int              { return 0 }
-func (m *mockPathForTest) Name() string           { return "" }
-func (m *mockPathForTest) Parent() Path           { return nil }
-func (m *mockPathForTest) String() string         { return m.s }
-func (m *mockPathForTest) System() string         { return "" }
-func (m *mockPathForTest) Equals(other Path) bool { return false }

@@ -42,20 +42,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// workPullingProducerConfig builds a complete work-pulling producer configuration.
-func workPullingProducerConfig() *reliableDeliveryConfig {
-	return &reliableDeliveryConfig{
-		producer: &reliableProducerConfig{
-			workPulling:   true,
-			retryInterval: DefaultReliableProducerRetryInterval,
-			queueRetry: &reliableQueueRetryConfig{
-				maxAttempts:    DefaultReliableQueueRetryAttempts,
-				initialBackoff: DefaultReliableQueueRetryBackoff,
-			},
-		},
-	}
-}
-
 func TestWorkPullingProducerConfigValidate(t *testing.T) {
 	t.Run("With a valid work-pulling producer", func(t *testing.T) {
 		require.NoError(t, workPullingProducerConfig().Validate())
@@ -75,14 +61,14 @@ func TestWorkPullingProducerConfigValidate(t *testing.T) {
 
 	t.Run("With a durable producer queue", func(t *testing.T) {
 		config := workPullingProducerConfig()
-		config.producer.queue = &mockDurableQueue{}
+		config.producer.queue = &MockDurableQueue{}
 		require.ErrorContains(t, config.Validate(), "rejects a durable producer queue")
 	})
 
 	t.Run("With a durable work queue", func(t *testing.T) {
 		config := workPullingProducerConfig()
-		config.producer.workQueue = &mockDurableWorkQueue{}
-		config.producer.durableQueueID = "mockDurableWorkQueue"
+		config.producer.workQueue = &MockDurableWorkQueue{}
+		config.producer.durableQueueID = "MockDurableWorkQueue"
 		require.NoError(t, config.Validate())
 	})
 }
@@ -133,10 +119,10 @@ func TestAsReliableWorkPullingSpawnOptions(t *testing.T) {
 func TestAuthenticateWorkPullingWorker(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsReliableWorkPullingProducer())
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockReliableProducer{}, AsReliableWorkPullingProducer())
 	require.NoError(t, err)
 
-	_, err = system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true}, AsReliableWorkPullingWorker("jobs-producer"))
+	_, err = system.Spawn(ctx, "jobs-worker", &MockReliableConsumer{autoConfirm: true}, AsReliableWorkPullingWorker("jobs-producer"))
 	require.NoError(t, err)
 
 	companion, err := system.resolveReliableCompanion(ctx, "jobs-worker", ReliableControllerRoleConsumer, nil)
@@ -148,7 +134,7 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 	assert.Equal(t, "jobs-worker", endpointName)
 
 	t.Run("With a worker naming another producer", func(t *testing.T) {
-		other, err := system.Spawn(ctx, "other-worker", &reliableConsumerMock{autoConfirm: true}, AsReliableWorkPullingWorker("other-producer"))
+		other, err := system.Spawn(ctx, "other-worker", &MockReliableConsumer{autoConfirm: true}, AsReliableWorkPullingWorker("other-producer"))
 		require.NoError(t, err)
 
 		otherCompanion, err := system.resolveReliableCompanion(ctx, other.Name(), ReliableControllerRoleConsumer, nil)
@@ -170,7 +156,7 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 	t.Run("With a point-to-point consumer naming the producer", func(t *testing.T) {
 		// fencing accepts any consumer configuration that names this producer,
 		// including a point-to-point consumer spawned against it
-		consumer, err := system.Spawn(ctx, "p2p-consumer", &reliableConsumerMock{autoConfirm: true}, AsReliableConsumer(producer.Name()))
+		consumer, err := system.Spawn(ctx, "p2p-consumer", &MockReliableConsumer{autoConfirm: true}, AsReliableConsumer(producer.Name()))
 		require.NoError(t, err)
 
 		consumerCompanion, err := system.resolveReliableCompanion(ctx, consumer.Name(), ReliableControllerRoleConsumer, nil)
@@ -186,14 +172,14 @@ func TestAuthenticateWorkPullingWorker(t *testing.T) {
 func TestWorkPullingDeliveryEndToEnd(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockReliableProducer{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker1, err := system.Spawn(ctx, "jobs-worker-1", &reliableConsumerMock{autoConfirm: true},
+	worker1, err := system.Spawn(ctx, "jobs-worker-1", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond), WithReliableFlowControlWindow(2)))
 	require.NoError(t, err)
 
-	worker2, err := system.Spawn(ctx, "jobs-worker-2", &reliableConsumerMock{autoConfirm: true},
+	worker2, err := system.Spawn(ctx, "jobs-worker-2", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond), WithReliableFlowControlWindow(2)))
 	require.NoError(t, err)
 
@@ -233,12 +219,12 @@ func TestWorkPullingDeliveryEndToEnd(t *testing.T) {
 func TestWorkPullingWorkerLossRequeues(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockReliableProducer{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
 	// worker-1 holds deliveries without confirming so unconfirmed work is
 	// outstanding when its endpoint dies
-	worker1, err := system.Spawn(ctx, "jobs-worker-1", &reliableConsumerMock{autoConfirm: false},
+	worker1, err := system.Spawn(ctx, "jobs-worker-1", &MockReliableConsumer{autoConfirm: false},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
@@ -248,7 +234,7 @@ func TestWorkPullingWorkerLossRequeues(t *testing.T) {
 		return len(awaitDeliveriesSnapshot(t, ctx, worker1)) >= 1
 	}, 10*time.Second, 20*time.Millisecond)
 
-	worker2, err := system.Spawn(ctx, "jobs-worker-2", &reliableConsumerMock{autoConfirm: true},
+	worker2, err := system.Spawn(ctx, "jobs-worker-2", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
@@ -274,10 +260,10 @@ func TestWorkPullingWorkerLossRequeues(t *testing.T) {
 func TestWorkPullingSilenceReregistrationKeepsDelivering(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockReliableProducer{}, AsReliableWorkPullingProducer(WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
-	worker, err := system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
+	worker, err := system.Spawn(ctx, "jobs-worker", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(150*time.Millisecond), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
@@ -309,14 +295,14 @@ func TestWorkPullingSilenceReregistrationKeepsDelivering(t *testing.T) {
 func TestWorkPullingRegistrationFencingDropsUntrusted(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMock{}, AsReliableWorkPullingProducer())
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockReliableProducer{}, AsReliableWorkPullingProducer())
 	require.NoError(t, err)
 
 	companion, err := system.resolveReliableCompanion(ctx, producer.Name(), ReliableControllerRoleProducer, nil)
 	require.NoError(t, err)
 
 	// a plain actor spoofing RegisterConsumer never receives an ack
-	spoof, err := system.Spawn(ctx, "spoof", &deliveryRecorder{})
+	spoof, err := system.Spawn(ctx, "spoof", &MockDeliveryRecorder{})
 	require.NoError(t, err)
 
 	register, err := commands.NewRegisterConsumer("nonce-1")
@@ -336,11 +322,11 @@ func TestWorkPullingRegistrationFencingDropsUntrusted(t *testing.T) {
 func TestWorkPullingDeliveryConfirmation(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &reliableProducerMockWithConfirm{},
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockConfirmingReliableProducer{},
 		AsReliableWorkPullingProducer(WithReliableDeliveryConfirmation(), WithReliableRetryInterval(100*time.Millisecond)))
 	require.NoError(t, err)
 
-	_, err = system.Spawn(ctx, "jobs-worker", &reliableConsumerMock{autoConfirm: true},
+	_, err = system.Spawn(ctx, "jobs-worker", &MockReliableConsumer{autoConfirm: true},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(200*time.Millisecond)))
 	require.NoError(t, err)
 
@@ -357,96 +343,19 @@ func TestWorkPullingDeliveryConfirmation(t *testing.T) {
 	}, 10*time.Second, 20*time.Millisecond)
 }
 
-// awaitDeliveriesSnapshot returns the consumer's current delivery list without
-// waiting for a count.
-func awaitDeliveriesSnapshot(t *testing.T, ctx context.Context, consumer *PID) []*Delivery {
-	t.Helper()
-
-	response, err := Ask(ctx, consumer, &getDeliveries{}, time.Second)
-	if err != nil {
-		return nil
-	}
-
-	recorded, _ := response.([]*Delivery)
-	return recorded
-}
-
-// distinctDeliveries collapses redeliveries to the first occurrence per MessageID.
-func distinctDeliveries(recorded []*Delivery) []*Delivery {
-	seen := make(map[string]bool, len(recorded))
-	distinct := make([]*Delivery, 0, len(recorded))
-
-	for _, delivery := range recorded {
-		if seen[delivery.MessageID()] {
-			continue
-		}
-
-		seen[delivery.MessageID()] = true
-		distinct = append(distinct, delivery)
-	}
-
-	return distinct
-}
-
-// recordedMessages asks a recorder double for its message snapshot.
-func recordedMessages(t *testing.T, ctx context.Context, pid *PID) []any {
-	t.Helper()
-
-	response, err := Ask(ctx, pid, &getRecorded{}, time.Second)
-	if err != nil {
-		return nil
-	}
-
-	snapshot, _ := response.([]any)
-	return snapshot
-}
-
-// reliableProducerMockWithConfirm extends the producer mock with DeliveryConfirmed capture.
-type reliableProducerMockWithConfirm struct {
-	reliableProducerMock
-	confirmations []*DeliveryConfirmed
-}
-
-func (x *reliableProducerMockWithConfirm) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *DeliveryConfirmed:
-		x.confirmations = append(x.confirmations, msg)
-	case *getConfirmations:
-		ctx.Response(append([]*DeliveryConfirmed(nil), x.confirmations...))
-	default:
-		x.reliableProducerMock.Receive(ctx)
-	}
-}
-
-// getConfirmations asks the producer mock for captured DeliveryConfirmed notices.
-type getConfirmations struct{}
-
-// testWorkPullingConfig builds the producer settings a directly constructed
-// work-pulling controller needs, so a test states only the values it cares about.
-func testWorkPullingConfig(retryAttempts int, retryBackoff, localRetryInterval time.Duration) *reliableProducerConfig {
-	return &reliableProducerConfig{
-		workPulling:   true,
-		retryInterval: localRetryInterval,
-		queueRetry: &reliableQueueRetryConfig{
-			maxAttempts:    retryAttempts,
-			initialBackoff: retryBackoff,
-		},
-	}
-}
-
 func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 	// the controller under test is never spawned: its handlers run on the
 	// test goroutine with stand-in PIDs, so no actor turn touches its state
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &deliveryRecorder{})
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockDeliveryRecorder{})
 	require.NoError(t, err)
 
-	workerStandIn, err := system.Spawn(ctx, "worker-stand-in", &deliveryRecorder{})
+	workerStandIn, err := system.Spawn(ctx, "worker-stand-in", &MockDeliveryRecorder{})
 	require.NoError(t, err)
 
 	// a genuine worker endpoint provides an authenticatable consumer companion
-	_, err = system.Spawn(ctx, "jobs-worker-edge", &reliableConsumerMock{},
+	_, err = system.Spawn(ctx, "jobs-worker-edge", &MockReliableConsumer{},
 		AsReliableWorkPullingWorker("jobs-producer", WithReliableResendInterval(time.Hour), WithReliableFlowControlWindow(4)))
 	require.NoError(t, err)
 
@@ -465,7 +374,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 
 	spawnHost := func(t *testing.T, name string) *PID {
 		t.Helper()
-		host, err := system.Spawn(ctx, name, &deliveryRecorder{})
+		host, err := system.Spawn(ctx, name, &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		return host
 	}
@@ -492,15 +401,15 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		assert.ErrorContains(t, newWorkPullingProducerController(nil, config, nil).PreStart(nil), "bound local producer")
 		assert.ErrorContains(t, newWorkPullingProducerController(newRemotePID(address.New("remote", "sys", "127.0.0.1", 1), nil), config, nil).PreStart(nil), "bound local producer")
 		assert.ErrorContains(t, newWorkPullingProducerController(producer, testWorkPullingConfig(1, time.Millisecond, 0), nil).PreStart(nil), "positive local retry interval")
-		assert.ErrorContains(t, newWorkPullingProducerController(producer, testWorkPullingConfig(0, time.Millisecond, time.Millisecond), &mockDurableWorkQueue{}).PreStart(nil), "positive queue retry settings")
-		assert.ErrorContains(t, newWorkPullingProducerController(producer, testWorkPullingConfig(1, 0, time.Millisecond), &mockDurableWorkQueue{}).PreStart(nil), "positive queue retry settings")
+		assert.ErrorContains(t, newWorkPullingProducerController(producer, testWorkPullingConfig(0, time.Millisecond, time.Millisecond), &MockDurableWorkQueue{}).PreStart(nil), "positive queue retry settings")
+		assert.ErrorContains(t, newWorkPullingProducerController(producer, testWorkPullingConfig(1, 0, time.Millisecond), &MockDurableWorkQueue{}).PreStart(nil), "positive queue retry settings")
 	})
 
 	t.Run("With load rebuilding the pending pool", func(t *testing.T) {
 		stored, err := NewUnconfirmedMessage("job-a", 1, payload)
 		require.NoError(t, err)
 
-		queue := &mockDurableWorkQueue{currentSeq: 1, entries: []workQueueEntry{{message: stored, accepted: true}}}
+		queue := &MockDurableWorkQueue{currentSeq: 1, entries: []workQueueEntry{{message: stored, accepted: true}}}
 		controller := newController(t, queue)
 
 		assert.EqualValues(t, 1, controller.storeSeq)
@@ -510,14 +419,14 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 	})
 
 	t.Run("With load failure on first incarnation", func(t *testing.T) {
-		queue := &mockDurableWorkQueue{loadErr: errors.New("unreachable")}
+		queue := &MockDurableWorkQueue{loadErr: errors.New("unreachable")}
 		controller := newWorkPullingProducerController(producer, testWorkPullingConfig(1, time.Millisecond, time.Millisecond), queue)
 		require.ErrorContains(t, controller.PreStart(newContext(ctx, "wp-load-fail", system)), "failed to load durable state")
 		assert.EqualValues(t, 1, controller.generation)
 	})
 
 	t.Run("With load failure after restart publishes failure", func(t *testing.T) {
-		queue := &mockDurableWorkQueue{}
+		queue := &MockDurableWorkQueue{}
 		controller := newController(t, queue)
 
 		queue.mu.Lock()
@@ -1128,7 +1037,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 	})
 
 	t.Run("With queue results fenced by the lane", func(t *testing.T) {
-		controller := newController(t, &mockDurableWorkQueue{})
+		controller := newController(t, &MockDurableWorkQueue{})
 		host := spawnHost(t, "host-lane-fence")
 		rctx := rctxFor(system.NoSender(), host, &PostStart{})
 
@@ -1156,7 +1065,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		}
 
 		for index, entry := range stages {
-			controller := newController(t, &mockDurableWorkQueue{})
+			controller := newController(t, &MockDurableWorkQueue{})
 			host := spawnHost(t, fmt.Sprintf("host-queue-failure-%d", index))
 			controller.opInFlight = true
 			controller.nextOperationID = 1
@@ -1172,7 +1081,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		}
 
 		// a retryable backend error escalates for a supervised restart
-		controller := newController(t, &mockDurableWorkQueue{})
+		controller := newController(t, &MockDurableWorkQueue{})
 		host := spawnHost(t, "host-queue-retryable")
 		controller.opInFlight = true
 		controller.nextOperationID = 1
@@ -1218,7 +1127,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		controller := newController(t, nil)
 		host := spawnHost(t, "host-lost-tell")
 
-		dead, err := system.Spawn(ctx, "soon-dead", &deliveryRecorder{})
+		dead, err := system.Spawn(ctx, "soon-dead", &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		require.NoError(t, dead.Shutdown(ctx))
 
@@ -1235,7 +1144,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 func TestWorkPullingControllerPublishFailure(t *testing.T) {
 	ctx, system := newCompanionTestSystem(t)
 
-	producer, err := system.Spawn(ctx, "jobs-producer", &deliveryRecorder{})
+	producer, err := system.Spawn(ctx, "jobs-producer", &MockDeliveryRecorder{})
 	require.NoError(t, err)
 
 	subscriber, err := system.Subscribe()

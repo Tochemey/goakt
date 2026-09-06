@@ -143,49 +143,6 @@ func TestNonBlockingBoundedMailbox(t *testing.T) {
 	})
 }
 
-// benchMailboxDepth is the batch size for the mailbox throughput benchmarks: a
-// batch of messages is enqueued and then fully drained before the next batch.
-const benchMailboxDepth = 128
-
-// benchMailboxPriorities is a small spread of priorities so the priority
-// mailboxes actually reorder their heap during the benchmark.
-var benchMailboxPriorities = []*testpb.TestMessage{
-	testpb.TestMessage_builder{Priority: 3}.Build(), testpb.TestMessage_builder{Priority: 1}.Build(), testpb.TestMessage_builder{Priority: 4}.Build(), testpb.TestMessage_builder{Priority: 1}.Build(),
-	testpb.TestMessage_builder{Priority: 5}.Build(), testpb.TestMessage_builder{Priority: 9}.Build(), testpb.TestMessage_builder{Priority: 2}.Build(), testpb.TestMessage_builder{Priority: 6}.Build(),
-}
-
-// benchmarkMailboxThroughput measures single-consumer enqueue and dequeue cost.
-// Each context is drawn from the pool, exactly as the Tell path does, and a
-// batch is enqueued before it is drained. The mailbox recycles each drained
-// context back to the pool, so the steady state stays allocation free while
-// memory stays flat regardless of b.N. Drawing fresh contexts also respects the
-// priority intake, which links messages through the intrusive
-// ReceiveContext.next field and cannot hold the same node twice.
-func benchmarkMailboxThroughput(b *testing.B, mb Mailbox) {
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i += benchMailboxDepth {
-		n := benchMailboxDepth
-		if remaining := b.N - i; remaining < n {
-			n = remaining
-		}
-
-		for j := range n {
-			ctx := getContext(0)
-			ctx.message = benchMailboxPriorities[j%len(benchMailboxPriorities)]
-			_ = mb.Enqueue(ctx)
-		}
-
-		for range n {
-			mb.Dequeue()
-		}
-	}
-	b.StopTimer()
-
-	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(opsPerSec, "ops/sec")
-}
-
 func BenchmarkNonBlockingBoundedMailbox(b *testing.B) {
 	benchmarkMailboxThroughput(b, NewNonBlockingBoundedMailbox(1<<16))
 }

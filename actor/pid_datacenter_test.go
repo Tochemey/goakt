@@ -35,7 +35,6 @@ import (
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
-	"github.com/tochemey/goakt/v4/log"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 )
 
@@ -66,7 +65,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when datacenter controller is nil", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystemWithNilController(t, remotingMock)
+		sys := newSystemWithoutDatacenter(t, remotingMock)
 		sys.dataCenterController = nil
 
 		pid := &PID{
@@ -83,7 +82,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when no active datacenter records", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return nil, nil
 		}, remotingMock)
 
@@ -101,7 +100,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when no active endpoints (records have non-active state)", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -130,7 +129,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when all remote lookups fail", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -159,7 +158,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when remote lookup returns NoSender", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -188,7 +187,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns actor address when found in one of the datacenters", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -218,7 +217,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns first successful result from multiple datacenters", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -257,7 +256,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("queries multiple endpoints within a datacenter", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -291,7 +290,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("skips invalid endpoint formats (no colon)", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -320,7 +319,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("skips invalid endpoint formats (non-numeric port)", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -349,7 +348,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("returns ErrActorNotFound when all endpoints have invalid format", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-1",
@@ -373,7 +372,7 @@ func TestDiscoverActor(t *testing.T) {
 
 	t.Run("skips non-active datacenter records", func(t *testing.T) {
 		remotingMock := mocksremote.NewClient(t)
-		sys := MockDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
 			return []datacenter.DataCenterRecord{
 				{
 					ID:        "dc-draining",
@@ -405,16 +404,4 @@ func TestDiscoverActor(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotNil(t, addr)
 	})
-}
-
-// MockDatacenterSystemWithNilController creates a mock actor system without a datacenter controller.
-func MockDatacenterSystemWithNilController(t *testing.T, remoting *mocksremote.Client) *actorSystem {
-	t.Helper()
-	sys := &actorSystem{
-		logger:   log.DiscardLogger,
-		remoting: remoting,
-	}
-	sys.started.Store(true)
-	sys.remotingEnabled.Store(true)
-	return sys
 }

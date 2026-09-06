@@ -49,7 +49,7 @@ func TestAsReliableProducer(t *testing.T) {
 	})
 
 	t.Run("With all options", func(t *testing.T) {
-		queue := &mockDurableQueue{}
+		queue := &MockDurableQueue{}
 		config := newSpawnConfig(AsReliableProducer("orders-consumer",
 			WithReliableDurableQueue(queue),
 			WithReliableQueueRetry(5, 250*time.Millisecond),
@@ -84,7 +84,7 @@ func TestAsReliableProducer(t *testing.T) {
 	})
 
 	t.Run("With chunking and a durable queue", func(t *testing.T) {
-		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(MinReliableChunkSize), WithReliableDurableQueue(&mockDurableQueue{})))
+		config := newSpawnConfig(AsReliableProducer("orders-consumer", WithReliableChunking(MinReliableChunkSize), WithReliableDurableQueue(&MockDurableQueue{})))
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, MinReliableChunkSize, config.reliableDelivery.producer.maxChunkBytes)
 		assert.NotNil(t, config.durableQueue)
@@ -155,8 +155,8 @@ func TestReliableOptionsTolerateNilConfig(t *testing.T) {
 	// the option closures run against caller-provided state, so a nil
 	// configuration must be a no-op rather than a panic
 	producerOptions := []ReliableProducerOption{
-		WithReliableDurableQueue(&mockDurableQueue{}),
-		WithReliableDurableWorkQueue(&mockDurableWorkQueue{}),
+		WithReliableDurableQueue(&MockDurableQueue{}),
+		WithReliableDurableWorkQueue(&MockDurableWorkQueue{}),
 		WithReliableQueueRetry(3, 100*time.Millisecond),
 		WithReliableRetryInterval(time.Second),
 		WithReliableDeliveryConfirmation(),

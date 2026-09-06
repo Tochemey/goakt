@@ -25,7 +25,6 @@ package actor
 import (
 	"context"
 	"errors"
-	"io"
 	"sync"
 	"testing"
 	"time"
@@ -143,17 +142,17 @@ func TestGrainContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -180,7 +179,7 @@ func TestGrainContext(t *testing.T) {
 		require.IsType(t, &testpb.Reply{}, response)
 
 		// create an actor
-		pid, err := node2.Spawn(ctx, "Actor20", NewMockGrainActor())
+		pid, err := node2.Spawn(ctx, "Actor20", NewMockPingActor())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
@@ -213,17 +212,17 @@ func TestGrainContext(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -361,7 +360,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-grain-success")
 
-		target := newPipeTargetGrain()
+		target := NewMockPipeTargetGrain()
 		identity, err := sys.GrainIdentity(ctx, "pipe-target-success", func(_ context.Context) (Grain, error) {
 			return target, nil
 		})
@@ -387,7 +386,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-grain-error")
 
-		target := newPipeTargetGrain()
+		target := NewMockPipeTargetGrain()
 		identity, err := sys.GrainIdentity(ctx, "pipe-target-error", func(_ context.Context) (Grain, error) {
 			return target, nil
 		})
@@ -411,7 +410,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-grain-timeout")
 
-		target := newPipeTargetGrain()
+		target := NewMockPipeTargetGrain()
 		identity, err := sys.GrainIdentity(ctx, "pipe-target-timeout", func(_ context.Context) (Grain, error) {
 			return target, nil
 		})
@@ -436,7 +435,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-grain-breaker")
 
-		target := newPipeTargetGrain()
+		target := NewMockPipeTargetGrain()
 		identity, err := sys.GrainIdentity(ctx, "pipe-target-breaker", func(_ context.Context) (Grain, error) {
 			return target, nil
 		})
@@ -488,7 +487,7 @@ func TestGrainContextPipeToActor(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-actor-success")
 
-		target := newPipeTargetActor()
+		target := NewMockPipeTargetActor()
 		_, err := sys.Spawn(ctx, "pipe-target-actor", target)
 		require.NoError(t, err)
 
@@ -523,7 +522,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 		ctx := t.Context()
 		sys := startTestActorSystem(t, "pipe-self-success")
 
-		target := newPipeTargetGrain()
+		target := NewMockPipeTargetGrain()
 		identity, err := sys.GrainIdentity(ctx, "pipe-self-target", func(_ context.Context) (Grain, error) {
 			return target, nil
 		})
@@ -557,7 +556,7 @@ func TestGrainContextPipeToSelf(t *testing.T) {
 func TestHandleGrainCompletionSendError(t *testing.T) {
 	t.Run("failure message send error", func(t *testing.T) {
 		sendErr := errors.New("send failure")
-		system := &stubGrainPipeSystem{err: sendErr}
+		system := &MockGrainPipeSystem{err: sendErr}
 		completion := &grainTaskCompletion{
 			Target: &GrainIdentity{kind: "grain", name: "id"},
 			Task: func() (any, error) {
@@ -572,7 +571,7 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 
 	t.Run("success message send error", func(t *testing.T) {
 		sendErr := errors.New("send failure")
-		system := &stubGrainPipeSystem{err: sendErr}
+		system := &MockGrainPipeSystem{err: sendErr}
 		completion := &grainTaskCompletion{
 			Target: &GrainIdentity{kind: "grain", name: "id"},
 			Task: func() (any, error) {
@@ -586,153 +585,11 @@ func TestHandleGrainCompletionSendError(t *testing.T) {
 	})
 }
 
-type pipeTargetGrain struct {
-	received chan any
-	failures chan *StatusFailure
-}
-
-func newPipeTargetGrain() *pipeTargetGrain {
-	return &pipeTargetGrain{
-		received: make(chan any, 1),
-		failures: make(chan *StatusFailure, 1),
-	}
-}
-
-func (p *pipeTargetGrain) OnActivate(context.Context, *GrainProps) error {
-	return nil
-}
-
-func (p *pipeTargetGrain) OnDeactivate(context.Context, *GrainProps) error {
-	return nil
-}
-
-func (p *pipeTargetGrain) OnReceive(ctx *GrainContext) {
-	switch msg := ctx.Message().(type) {
-	case *StatusFailure:
-		select {
-		case p.failures <- msg:
-		default:
-		}
-	default:
-		select {
-		case p.received <- msg:
-		default:
-		}
-	}
-	ctx.NoErr()
-}
-
-type pipeTargetActor struct {
-	received chan any
-}
-
-func newPipeTargetActor() *pipeTargetActor {
-	return &pipeTargetActor{
-		received: make(chan any, 1),
-	}
-}
-
-func (p *pipeTargetActor) PreStart(*Context) error {
-	return nil
-}
-
-func (p *pipeTargetActor) PostStop(*Context) error {
-	return nil
-}
-
-func (p *pipeTargetActor) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *testpb.Reply:
-		select {
-		case p.received <- msg:
-		default:
-		}
-	}
-}
-
-type stubGrainPipeSystem struct {
-	err         error
-	lastMessage any
-}
-
-func (s *stubGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any) error {
-	s.lastMessage = message
-	return s.err
-}
-
-func (s *stubGrainPipeSystem) Logger() log.Logger {
-	return log.DiscardLogger
-}
-
-func startTestActorSystem(t *testing.T, name string) ActorSystem {
-	t.Helper()
-
-	sys, err := NewActorSystem(name, WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-	require.NoError(t, sys.Start(t.Context()))
-
-	t.Cleanup(func() {
-		stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = sys.Stop(stopCtx)
-	})
-
-	return sys
-}
-
-// scriptedGrain runs a per-test OnReceive function.
-type scriptedGrain struct {
-	receive func(*GrainContext)
-}
-
-var _ Grain = (*scriptedGrain)(nil)
-
-func (g *scriptedGrain) OnActivate(context.Context, *GrainProps) error { return nil }
-
-func (g *scriptedGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
-
-func (g *scriptedGrain) OnReceive(gctx *GrainContext) { g.receive(gctx) }
-
-// newRequestTestSystem starts a system for the grain request and reply tests.
-// The logger discards but stays enabled so the debug and error paths execute.
-func newRequestTestSystem(t *testing.T) *actorSystem {
-	t.Helper()
-	ctx := context.Background()
-
-	system, err := NewActorSystem("testSys", WithLogger(log.NewSlog(log.DebugLevel, io.Discard)))
-	require.NoError(t, err)
-	require.NoError(t, system.Start(ctx))
-
-	t.Cleanup(func() {
-		_ = system.Stop(context.Background())
-	})
-
-	return system.(*actorSystem)
-}
-
-// activateReentrantGrain activates grain under name and equips its pid with
-// reentrancy state the way the config plumbing will.
-func activateReentrantGrain(t *testing.T, system *actorSystem, grain Grain, name string) *GrainIdentity {
-	t.Helper()
-
-	identity, err := system.GrainIdentity(context.Background(), name, func(context.Context) (Grain, error) {
-		return grain, nil
-	})
-	require.NoError(t, err)
-
-	pid, ok := system.grains.Get(identity.String())
-	require.True(t, ok)
-
-	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
-	return identity
-}
-
 func TestGrainEnvelopeReplyModes(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestPing:
 			gctx.Response(testpb.Reply_builder{Content: "pong"}.Build())
@@ -775,7 +632,7 @@ func TestGrainEnvelopeReplyModes(t *testing.T) {
 func TestGrainEnvelopeReplyIsOneShot(t *testing.T) {
 	system := newRequestTestSystem(t)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.Response(testpb.Reply_builder{Content: "first"}.Build())
 		gctx.Response(testpb.Reply_builder{Content: "second"}.Build())
 		gctx.Err(errors.New("late failure"))
@@ -796,7 +653,7 @@ func TestGrainCorrelationID(t *testing.T) {
 	ctx := context.Background()
 
 	correlations := make(chan string, 2)
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		correlations <- gctx.CorrelationID()
 
 		if gctx.CorrelationID() != "" {
@@ -818,7 +675,7 @@ func TestGrainCorrelationID(t *testing.T) {
 func TestGrainEnvelopePanicRepliesError(t *testing.T) {
 	system := newRequestTestSystem(t)
 
-	grain := &scriptedGrain{receive: func(*GrainContext) {
+	grain := &MockScriptedGrain{receive: func(*GrainContext) {
 		panic("handler exploded")
 	}}
 	identity := activateReentrantGrain(t, system, grain, "panickyGrain")
@@ -840,7 +697,7 @@ func TestGrainDeferResponse(t *testing.T) {
 		)
 		requests := make(chan struct{}, 1)
 
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			switch gctx.Message().(type) {
 			case *testpb.TestPing:
 				mu.Lock()
@@ -889,7 +746,7 @@ func TestGrainDeferResponse(t *testing.T) {
 	t.Run("in-turn replies after defer are no-ops", func(t *testing.T) {
 		system := newRequestTestSystem(t)
 
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			reply := gctx.DeferResponse()
 
 			// Ownership moved to the handle: none of these must reach the caller.
@@ -912,7 +769,7 @@ func TestGrainDeferResponse(t *testing.T) {
 	t.Run("double completion is a no-op", func(t *testing.T) {
 		system := newRequestTestSystem(t)
 
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			reply := gctx.DeferResponse()
 			reply.Response(testpb.Reply_builder{Content: "first"}.Build())
 			reply.Response(testpb.Reply_builder{Content: "second"}.Build())
@@ -932,7 +789,7 @@ func TestGrainDeferResponse(t *testing.T) {
 		system := newRequestTestSystem(t)
 
 		handles := make(chan *GrainReply, 1)
-		grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			reply := gctx.DeferResponse()
 			handles <- reply
 
@@ -954,7 +811,7 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 		}}
 		targetID := activateReentrantGrain(t, system, target, "target-grain")
@@ -962,7 +819,7 @@ func TestGrainRequestGrain(t *testing.T) {
 		results := make(chan *testpb.TestCount, 1)
 		failures := make(chan error, 1)
 
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			call := gctx.RequestGrain(targetID, new(testpb.TestPing))
 			call.Then(func(result any, err error) {
 				if err != nil {
@@ -991,13 +848,13 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.Unhandled()
 		}}
 		targetID := activateReentrantGrain(t, system, target, "unhandled-grain")
 
 		failures := make(chan error, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(targetID, new(testpb.TestPing)).Then(func(_ any, err error) {
 				failures <- err
 			})
@@ -1019,11 +876,11 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silent := &MockScriptedGrain{receive: func(*GrainContext) {}}
 		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
 
 		failures := make(chan error, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(200*time.Millisecond)).Then(func(_ any, err error) {
 				failures <- err
 			})
@@ -1045,13 +902,13 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		target := &scriptedGrain{receive: func(*GrainContext) {}}
+		target := &MockScriptedGrain{receive: func(*GrainContext) {}}
 		targetID := activateReentrantGrain(t, system, target, "guard-target")
 
 		captured := make(chan error, 5)
 		then := func(_ any, err error) { captured <- err }
 
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(targetID, nil).Then(then)
 			gctx.RequestGrain(nil, new(testpb.TestPing)).Then(then)
 			gctx.RequestGrain(&GrainIdentity{}, new(testpb.TestPing)).Then(then)
@@ -1086,7 +943,7 @@ func TestGrainRequestGrain(t *testing.T) {
 		ctx := context.Background()
 
 		failures := make(chan error, 1)
-		plain := &scriptedGrain{receive: func(gctx *GrainContext) {
+		plain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(&GrainIdentity{kind: "Kind", name: "name"}, new(testpb.TestPing)).Then(func(_ any, err error) {
 				failures <- err
 			})
@@ -1112,11 +969,11 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silent := &MockScriptedGrain{receive: func(*GrainContext) {}}
 		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
 
 		failures := make(chan error, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			first := gctx.RequestGrain(silentID, new(testpb.TestPing), WithRequestTimeout(0))
 			gctx.RequestGrain(silentID, new(testpb.TestPing)).Then(func(_ any, err error) {
 				failures <- err
@@ -1145,10 +1002,10 @@ func TestGrainRequestGrain(t *testing.T) {
 		ctx := context.Background()
 
 		// An identity whose kind was never registered cannot activate.
-		unknown := newGrainIdentity(&MockGrainActivationFailure{}, "never-registered")
+		unknown := newGrainIdentity(&MockActivationFailingGrain{}, "never-registered")
 
 		failures := make(chan error, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(unknown, new(testpb.TestPing)).Then(func(_ any, err error) {
 				failures <- err
 			})
@@ -1174,11 +1031,11 @@ func TestGrainRequestGrain(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		silent := &scriptedGrain{receive: func(*GrainContext) {}}
+		silent := &MockScriptedGrain{receive: func(*GrainContext) {}}
 		silentID := activateReentrantGrain(t, system, silent, "silent-grain")
 
 		issued := make(chan struct{}, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			switch gctx.Message().(type) {
 			case *testpb.TestPing:
 				gctx.RequestGrain(silentID, new(testpb.TestSend))
@@ -1226,12 +1083,12 @@ func TestGrainDeferResponseFromContinuation(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 	}}
 	targetID := activateReentrantGrain(t, system, target, "answer-grain")
 
-	front := &scriptedGrain{}
+	front := &MockScriptedGrain{}
 	front.receive = func(gctx *GrainContext) {
 		reply := gctx.DeferResponse()
 
@@ -1258,7 +1115,7 @@ func TestGrainRequestActor(t *testing.T) {
 		system := newRequestTestSystem(t)
 		ctx := context.Background()
 
-		_, err := system.Spawn(ctx, "responder", &reentrancyTestActor{receive: func(rctx *ReceiveContext) {
+		_, err := system.Spawn(ctx, "responder", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
 			switch rctx.Message().(type) {
 			case *testpb.TestPing:
 				rctx.Response(testpb.TestCount_builder{Value: 7}.Build())
@@ -1271,7 +1128,7 @@ func TestGrainRequestActor(t *testing.T) {
 		results := make(chan *testpb.TestCount, 1)
 		failures := make(chan error, 1)
 
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestActor("responder", new(testpb.TestPing)).Then(func(result any, err error) {
 				if err != nil {
 					failures <- err
@@ -1300,7 +1157,7 @@ func TestGrainRequestActor(t *testing.T) {
 		ctx := context.Background()
 
 		failures := make(chan error, 1)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestActor("missing-actor", new(testpb.TestPing)).Then(func(_ any, err error) {
 				failures <- err
 			})
@@ -1338,7 +1195,7 @@ func TestGrainChannelLessReplyMethodsAreNoOps(t *testing.T) {
 func TestGrainSendAsyncReplyDeliveryFailureIsSwallowed(t *testing.T) {
 	system := newRequestTestSystem(t)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.Response(testpb.Reply_builder{Content: "unroutable"}.Build())
 	}}
 	identity := activateReentrantGrain(t, system, grain, "unroutableReplier")
@@ -1394,11 +1251,11 @@ func TestGrainRequestActorAdmissionFailure(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	_, err := system.Spawn(ctx, "idle-responder", &reentrancyTestActor{receive: func(*ReceiveContext) {}})
+	_, err := system.Spawn(ctx, "idle-responder", &MockReentrancyActor{receive: func(*ReceiveContext) {}})
 	require.NoError(t, err)
 
 	failures := make(chan error, 1)
-	caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+	caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.RequestActor("idle-responder", new(testpb.TestPing), WithReentrancyMode(reentrancy.Off)).Then(func(_ any, err error) {
 			failures <- err
 		})
@@ -1423,7 +1280,7 @@ func TestGrainEnableReentrancyAtRuntime(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		gctx.Response(testpb.TestCount_builder{Value: 42}.Build())
 	}}
 	targetID := activateReentrantGrain(t, system, target, "toggle-target")
@@ -1434,7 +1291,7 @@ func TestGrainEnableReentrancyAtRuntime(t *testing.T) {
 
 	// TestSend enables, TestBye disables, TestPing requests, TestReply probes
 	// which ask path the message arrived on.
-	toggling := &scriptedGrain{receive: func(gctx *GrainContext) {
+	toggling := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestSend:
 			if err := gctx.EnableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))); err != nil {
@@ -1515,7 +1372,7 @@ func TestGrainEnableReentrancyUnderConcurrentAsks(t *testing.T) {
 	system := newRequestTestSystem(t)
 	ctx := context.Background()
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		if _, ok := gctx.Message().(*testpb.TestSend); ok {
 			_ = gctx.EnableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))
 			gctx.NoErr()
@@ -1588,7 +1445,7 @@ func TestGrainRequestCycle(t *testing.T) {
 
 	var identityA *GrainIdentity
 
-	grainB := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grainB := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		if _, ok := gctx.Message().(*testpb.TestPing); !ok {
 			return
 		}
@@ -1604,7 +1461,7 @@ func TestGrainRequestCycle(t *testing.T) {
 	}}
 	identityB := activateReentrantGrain(t, system, grainB, "cycle-b")
 
-	grainA := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grainA := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestSend:
 			gctx.RequestGrain(identityB, new(testpb.TestPing)).Then(func(result any, err error) {
@@ -1643,7 +1500,7 @@ func TestGrainSelfRequest(t *testing.T) {
 	results := make(chan *testpb.TestCount, 1)
 	failures := make(chan error, 1)
 
-	grain := &scriptedGrain{receive: func(gctx *GrainContext) {
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		switch gctx.Message().(type) {
 		case *testpb.TestSend:
 			gctx.RequestGrain(gctx.Self(), new(testpb.TestGetCount)).Then(func(result any, err error) {
@@ -1681,7 +1538,7 @@ func TestGrainMaxInFlightBurst(t *testing.T) {
 	ctx := context.Background()
 
 	replies := make(chan *GrainReply, 4)
-	target := &scriptedGrain{receive: func(gctx *GrainContext) {
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		replies <- gctx.DeferResponse()
 	}}
 
@@ -1691,7 +1548,7 @@ func TestGrainMaxInFlightBurst(t *testing.T) {
 	require.NoError(t, err)
 
 	outcomes := make(chan error, 4)
-	caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+	caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 		for range 4 {
 			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(0)).Then(func(_ any, err error) {
 				outcomes <- err
@@ -1754,7 +1611,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		ctx := context.Background()
 
 		replies := make(chan *GrainReply, 1)
-		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			replies <- gctx.DeferResponse()
 		}}
 
@@ -1764,7 +1621,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		require.NoError(t, err)
 
 		outcomes := make(chan error, 2)
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(150*time.Millisecond)).Then(func(_ any, err error) {
 				outcomes <- err
 			})
@@ -1805,7 +1662,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		ctx := context.Background()
 
 		replies := make(chan *GrainReply, 1)
-		target := &scriptedGrain{receive: func(gctx *GrainContext) {
+		target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			replies <- gctx.DeferResponse()
 		}}
 
@@ -1817,7 +1674,7 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		calls := make(chan RequestCall, 1)
 		outcomes := make(chan error, 2)
 
-		caller := &scriptedGrain{receive: func(gctx *GrainContext) {
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
 			call := gctx.RequestGrain(targetID, new(testpb.TestPing), WithRequestTimeout(0))
 			call.Then(func(_ any, err error) {
 				outcomes <- err

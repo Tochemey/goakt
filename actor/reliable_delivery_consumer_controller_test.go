@@ -39,280 +39,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// deliveryForward commands a test double to send a message so that the
-// double becomes the sender.
-type deliveryForward struct {
-	to      *PID
-	message any
-}
-
-// getRecorded asks a test double for a snapshot of its recorded messages.
-type getRecorded struct{}
-
-// getDeliveries asks the consumer mock for a snapshot of its deliveries.
-type getDeliveries struct{}
-
-// deliveryRecorder is a test double that records every message it receives,
-// forwards commanded sends, and answers snapshot queries. All state lives in
-// the actor and is only touched inside its own mailbox turns.
-type deliveryRecorder struct {
-	messages []any
-}
-
-func (x *deliveryRecorder) PreStart(*Context) error { return nil }
-func (x *deliveryRecorder) PostStop(*Context) error { return nil }
-
-func (x *deliveryRecorder) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *PostStart:
-	case *deliveryForward:
-		ctx.Tell(msg.to, msg.message)
-	case *getRecorded:
-		ctx.Response(append([]any(nil), x.messages...))
-	default:
-		x.messages = append(x.messages, msg)
-	}
-}
-
-// reliableConsumerMock records deliveries and optionally confirms them
-// immediately, mimicking an idempotent consumer endpoint. Its state is only
-// touched inside its own mailbox turns; tests query snapshots.
-type reliableConsumerMock struct {
-	autoConfirm bool
-	deliveries  []*Delivery
-}
-
-func (x *reliableConsumerMock) PreStart(*Context) error { return nil }
-func (x *reliableConsumerMock) PostStop(*Context) error { return nil }
-
-func (x *reliableConsumerMock) Receive(ctx *ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *Delivery:
-		x.deliveries = append(x.deliveries, msg)
-
-		if x.autoConfirm {
-			confirmed, err := NewConfirmed(msg)
-			if err != nil {
-				ctx.Err(err)
-				return
-			}
-
-			ctx.Tell(ctx.Sender(), confirmed)
-		}
-	case *deliveryForward:
-		ctx.Tell(msg.to, msg.message)
-	case *getDeliveries:
-		ctx.Response(append([]*Delivery(nil), x.deliveries...))
-	default:
-		ctx.Unhandled()
-	}
-}
-
-// consumerSettings builds the consumer-side configuration the controller
-// constructor consumes, keeping test call sites compact.
-func consumerSettings(producerName string, window int, resendInterval time.Duration) *reliableConsumerConfig {
-	return &reliableConsumerConfig{
-		producerName:      producerName,
-		flowControlWindow: window,
-		resendInterval:    resendInterval,
-	}
-}
-
-// consumerControllerHarness wires a consumer controller under test to a recording producer
-// controller stand-in and a mock consumer endpoint.
-type consumerControllerHarness struct {
-	ctx                       context.Context
-	system                    *actorSystem
-	producerControllerStandIn *PID
-	consumer                  *PID
-	consumerController        *PID
-}
-
-// newConsumerControllerHarness starts a cluster-disabled system with a
-// producer endpoint, its recording controller stand-in, a mock consumer, and
-// the consumer controller under test.
-func newConsumerControllerHarness(t *testing.T, window int, resendInterval time.Duration, autoConfirm bool) *consumerControllerHarness {
-	t.Helper()
-
-	ctx, system := newCompanionTestSystem(t)
-
-	producer, err := system.Spawn(ctx, "producer", NewMockActor())
-	require.NoError(t, err)
-
-	spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "producer", producer.incarnationID())
-	require.NoError(t, err)
-
-	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
-	producerControllerStandIn, err := system.Spawn(ctx, producerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
-	require.NoError(t, err)
-
-	consumer, err := system.Spawn(ctx, "consumer", &reliableConsumerMock{autoConfirm: autoConfirm})
-	require.NoError(t, err)
-
-	controller := newConsumerController(consumer, consumerSettings("producer", window, resendInterval))
-	consumerController, err := system.Spawn(ctx, "consumer-controller", controller)
-	require.NoError(t, err)
-
-	return &consumerControllerHarness{
-		ctx:                       ctx,
-		system:                    system,
-		producerControllerStandIn: producerControllerStandIn,
-		consumer:                  consumer,
-		consumerController:        consumerController,
-	}
-}
-
-// producerControllerRecorded asks the producer controller stand-in for a message snapshot.
-func (x *consumerControllerHarness) producerControllerRecorded() []any {
-	response, err := Ask(x.ctx, x.producerControllerStandIn, &getRecorded{}, time.Second)
-	if err != nil {
-		return nil
-	}
-
-	snapshot, _ := response.([]any)
-	return snapshot
-}
-
-// deliveries asks the consumer mock for its delivery snapshot.
-func (x *consumerControllerHarness) deliveries() []*Delivery {
-	response, err := Ask(x.ctx, x.consumer, &getDeliveries{}, time.Second)
-	if err != nil {
-		return nil
-	}
-
-	snapshot, _ := response.([]*Delivery)
-	return snapshot
-}
-
-// latestRegistration waits for and returns the latest RegisterConsumer
-// received by the producer controller stand-in.
-func (x *consumerControllerHarness) latestRegistration(t *testing.T) *commands.RegisterConsumer {
-	t.Helper()
-
-	var latest *commands.RegisterConsumer
-
-	require.Eventually(t, func() bool {
-		for _, message := range x.producerControllerRecorded() {
-			if register, ok := message.(*commands.RegisterConsumer); ok {
-				latest = register
-			}
-		}
-		return latest != nil
-	}, 3*time.Second, 10*time.Millisecond)
-
-	return latest
-}
-
-// fromProducerController sends a protocol message to the consumer controller with the
-// producer controller stand-in as sender.
-func (x *consumerControllerHarness) fromProducerController(t *testing.T, message any) {
-	t.Helper()
-	require.NoError(t, Tell(x.ctx, x.producerControllerStandIn, &deliveryForward{to: x.consumerController, message: message}))
-}
-
-// adopt completes a registration handshake for the given session and returns
-// the nonce of the acknowledged registration. It re-acks the latest
-// registration on every poll because a silent controller keeps re-registering
-// with fresh nonces.
-func (x *consumerControllerHarness) adopt(t *testing.T, sessionID string, nextSeq int64) string {
-	t.Helper()
-
-	var nonce string
-
-	require.Eventually(t, func() bool {
-		var register *commands.RegisterConsumer
-
-		for _, message := range x.producerControllerRecorded() {
-			if candidate, ok := message.(*commands.RegisterConsumer); ok {
-				register = candidate
-			}
-		}
-
-		if register == nil {
-			return false
-		}
-
-		nonce = register.Nonce()
-		ack, err := commands.NewRegistrationAck(sessionID, nextSeq, nonce)
-		if err != nil {
-			return false
-		}
-
-		if Tell(x.ctx, x.producerControllerStandIn, &deliveryForward{to: x.consumerController, message: ack}) != nil {
-			return false
-		}
-
-		for _, request := range x.requests() {
-			if request.SessionID() == sessionID {
-				return true
-			}
-		}
-
-		return false
-	}, 5*time.Second, 20*time.Millisecond)
-
-	return nonce
-}
-
-// sequenced builds a SequencedMessage carrying an encoded test payload.
-func (x *consumerControllerHarness) sequenced(t *testing.T, sessionID string, seq int64) *commands.SequencedMessage {
-	t.Helper()
-
-	payload := testpb.Reply_builder{Content: fmt.Sprintf("message-%d", seq)}.Build()
-	frame, err := x.system.getRemoting().Serializer(payload).Serialize(payload)
-	require.NoError(t, err)
-
-	message, err := commands.NewSequencedMessage(sessionID, fmt.Sprintf("id-%d", seq), seq, frame)
-	require.NoError(t, err)
-	return message
-}
-
-// chunk builds a chunked SequencedMessage carrying one part of a frame.
-func (x *consumerControllerHarness) chunk(t *testing.T, sessionID, messageID string, seq int64, part []byte, first, last bool) *commands.SequencedMessage {
-	t.Helper()
-
-	message, err := commands.NewChunkedSequencedMessage(sessionID, messageID, seq, part, first, last)
-	require.NoError(t, err)
-	return message
-}
-
-// encodeReply serializes one test payload the way the producer controller
-// would before splitting it into chunks.
-func (x *consumerControllerHarness) encodeReply(t *testing.T, content string) []byte {
-	t.Helper()
-
-	payload := testpb.Reply_builder{Content: content}.Build()
-	frame, err := x.system.getRemoting().Serializer(payload).Serialize(payload)
-	require.NoError(t, err)
-	return frame
-}
-
-// requests returns the Requests recorded by the producer controller stand-in.
-func (x *consumerControllerHarness) requests() []*commands.Request {
-	var requests []*commands.Request
-
-	for _, message := range x.producerControllerRecorded() {
-		if request, ok := message.(*commands.Request); ok {
-			requests = append(requests, request)
-		}
-	}
-
-	return requests
-}
-
-// acks returns the Acks recorded by the producer controller stand-in.
-func (x *consumerControllerHarness) acks() []*commands.Ack {
-	var acks []*commands.Ack
-
-	for _, message := range x.producerControllerRecorded() {
-		if ack, ok := message.(*commands.Ack); ok {
-			acks = append(acks, ack)
-		}
-	}
-
-	return acks
-}
-
 func TestConsumerControllerNoFaultOrdering(t *testing.T) {
 	harness := newConsumerControllerHarness(t, 6, 200*time.Millisecond, true)
 	harness.adopt(t, "s1", 1)
@@ -613,7 +339,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	// test goroutine with stand-in PIDs, so no actor turn touches its state
 	ctx, system := newCompanionTestSystem(t)
 
-	consumer, err := system.Spawn(ctx, "consumer", &reliableConsumerMock{})
+	consumer, err := system.Spawn(ctx, "consumer", &MockReliableConsumer{})
 	require.NoError(t, err)
 
 	producer, err := system.Spawn(ctx, "producer", NewMockActor())
@@ -623,12 +349,12 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 	require.NoError(t, err)
 
 	producerControllerName := reliableCompanionName(ReliableControllerRoleProducer, producer.incarnationID())
-	producerControllerStandIn, err := system.Spawn(ctx, producerControllerName, &deliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+	producerControllerStandIn, err := system.Spawn(ctx, producerControllerName, &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
 	require.NoError(t, err)
 
 	spawnControllerHost := func(t *testing.T, name string) *PID {
 		t.Helper()
-		host, err := system.Spawn(ctx, name, &deliveryRecorder{})
+		host, err := system.Spawn(ctx, name, &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		return host
 	}
@@ -862,7 +588,7 @@ func TestConsumerControllerEdgeBranches(t *testing.T) {
 		controller := newConsumerController(consumer, consumerSettings("producer", 6, time.Hour))
 		require.NoError(t, controller.PreStart(nil))
 
-		dead, err := system.Spawn(ctx, "dead-peer", &deliveryRecorder{})
+		dead, err := system.Spawn(ctx, "dead-peer", &MockDeliveryRecorder{})
 		require.NoError(t, err)
 		require.NoError(t, dead.Shutdown(ctx))
 		require.Eventually(t, func() bool { return !dead.IsRunning() }, 3*time.Second, 10*time.Millisecond)

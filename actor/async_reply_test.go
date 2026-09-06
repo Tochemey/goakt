@@ -40,10 +40,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-func actorReplyTarget() *commands.AsyncReplyTo {
-	return &commands.AsyncReplyTo{Kind: commands.ReplyToActor, Actor: address.New("actor", "sys", "127.0.0.1", 9000)}
-}
-
 func TestRouteAsyncReplyValidation(t *testing.T) {
 	sys, ctx := newReentrancySystem(t)
 	system := sys.(*actorSystem)

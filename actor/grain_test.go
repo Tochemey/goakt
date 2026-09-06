@@ -155,17 +155,17 @@ func TestGrain(t *testing.T) {
 		srv := startNatsServer(t)
 
 		// create and start a system cluster
-		node1, sd1 := testNATs(t, srv.Addr().String())
+		node1, sd1 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node1)
 		require.NotNil(t, sd1)
 
 		// create and start a system cluster
-		node2, sd2 := testNATs(t, srv.Addr().String())
+		node2, sd2 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node2)
 		require.NotNil(t, sd2)
 
 		// create and start a system cluster
-		node3, sd3 := testNATs(t, srv.Addr().String())
+		node3, sd3 := startNATsSystem(t, srv.Addr().String())
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -339,7 +339,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a grain instance
-		grain := NewMockGrainActivationFailure()
+		grain := NewMockActivationFailingGrain()
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
 			return grain, nil
 		})
@@ -363,7 +363,7 @@ func TestGrain(t *testing.T) {
 		testSystem.clusterEnabled.Store(true)
 
 		// create a grain instance
-		grain := NewMockGrainActivationFailure()
+		grain := NewMockActivationFailingGrain()
 		name := "testGrain"
 		kind := types.Name(grain)
 		identityStr := fmt.Sprintf("%s%s%s", kind, id.GrainIdentitySeparator, name)
@@ -389,7 +389,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a grain instance
-		grain := NewMockGrainDeactivationFailure()
+		grain := NewMockDeactivationFailingGrain()
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(_ context.Context) (Grain, error) {
 			return grain, nil
 		})
@@ -436,7 +436,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a grain instance
-		grain := NewMockGrainReceiveFailure()
+		grain := NewMockReceiveFailingGrain()
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
 			return grain, nil
 		})
@@ -743,7 +743,7 @@ func TestGrain(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a grain instance
-		grain := NewMockPersistenceGrain()
+		grain := NewMockPersistentGrain()
 		identity, err := testSystem.GrainIdentity(ctx, "testGrain", func(ctx context.Context) (Grain, error) {
 			return grain, nil
 		})
@@ -1368,7 +1368,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns owner lookup error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-owner-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-owner-error")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
 		expectedErr := errors.New("owner lookup failed")
 
@@ -1382,7 +1382,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns owner mismatch", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-owner-mismatch")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-owner-mismatch")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
 		remoteOwner := internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
@@ -1403,7 +1403,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns toWireGrain error when claiming", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-wire-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-wire-error")
 		expectedErr := errors.New("dependency marshal failed")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
 		seedInactiveGrainPID(sys, id, grain, config)
@@ -1418,7 +1418,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns claim error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-claim-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-claim-error")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
 		expectedErr := errors.New("claim failed")
 
@@ -1433,7 +1433,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns claim owner mismatch", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-claim-mismatch")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-claim-mismatch")
 		seedInactiveGrainPID(sys, id, grain, newGrainConfig())
 		remoteOwner := internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
@@ -1454,8 +1454,8 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 
 	t.Run("existing process cleans up claim on activation failure", func(t *testing.T) {
 		ctx := t.Context()
-		grain := NewMockGrainActivationFailure()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-activate-fail")
+		grain := NewMockActivationFailingGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-activate-fail")
 		config := newGrainConfig(
 			WithGrainInitMaxRetries(1),
 			WithGrainInitTimeout(10*time.Millisecond),
@@ -1477,7 +1477,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("existing process returns cluster publish error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-existing-publish-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-existing-publish-error")
 		expectedErr := errors.New("encode failed")
 		config := newGrainConfig(WithGrainDependencies(&MockFailingDependency{err: expectedErr}))
 		seedInactiveGrainPID(sys, id, grain, config)
@@ -1504,7 +1504,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("missing process returns owner lookup error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-owner-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-owner-error")
 		expectedErr := errors.New("owner lookup failed")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
@@ -1517,7 +1517,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("missing process returns owner mismatch", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-owner-mismatch")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-owner-mismatch")
 		remoteOwner := internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.12",
@@ -1537,7 +1537,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("missing process returns claim error", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-error")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-claim-error")
 		expectedErr := errors.New("claim failed")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
@@ -1551,7 +1551,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("missing process returns claim owner mismatch", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-mismatch")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-claim-mismatch")
 		remoteOwner := internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{Value: id.String()}.Build(),
 			Host:    "192.0.2.13",
@@ -1571,8 +1571,8 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 
 	t.Run("missing process cleans up claim on activation failure", func(t *testing.T) {
 		ctx := t.Context()
-		grain := NewMockGrainActivationFailure()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-activate-fail")
+		grain := NewMockActivationFailingGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-activate-fail")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
@@ -1589,7 +1589,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 	t.Run("missing process claims and activates", func(t *testing.T) {
 		ctx := t.Context()
 		grain := NewMockGrain()
-		sys, cl, id := MockClusterEnsureGrainSystem(t, grain, "cluster-missing-claim-success")
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-claim-success")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()

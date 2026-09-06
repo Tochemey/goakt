@@ -228,7 +228,7 @@ func TestDurableChunkMessageID(t *testing.T) {
 // TestMockDurableQueueStoreChunked verifies atomic batch first-write-wins and
 // fencing for the in-memory queue used by controller tests.
 func TestMockDurableQueueStoreChunked(t *testing.T) {
-	queue := &mockDurableQueue{}
+	queue := &MockDurableQueue{}
 	_, epoch, err := queue.Load(context.Background())
 	require.NoError(t, err)
 
@@ -263,31 +263,4 @@ func TestMockDurableQueueStoreChunked(t *testing.T) {
 	state, err := NewDurableQueueState(2, 0, queue.stored)
 	require.NoError(t, err)
 	assert.Len(t, state.Unconfirmed(), 2)
-}
-
-// mustChunkStoreRequest builds a StoreRequest or fails the test.
-func mustChunkStoreRequest(t *testing.T, messageID string, seq int64, payload ReliablePayload) StoreRequest {
-	t.Helper()
-
-	request, err := NewStoreRequest(messageID, seq, payload)
-	require.NoError(t, err)
-	return request
-}
-
-// durableQueuePayload creates a serialized payload for queue tests.
-func durableQueuePayload(t *testing.T, data string) ReliablePayload {
-	t.Helper()
-
-	payload, err := NewReliablePayload([]byte(data))
-	require.NoError(t, err)
-	return payload
-}
-
-// durableQueueMessage creates an unconfirmed message for queue tests.
-func durableQueueMessage(t *testing.T, messageID string, seq int64, data string) UnconfirmedMessage {
-	t.Helper()
-
-	message, err := NewUnconfirmedMessage(messageID, seq, durableQueuePayload(t, data))
-	require.NoError(t, err)
-	return message
 }
