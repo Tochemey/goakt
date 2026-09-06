@@ -30,7 +30,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
@@ -292,36 +291,4 @@ func TestContextErr(t *testing.T) {
 
 	cancel()
 	require.ErrorIs(t, contextErr(ctx), context.Canceled)
-}
-func useTempHome(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("HOME", root)
-	t.Setenv("USERPROFILE", root)
-}
-
-func withBoltPathGenerator(t *testing.T, fn func() (string, error)) {
-	t.Helper()
-	original := boltPathGenerator
-	boltPathGenerator = fn
-	t.Cleanup(func() { boltPathGenerator = original })
-}
-
-type MockContext struct{}
-
-var _ context.Context = (*MockContext)(nil)
-
-func (m *MockContext) Deadline() (deadline time.Time, ok bool) {
-	return time.Time{}, false
-}
-
-func (m *MockContext) Done() <-chan struct{} {
-	return nil
-}
-
-func (m *MockContext) Err() error {
-	return nil
-}
-
-func (m *MockContext) Value(key any) any { //nolint
-	return nil
 }
