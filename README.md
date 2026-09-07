@@ -47,7 +47,7 @@ This framework is used in production by the following projects/companies:
 
 - [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
 - [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
-- [StringKe](https://github.com/Tochemey/goakt/discussions/1259): Self-hosted analytics platform running a single Go monolith on Kubernetes at roughly 31 pods, with GoAkt as the entire distribution layer. Read the production report.
+- [Analytics Platform](https://github.com/Tochemey/goakt/discussions/1259): Self-hosted analytics platform running a single Go monolith on Kubernetes at roughly 31 pods, with GoAkt as the entire distribution layer. Read the production report.
 
 Running GoAkt in production? [Write a short report](https://github.com/Tochemey/goakt/discussions/new?category=show-and-tell&title=Production%20report%3A%20) to be listed here.
 
