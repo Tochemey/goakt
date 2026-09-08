@@ -112,8 +112,10 @@ Item failures are isolated: a failing actor, grain, or peer never aborts the res
 - Items that still cannot be relocated are reported in a single [`RelocationFailed`](#relocationfailed) event on the
   event stream, listing exactly the failed actor addresses and grain identities. Items that were relocated are not
   listed.
-- A failed lazy-grain release is never reported: it is a cleanup optimization, not an item loss. The directory entry
-  self-heals when the grain is next addressed.
+- A failed lazy-grain release is never reported. The grain is not lost: the directory entry self-heals the next time
+  the grain is activated through `GrainIdentity` or `GrainOf`, once the activating node confirms through the cluster
+  membership that the recorded owner has left. `TellGrain` and `AskGrain` alone do not release the entry, so until an
+  activation or a retried release happens, messages to that grain fail with the transport error of the departed owner.
 
 <Warning>
   The relocation handoff uses a batched wire request. During a rolling upgrade, run homogeneous GoAkt versions before triggering topology

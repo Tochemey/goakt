@@ -115,6 +115,10 @@ const (
 	// namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
 	// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
 	namespaceScheduleFire recordNamespace = "schedule-fire"
+	// namespaceGrainLocks holds the cluster-wide lock of a grain record, taken by
+	// ReleaseGrain so the comparison of the record with the expected owner and
+	// its deletion cannot interleave with another release of the same grain.
+	namespaceGrainLocks recordNamespace = "grain-locks"
 )
 
 // scheduleFireClaimValue is the placeholder payload for a schedule-fire claim entry; only the
@@ -195,8 +199,12 @@ type Cluster interface {
 	PutGrain(ctx context.Context, grain *internalpb.Grain) error
 	// GetGrain fetches grain metadata for the provided identity.
 	GetGrain(ctx context.Context, identity string) (*internalpb.Grain, error)
-	// RemoveGrain deletes grain metadata from the store.
-	RemoveGrain(ctx context.Context, identity string) error
+	// ReleaseGrain deletes the grain record only while it still names owner,
+	// the node's remoting address in the canonical host:port form built by
+	// address.FormatHostPort. It returns the record when it names another
+	// node, and nil when the record was deleted or is absent. The comparison
+	// and the deletion cannot interleave with another release of the grain.
+	ReleaseGrain(ctx context.Context, identity string, owner string) (*internalpb.Grain, error)
 	// GrainExists verifies whether a grain entry is present.
 	GrainExists(ctx context.Context, identity string) (bool, error)
 	// Grains enumerates all grains tracked by the cluster.
@@ -768,16 +776,51 @@ func (x *cluster) GrainExists(ctx context.Context, identity string) (bool, error
 	return true, nil
 }
 
-// RemoveGrain deletes grain metadata from the unified map and local cache.
-func (x *cluster) RemoveGrain(ctx context.Context, identity string) error {
+// ReleaseGrain deletes the grain record only while it still names owner, the
+// node's remoting address in the canonical host:port form built by
+// address.FormatHostPort. It returns the record when it names another node,
+// and nil when the record was deleted or is absent.
+//
+// The store offers no compare-and-delete, so the comparison and the deletion
+// run under the grain's cluster-wide lock, which every release takes. Claims
+// need no lock: a claim is a put-if-absent, which cannot succeed while a record
+// exists, so it can only land after a release deleted the record, and a later
+// release then finds the new owner and leaves it alone.
+func (x *cluster) ReleaseGrain(ctx context.Context, identity string, owner string) (*internalpb.Grain, error) {
 	if !x.running.Load() {
-		return ErrEngineNotRunning
+		return nil, ErrEngineNotRunning
 	}
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
+	// The read lock only, as in ClaimScheduleFire: atomicity comes from the
+	// cluster-wide lock, and holding the write lock while waiting for it would
+	// stall every registry access behind one grain's release.
+	x.mu.RLock()
+	defer x.mu.RUnlock()
 
-	return x.deleteRecord(ctx, namespaceGrains, identity)
+	unlock, err := x.lockGrain(ctx, identity)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	value, err := x.getRecord(ctx, namespaceGrains, identity)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	grain, err := decodeGrain(value)
+	if err != nil {
+		return nil, err
+	}
+
+	if address.FormatHostPort(grain.GetHost(), int(grain.GetPort())) != owner {
+		return grain, nil
+	}
+
+	return nil, x.deleteRecord(ctx, namespaceGrains, identity)
 }
 
 // Grains scans the map and returns all registered grains.
@@ -1799,6 +1842,30 @@ func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, k
 
 	_, err := x.dmap.Delete(ctx, composeKey(namespace, key))
 	return err
+}
+
+// lockGrain takes the cluster-wide lock of the grain and returns the function
+// releasing it. The lock is a lease that outlives the longest critical section
+// (one read and one delete, each bounded by the engine timeouts), so a holder
+// that dies mid-release frees the grain once the lease expires. The wait for
+// the lock is bounded like a write; a lock still held past it fails the
+// release, which its caller retries.
+func (x *cluster) lockGrain(ctx context.Context, identity string) (func(), error) {
+	ctx = context.WithoutCancel(ctx)
+	lease := 2 * (x.readTimeout + x.writeTimeout)
+	lock, err := x.dmap.LockWithTimeout(ctx, composeKey(namespaceGrainLocks, identity), lease, x.writeTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+		defer cancel()
+
+		if err := lock.Unlock(unlockCtx); err != nil {
+			x.logger.Warnf("failed to release the lock of grain=%s: %v", identity, err)
+		}
+	}, nil
 }
 
 // scanActors streams every registered actor record and invokes visit for each,

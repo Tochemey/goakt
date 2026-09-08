@@ -1520,6 +1520,80 @@ func (_c *Cluster_PutJobKey_Call) RunAndReturn(run func(ctx context.Context, job
 	return _c
 }
 
+// ReleaseGrain provides a mock function for the type Cluster
+func (_mock *Cluster) ReleaseGrain(ctx context.Context, identity string, owner string) (*internalpb.Grain, error) {
+	ret := _mock.Called(ctx, identity, owner)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReleaseGrain")
+	}
+
+	var r0 *internalpb.Grain
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (*internalpb.Grain, error)); ok {
+		return returnFunc(ctx, identity, owner)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) *internalpb.Grain); ok {
+		r0 = returnFunc(ctx, identity, owner)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.Grain)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, identity, owner)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_ReleaseGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReleaseGrain'
+type Cluster_ReleaseGrain_Call struct {
+	*mock.Call
+}
+
+// ReleaseGrain is a helper method to define mock.On call
+//   - ctx context.Context
+//   - identity string
+//   - owner string
+func (_e *Cluster_Expecter) ReleaseGrain(ctx any, identity any, owner any) *Cluster_ReleaseGrain_Call {
+	return &Cluster_ReleaseGrain_Call{Call: _e.mock.On("ReleaseGrain", ctx, identity, owner)}
+}
+
+func (_c *Cluster_ReleaseGrain_Call) Run(run func(ctx context.Context, identity string, owner string)) *Cluster_ReleaseGrain_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_ReleaseGrain_Call) Return(grain *internalpb.Grain, err error) *Cluster_ReleaseGrain_Call {
+	_c.Call.Return(grain, err)
+	return _c
+}
+
+func (_c *Cluster_ReleaseGrain_Call) RunAndReturn(run func(ctx context.Context, identity string, owner string) (*internalpb.Grain, error)) *Cluster_ReleaseGrain_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveActor provides a mock function for the type Cluster
 func (_mock *Cluster) RemoveActor(ctx context.Context, actorName string) error {
 	ret := _mock.Called(ctx, actorName)
@@ -1573,63 +1647,6 @@ func (_c *Cluster_RemoveActor_Call) Return(err error) *Cluster_RemoveActor_Call 
 }
 
 func (_c *Cluster_RemoveActor_Call) RunAndReturn(run func(ctx context.Context, actorName string) error) *Cluster_RemoveActor_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// RemoveGrain provides a mock function for the type Cluster
-func (_mock *Cluster) RemoveGrain(ctx context.Context, identity string) error {
-	ret := _mock.Called(ctx, identity)
-
-	if len(ret) == 0 {
-		panic("no return value specified for RemoveGrain")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, identity)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// Cluster_RemoveGrain_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveGrain'
-type Cluster_RemoveGrain_Call struct {
-	*mock.Call
-}
-
-// RemoveGrain is a helper method to define mock.On call
-//   - ctx context.Context
-//   - identity string
-func (_e *Cluster_Expecter) RemoveGrain(ctx any, identity any) *Cluster_RemoveGrain_Call {
-	return &Cluster_RemoveGrain_Call{Call: _e.mock.On("RemoveGrain", ctx, identity)}
-}
-
-func (_c *Cluster_RemoveGrain_Call) Run(run func(ctx context.Context, identity string)) *Cluster_RemoveGrain_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 string
-		if args[1] != nil {
-			arg1 = args[1].(string)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *Cluster_RemoveGrain_Call) Return(err error) *Cluster_RemoveGrain_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *Cluster_RemoveGrain_Call) RunAndReturn(run func(ctx context.Context, identity string) error) *Cluster_RemoveGrain_Call {
 	_c.Call.Return(run)
 	return _c
 }

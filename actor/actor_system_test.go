@@ -6348,7 +6348,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
-func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
+func TestCleanupCluster_ReleasesGrains(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
@@ -6362,7 +6362,28 @@ func TestCleanupCluster_RemoveGrainFailure(t *testing.T) {
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, grainID.String()).Return(assert.AnError)
+	// the record is released only while it still names this node
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, grainID.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil)
+	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+	require.NoError(t, system.cleanupCluster(context.Background(), []*PID{pid}))
+}
+
+func TestCleanupCluster_ReleaseGrainFailure(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := newReplicationSystem(clusterMock)
+	system.grains = xsync.NewMap[string, *grainPID]()
+
+	pid := &PID{
+		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		actorSystem: system,
+	}
+	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
+	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
+	system.grains.Set(grainID.String(), grain)
+
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, grainID.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
 	err := system.cleanupCluster(context.Background(), []*PID{pid})

@@ -4397,15 +4397,17 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 		})
 	}
 
-	// Remove all grains from the cluster if exists
+	// Release all grains from the cluster registry if any, only while their
+	// records still name this node
 	if x.grains.Len() > 0 {
+		node := address.FormatHostPort(x.Host(), x.Port())
 		for _, grain := range x.grains.Values() {
 			eg.Go(func() error {
-				if err := x.cluster.RemoveGrain(ctx, grain.identity.String()); err != nil {
-					x.logger.Errorf("failed to remove grain=%s from cluster: %v (hint: check cluster connectivity)", grain.identity.String(), err)
+				if _, err := x.cluster.ReleaseGrain(ctx, grain.identity.String(), node); err != nil {
+					x.logger.Errorf("failed to release grain=%s from the cluster registry: %v (hint: check cluster connectivity)", grain.identity.String(), err)
 					return err
 				}
-				x.logger.Debugf("grain=%s removed from cluster", grain.identity.String())
+				x.logger.Debugf("grain=%s released from the cluster registry", grain.identity.String())
 				return nil
 			})
 		}

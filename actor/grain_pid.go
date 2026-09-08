@@ -37,6 +37,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -328,9 +329,12 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 
 	actorSystem.getGrains().Delete(identity.String())
 	if actorSystem.InCluster() {
-		if err := actorSystem.getCluster().RemoveGrain(ctx, pid.identity.String()); err != nil {
+		// release the record only while it still names this node: a record
+		// re-owned by another node belongs to a live activation there
+		node := address.FormatHostPort(actorSystem.Host(), actorSystem.Port())
+		if _, err := actorSystem.getCluster().ReleaseGrain(ctx, pid.identity.String(), node); err != nil {
 			if pid.logger.Enabled(log.ErrorLevel) {
-				pid.logger.Errorf("failed to remove grain=%s from cluster: %v (hint: check cluster connectivity)", pid.identity.String(), err)
+				pid.logger.Errorf("failed to release grain=%s from the cluster registry: %v (hint: check cluster connectivity)", pid.identity.String(), err)
 			}
 			return gerrors.NewErrGrainDeactivationFailure(err)
 		}
