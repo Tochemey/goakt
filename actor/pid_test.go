@@ -8004,3 +8004,98 @@ func TestMailboxSize(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestShutdownPreservesSpawnTimeConfiguration(t *testing.T) {
+	t.Run("relocation stays disabled after shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockActor(), WithLongLived(), WithRelocationDisabled())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor(), WithLongLived(), WithRelocationDisabled())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		require.False(t, child.IsRelocatable())
+
+		// the teardown must not flip a spawn-time option: a stopped PID that is
+		// still referenced (or still in the tree awaiting DeathWatch cleanup)
+		// keeps reporting the configuration it was spawned with.
+		require.NoError(t, child.Shutdown(ctx))
+		require.False(t, child.IsRunning())
+		require.False(t, child.IsRelocatable())
+
+		require.NoError(t, parent.Shutdown(ctx))
+		require.False(t, parent.IsRelocatable())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("singleton flag survives shutdown", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		actorSystem := sys.(*actorSystem)
+		pid, err := actorSystem.configPID(ctx, "singleton", NewMockActor(), WithLongLived(), withSingleton(&singletonSpec{}))
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		require.True(t, pid.IsSingleton())
+
+		require.NoError(t, pid.Shutdown(ctx))
+		require.False(t, pid.IsRunning())
+		require.True(t, pid.IsSingleton())
+
+		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
+func TestRestartPreservesSpawnTimeConfiguration(t *testing.T) {
+	t.Run("relocation stays disabled after restart when disabled during spawning", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockActor(), WithLongLived(), WithRelocationDisabled())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+
+		// child actors are not relocatable
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, child)
+		require.False(t, child.IsRelocatable())
+
+		require.NoError(t, child.Restart(ctx))
+		require.True(t, child.IsRunning())
+		require.False(t, child.IsRelocatable())
+
+		require.NoError(t, parent.Shutdown(ctx))
+		require.False(t, parent.IsRelocatable())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("relocation stays enabled after restart when enabled during spawning", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockActor(), WithLongLived())
+		require.NoError(t, err)
+		require.NotNil(t, parent)
+		require.True(t, parent.IsRelocatable())
+
+		require.NoError(t, parent.Restart(ctx))
+		require.True(t, parent.IsRunning())
+		require.True(t, parent.IsRelocatable())
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+}

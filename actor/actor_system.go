@@ -5313,6 +5313,16 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 			continue // actor is not relocatable, skip it
 		}
 
+		// localActors walks the actor tree, and a stopped actor stays in the
+		// tree until DeathWatch processes its Terminated message. That removal
+		// is asynchronous, so an actor the user shut down just before Stop, or
+		// one whose shutdown is still in progress, can still be listed here.
+		// Relocating it would resurrect an actor that was deliberately stopped
+		// on another node, so only actors that are still alive are snapshotted.
+		if !actor.isStateSet(runningState) || actor.isStateSet(stoppingState) {
+			continue
+		}
+
 		wireActor, err := actor.toSerialize()
 		if err != nil {
 			return nil, err

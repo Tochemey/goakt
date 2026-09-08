@@ -7360,6 +7360,47 @@ func TestPreShutdown(t *testing.T) {
 		require.NoError(t, err)
 		assert.Nil(t, peerState)
 	})
+
+	t.Run("snapshots only live relocatable actors", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.relocationEnabled.Store(true)
+
+		newActor := func(name string) *PID {
+			pid := newPIDAt(system, name, 8080)
+			pid.actor = NewMockActor()
+			pid.setState(relocationState, true)
+			pid.setState(runningState, true)
+			return pid
+		}
+
+		running := newActor("running")
+
+		// a stopped actor stays in the tree until DeathWatch removes it
+		stopped := newActor("stopped")
+		stopped.setState(runningState, false)
+
+		// an actor whose shutdown is still in progress
+		stopping := newActor("stopping")
+		stopping.setState(stoppingState, true)
+
+		notRelocatable := newActor("notRelocatable")
+		notRelocatable.setState(relocationState, false)
+
+		tree := system.tree()
+		require.NoError(t, tree.addRootNode(running))
+		for _, pid := range []*PID{stopped, stopping, notRelocatable} {
+			require.NoError(t, tree.addNode(running, pid))
+		}
+
+		peerState, err := system.preShutdown()
+		require.NoError(t, err)
+		require.NotNil(t, peerState)
+
+		actors := peerState.GetActors()
+		require.Len(t, actors, 1)
+		require.Contains(t, actors, running.ID())
+	})
 }
 
 func TestPersistPeerStateToPeers(t *testing.T) {

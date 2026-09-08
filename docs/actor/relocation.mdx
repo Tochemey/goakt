@@ -62,7 +62,9 @@ sequenceDiagram
 ### Key steps
 
 1. **preShutdown**: When a node stops, it builds a `PeerState` snapshot of all relocatable actors and grains. Actors
-   with `WithRelocationDisabled` and grains with `WithGrainDisableRelocation` are excluded.
+   with `WithRelocationDisabled` and grains with `WithGrainDisableRelocation` are excluded. Actors that have already
+   been stopped, or whose shutdown is in progress, are excluded as well, even if they have not yet been removed from
+   the actor tree by DeathWatch.
 2. **persistPeerStateToPeers**: Before leaving membership, the node replicates its `PeerState` to **up to 3 oldest**
    cluster peers via RPC (not all remaining peers). The implementation uses `selectOldestPeers(3)` to pick the three
    oldest nodes by `CreatedAt`; if fewer than 3 peers exist, it replicates to all. Replication returns successfully as
