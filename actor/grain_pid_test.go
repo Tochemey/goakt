@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -233,6 +234,11 @@ func TestGrainPIDDeactivateReportsFailedRegistryRelease(t *testing.T) {
 	ctx := context.Background()
 	grain := NewMockGrain()
 	sys, cl, _, identity := newActivationTestSystem(t, grain, "deactivate-release-error", true)
+
+	// an error-level logger, so the failed release is reported
+	var logs bytes.Buffer
+	sys.logger = log.NewSlog(log.ErrorLevel, &logs)
+
 	pid := newGrainPID(identity, grain, sys, newGrainConfig())
 	require.NoError(t, pid.activate(ctx))
 	sys.grains.Set(identity.String(), pid)
@@ -245,6 +251,7 @@ func TestGrainPIDDeactivateReportsFailedRegistryRelease(t *testing.T) {
 	err := pid.deactivate(ctx)
 	require.ErrorIs(t, err, gerrors.ErrGrainDeactivationFailure)
 	require.ErrorIs(t, err, releaseErr)
+	require.Contains(t, logs.String(), "failed to release grain="+identity.String())
 
 	_, ok := sys.grains.Get(identity.String())
 	require.False(t, ok)
