@@ -255,13 +255,7 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	// the lazy grain's directory entry still points at the departed node, so it
 	// is released rather than recreated
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(internalpb.Grain_builder{
-			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
-			Host:    "127.0.0.1",
-			Port:    8080,
-		}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
 
 	store := &MockRecordingPeerStateStore{}
 	sys.cluster = clusterMock
@@ -431,13 +425,7 @@ func TestRelocationWorkerDistributesLazyGrainsToPeers(t *testing.T) {
 	// entirely.
 	// exactly one grain is released locally (the leader's share); which of the
 	// two it is depends on map iteration order
-	clusterMock.EXPECT().GetGrain(mock.Anything, mock.Anything).
-		Return(internalpb.Grain_builder{
-			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
-			Host:    "127.0.0.1",
-			Port:    8080,
-		}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, mock.Anything, address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
 
 	// the other grain travels to the peer inside a RelocateBatch request
 	var batched []*internalpb.Grain
@@ -613,16 +601,10 @@ func TestRelocationWorkerReleasesUndeliverableLazyGrains(t *testing.T) {
 
 	clusterMock := mockscluster.NewCluster(t)
 	// the leader releases the undeliverable lazy grain's stale directory entry
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(internalpb.Grain_builder{
-			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
-			Host:    "127.0.0.1",
-			Port:    8080,
-		}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
 	// the eager grain's entry already points at another live node, so the
 	// leader-local dispatch skips reactivating it
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/eager").
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/eager", address.FormatHostPort("127.0.0.1", 8080)).
 		Return(internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{Value: "kind/eager"}.Build(),
 			Host:    "127.0.0.2",
@@ -666,9 +648,7 @@ func TestRelocationWorkerReportsFailedUndeliverableLazyRelease(t *testing.T) {
 
 	// the lazy release is retried before being reported as failed
 	clusterMock := mockscluster.NewCluster(t)
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(), nil).Times(relocationItemMaxAttempts)
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(stdErrors.New("store down")).Times(relocationItemMaxAttempts)
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, stdErrors.New("store down")).Times(relocationItemMaxAttempts)
 	sys.cluster = clusterMock
 
 	worker := &relocationWorker{
@@ -805,9 +785,7 @@ func TestReportAbortedRelocation(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 
 	// the lazy grain still points at the departed node, so it is released
-	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
-		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build(), Host: host, Port: remoting}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "k/lazy").Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "k/lazy", address.FormatHostPort(host, remoting)).Return(nil, nil).Once()
 
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
@@ -941,9 +919,7 @@ func TestRelocationWorkerShareFailsOnFallbackPeer(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	// the undeliverable lazy grain still points at the departed node, so the
 	// leader releases its stale directory entry
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(), Host: "127.0.0.1", Port: 8080}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
 	sys.cluster = clusterMock
 
 	worker := &relocationWorker{
@@ -984,9 +960,7 @@ func TestReportAbortedRelocationReportsFailedLazyRelease(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 
 	// the lazy grain still points at the departed node, but its release fails
-	clusterMock.EXPECT().GetGrain(mock.Anything, "k/lazy").
-		Return(internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: "k/lazy"}.Build(), Host: host, Port: remoting}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "k/lazy").Return(stdErrors.New("store down")).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "k/lazy", address.FormatHostPort(host, remoting)).Return(nil, stdErrors.New("store down")).Once()
 
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
@@ -1578,13 +1552,7 @@ func TestRelocationWorkerHonorsEagerGrainRole(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{workerPeer, plainPeer}, nil).Once()
 	// the lazy grain is the leader share of the even split and is released locally
-	clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy").
-		Return(internalpb.Grain_builder{
-			GrainId: internalpb.GrainId_builder{Value: "kind/lazy"}.Build(),
-			Host:    "127.0.0.1",
-			Port:    8080,
-		}.Build(), nil).Once()
-	clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy").Return(nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
 
 	// the eager game-worker grain travels only to the game-worker peer; the
 	// role-less peer must receive nothing

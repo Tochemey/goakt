@@ -229,13 +229,10 @@ func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity
 		return identity, nil
 	}
 
-	// A remote owner record that was not handled names a node that left the
-	// cluster, and its entry has just been released. Local activation must then
-	// go through the atomic put-if-absent claim rather than inherit the dead
-	// record, so that survivors reacting to the same departure compete for the
-	// claim instead of each publishing its own activation. A record naming this
-	// node, or an empty record, keeps the pre-existing inherit path, which
-	// activates without a claim and overwrites the record on publication.
+	// A remote owner record that was not handled no longer names a live owner:
+	// local activation goes through the atomic claim instead of inheriting the
+	// record, so survivors compete for it. A record naming this node, or an
+	// empty record, keeps the inherit path.
 	if owner != nil && !x.isLocalGrainOwner(owner) && !proto.Equal(owner, new(internalpb.Grain)) {
 		owner = nil
 	}
@@ -414,6 +411,7 @@ func (x *actorSystem) tryRemoteGrainActivation(ctx context.Context, identity *Gr
 		if err := x.sendRemoteActivateGrain(ctx, owner); err != nil {
 			return false, x.releaseUnreachableGrainOwner(ctx, identity, owner, err)
 		}
+
 		return true, nil
 	}
 
@@ -454,18 +452,15 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 	}
 
 	if err := x.sendRemoteActivateGrain(ctx, grainInfo); err != nil {
-		// The claim is rolled back only when the activation is known not to
-		// have happened: the peer answered with an error, or the request never
-		// left this node. A transport failure or the caller's own deadline
-		// leaves the outcome unknown (the peer may have activated the grain
-		// after the caller stopped waiting), and erasing a live activation
-		// would let the next caller start a second one. The kept record names
-		// a live peer, which activates the grain with the recorded
-		// configuration on the first message routed to it; should that peer
-		// leave the cluster, the departure cleanup releases the record.
+		// Roll back the claim only when the activation is known not to have
+		// happened: the peer answered with an error, or the request never left
+		// this node. A transport failure or an expired caller context leaves
+		// the outcome unknown, so the claim is kept: the peer activates the
+		// grain on the first message routed to it, and a departed peer's record
+		// is released by the next activation (releaseUnreachableGrainOwner).
 		if ctx.Err() == nil && !isTransportFailure(ctx, err) {
 			node := address.FormatHostPort(peer.Host, peer.RemotingPort)
-			if _, rerr := x.releaseGrainEntry(ctx, identity.String(), node); rerr != nil {
+			if _, rerr := x.getCluster().ReleaseGrain(ctx, identity.String(), node); rerr != nil {
 				x.logger.Errorf("failed to roll back claim of grain=%s for peer=%s after a rejected activation: %v (hint: check cluster quorum)", identity.String(), node, rerr)
 			}
 		}
@@ -476,17 +471,13 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 }
 
 // releaseUnreachableGrainOwner decides what a failed activation request to a
-// remote owner means for its registry entry, and returns the error the caller
-// must report, nil meaning the entry was released and local activation may
-// proceed.
+// remote owner means for its registry entry and returns the error the caller
+// must report. A nil result means the entry no longer names the owner and
+// local activation may proceed through the atomic claim.
 //
-// A failed request says nothing about the owner on its own: the caller's own
-// deadline, a transient transport fault or a failing OnActivate on a healthy
-// owner all surface here. An error the owner answered with, or the caller
-// giving up, therefore keeps the owner and reaches the caller exactly as a
-// failed local activation would. Only a transport failure leaves the owner's
-// liveness in question, and only the cluster membership can settle it: the
-// entry is released solely when the owner's node has left the cluster.
+// A failed request alone says nothing about the owner: only a transport
+// failure puts its liveness in question, and only the cluster membership can
+// settle it, so the entry is released solely when the owner's node has left.
 func (x *actorSystem) releaseUnreachableGrainOwner(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error) error {
 	if !isTransportFailure(ctx, sendErr) {
 		return sendErr
@@ -504,34 +495,31 @@ func (x *actorSystem) releaseUnreachableGrainOwner(ctx context.Context, identity
 	}
 
 	x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
-	if _, err := x.releaseGrainEntry(ctx, identity.String(), node); err != nil {
+	if _, err := x.getCluster().ReleaseGrain(ctx, identity.String(), node); err != nil {
 		return fmt.Errorf("failed to release registry entry of grain=%s owned by departed node=%s: %w", identity.String(), node, err)
 	}
+
 	return nil
 }
 
 // isTransportFailure reports whether err means the remote node never answered
 // the request: the connection could not be established, timed out, was reset
-// or was closed. Such an error leaves the node's liveness open. Every other
-// error either came back from the node itself (an error response decoded by
-// the remoting client, such as an activation failure) or reflects the caller
-// abandoning the call through its own context, and in both cases the node is
-// not in question.
+// or was closed, before or while the request was in flight. Every other error
+// either came back from the node itself (an error response decoded by the
+// remoting client) or reflects the caller abandoning the call through its own
+// context, and in both cases the node's liveness is not in question.
 //
-// A black-holed host is the most common shape of a departed node, and its
-// dial timeout satisfies errors.Is(err, context.DeadlineExceeded), so the
-// caller giving up is recognized through its own context, never through the
-// error value alone.
+// A dial timeout also satisfies errors.Is(err, context.DeadlineExceeded), so
+// the caller giving up is recognized through its own context, never through
+// the error value alone.
 func isTransportFailure(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
 		return false
 	}
 
 	// Every dial, read and write failure of the net package, timeouts
-	// included, arrives as a *net.OpError. It is matched before the context
-	// sentinels because a timeout also satisfies errors.Is(err,
-	// context.DeadlineExceeded), and net.Error is deliberately not used here:
-	// context.DeadlineExceeded implements it too.
+	// included, arrives as a *net.OpError; it is matched before the context
+	// sentinels because a timeout also satisfies them.
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
 		return true
@@ -561,32 +549,8 @@ func (x *actorSystem) grainOwnerDeparted(ctx context.Context, owner *internalpb.
 			return false, nil
 		}
 	}
-	return true, nil
-}
 
-// releaseGrainEntry deletes the registry entry of the grain only while it still
-// names node, the canonical host:port built with address.FormatHostPort. An
-// entry that already names another node belongs to a live activation: it is
-// left untouched and returned so the caller can tell. A missing entry is a
-// no-op. Every release of an entry on behalf of a node that is not this one
-// goes through this gate: the departure cleanup (recreateGrainFromWire,
-// releaseGrainForLazyRelocation), the activation path once membership has
-// confirmed the owner left, and the rollback of a rejected peer claim.
-func (x *actorSystem) releaseGrainEntry(ctx context.Context, identity, node string) (*internalpb.Grain, error) {
-	existing, err := x.getCluster().GetGrain(ctx, identity)
-	switch {
-	case err == nil:
-		// Canonical (un-bracketed) host:port form, matching the node marker;
-		// net.JoinHostPort would bracket IPv6 hosts and never match.
-		if address.FormatHostPort(existing.GetHost(), int(existing.GetPort())) != node {
-			return existing, nil
-		}
-		return nil, x.getCluster().RemoveGrain(ctx, identity)
-	case errors.Is(err, cluster.ErrGrainNotFound):
-		return nil, nil
-	default:
-		return nil, err
-	}
+	return true, nil
 }
 
 // activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.
@@ -631,7 +595,7 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 
 			if err := pid.activate(ctx); err != nil {
 				if claimed && x.InCluster() {
-					_ = x.getCluster().RemoveGrain(ctx, identity.String())
+					x.rollbackGrainClaim(ctx, identity.String())
 				}
 				return nil, err
 			}
@@ -1260,7 +1224,7 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 		// Activate locally; roll back any claim if activation fails.
 		if err := process.activate(ctx); err != nil {
 			if claimed && x.InCluster() {
-				_ = x.getCluster().RemoveGrain(ctx, id.String())
+				x.rollbackGrainClaim(ctx, id.String())
 			}
 			return nil, err
 		}
@@ -1296,9 +1260,7 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 
 	// A record naming this node while no process exists is a claim made on
 	// this node's behalf (tryPeerActivation) whose activation request did not
-	// complete. It carries the caller's configuration, which this activation
-	// honors instead of replacing it with defaults, exactly as recreateGrainOnce
-	// does for a record received over the wire.
+	// complete; it carries the caller's configuration, which is honored here.
 	var options []GrainOption
 	if owner != nil {
 		if options, err = x.grainOptionsFromWire(owner); err != nil {
@@ -1321,7 +1283,7 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 
 	if err := process.activate(ctx); err != nil {
 		if claimed && x.InCluster() {
-			_ = x.getCluster().RemoveGrain(ctx, id.String())
+			x.rollbackGrainClaim(ctx, id.String())
 		}
 		return nil, err
 	}
@@ -1381,6 +1343,17 @@ func (x *actorSystem) claimGrainOwnership(ctx context.Context, process *grainPID
 	return claimed, nil
 }
 
+// rollbackGrainClaim releases the claim this node made for the grain after its
+// activation or publication failed. The release only deletes a record that
+// still names this node, so a claim another node made meanwhile is never
+// erased, and a failed rollback is reported rather than discarded.
+func (x *actorSystem) rollbackGrainClaim(ctx context.Context, identity string) {
+	node := address.FormatHostPort(x.Host(), x.Port())
+	if _, err := x.getCluster().ReleaseGrain(ctx, identity, node); err != nil {
+		x.logger.Errorf("failed to roll back claim of grain=%s: %v (hint: check cluster quorum)", identity, err)
+	}
+}
+
 // finalizeGrainActivation registers the activated grain in the local grains
 // map and synchronously publishes its registry record to the cluster. On
 // publication failure it rolls back exactly what this activation created: the
@@ -1412,7 +1385,7 @@ func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grai
 			x.grains.Delete(key)
 
 			if claimed && x.InCluster() {
-				_ = x.getCluster().RemoveGrain(ctx, key)
+				x.rollbackGrainClaim(ctx, key)
 			}
 		}
 
@@ -1422,7 +1395,7 @@ func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grai
 	if claimed && x.InCluster() {
 		// release the claim this call made without disturbing the grain,
 		// which was already active before this call
-		_ = x.getCluster().RemoveGrain(ctx, key)
+		x.rollbackGrainClaim(ctx, key)
 	}
 
 	return err
@@ -1521,7 +1494,7 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 	}
 
 	identity := grain.GetGrainId().GetValue()
-	reowned, err := x.releaseGrainEntry(ctx, identity, departedNode)
+	reowned, err := x.getCluster().ReleaseGrain(ctx, identity, departedNode)
 	if err != nil {
 		return gerrors.NewInternalError(err)
 	}
@@ -1545,44 +1518,36 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 // grain, matching the lazy (default) relocation behavior for virtual actors.
 //
 // The removal is gated exactly like recreateGrainFromWire (see
-// releaseGrainEntry): the entry is only deleted when it still points at the
-// departed node. The activation path also releases such an entry, but only
-// after a transport failure and once the cluster membership confirms the owner
-// left (see releaseUnreachableGrainOwner); the message paths never do. This
-// cleanup is therefore what lets Tell/Ask reach a departed owner's grains again
-// without an activation call, and what spares the first activation the
-// membership round trip.
+// Cluster.ReleaseGrain): the entry is only deleted when it still points at the
+// departed node. The message paths never release an entry, so this cleanup is
+// what lets Tell/Ask reach a departed owner's grains again without an
+// activation call.
 func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
 	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
 		return nil
 	}
 
-	if _, err := x.releaseGrainEntry(ctx, grain.GetGrainId().GetValue(), departedNode); err != nil {
+	if _, err := x.getCluster().ReleaseGrain(ctx, grain.GetGrainId().GetValue(), departedNode); err != nil {
 		return gerrors.NewInternalError(err)
 	}
+
 	return nil
 }
 
 // grainOptionsFromWire rebuilds the grain options carried by a registry or
 // wire record, so an activation driven by a record (relocation, remote
 // activation, or a claim made on this node's behalf) runs with the
-// configuration the original caller chose. The activation timeout and retries
-// are applied only when the record carries them, so a record built without
-// them keeps the node defaults.
+// configuration the original caller chose.
 func (x *actorSystem) grainOptionsFromWire(serializedGrain *internalpb.Grain) ([]GrainOption, error) {
 	dependencies, err := x.getReflection().dependenciesFromProto(serializedGrain.GetDependencies()...)
 	if err != nil {
 		return nil, err
 	}
 
-	options := []GrainOption{WithGrainDependencies(dependencies...)}
-
-	if serializedGrain.HasActivationTimeout() {
-		options = append(options, WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()))
-	}
-
-	if retries := serializedGrain.GetActivationRetries(); retries > 0 {
-		options = append(options, WithGrainInitMaxRetries(int(retries)))
+	options := []GrainOption{
+		WithGrainInitTimeout(serializedGrain.GetActivationTimeout().AsDuration()),
+		WithGrainInitMaxRetries(int(serializedGrain.GetActivationRetries())),
+		WithGrainDependencies(dependencies...),
 	}
 
 	if serializedGrain.HasMailboxCapacity() {

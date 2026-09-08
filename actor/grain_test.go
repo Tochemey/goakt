@@ -40,6 +40,7 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -1467,7 +1468,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == id.String()
 		})).Return(nil).Once()
-		cl.EXPECT().RemoveGrain(ctx, id.String()).Return(nil).Once()
+		cl.EXPECT().ReleaseGrain(ctx, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
@@ -1489,9 +1490,9 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
 		cl.EXPECT().GetGrain(ctx, id.String()).Return(localOwner, nil).Once()
-		// the publish failure deactivates the grain, which removes its
+		// the publish failure deactivates the grain, which releases its
 		// cluster record so a failed activation leaves nothing behind
-		cl.EXPECT().RemoveGrain(mock.Anything, id.String()).Return(nil).Once()
+		cl.EXPECT().ReleaseGrain(mock.Anything, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, expectedErr)
@@ -1579,7 +1580,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == id.String()
 		})).Return(nil).Once()
-		cl.EXPECT().RemoveGrain(ctx, id.String()).Return(nil).Once()
+		cl.EXPECT().ReleaseGrain(ctx, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
@@ -1633,6 +1634,77 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		require.NotNil(t, got.config.role)
 		require.Equal(t, "billing", *got.config.role)
 	})
-}
 
-// nolint
+	t.Run("missing process rejects a recorded claim with an unregistered dependency", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-claim-bad-dependency")
+
+		record, err := wireGrain(id, newGrainConfig(), sys.Host(), sys.Port())
+		require.NoError(t, err)
+		record.SetDependencies([]*internalpb.Dependency{
+			internalpb.Dependency_builder{Id: "dep1", TypeName: "actor.UnknownDependency", Bytea: []byte("noop")}.Build(),
+		})
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(record, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, gerrors.ErrDependencyTypeNotRegistered)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process rejects a recorded claim with conflicting relocation flags", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-claim-relocation-conflict")
+
+		record, err := wireGrain(id, newGrainConfig(), sys.Host(), sys.Port())
+		require.NoError(t, err)
+		record.SetDisableRelocation(true)
+		record.SetEagerRelocation(true)
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(record, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, gerrors.ErrGrainRelocationConflict)
+		require.Nil(t, got)
+	})
+
+	t.Run("missing process returns cluster publish error", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-publish-error")
+		expectedErr := errors.New("publish failed")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Twice()
+		// the claim succeeds, the publication fails
+		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(nil).Once()
+		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(expectedErr).Once()
+		// the failed publication deactivates the grain, which releases its record
+		cl.EXPECT().ReleaseGrain(mock.Anything, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, expectedErr)
+		require.Nil(t, got)
+
+		_, ok := sys.grains.Get(id.String())
+		require.False(t, ok)
+	})
+
+	t.Run("missing process reports a failed claim rollback", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockActivationFailingGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-rollback-error")
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Twice()
+		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(nil).Once()
+		// the rollback failure is reported, the activation error is kept
+		cl.EXPECT().ReleaseGrain(ctx, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, errors.New("release failed")).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+		require.Nil(t, got)
+	})
+}

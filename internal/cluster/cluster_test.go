@@ -23,6 +23,7 @@
 package cluster
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -102,7 +103,8 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	require.False(t, grainExists)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 
-	require.ErrorIs(t, cluster.RemoveGrain(ctx, grain.GetGrainId().GetValue()), ErrEngineNotRunning)
+	_, err = cluster.ReleaseGrain(ctx, grain.GetGrainId().GetValue(), "127.0.0.1:8080")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
 
 	grains, err := cluster.Grains(ctx, time.Second)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
@@ -719,24 +721,19 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With RemoveGrain", func(t *testing.T) {
-		// create the context
+	t.Run("With ReleaseGrain", func(t *testing.T) {
 		ctx := t.Context()
 
-		// generate the ports for the single node
 		nodePorts := dynaport.Get(3)
 		discoveryPort := nodePorts[0]
 		clusterPort := nodePorts[1]
 		remotingPort := nodePorts[2]
 
-		// define discovered addresses
 		addrs := []string{
 			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
 		}
 
-		// mock the discovery provider
 		provider := new(mocksdiscovery.Provider)
-
 		provider.EXPECT().ID().Return("testDisco")
 		provider.EXPECT().Initialize().Return(nil)
 		provider.EXPECT().Register().Return(nil)
@@ -744,7 +741,6 @@ func TestSingleNode(t *testing.T) {
 		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
 		provider.EXPECT().Close().Return(nil)
 
-		// create a Node
 		host := "127.0.0.1"
 		hostNode := discovery.Node{
 			Name:          host,
@@ -754,15 +750,13 @@ func TestSingleNode(t *testing.T) {
 			RemotingPort:  remotingPort,
 		}
 
-		cluster := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
-		require.NotNil(t, cluster)
+		// a short write timeout bounds the wait for a held lock below
+		engine := New("test", provider, &hostNode, WithLogger(log.DiscardLogger), WithWriteTimeout(200*time.Millisecond))
+		require.NotNil(t, engine)
+		require.NoError(t, engine.Start(ctx))
 
-		// start the Node
-		err := cluster.Start(ctx)
-		require.NoError(t, err)
-
-		// create an grain
 		identity := "grainKind/grainName"
+		owner := address.FormatHostPort(host, remotingPort)
 		grain := internalpb.Grain_builder{
 			GrainId: internalpb.GrainId_builder{
 				Kind:  "grainKind",
@@ -772,34 +766,55 @@ func TestSingleNode(t *testing.T) {
 			Host: host,
 			Port: int32(remotingPort),
 		}.Build()
+		require.NoError(t, engine.PutGrain(ctx, grain))
 
-		// replicate the grain in the Node
-		err = cluster.PutGrain(ctx, grain)
+		// a release on behalf of another node leaves the record untouched and
+		// returns the recorded owner
+		reowned, err := engine.ReleaseGrain(ctx, identity, address.FormatHostPort("192.0.2.10", 16000))
+		require.NoError(t, err)
+		require.NotNil(t, reowned)
+		require.True(t, proto.Equal(grain, reowned))
+
+		exists, err := engine.GrainExists(ctx, identity)
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		// a release while another release holds the grain's lock waits for
+		// it and fails once the wait is over, leaving the record untouched
+		unlock, err := engine.(*cluster).lockGrain(ctx, identity)
 		require.NoError(t, err)
 
-		exist, err := cluster.GrainExists(ctx, identity)
-		require.NoError(t, err)
-		require.True(t, exist)
+		reowned, err = engine.ReleaseGrain(ctx, identity, owner)
+		require.ErrorIs(t, err, olric.ErrLockNotAcquired)
+		require.Nil(t, reowned)
+		unlock()
 
-		// fetch the grain
-		actual, err := cluster.GetGrain(ctx, identity)
+		exists, err = engine.GrainExists(ctx, identity)
 		require.NoError(t, err)
-		require.NotNil(t, actual)
-		require.True(t, proto.Equal(grain, actual))
+		require.True(t, exists)
 
-		// let us remove the grain
-		err = cluster.RemoveGrain(ctx, identity)
+		// a release on behalf of the recorded owner deletes the record
+		reowned, err = engine.ReleaseGrain(ctx, identity, owner)
 		require.NoError(t, err)
+		require.Nil(t, reowned)
 
-		exist, err = cluster.GrainExists(ctx, identity)
+		exists, err = engine.GrainExists(ctx, identity)
 		require.NoError(t, err)
-		require.False(t, exist)
+		require.False(t, exists)
 
-		//  shutdown the Node
+		// a missing record is a no-op
+		reowned, err = engine.ReleaseGrain(ctx, identity, owner)
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+
+		// a record that cannot be decoded fails the release
+		require.NoError(t, engine.(*cluster).dmap.Put(ctx, composeKey(namespaceGrains, identity), []byte{0xff}))
+		reowned, err = engine.ReleaseGrain(ctx, identity, owner)
+		require.Error(t, err)
+		require.Nil(t, reowned)
+
 		pause.For(time.Second)
-
-		// stop the node
-		require.NoError(t, cluster.Stop(ctx))
+		require.NoError(t, engine.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
 	t.Run("With PutGrain and GetGrain when NotRunning", func(t *testing.T) {
@@ -969,7 +984,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cl.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With RemoveGrain/GrainExists when cluster engine is not running", func(t *testing.T) {
+	t.Run("With ReleaseGrain/GrainExists when cluster engine is not running", func(t *testing.T) {
 		// create the context
 		ctx := t.Context()
 
@@ -1002,10 +1017,10 @@ func TestSingleNode(t *testing.T) {
 		require.ErrorIs(t, err, ErrEngineNotRunning)
 		require.False(t, exists)
 
-		// let us remove the grain
-		err = cluster.RemoveGrain(ctx, identity)
-		require.Error(t, err)
+		// let us release the grain
+		reowned, err := cluster.ReleaseGrain(ctx, identity, address.FormatHostPort(host, remotingPort))
 		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.Nil(t, reowned)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -4430,4 +4445,55 @@ func TestStopWarnsWhenConsumeExceedsShutdownTimeout(t *testing.T) {
 
 	close(release)
 	cl.consumeWg.Wait()
+}
+
+func TestReleaseGrainReturnsDMapReadError(t *testing.T) {
+	expectedErr := errors.New("get failure")
+	lock := &MockLockContext{}
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.DiscardLogger,
+		readTimeout:  time.Second,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
+				require.Equal(t, composeKey(namespaceGrainLocks, "grain-id"), key)
+				return lock, nil
+			},
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceGrains, "grain-id"), key)
+				return nil, expectedErr
+			},
+		},
+	}
+
+	reowned, err := cl.ReleaseGrain(context.Background(), "grain-id", "127.0.0.1:8080")
+	require.ErrorIs(t, err, expectedErr)
+	require.Nil(t, reowned)
+	require.Equal(t, 1, lock.unlocks)
+}
+
+func TestReleaseGrainReportsUnlockFailure(t *testing.T) {
+	var logs bytes.Buffer
+	lock := &MockLockContext{unlockErr: errors.New("unlock failure")}
+	cl := &cluster{
+		running:      atomic.NewBool(true),
+		logger:       log.NewSlog(log.WarningLevel, &logs),
+		readTimeout:  time.Second,
+		writeTimeout: time.Second,
+		dmap: &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, olric.ErrKeyNotFound
+			},
+		},
+	}
+
+	reowned, err := cl.ReleaseGrain(context.Background(), "grain-id", "127.0.0.1:8080")
+	require.NoError(t, err)
+	require.Nil(t, reowned)
+	require.Equal(t, 1, lock.unlocks)
+	require.Contains(t, logs.String(), "failed to release the lock of grain=grain-id")
 }

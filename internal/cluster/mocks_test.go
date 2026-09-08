@@ -147,13 +147,14 @@ func (x *MockClient) Close(ctx context.Context) error {
 
 // MockDMap is a distributed map double whose calls are served by injected hooks and errors, and panic otherwise.
 type MockDMap struct {
-	putErr   error                                                                              // fallback error for Put
-	putFn    func(ctx context.Context, key string, value any, options ...olric.PutOption) error // hook serving Put
-	getFn    func(ctx context.Context, key string) (*olric.GetResponse, error)                  // hook serving Get
-	scanFn   func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error)     // hook serving Scan
-	deleteFn func(ctx context.Context, keys ...string) (int, error)                             // hook serving Delete
-	incrFn   func(ctx context.Context, key string, delta int) (int, error)                      // hook serving Incr
-	incrErr  error                                                                              // fallback error for Incr
+	putErr   error                                                                                             // fallback error for Put
+	putFn    func(ctx context.Context, key string, value any, options ...olric.PutOption) error                // hook serving Put
+	getFn    func(ctx context.Context, key string) (*olric.GetResponse, error)                                 // hook serving Get
+	scanFn   func(ctx context.Context, options ...olric.ScanOption) (olric.Iterator, error)                    // hook serving Scan
+	deleteFn func(ctx context.Context, keys ...string) (int, error)                                            // hook serving Delete
+	incrFn   func(ctx context.Context, key string, delta int) (int, error)                                     // hook serving Incr
+	incrErr  error                                                                                             // fallback error for Incr
+	lockFn   func(ctx context.Context, key string, timeout, deadline time.Duration) (olric.LockContext, error) // hook serving LockWithTimeout
 }
 
 // Name returns the fixed name of the map.
@@ -222,9 +223,29 @@ func (x *MockDMap) Lock(ctx context.Context, key string, deadline time.Duration)
 	panic("unexpected call to Lock")
 }
 
-// LockWithTimeout panics because no test exercises it.
+// LockWithTimeout calls lockFn and panics when it is unset.
 func (x *MockDMap) LockWithTimeout(ctx context.Context, key string, timeout, deadline time.Duration) (olric.LockContext, error) {
+	if x.lockFn != nil {
+		return x.lockFn(ctx, key, timeout, deadline)
+	}
 	panic("unexpected call to LockWithTimeout")
+}
+
+// MockLockContext is a LockContext double whose Unlock returns the injected error.
+type MockLockContext struct {
+	unlockErr error // error returned by Unlock
+	unlocks   int   // number of Unlock calls received
+}
+
+// Unlock counts the call and returns the injected error.
+func (x *MockLockContext) Unlock(context.Context) error {
+	x.unlocks++
+	return x.unlockErr
+}
+
+// Lease panics because no test exercises it.
+func (x *MockLockContext) Lease(context.Context, time.Duration) error {
+	panic("unexpected call to Lease")
 }
 
 // Scan calls scanFn and panics when it is unset.
@@ -311,8 +332,10 @@ func (x *MockCluster) GetGrain(context.Context, string) (*internalpb.Grain, erro
 	panic("unexpected call")
 }
 
-// RemoveGrain panics because no test exercises it.
-func (x *MockCluster) RemoveGrain(context.Context, string) error { panic("unexpected call") }
+// ReleaseGrain panics because no test exercises it.
+func (x *MockCluster) ReleaseGrain(context.Context, string, string) (*internalpb.Grain, error) {
+	panic("unexpected call")
+}
 
 // GrainExists counts the call and delegates to grainExistsFn when set, otherwise reports the grain missing.
 func (x *MockCluster) GrainExists(ctx context.Context, identity string) (bool, error) {

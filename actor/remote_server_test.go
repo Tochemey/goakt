@@ -2665,7 +2665,7 @@ func TestRelocateBatchHandler(t *testing.T) {
 			Return(internalpb.Actor_builder{Address: address.New("moved", sys.Name(), "10.0.0.9", 7000).String()}.Build(), nil).Once()
 
 		// eager grain entry pointing at a live third node: left alone as well
-		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/moved-grain").
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/moved-grain", departedNode).
 			Return(internalpb.Grain_builder{Host: "10.0.0.9", Port: 7000, GrainId: internalpb.GrainId_builder{Value: "kind/moved-grain", Name: "moved-grain"}.Build()}.Build(), nil).Once()
 
 		// entry still pointing at the departed node: removed before the respawn
@@ -2724,15 +2724,13 @@ func TestRelocateBatchHandler(t *testing.T) {
 
 		// lazy grain entry still pointing at the departed node: released so the
 		// grain re-activates on next use; nothing is instantiated or activated
-		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-stale").
-			Return(internalpb.Grain_builder{Host: "127.0.0.1", Port: 8080, GrainId: internalpb.GrainId_builder{Value: "kind/lazy-stale", Name: "lazy-stale"}.Build()}.Build(), nil).Once()
-		clusterMock.EXPECT().RemoveGrain(mock.Anything, "kind/lazy-stale").Return(nil).Once()
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy-stale", departedNode).Return(nil, nil).Once()
 
 		// lazy grain whose directory release fails: the entry stays pinned to
 		// the dead node and the TellGrain/AskGrain fast path does not self-heal a
 		// stale owner, so the grain would be unreachable with no signal; the
 		// release is retried before being reported as a relocation failure.
-		clusterMock.EXPECT().GetGrain(mock.Anything, "kind/lazy-fail").
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/lazy-fail", departedNode).
 			Return(nil, errors.New("registry unavailable")).Times(relocationItemMaxAttempts)
 
 		request := internalpb.RelocateBatchRequest_builder{

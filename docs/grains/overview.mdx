@@ -133,6 +133,11 @@ rolled back so the next activation can pick another node. When the outcome is un
 expired caller context, the claim is kept: the peer may already have activated the grain, and if it has not, it does so
 with the recorded configuration on the first message routed to it.
 
+Every release of a registry entry, by the departure cleanup, by an activation that confirmed the owner left, by the
+rollback of a claim, or by the owner's own deactivation and shutdown, deletes the entry only while it still names the
+expected node. The check and the deletion run
+under a cluster-wide lock on the grain, so a release that lost a race against a newer claim leaves that claim in place.
+
 When configured, the grain activation barrier delays grain activations until the cluster reaches the minimum peers
 quorum (or until the barrier timeout elapses).
 
