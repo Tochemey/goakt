@@ -123,6 +123,16 @@ In cluster mode, the system claims grain ownership in the cluster registry using
 before activating locally. If another node already owns the grain, requests are forwarded to that owner. If local
 activation fails after a successful claim, the claim is removed.
 
+A failed request to a remote owner never displaces that owner on its own. An activation error reported by the owner,
+or a request abandoned by the caller's own context, is returned to the caller and the registry entry is kept. Only a
+transport failure, where the owner never answered, makes the activating node consult the cluster membership, and the
+entry is released, letting the grain re-activate elsewhere, only if the owner's node has left the cluster.
+
+A claim made on behalf of a remote peer follows the same rule. When the peer rejects the activation, the claim is
+rolled back so the next activation can pick another node. When the outcome is unknown, after a transport failure or an
+expired caller context, the claim is kept: the peer may already have activated the grain, and if it has not, it does so
+with the recorded configuration on the first message routed to it.
+
 When configured, the grain activation barrier delays grain activations until the cluster reaches the minimum peers
 quorum (or until the barrier timeout elapses).
 

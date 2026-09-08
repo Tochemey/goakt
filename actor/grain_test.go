@@ -1605,6 +1605,34 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		_, ok := sys.grains.Get(id.String())
 		require.True(t, ok)
 	})
+
+	t.Run("missing process honors a claim recorded for this node", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, id := newClusterGrainSystem(t, grain, "cluster-missing-recorded-claim")
+
+		// a claim made on this node's behalf by another node's tryPeerActivation,
+		// carrying the caller's configuration, which the lazy activation keeps
+		record, err := wireGrain(id, newGrainConfig(WithGrainMailboxCapacity(7), WithGrainDisableRelocation(), WithActivationRole("billing")), sys.Host(), sys.Port())
+		require.NoError(t, err)
+
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(ctx, id.String()).Return(record, nil).Once()
+		// no claim is made against an existing record: a single publication
+		cl.EXPECT().PutGrain(ctx, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == id.String() &&
+				actual.GetMailboxCapacity() == 7 && actual.GetDisableRelocation() && actual.GetRole() == "billing"
+		})).Return(nil).Once()
+
+		got, err := sys.ensureGrainProcess(ctx, id)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.True(t, got.isActive())
+		require.EqualValues(t, 7, got.config.capacity)
+		require.True(t, got.config.disableRelocation)
+		require.NotNil(t, got.config.role)
+		require.Equal(t, "billing", *got.config.role)
+	})
 }
 
 // nolint
