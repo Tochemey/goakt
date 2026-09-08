@@ -2645,11 +2645,20 @@ func (pid *PID) reset() {
 	}
 
 	pid.mailbox.Dispose()
-	pid.setState(singletonState, false)
-	pid.setState(relocationState, true)
+
+	// Note: singletonState and relocationState are deliberately left untouched as
+	// well: both are spawn-time configuration applied once by newPID through
+	// asSingleton and withRelocationDisabled. The restart path re-runs init()
+	// on the same PID without re-applying options, so flipping them back to
+	// their defaults here turned a WithRelocationDisabled actor into a
+	// relocatable one after Restart, and a stopped PID awaiting DeathWatch
+	// cleanup reported the wrong configuration to IsRelocatable, IsSingleton,
+	// toSerialize and the remote state endpoint (#1349).
+
 	if pid.dependencies != nil {
 		pid.dependencies.Reset()
 	}
+
 	pid.setState(passivationPausedState, false)
 	pid.setState(passivatingState, false)
 	pid.setState(passivationSkipNextState, false)
@@ -3746,6 +3755,7 @@ func buildRestartSubtree(root *PID, tree *tree) *restartNode {
 			nodes[descendant.ID()] = &restartNode{pid: descendant}
 		}
 	}
+
 	if len(nodes) == 0 {
 		return rootNode
 	}
@@ -3755,10 +3765,12 @@ func buildRestartSubtree(root *PID, tree *tree) *restartNode {
 		if !ok || parent == nil {
 			continue
 		}
+
 		if parent.Equals(root) {
 			rootNode.children = append(rootNode.children, node)
 			continue
 		}
+
 		if parentNode, ok := nodes[parent.ID()]; ok {
 			parentNode.children = append(parentNode.children, node)
 		}
@@ -3787,10 +3799,12 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		if err := pid.Shutdown(ctx); err != nil {
 			return err
 		}
+
 		didShutdown = true
 		tk := ticker.New(10 * time.Millisecond)
 		tk.Start()
 		tickerStopSig := make(chan types.Unit, 1)
+
 		go func() {
 			for range tk.Ticks {
 				if !pid.IsRunning() {
@@ -3799,6 +3813,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 				}
 			}
 		}()
+
 		<-tickerStopSig
 		tk.Stop()
 	}
