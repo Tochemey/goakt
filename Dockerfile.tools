@@ -3,7 +3,7 @@
 # tools locally; `make` builds this image and runs targets inside it.
 FROM golang:1.26.6-alpine
 
-ARG GOLANGCI_VERSION=v2.12.2
+ARG GOLANGCI_VERSION=v2.13.1
 ARG BUF_VERSION=v1.72.0
 ARG MOCKERY_VERSION=v3.7.3
 ARG PROTOC_GEN_GO_VERSION=latest
