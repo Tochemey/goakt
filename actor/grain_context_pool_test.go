@@ -182,7 +182,23 @@ func TestGrainContextPool_ReleaseReturnsToHomeShard(t *testing.T) {
 	assert.Same(t, gctx, reused)
 }
 
+// drainGrainErrorChannelShard empties shard so a test asserting on
+// put-then-get order starts from an empty ring. The pool is process-wide
+// and system shutdown returns every grain's poison-pill ack channel to its
+// shard, so earlier tests in the binary leave channels behind, and the ring
+// hands them out first.
+func drainGrainErrorChannelShard(shard uint32) {
+	i := shard & grainErrorChannelPool.mask
+	for {
+		if grainErrorChannelPool.shards[i].pop() == nil {
+			return
+		}
+	}
+}
+
 func TestGrainErrorChannelPool_PutThenGetReusesChannel(t *testing.T) {
+	drainGrainErrorChannelShard(9)
+
 	first := make(chan error, 1)
 	putGrainErrorChannel(9, first)
 
@@ -191,6 +207,8 @@ func TestGrainErrorChannelPool_PutThenGetReusesChannel(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_PutDrainsStaleError(t *testing.T) {
+	drainGrainErrorChannelShard(10)
+
 	ch := make(chan error, 1)
 	ch <- assert.AnError
 
@@ -202,6 +220,9 @@ func TestGrainErrorChannelPool_PutDrainsStaleError(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_ShardsAreIndependent(t *testing.T) {
+	drainGrainErrorChannelShard(11)
+	drainGrainErrorChannelShard(12)
+
 	ch := make(chan error, 1)
 	putGrainErrorChannel(11, ch)
 
