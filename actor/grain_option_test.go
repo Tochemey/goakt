@@ -25,6 +25,7 @@ package actor
 import (
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -38,14 +39,14 @@ func TestGrainOptions(t *testing.T) {
 		config := &grainConfig{}
 		option := WithGrainInitMaxRetries(5)
 		option(config)
-		require.EqualValues(t, 5, config.initMaxRetries.Load())
+		require.EqualValues(t, 5, config.initMaxRetries)
 	})
 
 	t.Run("WithGrainInitTimeout", func(t *testing.T) {
 		config := &grainConfig{}
 		option := WithGrainInitTimeout(10 * time.Second)
 		option(config)
-		require.Equal(t, 10*time.Second, config.initTimeout.Load())
+		require.Equal(t, 10*time.Second, config.initTimeout)
 	})
 
 	t.Run("WithGrainDeactivateAfter", func(t *testing.T) {
@@ -166,10 +167,41 @@ func TestNewGrainPIDBuildsReentrancyState(t *testing.T) {
 	require.NotNil(t, reentrant)
 	require.Equal(t, reentrancy.StashNonReentrant, reentrant.getMode())
 	require.EqualValues(t, 7, reentrant.maxInFlight.Load())
-	require.NotNil(t, pid.responses)
+	require.NotNil(t, pid.responses.Load())
 
-	// An Off policy behaves exactly like no policy.
+	// An Off policy behaves exactly like no policy: no state and no response
+	// queue.
 	pid = newGrainPID(identity, NewMockGrain(), sys, newGrainConfig(WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.Off)))))
 	require.Nil(t, pid.reentrancy.Load())
-	require.NotNil(t, pid.responses)
+	require.Nil(t, pid.responses.Load())
+}
+
+// TestGrainConfigDependenciesOnDemand checks that the dependency map is only
+// allocated when a dependency is actually registered, and that the readers
+// cope with the map being absent.
+func TestGrainConfigDependenciesOnDemand(t *testing.T) {
+	config := newGrainConfig()
+	require.Nil(t, config.dependencies, "a grain without dependencies must carry no map")
+	require.Nil(t, config.dependencyValues())
+
+	_, ok := config.dependency("x")
+	require.False(t, ok)
+
+	WithGrainDependencies(nil)(config)
+	require.Nil(t, config.dependencies, "a nil dependency must not allocate the map")
+
+	dependency := NewMockDependency("dep", "user", "email")
+	WithGrainDependencies(dependency)(config)
+	require.NotNil(t, config.dependencies)
+	require.Len(t, config.dependencyValues(), 1)
+
+	actual, ok := config.dependency(dependency.ID())
+	require.True(t, ok)
+	require.Same(t, dependency, actual)
+}
+
+// TestGrainConfigStaysInItsSizeClass pins the grain configuration at 64 bytes,
+// the size class every idle grain pays for.
+func TestGrainConfigStaysInItsSizeClass(t *testing.T) {
+	require.EqualValues(t, 64, unsafe.Sizeof(grainConfig{}), "grainConfig grew past its size class")
 }

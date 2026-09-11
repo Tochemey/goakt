@@ -2816,8 +2816,9 @@ func TestRemoteGrainEnvelopeDelivery(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
-	// The constructor already installs the response mailbox; re-assigning it
-	// here would race the live grain worker reading pid.responses.
+	// Attach the queue before storing the state; a plain assignment would race
+	// the live grain worker.
+	pid.attachResponseQueue()
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 
 	envelope := &commands.AsyncRequest{
@@ -2871,8 +2872,9 @@ func TestRemoteEnvelopeAskDeferredAcrossNodes(t *testing.T) {
 
 	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
-	// The constructor already installs the response mailbox; re-assigning it
-	// here would race the live grain worker reading pid.responses.
+	// Attach the queue before storing the state; a plain assignment would race
+	// the live grain worker.
+	pid.attachResponseQueue()
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 
 	type askResult struct {

@@ -43,9 +43,13 @@ import (
 // GrainIdentity enables location-transparent routing, lifecycle management, and stable grain identity
 // across distributed systems and restarts. They are immutable and safe for concurrent use.
 type GrainIdentity struct {
-	kind      string // Fully qualified type name of the grain
-	name      string // Unique instance identifier within the grain type
-	cachedStr string // lazily computed by String(); safe because fields are immutable after construction
+	kind string // Fully qualified type name of the grain
+	name string // Unique instance identifier within the grain type
+	// cachedStr is the "kind/name" form: set at construction with kind and
+	// name as views into it, or computed on the first String() call for
+	// identities built field by field. Safe because the fields are immutable
+	// after construction.
+	cachedStr string
 
 	// validateOnce memoises Validate()'s result. Because kind and name
 	// are immutable after construction, the validation outcome is fixed
@@ -64,6 +68,10 @@ var _ validation.Validator = (*GrainIdentity)(nil)
 // It derives the grain kind via reflection and combines it with the provided name.
 // The resulting ID can be used for routing, activation, and identity management.
 //
+// The identity retains a single string: the "kind/name" form that String()
+// returns, with kind and name kept as views into it. Neither the reflected type
+// name nor the caller's name string is retained.
+//
 // Parameters:
 //   - grain: Any struct implementing the Grain interface (used for type derivation).
 //   - name: Unique identifier within the grain type.
@@ -77,9 +85,12 @@ var _ validation.Validator = (*GrainIdentity)(nil)
 //   - Name should be meaningful, unique, and safe for serialization.
 func newGrainIdentity(grain Grain, name string) *GrainIdentity {
 	kind := types.Name(grain)
+	full := kind + id.GrainIdentitySeparator + name
+
 	return &GrainIdentity{
-		kind: kind,
-		name: name,
+		kind:      full[:len(kind)],
+		name:      full[len(full)-len(name):],
+		cachedStr: full,
 	}
 }
 

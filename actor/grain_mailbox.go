@@ -33,6 +33,10 @@ import (
 // FIFO queue used as the per-grain inbox. GrainContext itself serves as
 // the intrusive list node via its `next` field, so a GrainContext may
 // be linked into only one mailbox at a time.
+//
+// The default unbounded user mailbox of a grain runs embedded in the process
+// instead (embeddedGrainMailbox); this type serves bounded user mailboxes and
+// the response queue.
 type grainMailbox struct {
 	head atomic.Pointer[GrainContext]
 	_    CacheLinePadding

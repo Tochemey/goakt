@@ -392,18 +392,27 @@ func TestGrainActivationFailureClosesTimers(t *testing.T) {
 	pid := newTestGrainPID(grain, "activation-failure")
 
 	// OnActivate registers a timer and then fails: the timer must never fire
+	var registry *grainTimers
+	var entry *grainTimerEntry
+
 	grain.onActivate = func(props *GrainProps) error {
-		_, err := props.ScheduleOnce("never", 10*time.Millisecond)
+		reference, err := props.ScheduleOnce("never", 10*time.Millisecond)
 		require.NoError(t, err)
+		registry = pid.getTimers()
+		entry = entryOf(t, registry, reference)
 		return errors.New("boom")
 	}
 
 	require.ErrorIs(t, pid.activate(ctx), gerrors.ErrGrainActivationFailure)
 
-	// the registry stopped: the entry is gone and late registrations are rejected
-	registry := pid.getTimers()
+	// the failed activation dropped its registry, and the one OnActivate created
+	// is stopped with its entry cancelled
+	require.Nil(t, pid.getTimers())
 	require.Equal(t, 0, entriesLen(registry))
-	_, err := registry.scheduleOnce("late", time.Second)
+	require.True(t, entry.cancelled.Load())
+
+	// late scheduling finds no activation to create a registry for
+	_, err := newGrainProps(pid.identity, pid.actorSystem, nil, pid).ScheduleOnce("late", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
 }
 
@@ -412,17 +421,24 @@ func TestGrainActivationPanicClosesTimers(t *testing.T) {
 	grain := NewMockTimerProbeGrain()
 	pid := newTestGrainPID(grain, "activation-panic")
 
+	var registry *grainTimers
+	var entry *grainTimerEntry
+
 	grain.onActivate = func(props *GrainProps) error {
-		_, err := props.ScheduleOnce("never", 10*time.Millisecond)
+		reference, err := props.ScheduleOnce("never", 10*time.Millisecond)
 		require.NoError(t, err)
+		registry = pid.getTimers()
+		entry = entryOf(t, registry, reference)
 		panic("boom")
 	}
 
 	require.ErrorIs(t, pid.activate(ctx), gerrors.ErrGrainActivationFailure)
 
-	registry := pid.getTimers()
+	require.Nil(t, pid.getTimers())
 	require.Equal(t, 0, entriesLen(registry))
-	_, err := registry.scheduleOnce("late", time.Second)
+	require.True(t, entry.cancelled.Load())
+
+	_, err := newGrainProps(pid.identity, pid.actorSystem, nil, pid).ScheduleOnce("late", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
 }
 
@@ -466,23 +482,28 @@ func TestGrainTimerFreshRegistryAcrossReactivation(t *testing.T) {
 	ctx := context.Background()
 	fx := spawnTimerProbeGrain(t)
 
-	oldRegistry := fx.pid.getTimers()
-	_, err := oldRegistry.scheduleInterval("beat", time.Hour)
+	_, err := fx.props.Schedule("beat", time.Hour)
 	require.NoError(t, err)
+	oldRegistry := fx.pid.getTimers()
+	require.NotNil(t, oldRegistry)
 
 	// a reused grainPID must not carry the previous activation's registry
 	require.NoError(t, fx.pid.deactivate(ctx))
 	require.NoError(t, fx.pid.activate(ctx))
 
+	// the new activation starts with none: its first schedule call creates one
+	require.Nil(t, fx.pid.getTimers())
+
+	_, err = fx.props.ScheduleOnce("fresh", time.Hour)
+	require.NoError(t, err)
+
 	newRegistry := fx.pid.getTimers()
 	require.NotSame(t, oldRegistry, newRegistry)
-	require.Equal(t, 0, entriesLen(newRegistry))
+	require.Equal(t, 1, entriesLen(newRegistry))
 
-	// the old registry stays stopped while the new one is fully usable
+	// the old registry stays stopped
 	_, err = oldRegistry.scheduleOnce("stale", time.Second)
 	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
-	_, err = newRegistry.scheduleOnce("fresh", time.Hour)
-	require.NoError(t, err)
 }
 
 func TestGrainTimerStopsOnSystemShutdown(t *testing.T) {
@@ -630,35 +651,36 @@ func TestGrainContextTimersOnNeverActivatedGrain(t *testing.T) {
 }
 
 func TestGrainPIDDeliverTimerTickInactiveGrain(t *testing.T) {
-	pid := &grainPID{mailbox: newGrainMailbox(0)}
+	pid := &grainPID{}
+	pid.attachMailbox(0)
 
 	// an inactive grain drops the tick before it ever reaches the mailbox
 	pid.deliverTimerTick(&grainTimerEntry{reference: "tick"})
-	require.True(t, pid.mailbox.IsEmpty())
+	require.True(t, pid.mailboxEmpty())
 }
 
 func TestGrainPIDDeliverTimerTickMailboxFull(t *testing.T) {
 	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
-		grain:    grain,
-		identity: newGrainIdentity(grain, "mailbox-full"),
-		mailbox:  newGrainMailbox(1),
-		logger:   log.NewSlog(log.WarningLevel, io.Discard),
+		grain:       grain,
+		identity:    newGrainIdentity(grain, "mailbox-full"),
+		actorSystem: &actorSystem{logger: log.NewSlog(log.WarningLevel, io.Discard)},
 	}
+	pid.attachMailbox(1)
 	pid.activated.Store(true)
 
 	// a full mailbox loses only this tick; the drop is logged
-	require.NoError(t, pid.mailbox.Enqueue(&GrainContext{}))
+	require.NoError(t, pid.boundedMailbox.Enqueue(&GrainContext{}))
 	pid.deliverTimerTick(&grainTimerEntry{reference: "tick"})
-	require.EqualValues(t, 1, pid.mailbox.Len())
+	require.EqualValues(t, 1, pid.boundedMailbox.Len())
 }
 
 func TestGrainPIDReportTimerTickFailure(t *testing.T) {
 	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
-		grain:    grain,
-		identity: newGrainIdentity(grain, "tick-failure"),
-		logger:   log.NewSlog(log.WarningLevel, io.Discard),
+		grain:       grain,
+		identity:    newGrainIdentity(grain, "tick-failure"),
+		actorSystem: &actorSystem{logger: log.NewSlog(log.WarningLevel, io.Discard)},
 	}
 
 	entry := &grainTimerEntry{reference: "tick"}
@@ -676,9 +698,9 @@ func TestGrainPIDReportTimerTickFailure(t *testing.T) {
 func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
 	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
-		grain:    grain,
-		identity: newGrainIdentity(grain, "drops"),
-		logger:   log.DiscardLogger,
+		grain:       grain,
+		identity:    newGrainIdentity(grain, "drops"),
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
 	pid.activated.Store(true)
 
@@ -704,9 +726,9 @@ func TestGrainPIDHandleTimerTickDrops(t *testing.T) {
 func TestGrainPIDHandleTimerTickActivityMarking(t *testing.T) {
 	grain := NewMockTimerProbeGrain()
 	pid := &grainPID{
-		grain:    grain,
-		identity: newGrainIdentity(grain, "activity"),
-		logger:   log.DiscardLogger,
+		grain:       grain,
+		identity:    newGrainIdentity(grain, "activity"),
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
 	pid.activated.Store(true)
 
@@ -742,4 +764,129 @@ func TestGrainTimersCronEndToEnd(t *testing.T) {
 	// the entry survives ticks and stays registered
 	require.Equal(t, 1, entriesLen(timers))
 	require.NoError(t, timers.cancel(reference))
+}
+
+// TestGrainTimersMapAllocatedByFirstRegistration checks that a registry pays
+// for its entry map only once a timer is actually scheduled into it.
+func TestGrainTimersMapAllocatedByFirstRegistration(t *testing.T) {
+	timers := newGrainTimers(NewMockTimerSink())
+
+	// a registry nobody scheduled into carries no entry map
+	require.Nil(t, timers.entries)
+	require.ErrorIs(t, timers.cancel("missing"), gerrors.ErrScheduledReferenceNotFound)
+
+	// starting and stopping an empty registry ranges over the absent map
+	timers.start()
+	timers.stop()
+
+	_, err := timers.scheduleOnce("tick", time.Hour)
+	require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+	require.Nil(t, timers.entries)
+
+	// the first registration is what allocates the map
+	fresh := newGrainTimers(NewMockTimerSink())
+	_, err = fresh.scheduleOnce("tick", time.Hour)
+	require.NoError(t, err)
+	require.NotNil(t, fresh.entries)
+	require.Equal(t, 1, entriesLen(fresh))
+}
+
+// TestGrainTimerRegistryOnDemand checks that the timer registry is created by
+// the first schedule call of an activation, rejected outside one, and that the
+// phase tracks the activation lifecycle.
+func TestGrainTimerRegistryOnDemand(t *testing.T) {
+	ctx := context.Background()
+
+	// activateGrain starts a system and returns the process of an activated grain.
+	activateGrain := func(t *testing.T, name string, grain Grain) *grainPID {
+		t.Helper()
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(context.Background()) })
+
+		identity, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		pid, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.True(t, pid.isActive())
+
+		return pid
+	}
+
+	t.Run("nil until the first schedule", func(t *testing.T) {
+		pid := activateGrain(t, "on-demand", NewMockTimerProbeGrain())
+
+		// an activation that never scheduled a timer carries no registry
+		require.Nil(t, pid.getTimers())
+
+		registry, err := pid.timerRegistry()
+		require.NoError(t, err)
+		require.NotNil(t, registry)
+
+		// the activation keeps the registry its first schedule call created
+		again, err := pid.timerRegistry()
+		require.NoError(t, err)
+		require.Same(t, registry, again)
+		require.Same(t, registry, pid.getTimers())
+
+		// created while the grain is active, so its timers are armed at once
+		reference, err := registry.scheduleOnce("tick", time.Hour)
+		require.NoError(t, err)
+		require.True(t, entryTimerStarted(registry, reference))
+	})
+
+	t.Run("rejected outside an activation", func(t *testing.T) {
+		never := newTestGrainPID(NewMockGrain(), "idle")
+
+		_, err := never.timerRegistry()
+		require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+		require.Nil(t, never.getTimers())
+
+		deactivated := activateGrain(t, "deactivated", NewMockTimerProbeGrain())
+		require.NoError(t, deactivated.deactivate(ctx))
+
+		_, err = deactivated.timerRegistry()
+		require.ErrorIs(t, err, gerrors.ErrGrainTimersStopped)
+		require.Nil(t, deactivated.getTimers())
+	})
+
+	t.Run("phase moves with the activation", func(t *testing.T) {
+		grain := NewMockTimerProbeGrain()
+		pid := newTestGrainPID(grain, "phases")
+
+		pid.mu.Lock()
+		phase := pid.phase
+		pid.mu.Unlock()
+		require.Equal(t, grainInactive, phase)
+
+		var hookPhase grainPhase
+		grain.onActivate = func(*GrainProps) error {
+			pid.mu.Lock()
+			hookPhase = pid.phase
+			pid.mu.Unlock()
+			return nil
+		}
+
+		require.NoError(t, pid.activate(ctx))
+		require.Equal(t, grainActivating, hookPhase)
+
+		pid.mu.Lock()
+		phase = pid.phase
+		pid.mu.Unlock()
+		require.Equal(t, grainActive, phase)
+
+		// deactivation puts the process back outside an activation
+		deactivated := activateGrain(t, "phase-deactivated", NewMockTimerProbeGrain())
+		require.NoError(t, deactivated.deactivate(ctx))
+
+		deactivated.mu.Lock()
+		phase = deactivated.phase
+		deactivated.mu.Unlock()
+		require.Equal(t, grainInactive, phase)
+	})
 }

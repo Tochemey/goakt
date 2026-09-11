@@ -113,8 +113,8 @@ func TestGrainOf_OptionsHonored(t *testing.T) {
 	sys := testSystem.(*actorSystem)
 	pid, ok := sys.grains.Get(identity.String())
 	require.True(t, ok)
-	require.EqualValues(t, 7, pid.config.initMaxRetries.Load())
-	require.EqualValues(t, 32, pid.mailbox.Capacity())
+	require.EqualValues(t, 7, pid.config.initMaxRetries)
+	require.EqualValues(t, 32, pid.boundedMailbox.Capacity())
 
 	require.NoError(t, testSystem.Stop(ctx))
 }

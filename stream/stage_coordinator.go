@@ -24,6 +24,7 @@ package stream
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"github.com/tochemey/goakt/v4/actor"
 )
@@ -48,8 +49,12 @@ import (
 // sink's PostStop fires the onDone callback), so they are NOT watched. Only the
 // sink is watched.
 type streamCoordinator struct {
-	handle  *streamHandleImpl
-	sinkPID *actor.PID // watched for unexpected early termination
+	handle *streamHandleImpl
+	// sinkPID is the sink stage, watched for unexpected early termination.
+	// Atomic because the materializer stores it after the stages are spawned
+	// and wired, while a Terminated from a fast-failing pipeline can already
+	// be running through Receive on a dispatcher worker.
+	sinkPID atomic.Pointer[actor.PID]
 }
 
 func (c *streamCoordinator) PreStart(_ *actor.Context) error { return nil }
@@ -64,7 +69,8 @@ func (c *streamCoordinator) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *actor.Terminated:
 		// Only care about the sink; ignore normal source/flow shutdowns.
-		if c.sinkPID == nil || !msg.ActorPath().Equals(c.sinkPID.Path()) {
+		sinkPID := c.sinkPID.Load()
+		if sinkPID == nil || !msg.ActorPath().Equals(sinkPID.Path()) {
 			return
 		}
 		select {

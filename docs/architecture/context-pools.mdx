@@ -500,23 +500,28 @@ into a second mailbox that way.
 
 **Recycle mix.** Grains recycle mostly from mailbox dequeue:
 
-- **`grainMailbox.Dequeue`** is the sentinel path, same idea as `UnboundedMailbox`: the previous head is `reset()`,
-  `next` cleared, `grainContextPool.put`.
+- **Mailbox `Dequeue`** is the sentinel path, same idea as `UnboundedMailbox`: the previous head is `reset()`,
+  `next` cleared, `grainContextPool.put`. The default user mailbox is `embeddedGrainMailbox`, two words inside
+  `grainPID`; `grainMailbox` serves bounded user mailboxes and the response queue.
 - **`releaseGrainContext`** is for failed enqueue (bounded mailbox full, timer tick dropped, passivation pill refused).
   It is not the steady-state drain path.
 
 `next` is `atomic.Pointer[*GrainContext]`, not `unsafe.Pointer`. `releaseGrainContext` uses `gctx.next.Store(nil)`.
 
-**Ack-channel pool in the same file.** The bottom half of `grain_context_pool.go` is a third sibling ring,
-`grainErrorChannelPool`: buffered capacity-1 error channels for `TellGrain` processed-acks. Callers index it with the
-context’s `poolShard`, so get and put stay on the same shard as the envelope.
+**Channel pools in the same file.** The bottom half of `grain_context_pool.go` is a third sibling ring, written once
+as `grainChannelPoolShards[T]` and instantiated twice: `grainErrorChannelPool` holds the buffered capacity-1 error
+channels that carry `TellGrain` processed-acks, `grainReplyChannelPool` the buffered capacity-1 `any` channels that
+carry `AskGrain` replies. Callers index both with the context’s `poolShard`, so get and put stay on the same shard as
+the envelope.
 
-That pool exists because `TellGrain` blocks until the grain has processed the message. A process-wide `errorCh` put two
-channel-lock crossings on every tell once contexts were already sharded. `AskGrain` does **not** use it: grain Ask
-replies use `getResponseChannel()`, a fresh `make(chan any, 1)`, same late-reply reason as actor Ask.
+Both pools exist because the call blocks for the grain: `TellGrain` until the message is processed, `AskGrain` until the
+reply is in hand. A process-wide `errorCh` put two channel-lock crossings on every tell once contexts were already
+sharded, and a fresh `make(chan any, 1)` cost every ask 128 bytes and two allocations. The actor Ask path keeps
+`getResponseChannel()`: it has no grain shard to index with.
 
-On `TellGrain` timeout, **do not** `putGrainErrorChannel`. The grain may still send on that channel; the timeout path
-abandons it to the GC. Returning it would hand the next borrower a stale ack.
+On `TellGrain` and `AskGrain` timeout, **do not** put the channel back (`putGrainErrorChannel`,
+`putGrainReplyChannel`). The grain may still send on that channel; the timeout path abandons it to the GC. Returning it
+would hand the next borrower a stale ack or reply.
 
 **How to think about a grain-side change.**
 

@@ -100,6 +100,7 @@ var (
 	_ Grain                = (*MockReentrantRecordingGrain)(nil)
 	_ Grain                = (*MockDeactivationCountingGrain)(nil)
 	_ Grain                = (*MockTimerProbeGrain)(nil)
+	_ grainTimerSink       = (*MockTimerSink)(nil)
 	_ Actor                = (*MockRestartMarkerActor)(nil)
 	_ Actor                = (*MockMailboxBlockingActor)(nil)
 )
@@ -2410,6 +2411,23 @@ func (x *MockTimerProbeGrain) OnReceive(ctx *GrainContext) {
 	default:
 		ctx.NoErr()
 	}
+}
+
+// MockTimerSink is a timer sink that records the ticks a registry fires, in place of a grain process.
+type MockTimerSink struct {
+	// ticks carries every delivered entry out to the test. Buffered so a stray
+	// late fire never blocks a timer goroutine after the test ends.
+	ticks chan *grainTimerEntry
+}
+
+// NewMockTimerSink returns a MockTimerSink with a 16-slot tick channel.
+func NewMockTimerSink() *MockTimerSink {
+	return &MockTimerSink{ticks: make(chan *grainTimerEntry, 16)}
+}
+
+// deliverTimerTick publishes the fired entry.
+func (x *MockTimerSink) deliverTimerTick(entry *grainTimerEntry) {
+	x.ticks <- entry
 }
 
 // MockShutdownHook is a shutdown hook whose outcome and recovery are driven by the configured strategy.

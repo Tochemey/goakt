@@ -762,7 +762,7 @@ func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts 
 // Returns:
 //   - []extension.Dependency: All registered dependencies in the Grain's context.
 func (gctx *GrainContext) Dependencies() []extension.Dependency {
-	return gctx.pid.dependencies.Values()
+	return gctx.pid.config.dependencyValues()
 }
 
 // Dependency retrieves a specific dependency registered in the Grain's context by its unique ID.
@@ -780,7 +780,7 @@ func (gctx *GrainContext) Dependencies() []extension.Dependency {
 // Returns:
 //   - extension.Dependency: The corresponding dependency if found, or nil otherwise.
 func (gctx *GrainContext) Dependency(dependencyID string) extension.Dependency {
-	if dependency, ok := gctx.pid.dependencies.Get(dependencyID); ok {
+	if dependency, ok := gctx.pid.config.dependency(dependencyID); ok {
 		return dependency
 	}
 	return nil
@@ -894,7 +894,7 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 		// Ask replies, success and failure alike, travel on the single
 		// response channel (see sendReply); no error channel is attached.
 		gctx.err = nil
-		gctx.response = getResponseChannel()
+		gctx.response = getGrainReplyChannel(gctx.poolShard)
 	case grainTell:
 		gctx.err = getGrainErrorChannel(gctx.poolShard)
 		gctx.response = nil

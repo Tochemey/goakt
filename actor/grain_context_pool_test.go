@@ -182,7 +182,24 @@ func TestGrainContextPool_ReleaseReturnsToHomeShard(t *testing.T) {
 	assert.Same(t, gctx, reused)
 }
 
+// drainGrainChannelShard empties shard of pool so a test asserting on
+// put-then-get order starts from an empty ring. The pools are process-wide
+// and earlier tests in the binary leave channels behind (system shutdown
+// returns every grain's poison-pill ack channel to its shard, and every
+// successful Ask returns its reply channel), and the ring hands those out
+// first.
+func drainGrainChannelShard[T any](pool *grainChannelPoolShards[T], shard uint32) {
+	i := shard & pool.mask
+	for {
+		if pool.shards[i].pop() == nil {
+			return
+		}
+	}
+}
+
 func TestGrainErrorChannelPool_PutThenGetReusesChannel(t *testing.T) {
+	drainGrainChannelShard(grainErrorChannelPool, 9)
+
 	first := make(chan error, 1)
 	putGrainErrorChannel(9, first)
 
@@ -191,6 +208,8 @@ func TestGrainErrorChannelPool_PutThenGetReusesChannel(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_PutDrainsStaleError(t *testing.T) {
+	drainGrainChannelShard(grainErrorChannelPool, 10)
+
 	ch := make(chan error, 1)
 	ch <- assert.AnError
 
@@ -202,6 +221,9 @@ func TestGrainErrorChannelPool_PutDrainsStaleError(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_ShardsAreIndependent(t *testing.T) {
+	drainGrainChannelShard(grainErrorChannelPool, 11)
+	drainGrainChannelShard(grainErrorChannelPool, 12)
+
 	ch := make(chan error, 1)
 	putGrainErrorChannel(11, ch)
 
@@ -214,7 +236,7 @@ func TestGrainErrorChannelPool_ShardsAreIndependent(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_GetAllocatesOnEmptyShard(t *testing.T) {
-	pool := newGrainErrorChannelPool()
+	pool := newGrainChannelPool[error]()
 
 	ch := pool.shards[0].pop()
 	assert.Nil(t, ch)
@@ -259,6 +281,55 @@ func TestGrainErrorChannelPool_ConcurrentGetPut(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+func TestGrainReplyChannelPool_PutThenGetReusesChannel(t *testing.T) {
+	drainGrainChannelShard(grainReplyChannelPool, 9)
+
+	first := make(chan any, 1)
+	putGrainReplyChannel(9, first)
+
+	second := getGrainReplyChannel(9)
+	assert.Equal(t, first, second)
+}
+
+func TestGrainReplyChannelPool_PutDrainsStaleReply(t *testing.T) {
+	drainGrainChannelShard(grainReplyChannelPool, 10)
+
+	ch := make(chan any, 1)
+	ch <- "stale reply"
+
+	putGrainReplyChannel(10, ch)
+
+	reused := getGrainReplyChannel(10)
+	require.Equal(t, ch, reused)
+	require.Empty(t, reused)
+}
+
+func TestGrainReplyChannelPool_ShardsAreIndependent(t *testing.T) {
+	drainGrainChannelShard(grainReplyChannelPool, 11)
+	drainGrainChannelShard(grainReplyChannelPool, 12)
+
+	ch := make(chan any, 1)
+	putGrainReplyChannel(11, ch)
+
+	// A different shard stays empty and must allocate a fresh channel.
+	other := getGrainReplyChannel(12)
+	assert.NotEqual(t, ch, other)
+
+	home := getGrainReplyChannel(11)
+	assert.Equal(t, ch, home)
+}
+
+func TestGrainReplyChannelPool_GetAllocatesOnEmptyShard(t *testing.T) {
+	pool := newGrainChannelPool[any]()
+
+	ch := pool.shards[0].pop()
+	assert.Nil(t, ch)
+
+	fresh := getGrainReplyChannel(uint32(len(pool.shards)) + 1)
+	require.NotNil(t, fresh)
+	assert.Equal(t, 1, cap(fresh))
 }
 
 func TestGrainMailbox_DequeueRecyclesSentinelToHomeShard(t *testing.T) {

@@ -30,16 +30,15 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -52,21 +51,20 @@ func TestGrainPIDPassivationIDEmptyWithoutIdentity(t *testing.T) {
 
 func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	pid := &grainPID{
-		logger:       log.DiscardLogger,
-		dependencies: xsync.NewMap[string, extension.Dependency](),
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		config:      newGrainConfig(WithGrainDeactivateAfter(time.Second)),
 	}
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(false)
-	pid.deactivateAfter.Store(time.Second)
 	require.False(t, pid.passivationTry("no-op"))
 }
 
 func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:             log.DiscardLogger,
+		actorSystem:        &actorSystem{logger: log.DiscardLogger},
 		grain:              &MockDeactivationFailingGrain{},
-		dependencies:       xsync.NewMap[string, extension.Dependency](),
+		config:             newGrainConfig(),
 		passivationManager: nil,
 	}
 
@@ -81,6 +79,7 @@ func TestGrainPIDStartPassivationSkipsWhenAutoDisabled(t *testing.T) {
 
 	pid := &grainPID{
 		passivationManager: manager,
+		config:             newGrainConfig(WithLongLivedGrain()),
 	}
 
 	pid.startPassivation()
@@ -97,10 +96,10 @@ func TestGrainPIDStartPassivationSkipsWhenTimeoutNonPositive(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		passivationManager: manager,
-		logger:             log.DiscardLogger,
+		actorSystem:        &actorSystem{logger: log.DiscardLogger},
+		config:             newGrainConfig(WithGrainDeactivateAfter(0)),
 	}
 
-	pid.deactivateAfter.Store(0)
 	pid.startPassivation()
 
 	manager.mu.Lock()
@@ -115,10 +114,10 @@ func TestGrainPIDStartPassivationRegistersStrategy(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		passivationManager: manager,
-		logger:             log.DiscardLogger,
+		actorSystem:        &actorSystem{logger: log.DiscardLogger},
+		config:             newGrainConfig(WithGrainDeactivateAfter(time.Second)),
 	}
 
-	pid.deactivateAfter.Store(time.Second)
 	pid.startPassivation()
 
 	manager.mu.Lock()
@@ -131,8 +130,8 @@ func TestGrainPIDShouldAutoPassivate(t *testing.T) {
 	manager.started.Store(true)
 	pid := &grainPID{
 		passivationManager: manager,
+		config:             newGrainConfig(WithGrainDeactivateAfter(time.Second)),
 	}
-	pid.deactivateAfter.Store(time.Second)
 	require.True(t, pid.shouldAutoPassivate())
 
 	pid.passivationManager = nil
@@ -146,7 +145,7 @@ func TestGrainPIDMarkActivityCoalescesTouch(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		passivationManager: manager,
-		logger:             log.DiscardLogger,
+		actorSystem:        &actorSystem{logger: log.DiscardLogger},
 	}
 
 	base := time.Now()
@@ -173,11 +172,10 @@ func TestGrainPIDMarkActivityCoalescesTouch(t *testing.T) {
 func TestGrainPIDActivateReturnsPanicErrorOnActivatePanic(t *testing.T) {
 	config := newGrainConfig()
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{activatePanic: "activate panic"},
-		dependencies: config.dependencies,
-		config:       config,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{activatePanic: "activate panic"},
+		config:      config,
 	}
 
 	var err error
@@ -194,11 +192,10 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivateErrorPanic(t *testing.T) {
 	config := newGrainConfig()
 	panicErr := errors.New("activate error panic")
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{activatePanic: panicErr},
-		dependencies: config.dependencies,
-		config:       config,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{activatePanic: panicErr},
+		config:      config,
 	}
 
 	err := pid.activate(context.Background())
@@ -213,11 +210,10 @@ func TestGrainPIDActivateReturnsPanicErrorOnActivatePanicError(t *testing.T) {
 	config := newGrainConfig()
 	panicErr := gerrors.NewPanicError(errors.New("activate panic error"))
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{activatePanic: panicErr},
-		dependencies: config.dependencies,
-		config:       config,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{activatePanic: panicErr},
+		config:      config,
 	}
 
 	err := pid.activate(context.Background())
@@ -259,10 +255,10 @@ func TestGrainPIDDeactivateReportsFailedRegistryRelease(t *testing.T) {
 
 func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{},
-		dependencies: xsync.NewMap[string, extension.Dependency](),
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{},
+		config:      newGrainConfig(),
 	}
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
@@ -280,10 +276,10 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivateErrorPanic(t *testing.T) {
 	panicErr := errors.New("deactivate error panic")
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
-		dependencies: xsync.NewMap[string, extension.Dependency](),
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
+		config:      newGrainConfig(),
 	}
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
@@ -299,10 +295,10 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivateErrorPanic(t *testing.T)
 func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanicError(t *testing.T) {
 	panicErr := gerrors.NewPanicError(errors.New("deactivate panic error"))
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
-		dependencies: xsync.NewMap[string, extension.Dependency](),
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{deactivatePanic: panicErr},
+		config:      newGrainConfig(),
 	}
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
@@ -318,10 +314,10 @@ func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanicError(t *testing.T)
 
 func TestGrainPIDHandlePoisonPillRecoversDeactivatePanic(t *testing.T) {
 	pid := &grainPID{
-		identity:     &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:       log.DiscardLogger,
-		grain:        &MockLifecyclePanickingGrain{},
-		dependencies: xsync.NewMap[string, extension.Dependency](),
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		grain:       &MockLifecyclePanickingGrain{},
+		config:      newGrainConfig(),
 	}
 	pid.onPoisonPill.Store(false)
 	pid.activated.Store(true)
@@ -523,7 +519,7 @@ func TestGrainStashPausesUserMailboxUntilCompletion(t *testing.T) {
 
 	pause.For(200 * time.Millisecond)
 	require.Empty(t, grain.recorded())
-	require.EqualValues(t, 3, pid.mailbox.Len())
+	require.EqualValues(t, 3, (*embeddedGrainMailbox)(pid).Len())
 
 	// The completion flows through the response queue, resumes consumption and
 	// releases the buffered messages in exact arrival order.
@@ -580,7 +576,7 @@ func TestGrainAsyncErrorWakesPausedGrain(t *testing.T) {
 }
 
 func TestGrainPoisonPillDuringPauseCancelsInFlight(t *testing.T) {
-	sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.StashNonReentrant)
+	_, pid, _, _ := startReentrantGrainFixture(t, reentrancy.StashNonReentrant)
 
 	var failure error
 	done := make(chan struct{})
@@ -591,8 +587,7 @@ func TestGrainPoisonPillDuringPauseCancelsInFlight(t *testing.T) {
 	})
 
 	// The pill waits in the user mailbox behind the pause.
-	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
-	pid.receive(gctx)
+	ack := pid.enqueuePoisonPill(context.Background())
 
 	pause.For(100 * time.Millisecond)
 	require.True(t, pid.isActive())
@@ -609,7 +604,8 @@ func TestGrainPoisonPillDuringPauseCancelsInFlight(t *testing.T) {
 	require.ErrorIs(t, failure, gerrors.ErrRequestCanceled)
 
 	select {
-	case <-pid.deactivated:
+	case err := <-ack:
+		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("grain did not deactivate")
 	}
@@ -620,7 +616,7 @@ func TestGrainPoisonPillDuringPauseCancelsInFlight(t *testing.T) {
 }
 
 func TestGrainPoisonPillTearsDownInFlightInline(t *testing.T) {
-	sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+	_, pid, _, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 	var failure error
 	done := make(chan struct{})
@@ -631,8 +627,7 @@ func TestGrainPoisonPillTearsDownInFlightInline(t *testing.T) {
 	})
 	state.startTimeout(time.Minute)
 
-	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
-	pid.receive(gctx)
+	ack := pid.enqueuePoisonPill(context.Background())
 
 	select {
 	case <-done:
@@ -642,7 +637,8 @@ func TestGrainPoisonPillTearsDownInFlightInline(t *testing.T) {
 	require.ErrorIs(t, failure, gerrors.ErrRequestCanceled)
 
 	select {
-	case <-pid.deactivated:
+	case err := <-ack:
+		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("grain did not deactivate")
 	}
@@ -669,7 +665,7 @@ func TestGrainShutdownCancelsInFlightRequests(t *testing.T) {
 	require.True(t, ok)
 
 	pid.reentrancy.Store(newReentrancyState(reentrancy.StashNonReentrant, 0))
-	pid.responses = newGrainMailbox(0)
+	pid.attachResponseQueue()
 
 	var failure error
 	done := make(chan struct{})
@@ -764,10 +760,11 @@ func TestGrainEnqueueAsyncErrorValidation(t *testing.T) {
 	})
 
 	t.Run("nil error is a no-op", func(t *testing.T) {
-		pid := &grainPID{responses: newGrainMailbox(0)}
+		pid := &grainPID{}
+		pid.attachResponseQueue()
 		pid.activated.Store(true)
 		require.NoError(t, pid.enqueueAsyncError(context.Background(), "corr", nil))
-		require.True(t, pid.responses.IsEmpty())
+		require.True(t, pid.responses.Load().IsEmpty())
 	})
 
 	t.Run("inactive grain", func(t *testing.T) {
@@ -792,10 +789,10 @@ func TestGrainEnqueueEnvelopeValidation(t *testing.T) {
 	t.Run("full mailbox", func(t *testing.T) {
 		pid := &grainPID{
 			identity: &GrainIdentity{kind: "Kind", name: "Name"},
-			mailbox:  newGrainMailbox(1),
 		}
+		pid.attachMailbox(1)
 		pid.activated.Store(true)
-		require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+		require.NoError(t, pid.boundedMailbox.Enqueue(new(GrainContext)))
 
 		err := pid.enqueueEnvelope(context.Background(), &commands.AsyncRequest{
 			CorrelationID: "req",
@@ -809,8 +806,8 @@ func TestGrainInFlightCancellationFailureLogged(t *testing.T) {
 	// An inactive grain rejects the queue-routed cancellation; the failure is
 	// logged and must not panic the shutdown pre-pass.
 	pid := &grainPID{
-		identity: &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:   log.NewSlog(log.DebugLevel, io.Discard),
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.NewSlog(log.DebugLevel, io.Discard)},
 	}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 
@@ -862,37 +859,161 @@ func TestGrainDeregisterRequestStateUnknown(t *testing.T) {
 
 func TestGrainHasPendingWork(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
-		pid := &grainPID{mailbox: newGrainMailbox(0)}
+		pid := &grainPID{}
+		pid.attachMailbox(0)
 		require.False(t, pid.hasPendingWork())
 	})
 
 	t.Run("user messages pending", func(t *testing.T) {
-		pid := &grainPID{mailbox: newGrainMailbox(0)}
-		require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+		require.NoError(t, pid.enqueueMessage(new(GrainContext)))
 		require.True(t, pid.hasPendingWork())
 	})
 
 	t.Run("paused hides user messages", func(t *testing.T) {
-		pid := &grainPID{
-			mailbox:   newGrainMailbox(0),
-			responses: newGrainMailbox(0),
-		}
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+		pid.attachResponseQueue()
 		pid.reentrancy.Store(newReentrancyState(reentrancy.StashNonReentrant, 0))
 		pid.reentrancy.Load().blockingCount.Inc()
-		require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+		require.NoError(t, pid.enqueueMessage(new(GrainContext)))
 		require.False(t, pid.hasPendingWork())
 	})
 
 	t.Run("responses always count", func(t *testing.T) {
-		pid := &grainPID{
-			mailbox:   newGrainMailbox(0),
-			responses: newGrainMailbox(0),
-		}
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+		pid.attachResponseQueue()
 		pid.reentrancy.Store(newReentrancyState(reentrancy.StashNonReentrant, 0))
 		pid.reentrancy.Load().blockingCount.Inc()
-		require.NoError(t, pid.responses.Enqueue(new(GrainContext)))
+		require.NoError(t, pid.responses.Load().Enqueue(new(GrainContext)))
 		require.True(t, pid.hasPendingWork())
 	})
+}
+
+// TestNewGrainPIDWithoutReentrancyHasNoResponseQueue asserts that a grain
+// built without a reentrancy policy never gets a response queue, and that the
+// turn-loop readers cope with its absence.
+func TestNewGrainPIDWithoutReentrancyHasNoResponseQueue(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	pid := newGrainPID(&GrainIdentity{kind: "Kind", name: "plain"}, NewMockGrain(), sys, newGrainConfig())
+
+	require.Nil(t, pid.responses.Load())
+	require.Nil(t, pid.dequeueResponse())
+	require.False(t, pid.hasPendingWork())
+}
+
+// TestGrainAttachResponseQueue asserts that the response queue is attached
+// exactly once, sequentially and under concurrent attaches.
+func TestGrainAttachResponseQueue(t *testing.T) {
+	t.Run("attaches once", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachResponseQueue()
+
+		queue := pid.responses.Load()
+		require.NotNil(t, queue)
+
+		// A second attach keeps the queue the grain already published.
+		pid.attachResponseQueue()
+		require.Same(t, queue, pid.responses.Load())
+	})
+
+	t.Run("concurrent attach yields one queue", func(t *testing.T) {
+		pid := &grainPID{}
+		observed := make([]*grainMailbox, 8)
+
+		var wg sync.WaitGroup
+		for i := range observed {
+			wg.Add(1)
+
+			go func() {
+				defer wg.Done()
+				pid.attachResponseQueue()
+				observed[i] = pid.responses.Load()
+			}()
+		}
+
+		wg.Wait()
+
+		queue := pid.responses.Load()
+		require.NotNil(t, queue)
+
+		for _, seen := range observed {
+			require.Same(t, queue, seen)
+		}
+	})
+}
+
+// TestGrainEnableReentrancyAttachesResponseQueue asserts that a runtime
+// reentrancy install attaches the response queue once and keeps it across a
+// retune, and that an invalid config attaches nothing.
+func TestGrainEnableReentrancyAttachesResponseQueue(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	newPID := func() *grainPID {
+		return newGrainPID(&GrainIdentity{kind: "Kind", name: "runtime"}, NewMockGrain(), sys, newGrainConfig())
+	}
+
+	t.Run("valid config attaches the queue", func(t *testing.T) {
+		pid := newPID()
+		require.Nil(t, pid.responses.Load())
+
+		require.NoError(t, pid.enableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+		require.NotNil(t, pid.reentrancy.Load())
+		require.NotNil(t, pid.responses.Load())
+	})
+
+	t.Run("retune keeps the queue", func(t *testing.T) {
+		pid := newPID()
+		require.NoError(t, pid.enableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+
+		queue := pid.responses.Load()
+		require.NotNil(t, queue)
+
+		require.NoError(t, pid.enableReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+		require.Same(t, queue, pid.responses.Load())
+	})
+
+	t.Run("invalid config installs no state", func(t *testing.T) {
+		pid := newPID()
+		require.ErrorIs(t, pid.enableReentrancy(nil), gerrors.ErrInvalidReentrancyMode)
+		require.Nil(t, pid.reentrancy.Load())
+	})
+}
+
+// TestGrainEnqueueEnvelopeResponseWithoutReentrancy walks a response envelope
+// through both states of the queue: a grain that never enabled reentrancy has
+// none and rejects the envelope, and the same grain accepts it once the queue
+// is attached. The dispatcher is never started, so nothing drains the queue
+// behind the assertion.
+func TestGrainEnqueueEnvelopeResponseWithoutReentrancy(t *testing.T) {
+	pid := &grainPID{
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		dispatcher:  newDispatcher(1, 1),
+	}
+	pid.attachMailbox(0)
+	pid.activated.Store(true)
+
+	ctx := context.Background()
+	response := &commands.AsyncResponse{CorrelationID: "corr"}
+	require.ErrorIs(t, pid.enqueueEnvelope(ctx, response), gerrors.ErrReentrancyDisabled)
+
+	pid.attachResponseQueue()
+	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+
+	require.NoError(t, pid.enqueueEnvelope(ctx, response))
+	require.False(t, pid.responses.Load().IsEmpty())
 }
 
 func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
@@ -905,11 +1026,11 @@ func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
 	t.Cleanup(d.signalStop)
 
 	pid := &grainPID{
-		grain:      grain,
-		mailbox:    newGrainMailbox(0),
-		logger:     log.DiscardLogger,
-		dispatcher: d,
+		grain:       grain,
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		dispatcher:  d,
 	}
+	pid.attachMailbox(0)
 	pid.activated.Store(true)
 
 	ctx := context.Background()
@@ -924,23 +1045,24 @@ func TestGrainRunTurnBudgetExhaustionReschedules(t *testing.T) {
 }
 
 func TestGrainFinishOrReclaimResumesOnPendingWork(t *testing.T) {
-	pid := &grainPID{mailbox: newGrainMailbox(0)}
+	pid := &grainPID{}
+	pid.attachMailbox(0)
 	require.True(t, pid.schedState.TrySchedule())
 	require.True(t, pid.schedState.TakeForProcessing())
 
 	// Work arrived: the turn must reclaim ownership and keep draining.
-	require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+	require.NoError(t, pid.enqueueMessage(new(GrainContext)))
 	require.False(t, pid.finishOrReclaim())
 
 	// Nothing left: the turn must park.
-	require.NotNil(t, pid.mailbox.Dequeue())
+	require.NotNil(t, pid.dequeueMessage())
 	require.True(t, pid.finishOrReclaim())
 }
 
 func TestGrainRecoveryWrapsPlainErrorPanic(t *testing.T) {
 	pid := &grainPID{
-		identity: &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:   log.DiscardLogger,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
 
 	grainContext := getGrainContext(0).build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
@@ -961,8 +1083,8 @@ func TestGrainRecoveryWrapsPlainErrorPanic(t *testing.T) {
 
 func TestGrainRecoveryDeliversPanicToAskCaller(t *testing.T) {
 	pid := &grainPID{
-		identity: &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:   log.DiscardLogger,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
 
 	// An ask context has no err channel: the panic must reach the caller
@@ -987,8 +1109,8 @@ func TestGrainRecoveryDeliversPanicToAskCaller(t *testing.T) {
 
 func TestGrainRecoveryKeepsPanicErrorIdentity(t *testing.T) {
 	pid := &grainPID{
-		identity: &GrainIdentity{kind: "Kind", name: "Name"},
-		logger:   log.DiscardLogger,
+		identity:    &GrainIdentity{kind: "Kind", name: "Name"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
 
 	grainContext := getGrainContext(0).build(context.Background(), pid, nil, pid.identity, &testpb.Reply{}, grainTell)
@@ -1008,18 +1130,18 @@ func TestGrainRecoveryKeepsPanicErrorIdentity(t *testing.T) {
 }
 
 func TestGrainPoisonPillTeardownContainsPanickingContinuation(t *testing.T) {
-	sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
+	_, pid, _, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 	registerGrainRequestState(pid, "boom", reentrancy.AllowAll, func(any, error) {
 		panic("continuation exploded during teardown")
 	})
 
-	gctx := getGrainContext(0).build(context.Background(), pid, sys, identity, new(PoisonPill), grainTell)
-	pid.receive(gctx)
+	ack := pid.enqueuePoisonPill(context.Background())
 
 	// The panic is contained: the pill still deactivates the grain.
 	select {
-	case <-pid.deactivated:
+	case err := <-ack:
+		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("panicking continuation blocked deactivation")
 	}
@@ -1234,17 +1356,17 @@ func TestGrainPassivationPillThenPoisonPillDeactivatesOnce(t *testing.T) {
 	pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
 	require.True(t, pid.passivationTry("idle"))
 
-	gctx := getGrainContext(0).build(ctx, pid, system, identity, new(PoisonPill), grainTell)
-	pid.receive(gctx)
+	ack := pid.enqueuePoisonPill(ctx)
 
 	select {
-	case <-pid.deactivated:
+	case err := <-ack:
+		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("grain did not deactivate")
 	}
 
 	require.Eventually(t, func() bool {
-		return pid.mailbox.IsEmpty()
+		return pid.mailboxEmpty()
 	}, 2*time.Second, 10*time.Millisecond)
 	require.EqualValues(t, 1, grain.deactivations.Load())
 	require.False(t, pid.isActive())
@@ -1252,13 +1374,13 @@ func TestGrainPassivationPillThenPoisonPillDeactivatesOnce(t *testing.T) {
 
 func TestGrainPassivationPillRejectedByFullMailbox(t *testing.T) {
 	pid := &grainPID{
-		identity: &GrainIdentity{kind: "Kind", name: "full"},
-		mailbox:  newGrainMailbox(1),
-		logger:   log.DiscardLogger,
+		identity:    &GrainIdentity{kind: "Kind", name: "full"},
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
 	}
+	pid.attachMailbox(1)
 	pid.activated.Store(true)
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	require.NoError(t, pid.mailbox.Enqueue(new(GrainContext)))
+	require.NoError(t, pid.boundedMailbox.Enqueue(new(GrainContext)))
 
 	before := time.Now().UnixNano()
 	require.False(t, pid.passivationTry("idle"))
@@ -1492,8 +1614,7 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 	// behind the message about to start a request.
 	pid.enqueueInFlightCancellations()
 
-	pill := getGrainContext(0).build(ctx, pid, system, identity, new(PoisonPill), grainTell)
-	pid.receive(pill)
+	ack := pid.enqueuePoisonPill(ctx)
 	close(release)
 
 	select {
@@ -1504,10 +1625,191 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 	}
 
 	select {
-	case <-pid.deactivated:
+	case err := <-ack:
+		require.NoError(t, err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("grain did not deactivate after the pause lifted")
 	}
 
 	require.False(t, pid.isActive())
+}
+
+// TestGrainAttachMailbox verifies the two mailbox shapes a grain can get: an
+// unbounded grain runs on the embedded queue, whose two words are seeded with a
+// single shared sentinel and which needs no standalone object, while a capacity
+// gives it a standalone bounded mailbox and leaves the embedded words nil.
+func TestGrainAttachMailbox(t *testing.T) {
+	t.Run("unbounded runs embedded", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+
+		require.Nil(t, pid.boundedMailbox)
+		sentinel := pid.mailboxHead.Load()
+		require.NotNil(t, sentinel)
+		require.Same(t, sentinel, pid.mailboxTail.Load())
+	})
+
+	t.Run("capacity runs standalone", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachMailbox(1)
+
+		require.NotNil(t, pid.boundedMailbox)
+		require.EqualValues(t, 1, pid.boundedMailbox.Capacity())
+		require.Nil(t, pid.mailboxHead.Load())
+		require.Nil(t, pid.mailboxTail.Load())
+	})
+}
+
+// TestGrainMailboxDispatch verifies that the process routes every user-mailbox
+// operation to the queue the grain actually has: the embedded queue accepts
+// without bound, the standalone one rejects past its capacity.
+func TestGrainMailboxDispatch(t *testing.T) {
+	t.Run("embedded", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+		require.True(t, pid.mailboxEmpty())
+
+		grainContext := new(GrainContext)
+		require.NoError(t, pid.enqueueMessage(grainContext))
+		require.False(t, pid.mailboxEmpty())
+
+		require.Same(t, grainContext, pid.dequeueMessage())
+		require.True(t, pid.mailboxEmpty())
+		require.Nil(t, pid.dequeueMessage())
+	})
+
+	t.Run("bounded rejects past capacity", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachMailbox(1)
+
+		require.NoError(t, pid.enqueueMessage(new(GrainContext)))
+		require.ErrorIs(t, pid.enqueueMessage(new(GrainContext)), gerrors.ErrMailboxFull)
+		require.False(t, pid.mailboxEmpty())
+		require.NotNil(t, pid.dequeueMessage())
+	})
+}
+
+// TestGrainPIDStaysInItsSizeClass pins the grain process struct at three whole
+// cache lines, the size the per-line field grouping is built on.
+func TestGrainPIDStaysInItsSizeClass(t *testing.T) {
+	require.EqualValues(t, 192, unsafe.Sizeof(grainPID{}), "grainPID must stay 192 bytes, three whole cache lines, so every process starts on a line boundary")
+}
+
+// TestGrainGetLogger checks that the process reports the logger of the actor
+// system it was built with.
+func TestGrainGetLogger(t *testing.T) {
+	pid := &grainPID{actorSystem: &actorSystem{logger: log.DiscardLogger}}
+	require.Equal(t, log.DiscardLogger, pid.getLogger())
+}
+
+// TestGrainEnqueuePoisonPill covers the three answers a poison pill gets: the
+// ack after OnDeactivate ran, the immediate ack for a grain that was never
+// activated, and the rejection from a full bounded mailbox.
+func TestGrainEnqueuePoisonPill(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("active grain deactivates and acks", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		identity, err := sys.GrainIdentity(ctx, "poisoned", func(context.Context) (Grain, error) {
+			return NewMockGrain(), nil
+		})
+		require.NoError(t, err)
+
+		pid, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+
+		ack := pid.enqueuePoisonPill(ctx)
+
+		select {
+		case err := <-ack:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the pill was never acknowledged")
+		}
+
+		require.False(t, pid.isActive())
+	})
+
+	t.Run("inactive grain acks immediately", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		// The process is built but never activated: handlePoisonPill answers
+		// on its behalf instead of leaving the caller without an ack.
+		identity := newGrainIdentity(NewMockGrain(), "never-activated")
+		pid := newGrainPID(identity, NewMockGrain(), sys.(*actorSystem), newGrainConfig())
+
+		ack := pid.enqueuePoisonPill(ctx)
+
+		select {
+		case err := <-ack:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the pill was never acknowledged")
+		}
+
+		require.False(t, pid.isActive())
+	})
+
+	t.Run("full mailbox acks the rejection", func(t *testing.T) {
+		// The dispatcher is never started, so nothing drains the mailbox and
+		// the rejection is the only thing that can reach the ack channel.
+		pid := &grainPID{
+			identity:    &GrainIdentity{kind: "Kind", name: "full"},
+			actorSystem: &actorSystem{logger: log.DiscardLogger},
+			dispatcher:  newDispatcher(1, 1),
+		}
+		pid.attachMailbox(1)
+		pid.activated.Store(true)
+		require.NoError(t, pid.boundedMailbox.Enqueue(new(GrainContext)))
+
+		ack := pid.enqueuePoisonPill(ctx)
+		require.ErrorIs(t, <-ack, gerrors.ErrMailboxFull)
+	})
+}
+
+// TestGrainPIDGettersNeedNoLock checks that getGrain and getIdentity stay
+// readable without mu while the registry is created under that same mutex.
+func TestGrainPIDGettersNeedNoLock(t *testing.T) {
+	ctx := context.Background()
+	grain := NewMockGrain()
+	pid := newTestGrainPID(grain, "getters")
+	identity := pid.identity
+
+	require.Same(t, grain, pid.getGrain())
+	require.Same(t, identity, pid.getIdentity())
+	require.NoError(t, pid.activate(ctx))
+
+	// the unlocked reads must stay clean while the registry is being created
+	// under the same mutex they used to take
+	stable := make([]bool, 4)
+
+	var wg sync.WaitGroup
+	for i := range stable {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			same := true
+			for range 100 {
+				same = same && pid.getIdentity() == identity && pid.getGrain() == grain
+			}
+
+			stable[i] = same
+		}()
+	}
+
+	registry, err := pid.timerRegistry()
+	require.NoError(t, err)
+	require.NotNil(t, registry)
+
+	wg.Wait()
+	require.Equal(t, []bool{true, true, true, true}, stable)
 }

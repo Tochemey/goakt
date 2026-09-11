@@ -1805,6 +1805,95 @@ func TestAskGrain(t *testing.T) {
 	})
 }
 
+func TestAskGrain_ReplyChannelPooling(t *testing.T) {
+	t.Run("a reply returns the channel to the grain shard", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-reply-pooled", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.Response(new(testpb.Reply))
+		}}
+
+		identity, err := sys.GrainIdentity(ctx, "reply-pooled", func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		// A first ask activates the grain, which is what assigns its home shard.
+		_, err = sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+
+		pid, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+
+		shard := pid.ctxShard
+		drainGrainChannelShard(grainReplyChannelPool, shard)
+
+		resp, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, &testpb.Reply{}, resp)
+
+		pooled := grainReplyChannelPool.shards[shard&grainReplyChannelPool.mask].pop()
+		require.NotNil(t, pooled, "a completed ask must return its reply channel to the grain shard")
+	})
+
+	t.Run("a timed out ask abandons the channel", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("ask-grain-reply-abandoned", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		started := make(chan struct{})
+		release := make(chan struct{})
+		// Registered after the shutdown cleanup so it runs first: the blocked
+		// handler must be released before the system stops.
+		t.Cleanup(func() { close(release) })
+
+		grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			switch gctx.Message().(type) {
+			case *testpb.TestTimeout:
+				close(started)
+				<-release
+				gctx.Response(new(testpb.Reply))
+			default:
+				gctx.Response(new(testpb.Reply))
+			}
+		}}
+
+		identity, err := sys.GrainIdentity(ctx, "reply-abandoned", func(context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		// A first ask activates the grain, which is what assigns its home shard.
+		_, err = sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+
+		pid, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+
+		shard := pid.ctxShard
+		drainGrainChannelShard(grainReplyChannelPool, shard)
+
+		resp, err := sys.AskGrain(ctx, identity, new(testpb.TestTimeout), 50*time.Millisecond)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		require.Nil(t, resp)
+
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("grain never started the timed-out ask")
+		}
+
+		pooled := grainReplyChannelPool.shards[shard&grainReplyChannelPool.mask].pop()
+		require.Nil(t, pooled, "a timed out ask must abandon its reply channel, a late reply could still reach it")
+	})
+}
+
 func TestSelectActivationPeer_LeastLoadActivation(t *testing.T) {
 	ctx := t.Context()
 	cl := mockcluster.NewCluster(t)
@@ -2947,11 +3036,11 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 		sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 		// Deactivate the grain so delivery has to go through activation.
-		gctx := getGrainContext(0).build(ctx, pid, sys, identity, new(PoisonPill), grainTell)
-		pid.receive(gctx)
+		ack := pid.enqueuePoisonPill(ctx)
 
 		select {
-		case <-pid.deactivated:
+		case err := <-ack:
+			require.NoError(t, err)
 		case <-time.After(2 * time.Second):
 			t.Fatal("grain did not deactivate")
 		}
