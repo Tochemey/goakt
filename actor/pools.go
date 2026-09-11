@@ -39,13 +39,17 @@ var timers = timer.NewPool()
 var emptyAnyCh = func() chan any { ch := make(chan any); close(ch); return ch }()
 
 // getResponseChannel returns a fresh buffered (capacity 1) reply
-// channel for one synchronous request. Reply channels are deliberately
-// not pooled: a process-wide pool serializes every concurrent Ask on
-// one channel lock, and a reply racing the asker's timeout could land
-// in the channel after the drain that precedes pooling, handing the
-// next borrower a stale response. A per-request channel scales with
+// channel for one synchronous actor request. It serves the actor Ask
+// path only. Reply channels are deliberately not pooled here: a
+// process-wide pool serializes every concurrent Ask on one channel
+// lock, and a reply racing the asker's timeout could land in the
+// channel after the drain that precedes pooling, handing the next
+// borrower a stale response. A per-request channel scales with
 // concurrency and makes a late reply land in an unreachable channel
-// instead.
+// instead. Grain asks avoid both problems differently: they borrow
+// from a per-shard ring (grainReplyChannelPool in
+// grain_context_pool.go), which has no global lock, and their timeout
+// paths abandon the channel instead of returning it.
 func getResponseChannel() chan any {
 	return make(chan any, 1)
 }
@@ -75,6 +79,12 @@ func putErrorChannel(ch chan error) {
 // drainErrorChannel non-blockingly empties ch so it can be returned to
 // a pool in a clean state.
 func drainErrorChannel(ch chan error) {
+	drainChannel(ch)
+}
+
+// drainChannel non-blockingly empties ch, whatever its element type, so
+// it can be returned to a pool in a clean state.
+func drainChannel[T any](ch chan T) {
 	for {
 		select {
 		case <-ch:

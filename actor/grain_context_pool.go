@@ -200,30 +200,40 @@ func nextGrainContextShard() uint32 {
 	return grainContextShardCounter.Add(1) & grainContextPool.mask
 }
 
-// grainErrorChannelPool is the sharded free list for the grain Tell ack
-// channels. Every Tell attaches a buffered capacity-1 error channel to its
-// context and returns it after the ack; borrowing both from the process-wide
-// errorCh pool put two global channel-lock crossings on every message, which
-// profiling showed as the dominant remaining cost once contexts were
-// sharded. Channels do not carry a home shard of their own: callers index
-// the pool with the context's poolShard, so get and put stay on the same
-// ring.
-var grainErrorChannelPool = newGrainErrorChannelPool()
+// grainErrorChannelPool is the ack instantiation of the sharded channel
+// ring: buffered capacity-1 error channels for the grain Tell path. Every
+// Tell attaches one to its context and returns it after the ack; borrowing
+// both from the process-wide errorCh pool put two global channel-lock
+// crossings on every message, which profiling showed as the dominant
+// remaining cost once contexts were sharded. Channels do not carry a home
+// shard of their own: callers index the pool with the context's poolShard,
+// so get and put stay on the same ring.
+var grainErrorChannelPool = newGrainChannelPool[error]()
 
-// grainErrorChannelCell is one slot of a grainErrorChannelShard ring. seq
-// is the sequence number that tells an arriving cursor whether the cell is
-// empty or full; ch is the pooled channel and is valid only while seq marks
-// the cell full. ch is written before the seq store that publishes it and
-// read after the seq load that observes it, so the plain field is ordered
-// by the atomic.
-type grainErrorChannelCell struct {
+// grainReplyChannelPool is the reply instantiation of the same ring:
+// buffered capacity-1 any channels for the grain Ask path. Every Ask
+// attaches one to its context and returns it once the reply has been
+// received, which keeps a steady-state AskGrain free of the 128 bytes and
+// two allocations a fresh make(chan any, 1) costs. It is indexed with the
+// context's poolShard exactly like the ack pool.
+var grainReplyChannelPool = newGrainChannelPool[any]()
+
+// grainChannelCell is one slot of a grainChannelShard ring. seq is the
+// sequence number that tells an arriving cursor whether the cell is empty
+// or full; ch is the pooled channel and is valid only while seq marks the
+// cell full. ch is written before the seq store that publishes it and read
+// after the seq load that observes it, so the plain field is ordered by the
+// atomic.
+type grainChannelCell[T any] struct {
 	seq atomic.Uint64
-	ch  chan error
+	ch  chan T
 }
 
-// grainErrorChannelShard is a bounded multi-producer multi-consumer ring of
-// spare ack channels, using the same Vyukov geometry as grainContextShard.
-type grainErrorChannelShard struct {
+// grainChannelShard is a bounded multi-producer multi-consumer ring of
+// spare channels, using the same Vyukov geometry as grainContextShard. T is
+// the channel element type: error for the Tell acks, any for the Ask
+// replies.
+type grainChannelShard[T any] struct {
 	// enqueuePos is the position of the next put; cells[enqueuePos&mask]
 	// is where the next spare channel is stored.
 	enqueuePos atomic.Uint64
@@ -235,24 +245,25 @@ type grainErrorChannelShard struct {
 	_          CacheLinePadding
 
 	// cells is the ring storage. Length is a power of two.
-	cells [contextShardCapacity]grainErrorChannelCell
+	cells [contextShardCapacity]grainChannelCell[T]
 }
 
-// grainErrorChannelPoolShards aggregates the shards with the bitmask used
-// to fold arbitrary shard hints into range.
-type grainErrorChannelPoolShards struct {
+// grainChannelPoolShards aggregates the shards with the bitmask used to
+// fold arbitrary shard hints into range. One instantiation serves the Tell
+// acks and another the Ask replies; the two are independent structures.
+type grainChannelPoolShards[T any] struct {
 	// shards holds contextShardCount independent rings.
-	shards []grainErrorChannelShard
+	shards []grainChannelShard[T]
 	// mask is len(shards)-1, applied to every incoming shard index.
 	mask uint32
 }
 
-// newGrainErrorChannelPool constructs the sharded pool with every cell
+// newGrainChannelPool constructs a sharded channel pool with every cell
 // marked empty. No channels are pre-allocated: shards fill naturally as
-// Tell acks recycle, and a cold get is a plain make.
-func newGrainErrorChannelPool() *grainErrorChannelPoolShards {
-	pool := &grainErrorChannelPoolShards{
-		shards: make([]grainErrorChannelShard, contextShardCount),
+// requests recycle, and a cold get is a plain make.
+func newGrainChannelPool[T any]() *grainChannelPoolShards[T] {
+	pool := &grainChannelPoolShards[T]{
+		shards: make([]grainChannelShard[T], contextShardCount),
 		mask:   contextShardCount - 1,
 	}
 
@@ -266,10 +277,29 @@ func newGrainErrorChannelPool() *grainErrorChannelPoolShards {
 	return pool
 }
 
+// get returns a buffered capacity-1 channel from the shard identified by
+// shard, allocating a fresh one when that shard is empty or contended.
+func (x *grainChannelPoolShards[T]) get(shard uint32) chan T {
+	if ch := x.shards[shard&x.mask].pop(); ch != nil {
+		return ch
+	}
+	return make(chan T, 1)
+}
+
+// put drains ch and returns it to the shard identified by shard. Callers
+// must pass the same shard the channel was fetched with (the owning
+// context's poolShard) and must not return a channel a late send could
+// still reach: timeout paths abandon their channel to the GC exactly like
+// the process-wide errorCh pool.
+func (x *grainChannelPoolShards[T]) put(shard uint32, ch chan T) {
+	drainChannel(ch)
+	x.shards[shard&x.mask].push(ch)
+}
+
 // pop removes and returns one channel, or nil when the shard is empty or
 // the spin budget is exhausted under contention. Safe for concurrent
 // callers.
-func (x *grainErrorChannelShard) pop() chan error {
+func (x *grainChannelShard[T]) pop() chan T {
 	pos := x.dequeuePos.Load()
 
 	for range poolSpinLimit {
@@ -300,7 +330,7 @@ func (x *grainErrorChannelShard) pop() chan error {
 // push stores ch into the ring, silently dropping it when the ring is full
 // or the spin budget is exhausted under contention. Safe for concurrent
 // callers.
-func (x *grainErrorChannelShard) push(ch chan error) {
+func (x *grainChannelShard[T]) push(ch chan T) {
 	pos := x.enqueuePos.Load()
 
 	for range poolSpinLimit {
@@ -329,20 +359,33 @@ func (x *grainErrorChannelShard) push(ch chan error) {
 // shard identified by shard, allocating a fresh one on empty/contended.
 // Used by the grain Tell path to carry the processed acknowledgment.
 func getGrainErrorChannel(shard uint32) chan error {
-	if ch := grainErrorChannelPool.shards[shard&grainErrorChannelPool.mask].pop(); ch != nil {
-		return ch
-	}
-	return make(chan error, 1)
+	return grainErrorChannelPool.get(shard)
 }
 
 // putGrainErrorChannel drains ch and returns it to the shard identified by
 // shard. Callers must pass the same shard the channel was fetched with (the
 // owning context's poolShard) and must not return a channel a late ack
-// could still reach: timeout paths abandon their channel to the GC exactly
-// like the process-wide errorCh pool.
+// could still reach: the TellGrain timeout paths abandon their channel to
+// the GC.
 func putGrainErrorChannel(shard uint32, ch chan error) {
-	drainErrorChannel(ch)
-	grainErrorChannelPool.shards[shard&grainErrorChannelPool.mask].push(ch)
+	grainErrorChannelPool.put(shard, ch)
+}
+
+// getGrainReplyChannel returns a buffered capacity-1 reply channel from the
+// shard identified by shard, allocating a fresh one on empty/contended.
+// Used by the grain Ask path to carry the reply, successes and handler
+// failures alike.
+func getGrainReplyChannel(shard uint32) chan any {
+	return grainReplyChannelPool.get(shard)
+}
+
+// putGrainReplyChannel drains ch and returns it to the shard identified by
+// shard. Callers must pass the same shard the channel was fetched with (the
+// owning context's poolShard) and must not return a channel a late reply
+// could still reach: the AskGrain timeout paths abandon their channel to
+// the GC.
+func putGrainReplyChannel(shard uint32, ch chan any) {
+	grainReplyChannelPool.put(shard, ch)
 }
 
 // getGrainContext retrieves a GrainContext from the pool shard identified

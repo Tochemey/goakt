@@ -118,7 +118,7 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 - **grain_engine.go**: Grain activation, routing, passivation.
 - **grain_pid.go**: `grainPID`: `PID` variant for virtual actors; implements `schedulable`.
 - **grain_context.go**: `GrainContext` for `OnReceive`.
-- **grain_context_pool.go**: Sharded lock-free pool for `GrainContext` and Tell ack channels. See
+- **grain_context_pool.go**: Sharded lock-free pool for `GrainContext`, Tell ack channels and Ask reply channels. See
   [Grain sibling](/architecture/context-pools#grain-sibling).
 - **grain_identity.go**: `GrainIdentity` with memoised validation (hot-path allocation fix).
 - **grain_mailbox.go**: Standalone grain mailbox for bounded user mailboxes and the response queue.

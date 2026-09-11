@@ -787,16 +787,23 @@ func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message 
 	// Handle synchronous (Ask) case
 	if synchronous {
 		responseCh := grainContext.response
+		shard := grainContext.poolShard
 
 		// receive hands the context to the mailbox; it can be recycled and
 		// rebuilt for an unrelated message at any point after, so only the
 		// per-request response channel captured above may be touched from here
 		// on. A reply arriving after this Ask gives up lands in that
-		// unreachable channel and is dropped with it.
+		// unreachable channel and is dropped with it. The reply channel goes
+		// home to the shard it was fetched from once the reply is in hand;
+		// poolShard is written once at allocation, so reading it after the
+		// mailbox handoff is race-free. The timeout and cancellation paths
+		// below abandon the channel instead, because a late reply could still
+		// reach it.
 		pid.receive(grainContext)
 		select {
 		case res := <-responseCh:
 			timers.Put(timer)
+			putGrainReplyChannel(shard, responseCh)
 
 			// Failures reported by the handler ride the same reply channel,
 			// wrapped so an error-typed response payload is not mistaken

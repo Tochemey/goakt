@@ -894,7 +894,7 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 		// Ask replies, success and failure alike, travel on the single
 		// response channel (see sendReply); no error channel is attached.
 		gctx.err = nil
-		gctx.response = getResponseChannel()
+		gctx.response = getGrainReplyChannel(gctx.poolShard)
 	case grainTell:
 		gctx.err = getGrainErrorChannel(gctx.poolShard)
 		gctx.response = nil
