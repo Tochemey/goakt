@@ -160,3 +160,11 @@ A single-node scale test (not a benchmark) that spawns one million actors, keeps
 ```
 go test -tags=scale -run TestMillionActorsSustainedLoad -v -timeout 30m ./benchmark/
 ```
+
+### MillionGrainsSustainedLoad — 1M grains processing under sustained load
+
+The grain counterpart of MillionActorsSustainedLoad, so the two populations are measured the same way: activates one million long-lived grains, reports memory per grain (bytes/grain, HeapInuse) once they are idle, then keeps every grain processing messages for the same fixed window and reports CPU and throughput. Each producer's TellGrain returns when the grain has processed the message, so there is no backlog cap. Build-tagged behind `scale` like the actor test; budget about 1 GB of RAM.
+
+```
+go test -tags=scale -run TestMillionGrainsSustainedLoad -v -timeout 30m ./benchmark/
+```
