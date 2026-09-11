@@ -25,8 +25,6 @@ package actor
 import (
 	"time"
 
-	"go.uber.org/atomic"
-
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -77,11 +75,23 @@ const (
 type GrainOption func(config *grainConfig)
 type grainConfig struct {
 	// initMaxRetries is the maximum number of retries when initializing a grain.
-	initMaxRetries atomic.Int32
+	// It is set at construction and never changed afterwards.
+	initMaxRetries int32
+	// this feature can be used to disable relocation of grains in cluster mode
+	disableRelocation bool
+	// eagerRelocation opts the grain into upfront reactivation on a surviving
+	// node when its host departs the cluster. When false (default) the grain
+	// relocates lazily: its directory entry is cleaned and it re-activates on
+	// next use.
+	eagerRelocation bool
 	// initTimeout is the timeout duration for grain initialization.
-	initTimeout     atomic.Duration
+	// It is set at construction and never changed afterwards.
+	initTimeout     time.Duration
 	deactivateAfter time.Duration
-	dependencies    *xsync.Map[string, extension.Dependency]
+	// dependencies holds the dependencies registered through WithGrainDependencies.
+	// It stays nil until the first one is registered, so a grain configured
+	// without dependencies carries no map.
+	dependencies *xsync.Map[string, extension.Dependency]
 	// role defines the role required for the node to activate the grain.
 	role *string
 	// placement specifies the placement strategy for activating the grain in a cluster.
@@ -90,13 +100,6 @@ type grainConfig struct {
 	//   <= 0 : unbounded
 	//   >  0 : bounded to capacity
 	capacity int64
-	// this feature can be used to disable relocation of grains in cluster mode
-	disableRelocation bool
-	// eagerRelocation opts the grain into upfront reactivation on a surviving
-	// node when its host departs the cluster. When false (default) the grain
-	// relocates lazily: its directory entry is cleaned and it re-activates on
-	// next use.
-	eagerRelocation bool
 	// reentrancy is the grain's async request policy; nil disables requests
 	// until enabled at runtime through GrainContext.EnableReentrancy.
 	reentrancy *reentrancy.Reentrancy
@@ -114,17 +117,12 @@ type grainConfig struct {
 //   - *grainConfig: a pointer to the configured grainConfig instance.
 func newGrainConfig(opts ...GrainOption) *grainConfig {
 	config := &grainConfig{
-		initMaxRetries:     atomic.Int32{},
-		initTimeout:        atomic.Duration{},
+		initMaxRetries:     DefaultInitMaxRetries,
+		initTimeout:        DefaultInitTimeout,
 		deactivateAfter:    DefaultPassivationTimeout,
-		dependencies:       xsync.NewMap[string, extension.Dependency](),
 		activationStrategy: LocalActivation,
 		capacity:           0,
 	}
-
-	// Set default values
-	config.initMaxRetries.Store(DefaultInitMaxRetries)
-	config.initTimeout.Store(DefaultInitTimeout)
 
 	for _, opt := range opts {
 		opt(config)
@@ -149,7 +147,7 @@ func (s *grainConfig) Validate() error {
 		}
 	}
 
-	for _, dependency := range s.dependencies.Values() {
+	for _, dependency := range s.dependencyValues() {
 		if dependency != nil {
 			if err := validation.NewIDValidator(dependency.ID()).Validate(); err != nil {
 				return err
@@ -157,6 +155,26 @@ func (s *grainConfig) Validate() error {
 		}
 	}
 	return nil
+}
+
+// dependencyValues returns the registered dependencies, nil when the grain was
+// configured without any.
+func (s *grainConfig) dependencyValues() []extension.Dependency {
+	if s.dependencies == nil {
+		return nil
+	}
+
+	return s.dependencies.Values()
+}
+
+// dependency returns the dependency registered under id, false when the grain
+// has none or the id is unknown.
+func (s *grainConfig) dependency(id string) (extension.Dependency, bool) {
+	if s.dependencies == nil {
+		return nil, false
+	}
+
+	return s.dependencies.Get(id)
 }
 
 // WithGrainInitMaxRetries returns a GrainOption that sets the maximum number of retries
@@ -174,7 +192,7 @@ func (s *grainConfig) Validate() error {
 //	cfg := newGrainConfig(WithGrainInitMaxRetries(10))
 func WithGrainInitMaxRetries(value int) GrainOption {
 	return func(config *grainConfig) {
-		config.initMaxRetries.Store(int32(value))
+		config.initMaxRetries = int32(value)
 	}
 }
 
@@ -193,7 +211,7 @@ func WithGrainInitMaxRetries(value int) GrainOption {
 //	WithGrainInitTimeout(2 * time.Second)
 func WithGrainInitTimeout(value time.Duration) GrainOption {
 	return func(config *grainConfig) {
-		config.initTimeout.Store(value)
+		config.initTimeout = value
 	}
 }
 
@@ -248,13 +266,16 @@ func WithLongLivedGrain() GrainOption {
 //	cfg := newGrainConfig(WithGrainDependencies(db, cache))
 func WithGrainDependencies(deps ...extension.Dependency) GrainOption {
 	return func(config *grainConfig) {
-		if config.dependencies == nil {
-			config.dependencies = xsync.NewMap[string, extension.Dependency]()
-		}
 		for _, dep := range deps {
-			if dep != nil {
-				config.dependencies.Set(dep.ID(), dep)
+			if dep == nil {
+				continue
 			}
+
+			if config.dependencies == nil {
+				config.dependencies = xsync.NewMap[string, extension.Dependency]()
+			}
+
+			config.dependencies.Set(dep.ID(), dep)
 		}
 	}
 }

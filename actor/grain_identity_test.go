@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -119,4 +120,22 @@ func TestIdentity(t *testing.T) {
 		require.Equal(t, identity.Name(), wireID.GetName())
 		require.Equal(t, identity.String(), wireID.GetValue())
 	})
+}
+
+// TestNewGrainIdentitySharesOneString checks that an identity built by
+// newGrainIdentity retains a single string: kind and name must be views into
+// the "kind/name" form that String() returns, so neither the reflected type
+// name nor the caller's name string is kept alive.
+func TestNewGrainIdentitySharesOneString(t *testing.T) {
+	grain := NewMockGrain()
+	identity := newGrainIdentity(grain, "shared")
+
+	expectedKind := types.Name(grain)
+	require.Equal(t, expectedKind, identity.Kind())
+	require.Equal(t, "shared", identity.Name())
+	require.Equal(t, expectedKind+id.GrainIdentitySeparator+"shared", identity.String())
+
+	full := identity.String()
+	require.Same(t, unsafe.StringData(identity.Kind()), unsafe.StringData(full), "kind must be a view into the full string")
+	require.Same(t, unsafe.StringData(identity.Name()), unsafe.StringData(full[len(identity.Kind())+len(id.GrainIdentitySeparator):]), "name must be a view into the full string")
 }

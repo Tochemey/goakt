@@ -60,11 +60,11 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	t.Cleanup(d.signalStop)
 
 	pid := &grainPID{
-		grain:      grain,
-		mailbox:    newGrainMailbox(0), // unbounded
-		logger:     log.DiscardLogger,
-		dispatcher: d,
+		grain:       grain,
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		dispatcher:  d,
 	}
+	pid.attachMailbox(0) // unbounded
 	pid.activated.Store(true)
 
 	ctx := context.Background()
@@ -80,7 +80,7 @@ func TestGrainPIDProcessReleasesContexts(t *testing.T) {
 	require.Same(t, second, <-grain.done)
 
 	require.Eventually(t, func() bool {
-		return pid.mailbox.IsEmpty() && pid.schedState.Load() == dispatchIdle
+		return pid.mailboxEmpty() && pid.schedState.Load() == dispatchIdle
 	}, time.Second, 10*time.Millisecond)
 
 	require.Nil(t, first.Message())

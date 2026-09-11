@@ -500,8 +500,9 @@ into a second mailbox that way.
 
 **Recycle mix.** Grains recycle mostly from mailbox dequeue:
 
-- **`grainMailbox.Dequeue`** is the sentinel path, same idea as `UnboundedMailbox`: the previous head is `reset()`,
-  `next` cleared, `grainContextPool.put`.
+- **Mailbox `Dequeue`** is the sentinel path, same idea as `UnboundedMailbox`: the previous head is `reset()`,
+  `next` cleared, `grainContextPool.put`. The default user mailbox is `embeddedGrainMailbox`, two words inside
+  `grainPID`; `grainMailbox` serves bounded user mailboxes and the response queue.
 - **`releaseGrainContext`** is for failed enqueue (bounded mailbox full, timer tick dropped, passivation pill refused).
   It is not the steady-state drain path.
 

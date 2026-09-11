@@ -2947,11 +2947,11 @@ func TestDeliverAsyncEnvelope(t *testing.T) {
 		sys, pid, _, identity := startReentrantGrainFixture(t, reentrancy.AllowAll)
 
 		// Deactivate the grain so delivery has to go through activation.
-		gctx := getGrainContext(0).build(ctx, pid, sys, identity, new(PoisonPill), grainTell)
-		pid.receive(gctx)
+		ack := pid.enqueuePoisonPill(ctx)
 
 		select {
-		case <-pid.deactivated:
+		case err := <-ack:
+			require.NoError(t, err)
 		case <-time.After(2 * time.Second):
 			t.Fatal("grain did not deactivate")
 		}

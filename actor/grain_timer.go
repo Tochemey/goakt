@@ -48,6 +48,12 @@ const (
 	cronGrainTimer
 )
 
+// grainTimerSink receives the ticks a registry fires. The grain process is the
+// production sink; registry tests substitute a recorder.
+type grainTimerSink interface {
+	deliverTimerTick(*grainTimerEntry)
+}
+
 // grainTimerEntry is a single registered grain timer. Entries are created by the
 // schedule methods of grainTimers and flow through delivery as the payload of a
 // tick.
@@ -98,7 +104,9 @@ type grainTimerTick struct {
 // References are unique per grain: registering a timer under a reference that is
 // already in use cancels and replaces the existing timer.
 type grainTimers struct {
-	mu      sync.Mutex
+	mu sync.Mutex
+	// entries holds the live timers by reference. Nil until the first
+	// registration allocates it, so a grain that never schedules carries no map.
 	entries map[string]*grainTimerEntry
 	// started flips once activation completes. Entries registered before that (from
 	// OnActivate) stay dormant so a short-delay tick cannot fire into the
@@ -107,18 +115,16 @@ type grainTimers struct {
 	// stopped flips once the grain deactivates or its activation fails; a
 	// stopped registry rejects every operation and is never restarted.
 	stopped bool
-	// deliver hands a due tick to the owning grain. Re-arming happens at fire
+	// sink hands a due tick to the owning grain. Re-arming happens at fire
 	// time, before delivery, so a failed delivery only loses that one tick; the
 	// grain logs the drop.
-	deliver func(*grainTimerEntry)
+	sink grainTimerSink
 }
 
-// newGrainTimers creates a new, not-yet-started registry delivering ticks through deliver.
-func newGrainTimers(deliver func(*grainTimerEntry)) *grainTimers {
-	return &grainTimers{
-		entries: make(map[string]*grainTimerEntry),
-		deliver: deliver,
-	}
+// newGrainTimers creates a new, not-yet-started registry delivering ticks to sink.
+// The entry map is allocated by the first registration.
+func newGrainTimers(sink grainTimerSink) *grainTimers {
+	return &grainTimers{sink: sink}
 }
 
 // scheduleOnce registers a timer firing message exactly once after delay.
@@ -251,6 +257,11 @@ func (x *grainTimers) register(entry *grainTimerEntry) (string, error) {
 	}
 
 	entry.tick = &grainTimerTick{entry: entry}
+
+	if x.entries == nil {
+		x.entries = make(map[string]*grainTimerEntry)
+	}
+
 	x.entries[entry.reference] = entry
 	if x.started {
 		x.startEntryLocked(entry)
@@ -283,7 +294,7 @@ func (x *grainTimers) fire(entry *grainTimerEntry) {
 
 	x.mu.Unlock()
 
-	x.deliver(entry)
+	x.sink.deliverTimerTick(entry)
 }
 
 // cancelEntryLocked marks entry cancelled and stops its fire trigger.

@@ -5916,11 +5916,9 @@ func TestPutGrainOnCluster(t *testing.T) {
 	newTestGrainPID := func(system *actorSystem, name string) *grainPID {
 		identity := &GrainIdentity{kind: "grain.kind", name: name}
 		return &grainPID{
-			identity:     identity,
-			actorSystem:  system,
-			logger:       log.DiscardLogger,
-			dependencies: newGrainConfig().dependencies,
-			config:       newGrainConfig(),
+			identity:    identity,
+			actorSystem: system,
+			config:      newGrainConfig(),
 		}
 	}
 
@@ -6204,18 +6202,16 @@ func TestResyncGrains_ErrorPaths(t *testing.T) {
 	system.locker.Unlock()
 
 	dependency := mocksextension.NewDependency(t)
+	dependency.EXPECT().ID().Return("dep").Once()
 	dependency.EXPECT().MarshalBinary().Return(nil, assert.AnError).Once()
 
-	config := newGrainConfig()
-	config.dependencies.Set("dep", dependency)
+	config := newGrainConfig(WithGrainDependencies(dependency))
 
 	identity := &GrainIdentity{kind: "grain.kind", name: "grain"}
 	grain := &grainPID{
-		identity:     identity,
-		actorSystem:  system,
-		logger:       log.DiscardLogger,
-		dependencies: config.dependencies,
-		config:       config,
+		identity:    identity,
+		actorSystem: system,
+		config:      config,
 	}
 
 	system.grains.Set(identity.String(), grain)
@@ -6358,7 +6354,7 @@ func TestCleanupCluster_ReleasesGrains(t *testing.T) {
 		actorSystem: system,
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
-	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
+	grain := &grainPID{identity: grainID, actorSystem: system}
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
@@ -6379,7 +6375,7 @@ func TestCleanupCluster_ReleaseGrainFailure(t *testing.T) {
 		actorSystem: system,
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
-	grain := &grainPID{identity: grainID, actorSystem: system, logger: log.DiscardLogger}
+	grain := &grainPID{identity: grainID, actorSystem: system}
 	system.grains.Set(grainID.String(), grain)
 
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
@@ -8555,4 +8551,59 @@ func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
 
 	require.EqualValues(t, 1, system.membersJoinedCount.Load())
 	require.EqualValues(t, 1, system.membersLeftCount.Load())
+}
+
+// TestPoisonAllGrainsReportsRejectedPill drives shutdown against a grain whose
+// bounded mailbox is full: the pill is rejected, shutdown finishes with the
+// remaining grains instead of waiting out its deadline, and the grain whose
+// OnDeactivate never ran is named in the error Stop returns.
+func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
+	ctx := context.Background()
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+
+	blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		entered <- struct{}{}
+		<-release
+		gctx.NoErr()
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "blocked-grain", func(context.Context) (Grain, error) {
+		return blocking, nil
+	}, WithGrainMailboxCapacity(1))
+	require.NoError(t, err)
+
+	// The first message parks the turn inside OnReceive and the second one
+	// fills the bounded mailbox, so the shutdown pill has nowhere to go. Both
+	// sends block on their own acknowledgment, hence the goroutines.
+	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	<-entered
+	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+
+	pid, ok := system.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	require.Eventually(t, func() bool {
+		return pid.boundedMailbox.Len() == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	started := time.Now()
+	stopErr := system.Stop(stopCtx)
+	require.Less(t, time.Since(started), 5*time.Second)
+
+	// the pill never reached the grain, so shutdown names it instead of
+	// reporting a clean deactivation
+	require.ErrorIs(t, stopErr, gerrors.ErrMailboxFull)
+	require.Contains(t, stopErr.Error(), identity.String())
+
+	_, ok = system.(*actorSystem).grains.Get(identity.String())
+	require.False(t, ok)
+
+	close(release)
 }

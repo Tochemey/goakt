@@ -1451,6 +1451,28 @@ func embeddedMailboxHead(mailbox *embeddedMailbox) *ReceiveContext {
 	return (*ReceiveContext)(syncatomic.LoadPointer(&mailbox.mailboxHead))
 }
 
+// newEmbeddedGrainMailbox builds a standalone embedded grain mailbox seeded
+// exactly as attachMailbox seeds an unbounded grain's: one shared sentinel node
+// on both ends of an otherwise blank process, reinterpreted through
+// (*embeddedGrainMailbox).
+func newEmbeddedGrainMailbox() *embeddedGrainMailbox {
+	pid := &grainPID{}
+	pid.attachMailbox(0)
+	return (*embeddedGrainMailbox)(pid)
+}
+
+// embeddedGrainMailboxMessage builds a context carrying message for the grain
+// mailbox tests.
+func embeddedGrainMailboxMessage(message any) *GrainContext {
+	return &GrainContext{message: message}
+}
+
+// embeddedGrainMailboxHead reads the mailbox's current head, the node the
+// release protocol keeps as the sentinel.
+func embeddedGrainMailboxHead(mailbox *embeddedGrainMailbox) *GrainContext {
+	return mailbox.mailboxHead.Load()
+}
+
 // startTestActorSystem returns a started actor system named name and stops it through t.Cleanup.
 func startTestActorSystem(t *testing.T, name string) ActorSystem {
 	t.Helper()
@@ -1499,7 +1521,7 @@ func activateReentrantGrain(t *testing.T, system *actorSystem, grain Grain, name
 	require.True(t, ok)
 
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
+	pid.attachResponseQueue()
 	return identity
 }
 
@@ -1588,7 +1610,7 @@ func startEnvelopeGrainFixture(t *testing.T, grain Grain, name string) (*actorSy
 	require.True(t, ok)
 
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	pid.responses = newGrainMailbox(0)
+	pid.attachResponseQueue()
 
 	return sys, pid, identity
 }
@@ -1619,7 +1641,7 @@ func startReentrantGrainFixture(t *testing.T, mode reentrancy.Mode) (*actorSyste
 	require.True(t, ok)
 
 	pid.reentrancy.Store(newReentrancyState(mode, 0))
-	pid.responses = newGrainMailbox(0)
+	pid.attachResponseQueue()
 
 	return sys, pid, grain, identity
 }
@@ -1657,14 +1679,10 @@ func passivationEntryState(system *actorSystem, pid *grainPID) (exists, paused b
 }
 
 // newTestGrainTimers returns a registry whose deliveries land on the returned
-// channel. The channel is buffered so a stray late fire can never block a timer
-// goroutine after a test finishes.
+// channel, recorded by a mock sink in place of a grain process.
 func newTestGrainTimers() (*grainTimers, chan *grainTimerEntry) {
-	deliveries := make(chan *grainTimerEntry, 16)
-	timers := newGrainTimers(func(entry *grainTimerEntry) {
-		deliveries <- entry
-	})
-	return timers, deliveries
+	sink := NewMockTimerSink()
+	return newGrainTimers(sink), sink.ticks
 }
 
 // entryOf fetches the live entry registered under reference.
@@ -1763,16 +1781,18 @@ func spawnTimerProbeGrain(t *testing.T, opts ...GrainOption) *grainTimerFixture 
 // driven directly, with a single fast activation attempt.
 func newTestGrainPID(grain Grain, name string) *grainPID {
 	config := newGrainConfig()
-	config.initMaxRetries.Store(1)
-	config.initTimeout.Store(100 * time.Millisecond)
+	config.initMaxRetries = 1
+	config.initTimeout = 100 * time.Millisecond
 
-	return &grainPID{
-		grain:        grain,
-		identity:     newGrainIdentity(grain, name),
-		logger:       log.DiscardLogger,
-		config:       config,
-		dependencies: config.dependencies,
+	pid := &grainPID{
+		grain:       grain,
+		identity:    newGrainIdentity(grain, name),
+		actorSystem: &actorSystem{logger: log.DiscardLogger},
+		config:      config,
 	}
+	pid.attachMailbox(config.capacity)
+
+	return pid
 }
 
 // entryTimerStarted reports whether the entry registered under reference has its

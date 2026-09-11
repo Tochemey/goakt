@@ -3332,27 +3332,29 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	return nil
 }
 
-// poisonAllGrains sends a PoisonPill to every active grain and waits
-// for each to signal deactivation, bounded by ctx. Because
-// handlePoisonPill runs inside the grain's dispatcher turn (under
-// schedState.Processing), OnDeactivate is serialised with OnReceive —
-// no cross-goroutine access on user grain state.
-//
-// Returns ctx.Err() if the deadline expires before every grain finishes.
-// Grains that did not drain in time are left in the registry; their
-// pending pill sits in the mailbox and is lost when the dispatcher is
-// signalled to stop later in shutdown's defer. Callers treat this as a
-// best-effort outcome — some OnDeactivate hooks may not run under a
-// tight shutdown deadline.
+// poisonAllGrains sends a PoisonPill to every active grain and waits, bounded
+// by ctx, for each pill's acknowledgment: sent after OnDeactivate ran on the
+// grain's own turn, at once for a grain already deactivated, and with the
+// error for a pill a full bounded mailbox rejected. A rejected pill's grain is
+// dropped from the registry and named in the returned error, since its
+// OnDeactivate did not run, while shutdown proceeds with the rest. Returns
+// ctx.Err() when the deadline expires first; the grains still pending keep
+// their pill in the mailbox and lose it when the dispatcher stops, so their
+// OnDeactivate does not run.
 func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 	if x.grains.Len() == 0 {
 		return nil
 	}
 
+	type pendingPill struct {
+		grain *grainPID
+		ack   chan error
+	}
+
 	grains := x.grains.Values()
 	x.logger.Debugf("deactivating %d grains via PoisonPill...", len(grains))
 
-	pending := make([]*grainPID, 0, len(grains))
+	pending := make([]pendingPill, 0, len(grains))
 	for _, grain := range grains {
 		if !grain.isActive() {
 			x.grains.Delete(grain.getIdentity().String())
@@ -3365,26 +3367,40 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 		// nothing would ever end.
 		grain.enqueueInFlightCancellations()
 
-		gctx := getGrainContext(grain.ctxShard)
-		gctx.build(ctx, grain, x, grain.getIdentity(), new(PoisonPill), grainTell)
-		grain.receive(gctx)
-		pending = append(pending, grain)
+		pending = append(pending, pendingPill{grain: grain, ack: grain.enqueuePoisonPill(ctx)})
 	}
 
-	for _, grain := range pending {
+	var rejected []error
+	for _, pill := range pending {
 		select {
-		case <-grain.deactivated:
-			x.grains.Delete(grain.getIdentity().String())
-			x.logger.Debugf("grain=%s deactivated", grain.getIdentity().String())
+		case err := <-pill.ack:
+			// The process shard is the context's pool shard: nextGrainContextShard masks it the way the pool does.
+			putGrainErrorChannel(pill.grain.ctxShard, pill.ack)
+			x.grains.Delete(pill.grain.getIdentity().String())
+
+			if errors.Is(err, gerrors.ErrMailboxFull) {
+				rejected = append(rejected, fmt.Errorf("grain=%s: OnDeactivate skipped, %w", pill.grain.getIdentity().String(), err))
+				continue
+			}
+
+			if err != nil {
+				x.logger.Errorf("grain=%s was not deactivated cleanly: %v", pill.grain.getIdentity().String(), err)
+				continue
+			}
+
+			x.logger.Debugf("grain=%s deactivated", pill.grain.getIdentity().String())
 		case <-ctx.Done():
+			// A late ack may still land on the abandoned channel, so it is not
+			// returned to its shard; the collector takes it.
 			x.logger.Errorf(
 				"shutdown context expired before grain=%s finished deactivating (hint: OnDeactivate will not run for remaining grains)",
-				grain.getIdentity().String(),
+				pill.grain.getIdentity().String(),
 			)
 			return ctx.Err()
 		}
 	}
-	return nil
+
+	return errors.Join(rejected...)
 }
 
 // resyncActors resyncs all actors in the actor system.

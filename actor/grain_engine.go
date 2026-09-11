@@ -1188,7 +1188,7 @@ func (x *actorSystem) ensureGrainProcess(ctx context.Context, id *GrainIdentity)
 	// through to the slow path which runs the full validation.
 	//
 	// We intentionally do NOT repeat the registry.Exists check here:
-	// getGrain() acquires the grainPID mutex, which would dominate the
+	// the registry lookup takes the registry lock, which would sit on the
 	// hot path with no practical benefit (registrations are set at
 	// startup and the slow path validates on re-activation).
 	if process, ok := x.grains.Get(key); ok && process.isActive() {

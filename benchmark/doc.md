@@ -139,6 +139,14 @@ Spawns 100,000 empty actors into a started actor system, waits for their PostSta
 go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchtime=1x ./benchmark/
 ```
 
+### GrainMemoryFootprint: live heap bytes per idle grain
+
+The grain counterpart of ActorMemoryFootprint. Activates 100,000 empty grains through `GrainOf` into a started actor system, forces a collection and reports the live-heap growth per grain against the empty system's collected baseline, extrapolated to one million grains. Activation is synchronous, so nothing is left in flight and no settle step is needed. Runs twice: the default activation, which registers every grain with the passivation manager, and a long-lived activation, which does not. The difference between the two is the passivation bookkeeping per grain. The run fails when the live heap per grain exceeds the ceiling pinned in `grain_memory_test.go`.
+
+```
+go test -run=^$ -bench=^BenchmarkGrainMemoryFootprint$ -benchtime=1x ./benchmark/
+```
+
 ### RemoteTellThroughput — one shared client fans TCP tells over 10 systems for 10 s
 
 ```

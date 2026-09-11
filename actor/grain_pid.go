@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	syncatomic "sync/atomic"
 	"time"
 
 	"github.com/flowchartsman/retry"
@@ -36,35 +37,43 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
-	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
-	"github.com/tochemey/goakt/v4/internal/remoteclient"
-	"github.com/tochemey/goakt/v4/internal/types"
-	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"
 )
 
-type grainPID struct {
-	grain    Grain
-	identity *GrainIdentity
-	mailbox  *grainMailbox
+// grainPhase is where a grain process stands in its activation lifecycle,
+// recorded under mu. It decides how a timer scheduled at that moment is
+// treated: dormant while activating, live while active, rejected otherwise.
+type grainPhase uint8
 
-	// reentrancy tracks this activation's in-flight requests; nil until the
-	// grain is configured with reentrancy, at activation or at runtime through
-	// EnableReentrancy. An atomic pointer because the runtime install happens
-	// on the processing turn while off-turn readers (the envelope-ask gate,
-	// envelope delivery, shutdown) observe it; it transitions nil to non-nil
-	// at most once and is never removed, disabling only flips the state's
-	// default mode to Off. responses is the dedicated queue for async response
-	// envelopes: completions must stay reachable while the user mailbox is
-	// paused, so they never share its queue.
-	reentrancy atomic.Pointer[reentrancyState]
-	responses  *grainMailbox
+const (
+	// grainInactive covers a process outside an activation: never activated,
+	// deactivating or deactivated.
+	grainInactive grainPhase = iota
+	// grainActivating spans OnActivate: timers scheduled now stay dormant until
+	// activation completes.
+	grainActivating
+	// grainActive spans a completed activation: timers scheduled now start at
+	// once.
+	grainActive
+)
+
+type grainPID struct {
+	// Line 0: the fields the processing turn writes per message (mailbox head,
+	// activity stamp, processed count, touch coalescing) beside what only the
+	// turn reads per message (grain, passivation manager). responses is read
+	// off the message path by async response delivery. No producer touches
+	// this line per message.
+	//
+	// mailboxHead is the consumer end of the embedded user mailbox, the retained
+	// sentinel; the turn advances it on every dequeue and no producer reads it
+	// per message, so it heads the turn-written line. Nil for a bounded grain.
+	mailboxHead syncatomic.Pointer[GrainContext]
 
 	// latestReceiveTimeNano holds the latest receive timestamp as
 	// UnixNano. Stored as int64 because atomic.Time boxes time.Time
@@ -80,23 +89,43 @@ type grainPID struct {
 	// otherwise independent grains on the drain path.
 	lastPassivationTouch atomic.Int64
 
-	// the actor system
-	actorSystem ActorSystem
+	grain Grain
 
-	// specifies the logger to use
-	logger log.Logger
+	// responses queues async response envelopes apart from the user mailbox, so
+	// completions stay reachable while the mailbox is paused. Nil until the
+	// grain has a reentrancy state: attached once by newGrainPID for a
+	// configured policy or by enableReentrancy at runtime, never removed.
+	// Atomic because the runtime attach runs on the turn while envelope
+	// delivery and the reclaim check read it off-turn.
+	responses atomic.Pointer[grainMailbox]
 
-	// schedState drives the grain's membership on the dispatcher's ready
-	// queue. The Idle -> Scheduled -> Processing transitions enforce that
-	// at most one worker drains the mailbox at a time, replacing the old
-	// per-burst goroutine while preserving the single-threaded execution
-	// invariant per grain.
-	schedState dispatchState
+	passivationManager *passivationManager
+
+	// Line 1: read by producers and the turn on every message, written only off
+	// the message path (construction, activation, poisoning, timer scheduling),
+	// so it stays shared in every core's cache.
+	//
+	// boundedMailbox is the standalone mailbox of a grain configured with a
+	// capacity, nil otherwise; the nil check is how the message path picks the
+	// embedded queue.
+	boundedMailbox *grainMailbox
+	identity       *GrainIdentity
+
 	// dispatcher is the shared worker pool that runs grain turns. Set at
 	// construction from the owning actor system; nil only in unit tests
 	// that drive runTurn directly.
 	dispatcher *dispatcher
-	remoting   remoteclient.Client
+
+	// reentrancy tracks this activation's in-flight requests; nil until the
+	// grain is configured with reentrancy, at activation or at runtime through
+	// EnableReentrancy. An atomic pointer because the runtime install happens
+	// on the processing turn while off-turn readers (the envelope-ask gate,
+	// envelope delivery, shutdown) observe it; it transitions nil to non-nil
+	// at most once and is never removed, disabling only flips the state's
+	// default mode to Off.
+	reentrancy atomic.Pointer[reentrancyState]
+
+	activated syncatomic.Bool
 
 	// ctxShard is this grain's home shard in grainContextPool. Every
 	// GrainContext built for this grain is taken from and returned to that
@@ -104,28 +133,48 @@ type grainPID struct {
 	// round-robin at construction.
 	ctxShard uint32
 
-	// the list of dependencies
-	dependencies *xsync.Map[string, extension.Dependency]
-	activated    atomic.Bool
+	onPoisonPill atomic.Bool
 	activatedAt  atomic.Int64
-	config       *grainConfig
 
-	mu                 sync.Mutex
-	deactivateAfter    atomic.Duration
-	passivationManager *passivationManager
+	// mu guards timers and phase. It is taken at activation transitions and by
+	// timer scheduling, never on the message path.
+	mu sync.Mutex
 
-	// timers holds the current activation's timer registry. activate installs a
-	// fresh one and starts it once activation completes; deactivate stops it
-	// before OnDeactivate runs. Nil until the first activation. Guarded by mu.
+	// Line 2: the producer-written mailbox tail and the scheduling word both
+	// sides compare-and-swap, with fields touched only at activation,
+	// deactivation or wire snapshots; the turn writes here once per turn, never
+	// per message.
+	//
+	// mailboxTail is the producer end of the embedded user mailbox: every
+	// enqueue swaps it, the turn reads it only on an empty dequeue, so it heads
+	// the producer-written line. Nil for a bounded grain.
+	mailboxTail syncatomic.Pointer[GrainContext]
+
+	// schedState drives the grain's membership on the dispatcher's ready
+	// queue. The Idle -> Scheduled -> Processing transitions enforce that
+	// at most one worker drains the mailbox at a time, replacing the old
+	// per-burst goroutine while preserving the single-threaded execution
+	// invariant per grain.
+	schedState dispatchState
+
+	// phase is the activation lifecycle point, guarded by mu. It sits in the
+	// padding after schedState so it costs no bytes.
+	phase grainPhase
+
+	// the actor system
+	actorSystem ActorSystem
+
+	config *grainConfig
+
+	// timers holds the registry of the current activation, created by the first
+	// schedule call of that activation and dropped when the activation ends or
+	// fails; nil otherwise. Guarded by mu.
 	timers *grainTimers
 
-	onPoisonPill atomic.Bool
-
-	// deactivated is closed exactly once when deactivate completes
-	// (success or failure). Shutdown uses this to wait for grain
-	// OnDeactivate hooks that are dispatched via a PoisonPill turn.
-	deactivated     chan types.Unit
-	deactivatedOnce sync.Once
+	// Pads the process to 192 bytes, three whole cache lines, so the allocator
+	// places every process on a line boundary and the line comments above hold
+	// for all of them; at 176 bytes only one process in four was aligned.
+	_ [16]byte
 }
 
 var (
@@ -143,20 +192,15 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 	pid := &grainPID{
 		grain:                 grain,
 		identity:              identity,
-		mailbox:               newGrainMailbox(config.capacity),
-		responses:             newGrainMailbox(0),
 		actorSystem:           actorSystem,
-		logger:                actorSystem.Logger(),
-		remoting:              actorSystem.getRemoting(),
 		dispatcher:            actorSystem.getDispatcher(),
-		dependencies:          config.dependencies,
 		latestReceiveTimeNano: atomic.Int64{},
 		config:                config,
 		passivationManager:    actorSystem.passivationManager(),
-		deactivated:           make(chan types.Unit),
 		ctxShard:              nextGrainContextShard(),
 	}
 
+	pid.attachMailbox(config.capacity)
 	pid.activated.Store(false)
 	pid.onPoisonPill.Store(false)
 	pid.processedCount.Store(0)
@@ -166,37 +210,58 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 	// state keeps the legacy paths bit for bit until reentrancy is enabled at
 	// runtime.
 	if config.reentrancy != nil && config.reentrancy.Mode() != reentrancy.Off {
+		pid.attachResponseQueue()
 		pid.reentrancy.Store(newReentrancyState(config.reentrancy.Mode(), config.reentrancy.MaxInFlight()))
 	}
 
 	return pid
 }
 
+// attachMailbox gives the process its user mailbox: a standalone bounded
+// mailbox for a positive capacity, otherwise the embedded unbounded queue
+// seeded with its sentinel.
+func (pid *grainPID) attachMailbox(capacity int64) {
+	if capacity > 0 {
+		pid.boundedMailbox = newGrainMailbox(capacity)
+		return
+	}
+
+	sentinel := new(GrainContext)
+	pid.mailboxHead.Store(sentinel)
+	pid.mailboxTail.Store(sentinel)
+}
+
+// getLogger returns the actor system's logger. The system's logger is set at
+// construction and never changes, so the process looks it up on the cold
+// paths that log instead of carrying its own copy.
+func (pid *grainPID) getLogger() log.Logger {
+	return pid.actorSystem.getLogger()
+}
+
 // activate activates the Grain
 func (pid *grainPID) activate(ctx context.Context) (err error) {
-	logger := pid.logger
+	logger := pid.getLogger()
 	if logger.Enabled(log.DebugLevel) {
 		logger.Debugf("grain=%s activating", pid.identity.String())
 	}
 
-	// Fresh registry per activation: a reused grainPID must not carry timers (or
-	// a stopped registry) from a previous activation. Timers registered during
-	// OnActivate stay dormant until the registry starts below, so a short-delay
-	// tick cannot fire into the not-yet-active grain and be silently dropped.
-	registry := newGrainTimers(pid.deliverTimerTick)
-	pid.setTimers(registry)
+	// Timers scheduled from OnActivate are created dormant and started once
+	// activation completes.
+	pid.mu.Lock()
+	pid.phase = grainActivating
+	pid.mu.Unlock()
 
 	// Registered before the recover defer so it runs after err is materialized:
-	// on any activation failure the registry stops and timers registered by the
-	// failed OnActivate can never fire.
+	// on any activation failure the registry is dropped and timers scheduled by
+	// the failed OnActivate can never fire.
 	defer func() {
 		if err != nil {
-			registry.stop()
+			pid.stopTimers()
 		}
 	}()
 
-	retries := pid.config.initMaxRetries.Load()
-	timeout := pid.config.initTimeout.Load()
+	retries := pid.config.initMaxRetries
+	timeout := pid.config.initTimeout
 
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	retrier := retry.NewRetrier(int(retries), timeout, timeout)
@@ -229,20 +294,19 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 	}()
 
 	if err := retrier.RunContext(cctx, func(ctx context.Context) error {
-		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values(), pid))
+		return pid.grain.OnActivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.config.dependencyValues(), pid))
 	}); err != nil {
 		cancel()
-		if pid.logger.Enabled(log.ErrorLevel) {
-			pid.logger.Errorf("grain=%s activation failed (hint: check OnActivate implementation)", pid.identity.String())
+		if logger.Enabled(log.ErrorLevel) {
+			logger.Errorf("grain=%s activation failed (hint: check OnActivate implementation)", pid.identity.String())
 		}
 		return gerrors.NewErrGrainActivationFailure(err)
 	}
 
 	pid.activated.Store(true)
 	pid.activatedAt.Store(time.Now().Unix())
-	pid.deactivateAfter.Store(pid.config.deactivateAfter)
-	if pid.logger.Enabled(log.DebugLevel) {
-		pid.logger.Debugf("grain=%s activated successfully", pid.identity.String())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("grain=%s activated successfully", pid.identity.String())
 	}
 	cancel()
 
@@ -252,14 +316,14 @@ func (pid *grainPID) activate(ctx context.Context) (err error) {
 		pid.startPassivation()
 	}
 
-	registry.start()
+	pid.startTimers()
 
 	return nil
 }
 
 // deactivate deactivates the Grain
 func (pid *grainPID) deactivate(ctx context.Context) (err error) {
-	logger := pid.logger
+	logger := pid.getLogger()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -289,37 +353,26 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 
 	pid.unregisterPassivation()
 
-	// Stop before OnDeactivate runs: every timer is cancelled, late
-	// registrations from the OnDeactivate hook are rejected, and a tick already
-	// sitting in the mailbox is dropped by the tick handler.
-	if registry := pid.getTimers(); registry != nil {
-		registry.stop()
-	}
+	// Dropped before OnDeactivate runs: every timer is cancelled, a tick already
+	// sitting in the mailbox is dropped by the tick handler, and the phase moves
+	// back to inactive so a late schedule call from the hook is rejected instead
+	// of creating a registry.
+	pid.stopTimers()
 
 	defer func() {
 		pid.activated.Store(false)
 		pid.activatedAt.Store(0)
 		pid.latestReceiveTimeNano.Store(0)
 		pid.onPoisonPill.Store(false)
-		// Signal completion exactly once so callers waiting on
-		// <-pid.deactivated (e.g. shutdown) unblock even on panic
-		// or error. Nil-guard lets tests that construct grainPID as
-		// a struct literal (without going through newGrainPID) still
-		// drive deactivate without panicking on close of nil channel.
-		pid.deactivatedOnce.Do(func() {
-			if pid.deactivated != nil {
-				close(pid.deactivated)
-			}
-		})
 	}()
 
 	if logger.Enabled(log.DebugLevel) {
 		logger.Debugf("grain=%s deactivating", pid.identity.String())
 	}
 
-	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.dependencies.Values(), pid)); err != nil {
-		if pid.logger.Enabled(log.ErrorLevel) {
-			pid.logger.Errorf("grain=%s deactivation failed (hint: check OnDeactivate implementation)", pid.identity.String())
+	if err := pid.grain.OnDeactivate(ctx, newGrainProps(pid.identity, pid.actorSystem, pid.config.dependencyValues(), pid)); err != nil {
+		if logger.Enabled(log.ErrorLevel) {
+			logger.Errorf("grain=%s deactivation failed (hint: check OnDeactivate implementation)", pid.identity.String())
 		}
 		return gerrors.NewErrGrainDeactivationFailure(err)
 	}
@@ -333,15 +386,15 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		// re-owned by another node belongs to a live activation there
 		node := address.FormatHostPort(actorSystem.Host(), actorSystem.Port())
 		if _, err := actorSystem.getCluster().ReleaseGrain(ctx, pid.identity.String(), node); err != nil {
-			if pid.logger.Enabled(log.ErrorLevel) {
-				pid.logger.Errorf("failed to release grain=%s from the cluster registry: %v (hint: check cluster connectivity)", pid.identity.String(), err)
+			if logger.Enabled(log.ErrorLevel) {
+				logger.Errorf("failed to release grain=%s from the cluster registry: %v (hint: check cluster connectivity)", pid.identity.String(), err)
 			}
 			return gerrors.NewErrGrainDeactivationFailure(err)
 		}
 	}
 
-	if pid.logger.Enabled(log.DebugLevel) {
-		pid.logger.Debugf("grain=%s deactivated successfully", pid.identity.String())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("grain=%s deactivated successfully", pid.identity.String())
 	}
 	return nil
 }
@@ -362,7 +415,7 @@ func (pid *grainPID) receive(grainContext *GrainContext) {
 		return
 	}
 
-	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+	if err := pid.enqueueMessage(grainContext); err != nil {
 		grainContext.Err(err)
 		return
 	}
@@ -370,6 +423,38 @@ func (pid *grainPID) receive(grainContext *GrainContext) {
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)
 	}
+}
+
+// enqueueMessage appends a user message to the grain's mailbox: the standalone
+// bounded one when the grain has a capacity, otherwise the embedded queue,
+// which never rejects.
+func (pid *grainPID) enqueueMessage(grainContext *GrainContext) error {
+	if pid.boundedMailbox != nil {
+		return pid.boundedMailbox.Enqueue(grainContext)
+	}
+
+	(*embeddedGrainMailbox)(pid).Enqueue(grainContext)
+	return nil
+}
+
+// dequeueMessage pops the next user message, or nil when the mailbox is empty.
+// Consumer turn only.
+func (pid *grainPID) dequeueMessage() *GrainContext {
+	if pid.boundedMailbox != nil {
+		return pid.boundedMailbox.Dequeue()
+	}
+
+	return (*embeddedGrainMailbox)(pid).Dequeue()
+}
+
+// mailboxEmpty reports whether the user mailbox holds no message. A racy
+// snapshot, meant for the turn's reclaim check.
+func (pid *grainPID) mailboxEmpty() bool {
+	if pid.boundedMailbox != nil {
+		return pid.boundedMailbox.IsEmpty()
+	}
+
+	return (*embeddedGrainMailbox)(pid).IsEmpty()
 }
 
 // runTurn implements schedulable. A dispatcher worker calls this after
@@ -394,7 +479,7 @@ func (pid *grainPID) runTurn(w *worker) {
 		grainContext := pid.dequeueResponse()
 
 		if grainContext == nil && !pid.paused() {
-			grainContext = pid.mailbox.Dequeue()
+			grainContext = pid.dequeueMessage()
 		}
 
 		if grainContext == nil {
@@ -413,10 +498,12 @@ func (pid *grainPID) runTurn(w *worker) {
 // grain has no response queue or the queue is empty. Responses outrank user
 // messages so a paused grain can always reach its completions.
 func (pid *grainPID) dequeueResponse() *GrainContext {
-	if pid.responses == nil {
+	responses := pid.responses.Load()
+	if responses == nil {
 		return nil
 	}
-	return pid.responses.Dequeue()
+
+	return responses.Dequeue()
 }
 
 // reentrantEnabled reports whether the grain takes the envelope ask path. A
@@ -444,16 +531,17 @@ func (pid *grainPID) paused() bool {
 // unreachable until the last blocking request completes, so counting them
 // would make the reclaim path spin across workers for the whole pause.
 func (pid *grainPID) hasPendingWork() bool {
-	if pid.responses != nil && !pid.responses.IsEmpty() {
+	if responses := pid.responses.Load(); responses != nil && !responses.IsEmpty() {
 		return true
 	}
-	return !pid.paused() && !pid.mailbox.IsEmpty()
+
+	return !pid.paused() && !pid.mailboxEmpty()
 }
 
 // dispatchOne routes a single message through the appropriate handler.
-// Release is owned by grainMailbox.Dequeue, which reclaims the
-// previous sentinel; dispatchOne must not return the context here or
-// the mailbox would hand out an in-use head.
+// Release is owned by the mailbox Dequeue, standalone or embedded,
+// which reclaims the previous sentinel; dispatchOne must not return
+// the context here or the mailbox would hand out an in-use head.
 //
 // now is the turn's shared timestamp, computed once per turn by runTurn:
 // activity stamping does not need per-message precision, and time.Now on
@@ -484,8 +572,8 @@ func (pid *grainPID) handleAsyncRequest(grainContext *GrainContext, now time.Tim
 	request := grainContext.Message().(*commands.AsyncRequest)
 
 	if request.CorrelationID == "" || request.Message == nil || (request.ReplyTo != nil && !request.ReplyTo.Valid()) {
-		if pid.logger.Enabled(log.WarningLevel) {
-			pid.logger.Warnf("grain=%s dropping malformed async request envelope", pid.getIdentity().String())
+		if pid.getLogger().Enabled(log.WarningLevel) {
+			pid.getLogger().Warnf("grain=%s dropping malformed async request envelope", pid.getIdentity().String())
 		}
 		return
 	}
@@ -516,8 +604,8 @@ func (pid *grainPID) handleAsyncResponse(grainContext *GrainContext, now time.Ti
 		completed = pid.completeRequest(response.CorrelationID, response.Message, nil)
 	}
 
-	if !completed && pid.logger.Enabled(log.DebugLevel) {
-		pid.logger.Debugf("grain=%s async response dropped: no in-flight request for correlation id=%s", pid.getIdentity().String(), response.CorrelationID)
+	if !completed && pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("grain=%s async response dropped: no in-flight request for correlation id=%s", pid.getIdentity().String(), response.CorrelationID)
 	}
 }
 
@@ -551,9 +639,27 @@ func (pid *grainPID) admitRequest(reentrant *reentrancyState, opts ...RequestOpt
 }
 
 // enableReentrancy installs or retunes the grain's async request policy at
-// runtime. In-flight requests keep the mode they were admitted with.
+// runtime. In-flight requests keep the mode they were admitted with. The queue
+// is attached before the state is installed, the same order as newGrainPID, so
+// it exists by the time reentrantEnabled reports true. An invalid config
+// leaves an idle queue attached, one mailbox on an error path.
 func (pid *grainPID) enableReentrancy(config *reentrancy.Reentrancy) error {
+	pid.attachResponseQueue()
 	return installReentrancy(&pid.reentrancy, config)
+}
+
+// attachResponseQueue gives the grain its dedicated queue for async response
+// envelopes, once. Only grains with a reentrancy state get one: newGrainPID
+// attaches it for a configured policy and enableReentrancy for a runtime
+// install, so a grain that never enables reentrancy never pays for it. The
+// CompareAndSwap keeps a concurrent attach safe; a loser's spare queue is
+// left to the collector.
+func (pid *grainPID) attachResponseQueue() {
+	if pid.responses.Load() != nil {
+		return
+	}
+
+	pid.responses.CompareAndSwap(nil, newGrainMailbox(0))
 }
 
 // disableReentrancy turns off async requests without disturbing in-flight
@@ -717,24 +823,30 @@ func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
 		return gerrors.ErrDead
 	}
 
-	var queue *grainMailbox
+	var responses *grainMailbox
 	switch envelope.(type) {
 	case *commands.AsyncRequest:
-		queue = pid.mailbox
+		// a request rides the user mailbox with ordinary messages
 	case *commands.AsyncResponse:
-		queue = pid.responses
+		responses = pid.responses.Load()
+		if responses == nil {
+			return gerrors.ErrReentrancyDisabled
+		}
 	default:
 		return gerrors.ErrInvalidMessage
-	}
-
-	if queue == nil {
-		return gerrors.ErrReentrancyDisabled
 	}
 
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.WithoutCancel(ctx), pid, pid.actorSystem, pid.getIdentity(), envelope, grainEnvelope)
 
-	if err := queue.Enqueue(grainContext); err != nil {
+	var err error
+	if responses != nil {
+		err = responses.Enqueue(grainContext)
+	} else {
+		err = pid.enqueueMessage(grainContext)
+	}
+
+	if err != nil {
 		releaseGrainContext(grainContext)
 		return err
 	}
@@ -775,8 +887,8 @@ func (pid *grainPID) teardownInFlightRequests() {
 // reaches deactivate and OnDeactivate runs.
 func (pid *grainPID) runTeardownCallback(callback func(any, error)) {
 	defer func() {
-		if r := recover(); r != nil && pid.logger.Enabled(log.ErrorLevel) {
-			pid.logger.Errorf("grain=%s continuation panicked during teardown: %v", pid.getIdentity().String(), r)
+		if r := recover(); r != nil && pid.getLogger().Enabled(log.ErrorLevel) {
+			pid.getLogger().Errorf("grain=%s continuation panicked during teardown: %v", pid.getIdentity().String(), r)
 		}
 	}()
 
@@ -797,8 +909,8 @@ func (pid *grainPID) enqueueInFlightCancellations() {
 	}
 
 	for _, state := range reentrant.requestStates.Values() {
-		if err := state.cancel(); err != nil && pid.logger.Enabled(log.DebugLevel) {
-			pid.logger.Debugf("grain=%s failed to cancel in-flight request id=%s: %v", pid.getIdentity().String(), state.id, err)
+		if err := state.cancel(); err != nil && pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("grain=%s failed to cancel in-flight request id=%s: %v", pid.getIdentity().String(), state.id, err)
 		}
 	}
 }
@@ -863,10 +975,10 @@ func (pid *grainPID) deliverTimerTick(entry *grainTimerEntry) {
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), entry.tick, grainTell)
 
-	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+	if err := pid.enqueueMessage(grainContext); err != nil {
 		releaseGrainContext(grainContext)
-		if pid.logger.Enabled(log.WarningLevel) {
-			pid.logger.Warnf("grain=%s dropping tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
+		if pid.getLogger().Enabled(log.WarningLevel) {
+			pid.getLogger().Warnf("grain=%s dropping tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
 		}
 		return
 	}
@@ -913,8 +1025,8 @@ func (pid *grainPID) runTimerTick(grainContext *GrainContext, message any) {
 func (pid *grainPID) reportTimerTickFailure(grainContext *GrainContext, entry *grainTimerEntry) {
 	select {
 	case err := <-grainContext.err:
-		if err != nil && pid.logger.Enabled(log.WarningLevel) {
-			pid.logger.Warnf("grain=%s failed to handle tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
+		if err != nil && pid.getLogger().Enabled(log.WarningLevel) {
+			pid.getLogger().Warnf("grain=%s failed to handle tick of timer=%s: %v", pid.getIdentity().String(), entry.reference, err)
 		}
 	default:
 	}
@@ -957,8 +1069,8 @@ func (pid *grainPID) recovery(received *GrainContext) {
 	// contexts, whose err channel is nil by construction), or the Tell ack
 	// channel.
 	if received.err == nil && received.requestID == "" && !received.synchronous {
-		if pid.logger.Enabled(log.ErrorLevel) {
-			pid.logger.Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
+		if pid.getLogger().Enabled(log.ErrorLevel) {
+			pid.getLogger().Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
 		}
 		return
 	}
@@ -974,52 +1086,88 @@ func (pid *grainPID) uptime() int64 {
 	return 0
 }
 
-// getGrain returns the Grain instance
+// getGrain returns the Grain instance. The field is set at construction and
+// never reassigned, so the read needs no lock.
 func (pid *grainPID) getGrain() Grain {
-	pid.mu.Lock()
-	grain := pid.grain
-	pid.mu.Unlock()
-	return grain
+	return pid.grain
 }
 
-// timerRegistry returns the current activation's timer registry for the public
-// scheduling API. It degrades to ErrGrainTimersStopped when the grain process is
-// absent or has never been activated, so GrainProps built without a process
-// reject scheduling instead of panicking.
+// timerRegistry returns the registry of the current activation for the public
+// scheduling API, creating it on the activation's first schedule call: dormant
+// while the grain is activating, started once it is active. Outside an
+// activation, or without a process, it reports ErrGrainTimersStopped so
+// GrainProps built without a process and hooks running after deactivation
+// began reject scheduling instead of panicking.
 func (pid *grainPID) timerRegistry() (*grainTimers, error) {
 	if pid == nil {
 		return nil, gerrors.ErrGrainTimersStopped
 	}
 
-	registry := pid.getTimers()
-	if registry == nil {
+	pid.mu.Lock()
+	phase := pid.phase
+	timers := pid.timers
+
+	if timers == nil && phase != grainInactive {
+		timers = newGrainTimers(pid)
+		pid.timers = timers
+	}
+
+	pid.mu.Unlock()
+
+	if timers == nil {
 		return nil, gerrors.ErrGrainTimersStopped
 	}
-	return registry, nil
+
+	// Idempotent: a registry created while activating is started by
+	// startTimers, one created afterwards starts here.
+	if phase == grainActive {
+		timers.start()
+	}
+
+	return timers, nil
+}
+
+// startTimers completes the activation for the timers: the phase becomes
+// active and a registry created dormant during OnActivate starts.
+func (pid *grainPID) startTimers() {
+	pid.mu.Lock()
+	pid.phase = grainActive
+	timers := pid.timers
+	pid.mu.Unlock()
+
+	if timers != nil {
+		timers.start()
+	}
+}
+
+// stopTimers ends the activation for the timers: the phase falls back to
+// inactive and the registry, if the activation created one, is stopped and
+// dropped so the next activation starts without timers.
+func (pid *grainPID) stopTimers() {
+	pid.mu.Lock()
+	pid.phase = grainInactive
+	timers := pid.timers
+	pid.timers = nil
+	pid.mu.Unlock()
+
+	if timers != nil {
+		timers.stop()
+	}
 }
 
 // getTimers returns the current activation's timer registry, or nil when the
 // grain has never been activated.
 func (pid *grainPID) getTimers() *grainTimers {
 	pid.mu.Lock()
-	registry := pid.timers
+	timers := pid.timers
 	pid.mu.Unlock()
-	return registry
+	return timers
 }
 
-// setTimers installs the timer registry of a new activation.
-func (pid *grainPID) setTimers(registry *grainTimers) {
-	pid.mu.Lock()
-	pid.timers = registry
-	pid.mu.Unlock()
-}
-
-// getIdentity returns the GrainIdentity of the Grain
+// getIdentity returns the GrainIdentity of the Grain. The field is set at
+// construction and never reassigned, so the read needs no lock.
 func (pid *grainPID) getIdentity() *GrainIdentity {
-	pid.mu.Lock()
-	id := pid.identity
-	pid.mu.Unlock()
-	return id
+	return pid.identity
 }
 
 func (pid *grainPID) passivationID() string {
@@ -1051,13 +1199,13 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return pid.enqueuePassivationPill()
 	}
 
-	if pid.logger.Enabled(log.DebugLevel) {
-		pid.logger.Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
 	}
 
 	if err := pid.deactivate(context.Background()); err != nil {
-		if pid.logger.Enabled(log.ErrorLevel) {
-			pid.logger.Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
+		if pid.getLogger().Enabled(log.ErrorLevel) {
+			pid.getLogger().Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
 		}
 		return false
 	}
@@ -1075,7 +1223,7 @@ func (pid *grainPID) enqueuePassivationPill() bool {
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.Background(), pid, pid.actorSystem, pid.getIdentity(), grainPassivationPill{}, grainEnvelope)
 
-	if err := pid.mailbox.Enqueue(grainContext); err != nil {
+	if err := pid.enqueueMessage(grainContext); err != nil {
 		releaseGrainContext(grainContext)
 		pid.markActivity(time.Now())
 		return false
@@ -1085,6 +1233,37 @@ func (pid *grainPID) enqueuePassivationPill() bool {
 		pid.dispatcher.schedule(pid)
 	}
 	return true
+}
+
+// enqueuePoisonPill hands a PoisonPill to the grain's turn stream and returns
+// the channel its acknowledgment arrives on, the same Tell ack channel every
+// grainTell context carries. Unlike receive it does not check that the grain
+// is active: handlePoisonPill acknowledges an already deactivated grain
+// itself, so the caller always gets an answer, and a rejected enqueue (full
+// bounded mailbox) is acknowledged with its error right away. Shutdown uses
+// it to wait for OnDeactivate without a per-grain channel. The caller returns
+// the channel to its shard with putGrainErrorChannel once the ack arrived,
+// and abandons it when it stopped waiting.
+func (pid *grainPID) enqueuePoisonPill(ctx context.Context) chan error {
+	grainContext := getGrainContext(pid.ctxShard)
+	grainContext.build(ctx, pid, pid.actorSystem, pid.getIdentity(), new(PoisonPill), grainTell)
+
+	// Read before the handoff: once enqueued the context belongs to the turn,
+	// which resets it on dequeue and may rebuild it for another message, so
+	// grainContext.err is not safe to touch afterwards.
+	ack := grainContext.err
+
+	if err := pid.enqueueMessage(grainContext); err != nil {
+		grainContext.Err(err)
+		releaseGrainContext(grainContext)
+		return ack
+	}
+
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+
+	return ack
 }
 
 // handlePassivationPill decides deactivation on the grain's turn. The pill may
@@ -1106,18 +1285,18 @@ func (pid *grainPID) handlePassivationPill() {
 		return
 	}
 
-	deadline := pid.latestReceiveTimeNano.Load() + pid.deactivateAfter.Load().Nanoseconds()
+	deadline := pid.latestReceiveTimeNano.Load() + pid.config.deactivateAfter.Nanoseconds()
 	if deadline > time.Now().UnixNano() {
 		pid.startPassivation()
 		return
 	}
 
-	if pid.logger.Enabled(log.DebugLevel) {
-		pid.logger.Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), passivation.NewTimeBasedStrategy(pid.deactivateAfter.Load()).Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), passivation.NewTimeBasedStrategy(pid.config.deactivateAfter).Name())
 	}
 
-	if err := pid.deactivate(context.Background()); err != nil && pid.logger.Enabled(log.ErrorLevel) {
-		pid.logger.Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
+	if err := pid.deactivate(context.Background()); err != nil && pid.getLogger().Enabled(log.ErrorLevel) {
+		pid.getLogger().Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
 	}
 }
 
@@ -1161,7 +1340,8 @@ func (pid *grainPID) passivationTimeout() time.Duration {
 	if pid.passivationManager == nil {
 		return 0
 	}
-	return pid.deactivateAfter.Load()
+
+	return pid.config.deactivateAfter
 }
 
 func (pid *grainPID) unregisterPassivation() {
@@ -1192,7 +1372,7 @@ func (pid *grainPID) toWireGrain() (*internalpb.Grain, error) {
 // any grain process exists (tryPeerActivation) must go through it so the two
 // representations cannot drift.
 func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port int) (*internalpb.Grain, error) {
-	dependencies, err := codec.EncodeDependencies(config.dependencies.Values()...)
+	dependencies, err := codec.EncodeDependencies(config.dependencyValues()...)
 	if err != nil {
 		return nil, err
 	}
@@ -1206,8 +1386,8 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 	grain.SetHost(host)
 	grain.SetPort(int32(port))
 	grain.SetDependencies(dependencies)
-	grain.SetActivationTimeout(durationpb.New(config.initTimeout.Load()))
-	grain.SetActivationRetries(config.initMaxRetries.Load())
+	grain.SetActivationTimeout(durationpb.New(config.initTimeout))
+	grain.SetActivationRetries(config.initMaxRetries)
 	grain.SetMailboxCapacity(config.capacity)
 	grain.SetDisableRelocation(config.disableRelocation)
 	grain.SetEagerRelocation(config.eagerRelocation)
