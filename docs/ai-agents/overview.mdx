@@ -1,0 +1,509 @@
+---
+title: AI Agents
+description: Running LLM-driven agents on actors and grains.
+sidebarTitle: "Overview"
+---
+
+An AI agent is a long-running program that calls a model, acts on the result, waits on tools and other agents, and keeps
+state across all of it. GoAkt does not call models and does not manage prompts. It is the runtime underneath an agent:
+it owns the agent's state, its concurrency, its failures, and its placement in a process or a cluster. This page takes
+the properties of an agent workload one at a time and ties each to the GoAkt mechanism that handles it. The short
+version: an agent is an actor whose decision is made by a model, and GoAkt is a production actor runtime whose existing
+features are the ones an agent runtime needs.
+
+## What an agent workload is
+
+These are properties of the environment an agent runs in, not design opinions:
+
+- **A model call is a network request measured in seconds.** The time goes to waiting on a remote service, not to
+  computing locally.
+- **Providers rate-limit and fail transiently.** Rejected and failed calls are part of normal operation, and clients are
+  expected to retry them after a delay.
+- **A conversation is state that outlives any single request.** History, working memory, and partial plans must exist
+  between turns, and turns can be minutes or days apart.
+- **Tool calls have side effects and unbounded latency.** A tool is a child process, an HTTP backend, or a database. It
+  can hang, crash, or answer late, and it may already have acted when it does.
+- **Output is non-deterministic.** The same input does not produce the same output, so the next step is decided at
+  runtime from the data, not from a fixed call graph.
+- **One process hosts many agents.** Sessions are numerous and mostly idle; a few are active at any instant.
+- **Agents talk to agents.** Planning, execution, evaluation, and memory are commonly split across specialized
+  components that exchange results.
+
+In short, an agent is concurrent, stateful over long periods, event-driven rather than call-driven, and dependent on
+unreliable external systems. The rest of this page is about what an actor runtime does with each of those.
+
+## Why the actor model fits
+
+In the model's original formulation, an actor may do three things in response to one message: send messages to other
+actors, create new actors, and designate how it will handle the next message. Write down what an agent does in one step
+and the same three appear:
+
+- **Send messages.** A tool call, a request to another agent, and a reply to the user are all messages to something
+  outside the agent. The model call itself is a request to a remote service whose result comes back later.
+- **Create actors.** An orchestrator that breaks a task into subtasks and hands them to workers is spawning children
+  with a bounded lifetime.
+- **Designate the next behavior.** After each result the agent updates its memory and plan and decides what the next
+  input means. That is a behavior change, and it is why an agent is stateful across steps rather than a function of its
+  last input.
+
+The mapping is structural, not an analogy: an agent step is an actor step with a model in the decision. Everything the
+actor model then guarantees is something an agent needs anyway:
+
+- **Private state, one message at a time** keeps memory and plans consistent without locks, so a concurrency bug cannot
+  corrupt what the model reasons over.
+- **Asynchronous message passing** is how a component waits seconds for a model or a tool without holding a thread; the
+  reply is just a later message.
+- **Supervision hierarchies** give every failure an owner other than the code that failed, which matters when most
+  failures come from services the agent does not control.
+- **Location transparency** means the same agent code runs in one process or across a cluster, and an agent addresses
+  another by name without knowing where it runs.
+- **The mailbox is an ordered record** of every event the agent saw, in the order it saw them, which is the trace you
+  need to explain a non-deterministic decision afterward.
+
+Other shapes cover part of this list and leave the rest to you. A stateless request handler reloads and re-locks
+conversation state on every request and has no owner for work in flight once the request ends. Goroutines and channels
+give concurrency without identity, supervision, or location: nothing names a session, restarts it, or moves it to
+another node. A workflow engine makes a predefined path durable, and the path is the thing an agent decides at runtime.
+The actor model covers the whole list because the list is its definition.
+
+## Why GoAkt
+
+The actor model is a specification. Whether an agent built on it holds up is decided by the runtime, and GoAkt is
+positioned for agents by what it already ships:
+
+- **An agent costs its state, not a goroutine.** Actors and grains do not own goroutines; they run on a fixed
+  [dispatcher pool](/architecture/dispatcher-pool), so thousands of idle sessions cost their fields, not a thread each.
+- **Sessions the runtime manages.** [Grains](/grains/overview) give one activation per identity: activated on the first
+  message, passivated when idle, claimed once across the cluster, relocated on node loss. The session lifecycle every
+  agent product otherwise writes by hand is the framework's job.
+- **Model calls that never block a worker.** [PipeTo](/actor/pipeto) runs the call off the message loop,
+  [reentrancy](/actor/reentrancy) lets a grain keep serving while it waits, and `DeferResponse` completes the caller's
+  request when the answer arrives.
+- **Failure handling as configuration.** [Supervision](/actor/supervision) with a restart budget and exponential
+  backoff, a circuit breaker on outbound calls, and dead letters for what could not be delivered.
+- **Delivery guarantees when a job must not be lost.** [Point-to-point](/clustering/reliable-delivery/point-to-point)
+  and [work-pulling](/clustering/reliable-delivery/work-pulling) flows deliver each message at least once under a stable
+  deduplication key, optionally through a durable queue, so a long-running agent task survives the worker that was
+  running it.
+- **One binary from laptop to cluster.** [Clustering](/clustering/overview), remoting, placement, relocation,
+  singletons, and multi-datacenter routing are in the library, and membership and the cluster registry run inside the
+  process; there is no broker or coordination service to operate beside it.
+- **Backpressure for fan-out.** [Streams](/advanced/streams) bound how many model calls run at once and slow producers
+  down when consumers fall behind.
+- **Time as messages.** The [scheduler](/actor/scheduling) fires once, on an interval, or on a cron expression, and can
+  fire exactly once cluster-wide.
+- **Observability built in.** [OpenTelemetry](/advanced/observability) metrics and traces, per-actor instruments, an
+  event stream, and dead letters, so a decision can be traced back to the message that triggered it.
+- **Testable without a cluster.** The [TestKit](/actor/testkit) drives actors and grains with probes, and its multi-node
+  helper runs cluster scenarios in one test process.
+- **Pure Go, in production since 2022.** One module to import, no sidecar, no CGO.
+
+## Isolation: state cannot be modified accidentally
+
+An agent's memory, context window, partial plan, and tool results are the kind of state that concurrent code corrupts
+when two components reach it at once. Inside an actor that cannot happen:
+
+- **One goroutine at a time.** The dispatcher moves an actor from `Scheduled` to `Processing` with a compare-and-swap,
+  so at most one worker is inside `Receive` for a given actor at any instant. A grain has the same guarantee for
+  `OnReceive`.
+- **Sequential delivery.** Messages drain from the mailbox in FIFO order; handler N returns before handler N+1 starts.
+- **No shared memory.** State lives in unexported fields, and the only way in is a message.
+
+So an agent's state is plain Go fields, mutated directly, with no mutex. The one way to reintroduce a race is a
+goroutine you start yourself, which is why a task handed to [PipeTo](/actor/pipeto) must copy what it needs and never
+touch fields. See [Actor Model](/actor/actor-model) for the mechanics.
+
+## Event-driven: the reasoning loop is Receive
+
+An agent loop reads as: receive an event, update internal state, decide the next action, communicate with other agents
+or external systems. That is the shape of `Receive`, and every input an agent reacts to arrives there as a message:
+
+- **A user turn**: a `Tell` or `Ask` from the caller.
+- **A model completion or a tool result**: the value a [PipeTo](/actor/pipeto) task returned, delivered to the mailbox
+  when the task completes, or the reply to a non-blocking [`Request`](/actor/reentrancy) against a tool actor.
+- **A failed call**: a `*StatusFailure` on a grain, a dead letter on an actor.
+- **Time**: a [scheduled](/actor/scheduling) message or a [grain timer](/grains/timers) tick.
+- **A collaborator stopping**: `Terminated`, through [death watch](/actor/death-watch).
+
+Nothing polls and nothing coordinates centrally. When the handling itself changes shape, for example from gathering
+context to executing a plan, [`Become`](/actor/behaviors) swaps the handler, and [`Stash`](/actor/stashing) holds input
+that arrived for the wrong phase until the actor is ready for it.
+
+## Failure is normal: the runtime recovers, not the handler
+
+Two kinds of failure reach an agent, and GoAkt handles them with two different mechanisms.
+
+**A model or tool call fails.** The call ran inside a `PipeTo` task, off the message loop. When the task returns an
+error or exceeds `WithTimeout`, the actor does not crash: a grain receives a `*StatusFailure` message and an actor's
+failure goes to the dead-letter queue. The handler decides what happens next on an ordinary turn: retry after a delay
+with `ScheduleOnce`, fall back to another model, or answer the caller with the error. `WithCircuitBreaker` drops
+outcomes while a breaker is open, so a provider that is down is not hammered from every session at once.
+
+**The handler itself fails.** A panic or an error reported from `Receive` goes to the parent, which applies a
+[supervision](/actor/supervision) directive: `Resume`, `Restart`, `Stop`, or `Escalate`. `WithRetry` bounds consecutive
+restarts and `WithExponentialBackoff` spaces them out, so a crash loop against a broken dependency slows down instead of
+tightening. Because the failing actor's state was private, no other agent observed a half-finished mutation.
+
+<Note>
+  A restart discards the actor's in-memory state and its mailbox. Keep the durable copy of a conversation in a store,
+  load it in `PreStart` or `OnActivate`, and write it back in `PostStop` or `OnDeactivate`, so a restart is a reload
+  rather than a loss.
+</Note>
+
+## Long-running and numerous: sessions as grains
+
+A conversation is state keyed by an identifier, active for a moment, then idle for a long time. That is the profile
+[grains](/grains/overview) are built for:
+
+- **Identity-addressed.** Send to `GrainOf[*SessionGrain](ctx, system, sessionID)`; there is no spawn step and no
+  registry to keep in sync.
+- **Activated on the first message.** `OnActivate` runs once, loads the conversation, and receives the store and model
+  client through `WithGrainDependencies`.
+- **Passivated when idle.** After `WithGrainDeactivateAfter` elapses with no traffic, `OnDeactivate` runs and the grain
+  leaves memory. The next message activates it again under the same identity.
+- **Placed by the cluster.** In cluster mode the grain is claimed once in the cluster registry, requests from any node
+  are forwarded to the owner, and the grain is [relocated](/actor/relocation) when its node leaves.
+
+Actors get the same idle handling through [passivation](/actor/passivation) strategies, and the system can evict actors
+under memory pressure. Per-actor [metrics](/advanced/observability) report the live population, and
+[coordinated shutdown](/advanced/coordinated-shutdown) drains it in order.
+
+## Multi-agent: messages and supervision trees
+
+Splitting an agent into a planner, executors, an evaluator, and a memory component turns each into a named actor or
+grain with one responsibility, and turns the collaboration into messages:
+
+- **Delegation** is `Tell`, `Ask`, or a non-blocking [`Request`](/actor/reentrancy) to a name. The API is the same
+  whether the target is in-process, on another node, or placed by the cluster; see
+  [location transparency](/actor/location-transparency).
+- **Hierarchy** is `ctx.Spawn`: an orchestrator spawns a child per subtask, supervises it, and learns through
+  `Terminated` when it stops.
+- **Bounded fan-out** is [`ParallelMap(n)`](/advanced/streams) in a stream, or a [router](/actor/routers) when the first
+  good answer among several should win.
+- **Durable job distribution** across nodes is [work-pulling](/clustering/reliable-delivery/work-pulling): each job is
+  delivered at least once to exactly one worker and is re-dispatched if that worker dies before confirming.
+
+The same code runs as one process or as a [cluster](/clustering/overview); placement and relocation are configuration.
+
+## Agent topologies
+
+Anthropic's [Building effective agents](https://www.anthropic.com/research/building-effective-agents) (December 2024)
+separates **workflows**, where models and tools run through predefined code paths, from **agents**, where the model
+directs its own process and tool use, and names five workflow patterns. Each is an actor topology:
+
+- **Prompt chaining.** A sequence of steps where each output feeds the next. A chain of actors passing messages by name,
+  or a stream of `Map` stages; a gate between steps is a `case` in `Receive` that decides whether to forward.
+- **Routing.** Classify the input, then hand it to a specialized handler. A classifier actor that `Tell`s the specialist
+  by name, or a `ConsistentHash` router when one conversation must keep hitting the same routee.
+- **Parallelization.** Run subtasks concurrently and aggregate. `ParallelMap(n)` when concurrency must be bounded;
+  children that each `PipeTo` their result to the parent when the subtasks differ; a scatter-gather router when the
+  first success is enough.
+- **Orchestrator-workers.** A central model decomposes work at runtime, delegates, and synthesizes. A parent actor
+  spawns a child per subtask, watches it, and collects results as messages. Work-pulling when workers live on other
+  nodes and a job must survive a worker's death.
+- **Evaluator-optimizer.** A generator and an evaluator loop until the output is accepted. Two actors exchanging
+  messages, with the iteration cap kept as a counter in the generator's state and `Become` switching it from drafting to
+  finalizing.
+- **Autonomous agent.** The model chooses tools until a stop condition. The agent grain issues each tool call with
+  `PipeTo` or `RequestActor`, folds the result into its state, and decides the next step on the next turn. Each tool is
+  an actor with its own supervisor and circuit breaker, so a broken tool degrades one capability, not the agent.
+
+Two of these in code. An orchestrator that spawns and watches its workers:
+
+```go Orchestrator and workers
+func (x *Orchestrator) Receive(ctx *actor.ReceiveContext) {
+    switch msg := ctx.Message().(type) {
+    case *Plan:
+        x.requester = ctx.Sender()
+
+        for i, task := range msg.Tasks {
+            worker := ctx.Spawn(fmt.Sprintf("worker-%d", i), &Worker{}, actor.WithSupervisor(x.strategy))
+            ctx.Watch(worker)
+            ctx.Tell(worker, task)
+            x.pending++
+        }
+    case *TaskResult:
+        x.results = append(x.results, msg)
+        x.pending--
+
+        if x.pending == 0 {
+            ctx.Tell(x.requester, &Synthesis{Results: x.results})
+        }
+    case *actor.Terminated:
+        // A worker stopped. Decide whether to respawn its task or fail the plan.
+    default:
+        ctx.Unhandled()
+    }
+}
+```
+
+Bounded fan-out over model calls, with at most four in flight:
+
+```go Bounded fan-out
+collector, sink := stream.Collect[Answer]()
+
+handle, err := stream.ViaLinear(
+    stream.From(stream.Of(questions...)),
+    stream.ParallelMap(4, func(q Question) Answer { return askModel(q) }),
+).To(sink).Run(ctx, system)
+if err != nil {
+    return err
+}
+
+<-handle.Done()
+answers := collector.Items()
+```
+
+## A complete example
+
+One grain per conversation. The caller sends a turn with `AskGrain` and receives the model's answer, yet the grain never
+blocks: the model call runs in a `PipeToSelf` task, the caller's reply is deferred with `DeferResponse`, and the answer
+completes it on a later turn. Failed calls are retried from a timer, turns that arrive while one is in flight wait in the
+grain's own queue, and the grain leaves memory after ten idle minutes.
+
+```go main.go
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
+)
+
+const (
+	modelDependencyID = "model"
+	modelTimeout      = 30 * time.Second
+	maxAttempts       = 3
+	retryDelay        = 2 * time.Second
+	idleTimeout       = 10 * time.Minute
+)
+
+// Message is one entry in a conversation.
+type Message struct {
+	Role    string
+	Content string
+}
+
+// Model is whatever calls the LLM. Any SDK fits behind it.
+type Model interface {
+	Complete(ctx context.Context, history []Message) (string, error)
+}
+
+// UserTurn is a user message for a session. AgentReply is the model's answer.
+type UserTurn struct{ Text string }
+
+type AgentReply struct{ Text string }
+
+// completion carries a model answer back into the grain's message loop.
+type completion struct{ Text string }
+
+// retry tells the grain to attempt the head turn again.
+type retry struct{}
+
+// turn is a user turn waiting for a model answer, with the deferred reply that
+// completes the caller's Ask.
+type turn struct {
+	prompt   string
+	reply    *actor.GrainReply
+	attempts int
+}
+
+// SessionGrain holds one conversation. The framework keeps one activation per session id.
+type SessionGrain struct {
+	model    Model
+	history  []Message
+	queue    []*turn
+	inFlight bool
+}
+
+func (x *SessionGrain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
+	for _, dep := range props.Dependencies() {
+		if model, ok := dep.(Model); ok {
+			x.model = model
+		}
+	}
+
+	if x.model == nil {
+		return errors.New("session grain requires a Model dependency")
+	}
+
+	// Load the persisted conversation here when it must survive passivation.
+	return nil
+}
+
+func (x *SessionGrain) OnReceive(ctx *actor.GrainContext) {
+	switch msg := ctx.Message().(type) {
+	case *UserTurn:
+		x.queue = append(x.queue, &turn{prompt: msg.Text, reply: ctx.DeferResponse()})
+		x.next(ctx)
+	case *completion:
+		x.finish(ctx, msg.Text, nil)
+		ctx.NoErr()
+	case *actor.StatusFailure:
+		if len(x.queue) > 0 && x.queue[0].attempts < maxAttempts {
+			x.inFlight = false
+			_, _ = ctx.ScheduleOnce(&retry{}, retryDelay)
+			ctx.NoErr()
+			return
+		}
+
+		x.finish(ctx, "", errors.New(msg.Error()))
+		ctx.NoErr()
+	case *retry:
+		x.next(ctx)
+		ctx.NoErr()
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *SessionGrain) OnDeactivate(ctx context.Context, props *actor.GrainProps) error {
+	// Persist x.history here when it must survive passivation.
+	return nil
+}
+
+// next starts the model call for the head of the queue when none is in flight.
+func (x *SessionGrain) next(ctx *actor.GrainContext) {
+	if x.inFlight || len(x.queue) == 0 {
+		return
+	}
+
+	current := x.queue[0]
+	current.attempts++
+	x.inFlight = true
+
+	// The task runs off the message loop: copy what it needs and never touch fields inside it.
+	model := x.model
+	history := append(append([]Message(nil), x.history...), Message{Role: "user", Content: current.prompt})
+
+	err := ctx.PipeToSelf(func() (any, error) {
+		callCtx, cancel := context.WithTimeout(context.Background(), modelTimeout)
+		defer cancel()
+
+		text, err := model.Complete(callCtx, history)
+		if err != nil {
+			return nil, err
+		}
+
+		return &completion{Text: text}, nil
+	}, actor.WithTimeout(modelTimeout))
+
+	if err != nil {
+		x.finish(ctx, "", err)
+	}
+}
+
+// finish answers the caller of the head turn, records the exchange, and starts the next turn.
+func (x *SessionGrain) finish(ctx *actor.GrainContext, text string, err error) {
+	if len(x.queue) == 0 {
+		return
+	}
+
+	current := x.queue[0]
+	x.queue = x.queue[1:]
+	x.inFlight = false
+
+	if err != nil {
+		current.reply.Err(err)
+		x.next(ctx)
+		return
+	}
+
+	x.history = append(x.history, Message{Role: "user", Content: current.prompt}, Message{Role: "assistant", Content: text})
+	current.reply.Response(&AgentReply{Text: text})
+	x.next(ctx)
+}
+
+// EchoModel stands in for a real model client. Grain dependencies travel with the
+// grain on relocation, so they implement encoding.BinaryMarshaler and BinaryUnmarshaler.
+type EchoModel struct{}
+
+func (EchoModel) ID() string { return modelDependencyID }
+
+func (EchoModel) MarshalBinary() ([]byte, error) { return nil, nil }
+
+func (EchoModel) UnmarshalBinary([]byte) error { return nil }
+
+func (EchoModel) Complete(_ context.Context, history []Message) (string, error) {
+	last := history[len(history)-1]
+	return "You said: " + strings.TrimSpace(last.Content), nil
+}
+
+func main() {
+	ctx := context.Background()
+	logger := log.DefaultLogger
+
+	system, err := actor.NewActorSystem("agents", actor.WithLogger(logger))
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	if err := system.Start(ctx); err != nil {
+		logger.Fatal(err)
+	}
+
+	session, err := actor.GrainOf[*SessionGrain](ctx, system, "session-42",
+		actor.WithGrainDependencies(EchoModel{}),
+		actor.WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+		actor.WithGrainDeactivateAfter(idleTimeout),
+	)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	response, err := system.AskGrain(ctx, session, &UserTurn{Text: "Summarize yesterday's incidents"}, time.Minute)
+	if err != nil {
+		logger.Fatal(err)
+	}
+
+	fmt.Println(response.(*AgentReply).Text)
+
+	_ = system.Stop(ctx)
+}
+```
+
+What the example relies on, and where each piece is documented:
+
+- **`DeferResponse` needs reentrancy.** An `Ask` against a grain spawned with `WithGrainReentrancy` arrives as a
+  correlated request, so the turn can hand its reply to a `GrainReply` and complete it later. Without reentrancy
+  `DeferResponse` returns nil, which is safe to complete but answers nobody. See
+  [Grain Reentrancy](/grains/reentrancy).
+- **The model call never touches grain state.** The task receives copies of the model handle and the history; the result
+  comes back as a `*completion` message and state changes on that turn. See [Grain PipeTo](/grains/pipeto).
+- **Two timeouts, two jobs.** `WithTimeout` on the pipe bounds how long the grain waits for an outcome; the context
+  inside the task bounds the call itself, so a slow provider does not leak goroutines.
+- **Retries are messages.** A `*StatusFailure` schedules a `*retry` tick through the grain timer; the tick is processed
+  in order with everything else. Timers are cancelled on deactivation, so a turn in flight across passivation is
+  answered by the caller's own timeout, not by a stale tick. See [Grain Timers](/grains/timers).
+- **Ordering is the grain's own decision.** With `AllowAll` reentrancy the grain keeps processing while a call is in
+  flight, and the queue in its state serializes turns within one session without blocking the message loop.
+- **Piped results are acknowledged.** A piped message is delivered like a `Tell`, so the handler calls `NoErr` once
+  it has processed it.
+
+## What GoAkt does not provide
+
+- Model clients: `Model` above is your interface over whichever SDK you use.
+- Prompt templates, token accounting, and context-window management.
+- Vector stores and retrieval.
+- Tool schemas and protocol handling for tool servers.
+
+Bring those as ordinary Go code and inject them through [dependencies](/advanced/extensions-and-dependencies) (per
+actor, serialized so they follow the actor on relocation) or extensions (system-wide). GoAkt runs them.
+
+## See also
+
+- [Grains](/grains/overview): identity-addressed sessions with activation and passivation
+- [Grain PipeTo](/grains/pipeto) and [PipeTo](/actor/pipeto): model and tool calls off the message loop
+- [Reentrancy](/actor/reentrancy) and [Grain Reentrancy](/grains/reentrancy): non-blocking requests and deferred replies
+- [Supervision](/actor/supervision): directives, restart budget, and backoff
+- [Passivation](/actor/passivation): idle and capacity-based deactivation
+- [Work-Pulling](/clustering/reliable-delivery/work-pulling): durable job distribution across workers
+- [Reactive Streams](/advanced/streams): bounded parallel processing
+- [Observability](/advanced/observability): per-actor metrics and OpenTelemetry
+- [Coordinated Shutdown](/advanced/coordinated-shutdown): draining live sessions on exit

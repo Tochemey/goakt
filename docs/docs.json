@@ -148,6 +148,13 @@
             ]
           },
           {
+            "group": "AI Agents",
+            "icon": "bot",
+            "pages": [
+              "/ai-agents/overview"
+            ]
+          },
+          {
             "group": "Remoting",
             "icon": "radio",
             "pages": [
