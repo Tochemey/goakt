@@ -81,7 +81,7 @@ run() {
 		-e TZ=UTC \
 		-e CGO_ENABLED=1 \
 		-e GOTOOLCHAIN=local \
-		-e GOFLAGS="-mod=readonly -tags=hashicorpmetrics" \
+		-e GOFLAGS="-mod=readonly" \
 		-e TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal \
 		-e GOTEST_VERBOSE="${V:-}" \
 		-v "$PWD:/src" \

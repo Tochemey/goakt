@@ -49,7 +49,7 @@ jobs:
       TZ: UTC
       CGO_ENABLED: "1"
       GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
-      GOFLAGS: -mod=readonly -tags=hashicorpmetrics
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Check out repository
@@ -104,7 +104,7 @@ jobs:
       TZ: UTC
       CGO_ENABLED: "0" # no cross C toolchain on the runner
       GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
-      GOFLAGS: -mod=readonly -tags=hashicorpmetrics
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Check out repository
@@ -216,10 +216,8 @@ jobs:
       TZ: UTC
       CGO_ENABLED: "1"
       GOTOOLCHAIN: local # avoid auto-upgrading the toolchain
-      # Stabilise tests that rely on randomness/time. The hashicorpmetrics tag
-      # routes memberlist's metrics through github.com/hashicorp/go-metrics
-      # instead of the deprecated github.com/armon/go-metrics fallback.
-      GOFLAGS: -mod=readonly -tags=hashicorpmetrics
+      # Stabilise tests that rely on randomness/time.
+      GOFLAGS: -mod=readonly
 
     steps:
       - name: Check out repository

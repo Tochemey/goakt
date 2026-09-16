@@ -24,7 +24,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.44.0
-	github.com/tochemey/olric v0.3.20
+	github.com/tochemey/olric v0.3.21
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	go.etcd.io/etcd/api/v3 v3.7.1
@@ -175,24 +175,4 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
-)
-
-// HashiCorp renamed github.com/armon/go-metrics to github.com/hashicorp/go-metrics
-// in v0.4.2; every tag since declares the new module path and cannot be required
-// under the legacy armon path. memberlist's hashicorp/go-metrics/compat shim
-// imports github.com/armon/go-metrics by default, but builds with the
-// `hashicorpmetrics` build tag route through github.com/hashicorp/go-metrics
-// instead. We build with that tag (see Makefile / CI), so the armon dependency
-// below is only a never-compiled fallback pinned at its last valid tag (v0.4.1).
-// The excludes keep `go mod tidy` and `go get -u` from probing the broken
-// armon-path tags that resolve to the renamed module.
-exclude (
-	github.com/armon/go-metrics v0.4.2
-	github.com/armon/go-metrics v0.5.0
-	github.com/armon/go-metrics v0.5.1
-	github.com/armon/go-metrics v0.5.2
-	github.com/armon/go-metrics v0.5.3
-	github.com/armon/go-metrics v0.5.4
-	github.com/armon/go-metrics v0.6.0
-	github.com/armon/go-metrics v0.6.1
 )
