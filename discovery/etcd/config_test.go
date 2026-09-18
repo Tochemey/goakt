@@ -45,6 +45,18 @@ func TestConfig(t *testing.T) {
 
 		assert.NoError(t, config.Validate())
 	})
+	t.Run("With a missing timeout", func(t *testing.T) {
+		config := &Config{
+			Endpoints:       []string{"http://0.0.0.0:2379"},
+			ActorSystemName: "test-system",
+			Host:            "localhost",
+			DiscoveryPort:   1234,
+			TTL:             60,
+			DialTimeout:     2 * time.Second,
+		}
+
+		assert.EqualError(t, config.Validate(), "Timeout must be greater than 0")
+	})
 	t.Run("With invalid configuration", func(t *testing.T) {
 		config := &Config{}
 		assert.Error(t, config.Validate())

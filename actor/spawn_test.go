@@ -2787,8 +2787,7 @@ func TestSpawnSingletonRetryClassification(t *testing.T) {
 	clusterMock := mockcluster.NewCluster(t)
 	system := newReplicationSystem(clusterMock)
 
-	// retry.Stop wraps without exposing Unwrap, so terminal classifications
-	// are asserted through the preserved message rather than errors.Is
+	// terminal classifications are asserted through the preserved message
 	t.Run("With a legacy singleton-exists error terminal", func(t *testing.T) {
 		var confirmed string
 		err := system.spawnSingletonRetryError(context.Background(), gerrors.ErrSingletonAlreadyExists, "kind", "", "name", &confirmed) //nolint:staticcheck // the deprecated sentinel is exactly what old-version hosts emit

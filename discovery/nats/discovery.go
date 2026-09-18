@@ -29,7 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowchartsman/retry"
 	"github.com/nats-io/nats.go"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
@@ -37,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/log"
 )
 

@@ -60,12 +60,10 @@ const (
 	// actorSystemName identifies the actor system every pod joins.
 	actorSystemName = "issue1260"
 
-	// discoveryPortName, remotingPortName and peersPortName are the container
-	// port names the kubernetes discovery provider resolves on each pod. They
-	// must match the port names declared in deploy/k8s.yaml.
+	// discoveryPortName is the container port name the kubernetes discovery
+	// provider resolves on each pod. It must match the port name declared in
+	// deploy/k8s.yaml.
 	discoveryPortName = "discovery-port"
-	remotingPortName  = "remoting-port"
-	peersPortName     = "peers-port"
 
 	// podLabelName is the pod label the discovery provider selects on. It must
 	// match the pod template labels declared in deploy/k8s.yaml.
@@ -119,8 +117,6 @@ func main() {
 	provider := kubernetes.NewDiscovery(&kubernetes.Config{
 		Namespace:         namespace,
 		DiscoveryPortName: discoveryPortName,
-		RemotingPortName:  remotingPortName,
-		PeersPortName:     peersPortName,
 		PodLabels: map[string]string{
 			podLabelName: serviceName,
 		},

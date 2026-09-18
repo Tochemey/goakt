@@ -41,6 +41,16 @@ func TestConfig(t *testing.T) {
 		}
 		assert.NoError(t, config.Validate())
 	})
+	t.Run("With the deprecated port names left empty", func(t *testing.T) {
+		config := &Config{
+			Namespace:         "namespace",
+			DiscoveryPortName: "gossipName",
+			PodLabels: map[string]string{
+				"app": "my-actor-system",
+			},
+		}
+		assert.NoError(t, config.Validate())
+	})
 	t.Run("With invalid configuration", func(t *testing.T) {
 		config := &Config{
 			Namespace:         "namespace",

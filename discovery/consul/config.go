@@ -37,8 +37,8 @@ type Config struct {
 	// Context specifies the execution context for Consul operations.
 	// If nil, context.Background() will be used.
 	Context context.Context
-	// Address is the address of the Consul agent to connect to.
-	// Default: "127.0.0.1:8500"
+	// Address is the address of the Consul agent to connect to,
+	// for example "127.0.0.1:8500". It is required.
 	Address string
 	// Datacenter specifies the Consul datacenter to use.
 	// If empty, the agent's default datacenter is used.

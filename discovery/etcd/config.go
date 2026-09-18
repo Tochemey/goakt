@@ -71,6 +71,7 @@ func (c *Config) Validate() error {
 		AddAssertion(c.DiscoveryPort > 0, "DiscoveryPort is invalid").
 		AddAssertion(c.TTL > 0, "TTL must be greater than 0").
 		AddAssertion(c.DialTimeout > 0, "DialTimeout must be greater than 0").
+		AddAssertion(c.Timeout > 0, "Timeout must be greater than 0").
 		AddAssertion(len(c.Endpoints) > 0, "Endpoints must not be empty").
 		Validate()
 }

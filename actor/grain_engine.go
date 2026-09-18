@@ -30,11 +30,11 @@ import (
 	"math/rand/v2"
 	"net"
 	"reflect"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
@@ -332,18 +332,20 @@ func (x *actorSystem) Grains(ctx context.Context, timeout time.Duration) []*Grai
 	x.locker.Lock()
 	ids := x.grains.Keys()
 	x.locker.Unlock()
-	uniques := goset.NewSet(ids...)
 
 	if x.InCluster() {
 		if grains, err := x.getCluster().Grains(ctx, timeout); err == nil {
 			for _, grain := range grains {
-				uniques.Add(grain.GetGrainId().GetValue())
+				ids = append(ids, grain.GetGrainId().GetValue())
 			}
+
+			slices.Sort(ids)
+			ids = slices.Compact(ids)
 		}
 	}
 
-	identities := make([]*GrainIdentity, 0, uniques.Cardinality())
-	for _, id := range uniques.ToSlice() {
+	identities := make([]*GrainIdentity, 0, len(ids))
+	for _, id := range ids {
 		if identity, err := toIdentity(id); err == nil {
 			identities = append(identities, identity)
 		}

@@ -34,12 +34,12 @@ import (
 	"time"
 	"unsafe"
 
-	goset "github.com/deckarep/golang-set/v2"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/require"
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	gtls "github.com/tochemey/goakt/v4/tls"
 	"github.com/tochemey/olric"
@@ -248,8 +248,8 @@ func newEventCluster(host string, port int) *cluster {
 	return &cluster{
 		node:                   &discovery.Node{Host: host, PeersPort: port},
 		events:                 make(chan *Event, defaultEventsBufSize),
-		nodeJoinedEventsFilter: goset.NewSet[string](),
-		nodeLeftEventsFilter:   goset.NewSet[string](),
+		nodeJoinedEventsFilter: make(map[string]types.Unit),
+		nodeLeftEventsFilter:   make(map[string]types.Unit),
 		pendingJoins:           make(map[string]pendingEvent),
 		pendingLeaves:          make(map[string]pendingEvent),
 		pendingEmitTimeout:     pendingEventEmitTimeout,

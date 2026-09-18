@@ -35,7 +35,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -46,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"

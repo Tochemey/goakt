@@ -24,7 +24,6 @@ package actor
 
 import (
 	"context"
-	"crypto/tls"
 	stdErrors "errors"
 	"fmt"
 	"net"
@@ -32,7 +31,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -42,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/tlstest"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
@@ -971,25 +970,12 @@ func TestRelocationWithTLS(t *testing.T) {
 	// start the NATS server
 	srv := startNatsServer(t)
 
-	// AutoGenerate TLS certs
-	serverConf := autotls.Config{
-		CaFile:           "../test/data/certs/ca.cert",
-		CertFile:         "../test/data/certs/auto.pem",
-		KeyFile:          "../test/data/certs/auto.key",
-		ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
-		ClientAuth:       tls.RequireAndVerifyClientCert,
-	}
-	require.NoError(t, autotls.Setup(&serverConf))
+	// load the TLS test fixtures
+	info, err := tlstest.Load("../test/data/certs")
+	require.NoError(t, err)
 
-	clientConf := &autotls.Config{
-		CertFile:           "../test/data/certs/client-auth.pem",
-		KeyFile:            "../test/data/certs/client-auth.key",
-		InsecureSkipVerify: true,
-	}
-	require.NoError(t, autotls.Setup(clientConf))
-
-	serverConfig := serverConf.ServerTLS
-	clientConfig := clientConf.ClientTLS
+	serverConfig := info.ServerConfig
+	clientConfig := info.ClientConfig
 	serverConfig.NextProtos = []string{"h2", "http/1.1"}
 	clientConfig.NextProtos = []string{"h2", "http/1.1"}
 

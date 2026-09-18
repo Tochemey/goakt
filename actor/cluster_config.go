@@ -23,10 +23,8 @@
 package actor
 
 import (
-	"sort"
+	"slices"
 	"time"
-
-	goset "github.com/deckarep/golang-set/v2"
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -86,7 +84,7 @@ type ClusterConfig struct {
 	bootstrapTimeout         time.Duration
 	clusterStateSyncInterval time.Duration
 	grainActivationBarrier   *grainActivationBarrierConfig
-	roles                    goset.Set[string]
+	roles                    []string
 	clusterBalancerInterval  time.Duration
 	dataCenterConfig         *datacenter.Config
 	crdtConfig               *crdt.Config
@@ -124,7 +122,6 @@ func NewClusterConfig() *ClusterConfig {
 		shutdownTimeout:          3 * time.Minute,
 		bootstrapTimeout:         DefaultClusterBootstrapTimeout,
 		clusterStateSyncInterval: DefaultClusterStateSyncInterval,
-		roles:                    goset.NewSet[string](),
 		clusterBalancerInterval:  DefaultClusterBalancerInterval,
 		convergenceTimeout:       DefaultClusterConvergenceTimeout,
 		networkProfile:           NetworkProfileLAN,
@@ -452,10 +449,10 @@ func (x *ClusterConfig) WithTableSize(size uint64) *ClusterConfig {
 // Once roles are set, you can use SpawnOn("<role>") to spawn an actor on a
 // node that advertises that role.
 //
-// This call replaces any previously configured roles. Duplicates are
-// de-duplicated; order is not meaningful
+// This call adds to any previously configured roles. Duplicates are removed
+// and the order is not meaningful.
 func (x *ClusterConfig) WithRoles(roles ...string) *ClusterConfig {
-	x.roles.Append(roles...)
+	x.roles = append(x.roles, roles...)
 	return x
 }
 
@@ -576,12 +573,11 @@ func (x *ClusterConfig) WithCRDT(opts ...crdt.Option) *ClusterConfig {
 //
 // A role is a label/metadata used by the cluster to define a node’s
 // responsibilities (see WithRoles for details and examples). The returned
-// slice is derived from an internal set: there are no duplicates and the
-// order is unspecified.
+// slice is a sorted copy of the configured roles with duplicates removed.
 func (x *ClusterConfig) getRoles() []string {
-	roles := x.roles.ToSlice()
-	sort.Strings(roles)
-	return roles
+	roles := slices.Clone(x.roles)
+	slices.Sort(roles)
+	return slices.Compact(roles)
 }
 
 // grainActivationBarrierEnabled reports whether the grain activation barrier is enabled.

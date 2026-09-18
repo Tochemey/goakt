@@ -33,10 +33,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/flowchartsman/retry"
-
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/hash"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/supervisor"

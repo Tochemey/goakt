@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/flowchartsman/retry"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/errors"
@@ -42,6 +41,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/log"
 )
 

@@ -27,11 +27,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -170,7 +170,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		return nil, err
 	}
 
-	addresses := goset.NewSet[string]()
+	addresses := make([]string, 0, len(pods.Items))
 
 	for _, pod := range pods.Items {
 		// Terminating pods keep status.phase=Running until their containers exit;
@@ -185,15 +185,16 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		}
 
 		if port, ok := discoveryPort(&pod, d.config.DiscoveryPortName); ok {
-			addresses.Add(net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))))
+			addresses = append(addresses, net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(int(port))))
 		}
 	}
 
-	if addresses.Cardinality() == 0 {
+	if len(addresses) == 0 {
 		return nil, ErrNoPodsAvailable
 	}
 
-	return addresses.ToSlice(), nil
+	slices.Sort(addresses)
+	return slices.Compact(addresses), nil
 }
 
 // discoveryPort returns the container port named portName from the pod spec.

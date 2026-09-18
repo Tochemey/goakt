@@ -26,11 +26,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/grandcat/zeroconf"
 	"go.uber.org/atomic"
 
@@ -159,7 +159,7 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		v6 = *d.config.IPv6
 	}
 
-	addresses := goset.NewSet[string]()
+	var addresses []string
 	for entry := range entries {
 		if !d.validateEntry(entry) {
 			continue
@@ -167,15 +167,17 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 
 		if v6 {
 			for _, addr := range entry.AddrIPv6 {
-				addresses.Add(net.JoinHostPort(addr.String(), strconv.Itoa(entry.Port)))
+				addresses = append(addresses, net.JoinHostPort(addr.String(), strconv.Itoa(entry.Port)))
 			}
 		}
 
 		for _, addr := range entry.AddrIPv4 {
-			addresses.Add(net.JoinHostPort(addr.String(), strconv.Itoa(entry.Port)))
+			addresses = append(addresses, net.JoinHostPort(addr.String(), strconv.Itoa(entry.Port)))
 		}
 	}
-	return addresses.ToSlice(), nil
+
+	slices.Sort(addresses)
+	return slices.Compact(addresses), nil
 }
 
 // validateEntry validates the mDNS discovered entry

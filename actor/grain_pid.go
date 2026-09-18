@@ -31,7 +31,6 @@ import (
 	syncatomic "sync/atomic"
 	"time"
 
-	"github.com/flowchartsman/retry"
 	"github.com/google/uuid"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -41,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/reentrancy"

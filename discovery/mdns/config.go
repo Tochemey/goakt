@@ -34,7 +34,8 @@ type Config struct {
 	Domain string
 	// Port specifies the port the service is listening to
 	Port int
-	// IPv6 states whether to fetch ipv6 address instead of ipv4
+	// IPv6 states whether to return IPv6 addresses as well.
+	// IPv4 addresses are always returned.
 	IPv6 *bool
 }
 
