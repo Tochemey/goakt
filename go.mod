@@ -9,9 +9,9 @@ require (
 	github.com/cenkalti/backoff/v7 v7.0.0
 	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/google/uuid v1.6.0
-	github.com/grandcat/zeroconf v1.0.0
 	github.com/hashicorp/consul/api/v2 v2.0.0
 	github.com/hashicorp/go-sockaddr v1.0.7
+	github.com/hashicorp/mdns v1.0.7
 	github.com/hashicorp/memberlist v0.7.0
 	github.com/klauspost/compress v1.20.0
 	github.com/nats-io/nats-server/v2 v2.15.0
@@ -51,7 +51,6 @@ require (
 	github.com/bits-and-blooms/bitset v1.25.0 // indirect
 	github.com/bytedance/gopkg v0.1.4 // indirect
 	github.com/bytedance/sonic/loader v0.5.2 // indirect
-	github.com/cenkalti/backoff v2.2.1+incompatible // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.7 // indirect
