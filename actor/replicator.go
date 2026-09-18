@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -1119,7 +1120,7 @@ func (x *actorSystem) spawnReplicator(ctx context.Context) error {
 	}
 
 	if requiredRole := x.clusterConfig.crdtConfig.Role(); requiredRole != "" {
-		if !x.clusterConfig.roles.Contains(requiredRole) {
+		if !slices.Contains(x.clusterConfig.roles, requiredRole) {
 			return nil
 		}
 	}

@@ -6,7 +6,6 @@ require (
 	github.com/Workiva/go-datastructures v1.1.7
 	github.com/andybalholm/brotli v1.2.4
 	github.com/bytedance/sonic v1.15.4
-	github.com/deckarep/golang-set/v2 v2.9.0
 	github.com/flowchartsman/retry v1.2.0
 	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/google/uuid v1.6.0
@@ -14,7 +13,6 @@ require (
 	github.com/hashicorp/consul/api/v2 v2.0.0
 	github.com/hashicorp/go-sockaddr v1.0.7
 	github.com/hashicorp/memberlist v0.7.0
-	github.com/kapetan-io/tackle v0.15.0
 	github.com/klauspost/compress v1.20.0
 	github.com/nats-io/nats-server/v2 v2.15.0
 	github.com/nats-io/nats.go v1.53.1
@@ -150,7 +148,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.7.1 // indirect
-	go.mongodb.org/mongo-driver v1.17.10 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.71.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect

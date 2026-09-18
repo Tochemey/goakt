@@ -41,7 +41,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -62,6 +61,7 @@ import (
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/tlstest"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
@@ -93,16 +93,12 @@ func TestActorSystem(t *testing.T) {
 	t.Run("New instance with Defaults and TLS", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
-		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: false,
-		}
-		require.NoError(t, autotls.Setup(&conf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
 
-		serverConfig := conf.ServerTLS
-		clientConfig := conf.ClientTLS
+		serverConfig := info.ServerConfig
+		clientConfig := info.ClientConfig
 		// define the logger to use
 		logger := log.DiscardLogger
 		// generate the remoting port
@@ -3130,25 +3126,12 @@ func TestRemotingLookup(t *testing.T) {
 	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
-		// AutoGenerate TLS certs
-		serverConf := autotls.Config{
-			CaFile:           "../test/data/certs/ca.cert",
-			CertFile:         "../test/data/certs/auto.pem",
-			KeyFile:          "../test/data/certs/auto.key",
-			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-		require.NoError(t, autotls.Setup(&serverConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
 
-		clientConf := &autotls.Config{
-			CertFile:           "../test/data/certs/client-auth.pem",
-			KeyFile:            "../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
-
-		serverConfig := serverConf.ServerTLS
-		clientConfig := clientConf.ClientTLS
+		serverConfig := info.ServerConfig
+		clientConfig := info.ClientConfig
 		serverConfig.NextProtos = []string{"h2", "http/1.1"}
 		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
@@ -3356,25 +3339,12 @@ func TestRemotingReSpawn(t *testing.T) {
 	t.Run("When TLS enabled", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
-		// AutoGenerate TLS certs
-		serverConf := autotls.Config{
-			CaFile:           "../test/data/certs/ca.cert",
-			CertFile:         "../test/data/certs/auto.pem",
-			KeyFile:          "../test/data/certs/auto.key",
-			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-		require.NoError(t, autotls.Setup(&serverConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
 
-		clientConf := &autotls.Config{
-			CertFile:           "../test/data/certs/client-auth.pem",
-			KeyFile:            "../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
-
-		serverConfig := serverConf.ServerTLS
-		clientConfig := clientConf.ClientTLS
+		serverConfig := info.ServerConfig
+		clientConfig := info.ClientConfig
 		serverConfig.NextProtos = []string{"h2", "http/1.1"}
 		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
@@ -3812,25 +3782,12 @@ func TestRemotingStop(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// AutoGenerate TLS certs
-		serverConf := autotls.Config{
-			CaFile:           "../test/data/certs/ca.cert",
-			CertFile:         "../test/data/certs/auto.pem",
-			KeyFile:          "../test/data/certs/auto.key",
-			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-		require.NoError(t, autotls.Setup(&serverConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
 
-		clientConf := &autotls.Config{
-			CertFile:           "../test/data/certs/client-auth.pem",
-			KeyFile:            "../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
-
-		serverConfig := serverConf.ServerTLS
-		clientConfig := clientConf.ClientTLS
+		serverConfig := info.ServerConfig
+		clientConfig := info.ClientConfig
 		serverConfig.NextProtos = []string{"h2", "http/1.1"}
 		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 
@@ -5071,25 +5028,15 @@ func TestRemotingSpawn(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
 
-		// AutoGenerate TLS certs
-		serverConf := autotls.Config{
-			CaFile:           "../test/data/certs/ca.cert",
-			CertFile:         "../test/data/certs/auto.pem",
-			KeyFile:          "../test/data/certs/auto.key",
-			ClientAuthCaFile: "../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-		require.NoError(t, autotls.Setup(&serverConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
+		// the remoting client sets no server name on the connection, which
+		// certificate verification requires
+		info.ClientConfig.InsecureSkipVerify = true
 
-		clientConf := &autotls.Config{
-			CertFile:           "../test/data/certs/client-auth.pem",
-			KeyFile:            "../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
-
-		serverConfig := serverConf.ServerTLS
-		clientConfig := clientConf.ClientTLS
+		serverConfig := info.ServerConfig
+		clientConfig := info.ClientConfig
 		serverConfig.NextProtos = []string{"h2", "http/1.1"}
 		clientConfig.NextProtos = []string{"h2", "http/1.1"}
 

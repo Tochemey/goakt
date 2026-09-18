@@ -25,7 +25,6 @@ package memberlist
 import (
 	"bytes"
 	"crypto/md5" // nolint
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -37,7 +36,6 @@ import (
 	"time"
 
 	"github.com/hashicorp/memberlist"
-	"github.com/kapetan-io/tackle/autotls"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
@@ -45,6 +43,7 @@ import (
 	goaktlog "github.com/tochemey/goakt/v4/log"
 
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/tlstest"
 )
 
 func TestTCPTransport(t *testing.T) {
@@ -83,28 +82,15 @@ func TestTCPTransport(t *testing.T) {
 	t.Run("NewTCPTransport with TLS", func(t *testing.T) {
 		host := "127.0.0.1"
 		ports := dynaport.Get(1)
-		serverConf := autotls.Config{
-			CaFile:           "../../test/data/certs/ca.cert",
-			CertFile:         "../../test/data/certs/auto.pem",
-			KeyFile:          "../../test/data/certs/auto.key",
-			ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-
-		require.NoError(t, autotls.Setup(&serverConf))
-
-		clientConf := &autotls.Config{
-			CertFile:           "../../test/data/certs/client-auth.pem",
-			KeyFile:            "../../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../../test/data/certs")
+		require.NoError(t, err)
 
 		transport, err := NewTransport(TransportConfig{
 			BindAddrs:  []string{host},
 			BindPort:   ports[0],
 			TLSEnabled: true,
-			TLS:        clientConf.ClientTLS,
+			TLS:        info.ClientConfig,
 		})
 		require.NoError(t, err)
 		require.NotNil(t, transport)
@@ -396,22 +382,12 @@ func makeCluster(t *testing.T) (*mockCluster, func()) {
 }
 
 func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlist.Memberlist {
-	serverConf := autotls.Config{
-		CaFile:           "../../test/data/certs/ca.cert",
-		CertFile:         "../../test/data/certs/auto.pem",
-		KeyFile:          "../../test/data/certs/auto.key",
-		ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
-		ClientAuth:       tls.RequireAndVerifyClientCert,
-	}
-
-	require.NoError(t, autotls.Setup(&serverConf))
-
-	clientConf := &autotls.Config{
-		CertFile:           "../../test/data/certs/client-auth.pem",
-		KeyFile:            "../../test/data/certs/client-auth.key",
-		InsecureSkipVerify: true,
-	}
-	require.NoError(t, autotls.Setup(clientConf))
+	// load the TLS test fixtures
+	info, err := tlstest.Load("../../test/data/certs")
+	require.NoError(t, err)
+	// the transport listens and dials with this one config, so peers present
+	// the client certificate, which the server CA cannot verify
+	info.ClientConfig.InsecureSkipVerify = true
 
 	mconf := memberlist.DefaultLocalConfig()
 	mconf.BindPort = 0
@@ -424,7 +400,7 @@ func newNode(t *testing.T, name string, delegate memberlist.Delegate) *memberlis
 	tConfig := TransportConfig{
 		BindAddrs:  []string{mconf.BindAddr},
 		BindPort:   mconf.BindPort,
-		TLS:        clientConf.ClientTLS,
+		TLS:        info.ClientConfig,
 		TLSEnabled: true,
 	}
 

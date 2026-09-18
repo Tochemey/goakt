@@ -25,10 +25,10 @@ package dnssd
 import (
 	"context"
 	"net"
+	"slices"
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"go.uber.org/atomic"
 
 	"github.com/tochemey/goakt/v4/discovery"
@@ -138,22 +138,28 @@ func (d *Discovery) DiscoverPeers() ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
+
 		ipList := make([]string, len(ips))
 		for i, ip := range ips {
 			ipList[i] = ip.String()
 		}
-		return goset.NewSet(ipList...).ToSlice(), nil
+
+		slices.Sort(ipList)
+		return slices.Compact(ipList), nil
 	}
 
 	addrs, err := resolver.LookupIPAddr(ctx, domain)
 	if err != nil {
 		return nil, err
 	}
+
 	ipList := make([]string, len(addrs))
 	for i, addr := range addrs {
 		ipList[i] = addr.IP.String()
 	}
-	return goset.NewSet(ipList...).ToSlice(), nil
+
+	slices.Sort(ipList)
+	return slices.Compact(ipList), nil
 }
 
 // Close closes the provider

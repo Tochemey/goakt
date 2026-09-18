@@ -32,9 +32,17 @@ type Config struct {
 	Namespace string
 	// DiscoveryPortName specifies the gossip port name
 	DiscoveryPortName string
-	// RemotingPortName specifies the remoting port name
+	// RemotingPortName specifies the remoting port name.
+	//
+	// Deprecated: the provider only reads DiscoveryPortName. Peers learn each
+	// other's remoting port from the node metadata exchanged once they are
+	// members. The field is ignored and kept so existing configurations compile.
 	RemotingPortName string
-	// PeersPortName specifies the cluster port name
+	// PeersPortName specifies the cluster port name.
+	//
+	// Deprecated: the provider only reads DiscoveryPortName. Peers learn each
+	// other's peers port from the node metadata exchanged once they are
+	// members. The field is ignored and kept so existing configurations compile.
 	PeersPortName string
 	// PodLabels specifies the pod labels
 	PodLabels map[string]string
@@ -45,8 +53,6 @@ func (x Config) Validate() error {
 	return validation.New(validation.FailFast()).
 		AddValidator(validation.NewEmptyStringValidator("Namespace", x.Namespace)).
 		AddValidator(validation.NewEmptyStringValidator("DiscoveryPortName", x.DiscoveryPortName)).
-		AddValidator(validation.NewEmptyStringValidator("PeersPortName", x.PeersPortName)).
-		AddValidator(validation.NewEmptyStringValidator("RemotingPortName", x.RemotingPortName)).
 		AddAssertion(len(x.PodLabels) > 0, "PodLabels are required").
 		Validate()
 }

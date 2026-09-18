@@ -24,14 +24,12 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/kapetan-io/tackle/autotls"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -45,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/tlstest"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
@@ -1741,18 +1740,14 @@ func TestClientTLS(t *testing.T) {
 		ctx := context.TODO()
 		logger := log.DiscardLogger
 
-		// AutoGenerate TLS certs
-		conf := autotls.Config{
-			AutoTLS:            true,
-			ClientAuth:         tls.RequireAndVerifyClientCert,
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(&conf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../test/data/certs")
+		require.NoError(t, err)
+		// the remoting client sets no server name on the connection, which
+		// certificate verification requires
+		info.ClientConfig.InsecureSkipVerify = true
 
-		tlsInfo := &gtls.Info{
-			ClientConfig: conf.ClientTLS,
-			ServerConfig: conf.ServerTLS,
-		}
+		tlsInfo := info
 
 		// start the NATS server
 		srv := startNatsServer(t)

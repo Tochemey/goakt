@@ -37,7 +37,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/hashicorp/memberlist"
-	"github.com/kapetan-io/tackle/autotls"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -53,6 +52,8 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/tlstest"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mocksdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
 	gtls "github.com/tochemey/goakt/v4/tls"
@@ -1651,35 +1652,26 @@ func TestMultipleNodes(t *testing.T) {
 	})
 	t.Run("With TLS", func(t *testing.T) {
 		ctx := context.TODO()
-		// AutoGenerate TLS certs
-		serverConf := autotls.Config{
-			CaFile:           "../../test/data/certs/ca.cert",
-			CertFile:         "../../test/data/certs/auto.pem",
-			KeyFile:          "../../test/data/certs/auto.key",
-			ClientAuthCaFile: "../../test/data/certs/client-auth-ca.pem",
-			ClientAuth:       tls.RequireAndVerifyClientCert,
-		}
-		require.NoError(t, autotls.Setup(&serverConf))
-
-		clientConf := &autotls.Config{
-			CertFile:           "../../test/data/certs/client-auth.pem",
-			KeyFile:            "../../test/data/certs/client-auth.key",
-			InsecureSkipVerify: true,
-		}
-		require.NoError(t, autotls.Setup(clientConf))
+		// load the TLS test fixtures
+		info, err := tlstest.Load("../../test/data/certs")
+		require.NoError(t, err)
+		// the cluster hands this config to the memberlist transport, which
+		// listens and dials with it, so peers present the client certificate,
+		// which the server CA cannot verify
+		info.ClientConfig.InsecureSkipVerify = true
 
 		// start the NATS server
 		srv := startNatsServer(t)
 
 		// create a cluster node1
-		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		node1, sd1 := startEngineWithTLS(t, srv.Addr().String(), info.ServerConfig, info.ClientConfig)
 		require.NotNil(t, node1)
 
 		// wait for the node to start properly
 		pause.For(2 * time.Second)
 
 		// create a cluster node2
-		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		node2, sd2 := startEngineWithTLS(t, srv.Addr().String(), info.ServerConfig, info.ClientConfig)
 		require.NotNil(t, node2)
 		node2Addr := node2.(*cluster).node.PeersAddress()
 
@@ -1687,7 +1679,7 @@ func TestMultipleNodes(t *testing.T) {
 		pause.For(time.Second)
 
 		// create a cluster node3
-		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), serverConf.ServerTLS, clientConf.ClientTLS)
+		node3, sd3 := startEngineWithTLS(t, srv.Addr().String(), info.ServerConfig, info.ClientConfig)
 		require.NotNil(t, node3)
 		require.NotNil(t, sd3)
 
@@ -2961,7 +2953,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	t.Run("ignores a copy of an announced join", func(t *testing.T) {
 		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5100"
-		cl.nodeJoinedEventsFilter.Add(node)
+		cl.nodeJoinedEventsFilter[node] = types.Unit{}
 
 		announceJoin(cl, node, 1)
 		require.Empty(t, cl.pendingJoins)
@@ -2970,7 +2962,7 @@ func TestTrackNodeJoinEvent(t *testing.T) {
 	t.Run("records a join while the departure of the node is pending", func(t *testing.T) {
 		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:5200"
-		cl.nodeJoinedEventsFilter.Add(node)
+		cl.nodeJoinedEventsFilter[node] = types.Unit{}
 
 		announceLeft(cl, node, 1)
 		announceJoin(cl, node, 2)
@@ -3011,7 +3003,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 	t.Run("ignores a copy of an announced departure", func(t *testing.T) {
 		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9200"
-		cl.nodeLeftEventsFilter.Add(node)
+		cl.nodeLeftEventsFilter[node] = types.Unit{}
 
 		announceLeft(cl, node, 1)
 		require.Empty(t, cl.pendingLeaves)
@@ -3020,7 +3012,7 @@ func TestTrackNodeLeftEvent(t *testing.T) {
 	t.Run("records a departure while the restart of the node is pending", func(t *testing.T) {
 		cl := newEventCluster("127.0.0.1", 4000)
 		node := "127.0.0.1:9300"
-		cl.nodeLeftEventsFilter.Add(node)
+		cl.nodeLeftEventsFilter[node] = types.Unit{}
 
 		announceJoin(cl, node, 1)
 		announceLeft(cl, node, 2)
@@ -4382,7 +4374,7 @@ func TestTrackingIsIgnoredAfterStop(t *testing.T) {
 func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
 	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9500"
-	cl.nodeLeftEventsFilter.Add(node)
+	cl.nodeLeftEventsFilter[node] = types.Unit{}
 
 	cl.emitNodeLeftLocked(node, time.Now().UnixNano())
 
@@ -4392,7 +4384,7 @@ func TestEmitNodeLeftLockedDeduplicates(t *testing.T) {
 func TestEmitNodeJoinedLockedDeduplicates(t *testing.T) {
 	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9600"
-	cl.nodeJoinedEventsFilter.Add(node)
+	cl.nodeJoinedEventsFilter[node] = types.Unit{}
 
 	cl.emitNodeJoinedLocked(node, time.Now().UnixNano())
 

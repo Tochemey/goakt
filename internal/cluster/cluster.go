@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	goset "github.com/deckarep/golang-set/v2"
 	"github.com/redis/go-redis/v9"
 	"github.com/tochemey/olric"
 	oconfig "github.com/tochemey/olric/config"
@@ -294,8 +293,8 @@ type cluster struct {
 	// nodeJoinedEventsFilter and nodeLeftEventsFilter hold the peers addresses
 	// whose latest announced membership event was a join or a departure, so a
 	// membership event is announced once per membership change.
-	nodeJoinedEventsFilter goset.Set[string]
-	nodeLeftEventsFilter   goset.Set[string]
+	nodeJoinedEventsFilter map[string]types.Unit
+	nodeLeftEventsFilter   map[string]types.Unit
 	// pendingJoins and pendingLeaves hold the membership events not yet
 	// announced, keyed by peers address.
 	pendingJoins  map[string]pendingEvent
@@ -354,8 +353,8 @@ func New(name string, disco discovery.Provider, node *discovery.Node, opts ...Co
 		tlsInfo:                 config.tlsInfo,
 		networkProfile:          config.networkProfile,
 		events:                  make(chan *Event, defaultEventsBufSize),
-		nodeJoinedEventsFilter:  goset.NewSet[string](),
-		nodeLeftEventsFilter:    goset.NewSet[string](),
+		nodeJoinedEventsFilter:  make(map[string]types.Unit),
+		nodeLeftEventsFilter:    make(map[string]types.Unit),
 		pendingJoins:            make(map[string]pendingEvent),
 		pendingLeaves:           make(map[string]pendingEvent),
 		pendingEmitTimeout:      config.convergenceTimeout,
@@ -893,14 +892,14 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 	for _, member := range members {
 		node := new(discovery.Node)
 		_ = json.Unmarshal([]byte(member.Meta), node)
-		roles := goset.NewSet(node.Roles...)
+		slices.Sort(node.Roles)
 		peers = append(peers, &Peer{
 			Host:          node.Host,
 			DiscoveryPort: node.DiscoveryPort,
 			PeersPort:     node.PeersPort,
 			Coordinator:   member.Coordinator,
 			RemotingPort:  node.RemotingPort,
-			Roles:         roles.ToSlice(),
+			Roles:         slices.Compact(node.Roles),
 			CreatedAt:     member.Birthdate,
 		})
 	}
@@ -1465,7 +1464,9 @@ func (x *cluster) trackJoinLocked(node string, source string, generation uint64,
 		return
 	}
 
-	if _, leaving := x.pendingLeaves[node]; !leaving && x.nodeJoinedEventsFilter.Contains(node) {
+	_, leaving := x.pendingLeaves[node]
+	_, joined := x.nodeJoinedEventsFilter[node]
+	if !leaving && joined {
 		return
 	}
 
@@ -1482,8 +1483,10 @@ func (x *cluster) trackLeftLocked(node string, source string, generation uint64,
 		return
 	}
 
-	x.nodeJoinedEventsFilter.Remove(node)
-	if _, joining := x.pendingJoins[node]; !joining && x.nodeLeftEventsFilter.Contains(node) {
+	delete(x.nodeJoinedEventsFilter, node)
+	_, joining := x.pendingJoins[node]
+	_, left := x.nodeLeftEventsFilter[node]
+	if !joining && left {
 		return
 	}
 
@@ -1723,13 +1726,13 @@ func (x *cluster) detectLeaderChangeLocked() {
 // already announced as departed is skipped until it is announced as joined
 // again. It must be called while holding eventsLock.
 func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
-	x.nodeJoinedEventsFilter.Remove(node)
+	delete(x.nodeJoinedEventsFilter, node)
 
-	if x.nodeLeftEventsFilter.Contains(node) {
+	if _, left := x.nodeLeftEventsFilter[node]; left {
 		return
 	}
 
-	x.nodeLeftEventsFilter.Add(node)
+	x.nodeLeftEventsFilter[node] = types.Unit{}
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &NodeLeftEvent{
 		Address:   node,
@@ -1745,13 +1748,13 @@ func (x *cluster) emitNodeLeftLocked(node string, timestamp int64) {
 // departs a second time is announced each time. It must be called while holding
 // eventsLock.
 func (x *cluster) emitNodeJoinedLocked(node string, timestamp int64) {
-	x.nodeLeftEventsFilter.Remove(node)
+	delete(x.nodeLeftEventsFilter, node)
 
-	if x.nodeJoinedEventsFilter.Contains(node) {
+	if _, joined := x.nodeJoinedEventsFilter[node]; joined {
 		return
 	}
 
-	x.nodeJoinedEventsFilter.Add(node)
+	x.nodeJoinedEventsFilter[node] = types.Unit{}
 	timeMilli := timestamp / int64(time.Millisecond)
 	evt := &NodeJoinedEvent{
 		Address:   node,
