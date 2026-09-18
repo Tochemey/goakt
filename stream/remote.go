@@ -28,9 +28,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/flowchartsman/retry"
-
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/remote"
 )
 

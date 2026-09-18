@@ -38,7 +38,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/flowchartsman/retry"
 	"go.opentelemetry.io/otel/attribute"
 	otelmetric "go.opentelemetry.io/otel/metric"
 	"go.uber.org/atomic"
@@ -66,6 +65,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pendingasks"
 	"github.com/tochemey/goakt/v4/internal/pointer"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"

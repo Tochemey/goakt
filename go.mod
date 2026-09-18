@@ -6,7 +6,7 @@ require (
 	github.com/Workiva/go-datastructures v1.1.7
 	github.com/andybalholm/brotli v1.2.4
 	github.com/bytedance/sonic v1.15.4
-	github.com/flowchartsman/retry v1.2.0
+	github.com/cenkalti/backoff/v7 v7.0.0
 	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/google/uuid v1.6.0
 	github.com/grandcat/zeroconf v1.0.0
