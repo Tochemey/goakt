@@ -141,16 +141,20 @@ provider := nats.NewDiscovery(config)
 
 ### mDNS
 
-The provider registers a service instance on the local network and browses for instances of the same type. An entry
-counts as a peer when its instance name, service type, domain and port all match the configuration. Each discovery
-call browses for five seconds and returns IPv4 addresses, plus IPv6 addresses when `IPv6` is true. Multicast must be
-allowed on the network, which rules out most cloud networks.
+Each node advertises a service instance named after the cluster with a unique suffix, and carries the cluster name in
+its TXT record. Each discovery call browses for five seconds and keeps the instances whose service, domain, port and
+cluster name match. It returns one IPv4 address per node, plus one IPv6 address when `IPv6` is true. Queries travel
+over IPv4 multicast, and IPv6 addresses come from the AAAA records nodes include in their answers, so the network needs
+IPv4 multicast even for IPv6 discovery. Multicast must be allowed on the network, which rules out most cloud networks.
 
-- **ServiceName**: Required. The instance name shared by all nodes of the cluster.
+- **ServiceName**: Required. The cluster name. All nodes of one cluster share it, and each node adds its own suffix on the wire.
 - **Service**: Required. The service type, for example `_goakt._tcp`.
-- **Domain**: Required. The mDNS domain, usually `local.`.
+- **Domain**: Required. The mDNS domain. `local` and `local.` are both accepted.
 - **Port**: The discovery port this node announces. Peers announcing a different port are ignored.
 - **IPv6**: Optional. When true, IPv6 addresses are returned alongside IPv4 ones.
+
+`NewDiscovery` also accepts `mdns.WithLogger` to route the provider's log output, including the mDNS library's own
+messages, to your logger.
 
 ```go mDNS
 import "github.com/tochemey/goakt/v4/discovery/mdns"

@@ -13,7 +13,7 @@ The mDNS discovery provider allows GoAkt cluster nodes to discover each other us
     +---------------------+ -----------------> +---------------------+
               |                                         |
               |  Register / Browse                       v
-              |  zeroconf (mDNS)                +---------------+
+              |  mDNS multicast                 +---------------+
               v                                  |  Memberlist   |
     +---------------------+                      |  (gossip)     |
     |   mDNS (multicast)   |                      +---------------+
@@ -51,8 +51,8 @@ type Provider interface {
 ### How It Works
 
 1. **Initialize**: Validate config.
-2. **Register**: Create zeroconf resolver; register this node as a service (ServiceName, Service type, Domain, Port).
-3. **DiscoverPeers**: Browse for services matching Service type and Domain; filter by Port and Instance; return addresses.
+2. **Register**: Start an mDNS server advertising a unique instance (ServiceName plus a random suffix) of the configured Service type and Domain on Port, with the cluster name in a TXT record.
+3. **DiscoverPeers**: Browse for services matching Service type and Domain; keep the entries whose Port and cluster name match; return addresses.
 4. **Deregister**: Shutdown server; close stop channel.
 
 ```
@@ -70,7 +70,7 @@ type Provider interface {
 
 ### Service Matching
 
-Entries are validated by `Port`, `Service`, `Domain`, and `Instance` (ServiceName) to ensure only cluster peers are returned.
+Entries are kept when their `Port` matches, their name ends with the configured `Service` and `Domain`, and their TXT record carries `name=<ServiceName>`. Every node registers its own instance name, so nodes of one cluster do not overwrite each other on the wire.
 
 ---
 
@@ -78,7 +78,7 @@ Entries are validated by `Port`, `Service`, `Domain`, and `Instance` (ServiceNam
 
 ```go
 type Config struct {
-    ServiceName string  // Required. Service instance name.
+    ServiceName string  // Required. Cluster name shared by all nodes.
     Service     string  // Required. Service type (e.g. _goakt._tcp).
     Domain      string  // Required. Domain (e.g. local.).
     Port        int     // Required. Port the service listens on.
@@ -111,6 +111,7 @@ clusterConfig := actor.NewClusterConfig().
 discovery/mdns/
 ├── config.go       # Config + validation
 ├── discovery.go    # Provider implementation
+├── option.go       # Provider options
 └── README.md
 ```
 
@@ -124,7 +125,7 @@ discovery/mdns/
 | Cross-subnet      | No (mDNS is link-local)  |
 | Loopback (tests)  | May work on some systems |
 
-Uses zeroconf (github.com/grandcat/zeroconf). mDNS is typically link-local.
+Uses github.com/hashicorp/mdns. mDNS is typically link-local.
 
 ---
 
