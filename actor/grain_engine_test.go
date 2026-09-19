@@ -3652,3 +3652,71 @@ func TestTellGrainOneWay(t *testing.T) {
 		}
 	})
 }
+
+func TestTellGrainOneWayDeadletters(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("tell-grain-one-way-deadletters", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	consumer, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	require.NoError(t, sys.RegisterGrainKind(ctx, &MockReceiveFailingGrain{}))
+	require.NoError(t, sys.RegisterGrainKind(ctx, &MockPanickingGrain{}))
+	failing := newGrainIdentity(NewMockReceiveFailingGrain(), "one-way-deadletter-failing")
+	panicking := newGrainIdentity(NewMockPanickingGrain(), "one-way-deadletter-panicking")
+
+	// Err on TestSend, Unhandled on TestReply and a panic on TestSend: none
+	// reaches the caller, each is recorded as a deadletter naming the grain.
+	require.NoError(t, sys.TellGrain(ctx, failing, new(testpb.TestSend), WithOneWay()))
+	require.NoError(t, sys.TellGrain(ctx, failing, new(testpb.TestReply), WithOneWay()))
+	require.NoError(t, sys.TellGrain(ctx, panicking, new(testpb.TestSend), WithOneWay()))
+	pause.For(time.Second)
+
+	reasons := make(map[string]string)
+	for message := range consumer.Iterator() {
+		deadletter, ok := message.Payload().(*Deadletter)
+		if !ok {
+			continue
+		}
+
+		require.Equal(t, sys.Name(), deadletter.Receiver().System())
+		require.Equal(t, sys.NoSender().Name(), deadletter.Sender().Name())
+
+		key := deadletter.Receiver().Name()
+		switch deadletter.Message().(type) {
+		case *testpb.TestSend:
+			key += ":TestSend"
+		case *testpb.TestReply:
+			key += ":TestReply"
+		}
+		reasons[key] = deadletter.Reason()
+	}
+
+	require.Len(t, reasons, 3)
+	require.Contains(t, reasons[failing.String()+":TestSend"], "failed to process message")
+	require.Contains(t, reasons[failing.String()+":TestReply"], "unhandled message type")
+	require.Contains(t, reasons[panicking.String()+":TestSend"], "test panic")
+
+	// The acknowledged tell hands the failure to its caller, and a handler
+	// reporting a nil error on a one-way message succeeded: neither records
+	// anything.
+	require.Error(t, sys.TellGrain(ctx, failing, new(testpb.TestSend)))
+
+	succeeding := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Err(nil)
+	}}
+	succeedingID, err := sys.GrainIdentity(ctx, "one-way-deadletter-succeeding", func(context.Context) (Grain, error) {
+		return succeeding, nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, sys.TellGrain(ctx, succeedingID, new(testpb.TestSend), WithOneWay()))
+	pause.For(500 * time.Millisecond)
+
+	for message := range consumer.Iterator() {
+		_, ok := message.Payload().(*Deadletter)
+		require.False(t, ok, "neither an acknowledged tell nor a nil error must produce a deadletter")
+	}
+}

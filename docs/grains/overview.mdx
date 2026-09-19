@@ -93,7 +93,10 @@ With `WithOneWay()`:
 
 - The caller still receives errors that occur before the enqueue: an invalid identity, a stopped system, an activation
   failure, a full bounded mailbox, or a transport failure toward a remote owner.
-- Errors reported by the handler through `Err` or `Unhandled` are dropped. A panic in `OnReceive` is logged.
+- A failure the handler reports through `Err` or `Unhandled`, or a panic in `OnReceive`, is recorded as a
+  [deadletter](/advanced/event-streams) on the node that ran the handler. The `Deadletter` event names the grain as
+  receiver, using its identity `kind/name` as the name, and carries the message and the reason. A panic is logged as
+  well.
 - The message rides the grain mailbox like any other, so ordering with other messages is preserved and the grain's
   passivation activity is refreshed.
 - `CorrelationID()` is empty and `DeferResponse()` returns nil inside the handler, since there is nothing to reply to.

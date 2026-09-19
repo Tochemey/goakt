@@ -53,9 +53,10 @@ func newTellGrainConfig(opts ...TellGrainOption) tellGrainConfig {
 //
 // Errors that occur before the enqueue are still returned: an invalid
 // identity, a stopped system, an activation failure, a full bounded mailbox
-// or a transport failure toward a remote owner. Errors reported by the
-// handler through Err or Unhandled are dropped, and a panic in OnReceive is
-// only logged.
+// or a transport failure toward a remote owner. A failure the handler reports
+// through Err or Unhandled, or a panic in OnReceive, is recorded as a
+// deadletter on the node that ran the handler, with the grain as receiver,
+// instead of being returned.
 func WithOneWay() TellGrainOption {
 	return func(config tellGrainConfig) tellGrainConfig {
 		config.isOneWay = true

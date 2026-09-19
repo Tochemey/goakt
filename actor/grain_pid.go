@@ -1071,14 +1071,20 @@ func (pid *grainPID) recovery(received *GrainContext) {
 		)
 	}
 
-	// A response envelope has no reply route: the log is the only signal
-	// anyone gets. Everything else reports through Err, which routes an
+	// A response envelope or a one-way message has no reply route: the log
+	// is the only signal anyone gets for the envelope, and the one-way
+	// message is recorded as a deadletter as well, like a failure its handler
+	// reports itself. Everything else reports through Err, which routes an
 	// async reply (request envelopes), the ask reply channel (synchronous
 	// contexts, whose err channel is nil by construction), or the Tell ack
 	// channel.
 	if received.err == nil && received.requestID == "" && !received.synchronous {
 		if pid.getLogger().Enabled(log.ErrorLevel) {
 			pid.getLogger().Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
+		}
+
+		if received.oneWay {
+			received.Err(failure)
 		}
 		return
 	}

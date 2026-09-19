@@ -31,6 +31,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
+	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/future"
 	"github.com/tochemey/goakt/v4/log"
@@ -50,8 +51,8 @@ const (
 	// the context and nothing needs draining before it recycles.
 	grainEnvelope
 	// grainOneWay carries no channels: the caller returned as soon as the
-	// message was enqueued, so the turn's reply methods are no-ops and a
-	// panic in the handler is only logged.
+	// message was enqueued, so a failure the handler reports, or a panic, is
+	// recorded as a deadletter instead of reaching anyone.
 	grainOneWay
 )
 
@@ -107,6 +108,11 @@ type GrainContext struct {
 	// Both are turn-owned and need no synchronization.
 	replyDeferred bool
 	replySent     bool
+
+	// oneWay marks a message sent with WithOneWay: nobody awaits it, so a
+	// failure the handler reports is recorded as a deadletter instead of
+	// being returned to a caller.
+	oneWay bool
 
 	// poolShard is the home shard of this context in grainContextPool:
 	// recycling always returns it to that ring. Stamped by the pool on
@@ -191,9 +197,20 @@ func (gctx *GrainContext) Err(err error) {
 		return
 	}
 
+	// A one-way message has no reply route: a failure is recorded as a
+	// deadletter, the only place it can surface. A nil error is a success,
+	// as on the acknowledged path, and records nothing.
+	if gctx.oneWay {
+		if err != nil {
+			gctx.toDeadletter(err)
+		}
+		return
+	}
+
 	if gctx.err == nil {
 		return
 	}
+
 	gctx.err <- err
 }
 
@@ -300,10 +317,48 @@ func (gctx *GrainContext) Unhandled() {
 		return
 	}
 
+	// A one-way message has no reply route: the failure is recorded as a
+	// deadletter, the only place it can surface.
+	if gctx.oneWay {
+		gctx.toDeadletter(failure)
+		return
+	}
+
 	if gctx.err == nil {
 		return
 	}
 	gctx.err <- failure
+}
+
+// toDeadletter records a one-way message the grain failed to handle with the
+// system deadletter actor. Nobody awaits a one-way message, so the deadletter
+// stream is the only place the failure can surface, the same channel an actor
+// uses for a told message it does not handle. The receiver is the grain's
+// address on this node, named by its identity, so subscribers and counters see
+// the grain like any other receiver. The sender is unknown: a one-way message
+// carries no envelope.
+func (gctx *GrainContext) toDeadletter(failure error) {
+	system := gctx.actorSystem
+	deadletter := system.getDeadletter()
+	if deadletter == nil {
+		return
+	}
+
+	command := &commands.SendDeadletter{
+		Deadletter: commands.Deadletter{
+			Sender:   system.NoSender().address,
+			Receiver: address.New(gctx.self.String(), system.Name(), system.Host(), system.Port()),
+			Message:  gctx.message,
+			SendTime: time.Now().UTC(),
+			Reason:   failure.Error(),
+		},
+	}
+
+	if err := system.NoSender().Tell(context.WithoutCancel(gctx.ctx), deadletter, command); err != nil {
+		if logger := system.Logger(); logger.Enabled(log.DebugLevel) {
+			logger.Debugf("grain=%s failed to record one-way message %T as deadletter: %v", gctx.self.String(), gctx.message, err)
+		}
+	}
 }
 
 // CorrelationID returns the correlation ID of the async request being
@@ -557,8 +612,9 @@ func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.
 //
 // By default the call waits for the target grain to acknowledge the message
 // through NoErr, Err or Unhandled, and returns the reported error, if any.
-// With WithOneWay the call returns as soon as the message is enqueued and
-// nothing reported by the handler reaches the caller.
+// With WithOneWay the call returns as soon as the message is enqueued and a
+// failure the handler reports is recorded as a deadletter instead of
+// reaching the caller.
 //
 // Example:
 //
@@ -889,6 +945,7 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.ctx = ctx
 	gctx.actorSystem = actorSystem
 	gctx.synchronous = mode == grainAsk
+	gctx.oneWay = mode == grainOneWay
 	gctx.pid = pid
 	gctx.requestID = ""
 	gctx.requestReplyTo = nil
@@ -926,6 +983,7 @@ func (gctx *GrainContext) reset() {
 	gctx.response = nil
 	gctx.err = nil
 	gctx.synchronous = false
+	gctx.oneWay = false
 	gctx.pid = nil
 	gctx.requestID = ""
 	gctx.requestReplyTo = nil

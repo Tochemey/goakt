@@ -586,7 +586,7 @@ type ActorSystem interface {
 	// protobuf message. No response payload is returned. By default the call waits for the grain to acknowledge
 	// the message through NoErr, Err or Unhandled, bounded by DefaultGrainRequestTimeout, and returns the error
 	// the handler reported, if any. With WithOneWay the call returns as soon as the message is enqueued in the
-	// grain mailbox and nothing reported by the handler reaches the caller.
+	// grain mailbox; a failure the handler reports is recorded as a deadletter instead of reaching the caller.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout control.

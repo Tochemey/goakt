@@ -45,8 +45,9 @@ func newTellGrainConfig(opts ...TellGrainOption) tellGrainConfig {
 // WithOneWay makes TellGrain fire-and-forget: the call returns once the node
 // hosting the grain has enqueued the message, without waiting for the grain to
 // process it. Transport failures and an enqueue failure reported by that node,
-// such as a full bounded mailbox, are still returned. Errors reported by the
-// grain handler never reach the caller.
+// such as a full bounded mailbox, are still returned. A failure the grain
+// handler reports never reaches the caller: the hosting node records it as a
+// deadletter with the grain as receiver.
 func WithOneWay() TellGrainOption {
 	return func(config tellGrainConfig) tellGrainConfig {
 		config.isOneWay = true
