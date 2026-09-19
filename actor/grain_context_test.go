@@ -1714,3 +1714,43 @@ func TestGrainRequestLateReplyIdempotence(t *testing.T) {
 		require.Empty(t, outcomes)
 	})
 }
+
+func TestGrainContextTellGrainOneWay(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	target := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		entered <- struct{}{}
+		<-release
+		gctx.NoErr()
+	}}
+	targetID, err := system.GrainIdentity(ctx, "oneWayTarget", func(context.Context) (Grain, error) {
+		return target, nil
+	})
+	require.NoError(t, err)
+
+	// The target parks inside OnReceive, so a one-way tell issued from a
+	// handler must return without waiting for it and without an error.
+	results := make(chan error, 1)
+	caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		results <- gctx.TellGrain(targetID, new(testpb.TestSend), WithOneWay())
+		gctx.NoErr()
+	}}
+	callerID, err := system.GrainIdentity(ctx, "oneWayCaller", func(context.Context) (Grain, error) {
+		return caller, nil
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+	require.NoError(t, <-results)
+
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("the target grain did not receive the one-way message")
+	}
+}

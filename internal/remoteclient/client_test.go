@@ -2863,3 +2863,20 @@ func TestPersistPeerState_EnrichContextError(t *testing.T) {
 	require.Error(t, err)
 	assert.EqualError(t, err, "inject error")
 }
+
+func TestRemoteTellGrainOneWay_InvalidMessage(t *testing.T) {
+	r := NewClient()
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteTellGrainOneWay(context.Background(), "host", 1000, grainReq, nil)
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, gerrors.ErrInvalidMessage)
+}
+
+func TestRemoteTellGrainOneWay_ConnectionRefused(t *testing.T) {
+	r := NewClient()
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
+
+	err := r.RemoteTellGrainOneWay(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second))
+	assert.Error(t, err)
+}

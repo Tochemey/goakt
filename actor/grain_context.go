@@ -49,6 +49,10 @@ const (
 	// routed by the system from the envelope metadata, so nothing can block on
 	// the context and nothing needs draining before it recycles.
 	grainEnvelope
+	// grainOneWay carries no channels: the caller returned as soon as the
+	// message was enqueued, so the turn's reply methods are no-ops and a
+	// panic in the handler is only logged.
+	grainOneWay
 )
 
 // grainReplyError wraps a handler-reported failure for transport on the ask
@@ -551,8 +555,10 @@ func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.
 
 // TellGrain sends a message to another Grain without waiting for a response.
 //
-// This method performs an asynchronous send (Tell pattern) to the specified Grain.
-// It returns an error if the message could not be delivered.
+// By default the call waits for the target grain to acknowledge the message
+// through NoErr, Err or Unhandled, and returns the reported error, if any.
+// With WithOneWay the call returns as soon as the message is enqueued and
+// nothing reported by the handler reaches the caller.
 //
 // Example:
 //
@@ -560,9 +566,12 @@ func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.
 //	if err != nil {
 //	    // handle error
 //	}
-func (gctx *GrainContext) TellGrain(to *GrainIdentity, message any) error {
+//
+//	// fire-and-forget
+//	err = ctx.TellGrain(otherGrainID, &MyNotification{}, actor.WithOneWay())
+func (gctx *GrainContext) TellGrain(to *GrainIdentity, message any, opts ...TellGrainOption) error {
 	ctx := context.WithoutCancel(gctx.Context())
-	return gctx.actorSystem.TellGrain(ctx, to, message)
+	return gctx.actorSystem.TellGrain(ctx, to, message, opts...)
 }
 
 // PipeToGrain runs a task asynchronously and delivers its result to the target Grain.
@@ -818,7 +827,7 @@ func (gctx *GrainContext) Extension(extensionID string) extension.Extension {
 }
 
 type grainPipeSystem interface {
-	TellGrain(ctx context.Context, identity *GrainIdentity, message any) error
+	TellGrain(ctx context.Context, identity *GrainIdentity, message any, opts ...TellGrainOption) error
 	Logger() log.Logger
 }
 

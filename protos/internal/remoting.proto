@@ -208,6 +208,9 @@ message RemoteAskGrainResponse {
 message RemoteTellGrainRequest {
   Grain grain = 1;
   bytes message = 2;
+  // one_way asks the receiving node to enqueue the message and answer at
+  // once, without waiting for the grain to process it.
+  bool one_way = 3;
 }
 
 message RemoteTellGrainResponse {}

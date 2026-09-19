@@ -1573,7 +1573,7 @@ type RemoteSpawnRequest_builder struct {
 	PassivationStrategy *PassivationStrategy
 	// Specifies the dependencies
 	Dependencies []*Dependency
-	// States whether the actor will require a stash buffer
+	//  States whether the actor will require a stash buffer
 	EnableStash bool
 	// Specifies the role the actor belongs to
 	Role *string
@@ -1978,6 +1978,7 @@ type RemoteTellGrainRequest struct {
 	state              protoimpl.MessageState `protogen:"opaque.v1"`
 	xxx_hidden_Grain   *Grain                 `protobuf:"bytes,1,opt,name=grain,proto3"`
 	xxx_hidden_Message []byte                 `protobuf:"bytes,2,opt,name=message,proto3"`
+	xxx_hidden_OneWay  bool                   `protobuf:"varint,3,opt,name=one_way,json=oneWay,proto3"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -2021,6 +2022,13 @@ func (x *RemoteTellGrainRequest) GetMessage() []byte {
 	return nil
 }
 
+func (x *RemoteTellGrainRequest) GetOneWay() bool {
+	if x != nil {
+		return x.xxx_hidden_OneWay
+	}
+	return false
+}
+
 func (x *RemoteTellGrainRequest) SetGrain(v *Grain) {
 	x.xxx_hidden_Grain = v
 }
@@ -2030,6 +2038,10 @@ func (x *RemoteTellGrainRequest) SetMessage(v []byte) {
 		v = []byte{}
 	}
 	x.xxx_hidden_Message = v
+}
+
+func (x *RemoteTellGrainRequest) SetOneWay(v bool) {
+	x.xxx_hidden_OneWay = v
 }
 
 func (x *RemoteTellGrainRequest) HasGrain() bool {
@@ -2048,6 +2060,9 @@ type RemoteTellGrainRequest_builder struct {
 
 	Grain   *Grain
 	Message []byte
+	// one_way asks the receiving node to enqueue the message and answer at
+	// once, without waiting for the grain to process it.
+	OneWay bool
 }
 
 func (b0 RemoteTellGrainRequest_builder) Build() *RemoteTellGrainRequest {
@@ -2056,6 +2071,7 @@ func (b0 RemoteTellGrainRequest_builder) Build() *RemoteTellGrainRequest {
 	_, _ = b, x
 	x.xxx_hidden_Grain = b.Grain
 	x.xxx_hidden_Message = b.Message
+	x.xxx_hidden_OneWay = b.OneWay
 	return m0
 }
 
@@ -4128,7 +4144,7 @@ type RemoteSpawnChildRequest_builder struct {
 	PassivationStrategy *PassivationStrategy
 	// Specifies the dependencies
 	Dependencies []*Dependency
-	// States whether the actor will require a stash buffer
+	//  States whether the actor will require a stash buffer
 	EnableStash bool
 	// Specifies the reentrancy configuration when explicitly set
 	Reentrancy *ReentrancyConfig
@@ -4311,10 +4327,11 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\fR\amessage\x12B\n" +
 	"\x0frequest_timeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\x0erequestTimeout\"2\n" +
 	"\x16RemoteAskGrainResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\fR\amessage\"[\n" +
+	"\amessage\x18\x01 \x01(\fR\amessage\"t\n" +
 	"\x16RemoteTellGrainRequest\x12'\n" +
 	"\x05grain\x18\x01 \x01(\v2\x11.internalpb.GrainR\x05grain\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\fR\amessage\"\x19\n" +
+	"\amessage\x18\x02 \x01(\fR\amessage\x12\x17\n" +
+	"\aone_way\x18\x03 \x01(\bR\x06oneWay\"\x19\n" +
 	"\x17RemoteTellGrainResponse\"E\n" +
 	"\x1aRemoteActivateGrainRequest\x12'\n" +
 	"\x05grain\x18\x01 \x01(\v2\x11.internalpb.GrainR\x05grain\"\x1d\n" +

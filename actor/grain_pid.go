@@ -410,19 +410,27 @@ func (pid *grainPID) isActive() bool {
 // producers race on the Idle -> Scheduled CAS and only the winner pushes
 // onto the ready queue. The losers' messages are still drained because
 // the winner's turn observes them via the FIFO mailbox.
-func (pid *grainPID) receive(grainContext *GrainContext) {
+//
+// An enqueue failure is reported on the context, which wakes the blocked
+// ack or ask caller, and returned, which is what a one-way send relies on
+// since its context carries no reply channel. An inactive grain is only
+// returned as ErrDead; ack and ask callers keep observing it through their
+// timeout.
+func (pid *grainPID) receive(grainContext *GrainContext) error {
 	if !pid.isActive() {
-		return
+		return gerrors.ErrDead
 	}
 
 	if err := pid.enqueueMessage(grainContext); err != nil {
 		grainContext.Err(err)
-		return
+		return err
 	}
 
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)
 	}
+
+	return nil
 }
 
 // enqueueMessage appends a user message to the grain's mailbox: the standalone

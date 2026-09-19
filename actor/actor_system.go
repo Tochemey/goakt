@@ -583,16 +583,20 @@ type ActorSystem interface {
 	// TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 	//
 	// This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
-	// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
+	// protobuf message. No response payload is returned. By default the call waits for the grain to acknowledge
+	// the message through NoErr, Err or Unhandled, bounded by DefaultGrainRequestTimeout, and returns the error
+	// the handler reported, if any. With WithOneWay the call returns as soon as the message is enqueued in the
+	// grain mailbox and nothing reported by the handler reaches the caller.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout control.
 	//   - identity: The unique identity of the Grain.
 	//   - message: The protobuf message to send to the Grain.
+	//   - opts: Per-call options, such as WithOneWay.
 	//
 	// Returns:
 	//   - error: An error if the message could not be delivered or the system is not started.
-	TellGrain(ctx context.Context, identity *GrainIdentity, message any) error
+	TellGrain(ctx context.Context, identity *GrainIdentity, message any, opts ...TellGrainOption) error
 	// Grains retrieves a list of all active Grains (virtual actors) in the system.
 	//
 	// Grains are virtual actors that are automatically managed by the actor system. This method returns a slice of

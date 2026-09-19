@@ -297,9 +297,10 @@ func main() {
   are logged and dropped.
 - Requests that cross nodes carry their payload as protobuf: the message must be a `proto.Message`, like every other
   remote send. Local requests accept any Go value.
-- `TellGrain` keeps its existing acknowledgement semantics; deferred replies apply to Ask and Request flows.
+- `TellGrain` keeps its acknowledgement semantics by default; deferred replies apply to Ask and Request flows.
   Consequently a `TellGrain` against a grain paused in `StashNonReentrant` mode can return `ErrRequestTimeout` even
-  though the message is delivered and processes after resume. Prefer `RequestGrain` toward reentrant grains.
+  though the message is delivered and processes after resume. Prefer `RequestGrain` toward reentrant grains, or send
+  with `WithOneWay()` when no acknowledgement is needed: the message then waits in the mailbox until the grain resumes.
 - `StashNonReentrant` with `WithRequestTimeout(d)` where `d <= 0` pauses the grain until the reply arrives; if the reply
   is lost (target node crash), only shutdown unblocks it. Keep the default timeout in stash mode.
 - Interval and cron timer ticks accumulate in the mailbox during a long pause and replay on resume; with a bounded

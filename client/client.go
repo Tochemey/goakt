@@ -387,26 +387,33 @@ func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest
 
 // TellGrain sends a message to the specified Grain.
 //
-// This method delivers the given message to the target Grain.
-// It is intended for fire-and-forget messaging patterns.
+// This method delivers the given message to the target Grain. No response
+// payload is returned. By default the call returns once the node hosting the
+// grain has processed the message and reports the error the handler
+// returned, if any. With WithOneWay the call returns once that node has
+// enqueued the message and nothing reported by the handler reaches the caller.
 //
 // Parameters:
 //   - ctx: Context used for cancellation and timeout control.
 //   - grainRequest: The GrainRequest identifying the target Grain.
 //   - message: The message to send to the Grain.
+//   - opts: Per-call options, such as WithOneWay.
 //
 // Returns:
 //   - error: Returns nil on success. Returns an error if message delivery fails.
 //
 // Note:
-//   - This method is asynchronous; it does not wait for a response.
 //   - The grain kind must be registered on the remote actor system using RegisterGrainKind.
-func (x *Client) TellGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message) error {
+func (x *Client) TellGrain(ctx context.Context, grainRequest *remote.GrainRequest, message proto.Message, opts ...TellGrainOption) error {
 	x.locker.Lock()
 	node := nextNode(x.balancer)
 	remoteHost, remotePort := node.hostAndPort()
 	remoting := node.remoteClient()
 	x.locker.Unlock()
+
+	if newTellGrainConfig(opts...).isOneWay {
+		return remoting.RemoteTellGrainOneWay(ctx, remoteHost, remotePort, grainRequest, message)
+	}
 	return remoting.RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message)
 }
 

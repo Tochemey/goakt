@@ -42,6 +42,7 @@ Inside `OnReceive`, `GrainContext` provides:
 - **TellActor**: Send to an actor by name.
 - **AskActor**: Ask an actor by name.
 - **AskGrain**: Ask another grain.
+- **TellGrain**: Tell another grain; add `WithOneWay()` to return without waiting for the acknowledgement.
 - **RequestGrain** / **RequestActor**: Non-blocking async request; needs [reentrancy](/grains/reentrancy).
 - **DeferResponse**: Hand off this Ask's reply to a `GrainReply` for a later turn.
 - **PipeToSelf**, **PipeToGrain**, **PipeToActor**: Run a task off the message loop, deliver its result as a message;
@@ -62,6 +63,45 @@ if err != nil {
 
 response, err := system.AskGrain(ctx, identity, request, time.Second)
 ```
+
+### Tell: acknowledged or one-way
+
+`TellGrain` never returns a response payload, but by default it does wait for the grain to acknowledge the message:
+the call returns once `OnReceive` called `NoErr`, `Err` or `Unhandled`, bounded by `DefaultGrainRequestTimeout`, and
+surfaces the error the handler reported. Use this when the caller needs to know the message was processed.
+
+Add `WithOneWay()` to make the call fire-and-forget. The message is enqueued in the grain mailbox, locally or on the
+node that owns the grain, and the call returns without waiting for the grain to process it.
+
+```go One-way tell
+err := system.TellGrain(ctx, identity, &Notification{}, actor.WithOneWay())
+```
+
+Why send one-way:
+
+- **Lower latency for the caller**. The call costs one enqueue locally, or one round trip to the owning node. It does
+  not pay for the grain's processing time, nor for the messages already queued ahead of it.
+- **No coupling to the grain's pace**. A slow handler, a long mailbox, or a grain paused in `StashNonReentrant` mode
+  cannot make the caller wait or time out. The message simply waits its turn.
+- **Higher throughput**. A producer is bounded only by the enqueue rate, so notifications, event fan-out, telemetry
+  and other high-rate traffic flow without blocking the sender on each message.
+- **Simpler senders**. When the sender has nothing to do with the outcome, there is no acknowledgement to handle and
+  no timeout to choose. The default `TellGrain` remains the right choice when the caller needs to know the message was
+  processed.
+
+With `WithOneWay()`:
+
+- The caller still receives errors that occur before the enqueue: an invalid identity, a stopped system, an activation
+  failure, a full bounded mailbox, or a transport failure toward a remote owner.
+- Errors reported by the handler through `Err` or `Unhandled` are dropped. A panic in `OnReceive` is logged.
+- The message rides the grain mailbox like any other, so ordering with other messages is preserved and the grain's
+  passivation activity is refreshed.
+- `CorrelationID()` is empty and `DeferResponse()` returns nil inside the handler, since there is nothing to reply to.
+
+<Note>
+  A one-way tell does not apply backpressure: with the default unbounded mailbox, a fast producer can grow the mailbox
+  without limit. Use `WithGrainMailboxCapacity` when the producer must be slowed down by `ErrMailboxFull`.
+</Note>
 
 When activation is needed, the framework constructs the grain as a zero value of its struct type. Put initialization
 logic in `OnActivate` and supply external resources (database handles, clients, configuration) through

@@ -507,6 +507,52 @@ func BenchmarkGrainTell(b *testing.B) {
 	b.ReportMetric(messagesPerSec, "messages/sec")
 }
 
+// BenchmarkGrainTellOneWay is the one-way counterpart of BenchmarkGrainTell.
+// Each TellGrain returns once the message is enqueued instead of blocking
+// for the processed acknowledgment, so producers only pay the mailbox
+// enqueue and the schedule CAS. The timer still runs until the grain has
+// processed every message, so messages/sec remains an end-to-end figure
+// comparable with BenchmarkGrainTell.
+func BenchmarkGrainTellOneWay(b *testing.B) {
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	done := make(chan struct{})
+	target := int64(b.N)
+	//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
+	identity, err := actorSystem.GrainIdentity(ctx, "receiver", func(context.Context) (actor.Grain, error) {
+		return &countingGrain{done: done, target: target}, nil
+	})
+	if err != nil {
+		b.Fatalf("failed to create grain identity: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		msg := new(testpb.TestSend)
+		for pb.Next() {
+			if err := actorSystem.TellGrain(ctx, identity, msg, actor.WithOneWay()); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	<-done
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
 // BenchmarkGrainTellFanOut spreads load across many grains. This is the
 // case where the dispatcher pool change matters most: under the old
 // per-burst goroutine model, each active grain spawned its own
