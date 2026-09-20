@@ -23,6 +23,7 @@
 package remote
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -130,6 +131,14 @@ func TestConfig(t *testing.T) {
 		config := NewConfig("256.256.256.256", 8080, WithMaxFrameSize(20*size.MB))
 		err := config.Sanitize()
 		require.Error(t, err)
+	})
+	t.Run("With IPv6 wildcard bindAddr", func(t *testing.T) {
+		config := NewConfig("::", 8080)
+		require.NoError(t, config.Sanitize())
+		ip := net.ParseIP(config.BindAddr())
+		require.NotNil(t, ip)
+		assert.False(t, ip.IsUnspecified())
+		assert.Exactly(t, 8080, config.BindPort())
 	})
 	t.Run("With_default_serializer_resolves_proto_message", func(t *testing.T) {
 		config := DefaultConfig()

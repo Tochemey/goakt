@@ -1032,9 +1032,15 @@ type actorSystem struct {
 	// Specifies how long the sender of a message should wait to receive a reply
 	// when using SendReply. The default value is 5s
 	askTimeout time.Duration
-	// Canonical "host:port" of the remoting bind address, precomputed once
-	// at remoting startup so per-message handlers do not rebuild it.
+	// Canonical "host:port" this node is known by to peers (the sanitized
+	// remoting bind address), precomputed once at remoting startup so
+	// per-message handlers do not rebuild it.
 	remoteHostPort string
+	// listenHost is the address the remoting server listens on. It is the
+	// wildcard when one was configured, so the server binds every interface
+	// while BindAddr() names this node to peers, and the sanitized bind
+	// address otherwise, in which case both are the same.
+	listenHost string
 	// Specifies the deadline applied to remote PID.Watch / PID.UnWatch RPCs.
 	// The default value is DefaultRemoteWatchTimeout (5s).
 	remoteWatchTimeout time.Duration
@@ -1510,8 +1516,9 @@ func (x *actorSystem) Uptime() int64 {
 	return 0
 }
 
-// Host returns the actor system node host address
-// This is the bind address for remote communication
+// Host returns the actor system node host address.
+// This is the address other nodes use to reach this node over remoting: the
+// configured bind address, or the address resolved for a wildcard bind address.
 func (x *actorSystem) Host() string {
 	x.locker.RLock()
 	host := x.remoteConfig.BindAddr()
@@ -2470,8 +2477,18 @@ func (x *actorSystem) validate() error {
 		}
 	}
 
+	// Sanitize replaces a wildcard bind address with the address advertised to
+	// peers. The remoting server keeps listening on the wildcard so that it
+	// binds every interface; any other bind address listens on the sanitized
+	// value, exactly as before.
+	configured := x.remoteConfig.BindAddr()
 	if err := x.remoteConfig.Sanitize(); err != nil {
 		return err
+	}
+
+	x.listenHost = x.remoteConfig.BindAddr()
+	if ip := net.ParseIP(configured); ip != nil && ip.IsUnspecified() {
+		x.listenHost = configured
 	}
 
 	// we need to make sure the cluster kinds are defined

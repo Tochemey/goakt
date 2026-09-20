@@ -12,6 +12,8 @@
 
 - **etcd discovery validates `Timeout`**. A zero `Timeout` is now rejected at validation instead of failing every request at runtime, in line with `DialTimeout` and `TTL`.
 
+- **A wildcard bind address listens on every interface** ([#1374](https://github.com/Tochemey/goakt/issues/1374)). `remote.NewConfig("0.0.0.0", port)` used to bind the remoting server to one guessed private IP, so connections through loopback or any other interface were refused, and start failed on a host with no private or public address. The remoting server now listens on the wildcard as configured, `::` is accepted and serves IPv4 and IPv6 peers, and a host with no other address advertises loopback. What peers are told is unchanged: `ActorSystem.Host()`, actor addresses and cluster membership keep advertising the first private IP, and cluster gossip and the registry keep binding it. Bind to a concrete IP to listen on one interface only.
+
 ## ⚠️ Behavior Changes
 
 - **mDNS discovery rebuilt on `hashicorp/mdns`** ([#1368](https://github.com/Tochemey/goakt/issues/1368)). Each node registers its own instance name and carries the cluster name in its TXT record; configuration is unchanged. Nodes on the old and the new provider do not discover each other, so upgrade an mDNS cluster with a full stop and restart rather than a rolling upgrade. Peers learn one IPv4 address and, with `IPv6` set, one IPv6 address per node; IPv6-only networks are not supported.

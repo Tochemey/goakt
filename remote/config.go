@@ -70,9 +70,11 @@ const DefaultMaxMessageSize uint64 = inet.DefaultMaxMessageSize
 //
 // BindAddr must be provided as a physical IP address rather than a DNS name so
 // GoAkt can bind to a deterministic network interface without relying on
-// external name resolution. When BindAddr is set to 0.0.0.0 the runtime will
-// attempt to discover an appropriate private IP address to publish to other
-// nodes, only falling back to a public IP when no private candidate exists.
+// external name resolution. When BindAddr is a wildcard (0.0.0.0 or ::) the
+// runtime will attempt to discover an appropriate private IP address to publish
+// to other nodes, falling back to a public IP when no private candidate exists
+// and to loopback when the host has neither; the remoting server still listens
+// on every interface in that case, only the published address is resolved.
 // The design favors predictable intra-cluster connectivity in multi-homed or
 // containerized deployments where DNS entries may be unavailable or resolve to
 // unintended interfaces.

@@ -357,7 +357,12 @@ func (s *TCPServer) EnableTLS() error {
 func (s *TCPServer) Listen() error {
 	network := "tcp4"
 	if IsIPv6Addr(s.listenAddr) {
+		// tcp6 is IPv6-only. The unspecified address [::] must also accept IPv4
+		// peers, because the address advertised for it is usually an IPv4 one.
 		network = "tcp6"
+		if s.listenAddr.IP.IsUnspecified() {
+			network = "tcp"
+		}
 	}
 
 	// Listen on a local copy of the net.ListenConfig instead of mutating the

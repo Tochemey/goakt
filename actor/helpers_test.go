@@ -3252,3 +3252,20 @@ func highestPriority(msg1, msg2 any) bool {
 	p2 := msg2.(*testpb.TestMessage)
 	return p1.GetPriority() > p2.GetPriority()
 }
+
+// dialRemoting asserts that the remoting server on port accepts a TCP connection through host.
+func dialRemoting(t *testing.T, host string, port int) {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), time.Second)
+	require.NoError(t, err, "the remoting server must accept connections through %s", host)
+	require.NoError(t, conn.Close())
+}
+
+// requireConcreteHost asserts that the actor system advertises a concrete IP, never a wildcard.
+func requireConcreteHost(t *testing.T, sys ActorSystem) net.IP {
+	t.Helper()
+	ip := net.ParseIP(sys.Host())
+	require.NotNil(t, ip, "advertised host %q is not an IP", sys.Host())
+	require.False(t, ip.IsUnspecified(), "advertised host must not be a wildcard")
+	return ip
+}
