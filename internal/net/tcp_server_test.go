@@ -887,6 +887,26 @@ func TestServer_IPv6Listen(t *testing.T) {
 	require.NoError(t, srv.listener.Close())
 }
 
+func TestServer_UnspecifiedIPv6ListensForIPv4Peers(t *testing.T) {
+	srv, err := NewTCPServer("[::]:0")
+	require.NoError(t, err)
+
+	if err := srv.Listen(); err != nil {
+		t.Skip("IPv6 not available:", err)
+	}
+
+	addr := srv.ListenAddr()
+	require.NotNil(t, addr)
+
+	// [::] must not be IPv6-only: the address advertised for it is usually IPv4
+	target := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: addr.Port}
+	conn, err := net.DialTimeout("tcp4", target.String(), time.Second)
+	require.NoError(t, err, "an IPv4 peer must reach a server listening on [::]")
+	require.NoError(t, conn.Close())
+
+	require.NoError(t, srv.listener.Close())
+}
+
 // errConnWrapper is a ConnWrapper that always returns an error.
 type errConnWrapper struct {
 	err error

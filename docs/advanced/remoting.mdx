@@ -33,8 +33,13 @@ defer sys.Stop(ctx)
 ## Configuration
 
 Create a `remote.Config` with `remote.NewConfig(bindAddr, bindPort, opts...)`. The bind address must be a concrete IP
-(`127.0.0.1`, `0.0.0.0`, …), not a hostname. When the bind address is `0.0.0.0`, GoAkt picks a suitable private IP to
-advertise. Pass the config via `actor.WithRemote(cfg)`.
+(`127.0.0.1`, `0.0.0.0`, `::`, …), not a hostname. Pass the config via `actor.WithRemote(cfg)`.
+
+With a wildcard bind address (`0.0.0.0` or `::`) the remoting server listens on every interface, and the node is
+advertised to peers, through `ActorSystem.Host()`, actor addresses and cluster membership, as the first private IP of
+the host, or its first public IP when it has no private one, or loopback when it has neither, so an offline machine
+still starts. `::` accepts both IPv4 and IPv6 peers. Cluster gossip and the registry bind the advertised address rather
+than the wildcard. To listen on one interface only, and to choose the advertised address, bind to that interface's IP.
 
 - **WithProtocolPin**: Wire protocol on dial and accept: `auto`, `legacy`, or `duplex`. Default: `auto`.
 - **WithOrdinaryLanes**: Ordinary duplex lanes per peer for user tell/ask. Default: `1`.

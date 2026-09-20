@@ -41,40 +41,62 @@ func GetHostPort(address string) (string, int, error) {
 	return addr.IP.String(), addr.Port, nil
 }
 
-// GetBindIP tries to find an appropriate bindIP to bind and propagate.
+// GetBindIP returns the address to advertise to peers for the given "host:port"
+// bind address. A concrete IP is returned unchanged. A wildcard (0.0.0.0 or ::)
+// is replaced by the first private interface address, then by the first public
+// one, and finally by the loopback address of the wildcard's family when the
+// host has neither, so an offline machine still starts. Only the advertised
+// address is resolved here; listeners keep binding the wildcard.
 func GetBindIP(address string) (string, error) {
 	bindIP, _, err := GetHostPort(address)
 	if err != nil {
 		return "", fmt.Errorf("invalid address: %w", err)
 	}
 
-	if bindIP == "0.0.0.0" {
-		// if we're not bound to a specific IP, let's use a suitable private IP address.
-		ipStr, err := sockaddr.GetPrivateIP()
-		if err != nil {
-			return "", fmt.Errorf("failed to get private interface addresses: %w", err)
-		}
-
-		// if we could not find a private address, we need to expand our search to a public
-		// ip address
-		if ipStr == "" {
-			ipStr, err = sockaddr.GetPublicIP()
-			if err != nil {
-				return "", fmt.Errorf("failed to get public interface addresses: %w", err)
-			}
-		}
-
-		if ipStr == "" {
-			return "", fmt.Errorf("no private IP address found, and explicit IP not provided")
-		}
-
-		parsed := net.ParseIP(ipStr)
-		if parsed == nil {
-			return "", fmt.Errorf("failed to parse private IP address: %q", ipStr)
-		}
-		bindIP = parsed.String()
+	ip := net.ParseIP(bindIP)
+	if ip == nil || !ip.IsUnspecified() {
+		return bindIP, nil
 	}
-	return bindIP, nil
+
+	return wildcardAdvertisedIP(ip, sockaddr.GetPrivateIP, sockaddr.GetPublicIP)
+}
+
+// wildcardAdvertisedIP picks the address a wildcard bind address advertises to
+// peers: the first private interface address, then the first public one, then
+// the loopback address of the wildcard's family. privateIP and publicIP are the
+// interface lookups; they return an empty string when they find nothing.
+func wildcardAdvertisedIP(wildcard net.IP, privateIP, publicIP func() (string, error)) (string, error) {
+	// if we're not bound to a specific IP, let's use a suitable private IP address.
+	ipStr, err := privateIP()
+	if err != nil {
+		return "", fmt.Errorf("failed to get private interface addresses: %w", err)
+	}
+
+	// if we could not find a private address, we need to expand our search to a public
+	// ip address
+	if ipStr == "" {
+		ipStr, err = publicIP()
+		if err != nil {
+			return "", fmt.Errorf("failed to get public interface addresses: %w", err)
+		}
+	}
+
+	// a host with no routable address at all, such as an offline machine, can only
+	// be reached through loopback
+	if ipStr == "" {
+		if wildcard.To4() == nil {
+			return net.IPv6loopback.String(), nil
+		}
+
+		return "127.0.0.1", nil
+	}
+
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return "", fmt.Errorf("failed to parse private IP address: %q", ipStr)
+	}
+
+	return parsed.String(), nil
 }
 
 // KeepAliveListener sets TCP keep-alive timeouts on accepted

@@ -23,6 +23,8 @@
 package net
 
 import (
+	"errors"
+	"net"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,4 +58,67 @@ func TestGetBindIP(t *testing.T) {
 		require.NoError(t, err)
 		assert.NotEqual(t, "127.0.0.1", bindIP)
 	})
+	t.Run("With IPv6 wildcard", func(t *testing.T) {
+		bindIP, err := GetBindIP("[::]:8080")
+		require.NoError(t, err)
+		ip := net.ParseIP(bindIP)
+		require.NotNil(t, ip)
+		assert.False(t, ip.IsUnspecified())
+	})
+	t.Run("With concrete address", func(t *testing.T) {
+		bindIP, err := GetBindIP("10.0.0.4:8080")
+		require.NoError(t, err)
+		assert.Equal(t, "10.0.0.4", bindIP)
+	})
+}
+
+func TestWildcardAdvertisedIP(t *testing.T) {
+	v4 := net.ParseIP("0.0.0.0")
+	v6 := net.ParseIP("::")
+
+	t.Run("With private address", func(t *testing.T) {
+		ip, err := wildcardAdvertisedIP(v4, lookupResult("10.0.0.4"), lookupError("public must not be consulted"))
+		require.NoError(t, err)
+		assert.Equal(t, "10.0.0.4", ip)
+	})
+	t.Run("With public address only", func(t *testing.T) {
+		ip, err := wildcardAdvertisedIP(v4, lookupResult(""), lookupResult("203.0.113.5"))
+		require.NoError(t, err)
+		assert.Equal(t, "203.0.113.5", ip)
+	})
+	t.Run("With no address falls back to loopback", func(t *testing.T) {
+		ip, err := wildcardAdvertisedIP(v4, lookupResult(""), lookupResult(""))
+		require.NoError(t, err)
+		assert.Equal(t, "127.0.0.1", ip)
+
+		ip, err = wildcardAdvertisedIP(v6, lookupResult(""), lookupResult(""))
+		require.NoError(t, err)
+		assert.Equal(t, "::1", ip)
+	})
+	t.Run("With private lookup error", func(t *testing.T) {
+		_, err := wildcardAdvertisedIP(v4, lookupError("private"), lookupResult(""))
+		require.ErrorContains(t, err, "private")
+	})
+	t.Run("With public lookup error", func(t *testing.T) {
+		_, err := wildcardAdvertisedIP(v4, lookupResult(""), lookupError("public"))
+		require.ErrorContains(t, err, "public")
+	})
+	t.Run("With unparsable interface address", func(t *testing.T) {
+		_, err := wildcardAdvertisedIP(v4, lookupResult("not-an-ip"), lookupResult(""))
+		require.ErrorContains(t, err, "not-an-ip")
+	})
+}
+
+// lookupResult returns an interface lookup that yields the given address.
+func lookupResult(address string) func() (string, error) {
+	return func() (string, error) {
+		return address, nil
+	}
+}
+
+// lookupError returns an interface lookup that fails with the given message.
+func lookupError(message string) func() (string, error) {
+	return func() (string, error) {
+		return "", errors.New(message)
+	}
 }

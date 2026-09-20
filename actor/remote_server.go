@@ -1765,10 +1765,14 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 
 	x.logger.Info("Starting remote server...")
 
-	// Build the server address from the remote config and cache it for
-	// per-message host validation in the request handlers.
+	// Build the address this node is known by from the remote config and cache
+	// it for per-message host validation in the request handlers.
 	hostPort := net.JoinHostPort(x.remoteConfig.BindAddr(), strconv.Itoa(x.remoteConfig.BindPort()))
 	x.remoteHostPort = hostPort
+
+	// The listener binds the address as configured, so a wildcard covers every
+	// interface. It only differs from hostPort for a wildcard bind address.
+	listenAddr := net.JoinHostPort(x.listenHost, strconv.Itoa(x.remoteConfig.BindPort()))
 
 	// Create proto server options based on the remote config.
 	serverOpts := x.remotingServerOptions()
@@ -1850,7 +1854,7 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	}
 
 	// Create the proto server.
-	remotingServer, err := inet.NewRemotingServer(hostPort, serverOpts...)
+	remotingServer, err := inet.NewRemotingServer(listenAddr, serverOpts...)
 	if err != nil {
 		x.logger.Error(fmt.Errorf("failed to create remote server: %w", err))
 		return err
@@ -1862,12 +1866,12 @@ func (x *actorSystem) startRemoteServer(ctx context.Context) error {
 	// Start listening (with or without TLS).
 	if useTLS {
 		if err := remotingServer.ListenTLS(); err != nil {
-			x.logger.Error(fmt.Errorf("failed to listen on %s with TLS: %w", hostPort, err))
+			x.logger.Error(fmt.Errorf("failed to listen on %s with TLS: %w", listenAddr, err))
 			return err
 		}
 	} else {
 		if err := remotingServer.Listen(); err != nil {
-			x.logger.Error(fmt.Errorf("failed to listen on %s: %w", hostPort, err))
+			x.logger.Error(fmt.Errorf("failed to listen on %s: %w", listenAddr, err))
 			return err
 		}
 	}

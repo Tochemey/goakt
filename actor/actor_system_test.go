@@ -8554,3 +8554,185 @@ func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
 
 	close(release)
 }
+
+func TestRemotingWildcardBindAddress(t *testing.T) {
+	t.Run("IPv4 wildcard listens on every interface and advertises a concrete address", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem("test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("0.0.0.0", remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+
+		requireConcreteHost(t, sys)
+		host := sys.Host()
+
+		// actors are addressed by the advertised host, as before
+		pid, err := sys.Spawn(ctx, "actor", NewMockActor())
+		require.NoError(t, err)
+		assert.Equal(t, host, pid.getAddress().Host())
+		assert.Equal(t, remotingPort, pid.getAddress().Port())
+
+		// the listener accepts connections through loopback and through the advertised address
+		dialRemoting(t, "127.0.0.1", remotingPort)
+		dialRemoting(t, host, remotingPort)
+
+		// remote operations addressed to the advertised host keep working
+		addr, err := remoteclient.NewClient().RemoteLookup(ctx, host, remotingPort, "actor")
+		require.NoError(t, err)
+		require.NotNil(t, addr)
+		assert.Equal(t, host, addr.Host())
+	})
+
+	t.Run("IPv6 wildcard listens for IPv4 and IPv6 peers", func(t *testing.T) {
+		probe, err := net.Listen("tcp6", "[::1]:0")
+		if err != nil {
+			t.Skip("IPv6 not available:", err)
+		}
+
+		require.NoError(t, probe.Close())
+
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem("test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("::", remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+
+		requireConcreteHost(t, sys)
+		dialRemoting(t, "127.0.0.1", remotingPort)
+		dialRemoting(t, "::1", remotingPort)
+	})
+
+	t.Run("hostname bind address keeps resolving before listening", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem("test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("localhost", remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+
+		assert.Equal(t, "127.0.0.1", sys.Host())
+		assert.Equal(t, "127.0.0.1", sys.(*actorSystem).listenHost)
+		dialRemoting(t, "127.0.0.1", remotingPort)
+	})
+
+	t.Run("concrete bind address listens on that address only", func(t *testing.T) {
+		ctx := context.TODO()
+		remotingPort := dynaport.Get(1)[0]
+
+		sys, err := NewActorSystem("test",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("127.0.0.1", remotingPort)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		t.Cleanup(func() {
+			assert.NoError(t, sys.Stop(ctx))
+		})
+
+		assert.Equal(t, "127.0.0.1", sys.Host())
+		dialRemoting(t, "127.0.0.1", remotingPort)
+
+		// the other interfaces stay closed, exactly as before
+		other, err := dynaport.GetBindIP("0.0.0.0:0")
+		require.NoError(t, err)
+
+		if other != "127.0.0.1" {
+			_, err = net.DialTimeout("tcp", net.JoinHostPort(other, strconv.Itoa(remotingPort)), time.Second)
+			require.Error(t, err, "a concrete bind address must not listen on %s", other)
+		}
+	})
+}
+
+func TestClusterWildcardBindAddress(t *testing.T) {
+	ctx := context.TODO()
+
+	// the address a wildcard advertises, computed the same way the actor system does
+	advertised, err := dynaport.GetBindIP("0.0.0.0:0")
+	require.NoError(t, err)
+
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	newNode := func() (ActorSystem, int) {
+		ports := dynaport.Get(3)
+		discoveryPort, remotingPort, peersPort := ports[0], ports[1], ports[2]
+
+		// the provider registers the advertised address, the same one the node advertises
+		provider := createNATsProvider(srv.Addr().String())(t, advertised, discoveryPort)
+
+		clusterConfig := NewClusterConfig().
+			WithKinds(new(MockActor)).
+			WithDiscoveryPort(discoveryPort).
+			WithPeersPort(peersPort).
+			WithReplicaCount(1).
+			WithMinimumPeersQuorum(1).
+			WithBootstrapTimeout(5 * time.Second).
+			WithClusterStateSyncInterval(300 * time.Millisecond).
+			WithClusterBalancerInterval(100 * time.Millisecond).
+			WithDiscovery(provider)
+
+		sys, err := NewActorSystem("wildcard",
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig("0.0.0.0", remotingPort)),
+			WithCluster(clusterConfig),
+		)
+		require.NoError(t, err)
+		return sys, remotingPort
+	}
+
+	node1, port1 := newNode()
+	node2, port2 := newNode()
+	require.NoError(t, node1.Start(ctx))
+	require.NoError(t, node2.Start(ctx))
+
+	t.Cleanup(func() {
+		assert.NoError(t, node2.Stop(ctx))
+		assert.NoError(t, node1.Stop(ctx))
+	})
+
+	// both nodes advertise the same concrete address and find each other through it
+	assert.Equal(t, advertised, node1.Host())
+	assert.Equal(t, advertised, node2.Host())
+
+	require.Eventually(t, func() bool {
+		peers, err := node1.(*actorSystem).cluster.Peers(ctx)
+		return err == nil && len(peers) == 1
+	}, 10*time.Second, 100*time.Millisecond, "node1 must see node2 as its peer")
+
+	// each remoting server also accepts connections through loopback
+	dialRemoting(t, "127.0.0.1", port1)
+	dialRemoting(t, "127.0.0.1", port2)
+
+	// an actor spawned on node1 resolves on node2 with the advertised host
+	_, err = node1.Spawn(ctx, "actor", NewMockActor())
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		pid, err := node2.ActorOf(ctx, "actor")
+		return err == nil && pid != nil && pid.getAddress().Host() == advertised && pid.getAddress().Port() == port1
+	}, 10*time.Second, 100*time.Millisecond, "node2 must resolve the actor at node1's advertised address")
+}
