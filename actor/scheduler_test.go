@@ -2736,7 +2736,11 @@ func TestGrainSchedulerListSchedules(t *testing.T) {
 			return len(newActorSystem.ListSchedules()) == 0
 		}, 5*time.Second, 50*time.Millisecond)
 
-		assert.EqualValues(t, 1, grainProcessedCount(newActorSystem, identity))
+		// quartz removes a one-shot from its queue before running it, so the schedule can
+		// disappear a moment before the grain processes the message
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) == 1
+		}, 5*time.Second, 50*time.Millisecond)
 
 		require.NoError(t, newActorSystem.Stop(ctx))
 	})
