@@ -23,7 +23,7 @@
 
 ## 1. Overview
 
-By default an actor or grain that needs an answer from another process blocks its handler in `Ask`, which stalls its mailbox for the round trip. Reentrancy (the Orleans "request scheduling" pattern) replaces that blocking wait with a **correlation-ID request**: the handler calls `Request` / `RequestName` / `RequestGrain` / `RequestActor`, gets back a `RequestCall` handle, registers a continuation with `Then`, and returns. The reply arrives later as an ordinary queue item and runs the continuation **on the process's own turn**, so handler code stays single-threaded in every mode.
+By default an actor or grain that needs an answer from another process blocks its handler in `Ask`, which stalls its mailbox for the round trip. Reentrancy replaces that blocking wait with a **correlation-ID request**: the handler calls `Request` / `RequestName` / `RequestGrain` / `RequestActor`, gets back a `RequestCall` handle, registers a continuation with `Then`, and returns. The reply arrives later as an ordinary queue item and runs the continuation **on the process's own turn**, so handler code stays single-threaded in every mode.
 
 Both process kinds share one request machinery (`requestState`, `reentrancyState`, the envelope structs and serializers, the reply router). They differ only in how envelopes enter and leave the process: actors receive them through their system mailbox dispatch, grains through a dedicated response queue beside the user mailbox.
 

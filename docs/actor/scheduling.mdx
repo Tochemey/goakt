@@ -19,6 +19,12 @@ timeouts, periodic tasks, heartbeats, and cron-style jobs.
 via `ActorOf` and pass it to `ScheduleOnce`, `Schedule`, or `ScheduleWithCron`; the scheduler delivers to the actor
 regardless of where it runs.
 
+<Note>
+  The same scheduler also targets grains: `ScheduleGrainOnce`, `ScheduleGrain` and `ScheduleGrainWithCron` take a
+  `*GrainIdentity` instead of a `*PID` and share the management API, options and cluster rules described on this page.
+  See [Grain scheduling](/grains/scheduling).
+</Note>
+
 ## Operations
 
 - **ScheduleOnce**: Trigger Type: RunOnce. Behavior: Deliver a message once after a delay.
@@ -114,7 +120,9 @@ day-of-month, month, day-of-week, and optionally year).
 
 ### Timezone
 
-Cron expressions are evaluated in the **local timezone** of the process (`time.Now().Location()`).
+Outside cluster mode, cron expressions are evaluated in the **local timezone** of the process
+(`time.Now().Location()`). In cluster mode they are evaluated in **UTC**; see
+[Cluster-wide single fire](#cluster-wide-single-fire).
 
 ## Use cases
 
@@ -207,14 +215,15 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 
 ## Introspection
 
-`ListSchedules()` returns a read-only snapshot of every schedule the scheduler currently knows about. Use it to answer
-"what is currently scheduled, and to whom will it deliver?" - the read-side counterpart of the reference-based
-Cancel/Pause/Resume management APIs.
+`ListSchedules()` returns a read-only snapshot of every schedule the scheduler currently knows about, actor and grain
+schedules alike. Use it to answer "what is currently scheduled, and to whom will it deliver?" - the read-side
+counterpart of the reference-based Cancel/Pause/Resume management APIs.
 
 ```go Introspection
 type ScheduleInfo struct {
-	Reference string // the schedule reference (user-supplied or auto-generated)
-	Path      Path   // target actor path
+	Reference string         // the schedule reference (user-supplied or auto-generated)
+	Path      Path           // target actor path; nil for a grain schedule
+	Grain     *GrainIdentity // target grain identity; nil for an actor schedule
 }
 ```
 
@@ -226,6 +235,6 @@ for _, info := range system.ListSchedules() {
 
 <Note>
   `ListSchedules` is purely read-only: it has no effect on the schedules themselves. A schedule stops appearing once it
-  has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce`, once it has fired and
-  been delivered: there is no need to clean anything up manually.
+  has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce` or `ScheduleGrainOnce`,
+  once it has fired and been delivered: there is no need to clean anything up manually.
 </Note>

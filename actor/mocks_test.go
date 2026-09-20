@@ -85,6 +85,7 @@ var (
 	_ Grain                = (*MockDeactivationFailingGrain)(nil)
 	_ Grain                = (*MockReceiveFailingGrain)(nil)
 	_ Grain                = (*MockPanickingGrain)(nil)
+	_ Grain                = (*MockCountingGrain)(nil)
 	_ Grain                = (*MockPersistentGrain)(nil)
 	_ Grain                = (*MockContextReleasingGrain)(nil)
 	_ ShutdownHook         = (*MockShutdownHook)(nil)
@@ -1818,6 +1819,33 @@ func (x *MockDeactivationFailingGrain) OnDeactivate(ctx context.Context, props *
 
 // OnReceive succeeds without a reply.
 func (x *MockDeactivationFailingGrain) OnReceive(ctx *GrainContext) {
+	ctx.NoErr()
+}
+
+// MockCountingGrain counts the messages it receives by type, so a test can attribute
+// deliveries to whichever node scheduled each message type.
+type MockCountingGrain struct {
+	MockNoopGrain
+
+	// sends and replies count the TestSend and TestReply messages received.
+	sends   atomic.Int64
+	replies atomic.Int64
+}
+
+// NewMockCountingGrain returns a MockCountingGrain.
+func NewMockCountingGrain() *MockCountingGrain {
+	return &MockCountingGrain{}
+}
+
+// OnReceive counts TestSend and TestReply and acknowledges every message.
+func (x *MockCountingGrain) OnReceive(ctx *GrainContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		x.sends.Inc()
+	case *testpb.TestReply:
+		x.replies.Inc()
+	}
+
 	ctx.NoErr()
 }
 

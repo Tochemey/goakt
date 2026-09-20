@@ -68,7 +68,7 @@ type scheduleFireClaim struct {
 }
 
 // scheduler defines the Go-Akt scheduler.
-// Its job is to help stack messages that will be delivered in the future to actors.
+// Its job is to help stack messages that will be delivered in the future to actors and grains.
 type scheduler struct {
 	// helps lock concurrent access
 	mu sync.Mutex
@@ -85,7 +85,8 @@ type scheduler struct {
 	// specifies the introspection metadata mapping used by ListSchedules
 	scheduledMeta *xsync.Map[string, *scheduleMeta]
 	// actorSystem is needed to resolve NoSender() for remote-PID schedules,
-	// since remote PIDs carry no actor-system reference.
+	// since remote PIDs carry no actor-system reference, and to deliver grain
+	// schedules through TellGrain.
 	actorSystem ActorSystem
 	// scheduledCount and cancelledCount total the schedules accepted and the
 	// cancellations honored since the scheduler was created. They feed the
@@ -103,15 +104,21 @@ type scheduler struct {
 type ScheduleInfo struct {
 	// Reference is the schedule reference, either user-supplied via WithReference or auto-generated.
 	Reference string
-	// Path is the target actor path the message will be delivered to.
+	// Path is the target actor path the message will be delivered to. It is nil for a Grain schedule.
 	Path Path
+	// Grain is the identity of the target Grain the message will be delivered to. It is nil for an
+	// actor schedule; exactly one of Path and Grain is set.
+	Grain *GrainIdentity
 }
 
 // scheduleMeta captures what the underlying quartz job cannot report back on its own: the
-// delivery target's path. The quartz scheduled job itself remains the source of truth for
-// whether the schedule still exists.
+// delivery target, an actor path or a Grain identity. The quartz scheduled job itself remains
+// the source of truth for whether the schedule still exists.
 type scheduleMeta struct {
+	// path is the target actor path; nil for a Grain schedule.
 	path Path
+	// grain is the target Grain identity; nil for an actor schedule.
+	grain *GrainIdentity
 }
 
 // newScheduler creates an instance of scheduler
@@ -365,6 +372,190 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 	return nil
 }
 
+// ScheduleGrainOnce schedules a one-time delivery of a message to the Grain identified by the given identity after a given delay.
+//
+// The message is delivered exactly once to the target Grain after the specified duration has elapsed.
+// This is a fire-and-forget scheduling mechanism: once delivered, the message is not retried or repeated.
+// Delivery goes through TellGrain, so the Grain is located, or activated, wherever it lives when the
+// schedule fires; a Grain passivated in the meantime is activated again by the delivery.
+//
+// Parameters:
+//   - message: The message to deliver.
+//   - identity: The identity of the Grain that will receive the message.
+//   - delay: The duration to wait before delivering the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
+//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
+//   - WithSender has no effect on a Grain schedule: a Grain has no sender notion.
+func (x *scheduler) ScheduleGrainOnce(message any, identity *GrainIdentity, delay time.Duration, opts ...ScheduleOption) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if !x.started.Load() {
+		return errors.ErrSchedulerNotStarted
+	}
+
+	if err := identity.Validate(); err != nil {
+		return errors.NewErrInvalidGrainIdentity(err)
+	}
+
+	config := newScheduleConfig(opts...)
+	// Interval and one-shot schedules never claim: they stay node-local by design (see ScheduleWithCron).
+	jobFn := x.makeGrainJobFn(identity, message, nil)
+
+	reference := config.Reference()
+	jobKey := quartz.NewJobKey(reference)
+	x.scheduledKeys.Set(reference, jobKey)
+	x.recordSchedule(reference, &scheduleMeta{grain: identity})
+
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
+	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay)); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
+}
+
+// ScheduleGrain schedules a recurring message to be delivered to the Grain identified by the given identity at a fixed interval.
+//
+// This method sets up a message to be delivered repeatedly to the target Grain, with each delivery occurring
+// after the specified interval. The scheduling continues until it is explicitly canceled or the scheduler stops.
+// Delivery goes through TellGrain, so on every tick the Grain is located, or activated, wherever it lives;
+// a Grain passivated between two ticks is activated again by the next delivery.
+//
+// Parameters:
+//   - message: The message to deliver at regular intervals.
+//   - identity: The identity of the Grain that will receive the message.
+//   - interval: The time duration between each delivery of the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+//   - This method does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
+//   - WithSender has no effect on a Grain schedule: a Grain has no sender notion.
+func (x *scheduler) ScheduleGrain(message any, identity *GrainIdentity, interval time.Duration, opts ...ScheduleOption) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if !x.started.Load() {
+		return errors.ErrSchedulerNotStarted
+	}
+
+	if err := identity.Validate(); err != nil {
+		return errors.NewErrInvalidGrainIdentity(err)
+	}
+
+	config := newScheduleConfig(opts...)
+	// Interval and one-shot schedules never claim: they stay node-local by design (see ScheduleWithCron).
+	jobFn := x.makeGrainJobFn(identity, message, nil)
+
+	reference := config.Reference()
+	jobKey := quartz.NewJobKey(reference)
+	x.scheduledKeys.Set(reference, jobKey)
+	x.recordSchedule(reference, &scheduleMeta{grain: identity})
+
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
+	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval)); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
+}
+
+// ScheduleGrainWithCron schedules a message to be delivered to the Grain identified by the given identity using a cron expression.
+//
+// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
+// The message is delivered to the target Grain according to the schedule defined by the cron expression.
+// Delivery goes through TellGrain, so on every tick the Grain is located, or activated, wherever it lives;
+// a Grain passivated between two ticks is activated again by the next delivery.
+//
+// Parameters:
+//   - message: The message to deliver.
+//   - identity: The identity of the Grain that will receive the message.
+//   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the cron expression or the identity is invalid, or if scheduling fails due to internal errors.
+//
+// Note:
+//   - In cluster mode the message is delivered exactly once per trigger tick across the
+//     cluster, WithReference is required (ErrScheduleReferenceRequired otherwise), and the
+//     cron expression is evaluated in UTC so every node computes the same tick instants.
+//     Outside cluster mode the expression is evaluated in the process's local timezone.
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
+//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
+//   - WithSender has no effect on a Grain schedule: a Grain has no sender notion.
+func (x *scheduler) ScheduleGrainWithCron(message any, identity *GrainIdentity, cronExpression string, opts ...ScheduleOption) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	if !x.started.Load() {
+		return errors.ErrSchedulerNotStarted
+	}
+
+	if err := identity.Validate(); err != nil {
+		return errors.NewErrInvalidGrainIdentity(err)
+	}
+
+	// Cluster mode is gated on the cluster engine and the expression evaluated in UTC there,
+	// for the reasons given in ScheduleWithCron.
+	inCluster := x.actorSystem.getCluster() != nil
+
+	location := time.Now().Location()
+	if inCluster {
+		location = time.UTC
+	}
+
+	trigger, err := quartz.NewCronTriggerWithLoc(cronExpression, location)
+	if err != nil {
+		x.logger.Error(fmt.Errorf("failed to schedule message: %w", err))
+		return err
+	}
+
+	config := newScheduleConfig(opts...)
+
+	var claim *scheduleFireClaim
+	if inCluster {
+		// Single fire is cron-only and needs a caller-chosen reference, as for actors (see ScheduleWithCron).
+		if !config.hasExplicitReference() {
+			return errors.ErrScheduleReferenceRequired
+		}
+
+		claim = &scheduleFireClaim{
+			reference: config.Reference(),
+			ttl:       cronClaimTTL(trigger),
+		}
+	}
+
+	jobFn := x.makeGrainJobFn(identity, message, claim)
+
+	reference := config.Reference()
+	jobKey := quartz.NewJobKey(reference)
+	x.scheduledKeys.Set(reference, jobKey)
+	x.recordSchedule(reference, &scheduleMeta{grain: identity})
+
+	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
+	if err := x.quartzScheduler.ScheduleJob(detail, trigger); err != nil {
+		return err
+	}
+
+	x.scheduledCount.Inc()
+	return nil
+}
+
 // CancelSchedule cancels a previously scheduled message intended for delivery to a target actor (PID).
 //
 // It attempts to locate and cancel the scheduled task associated with the specified message reference.
@@ -452,11 +643,11 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 }
 
 // ListSchedules returns a snapshot of every schedule currently known to the scheduler:
-// its reference and the target actor path.
+// its reference and its target, an actor path or a Grain identity.
 //
 // It is purely read-only and has no effect on the schedules themselves. A schedule stops appearing
-// once it has been canceled (CancelSchedule) or, for one-shot schedules created via ScheduleOnce,
-// once it has fired and been delivered.
+// once it has been canceled (CancelSchedule) or, for one-shot schedules created via ScheduleOnce or
+// ScheduleGrainOnce, once it has fired and been delivered.
 //
 // Returns an empty slice when the scheduler has not started or when nothing is currently scheduled.
 func (x *scheduler) ListSchedules() []ScheduleInfo {
@@ -483,6 +674,7 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 		infos = append(infos, ScheduleInfo{
 			Reference: reference,
 			Path:      meta.path,
+			Grain:     meta.grain,
 		})
 	})
 
@@ -490,7 +682,7 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 }
 
 // recordSchedule stores the introspection metadata for a newly created schedule.
-// Called by ScheduleOnce, Schedule and ScheduleWithCron right after the job key is registered.
+// Called by the actor and Grain scheduling methods right after the job key is registered.
 func (x *scheduler) recordSchedule(reference string, meta *scheduleMeta) {
 	x.scheduledMeta.Set(reference, meta)
 }
@@ -550,6 +742,33 @@ func (x *scheduler) makeJobFn(to *PID, message any, cfg *scheduleConfig, claim *
 		}
 
 		err := sender.Tell(ctx, to, message)
+		return err == nil, err
+	}
+}
+
+// makeGrainJobFn returns the job function delivering a scheduled message to a grain.
+// TellGrain is location-transparent and activates the grain when needed. One-way delivery
+// mirrors PID.Tell in makeJobFn: a failure the handler reports surfaces as a deadletter, and
+// an error before the enqueue (activation, registration or transport failure) is returned to
+// quartz, which discards it, exactly as makeJobFn does for actors.
+func (x *scheduler) makeGrainJobFn(identity *GrainIdentity, message any, claim *scheduleFireClaim) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		if claim != nil {
+			won, err := x.claimClusterFire(ctx, claim)
+			if err != nil {
+				// quartz runs job functions with logging disabled and no retries, so this is
+				// the only place a claim failure becomes observable.
+				x.logger.Warnf("failed to claim cron tick for schedule=(%s): %v", claim.reference, err)
+				return false, err
+			}
+
+			if !won {
+				// Another node already claimed this tick: skip delivery silently.
+				return true, nil
+			}
+		}
+
+		err := x.actorSystem.TellGrain(ctx, identity, message, WithOneWay())
 		return err == nil, err
 	}
 }
