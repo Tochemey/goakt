@@ -144,7 +144,8 @@
               "/grains/overview",
               "/grains/reentrancy",
               "/grains/pipeto",
-              "/grains/timers"
+              "/grains/timers",
+              "/grains/scheduling"
             ]
           },
           {

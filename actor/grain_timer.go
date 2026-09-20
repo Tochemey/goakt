@@ -66,7 +66,7 @@ type grainTimerEntry struct {
 	// trigger computes the wall-clock fire instants; nil unless kind is cronGrainTimer.
 	trigger quartz.Trigger
 	// keepAlive marks ticks of this timer as passivation activity. By default a
-	// tick does not keep the grain alive, matching Orleans timer semantics.
+	// tick does not keep the grain alive.
 	keepAlive bool
 
 	// cancelled flips exactly once, when the entry is cancelled or replaced or the

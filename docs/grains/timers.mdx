@@ -15,8 +15,10 @@ persisted, and they never reactivate a passivated grain. Use them for work that 
 memory: heartbeats, batch flushing, cache refresh, timeouts, and polling.
 
 <Note>
-  Grain timers are self-scheduling only. To schedule messages to actors from anywhere in the system, use the [actor
-  scheduler](/actor/scheduling). Durable, reactivating schedules for grains (reminders) are not available.
+  Grain timers are self-scheduling only. To schedule messages to a grain from anywhere in the system, including to a
+  grain that has passivated, use the actor system's [grain scheduling](/grains/scheduling) methods; to schedule messages
+  to actors, use the [actor scheduler](/actor/scheduling). Neither is persisted: durable reminders that survive a node
+  restart are not available.
 </Note>
 
 ## API
@@ -107,7 +109,9 @@ func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
 <Warning>
   Timers do not survive passivation. A grain with a pending 30-minute one-shot passivates on its normal schedule and the
   timer is lost. If the grain must stay available for the timer, register it with `WithTimerKeepAlive()` or extend the
-  grain's passivation timeout.
+  grain's passivation timeout. If the message must reach the grain even after it has passivated, use a
+  [grain schedule](/grains/scheduling) instead: it is held by the node's scheduler and activates the grain again on
+  delivery.
 </Warning>
 
 ## Semantics
@@ -125,9 +129,9 @@ func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
 
 - Ticks are processed one at a time, serialized with the grain's other messages. Tick handling never runs concurrently
   with other work on the same grain.
-- `Schedule` fires at a **fixed cadence**, matching the actor scheduler. A handler slower than the interval accumulates
-  queued ticks in the mailbox; execution itself never overlaps. This differs from Orleans, where the period is measured
-  from callback completion.
+- `Schedule` fires at a **fixed cadence**, matching the actor scheduler: the period is measured from the previous fire
+  time, not from the handler's completion. A handler slower than the interval accumulates queued ticks in the mailbox;
+  execution itself never overlaps.
 - Tick handlers run with a background context: no deadline and no cancellation.
 - A tick is fire-and-forget: an error reported with `ctx.Err(err)` is logged as a warning, and `ctx.Unhandled()` is
   logged the same way. Signal at most once per message (`Err`, `NoErr`, or `Unhandled`), as with any Tell-style message.
@@ -153,7 +157,11 @@ func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
 - **ErrInvalidTimerInterval**: `Schedule` is called with an interval that is not strictly positive.
 - **ErrScheduledReferenceNotFound**: Cancelling an unknown reference, or a one-shot that has already fired.
 
-## Grain timers vs actor scheduling
+## Grain timers vs scheduling
+
+Grain timers are one of two ways to deliver a message to a grain later. The other is the actor system's scheduler,
+which targets actors through their `*PID` and grains through their identity; for the grain side of that comparison,
+see [Grain schedules vs grain timers](/grains/scheduling#grain-schedules-vs-grain-timers). Against the actor scheduler:
 
 - **Who schedules**: Grain timers: The grain itself. [Actor scheduler](/actor/scheduling): Any code holding a `*PID`.
 - **Target**: Grain timers: Always the scheduling grain. [Actor scheduler](/actor/scheduling): Any actor, local or

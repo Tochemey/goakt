@@ -273,20 +273,6 @@ func TestGrainIdentity_EmptyOwnerRecordIsInherited(t *testing.T) {
 	require.True(t, process.isActive())
 }
 
-// remoteGrainRecord returns a registry record naming host:port as the owner of identity.
-func remoteGrainRecord(identity *GrainIdentity, host string, port int) *internalpb.Grain {
-	return internalpb.Grain_builder{
-		GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
-		Host:    host,
-		Port:    int32(port),
-	}.Build()
-}
-
-// localClusterPeer returns the cluster membership entry of the system's own node.
-func localClusterPeer(sys *actorSystem) *cluster.Peer {
-	return &cluster.Peer{Host: sys.clusterNode.Host, RemotingPort: sys.clusterNode.RemotingPort, PeersPort: sys.clusterNode.PeersPort}
-}
-
 func TestIsTransportFailure(t *testing.T) {
 	live := t.Context()
 	gaveUp, cancel := context.WithCancel(live)

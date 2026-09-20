@@ -47,6 +47,10 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	consulcontainer "github.com/testcontainers/testcontainers-go/modules/consul"
 	etcdContainer "github.com/testcontainers/testcontainers-go/modules/etcd"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/otel/attribute"
+	"google.golang.org/protobuf/types/known/anypb"
+
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
@@ -76,9 +80,6 @@ import (
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 	"github.com/tochemey/goakt/v4/tls"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.opentelemetry.io/otel/attribute"
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // everySecondCron fires on every second, the smallest granularity the Quartz
@@ -156,6 +157,20 @@ var errSupervisionTest = errors.New("supervision test failure")
 var (
 	sharedRemotingForTests = remoteclient.NewClient()
 )
+
+// remoteGrainRecord returns a registry record naming host:port as the owner of identity.
+func remoteGrainRecord(identity *GrainIdentity, host string, port int) *internalpb.Grain {
+	return internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
+		Host:    host,
+		Port:    int32(port),
+	}.Build()
+}
+
+// localClusterPeer returns the cluster membership entry of the system's own node.
+func localClusterPeer(sys *actorSystem) *cluster.Peer {
+	return &cluster.Peer{Host: sys.clusterNode.Host, RemotingPort: sys.clusterNode.RemotingPort, PeersPort: sys.clusterNode.PeersPort}
+}
 
 // newReSpawnClusterSystem returns a cluster-enabled actor system together with the mock cluster and
 // mock remoting client it is wired to. The actors tree is empty, so ReSpawn takes the ActorOf path.
@@ -285,6 +300,59 @@ func newClusterGrainSystem(t *testing.T, grain Grain, name string) (*actorSystem
 	sys.registry.Register(grain)
 
 	return sys, clusterMock, newGrainIdentity(grain, name)
+}
+
+// startGrainSchedulerClusterNode starts a single-node cluster with the MockGrain kind, the
+// setup the actor scheduler cluster tests use: the sole node always wins the cron tick claim,
+// so delivery must proceed exactly as it would without any other node in the race.
+func startGrainSchedulerClusterNode(t *testing.T) (ActorSystem, *testkit.Provider) {
+	t.Helper()
+	nodePorts := dynaport.Get(3)
+	discoveryPort := nodePorts[0]
+	clusterPort := nodePorts[1]
+	remotingPort := nodePorts[2]
+	host := "127.0.0.1"
+	addrs := []string{net.JoinHostPort(host, strconv.Itoa(discoveryPort))}
+
+	provider := new(testkit.Provider)
+	system, err := NewActorSystem(
+		"test",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig(host, remotingPort)),
+		WithCluster(
+			NewClusterConfig().
+				WithKinds(new(MockActor)).
+				WithGrains(new(MockGrain)).
+				WithPartitionCount(9).
+				WithReplicaCount(1).
+				WithPeersPort(clusterPort).
+				WithMinimumPeersQuorum(1).
+				WithDiscoveryPort(discoveryPort).
+				WithDiscovery(provider)),
+	)
+	require.NoError(t, err)
+
+	provider.EXPECT().ID().Return("testDisco")
+	provider.EXPECT().Initialize().Return(nil)
+	provider.EXPECT().Register().Return(nil)
+	provider.EXPECT().Deregister().Return(nil)
+	provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+	provider.EXPECT().Close().Return(nil)
+
+	require.NoError(t, system.Start(context.TODO()))
+	pause.For(time.Second)
+	return system, provider
+}
+
+// grainProcessedCount reports how many messages the Grain's current activation has processed
+// on the node, or zero when the Grain is not active there.
+func grainProcessedCount(system ActorSystem, identity *GrainIdentity) int64 {
+	process, ok := system.(*actorSystem).grains.Get(identity.String())
+	if !ok {
+		return 0
+	}
+
+	return process.processedCount.Load()
 }
 
 // startDatacenterSystem returns an actor system whose datacenter controller is already started

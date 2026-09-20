@@ -448,11 +448,11 @@ type ActorSystem interface {
 	//   - error: An error is returned if the scheduled message cannot be found, was never paused, has already been delivered, or cannot be resumed.
 	ResumeSchedule(reference string) error
 	// ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
-	// its reference and the target actor path.
+	// its reference and its target, an actor path or a Grain identity.
 	//
 	// It has no effect on the schedules themselves. A schedule stops appearing once it has been
-	// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
-	// fired and been delivered.
+	// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce or
+	// ScheduleGrainOnce, once it has fired and been delivered.
 	ListSchedules() []ScheduleInfo
 	// PeersAddress returns the actor system address known in the cluster. That address is used by other nodes to communicate with the actor system.
 	// This address is empty when cluster mode is not activated
@@ -788,6 +788,87 @@ type ActorSystem interface {
 	// deactivate already-running Grain instances of that kind; it only prevents new activations via the
 	// registry.
 	DeregisterGrainKind(ctx context.Context, kind Grain) error
+
+	// ScheduleGrainOnce schedules a one-time delivery of a message to the Grain identified by the given identity after a given delay.
+	//
+	// The message is delivered exactly once to the target Grain after the specified duration has elapsed.
+	// This is a fire-and-forget scheduling mechanism: once delivered, the message is not retried or repeated.
+	//
+	// This method is location-transparent: when the schedule fires, the Grain is located, or activated, wherever it
+	// lives, locally or on another node when clustering is enabled. A Grain that has been passivated in the meantime
+	// is activated again by the delivery.
+	//
+	// Parameters:
+	//   - ctx: The context for managing cancellation and deadlines.
+	//   - message: The message to deliver.
+	//   - identity: The identity of the Grain that will receive the message.
+	//   - delay: The duration to wait before delivering the message.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+	//
+	// Note:
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
+	//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
+	//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+	ScheduleGrainOnce(ctx context.Context, message any, identity *GrainIdentity, delay time.Duration, opts ...ScheduleOption) error
+	// ScheduleGrain schedules a recurring message to be delivered to the Grain identified by the given identity at a fixed interval.
+	//
+	// This method sets up a message to be delivered repeatedly to the target Grain, with each delivery occurring
+	// after the specified interval. The scheduling continues until it is explicitly canceled or the actor system stops.
+	//
+	// This method is location-transparent: on every tick, the Grain is located, or activated, wherever it lives,
+	// locally or on another node when clustering is enabled. A Grain that has been passivated between two ticks
+	// is activated again by the next delivery.
+	//
+	// Parameters:
+	//   - ctx: The context for managing cancellation and deadlines.
+	//   - message: The message to deliver at regular intervals.
+	//   - identity: The identity of the Grain that will receive the message.
+	//   - interval: The time duration between each delivery of the message.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+	//
+	// Note:
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+	//   - This method does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
+	//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+	ScheduleGrain(ctx context.Context, message any, identity *GrainIdentity, interval time.Duration, opts ...ScheduleOption) error
+	// ScheduleGrainWithCron schedules a message to be delivered to the Grain identified by the given identity using a cron expression.
+	//
+	// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
+	// The message is delivered to the target Grain according to the schedule defined by the cron expression.
+	//
+	// This method is location-transparent: on every tick, the Grain is located, or activated, wherever it lives,
+	// locally or on another node when clustering is enabled. A Grain that has been passivated between two ticks
+	// is activated again by the next delivery.
+	//
+	// Parameters:
+	//   - ctx: The context for managing cancellation and deadlines.
+	//   - message: The message to deliver.
+	//   - identity: The identity of the Grain that will receive the message.
+	//   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
+	//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+	//
+	// Returns:
+	//   - error: An error is returned if the cron expression or the identity is invalid, or if scheduling fails due to internal errors.
+	//
+	// Note:
+	//   - In cluster mode the message is delivered exactly once per trigger tick across the
+	//     cluster, WithReference is required (the call is rejected with
+	//     ErrScheduleReferenceRequired otherwise), and the cron expression is evaluated in
+	//     UTC so every node computes the same tick instants. Outside cluster mode the
+	//     expression is evaluated in the process's local timezone.
+	//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+	//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
+	//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
+	//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+	ScheduleGrainWithCron(ctx context.Context, message any, identity *GrainIdentity, cronExpression string, opts ...ScheduleOption) error
+
 	// handleRemoteAsk handles a synchronous message to another actor and expect a response.
 	// This block until a response is received or timed out.
 	handleRemoteAsk(ctx context.Context, to *PID, message any, timeout time.Duration) (response any, err error)
@@ -1787,6 +1868,94 @@ func (x *actorSystem) PauseSchedule(reference string) error {
 	return x.scheduler.PauseSchedule(reference)
 }
 
+// ScheduleGrain schedules a recurring message to be delivered to the Grain identified by the given identity at a fixed interval.
+//
+// This method sets up a message to be delivered repeatedly to the target Grain, with each delivery occurring
+// after the specified interval. The scheduling continues until it is explicitly canceled or the actor system stops.
+//
+// This method is location-transparent: on every tick, the Grain is located, or activated, wherever it lives,
+// locally or on another node when clustering is enabled. A Grain that has been passivated between two ticks
+// is activated again by the next delivery.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The message to deliver at regular intervals.
+//   - identity: The identity of the Grain that will receive the message.
+//   - interval: The time duration between each delivery of the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for later operations.
+//   - This method does not provide built-in delivery guarantees such as at-least-once or exactly-once semantics; ensure idempotency where needed.
+//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+func (x *actorSystem) ScheduleGrain(_ context.Context, message any, identity *GrainIdentity, interval time.Duration, opts ...ScheduleOption) error {
+	return x.scheduler.ScheduleGrain(message, identity, interval, opts...)
+}
+
+// ScheduleGrainOnce schedules a one-time delivery of a message to the Grain identified by the given identity after a given delay.
+//
+// The message is delivered exactly once to the target Grain after the specified duration has elapsed.
+// This is a fire-and-forget scheduling mechanism: once delivered, the message is not retried or repeated.
+//
+// This method is location-transparent: when the schedule fires, the Grain is located, or activated, wherever it
+// lives, locally or on another node when clustering is enabled. A Grain that has been passivated in the meantime
+// is activated again by the delivery.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The message to deliver.
+//   - identity: The identity of the Grain that will receive the message.
+//   - delay: The duration to wait before delivering the message.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the identity is invalid or if scheduling fails due to internal errors.
+//
+// Note:
+//   - It's strongly recommended to set a unique reference ID using WithReference if you intend to cancel, pause, or resume the message later.
+//   - If no reference is set, an automatic one will be generated, which may not be easily retrievable.
+//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+func (x *actorSystem) ScheduleGrainOnce(_ context.Context, message any, identity *GrainIdentity, delay time.Duration, opts ...ScheduleOption) error {
+	return x.scheduler.ScheduleGrainOnce(message, identity, delay, opts...)
+}
+
+// ScheduleGrainWithCron schedules a message to be delivered to the Grain identified by the given identity using a cron expression.
+//
+// This method enables flexible time-based scheduling using standard cron syntax, allowing you to specify complex recurring schedules.
+// The message is delivered to the target Grain according to the schedule defined by the cron expression.
+//
+// This method is location-transparent: on every tick, the Grain is located, or activated, wherever it lives,
+// locally or on another node when clustering is enabled. A Grain that has been passivated between two ticks
+// is activated again by the next delivery.
+//
+// Parameters:
+//   - ctx: The context for managing cancellation and deadlines.
+//   - message: The message to deliver.
+//   - identity: The identity of the Grain that will receive the message.
+//   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
+//   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
+//
+// Returns:
+//   - error: An error is returned if the cron expression or the identity is invalid, or if scheduling fails due to internal errors.
+//
+// Note:
+//   - In cluster mode the message is delivered exactly once per trigger tick across the
+//     cluster, WithReference is required (the call is rejected with
+//     ErrScheduleReferenceRequired otherwise), and the cron expression is evaluated in
+//     UTC so every node computes the same tick instants. Outside cluster mode the
+//     expression is evaluated in the process's local timezone.
+//   - It's strongly recommended to set a unique reference ID using WithReference if you plan to cancel, pause, or resume the scheduled message.
+//   - If no reference is set, an automatic one will be generated internally, which may not be easily retrievable for future operations.
+//   - The cron expression must follow the format supported by the scheduler (typically 6 or 5 fields depending on implementation).
+//   - As with TellGrain, activating a Grain that is not active requires its kind to be registered (see RegisterGrainKind).
+func (x *actorSystem) ScheduleGrainWithCron(_ context.Context, message any, identity *GrainIdentity, cronExpression string, opts ...ScheduleOption) error {
+	return x.scheduler.ScheduleGrainWithCron(message, identity, cronExpression, opts...)
+}
+
 // ResumeSchedule resumes a previously paused scheduled message intended for delivery to a target actor.
 //
 // This function reactivates a scheduled message that was previously paused, allowing it to continue toward delivery.
@@ -1802,11 +1971,11 @@ func (x *actorSystem) ResumeSchedule(reference string) error {
 }
 
 // ListSchedules returns a read-only snapshot of every schedule currently known to the scheduler:
-// its reference and the target actor path.
+// its reference and its target, an actor path or a Grain identity.
 //
 // It has no effect on the schedules themselves. A schedule stops appearing once it has been
-// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce, once it has
-// fired and been delivered.
+// canceled via CancelSchedule or, for one-shot schedules created via ScheduleOnce or
+// ScheduleGrainOnce, once it has fired and been delivered.
 func (x *actorSystem) ListSchedules() []ScheduleInfo {
 	return x.scheduler.ListSchedules()
 }

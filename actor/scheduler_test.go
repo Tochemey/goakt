@@ -2171,3 +2171,706 @@ func TestSchedulerCounters(t *testing.T) {
 		require.Zero(t, scheduler.cancelledCount.Load())
 	})
 }
+
+// TestGrainScheduler covers the Grain counterparts of ScheduleOnce, Schedule and
+// ScheduleWithCron: delivery through one-way TellGrain, reactivation of a passivated Grain,
+// validation, cluster gating and the reference-based management shared with actor schedules.
+func TestGrainScheduler(t *testing.T) {
+	t.Run("With ScheduleGrainOnce", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-once")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 100*time.Millisecond)
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) == 1
+		}, 5*time.Second, 50*time.Millisecond)
+
+		// a fired one-shot leaves the quartz scheduler
+		require.Eventually(t, func() bool {
+			keys, err := newActorSystem.(*actorSystem).scheduler.quartzScheduler.GetJobKeys()
+			return err == nil && len(keys) == 0
+		}, 5*time.Second, 50*time.Millisecond)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With ScheduleGrain", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-interval")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrain(ctx, new(testpb.TestSend), identity, 100*time.Millisecond, WithReference("grain-interval"))
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 2
+		}, 5*time.Second, 50*time.Millisecond)
+
+		require.NoError(t, newActorSystem.CancelSchedule("grain-interval"))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With ScheduleGrainWithCron", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-cron")
+		require.NoError(t, err)
+
+		// every second
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, expr, WithReference("grain-cron"))
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 2
+		}, 5*time.Second, 100*time.Millisecond)
+
+		require.NoError(t, newActorSystem.CancelSchedule("grain-cron"))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With ScheduleGrainOnce reactivates a passivated Grain", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		sys := newActorSystem.(*actorSystem)
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-passivated", WithGrainDeactivateAfter(200*time.Millisecond))
+		require.NoError(t, err)
+
+		// the idle Grain passivates and leaves the local grains map
+		require.Eventually(t, func() bool {
+			_, exists := sys.grains.Get(identity.String())
+			return !exists
+		}, 3*time.Second, 20*time.Millisecond)
+
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 50*time.Millisecond))
+
+		// the delivery activates the Grain again and the new activation processes the message
+		require.Eventually(t, func() bool {
+			process, ok := sys.grains.Get(identity.String())
+			return ok && process.isActive() && process.processedCount.Load() == 1
+		}, 5*time.Second, 50*time.Millisecond)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With scheduler not started", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		scheduler := newActorSystem.(*actorSystem).scheduler
+		scheduler.Stop(ctx)
+
+		identity := newGrainIdentity(NewMockGrain(), "not-started")
+		message := new(testpb.TestSend)
+
+		err = scheduler.ScheduleGrainOnce(message, identity, 100*time.Millisecond)
+		require.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
+
+		err = scheduler.ScheduleGrain(message, identity, 100*time.Millisecond)
+		require.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
+
+		err = scheduler.ScheduleGrainWithCron(message, identity, "* * * ? * *")
+		require.ErrorIs(t, err, errors.ErrSchedulerNotStarted)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With an invalid identity", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		invalid := &GrainIdentity{kind: "", name: ""}
+		message := new(testpb.TestSend)
+
+		err = newActorSystem.ScheduleGrainOnce(ctx, message, invalid, 100*time.Millisecond)
+		require.ErrorIs(t, err, errors.ErrInvalidGrainIdentity)
+
+		err = newActorSystem.ScheduleGrain(ctx, message, invalid, 100*time.Millisecond)
+		require.ErrorIs(t, err, errors.ErrInvalidGrainIdentity)
+
+		err = newActorSystem.ScheduleGrainWithCron(ctx, message, invalid, "* * * ? * *")
+		require.ErrorIs(t, err, errors.ErrInvalidGrainIdentity)
+
+		// nothing was registered
+		assert.Empty(t, newActorSystem.ListSchedules())
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With ScheduleGrainWithCron with an invalid cron expression", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-bad-cron")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, "not a cron expression")
+		require.Error(t, err)
+		assert.Empty(t, newActorSystem.ListSchedules())
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With Pause, Resume and Cancel on a Grain schedule", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-managed")
+		require.NoError(t, err)
+
+		const reference = "grain-managed"
+		err = newActorSystem.ScheduleGrain(ctx, new(testpb.TestSend), identity, 50*time.Millisecond, WithReference(reference))
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 1
+		}, 5*time.Second, 20*time.Millisecond)
+
+		// a paused schedule stops delivering once the in-flight tick has drained
+		require.NoError(t, newActorSystem.PauseSchedule(reference))
+		pause.For(200 * time.Millisecond)
+		paused := grainProcessedCount(newActorSystem, identity)
+		pause.For(300 * time.Millisecond)
+		require.Equal(t, paused, grainProcessedCount(newActorSystem, identity))
+
+		// a resumed schedule delivers again
+		require.NoError(t, newActorSystem.ResumeSchedule(reference))
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) > paused
+		}, 5*time.Second, 20*time.Millisecond)
+
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+		assert.Empty(t, newActorSystem.ListSchedules())
+		require.ErrorIs(t, newActorSystem.CancelSchedule(reference), errors.ErrScheduledReferenceNotFound)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With an unregistered Grain kind", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		sys := newActorSystem.(*actorSystem)
+		// the kind is never registered on this node, so the delivery cannot activate the Grain
+		identity := newGrainIdentity(NewMockGrain(), "scheduled-unregistered")
+
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 50*time.Millisecond))
+		pause.For(time.Second)
+
+		// the tick failed without activating anything and the one-shot is gone
+		_, exists := sys.grains.Get(identity.String())
+		require.False(t, exists)
+		keys, err := sys.scheduler.quartzScheduler.GetJobKeys()
+		require.NoError(t, err)
+		require.Empty(t, keys)
+
+		// the job function reports the delivery failure to quartz
+		done, err := sys.scheduler.makeGrainJobFn(identity, new(testpb.TestSend), nil)(ctx)
+		require.ErrorIs(t, err, errors.ErrGrainNotRegistered)
+		require.False(t, done)
+
+		// an interval schedule outlives its failing ticks: quartz reschedules a job before
+		// running it, so a delivery failure never removes the schedule
+		const reference = "grain-unregistered-interval"
+		require.NoError(t, newActorSystem.ScheduleGrain(ctx, new(testpb.TestSend), identity, 50*time.Millisecond, WithReference(reference)))
+		pause.For(500 * time.Millisecond)
+
+		_, err = sys.scheduler.quartzScheduler.GetScheduledJob(quartz.NewJobKey(reference))
+		require.NoError(t, err)
+		_, exists = sys.grains.Get(identity.String())
+		require.False(t, exists)
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a handler failure recorded as a deadletter", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		consumer, err := newActorSystem.Subscribe()
+		require.NoError(t, err)
+
+		require.NoError(t, newActorSystem.RegisterGrainKind(ctx, &MockReceiveFailingGrain{}))
+		failing := newGrainIdentity(NewMockReceiveFailingGrain(), "scheduled-failing")
+
+		// the handler reports Err on TestSend: with one-way delivery that is a deadletter
+		// naming the Grain, not an error the scheduler could return to anyone.
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), failing, 50*time.Millisecond))
+		pause.For(time.Second)
+
+		var reason string
+		for message := range consumer.Iterator() {
+			deadletter, ok := message.Payload().(*Deadletter)
+			if !ok || deadletter.Receiver().Name() != failing.String() {
+				continue
+			}
+			reason = deadletter.Reason()
+		}
+
+		require.Contains(t, reason, "failed to process message")
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With ScheduleGrainOnce when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, provider := startGrainSchedulerClusterNode(t)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cluster-once")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 100*time.Millisecond)
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) == 1
+		}, 5*time.Second, 50*time.Millisecond)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With ScheduleGrain when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, provider := startGrainSchedulerClusterNode(t)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cluster-interval")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrain(ctx, new(testpb.TestSend), identity, 100*time.Millisecond, WithReference("grain-interval-cluster"))
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 2
+		}, 5*time.Second, 50*time.Millisecond)
+
+		require.NoError(t, newActorSystem.CancelSchedule("grain-interval-cluster"))
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With ScheduleGrainWithCron when cluster is enabled", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, provider := startGrainSchedulerClusterNode(t)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cluster-cron")
+		require.NoError(t, err)
+
+		// every second; cluster-mode cron requires an explicit reference
+		const expr = "* * * ? * *"
+		err = newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, expr, WithReference("grain-cron-cluster"))
+		require.NoError(t, err)
+
+		// as the sole node racing for every tick, this node always wins the claim
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 2
+		}, 5*time.Second, 100*time.Millisecond)
+
+		require.NoError(t, newActorSystem.CancelSchedule("grain-cron-cluster"))
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With ScheduleGrainWithCron in cluster mode without explicit reference returns an error", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, provider := startGrainSchedulerClusterNode(t)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cluster-cron-no-reference")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, "* * * ? * *")
+		require.ErrorIs(t, err, errors.ErrScheduleReferenceRequired)
+		assert.Empty(t, newActorSystem.ListSchedules())
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+	t.Run("With a duplicate reference", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "scheduled-duplicate")
+		require.NoError(t, err)
+
+		// a reference names one quartz job: registering it again is rejected by the scheduler
+		const reference = "grain-duplicate"
+		message := new(testpb.TestSend)
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, message, identity, time.Minute, WithReference(reference)))
+
+		err = newActorSystem.ScheduleGrainOnce(ctx, message, identity, time.Minute, WithReference(reference))
+		require.ErrorIs(t, err, quartz.ErrJobAlreadyExists)
+
+		err = newActorSystem.ScheduleGrain(ctx, message, identity, time.Minute, WithReference(reference))
+		require.ErrorIs(t, err, quartz.ErrJobAlreadyExists)
+
+		err = newActorSystem.ScheduleGrainWithCron(ctx, message, identity, "0 0 12 * * *", WithReference(reference))
+		require.ErrorIs(t, err, quartz.ErrJobAlreadyExists)
+
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+}
+
+// TestScheduleGrainWithCronTimezone pins that ScheduleGrainWithCron evaluates the cron
+// expression in UTC in cluster mode and in the process local timezone otherwise, the same
+// rule as ScheduleWithCron and for the same reason: the per-tick fire claims must line up
+// cluster-wide. See TestScheduleWithCronTimezone for why the trigger description is asserted.
+func TestScheduleGrainWithCronTimezone(t *testing.T) {
+	// daily at noon: never fires during the test, so the job stays queued for inspection
+	const expr = "0 0 12 * * *"
+
+	scheduledTriggerDescription := func(t *testing.T, sys ActorSystem, reference string) string {
+		t.Helper()
+		job, err := sys.(*actorSystem).scheduler.quartzScheduler.GetScheduledJob(quartz.NewJobKey(reference))
+		require.NoError(t, err)
+		return job.Trigger().Description()
+	}
+
+	t.Run("non-cluster mode evaluates cron in the local timezone", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cron-local-tz")
+		require.NoError(t, err)
+
+		const reference = "grain-cron-local-tz"
+		require.NoError(t, newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, expr, WithReference(reference)))
+
+		localTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.Now().Location())
+		require.NoError(t, err)
+		require.Equal(t, localTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("cluster mode evaluates cron in UTC", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, provider := startGrainSchedulerClusterNode(t)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "cron-utc-tz")
+		require.NoError(t, err)
+
+		const reference = "grain-cron-utc-tz"
+		require.NoError(t, newActorSystem.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, expr, WithReference(reference)))
+
+		utcTrigger, err := quartz.NewCronTriggerWithLoc(expr, time.UTC)
+		require.NoError(t, err)
+		require.Equal(t, utcTrigger.Description(), scheduledTriggerDescription(t, newActorSystem, reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
+}
+
+// TestMakeGrainJobFn drives the Grain job function directly against a mocked cluster engine
+// to pin its claim gate: a lost claim skips delivery silently, a claim error is propagated,
+// and a won claim, or no claim outside cluster mode, hands the message to TellGrain. The bare
+// actor system is not started, so ErrActorSystemNotStarted from TellGrain is the proof that
+// delivery was attempted.
+func TestMakeGrainJobFn(t *testing.T) {
+	metadataCtx := func(runTime int64) context.Context {
+		return context.WithValue(context.Background(), quartz.JobMetadataContextKey, quartz.JobMetadata{RunTime: runTime})
+	}
+
+	identity := newGrainIdentity(NewMockGrain(), "job")
+	claim := &scheduleFireClaim{reference: "ref", ttl: time.Minute}
+
+	t.Run("skips delivery when another node already claimed the tick", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(cluster.ErrScheduleFireClaimed)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		done, err := sched.makeGrainJobFn(identity, new(testpb.TestSend), claim)(metadataCtx(time.Now().UnixNano()))
+		require.NoError(t, err)
+		require.True(t, done)
+	})
+	t.Run("propagates claim errors and skips delivery", func(t *testing.T) {
+		expectedErr := stderrors.New("claim failure")
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(expectedErr)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		done, err := sched.makeGrainJobFn(identity, new(testpb.TestSend), claim)(metadataCtx(time.Now().UnixNano()))
+		require.ErrorIs(t, err, expectedErr)
+		require.False(t, done)
+	})
+	t.Run("delivers once the claim is won", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().ClaimScheduleFire(mock.Anything, mock.Anything, time.Minute).Return(nil)
+
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{cluster: clusterMock})
+		done, err := sched.makeGrainJobFn(identity, new(testpb.TestSend), claim)(metadataCtx(time.Now().UnixNano()))
+		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
+		require.False(t, done)
+	})
+	t.Run("delivers without a claim outside cluster mode", func(t *testing.T) {
+		sched := newScheduler(log.DiscardLogger, time.Second, &actorSystem{})
+		done, err := sched.makeGrainJobFn(identity, new(testpb.TestSend), nil)(context.Background())
+		require.ErrorIs(t, err, errors.ErrActorSystemNotStarted)
+		require.False(t, done)
+	})
+}
+
+// TestGrainSchedulerListSchedules pins how ListSchedules reports Grain schedules: the target
+// is the Grain identity and Path is nil, the mirror image of an actor schedule.
+func TestGrainSchedulerListSchedules(t *testing.T) {
+	t.Run("With a Grain schedule", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "listed")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrain(ctx, new(testpb.TestSend), identity, 100*time.Millisecond, WithReference("grain-ref"))
+		require.NoError(t, err)
+
+		schedules := newActorSystem.ListSchedules()
+		require.Len(t, schedules, 1)
+		info := schedules[0]
+		assert.Equal(t, "grain-ref", info.Reference)
+		assert.Nil(t, info.Path)
+		require.NotNil(t, info.Grain)
+		assert.True(t, identity.Equal(info.Grain))
+
+		require.NoError(t, newActorSystem.CancelSchedule("grain-ref"))
+		assert.Empty(t, newActorSystem.ListSchedules())
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With actor and Grain schedules", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "listed-alongside")
+		require.NoError(t, err)
+
+		message := new(testpb.TestSend)
+		require.NoError(t, newActorSystem.Schedule(ctx, message, actorRef, 100*time.Millisecond, WithReference("actor-ref")))
+		require.NoError(t, newActorSystem.ScheduleGrain(ctx, message, identity, 100*time.Millisecond, WithReference("grain-ref")))
+
+		schedules := newActorSystem.ListSchedules()
+		require.Len(t, schedules, 2)
+
+		byReference := make(map[string]ScheduleInfo, len(schedules))
+		for _, info := range schedules {
+			byReference[info.Reference] = info
+		}
+
+		actorInfo, ok := byReference["actor-ref"]
+		require.True(t, ok)
+		require.NotNil(t, actorInfo.Path)
+		assert.Equal(t, actorRef.Path().String(), actorInfo.Path.String())
+		assert.Nil(t, actorInfo.Grain)
+
+		grainInfo, ok := byReference["grain-ref"]
+		require.True(t, ok)
+		assert.Nil(t, grainInfo.Path)
+		require.NotNil(t, grainInfo.Grain)
+		assert.True(t, identity.Equal(grainInfo.Grain))
+
+		require.NoError(t, newActorSystem.CancelSchedule("actor-ref"))
+		require.NoError(t, newActorSystem.CancelSchedule("grain-ref"))
+		assert.Empty(t, newActorSystem.ListSchedules())
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a ScheduleGrainOnce schedule that disappears once delivered", func(t *testing.T) {
+		ctx := context.TODO()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+		pause.For(time.Second)
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "listed-once")
+		require.NoError(t, err)
+
+		err = newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 500*time.Millisecond, WithReference("grain-once-ref"))
+		require.NoError(t, err)
+
+		schedules := newActorSystem.ListSchedules()
+		require.Len(t, schedules, 1)
+		assert.Equal(t, "grain-once-ref", schedules[0].Reference)
+		assert.True(t, identity.Equal(schedules[0].Grain))
+
+		require.Eventually(t, func() bool {
+			return len(newActorSystem.ListSchedules()) == 0
+		}, 5*time.Second, 50*time.Millisecond)
+
+		assert.EqualValues(t, 1, grainProcessedCount(newActorSystem, identity))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+}
+
+// TestGrainSchedulerCounters pins that Grain schedules feed the same scheduled and cancelled
+// counters as actor schedules, so the scheduler metrics count them.
+func TestGrainSchedulerCounters(t *testing.T) {
+	ctx := context.TODO()
+	newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, newActorSystem.Start(ctx))
+	pause.For(time.Second)
+
+	identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "counted")
+	require.NoError(t, err)
+
+	sched := newActorSystem.(*actorSystem).scheduler
+	scheduled := sched.scheduledCount.Load()
+	cancelled := sched.cancelledCount.Load()
+
+	message := new(testpb.TestSend)
+	require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, message, identity, time.Minute, WithReference("counted-once")))
+	require.NoError(t, newActorSystem.ScheduleGrain(ctx, message, identity, time.Minute, WithReference("counted-interval")))
+	require.NoError(t, newActorSystem.ScheduleGrainWithCron(ctx, message, identity, "0 0 12 * * *", WithReference("counted-cron")))
+	assert.Equal(t, scheduled+3, sched.scheduledCount.Load())
+
+	require.NoError(t, newActorSystem.CancelSchedule("counted-once"))
+	require.NoError(t, newActorSystem.CancelSchedule("counted-interval"))
+	require.NoError(t, newActorSystem.CancelSchedule("counted-cron"))
+	assert.Equal(t, cancelled+3, sched.cancelledCount.Load())
+
+	require.NoError(t, newActorSystem.Stop(ctx))
+}
+
+// TestGrainSchedulerMultiNode runs the cluster rules of Grain schedules on a real three-node
+// NATS-backed cluster: cron single fire across nodes, node-local interval schedules, and a
+// one-shot registered on a node that does not own the Grain. The Grain is activated on node1
+// only, so every delivery from another node travels through TellGrain's remote routing.
+func TestGrainSchedulerMultiNode(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+	systems, providers := startNATsSystems(t, srv.Addr().String(), 3, withTestExtraGrains(new(MockCountingGrain)))
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+
+	// let the membership settle before registering anything
+	pause.For(3 * time.Second)
+
+	// activate activates a counting Grain on node1 under name and waits until the other nodes
+	// can resolve its registry record, so their deliveries route to node1 instead of activating
+	// a copy of their own.
+	activate := func(t *testing.T, name string) (*MockCountingGrain, *GrainIdentity) {
+		t.Helper()
+		grain := NewMockCountingGrain()
+		identity, err := node1.GrainIdentity(ctx, name, func(context.Context) (Grain, error) { return grain, nil })
+		require.NoError(t, err)
+
+		for _, node := range []ActorSystem{node2, node3} {
+			require.Eventually(t, func() bool {
+				record, err := node.(*actorSystem).getCluster().GetGrain(ctx, identity.String())
+				return err == nil && node1.(*actorSystem).isLocalGrainOwner(record)
+			}, 10*time.Second, 100*time.Millisecond)
+		}
+
+		return grain, identity
+	}
+
+	t.Run("three nodes racing one cron tick deliver once per tick", func(t *testing.T) {
+		grain, identity := activate(t, "cron-race")
+
+		// every second, registered identically on every node
+		const expr = "* * * ? * *"
+		const reference = "grain-cron-race"
+		for _, node := range systems {
+			require.NoError(t, node.ScheduleGrainWithCron(ctx, new(testpb.TestSend), identity, expr, WithReference(reference)))
+		}
+
+		// a five-second window holds four to six ticks. Three triggers fire for each of them, so
+		// duplicate delivery by even two nodes would push the count to eight or more; single fire
+		// keeps it at one per tick, plus at most one tick in flight at cancel time.
+		pause.For(5 * time.Second)
+		for _, node := range systems {
+			require.NoError(t, node.CancelSchedule(reference))
+		}
+
+		pause.For(500 * time.Millisecond)
+		delivered := grain.sends.Load()
+		require.GreaterOrEqual(t, delivered, int64(3))
+		require.LessOrEqual(t, delivered, int64(7), "a cron tick was delivered by more than one node")
+
+		// the Grain stayed on node1: the other nodes routed to it instead of activating a copy
+		for _, node := range []ActorSystem{node2, node3} {
+			_, exists := node.(*actorSystem).grains.Get(identity.String())
+			require.False(t, exists)
+		}
+	})
+	t.Run("two nodes each deliver their own interval schedule", func(t *testing.T) {
+		grain, identity := activate(t, "interval-local")
+
+		// the same reference on two nodes names two independent, node-local schedules; each node
+		// sends a different message type so the deliveries can be attributed
+		const reference = "grain-interval-local"
+		require.NoError(t, node1.ScheduleGrain(ctx, new(testpb.TestSend), identity, 200*time.Millisecond, WithReference(reference)))
+		require.NoError(t, node2.ScheduleGrain(ctx, new(testpb.TestReply), identity, 200*time.Millisecond, WithReference(reference)))
+
+		require.Eventually(t, func() bool {
+			return grain.sends.Load() >= 3 && grain.replies.Load() >= 3
+		}, 10*time.Second, 100*time.Millisecond)
+
+		require.NoError(t, node1.CancelSchedule(reference))
+		require.NoError(t, node2.CancelSchedule(reference))
+		require.ErrorIs(t, node3.CancelSchedule(reference), errors.ErrScheduledReferenceNotFound)
+	})
+	t.Run("a one-shot registered on a non-owner node reaches the owner", func(t *testing.T) {
+		grain, identity := activate(t, "one-shot-remote")
+
+		require.NoError(t, node3.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 100*time.Millisecond))
+
+		require.Eventually(t, func() bool {
+			return grain.sends.Load() == 1
+		}, 10*time.Second, 50*time.Millisecond)
+
+		// delivered to node1's activation, not to a copy on node3
+		_, exists := node3.(*actorSystem).grains.Get(identity.String())
+		require.False(t, exists)
+		process, ok := node1.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.EqualValues(t, 1, process.processedCount.Load())
+	})
+
+	for i, node := range systems {
+		assert.NoError(t, node.Stop(ctx))
+		assert.NoError(t, providers[i].Close())
+	}
+
+	srv.Shutdown()
+}

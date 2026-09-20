@@ -647,7 +647,7 @@ func reshuffleRoutees(routees []*PID) []*PID {
 	shuffled := make([]*PID, n)
 	copy(shuffled, routees)
 
-	rand.Shuffle(n, func(i, j int) {
+	rand.Shuffle(n, func(i, j int) { //nolint:gosec // routee order needs no cryptographic randomness
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	})
 

@@ -1,0 +1,177 @@
+---
+title: Grain Scheduling
+description: Delayed, recurring and cron-based delivery of messages to grains.
+sidebarTitle: "Scheduling"
+---
+
+## Overview
+
+The actor system's scheduler can target grains as well as actors. `ScheduleGrainOnce`, `ScheduleGrain` and
+`ScheduleGrainWithCron` take a `*GrainIdentity` where the actor methods take a `*PID`, and deliver the message to the
+grain once after a delay, repeatedly at a fixed interval, or on a cron expression. Everything else is shared with the
+[actor scheduler](/actor/scheduling): the underlying go-quartz scheduler, the reference-based management API
+(`CancelSchedule`, `PauseSchedule`, `ResumeSchedule`, `ListSchedules`), the `ScheduleOption` values, the scheduler
+metrics, and the cluster rules for cron.
+
+A grain schedule is held by the scheduler of the node that registered it, not by the grain. It outlives the grain's
+activation: a grain that passivated between two deliveries is activated again by the next one. It is not persisted, so
+it does not survive a restart of the node, exactly like an actor schedule.
+
+<Note>
+  Grain schedules are not [grain timers](/grains/timers). A timer is registered by the grain for itself and is cancelled
+  when the grain deactivates. A schedule can be registered by any code holding the grain identity and keeps firing until
+  it is cancelled. Read [Grain schedules vs grain timers](#grain-schedules-vs-grain-timers) before using a schedule for a
+  grain's own periodic work.
+</Note>
+
+## API
+
+- **ScheduleGrainOnce**: Deliver once after the delay.
+- **ScheduleGrain**: Deliver at a fixed interval (repeating).
+- **ScheduleGrainWithCron**: Deliver according to a cron expression in the
+  [Quartz format](/actor/scheduling#cron-expression-format).
+- **CancelSchedule**, **PauseSchedule**, **ResumeSchedule**, **ListSchedules**: Shared with actor schedules and keyed by
+  the schedule reference.
+
+## Options
+
+The methods take the same `ScheduleOption` values as the actor methods:
+
+- **WithReference**: Set a unique ID for cancel, pause or resume. **Strongly recommended** if you plan to manage the
+  schedule later, and **required** for `ScheduleGrainWithCron` in cluster mode. Without it an auto-generated UUID is
+  used. A reference names one schedule on the node: registering another schedule, actor or grain, under a reference
+  that is still in use fails with go-quartz's `quartz.ErrJobAlreadyExists`.
+- **WithSender**: Has no effect on a grain schedule. A grain has no sender notion, so `GrainContext` exposes none.
+
+## Example
+
+```go Scheduling to a grain
+identity, err := actor.GrainOf[*ReportGrain](ctx, system, "monthly-report")
+if err != nil {
+    return err
+}
+
+// deliver once, ten minutes from now
+err = system.ScheduleGrainOnce(ctx, &Remind{}, identity, 10*time.Minute,
+    actor.WithReference("remind-monthly-report"))
+
+// deliver every minute
+err = system.ScheduleGrain(ctx, &Refresh{}, identity, time.Minute,
+    actor.WithReference("refresh-monthly-report"))
+
+// deliver every day at 09:00 (UTC in cluster mode, local time otherwise)
+err = system.ScheduleGrainWithCron(ctx, &Generate{}, identity, "0 0 9 * * *",
+    actor.WithReference("generate-monthly-report"))
+
+// manage by reference
+_ = system.PauseSchedule("refresh-monthly-report")
+_ = system.ResumeSchedule("refresh-monthly-report")
+_ = system.CancelSchedule("refresh-monthly-report")
+```
+
+## Delivery
+
+Every tick delivers the message with a one-way `TellGrain` (see
+[Tell: acknowledged or one-way](/grains/overview#tell-acknowledged-or-one-way)). Grain schedules therefore have the
+following properties:
+
+- **Location transparency**: The grain is located, or activated, wherever it lives when the tick fires: on the local
+  node, or on the node that owns it in cluster mode. The registering node and the owning node need not be the same.
+- **Reactivation**: A grain that passivated since the previous tick is activated again by the delivery, the way any
+  `TellGrain` to a passivated grain activates it: the grain is built as a zero value of its struct type and
+  `OnActivate` runs again. The grain kind must be registered on the node that activates it, through `GrainOf` on that
+  node, `RegisterGrainKind`, or `ClusterConfig.WithGrains`.
+- **Passivation activity**: The delivered message rides the grain mailbox like any other message, so it refreshes the
+  grain's passivation activity and counts toward message-count-based passivation strategies. An interval shorter than
+  the grain's deactivation timeout keeps the grain alive for as long as the schedule runs.
+- **Handler failures**: A failure the handler reports through `Err` or `Unhandled`, or a panic in `OnReceive`, is
+  recorded as a [deadletter](/advanced/event-streams) naming the grain as receiver. Nothing is retried.
+- **Delivery failures**: An error before the message is enqueued, for example a grain kind that is not registered on
+  the firing node, an activation failure, or a transport failure toward the owning node, is neither returned to anyone
+  nor logged by the scheduler: that tick is lost. Interval and cron schedules keep firing on the next tick; a one-shot
+  is gone.
+- **Ordering**: Deliveries are processed one at a time, serialized with the grain's other messages. The scheduler fires
+  at a fixed cadence, so ticks of a handler slower than the interval queue up in the mailbox.
+- **Cancellation**: `CancelSchedule` stops future ticks. A tick that already handed its message to the grain is not
+  recalled.
+
+## Cluster mode
+
+The rules are those of the [actor scheduler](/actor/scheduling#cluster-wide-single-fire):
+
+- **`ScheduleGrainWithCron`** delivers exactly once per tick across the cluster. Every node that registers the schedule
+  runs its own cron trigger; before delivery each node races to claim the tick, and only the winner calls `TellGrain`,
+  which routes the message to the node that owns the grain. `WithReference` is required, since the claim is keyed on the
+  reference, and the cron expression is evaluated in **UTC**. The call is rejected with `ErrScheduleReferenceRequired`
+  without a reference.
+- **`ScheduleGrain` and `ScheduleGrainOnce`** stay node-local. The same schedule registered on several nodes delivers
+  once per node per tick, all to the single activation of the grain.
+- **`CancelSchedule`** only stops the trigger on the node where it is called, for cron as for interval schedules.
+
+Outside cluster mode the cron expression is evaluated in the process's local timezone and no arbitration takes place.
+
+## Errors
+
+- **ErrSchedulerNotStarted**: The actor system, and with it the scheduler, is not started.
+- **ErrInvalidGrainIdentity**: The identity fails validation, for example an empty name.
+- **ErrScheduleReferenceRequired**: `ScheduleGrainWithCron` in cluster mode without `WithReference`.
+- **ErrScheduledReferenceNotFound**: Cancel, pause or resume with an unknown reference, or a one-shot that already
+  fired.
+- An invalid cron expression is rejected with the parser's error; a reference still in use with
+  `quartz.ErrJobAlreadyExists`.
+
+## Introspection
+
+`ListSchedules` reports grain schedules alongside actor schedules. A `ScheduleInfo` carries the reference and its
+target: `Path` for an actor schedule, `Grain` for a grain schedule. Exactly one of the two is set.
+
+```go Introspection
+for _, info := range system.ListSchedules() {
+    if info.Grain != nil {
+        fmt.Printf("%s -> grain %s\n", info.Reference, info.Grain)
+        continue
+    }
+    fmt.Printf("%s -> actor %s\n", info.Reference, info.Path)
+}
+```
+
+Grain schedules also count in the scheduler metrics, `scheduler.scheduled.count` and `scheduler.cancelled.count`.
+
+## Grain schedules vs grain timers
+
+Both can deliver a message to a grain later, and a grain can register either for itself. They differ in who owns the
+entry:
+
+- **Who schedules**: Grain timers: The grain itself, from `GrainContext` or `GrainProps`. Grain schedules: Any code
+  holding an `ActorSystem` and the grain identity, including the grain through `ctx.ActorSystem()`.
+- **Target**: Grain timers: Always the scheduling grain. Grain schedules: Any grain.
+- **Held by**: Grain timers: The activation. Grain schedules: The scheduler of the registering node.
+- **Passivation**: Grain timers: All cancelled on deactivation; never reactivate the grain. Grain schedules: Survive
+  passivation; each delivery reactivates the grain.
+- **Passivation clock**: Grain timers: A tick does not refresh it unless `WithTimerKeepAlive`. Grain schedules: Every
+  delivery refreshes it.
+- **Node restart**: Both are lost.
+- **References**: Grain timers: Scoped to the grain; a duplicate replaces the timer. Grain schedules: Scoped to the
+  node; a duplicate is rejected.
+- **Management**: Grain timers: `CancelSchedule` on the grain context. Grain schedules: `CancelSchedule`,
+  `PauseSchedule`, `ResumeSchedule` and `ListSchedules` on the actor system.
+- **Cluster cron**: Grain timers: No arbitration needed. Grain schedules: Claim per tick, `WithReference` required,
+  UTC.
+- **Handler failure**: Grain timers: Logged as a warning. Grain schedules: Recorded as a deadletter.
+
+<Warning>
+  A grain that schedules its own periodic work through `ScheduleGrain` instead of a timer either keeps itself alive, when
+  the interval is shorter than its deactivation timeout, since every tick refreshes the passivation clock, or churns
+  through deactivation and reactivation on every tick, when the interval is longer. The schedule is not cancelled when
+  the grain deactivates: registering it from `OnActivate` under an auto-generated reference adds a new schedule on every
+  activation, and under a fixed reference fails with `quartz.ErrJobAlreadyExists` once the schedule exists. Use a
+  [grain timer](/grains/timers) for work that only matters while the grain is active, and reserve schedules for
+  messages that must reach the grain even after it has passivated, registered under a fixed reference with an explicit
+  cancel path.
+</Warning>
+
+## See also
+
+- [Actor scheduling](/actor/scheduling): The shared scheduler, the cron format, and cluster-wide single fire
+- [Grain Timers](/grains/timers): Volatile, activation-scoped timers for a grain's own periodic behavior
+- [Grains overview](/grains/overview): Identity, messaging and the one-way tell
