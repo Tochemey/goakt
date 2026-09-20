@@ -410,19 +410,27 @@ func (pid *grainPID) isActive() bool {
 // producers race on the Idle -> Scheduled CAS and only the winner pushes
 // onto the ready queue. The losers' messages are still drained because
 // the winner's turn observes them via the FIFO mailbox.
-func (pid *grainPID) receive(grainContext *GrainContext) {
+//
+// An enqueue failure is reported on the context, which wakes the blocked
+// ack or ask caller, and returned, which is what a one-way send relies on
+// since its context carries no reply channel. An inactive grain is only
+// returned as ErrDead; ack and ask callers keep observing it through their
+// timeout.
+func (pid *grainPID) receive(grainContext *GrainContext) error {
 	if !pid.isActive() {
-		return
+		return gerrors.ErrDead
 	}
 
 	if err := pid.enqueueMessage(grainContext); err != nil {
 		grainContext.Err(err)
-		return
+		return err
 	}
 
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)
 	}
+
+	return nil
 }
 
 // enqueueMessage appends a user message to the grain's mailbox: the standalone
@@ -1063,14 +1071,20 @@ func (pid *grainPID) recovery(received *GrainContext) {
 		)
 	}
 
-	// A response envelope has no reply route: the log is the only signal
-	// anyone gets. Everything else reports through Err, which routes an
+	// A response envelope or a one-way message has no reply route: the log
+	// is the only signal anyone gets for the envelope, and the one-way
+	// message is recorded as a deadletter as well, like a failure its handler
+	// reports itself. Everything else reports through Err, which routes an
 	// async reply (request envelopes), the ask reply channel (synchronous
 	// contexts, whose err channel is nil by construction), or the Tell ack
 	// channel.
 	if received.err == nil && received.requestID == "" && !received.synchronous {
 		if pid.getLogger().Enabled(log.ErrorLevel) {
 			pid.getLogger().Errorf("grain=%s panicked while handling %T: %v", pid.getIdentity().String(), received.Message(), failure)
+		}
+
+		if received.oneWay {
+			received.Err(failure)
 		}
 		return
 	}

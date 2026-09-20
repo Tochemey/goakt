@@ -379,6 +379,24 @@ type Client interface {
 	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
 	RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error
 
+	// RemoteTellGrainOneWay sends a message to a grain and returns once the remote node has enqueued it.
+	//
+	// Unlike RemoteTellGrain, the remote node does not wait for the grain to process the message
+	// before answering, so a failure reported by the grain handler never reaches the caller.
+	//
+	// Parameters:
+	//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+	//   - host, port: Location of the remote actor system where the grain is hosted.
+	//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+	//   - message: A message that will be serialized into a byte slice.
+	//
+	// Errors:
+	//   - Message serialization failures return gerrors.NewErrInvalidMessage.
+	//   - Transport and context errors, and enqueue failures reported by the remote node.
+	//
+	// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+	RemoteTellGrainOneWay(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error
+
 	// RemoteAskGrain sends a request message to a grain and waits for a reply, subject to the provided timeout and context.
 	//
 	// Parameters:
@@ -1814,6 +1832,33 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 //
 // Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
 func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error {
+	return r.remoteTellGrain(ctx, host, port, grainRequest, message, false)
+}
+
+// RemoteTellGrainOneWay sends a message to a grain and returns once the remote node has enqueued it.
+//
+// Unlike RemoteTellGrain, the remote node does not wait for the grain to process the message
+// before answering, so a failure reported by the grain handler never reaches the caller.
+//
+// Parameters:
+//   - ctx: Governs cancellation and deadlines for the outbound RPC.
+//   - host, port: Location of the remote actor system where the grain is hosted.
+//   - grainRequest: Grain activation details (identity, kind, and any activation metadata).
+//   - message: The message to send; serialized via the matching registered serializer.
+//
+// Errors:
+//   - Message packing failures return gerrors.NewErrInvalidMessage.
+//   - Transport and context errors, and enqueue failures reported by the remote node.
+//
+// Note: The grain must already be activated, or the grain kind must be registered on the remote actor system using RegisterGrainKind.
+func (r *client) RemoteTellGrainOneWay(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any) error {
+	return r.remoteTellGrain(ctx, host, port, grainRequest, message, true)
+}
+
+// remoteTellGrain serializes message and sends it to the grain hosted at host:port as a
+// RemoteTellGrainRequest. oneWay sets the request flag that tells the remote node to answer
+// as soon as the message is enqueued instead of after the grain processed it.
+func (r *client) remoteTellGrain(ctx context.Context, host string, port int, grainRequest *remote.GrainRequest, message any, oneWay bool) error {
 	grain, err := getGrainFromRequest(host, port, grainRequest)
 	if err != nil {
 		return err
@@ -1837,6 +1882,7 @@ func (r *client) RemoteTellGrain(ctx context.Context, host string, port int, gra
 	request := &internalpb.RemoteTellGrainRequest{}
 	request.SetGrain(grain)
 	request.SetMessage(marshaled)
+	request.SetOneWay(oneWay)
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)

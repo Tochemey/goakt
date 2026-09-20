@@ -2069,7 +2069,7 @@ type MockGrainPipeSystem struct {
 }
 
 // TellGrain records the message and reports the injected error.
-func (x *MockGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any) error {
+func (x *MockGrainPipeSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any, _ ...TellGrainOption) error {
 	x.lastMessage = message
 	return x.err
 }

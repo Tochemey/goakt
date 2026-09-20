@@ -52,7 +52,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 		}
 		sys.dataCenterController = nil
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
@@ -63,7 +63,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			return nil, nil
 		}, remotingMock)
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
@@ -80,7 +80,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			}, nil
 		}, remotingMock)
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
@@ -104,7 +104,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(errors.New("remote tell failed")).
 			Once()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
@@ -128,7 +128,31 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(nil).
 			Once()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
+		require.NoError(t, err)
+	})
+
+	t.Run("uses the one-way remote call in grainOneWay mode", func(t *testing.T) {
+		remotingMock := mocksremote.NewClient(t)
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{
+				{
+					ID:        "dc-1",
+					State:     datacenter.DataCenterActive,
+					Endpoints: []string{"127.0.0.1:9000"},
+				},
+			}, nil
+		}, remotingMock)
+
+		// No RemoteTellGrain expectation: an acknowledged call would fail the mock.
+		remotingMock.EXPECT().
+			RemoteTellGrainOneWay(mock.Anything, "127.0.0.1", 9000, mock.MatchedBy(func(req *remote.GrainRequest) bool {
+				return req.Name == grainID.Name() && req.Kind == grainID.Kind()
+			}), mock.Anything).
+			Return(nil).
+			Once()
+
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainOneWay)
 		require.NoError(t, err)
 	})
 
@@ -155,7 +179,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(nil).
 			Maybe()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.NoError(t, err)
 	})
 
@@ -186,7 +210,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(nil).
 			Maybe()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.NoError(t, err)
 	})
 
@@ -213,7 +237,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(nil).
 			Once()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.NoError(t, err)
 	})
 
@@ -235,7 +259,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Return(nil).
 			Once()
 
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, time.Second, grainTell)
 		require.NoError(t, err)
 	})
 
@@ -257,7 +281,7 @@ func TestTellGrainAcrossDataCenters(t *testing.T) {
 			Once()
 
 		// Use a short timeout
-		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, 100*time.Millisecond)
+		err := sys.tellGrainAcrossDataCenters(ctx, grainID, message, 100*time.Millisecond, grainTell)
 		require.NoError(t, err)
 	})
 }

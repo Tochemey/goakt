@@ -1954,6 +1954,123 @@ func TestRemoteTellGrainHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
 	})
+
+	t.Run("one-way request answers once the message is enqueued", func(t *testing.T) {
+		p := inet.Get(1)[0]
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, p)),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		impl := sys.(*actorSystem)
+		require.NoError(t, impl.Start(ctx))
+		t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+
+		blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			entered <- struct{}{}
+			<-release
+			gctx.NoErr()
+		}}
+
+		identity, err := impl.GrainIdentity(ctx, "one-way-handler-grain", func(context.Context) (Grain, error) {
+			return blocking, nil
+		})
+		require.NoError(t, err)
+
+		message := new(testpb.TestSend)
+		payload, err := impl.remoting.Serializer(message).Serialize(message)
+		require.NoError(t, err)
+
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
+				Host:    host,
+				Port:    int32(p),
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			}.Build(),
+			Message: payload,
+			OneWay:  true,
+		}.Build()
+
+		// The handler parks inside OnReceive until release is closed: an
+		// acknowledged tell would hold the RPC until its timeout and answer
+		// with an error, a one-way tell answers as soon as the message is
+		// enqueued.
+		resp, err := impl.remoteTellGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteTellGrainResponse)
+		require.True(t, ok, "expected *internalpb.RemoteTellGrainResponse, got %T", resp)
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("the grain did not receive the one-way message")
+		}
+	})
+
+	t.Run("one-way request reports a full mailbox as CODE_INTERNAL_ERROR", func(t *testing.T) {
+		p := inet.Get(1)[0]
+		sys, err := NewActorSystem("testSys",
+			WithRemote(remote.NewConfig(host, p)),
+			WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		impl := sys.(*actorSystem)
+		require.NoError(t, impl.Start(ctx))
+		t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+
+		blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			entered <- struct{}{}
+			<-release
+			gctx.NoErr()
+		}}
+
+		identity, err := impl.GrainIdentity(ctx, "one-way-handler-bounded-grain", func(context.Context) (Grain, error) {
+			return blocking, nil
+		}, WithGrainMailboxCapacity(1))
+		require.NoError(t, err)
+
+		message := new(testpb.TestSend)
+		payload, err := impl.remoting.Serializer(message).Serialize(message)
+		require.NoError(t, err)
+
+		req := internalpb.RemoteTellGrainRequest_builder{
+			Grain: internalpb.Grain_builder{
+				Host:    host,
+				Port:    int32(p),
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			}.Build(),
+			Message: payload,
+			OneWay:  true,
+		}.Build()
+
+		// The first message parks the turn, the second fills the single slot
+		// and the third is rejected at enqueue time.
+		resp, err := impl.remoteTellGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteTellGrainResponse)
+		require.True(t, ok, "expected *internalpb.RemoteTellGrainResponse, got %T", resp)
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("the grain did not receive the one-way message")
+		}
+
+		resp, err = impl.remoteTellGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok = resp.(*internalpb.RemoteTellGrainResponse)
+		require.True(t, ok, "expected *internalpb.RemoteTellGrainResponse, got %T", resp)
+
+		resp, err = impl.remoteTellGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
+	})
 }
 
 func TestRemoteActivateGrainHandler(t *testing.T) {

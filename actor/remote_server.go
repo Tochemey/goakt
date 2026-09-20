@@ -1422,7 +1422,7 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrReservedName(identity.String())), nil
 	}
 
-	reply, err := x.localSend(ctx, identity, message, timeout.AsDuration(), true)
+	reply, err := x.localSendGrain(ctx, identity, message, timeout.AsDuration(), grainAsk)
 	if err != nil {
 		logger.Errorf("failed to send to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
@@ -1495,7 +1495,14 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 		return new(internalpb.RemoteTellGrainResponse), nil
 	}
 
-	_, err = x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
+	// A one-way tell answers once the message is enqueued; an acknowledged
+	// tell holds the RPC until the grain processed the message.
+	mode := grainTell
+	if request.GetOneWay() {
+		mode = grainOneWay
+	}
+
+	_, err = x.localSendGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
 	if err != nil {
 		logger.Errorf("failed to send message to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil

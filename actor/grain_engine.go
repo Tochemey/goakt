@@ -248,16 +248,20 @@ func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity
 // TellGrain sends an asynchronous message to a Grain (virtual actor) identified by the given identity.
 //
 // This method locates or activates the target Grain (locally or in the cluster) and delivers the provided
-// protobuf message without waiting for a response. Use this for fire-and-forget scenarios where no reply is expected.
+// protobuf message. No response payload is returned. By default the call waits for the grain to acknowledge
+// the message through NoErr, Err or Unhandled, bounded by DefaultGrainRequestTimeout, and returns the error
+// the handler reported, if any. With WithOneWay the call returns as soon as the message is enqueued in the
+// grain mailbox; a failure the handler reports is recorded as a deadletter instead of reaching the caller.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control.
 //   - identity: The unique identity of the Grain.
 //   - message: The protobuf message to send to the Grain.
+//   - opts: Per-call options, such as WithOneWay.
 //
 // Returns:
 //   - error: An error if the message could not be delivered or the system is not started.
-func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any) error {
+func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, message any, opts ...TellGrainOption) error {
 	if !x.started.Load() || x.isStopping() {
 		return gerrors.ErrActorSystemNotStarted
 	}
@@ -267,10 +271,16 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 		return gerrors.NewErrInvalidGrainIdentity(err)
 	}
 
-	if x.InCluster() {
-		return x.remoteTellGrain(ctx, identity, message, DefaultGrainRequestTimeout)
+	mode := grainTell
+	if newTellGrainConfig(opts...).isOneWay {
+		mode = grainOneWay
 	}
-	_, err := x.localSend(ctx, identity, message, DefaultGrainRequestTimeout, false)
+
+	if x.InCluster() {
+		return x.remoteTellGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
+	}
+
+	_, err := x.localSendGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
 	return err
 }
 
@@ -302,7 +312,8 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, mes
 	if x.InCluster() {
 		return x.remoteAskGrain(ctx, identity, message, timeout)
 	}
-	return x.localSend(ctx, identity, message, timeout, true)
+
+	return x.localSendGrain(ctx, identity, message, timeout, grainAsk)
 }
 
 // Grains retrieves a list of all active Grains (virtual actors) in the system.
@@ -655,10 +666,11 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 //   - id: identity of the target Grain.
 //   - message: protobuf message to send.
 //   - timeout: request timeout duration.
+//   - mode: grainTell for an acknowledged tell, grainOneWay to return once the message is enqueued.
 //
 // Returns:
 //   - error: error if the request fails.
-func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) error {
+func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, mode grainContextMode) error {
 	// Fast path: a grain that is already activated and live on this node is
 	// owned by this node, so deliver in-process and skip the cluster registry
 	// lookup (engine RLock + olric Get + protobuf decode) on every send. The
@@ -666,7 +678,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 	// deactivated during the handoff, so this falls through to the
 	// authoritative cluster lookup below.
 	if process, ok := x.grains.Get(id.String()); ok && process.isActive() {
-		_, err := x.localSend(ctx, id, message, timeout, false)
+		_, err := x.localSendGrain(ctx, id, message, timeout, mode)
 		return err
 	}
 
@@ -676,10 +688,10 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 		// When the grain is owned by the calling node, deliver in-process and
 		// skip the remoting round trip (loopback serialization/connection).
 		if x.isLocalGrainOwner(grain) {
-			_, err := x.localSend(ctx, id, message, timeout, false)
+			_, err := x.localSendGrain(ctx, id, message, timeout, mode)
 			return err
 		}
-		return x.sendRemoteTellGrainRequest(ctx, grain, message)
+		return x.sendRemoteTellGrainRequest(ctx, grain, message, mode)
 	}
 
 	if !errors.Is(err, cluster.ErrGrainNotFound) {
@@ -687,12 +699,12 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 	}
 
 	// Try to find and send to grain in remote datacenters
-	if err := x.tellGrainAcrossDataCenters(ctx, id, message, timeout); err == nil {
+	if err := x.tellGrainAcrossDataCenters(ctx, id, message, timeout, mode); err == nil {
 		return nil
 	}
 
 	// Not found anywhere - activate locally
-	_, err = x.localSend(ctx, id, message, timeout, false)
+	_, err = x.localSendGrain(ctx, id, message, timeout, mode)
 	return err
 }
 
@@ -714,7 +726,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	// Fast path: see remoteTellGrain. A locally active grain is owned here, so
 	// deliver in-process and skip the per-send cluster registry lookup.
 	if process, ok := x.grains.Get(id.String()); ok && process.isActive() {
-		return x.localSend(ctx, id, message, timeout, true)
+		return x.localSendGrain(ctx, id, message, timeout, grainAsk)
 	}
 
 	// Try local cluster first
@@ -723,7 +735,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 		// When the grain is owned by the calling node, deliver in-process and
 		// skip the remoting round trip (loopback serialization/connection).
 		if x.isLocalGrainOwner(grain) {
-			return x.localSend(ctx, id, message, timeout, true)
+			return x.localSendGrain(ctx, id, message, timeout, grainAsk)
 		}
 		return x.sendRemoteAskGrainRequest(ctx, grain, message, timeout)
 	}
@@ -739,109 +751,144 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	}
 
 	// Not found anywhere - activate locally
-	return x.localSend(ctx, id, message, timeout, true)
+	return x.localSendGrain(ctx, id, message, timeout, grainAsk)
 }
 
-// localSend sends a message to a local Grain.
+// localSendGrain sends a message to a local Grain.
 //
-// It creates or locates the Grain locally, delivers the message, and waits for a response or error.
+// It creates or locates the Grain locally and delivers the message. In grainAsk mode it waits
+// for the reply, in grainTell mode for the processed acknowledgement, and in grainOneWay mode
+// it returns once the message is enqueued.
 //
 // Parameters:
 //   - ctx: context for cancellation and timeout control.
 //   - id: identity of the target Grain.
 //   - message: protobuf message to send.
-//   - sender: identity of the sender (optional).
-//   - timeout: request timeout duration.
-//   - synchronous: whether to wait for a response (true for Ask, false for Tell).
+//   - timeout: request timeout duration, unused in grainOneWay mode.
+//   - mode: grainAsk, grainTell or grainOneWay.
 //
 // Returns:
-//   - proto.Message: the response from the Grain (if synchronous).
+//   - proto.Message: the response from the Grain (grainAsk only).
 //   - error: error if the request fails.
-func (x *actorSystem) localSend(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, synchronous bool) (any, error) {
+func (x *actorSystem) localSendGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, mode grainContextMode) (any, error) {
 	// Ensure the grain process exists and is activated if needed.
 	pid, err := x.ensureGrainProcess(ctx, id)
 	if err != nil {
 		var ownerErr *grainOwnerMismatchError
 		if errors.As(err, &ownerErr) {
-			return x.sendToGrainOwner(ctx, ownerErr.owner, message, timeout, synchronous)
+			return x.sendToGrainOwner(ctx, ownerErr.owner, message, timeout, mode)
 		}
 		return nil, err
 	}
 
-	// Asks against a reentrancy-enabled grain travel as envelopes so the grain
-	// can keep processing (and defer the reply) while the caller waits. The
-	// async (Tell) branch below stays on the channel path for every target.
-	if synchronous && pid.reentrantEnabled() {
-		return x.envelopeAsk(ctx, pid, message, timeout)
+	switch mode {
+	case grainOneWay:
+		return nil, x.localOneWayTellGrain(ctx, pid, id, message)
+	case grainAsk:
+		// Asks against a reentrancy-enabled grain travel as envelopes so the
+		// grain can keep processing (and defer the reply) while the caller
+		// waits. Tells stay on the channel path for every target.
+		if pid.reentrantEnabled() {
+			return x.envelopeAsk(ctx, pid, message, timeout)
+		}
+
+		return x.localAskGrain(ctx, pid, id, message, timeout)
+	default:
+		return nil, x.localTellGrain(ctx, pid, id, message, timeout)
+	}
+}
+
+// localOneWayTellGrain enqueues message for pid and returns, the grain counterpart of
+// PID.Tell. The caller's cancellation is detached because it returns before
+// the message is processed; values such as trace metadata are kept. A context
+// that can never be cancelled reports a nil Done channel and needs no wrapper,
+// which spares the allocation on that path. The context carries no reply
+// channel, so the enqueue failure is taken from the return value of receive
+// and the context is recycled on that path.
+func (x *actorSystem) localOneWayTellGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any) error {
+	if ctx.Done() != nil {
+		ctx = context.WithoutCancel(ctx)
 	}
 
-	mode := grainTell
-	if synchronous {
-		mode = grainAsk
-	}
-
-	// Build and send the grainContext
 	grainContext := getGrainContext(pid.ctxShard)
-	grainContext.build(ctx, pid, x, id, message, mode)
+	grainContext.build(ctx, pid, x, id, message, grainOneWay)
 
+	if err := pid.receive(grainContext); err != nil {
+		releaseGrainContext(grainContext)
+		return err
+	}
+
+	return nil
+}
+
+// localAskGrain delivers message to pid and blocks for the reply on the
+// per-request response channel, bounded by timeout and ctx.
+//
+// receive hands the context to the mailbox; it can be recycled and rebuilt
+// for an unrelated message at any point after, so only the per-request
+// response channel captured before the handoff may be touched from then on.
+// A reply arriving after this Ask gives up lands in that unreachable channel
+// and is dropped with it. The reply channel goes home to the shard it was
+// fetched from once the reply is in hand; poolShard is written once at
+// allocation, so reading it after the mailbox handoff is race-free. The
+// timeout and cancellation paths abandon the channel instead, because a late
+// reply could still reach it.
+func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any, timeout time.Duration) (any, error) {
+	grainContext := getGrainContext(pid.ctxShard)
+	grainContext.build(ctx, pid, x, id, message, grainAsk)
+
+	responseCh := grainContext.response
+	shard := grainContext.poolShard
 	timer := timers.Get(timeout)
 
-	// Handle synchronous (Ask) case
-	if synchronous {
-		responseCh := grainContext.response
-		shard := grainContext.poolShard
+	pid.receive(grainContext)
+	select {
+	case res := <-responseCh:
+		timers.Put(timer)
+		putGrainReplyChannel(shard, responseCh)
 
-		// receive hands the context to the mailbox; it can be recycled and
-		// rebuilt for an unrelated message at any point after, so only the
-		// per-request response channel captured above may be touched from here
-		// on. A reply arriving after this Ask gives up lands in that
-		// unreachable channel and is dropped with it. The reply channel goes
-		// home to the shard it was fetched from once the reply is in hand;
-		// poolShard is written once at allocation, so reading it after the
-		// mailbox handoff is race-free. The timeout and cancellation paths
-		// below abandon the channel instead, because a late reply could still
-		// reach it.
-		pid.receive(grainContext)
-		select {
-		case res := <-responseCh:
-			timers.Put(timer)
-			putGrainReplyChannel(shard, responseCh)
-
-			// Failures reported by the handler ride the same reply channel,
-			// wrapped so an error-typed response payload is not mistaken
-			// for a failure.
-			if failure, ok := res.(grainReplyError); ok {
-				return nil, failure.err
-			}
-			return res, nil
-		case <-ctx.Done():
-			timers.Put(timer)
-			return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-		case <-timer.C:
-			timers.Put(timer)
-			return nil, gerrors.ErrRequestTimeout
+		// Failures reported by the handler ride the same reply channel,
+		// wrapped so an error-typed response payload is not mistaken
+		// for a failure.
+		if failure, ok := res.(grainReplyError); ok {
+			return nil, failure.err
 		}
+		return res, nil
+	case <-ctx.Done():
+		timers.Put(timer)
+		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
+	case <-timer.C:
+		timers.Put(timer)
+		return nil, gerrors.ErrRequestTimeout
 	}
+}
 
-	// Asynchronous (Tell) case. The ack channel goes home to the shard it
-	// was fetched from; poolShard is written once at allocation, so reading
-	// it after the mailbox handoff is race-free.
+// localTellGrain delivers message to pid and blocks for the processed
+// acknowledgement on the per-request error channel, bounded by timeout and
+// ctx. The ack channel goes home to the shard it was fetched from; poolShard
+// is written once at allocation, so reading it after the mailbox handoff is
+// race-free. The timeout and cancellation paths abandon the channel, because
+// the grain may still be processing and could send on it later.
+func (x *actorSystem) localTellGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any, timeout time.Duration) error {
+	grainContext := getGrainContext(pid.ctxShard)
+	grainContext.build(ctx, pid, x, id, message, grainTell)
+
 	errCh := grainContext.err
 	shard := grainContext.poolShard
+	timer := timers.Get(timeout)
+
 	pid.receive(grainContext)
 	select {
 	case err := <-errCh:
 		timers.Put(timer)
 		putGrainErrorChannel(shard, errCh)
-		return nil, err
+		return err
 	case <-timer.C:
-		// The grain goroutine may still be processing and could send on
-		// errCh later. Do NOT return it to the pool -- let it be GC'd.
 		timers.Put(timer)
-		return nil, gerrors.ErrRequestTimeout
+		return gerrors.ErrRequestTimeout
 	case <-ctx.Done():
 		timers.Put(timer)
-		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
+		return errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }
 
@@ -908,7 +955,7 @@ func (x *actorSystem) deliverAsyncEnvelope(ctx context.Context, id *GrainIdentit
 		if errors.As(err, &ownerErr) {
 			// The owner is remote: the envelope rides the existing tell-grain
 			// remote call, made encodable by the envelope serializers.
-			return x.sendRemoteTellGrainRequest(ctx, ownerErr.owner, envelope)
+			return x.sendRemoteTellGrainRequest(ctx, ownerErr.owner, envelope, grainEnvelope)
 		}
 		return err
 	}
@@ -930,10 +977,11 @@ func (x *actorSystem) deliverAsyncEnvelope(ctx context.Context, id *GrainIdentit
 //   - id: Identity of the target Grain
 //   - message: The protobuf message to send
 //   - timeout: Maximum duration to wait for the operation
+//   - mode: grainTell for an acknowledged tell, grainOneWay to return once the message is enqueued
 //
 // Returns:
 //   - error: nil if message was sent successfully, error otherwise
-func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration) error {
+func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, mode grainContextMode) error {
 	dcController := x.getDataCenterController()
 	if dcController == nil {
 		return gerrors.ErrActorNotFound
@@ -987,6 +1035,11 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 		Kind: id.Kind(),
 	}
 
+	send := x.remoting.RemoteTellGrain
+	if mode == grainOneWay {
+		send = x.remoting.RemoteTellGrainOneWay
+	}
+
 	// Query each active datacenter in parallel
 	for _, dcRecord := range dcRecords {
 		if dcRecord.State != datacenter.DataCenterActive {
@@ -1007,7 +1060,7 @@ func (x *actorSystem) tellGrainAcrossDataCenters(ctx context.Context, id *GrainI
 			wg.Add(1)
 			go func(host string, port int) {
 				defer wg.Done()
-				err := x.remoting.RemoteTellGrain(requestCtx, host, port, grainReq, message)
+				err := send(requestCtx, host, port, grainReq, message)
 				results <- err
 			}(host, port)
 		}
@@ -1453,17 +1506,18 @@ func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain
 	return true, grain, nil
 }
 
-// sendToGrainOwner forwards a message to the owning node using Ask/Tell semantics.
-func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message any, timeout time.Duration, synchronous bool) (any, error) {
+// sendToGrainOwner forwards a message to the owning node with the semantics selected by mode:
+// a remote ask for grainAsk, a remote tell otherwise.
+func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message any, timeout time.Duration, mode grainContextMode) (any, error) {
 	if owner == nil {
 		return nil, errors.New("grain owner is unknown")
 	}
 
-	if synchronous {
+	if mode == grainAsk {
 		return x.sendRemoteAskGrainRequest(ctx, owner, message, timeout)
 	}
 
-	return nil, x.sendRemoteTellGrainRequest(ctx, owner, message)
+	return nil, x.sendRemoteTellGrainRequest(ctx, owner, message, mode)
 }
 
 // sendRemoteAskGrainRequest sends a request to a known Grain endpoint and returns the decoded reply.
@@ -1477,13 +1531,19 @@ func (x *actorSystem) sendRemoteAskGrainRequest(ctx context.Context, grain *inte
 	return x.remoting.RemoteAskGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message, timeout)
 }
 
-// sendRemoteTellGrainRequest sends a fire-and-forget message to a known Grain endpoint.
-// It delegates to the remote client's RemoteTellGrain method, which handles serialization,
-// context propagation (via enrichContext/ContextPropagator.Inject), and error handling.
-func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message any) error {
+// sendRemoteTellGrainRequest sends a tell to a known Grain endpoint. It delegates to the
+// remote client, which handles serialization, context propagation (via
+// enrichContext/ContextPropagator.Inject), and error handling. In grainOneWay mode the
+// one-way remote call is used, so the owning node answers once the message is enqueued
+// instead of after the grain processed it.
+func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *internalpb.Grain, message any, mode grainContextMode) error {
 	grainRequest := &remote.GrainRequest{
 		Name: grain.GetGrainId().GetName(),
 		Kind: grain.GetGrainId().GetKind(),
+	}
+
+	if mode == grainOneWay {
+		return x.remoting.RemoteTellGrainOneWay(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message)
 	}
 	return x.remoting.RemoteTellGrain(ctx, grain.GetHost(), int(grain.GetPort()), grainRequest, message)
 }

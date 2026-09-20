@@ -1813,3 +1813,16 @@ func TestGrainPIDGettersNeedNoLock(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, []bool{true, true, true, true}, stable)
 }
+
+func TestGrainPIDReceiveReturnsEnqueueOutcome(t *testing.T) {
+	t.Run("returns ErrDead when the grain is not active", func(t *testing.T) {
+		grain := NewMockGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "receive-inactive-grain", false)
+		pid := newGrainPID(identity, grain, sys, newGrainConfig())
+
+		grainContext := getGrainContext(pid.ctxShard)
+		grainContext.build(context.Background(), pid, sys, identity, new(testpb.TestSend), grainOneWay)
+
+		require.ErrorIs(t, pid.receive(grainContext), gerrors.ErrDead)
+	})
+}

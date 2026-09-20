@@ -45,7 +45,9 @@ The system publishes these events to the event stream:
 - **ActorRestarted**: Actor was restarted by supervisor.
 - **ActorSuspended**: Actor was suspended after a failure.
 - **ActorReinstated**: Actor was reinstated by supervisor.
-- **Deadletter**: Message could not be delivered (non-existent or stopped actor).
+- **Deadletter**: Message could not be delivered (non-existent or stopped actor), or a grain failed to handle a
+  [one-way message](/grains/overview#tell-acknowledged-or-one-way). For a grain the receiver is named by the grain
+  identity, `kind/name`.
 - **NodeJoined**: A node joined the cluster (cluster mode only).
 - **NodeLeft**: A node left the cluster (cluster mode only).
 - **LeaderChanged**: The cluster coordinator moved to a different node (cluster mode only).

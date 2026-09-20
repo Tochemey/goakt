@@ -97,6 +97,14 @@ go test -run=^$ -bench=^BenchmarkSendSync$ -count=10 ./benchmark/
 go test -run=^$ -bench=^BenchmarkGrainTell$ -count=10 ./benchmark/
 ```
 
+### GrainTellOneWay — one-way tell to a grain, parallel
+
+Same shape as GrainTell with `WithOneWay()`: each TellGrain returns once the message is enqueued instead of blocking for the processed acknowledgment, so producers only pay the mailbox enqueue. The timer runs until the grain has processed every message, so messages/sec stays end-to-end and comparable with GrainTell.
+
+```
+go test -run=^$ -bench=^BenchmarkGrainTellOneWay$ -count=10 ./benchmark/
+```
+
 ### GrainAsk — sync ask to a grain, sequential
 
 ```
@@ -115,6 +123,14 @@ Every producer goroutine tells its own private grain; the reported messages/sec 
 
 ```
 go test -run=^$ -bench=^BenchmarkGrainTellPairwise$ -count=10 ./benchmark/
+```
+
+### GrainTellOneWayPairwise — one-way tell across GOMAXPROCS producer/grain pairs
+
+Same shape as GrainTellPairwise with `WithOneWay()`. A producer returning only proves its messages were enqueued, so every grain counts what it processed and the timer runs until all of them are done; messages/sec stays end-to-end. The gap to GrainTellPairwise is the per-message acknowledgment round trip.
+
+```
+go test -run=^$ -bench=^BenchmarkGrainTellOneWayPairwise$ -count=10 ./benchmark/
 ```
 
 ### GrainAskPairwise — sync ask across GOMAXPROCS asker/grain pairs

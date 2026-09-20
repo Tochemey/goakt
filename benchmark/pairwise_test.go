@@ -282,6 +282,90 @@ func BenchmarkGrainTellPairwise(b *testing.B) {
 	b.ReportMetric(messagesPerSec, "messages/sec")
 }
 
+// BenchmarkGrainTellOneWayPairwise is the one-way counterpart of
+// BenchmarkGrainTellPairwise: each producer goroutine sends one-way to
+// its own private grain, so a producer returning only proves its
+// messages were enqueued. Every grain therefore counts what it processed
+// and the timer runs until all of them are done, which keeps messages/sec
+// an end-to-end figure comparable with BenchmarkGrainTellPairwise. The
+// gap between the two is the per-message acknowledgment round trip.
+func BenchmarkGrainTellOneWayPairwise(b *testing.B) {
+	pairs := runtime.GOMAXPROCS(0)
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// b.N messages are split near-evenly: the first b.N % pairs pairs
+	// take one extra message. A pair with no message to send has nothing
+	// to wait for, which matters for the small b.N of calibration runs.
+	identities := make([]*actor.GrainIdentity, pairs)
+	targets := make([]int64, pairs)
+	dones := make([]chan struct{}, pairs)
+	base := int64(b.N) / int64(pairs)
+	extra := int64(b.N) % int64(pairs)
+
+	for i := range pairs {
+		target := base
+		if int64(i) < extra {
+			target++
+		}
+
+		done := make(chan struct{})
+		//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
+		identity, err := actorSystem.GrainIdentity(ctx, fmt.Sprintf("receiver-%d", i), func(context.Context) (actor.Grain, error) {
+			return &countingGrain{done: done, target: target}, nil
+		})
+		if err != nil {
+			b.Fatalf("failed to create grain identity: %v", err)
+		}
+
+		identities[i], targets[i], dones[i] = identity, target, done
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(pairs)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := range pairs {
+		go func(i int) {
+			defer wg.Done()
+
+			// Reuse the same message per goroutine to reduce allocs in the hot path.
+			msg := new(testpb.TestSend)
+			for range targets[i] {
+				if err := actorSystem.TellGrain(ctx, identities[i], msg, actor.WithOneWay()); err != nil {
+					b.Error(err)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	for i := range pairs {
+		if targets[i] > 0 {
+			<-dones[i]
+		}
+	}
+
+	b.StopTimer()
+	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
+}
+
 // BenchmarkGrainAskPairwise measures aggregate AskGrain throughput
 // across GOMAXPROCS independent asker/grain pairs: each producer
 // goroutine issues sequential AskGrain round trips against its own

@@ -2018,3 +2018,59 @@ func (m *MockGrain) OnReceive(ctx *actors.GrainContext) {
 		ctx.Unhandled()
 	}
 }
+
+func TestClientTellGrainOptions(t *testing.T) {
+	t.Run("acknowledged by default", func(t *testing.T) {
+		ctx := context.TODO()
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		grainRequest := &remote.GrainRequest{Name: "grain", Kind: "MockGrain"}
+		message := new(testpb.TestSend)
+
+		remoteHost, remotePort := node.hostAndPort()
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message).Return(nil)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		require.NoError(t, client.TellGrain(ctx, grainRequest, message))
+		mockRemoting.AssertNotCalled(t, "RemoteTellGrainOneWay", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
+	t.Run("WithOneWay uses the one-way remote call", func(t *testing.T) {
+		ctx := context.TODO()
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		grainRequest := &remote.GrainRequest{Name: "grain", Kind: "MockGrain"}
+		message := new(testpb.TestSend)
+
+		remoteHost, remotePort := node.hostAndPort()
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteTellGrainOneWay(ctx, remoteHost, remotePort, grainRequest, message).Return(nil)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		require.NoError(t, client.TellGrain(ctx, grainRequest, message, WithOneWay()))
+		mockRemoting.AssertNotCalled(t, "RemoteTellGrain", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+}

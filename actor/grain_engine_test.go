@@ -1360,7 +1360,7 @@ func TestLocalSend_ErrorsWhenEnsureGrainProcessFails(t *testing.T) {
 	process := newGrainPID(identity, grain, sys, newGrainConfig())
 	sys.grains.Set(identity.String(), process)
 
-	resp, err := sys.localSend(ctx, identity, &testpb.TestReply{}, time.Second, true)
+	resp, err := sys.localSendGrain(ctx, identity, &testpb.TestReply{}, time.Second, grainAsk)
 	require.ErrorIs(t, err, gerrors.ErrGrainNotRegistered)
 	require.Nil(t, resp)
 
@@ -1570,7 +1570,7 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9012, RemotingPort: 9112}
 	sys := newClusterReadySystem(rem, cl, node)
 
-	resp, err := sys.sendToGrainOwner(ctx, nil, &testpb.TestReply{}, time.Second, true)
+	resp, err := sys.sendToGrainOwner(ctx, nil, &testpb.TestReply{}, time.Second, grainAsk)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "grain owner is unknown")
 	require.Nil(t, resp)
@@ -2001,9 +2001,56 @@ func TestSendToGrainOwner_TellMode(t *testing.T) {
 	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 		Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
 
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, false)
+	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, grainTell)
 	require.Error(t, err)
 	require.Nil(t, resp)
+}
+
+func TestSendToGrainOwner_OneWayMode(t *testing.T) {
+	ctx := t.Context()
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9027, RemotingPort: 9127}
+	sys := newClusterReadySystem(rem, cl, node)
+
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: "grain|test", Kind: "TestGrain", Name: "test"}.Build(),
+		Host:    "192.0.2.1",
+		Port:    16000,
+	}.Build()
+
+	// No RemoteTellGrain expectation: the acknowledged call would fail the mock.
+	rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()),
+		mock.MatchedBy(func(request *remote.GrainRequest) bool {
+			return request.Name == "test" && request.Kind == "TestGrain"
+		}), mock.Anything).Return(nil).Once()
+
+	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, grainOneWay)
+	require.NoError(t, err)
+	require.Nil(t, resp)
+}
+
+func TestLocalSend_OneWayForwardsToRemoteOwner(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	sys, cl, rem, identity := newActivationTestSystem(t, grain, "one-way-owner-mismatch", true)
+
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.1",
+		Port:    16000,
+	}.Build()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+		Return(nil).Once()
+
+	resp, err := sys.localSendGrain(ctx, identity, &testpb.TestSend{}, time.Second, grainOneWay)
+	require.NoError(t, err)
+	require.Nil(t, resp)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok, "a grain owned elsewhere must not be activated locally")
 }
 
 func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
@@ -2019,7 +2066,7 @@ func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
 		identity := newGrainIdentity(NewMockGrain(), "tell-err-grain")
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, errors.New("cluster error")).Once()
 
-		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second)
+		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second, grainTell)
 		require.Error(t, err)
 		require.ErrorContains(t, err, "cluster error")
 	})
@@ -2040,7 +2087,27 @@ func TestRemoteTellGrain_FallbackPaths(t *testing.T) {
 		identity := newGrainIdentity(NewMockGrain(), "tell-dc-grain")
 		rem.EXPECT().RemoteTellGrain(mock.Anything, "127.0.0.1", 9000, mock.Anything, mock.Anything).Return(nil).Once()
 
-		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second)
+		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second, grainTell)
+		require.NoError(t, err)
+	})
+
+	t.Run("one-way GetGrain ErrGrainNotFound then tellGrainAcrossDataCenters uses the one-way call", func(t *testing.T) {
+		rem := mockremote.NewClient(t)
+		sys := startDatacenterSystem(t, func(_ context.Context) ([]datacenter.DataCenterRecord, error) {
+			return []datacenter.DataCenterRecord{{
+				ID: "dc-1", State: datacenter.DataCenterActive,
+				Endpoints: []string{"127.0.0.1:9000"},
+			}}, nil
+		}, rem)
+		sys.clusterEnabled.Store(true)
+		cl := mockcluster.NewCluster(t)
+		cl.EXPECT().GetGrain(mock.Anything, mock.Anything).Return(nil, cluster.ErrGrainNotFound).Once()
+		sys.cluster = cl
+
+		identity := newGrainIdentity(NewMockGrain(), "tell-one-way-dc-grain")
+		rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, "127.0.0.1", 9000, mock.Anything, mock.Anything).Return(nil).Once()
+
+		err := sys.remoteTellGrain(ctx, identity, &testpb.TestSend{}, time.Second, grainOneWay)
 		require.NoError(t, err)
 	})
 }
@@ -2103,7 +2170,7 @@ func TestSendToGrainOwner_AskMode(t *testing.T) {
 	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
 		Return(nil, errors.New("connection refused")).Once()
 
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, true)
+	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, grainAsk)
 	require.Error(t, err)
 	require.Nil(t, resp)
 }
@@ -2426,6 +2493,53 @@ func TestGrainContextPropagation(t *testing.T) {
 			return grain.Seen() == headerVal
 		}, 2*time.Second, 50*time.Millisecond)
 	})
+
+	t.Run("one-way TellGrain propagates context across nodes", func(t *testing.T) {
+		ctx := context.Background()
+		srv := startNatsServer(t)
+
+		propagator := &MockHeaderPropagator{headerKey: headerKey, ctxKey: ctxKey}
+		grain := &MockContextEchoGrain{key: ctxKey}
+
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(grain))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(),
+			withTestContextPropagator(propagator),
+			withTestExtraGrains(&MockContextEchoGrain{key: ctxKey}))
+
+		defer func() {
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, node1.Stop(ctx))
+			sd2.Close()
+			sd1.Close()
+			srv.Shutdown()
+		}()
+
+		pause.For(time.Second)
+
+		// Activate grain on node1
+		identity, err := node1.GrainIdentity(ctx, "tell-one-way-ctx-grain", func(_ context.Context) (Grain, error) {
+			return grain, nil
+		})
+		require.NoError(t, err)
+
+		// First call from node1 to activate the grain
+		_, err = node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		// A one-way send from node2 rides the one-way remote call to node1,
+		// where the handler enqueues it with the propagated context value.
+		headerVal := "cross-node-one-way-value"
+		propagatedCtx := context.WithValue(ctx, ctxKey, headerVal)
+		err = node2.TellGrain(propagatedCtx, identity, new(testpb.TestSend), WithOneWay())
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			return grain.Seen() == headerVal
+		}, 2*time.Second, 50*time.Millisecond)
+	})
 }
 
 // TestGrainActivationDuringShutdownNoRace covers the shutdown race originally
@@ -2511,7 +2625,20 @@ func TestRemoteTellGrainLocalShortCircuit(t *testing.T) {
 	pid := seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
 	pid.activated.Store(true)
 
-	err := sys.remoteTellGrain(context.Background(), identity, new(testpb.TestSend), time.Second)
+	err := sys.remoteTellGrain(context.Background(), identity, new(testpb.TestSend), time.Second, grainTell)
+	require.NoError(t, err)
+	cl.AssertNotCalled(t, "GetGrain", mock.Anything, mock.Anything)
+}
+
+// TestRemoteTellGrainOneWayLocalShortCircuit is the one-way counterpart of
+// TestRemoteTellGrainLocalShortCircuit.
+func TestRemoteTellGrainOneWayLocalShortCircuit(t *testing.T) {
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "local-fast-one-way-tell", true)
+	pid := seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
+	pid.activated.Store(true)
+
+	err := sys.remoteTellGrain(context.Background(), identity, new(testpb.TestSend), time.Second, grainOneWay)
 	require.NoError(t, err)
 	cl.AssertNotCalled(t, "GetGrain", mock.Anything, mock.Anything)
 }
@@ -3245,5 +3372,351 @@ func TestNonReentrantAskSkipsPendingAsks(t *testing.T) {
 		require.Equal(t, "legacy", reply.GetContent())
 	case <-time.After(2 * time.Second):
 		t.Fatal("legacy ask never completed")
+	}
+}
+
+func TestTellGrainOneWay(t *testing.T) {
+	t.Run("local mode returns before the grain processes the message", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-local", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+
+		blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			entered <- struct{}{}
+			<-release
+			gctx.NoErr()
+		}}
+
+		identity, err := sys.GrainIdentity(ctx, "one-way-blocking-grain", func(context.Context) (Grain, error) {
+			return blocking, nil
+		})
+		require.NoError(t, err)
+
+		// The handler parks inside OnReceive until release is closed, so the
+		// call can only return without waiting for the acknowledgement.
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("the grain did not receive the one-way message")
+		}
+	})
+
+	t.Run("returns ErrMailboxFull when the bounded mailbox is full", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-bounded", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+
+		blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			entered <- struct{}{}
+			<-release
+			gctx.NoErr()
+		}}
+
+		identity, err := sys.GrainIdentity(ctx, "one-way-bounded-grain", func(context.Context) (Grain, error) {
+			return blocking, nil
+		}, WithGrainMailboxCapacity(1))
+		require.NoError(t, err)
+
+		// The first message parks the turn inside OnReceive.
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("the grain did not receive the one-way message")
+		}
+
+		// The second message fills the single slot and the third is rejected
+		// at enqueue time, which is the only failure a one-way tell reports.
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+		err = sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay())
+		require.ErrorIs(t, err, gerrors.ErrMailboxFull)
+	})
+
+	t.Run("drops handler failures", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-failing", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		require.NoError(t, sys.RegisterGrainKind(ctx, &MockReceiveFailingGrain{}))
+		identity := newGrainIdentity(NewMockReceiveFailingGrain(), "one-way-failing-grain")
+
+		// The acknowledged tell surfaces the handler error, the one-way tell does not.
+		require.Error(t, sys.TellGrain(ctx, identity, new(testpb.TestSend)))
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+		pause.For(100 * time.Millisecond)
+	})
+
+	t.Run("drops handler panics and keeps the grain active", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-panicking", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		require.NoError(t, sys.RegisterGrainKind(ctx, &MockPanickingGrain{}))
+		identity := newGrainIdentity(NewMockPanickingGrain(), "one-way-panicking-grain")
+
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+		pause.For(100 * time.Millisecond)
+
+		process, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		assert.True(t, process.isActive())
+	})
+
+	t.Run("returns ErrActorSystemNotStarted when not started", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-not-started", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		identity := newGrainIdentity(NewMockGrain(), "grain")
+
+		err = sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay())
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+	})
+
+	t.Run("returns ErrInvalidGrainIdentity when identity invalid", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("tell-grain-one-way-invalid", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		invalidID := &GrainIdentity{kind: "", name: ""}
+		err = sys.TellGrain(ctx, invalidID, new(testpb.TestSend), WithOneWay())
+		require.ErrorIs(t, err, gerrors.ErrInvalidGrainIdentity)
+	})
+
+	t.Run("cluster mode forwards to the remote owner", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9019, RemotingPort: 9119}
+		sys := newClusterReadySystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "one-way-remote-owner-grain")
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    "192.0.2.1",
+			Port:    16000,
+		}.Build()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()),
+			mock.MatchedBy(func(request *remote.GrainRequest) bool {
+				return request.Name == identity.Name() && request.Kind == identity.Kind()
+			}), mock.Anything).Return(nil).Once()
+
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+	})
+
+	t.Run("cluster mode surfaces the remote transport failure", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9021, RemotingPort: 9121}
+		sys := newClusterReadySystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "one-way-remote-failure-grain")
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    "192.0.2.1",
+			Port:    16000,
+		}.Build()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+		rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+			Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
+
+		err := sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay())
+		require.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
+	})
+
+	t.Run("cluster mode enqueues in-process when the grain is owned by the current node", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9023, RemotingPort: 9123}
+		sys := newClusterReadySystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "one-way-local-owner-grain")
+		owner := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind()}.Build(),
+			Host:    node.Host,
+			Port:    int32(node.RemotingPort),
+		}.Build()
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil)
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+		// No RemoteTellGrainOneWay expectation: a loopback round trip would
+		// fail the mock client, proving the message was enqueued locally.
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+
+		require.Eventually(t, func() bool {
+			process, ok := sys.grains.Get(identity.String())
+			return ok && process.isActive()
+		}, time.Second, 5*time.Millisecond, "grain should be activated locally after a one-way TellGrain")
+	})
+
+	t.Run("cluster mode activates locally when the grain is not found anywhere", func(t *testing.T) {
+		ctx := context.Background()
+		cl := mockcluster.NewCluster(t)
+		rem := mockremote.NewClient(t)
+		node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9029, RemotingPort: 9129}
+		sys := newClusterReadySystem(rem, cl, node)
+		sys.registry.Register(NewMockGrain())
+
+		identity := newGrainIdentity(NewMockGrain(), "one-way-not-found-grain")
+
+		// The registry lookup misses, there is no datacenter controller, so the
+		// send falls back to a local activation: the ownership check and the
+		// claim both see no record, and the activation is then published.
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil)
+		cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
+		})).Return(nil)
+
+		require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+
+		require.Eventually(t, func() bool {
+			process, ok := sys.grains.Get(identity.String())
+			return ok && process.isActive() && process.processedCount.Load() == 1
+		}, time.Second, 5*time.Millisecond, "grain should be activated locally and process the one-way message")
+	})
+
+	t.Run("cluster mode returns before the remote grain processes the message", func(t *testing.T) {
+		ctx := context.Background()
+		srv := startNatsServer(t)
+
+		node1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestExtraGrains(&MockScriptedGrain{}))
+		node2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestExtraGrains(&MockScriptedGrain{}))
+
+		entered := make(chan struct{}, 1)
+		release := make(chan struct{})
+
+		defer func() {
+			assert.NoError(t, node2.Stop(ctx))
+			assert.NoError(t, node1.Stop(ctx))
+			sd2.Close()
+			sd1.Close()
+			srv.Shutdown()
+		}()
+		// Deferred after the shutdown, so it runs first and unparks the grain.
+		defer close(release)
+
+		pause.For(time.Second)
+
+		blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			entered <- struct{}{}
+			<-release
+			gctx.NoErr()
+		}}
+
+		// Activate the grain on node1.
+		identity, err := node1.GrainIdentity(ctx, "one-way-remote-blocking-grain", func(context.Context) (Grain, error) {
+			return blocking, nil
+		})
+		require.NoError(t, err)
+		pause.For(time.Second)
+
+		// The handler parks inside OnReceive: an acknowledged tell from node2
+		// would hold until DefaultGrainRequestTimeout and fail, a one-way tell
+		// returns once node1 enqueued the message.
+		start := time.Now()
+		require.NoError(t, node2.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+		require.Less(t, time.Since(start), DefaultGrainRequestTimeout)
+
+		select {
+		case <-entered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("the remote grain did not receive the one-way message")
+		}
+	})
+}
+
+func TestTellGrainOneWayDeadletters(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("tell-grain-one-way-deadletters", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	consumer, err := sys.Subscribe()
+	require.NoError(t, err)
+
+	require.NoError(t, sys.RegisterGrainKind(ctx, &MockReceiveFailingGrain{}))
+	require.NoError(t, sys.RegisterGrainKind(ctx, &MockPanickingGrain{}))
+	failing := newGrainIdentity(NewMockReceiveFailingGrain(), "one-way-deadletter-failing")
+	panicking := newGrainIdentity(NewMockPanickingGrain(), "one-way-deadletter-panicking")
+
+	// Err on TestSend, Unhandled on TestReply and a panic on TestSend: none
+	// reaches the caller, each is recorded as a deadletter naming the grain.
+	require.NoError(t, sys.TellGrain(ctx, failing, new(testpb.TestSend), WithOneWay()))
+	require.NoError(t, sys.TellGrain(ctx, failing, new(testpb.TestReply), WithOneWay()))
+	require.NoError(t, sys.TellGrain(ctx, panicking, new(testpb.TestSend), WithOneWay()))
+	pause.For(time.Second)
+
+	reasons := make(map[string]string)
+	for message := range consumer.Iterator() {
+		deadletter, ok := message.Payload().(*Deadletter)
+		if !ok {
+			continue
+		}
+
+		require.Equal(t, sys.Name(), deadletter.Receiver().System())
+		require.Equal(t, sys.NoSender().Name(), deadletter.Sender().Name())
+
+		key := deadletter.Receiver().Name()
+		switch deadletter.Message().(type) {
+		case *testpb.TestSend:
+			key += ":TestSend"
+		case *testpb.TestReply:
+			key += ":TestReply"
+		}
+		reasons[key] = deadletter.Reason()
+	}
+
+	require.Len(t, reasons, 3)
+	require.Contains(t, reasons[failing.String()+":TestSend"], "failed to process message")
+	require.Contains(t, reasons[failing.String()+":TestReply"], "unhandled message type")
+	require.Contains(t, reasons[panicking.String()+":TestSend"], "test panic")
+
+	// The acknowledged tell hands the failure to its caller, and a handler
+	// reporting a nil error on a one-way message succeeded: neither records
+	// anything.
+	require.Error(t, sys.TellGrain(ctx, failing, new(testpb.TestSend)))
+
+	succeeding := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Err(nil)
+	}}
+	succeedingID, err := sys.GrainIdentity(ctx, "one-way-deadletter-succeeding", func(context.Context) (Grain, error) {
+		return succeeding, nil
+	})
+	require.NoError(t, err)
+	require.NoError(t, sys.TellGrain(ctx, succeedingID, new(testpb.TestSend), WithOneWay()))
+	pause.For(500 * time.Millisecond)
+
+	for message := range consumer.Iterator() {
+		_, ok := message.Payload().(*Deadletter)
+		require.False(t, ok, "neither an acknowledged tell nor a nil error must produce a deadletter")
 	}
 }
