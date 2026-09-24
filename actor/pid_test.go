@@ -3013,6 +3013,65 @@ func TestSpawnChild(t *testing.T) {
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
+
+	t.Run("With same-named children under different parents resolved by name", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		pause.For(time.Second)
+
+		p1, err := sys.Spawn(ctx, "p1", NewMockSupervisor())
+		require.NoError(t, err)
+		p2, err := sys.Spawn(ctx, "p2", NewMockSupervisor())
+		require.NoError(t, err)
+
+		firstKid, err := p1.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+		secondKid, err := p2.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+
+		// the qualified name resolves each child exactly
+		actual, err := sys.ActorOf(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.Same(t, firstKid, actual)
+
+		actual, err = sys.ActorOf(ctx, "p2/kid")
+		require.NoError(t, err)
+		require.Same(t, secondKid, actual)
+
+		// the bare name resolves the most recently spawned child
+		actual, err = sys.ActorOf(ctx, "kid")
+		require.NoError(t, err)
+		require.Same(t, secondKid, actual)
+
+		// an address on this node resolves to exactly the child it names
+		system := sys.(*actorSystem)
+		actual, err = system.pidOf(ctx, firstKid.getAddress())
+		require.NoError(t, err)
+		require.Same(t, firstKid, actual)
+
+		require.NoError(t, secondKid.Shutdown(ctx))
+
+		// the death watch removes the stopped child from the tree asynchronously
+		pause.For(time.Second)
+
+		// once the second child stops, the bare name resolves the first
+		actual, err = sys.ActorOf(ctx, "kid")
+		require.NoError(t, err)
+		require.Same(t, firstKid, actual)
+
+		exists, err := sys.ActorExists(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		exists, err = sys.ActorExists(ctx, "p2/kid")
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		require.NoError(t, sys.Stop(ctx))
+	})
 }
 
 func TestSpawnChildInitTimeout(t *testing.T) {
@@ -5570,6 +5629,30 @@ func TestReinstate(t *testing.T) {
 		require.Error(t, err)
 		require.ErrorIs(t, err, errors.ErrUndefinedActor)
 	})
+	t.Run("When a child shares its name with a child of another parent", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		p1, err := actorSystem.Spawn(ctx, "p1", NewMockSupervisor())
+		require.NoError(t, err)
+		p2, err := actorSystem.Spawn(ctx, "p2", NewMockSupervisor())
+		require.NoError(t, err)
+
+		firstKid, err := p1.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+		// spawned last, so the bare name kid resolves to it and not to firstKid
+		_, err = p2.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+
+		// the reinstated child is resolved by its qualified name, p1/kid
+		require.NoError(t, p1.Reinstate(firstKid))
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 
 func TestReinstateAvoidsPassivationRace(t *testing.T) {
@@ -7392,8 +7475,9 @@ func TestSpawnChildPublishFailure(t *testing.T) {
 	// the parent publication succeeds, the child publication fails
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
-	// the rollback stops the child, whose death watch removes it asynchronously
-	clusterMock.EXPECT().RemoveActor(mock.Anything, childName).Return(nil).Maybe()
+	// the rollback stops the child, whose death watch removes its registry
+	// record, keyed by the child's qualified name, asynchronously
+	clusterMock.EXPECT().RemoveActor(mock.Anything, parentName+"/"+childName).Return(nil).Maybe()
 
 	parent, err := actorSystem.Spawn(ctx, parentName, NewMockSupervisor())
 	require.NoError(t, err)

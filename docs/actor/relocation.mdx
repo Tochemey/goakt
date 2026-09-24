@@ -239,6 +239,11 @@ scanning (bounded, so recovery still proceeds when the repair signal never settl
 (for example on a member that is flapping while the cluster churns) is retried a bounded number of times with backoff
 before the rebalance is skipped and the loss reported loudly.
 
+A departure can also be transient: a node whose bootstrap attempt failed and was retried, or one briefly cut off,
+rejoins at the same address while the leader is still waiting, with its actors and grains still running on it. The
+leader therefore checks the membership after the wait and again before dispatching the derived set, and skips the
+recovery with a warning when the departed address is a member again. Only a node that is still gone is recovered.
+
 A crashed node that **restarts at the same address** (a container restart in place, the common Kubernetes case) is
 handled separately, because the cluster may never observe a `NodeLeft` for a fast restart: on startup, a node that finds
 registry records pointing at its own address with no corresponding local actor **respawns the relocatable ones

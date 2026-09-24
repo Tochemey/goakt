@@ -398,6 +398,65 @@ func TestActorSystem(t *testing.T) {
 		err = newActorSystem.Stop(ctx)
 		require.NoError(t, err)
 	})
+	t.Run("With same-named children under different parents across nodes", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		owner, ownerProvider := startNATsSystem(t, srv.Addr().String())
+		require.NotNil(t, ownerProvider)
+		observer, observerProvider := startNATsSystem(t, srv.Addr().String())
+		require.NotNil(t, observerProvider)
+
+		p1, err := owner.Spawn(ctx, "p1", NewMockSupervisor(), WithRelocationDisabled())
+		require.NoError(t, err)
+		p2, err := owner.Spawn(ctx, "p2", NewMockSupervisor(), WithRelocationDisabled())
+		require.NoError(t, err)
+
+		firstKid, err := p1.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+		secondKid, err := p2.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+
+		// each child has its own registry record, keyed by its qualified name
+		actual, err := observer.ActorOf(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.True(t, actual.IsRemote())
+		require.Equal(t, firstKid.ID(), actual.ID())
+
+		actual, err = observer.ActorOf(ctx, "p2/kid")
+		require.NoError(t, err)
+		require.True(t, actual.IsRemote())
+		require.Equal(t, secondKid.ID(), actual.ID())
+
+		// a child is not registered under its bare name
+		_, err = observer.ActorOf(ctx, "kid")
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		// restarting a child from the other node restarts that child only
+		respawned, err := observer.ReSpawn(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.Equal(t, firstKid.ID(), respawned.ID())
+		require.EqualValues(t, 1, firstKid.RestartCount())
+		require.Zero(t, secondKid.RestartCount())
+
+		// stopping one child from the other node removes only its own record
+		require.NoError(t, observer.Kill(ctx, "p2/kid"))
+
+		require.Eventually(t, func() bool {
+			exists, err := observer.ActorExists(ctx, "p2/kid")
+			return err == nil && !exists
+		}, 5*time.Second, 100*time.Millisecond)
+
+		require.True(t, firstKid.IsRunning())
+
+		exists, err := observer.ActorExists(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		require.NoError(t, observer.Stop(ctx))
+		require.NoError(t, owner.Stop(ctx))
+		srv.Shutdown()
+	})
 	t.Run("With ActorOf:remoting not enabled", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -4228,6 +4287,8 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the departed node stays gone
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 
@@ -4252,6 +4313,8 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the departed node stays gone
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
 	// the first scan fails transiently, the retry succeeds
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Once()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
@@ -4282,12 +4345,106 @@ func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the departed node stays gone
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Times(relocationDeriveMaxAttempts)
 
 	system.gateCrashRecovery(peer)
 
 	_, cached := system.peerRemotingPort(peer)
 	require.False(t, cached, "the cache entry is pruned even when recovery gives up")
+}
+
+func TestGateCrashRecoverySkipsRejoinedNode(t *testing.T) {
+	// a departure can be transient (a bootstrap attempt retried, a brief cut):
+	// once the node is a member again its actors and grains are still hosted
+	// there, so the registry must not be scanned and nothing dispatched
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the departed address is a member again; no ActorsByHost or GrainsByHost
+	// expectation is set, so a scan fails the test as an unexpected call
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 3320}}, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	for event := range consumer.Iterator() {
+		_, started := event.Payload().(*RelocationStarted)
+		require.False(t, started, "no relocation must start for a node that rejoined")
+	}
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery must prune the cache entry when it skips")
+}
+
+func TestGateCrashRecoverySkipsNodeRejoinedDuringDerivation(t *testing.T) {
+	// the registry scan can take a while: a node that rejoins while its
+	// relocation set is being derived must not have that set dispatched
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// gone before the scan, back before the dispatch
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 4000}}, nil).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 3320}}, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	for event := range consumer.Iterator() {
+		_, started := event.Payload().(*RelocationStarted)
+		require.False(t, started, "no relocation must start for a node that rejoined during derivation")
+	}
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery must prune the cache entry when it skips")
+}
+
+func TestGateCrashRecoveryProceedsWhenMembershipReadFails(t *testing.T) {
+	// a failed membership read must not silence recovery: the node is treated
+	// as gone, exactly as before the membership check existed
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError).Times(2)
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	var started []*RelocationStarted
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			started = append(started, msg)
+		}
+	}
+
+	require.Len(t, started, 1, "recovery must proceed when the membership cannot be read")
 }
 
 func TestPublishRelocationStarted(t *testing.T) {
@@ -5942,7 +6099,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		addPIDNode := func(pid *PID) {
 			node := newPidNode(pid)
 			system.actors.pids[node.id] = node
-			system.actors.names[node.name] = node
+			system.actors.names[node.name] = []*pidNode{node}
 		}
 
 		localAddr := address.New("local", system.name, "127.0.0.1", 8080)
@@ -6278,8 +6435,10 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
+	addr := address.New("actor", system.name, "127.0.0.1", 8080)
 	pid := &PID{
-		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		address:     addr,
+		path:        newPath(addr),
 		actorSystem: system,
 	}
 
@@ -6296,8 +6455,10 @@ func TestCleanupCluster_ReleasesGrains(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
+	addr := address.New("actor", system.name, "127.0.0.1", 8080)
 	pid := &PID{
-		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		address:     addr,
+		path:        newPath(addr),
 		actorSystem: system,
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
@@ -6317,8 +6478,10 @@ func TestCleanupCluster_ReleaseGrainFailure(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
 
+	addr := address.New("actor", system.name, "127.0.0.1", 8080)
 	pid := &PID{
-		address:     address.New("actor", system.name, "127.0.0.1", 8080),
+		address:     addr,
+		path:        newPath(addr),
 		actorSystem: system,
 	}
 	grainID := &GrainIdentity{kind: "grain.kind", name: "grain"}
@@ -6353,9 +6516,11 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 	system.peerStatesWriter = nil
 	system.remotingEnabled.Store(false)
 
+	addr := address.New("actor", system.name, "127.0.0.1", 8080)
 	pid := &PID{
 		actor:        NewMockActor(),
-		address:      address.New("actor", system.name, "127.0.0.1", 8080),
+		address:      addr,
+		path:         newPath(addr),
 		dependencies: xsync.NewMap[string, extension.Dependency](),
 		actorSystem:  system,
 	}
@@ -8115,7 +8280,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 
 		node := newPidNode(companion)
 		system.actors.pids[node.id] = node
-		system.actors.names[node.name] = node
+		system.actors.names[node.name] = []*pidNode{node}
 
 		record := internalpb.Actor_builder{
 			Address: companionAddr.String(),

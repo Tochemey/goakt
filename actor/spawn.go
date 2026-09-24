@@ -143,7 +143,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nil, err
 		}
 
-		if pidNode, exist := x.actors.nodeByName(name); exist {
+		// only a top-level actor: a child that shares the name is not this actor
+		if pidNode, exist := x.topLevelActor(name); exist {
 			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
 				return pid, nil
 			}
@@ -191,7 +192,8 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 			return nil, err
 		}
 
-		if pidNode, exist := x.actors.nodeByName(name); exist {
+		// only a top-level actor: a child that shares the name is not this actor
+		if pidNode, exist := x.topLevelActor(name); exist {
 			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
 				return pid, nil
 			}
@@ -528,7 +530,8 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 // is therefore never surfaced as ErrActorNotFound: a creation call must not tell the
 // caller the actor it just created does not exist.
 func (x *actorSystem) resolveExistingSingleton(ctx context.Context, actorName, confirmedAddr string) (*PID, error) {
-	if pidnode, ok := x.actors.nodeByName(actorName); ok {
+	// only a top-level actor: a child that shares the name is not the singleton
+	if pidnode, ok := x.topLevelActor(actorName); ok {
 		if pid := pidnode.value(); pid != nil && !pid.IsStopping() {
 			return pid, nil
 		}
@@ -849,7 +852,8 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 
 		// A running local instance already satisfies the singleton contract; return
 		// it instead of creating (and immediately discarding) a duplicate.
-		if node, exist := x.actors.nodeByName(name); exist {
+		// only a top-level actor: a child that shares the name is not the singleton
+		if node, exist := x.topLevelActor(name); exist {
 			if pid := node.value(); pid != nil && pid.IsRunning() {
 				return pid, nil
 			}
@@ -1050,7 +1054,7 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 		// endpoint and controller records; ordinary non-relocatable actors
 		// keep their historical registry semantics.
 		if props.GetReliableDelivery() != nil {
-			if _, rerr := x.releaseDepartedEntry(ctx, addr.Name(), departedNode); rerr != nil {
+			if _, rerr := x.releaseDepartedEntry(ctx, addr.QualifiedName(), departedNode); rerr != nil {
 				x.logger.Errorf("failed to release registry record of the departed non-relocatable reliable endpoint=%s: %v", addr.Name(), rerr)
 			}
 
@@ -1060,7 +1064,7 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 		return nil
 	}
 
-	proceed, err := x.releaseDepartedEntry(ctx, addr.Name(), departedNode)
+	proceed, err := x.releaseDepartedEntry(ctx, addr.QualifiedName(), departedNode)
 	if err != nil || !proceed {
 		return err
 	}
@@ -1103,26 +1107,26 @@ func (x *actorSystem) restoreDepartedEntry(ctx context.Context, props *internalp
 	}
 }
 
-// releaseDepartedEntry resolves the registry entry for name and removes it when
-// it still points at the departed node, reporting whether the caller should
-// proceed with the respawn. It reports false without error when the entry
-// points at another live node: the actor was already recreated there
-// (concurrent relocation or a client respawn), so respawning it here would be
-// a double spawn. Logged rather than silent so a rare stale entry (e.g. a lost
+// releaseDepartedEntry resolves the registry entry stored under qualifiedName
+// and removes it when it still points at the departed node, reporting whether
+// the caller should proceed with the respawn. It reports false without error
+// when the entry points at another live node: the actor was already recreated
+// there (concurrent relocation or a client respawn), so respawning it here
+// would be a double spawn. Logged rather than silent so a rare stale entry (e.g. a lost
 // replication write pointing at a previous owner) is diagnosable. A missing
 // entry proceeds as-is.
-func (x *actorSystem) releaseDepartedEntry(ctx context.Context, name, departedNode string) (bool, error) {
-	existing, err := x.cluster.GetActor(ctx, name)
+func (x *actorSystem) releaseDepartedEntry(ctx context.Context, qualifiedName, departedNode string) (bool, error) {
+	existing, err := x.cluster.GetActor(ctx, qualifiedName)
 
 	switch {
 	case err == nil:
 		entry, perr := address.Parse(existing.GetAddress())
 		if perr == nil && entry.HostPort() != departedNode {
-			x.logger.Debugf("node=%s skipping relocation of actor=%s: registry entry points at %s, not departed node %s", x.String(), name, entry.HostPort(), departedNode)
+			x.logger.Debugf("node=%s skipping relocation of actor=%s: registry entry points at %s, not departed node %s", x.String(), qualifiedName, entry.HostPort(), departedNode)
 			return false, nil
 		}
 
-		if rerr := x.cluster.RemoveActor(ctx, name); rerr != nil {
+		if rerr := x.cluster.RemoveActor(ctx, qualifiedName); rerr != nil {
 			return false, gerrors.NewInternalError(rerr)
 		}
 

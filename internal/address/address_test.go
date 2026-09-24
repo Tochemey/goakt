@@ -122,6 +122,15 @@ func TestAddressValidate(t *testing.T) {
 		err := addr.Validate()
 		assert.Error(t, err)
 	})
+
+	t.Run("Name with a slash", func(t *testing.T) {
+		// a name never contains '/', so no top-level actor can share the
+		// qualified name of a child
+		addr := New("parent/child", "system", "host", 1234)
+		err := addr.Validate()
+		assert.Error(t, err)
+		assert.ErrorContains(t, err, "must contain only word characters")
+	})
 }
 
 func TestAddress(t *testing.T) {
@@ -189,6 +198,42 @@ func TestAddress(t *testing.T) {
 		assert.NotNil(t, child.Parent())
 		assert.True(t, child.Parent().Equals(parent))
 		assert.True(t, child.Parent().Equals(parent))
+	})
+
+	t.Run("Qualified name of a top-level actor", func(t *testing.T) {
+		addr := New("orders", "system", "host", 1234)
+		assert.Equal(t, "orders", addr.QualifiedName())
+	})
+
+	t.Run("Qualified name of a child", func(t *testing.T) {
+		orders := New("orders", "system", "host", 1234)
+		cart := NewWithParent("cart", "system", "host", 1234, orders)
+		assert.Equal(t, "orders/cart", cart.QualifiedName())
+	})
+
+	t.Run("Qualified name of a nested child", func(t *testing.T) {
+		orders := New("orders", "system", "host", 1234)
+		cart := NewWithParent("cart", "system", "host", 1234, orders)
+		item := NewWithParent("item", "system", "host", 1234, cart)
+		assert.Equal(t, "orders/cart/item", item.QualifiedName())
+	})
+
+	t.Run("Qualified name of a parsed address", func(t *testing.T) {
+		addr, err := Parse("goakt://system@host:1234/orders/cart/item")
+		assert.NoError(t, err)
+		assert.Equal(t, "orders/cart/item", addr.QualifiedName())
+	})
+
+	t.Run("Qualified name of a reference", func(t *testing.T) {
+		addr := NewReference("orders/cart", "system", "host", 1234)
+		assert.Equal(t, "orders/cart", addr.QualifiedName())
+		assert.Equal(t, "goakt://system@host:1234/orders/cart", addr.String())
+	})
+
+	t.Run("Qualified name of nil and of NoSender", func(t *testing.T) {
+		var addr *Address
+		assert.Empty(t, addr.QualifiedName())
+		assert.Empty(t, NoSender().QualifiedName())
 	})
 }
 

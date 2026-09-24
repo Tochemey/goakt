@@ -91,7 +91,7 @@ func TestCreditDeferredGrantFlushedByWriterDrain(t *testing.T) {
 	right.grantAccum.Store(window)
 
 	// Any writer drain on the granting side must flush the deferred grant.
-	require.True(t, right.trySubmit(Frame{
+	require.NoError(t, right.admitFrame(Frame{
 		Version: ProtocolVersion,
 		Type:    FrameTypePing,
 		Lane:    right.Lane(),
@@ -180,7 +180,7 @@ func TestCreditExemptFramesBypassParkedWriter(t *testing.T) {
 	}, time.Second, 5*time.Millisecond)
 
 	before := right.lastInbound.Load()
-	require.True(t, left.trySubmit(Frame{
+	require.NoError(t, left.admitFrame(Frame{
 		Type:        FrameTypePing,
 		Correlation: 42,
 	}))
@@ -252,7 +252,7 @@ func TestCreditRevisionThreeIgnoresCredit(t *testing.T) {
 	assert.Equal(t, []byte("rev3"), frame.Payload)
 	right.ReleasePayload(frame)
 
-	require.True(t, left.trySubmit(Frame{
+	require.NoError(t, left.admitFrame(Frame{
 		Type:    FrameTypeCredit,
 		Payload: encodeCreditPayload(100),
 	}))

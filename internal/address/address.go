@@ -77,6 +77,7 @@ var zeroAddress = &Address{}
 //   - Name: actor name within the system (non-empty, <= 255 chars, pattern-validated)
 //   - ID: a unique identifier for the actor instance (UUID string)
 //   - Parent: the parent actor's Address, or a zero address if none
+//   - QualifiedName: the name qualified by every ancestor name, e.g. "orders/cart"
 //
 // Zero Value and No Sender:
 // A special "no sender" value can be produced via NoSender, which wraps a zero
@@ -89,7 +90,11 @@ type Address struct {
 	system        string
 	parent        *Address
 	incarnationID string
-	cachedStr     string // eagerly computed at construction; String() is a pure read
+	// cachedQualifiedName is the actor name qualified by every ancestor name,
+	// the part of the address after host:port. It is computed once at
+	// construction, before cachedStr, which is built from it.
+	cachedQualifiedName string
+	cachedStr           string // eagerly computed at construction; String() is a pure read
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -118,6 +123,7 @@ func New(name, system string, host string, port int) *Address {
 		system:        system,
 		incarnationID: uuid.NewString(),
 	}
+	a.cachedQualifiedName = a.buildQualifiedName()
 	a.cachedStr = a.buildString()
 	return a
 }
@@ -159,6 +165,7 @@ func NewWithParent(name, system, host string, port int, parent *Address) *Addres
 	if parent != nil {
 		a.parent = parent
 	}
+	a.cachedQualifiedName = a.buildQualifiedName()
 	a.cachedStr = a.buildString()
 	return a
 }
@@ -176,6 +183,7 @@ func NewReference(name, system string, host string, port int) *Address {
 		name:   name,
 		system: system,
 	}
+	a.cachedQualifiedName = a.buildQualifiedName()
 	a.cachedStr = a.buildString()
 	return a
 }
@@ -206,6 +214,26 @@ func (x *Address) Name() string {
 		return ""
 	}
 	return x.name
+}
+
+// QualifiedName returns the actor name qualified by its ancestors: every
+// ancestor name from the root down and the actor name, joined by '/'. It is
+// the part of the address after host:port, so it identifies the actor without
+// its location, and the cluster registry keys actor records by it.
+//
+// Examples:
+//
+//	orders := New("orders", "sys", "127.0.0.1", 9000)
+//	cart := NewWithParent("cart", "sys", "127.0.0.1", 9000, orders)
+//	item := NewWithParent("item", "sys", "127.0.0.1", 9000, cart)
+//	orders.QualifiedName() // "orders"
+//	cart.QualifiedName()   // "orders/cart"
+//	item.QualifiedName()   // "orders/cart/item"
+func (x *Address) QualifiedName() string {
+	if x == nil {
+		return ""
+	}
+	return x.cachedQualifiedName
 }
 
 // Host returns the host component of the Address.
@@ -246,9 +274,9 @@ func (x *Address) IncarnationID() string {
 //
 //	goakt://<system>@<host>:<port>/<name>
 //
-// If a parent is set and is not NoSender:
+// If a parent is set and is not NoSender, the qualified name follows host:port:
 //
-//	goakt://<system>@<host>:<port>/<parent>/<name>
+//	goakt://<system>@<host>:<port>/<ancestor>/.../<parent>/<name>
 //
 // Behavior:
 //   - No validation or escaping is performed; call Validate first.
@@ -270,33 +298,35 @@ func (x *Address) String() string {
 	return x.cachedStr
 }
 
+// buildQualifiedName computes the actor name qualified by its ancestors: every
+// ancestor name from the root down and the actor name, joined by '/'. Called
+// once at construction time so that QualifiedName() is a pure read.
+func (x *Address) buildQualifiedName() string {
+	// the chain is walked from the parent up, so the names are collected
+	// nearest first and reversed to read from the root down
+	names := []string{x.Name()}
+	for parent := x.Parent(); parent != nil && !parent.Equals(NoSender()); parent = parent.Parent() {
+		names = append(names, parent.Name())
+	}
+
+	slices.Reverse(names)
+	return strings.Join(names, "/")
+}
+
 // buildString computes the canonical string representation.
-// Called once at construction time so that String() is safe for concurrent use.
-// The path lists every ancestor from the root down, so an actor nested at any
-// depth renders as goakt://<system>@<host>:<port>/<ancestor>/.../<name>.
+// Called once at construction time, after buildQualifiedName, so that String()
+// is safe for concurrent use. The qualified name lists every ancestor from the
+// root down, so an actor nested at any depth renders as
+// goakt://<system>@<host>:<port>/<ancestor>/.../<name>.
 func (x *Address) buildString() string {
 	system := x.System()
 	host := x.Host()
-	name := x.Name()
-
-	// the chain is walked from the parent up, so the ancestors are collected
-	// nearest first and reversed to read from the root down
-	var ancestors []string
-	for parent := x.Parent(); parent != nil && !parent.Equals(NoSender()); parent = parent.Parent() {
-		ancestors = append(ancestors, parent.Name())
-	}
-
-	slices.Reverse(ancestors)
+	qualifiedName := x.cachedQualifiedName
 
 	var portBuf [6]byte
 	portBytes := strconv.AppendInt(portBuf[:0], int64(x.Port()), 10)
 
-	pathLen := 1 + len(name)
-	for _, ancestor := range ancestors {
-		pathLen += len(ancestor) + 1
-	}
-
-	totalLen := len(scheme) + len("://") + len(system) + 1 + len(host) + 1 + len(portBytes) + pathLen
+	totalLen := len(scheme) + len("://") + len(system) + 1 + len(host) + 1 + len(portBytes) + 1 + len(qualifiedName)
 	var builder strings.Builder
 	builder.Grow(totalLen)
 
@@ -308,13 +338,7 @@ func (x *Address) buildString() string {
 	_ = builder.WriteByte(':')
 	_, _ = builder.Write(portBytes)
 	_ = builder.WriteByte('/')
-
-	for _, ancestor := range ancestors {
-		_, _ = builder.WriteString(ancestor)
-		_ = builder.WriteByte('/')
-	}
-
-	_, _ = builder.WriteString(name)
+	_, _ = builder.WriteString(qualifiedName)
 
 	return builder.String()
 }

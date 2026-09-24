@@ -1740,6 +1740,54 @@ func TestSpawn(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.Nil(t, pid)
 	})
+	t.Run("With a top-level name equal to a child's name", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		pause.For(time.Second)
+
+		parent, err := sys.Spawn(ctx, "p1", NewMockSupervisor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "kid", NewMockSupervised())
+		require.NoError(t, err)
+
+		// a running child named kid does not satisfy a top-level spawn of kid
+		topLevel, err := sys.Spawn(ctx, "kid", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, child, topLevel)
+		require.True(t, strings.HasSuffix(topLevel.ID(), "/kid"), topLevel.ID())
+		require.False(t, strings.HasSuffix(topLevel.ID(), "/p1/kid"), topLevel.ID())
+		require.True(t, child.IsRunning())
+		require.True(t, topLevel.IsRunning())
+
+		// the bare name now resolves the top-level actor, whose ID matches it exactly
+		actual, err := sys.ActorOf(ctx, "kid")
+		require.NoError(t, err)
+		require.Same(t, topLevel, actual)
+
+		actual, err = sys.ActorOf(ctx, "p1/kid")
+		require.NoError(t, err)
+		require.Same(t, child, actual)
+
+		// the same holds for SpawnNamedFromFunc
+		fnChild, err := parent.SpawnChild(ctx, "kid2", NewMockSupervised())
+		require.NoError(t, err)
+
+		fnTopLevel, err := sys.SpawnNamedFromFunc(ctx, "kid2", func(context.Context, any) error { return nil })
+		require.NoError(t, err)
+		require.NotSame(t, fnChild, fnTopLevel)
+		require.False(t, strings.HasSuffix(fnTopLevel.ID(), "/p1/kid2"), fnTopLevel.ID())
+
+		// a top-level name cannot take a child's qualified name
+		_, err = sys.Spawn(ctx, "p1/kid", NewMockActor())
+		require.Error(t, err)
+		_, err = sys.SpawnNamedFromFunc(ctx, "p1/kid", func(context.Context, any) error { return nil })
+		require.Error(t, err)
+
+		require.NoError(t, sys.Stop(ctx))
+	})
 }
 
 func TestSpawnInitTimeoutOption(t *testing.T) {
