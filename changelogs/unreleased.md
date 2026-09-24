@@ -10,6 +10,8 @@
 
 ## 🔧 Fixes
 
+- **Actor addresses carry the full path** ([#1379](https://github.com/Tochemey/goakt/issues/1379)). An address now renders every ancestor of the actor, `goakt://system@host:port/grand/parent/name`, and parses it back, as the documentation describes. Before, only the immediate parent was written, so two actors nested under parents with the same name shared one address and the second `SpawnChild` returned the first actor instead of creating one. Top-level actors and direct children keep the addresses they had. Large-message destination patterns now see the full path, one `*` per segment. During a rolling upgrade, nodes on the previous version reject the addresses of actors nested two or more levels deep until they are upgraded.
+
 - **etcd discovery validates `Timeout`**. A zero `Timeout` is now rejected at validation instead of failing every request at runtime, in line with `DialTimeout` and `TTL`.
 
 - **A wildcard bind address listens on every interface** ([#1374](https://github.com/Tochemey/goakt/issues/1374)). `remote.NewConfig("0.0.0.0", port)` used to bind the remoting server to one guessed private IP, so connections through loopback or any other interface were refused, and start failed on a host with no private or public address. The remoting server now listens on the wildcard as configured, `::` is accepted and serves IPv4 and IPv6 peers, and a host with no other address advertises loopback. What peers are told is unchanged: `ActorSystem.Host()`, actor addresses and cluster membership keep advertising the first private IP, and cluster gossip and the registry keep binding it. Bind to a concrete IP to listen on one interface only.

@@ -36,9 +36,10 @@
 //
 //	goakt://<system>@<host>:<port>/<name>
 //
-// When a parent is defined, the representation becomes:
+// When a parent is defined, the path lists every ancestor from the root down:
 //
 //	goakt://<system>@<host>:<port>/<parent>/<name>
+//	goakt://<system>@<host>:<port>/<grandparent>/<parent>/<name>
 //
 // Unless stated otherwise, methods on Address mutate the receiver and are not
 // safe for concurrent use without external synchronization.
@@ -47,6 +48,7 @@ package address
 import (
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -270,22 +272,30 @@ func (x *Address) String() string {
 
 // buildString computes the canonical string representation.
 // Called once at construction time so that String() is safe for concurrent use.
+// The path lists every ancestor from the root down, so an actor nested at any
+// depth renders as goakt://<system>@<host>:<port>/<ancestor>/.../<name>.
 func (x *Address) buildString() string {
 	system := x.System()
 	host := x.Host()
 	name := x.Name()
-	parentName := ""
-	if parent := x.Parent(); parent != nil && !parent.Equals(NoSender()) {
-		parentName = parent.Name()
+
+	// the chain is walked from the parent up, so the ancestors are collected
+	// nearest first and reversed to read from the root down
+	var ancestors []string
+	for parent := x.Parent(); parent != nil && !parent.Equals(NoSender()); parent = parent.Parent() {
+		ancestors = append(ancestors, parent.Name())
 	}
+
+	slices.Reverse(ancestors)
 
 	var portBuf [6]byte
 	portBytes := strconv.AppendInt(portBuf[:0], int64(x.Port()), 10)
 
 	pathLen := 1 + len(name)
-	if parentName != "" {
-		pathLen += len(parentName) + 1
+	for _, ancestor := range ancestors {
+		pathLen += len(ancestor) + 1
 	}
+
 	totalLen := len(scheme) + len("://") + len(system) + 1 + len(host) + 1 + len(portBytes) + pathLen
 	var builder strings.Builder
 	builder.Grow(totalLen)
@@ -298,10 +308,12 @@ func (x *Address) buildString() string {
 	_ = builder.WriteByte(':')
 	_, _ = builder.Write(portBytes)
 	_ = builder.WriteByte('/')
-	if parentName != "" {
-		_, _ = builder.WriteString(parentName)
+
+	for _, ancestor := range ancestors {
+		_, _ = builder.WriteString(ancestor)
 		_ = builder.WriteByte('/')
 	}
+
 	_, _ = builder.WriteString(name)
 
 	return builder.String()
@@ -459,22 +471,26 @@ func ParseWithIncarnationID(value, incarnationID string) (*Address, error) {
 //
 //	goakt://<system>@<host>:<port>/<name>
 //	goakt://<system>@<host>:<port>/<parent>/<name>
+//	goakt://<system>@<host>:<port>/<ancestor>/.../<parent>/<name>
 //
 // Notes:
 //   - Only the "goakt" scheme is accepted (case-sensitive).
 //   - Port must be a base-10 integer.
-//   - Path may contain at most one '/' (to separate <parent>/<name>).
+//   - Path segments are separated by '/'. Any number of ancestors is accepted,
+//     listed from the root down, and no segment may be empty.
 //   - Raw IPv6 literals are not supported by this parser (use a hostname).
 //   - No semantic validation is performed. The canonical string carries no
 //     incarnation identifier, so the result has an empty IncarnationID and does
 //     not pass Validate; use ParseWithIncarnationID to restore a validatable
 //     address from actor metadata.
 //   - If no parent component is present, the returned Address has no parent (nil).
+//     Otherwise the whole parent chain is rebuilt, each ancestor minted with New.
 //
 // Errors:
 //   - "address is required" when input is empty.
 //   - "address protocol is not supported" when scheme != goakt.
-//   - "address format is invalid" for malformed delimiters or extra separators.
+//   - "address format is invalid" for malformed delimiters, extra separators or
+//     an empty path segment.
 //   - Atoi error when the port is not an integer.
 //
 // Examples:
@@ -484,6 +500,9 @@ func ParseWithIncarnationID(value, incarnationID string) (*Address, error) {
 //
 //	addr, _ := Parse("goakt://orders@127.0.0.1:9000/root/checkout")
 //	// parent.Name() == "root"
+//
+//	addr, _ := Parse("goakt://orders@127.0.0.1:9000/root/cart/checkout")
+//	// parent.Name() == "cart", parent.Parent().Name() == "root"
 //
 //	_, err := Parse("goakt://orders@127.0.0.1:abc/checkout")
 //	// err != nil
@@ -511,10 +530,6 @@ func Parse(addr string) (*Address, error) {
 		return nil, errors.New("address format is invalid")
 	}
 
-	if strings.HasPrefix(path, "/") {
-		return nil, errors.New("address format is invalid")
-	}
-
 	host, portStr, ok := strings.Cut(hostPort, ":")
 	if !ok || strings.Contains(portStr, ":") {
 		return nil, errors.New("address format is invalid")
@@ -526,20 +541,28 @@ func Parse(addr string) (*Address, error) {
 	}
 	port := int(parsedPort)
 
-	parentName := ""
-	name := path
-	if parentPart, childPart, ok := strings.Cut(path, "/"); ok {
-		if strings.Contains(childPart, "/") {
-			return nil, errors.New("address format is invalid")
-		}
-		parentName = parentPart
-		name = childPart
+	segments := strings.Split(path, "/")
+	if slices.Contains(segments, "") {
+		return nil, errors.New("address format is invalid")
 	}
 
-	if parentName == "" {
+	// the ancestors precede the name and are chained from the root down; each
+	// one is minted with New so the result validates like an address built
+	// through NewWithParent
+	var parent *Address
+	for _, ancestor := range segments[:len(segments)-1] {
+		if parent == nil {
+			parent = New(ancestor, system, host, port)
+			continue
+		}
+
+		parent = NewWithParent(ancestor, system, host, port, parent)
+	}
+
+	name := segments[len(segments)-1]
+	if parent == nil {
 		return New(name, system, host, port), nil
 	}
 
-	parent := New(parentName, system, host, port)
 	return NewWithParent(name, system, host, port, parent), nil
 }
