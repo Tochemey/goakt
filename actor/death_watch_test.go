@@ -695,7 +695,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: actorName, attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -745,7 +745,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		retry := &retryDeadActorRemoval{actorName: actorName, attempt: deathWatchRemovalMaxRetries}
+		retry := &retryDeadActorRemoval{qualifiedName: actorName, attempt: deathWatchRemovalMaxRetries}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -852,7 +852,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		// expectation) enforces that the registry is left untouched.
 		sys.shuttingDown.Store(true)
 
-		retry := &retryDeadActorRemoval{actorName: "dead-actor", attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: "dead-actor", attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -891,7 +891,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		retry := &retryDeadActorRemoval{actorName: "dead-actor", attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: "dead-actor", attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 	})
@@ -933,7 +933,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: actorName, attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -979,7 +979,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
-		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: actorName, attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -1031,7 +1031,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
 		buf.Reset()
-		retry := &retryDeadActorRemoval{actorName: actorName, attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: actorName, attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
@@ -1142,11 +1142,11 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 
 		buf.Reset()
 
-		retry := &retryDeadActorRemoval{actorName: retriedActor, attempt: 1}
+		retry := &retryDeadActorRemoval{qualifiedName: retriedActor, attempt: 1}
 		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, retry)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 
-		doomed := &retryDeadActorRemoval{actorName: doomedActor, attempt: deathWatchRemovalMaxRetries}
+		doomed := &retryDeadActorRemoval{qualifiedName: doomedActor, attempt: deathWatchRemovalMaxRetries}
 		receiveCtx = newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, doomed)
 		deathWatchActor.handleRetryDeadActorRemoval(receiveCtx)
 

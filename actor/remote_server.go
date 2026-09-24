@@ -452,7 +452,8 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(request.GetName())), nil
 	}
 
-	// Fetch the actor address
+	// Fetch the actor address. The name is the actor's qualified name, so a
+	// child named parent/child resolves to its own address.
 	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	node, exist := x.actors.node(actorAddress.String())
 	if !exist {
@@ -512,7 +513,8 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.NewErrActorNotFound(request.GetName())), nil
 	}
 
-	// Fetch the actor address
+	// Fetch the actor address. The name is the actor's qualified name, so a
+	// child named parent/child resolves to its own address.
 	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
 	pidNode, exist := x.actors.node(actorAddress.String())
 	if !exist {

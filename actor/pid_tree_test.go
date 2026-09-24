@@ -741,6 +741,116 @@ func TestNodeByName(t *testing.T) {
 		require.False(t, ok)
 		require.Nil(t, node)
 	})
+
+	t.Run("same name under two parents returns the last added", func(t *testing.T) {
+		tree, root, first := newTreeWithNodes(t)
+		// a distinct port gives the second child a distinct ID under the same name
+		second := newPIDAt(root.ActorSystem(), first.Name(), 3)
+		require.NoError(t, tree.addNode(root, second))
+
+		node, ok := tree.nodeByName(first.Name())
+		require.True(t, ok)
+		require.Equal(t, second.ID(), node.id)
+	})
+
+	t.Run("deleting one of two same-named nodes keeps the other", func(t *testing.T) {
+		tree, root, first := newTreeWithNodes(t)
+		second := newPIDAt(root.ActorSystem(), first.Name(), 3)
+		require.NoError(t, tree.addNode(root, second))
+
+		tree.deleteNode(second)
+
+		node, ok := tree.nodeByName(first.Name())
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+
+		tree.deleteNode(first)
+
+		node, ok = tree.nodeByName(first.Name())
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+}
+
+func TestNodeByQualifiedName(t *testing.T) {
+	// newChildPID returns a PID whose address nests name under parent, the way
+	// SpawnChild builds child addresses
+	newChildPID := func(system ActorSystem, name string, parent *PID) *PID {
+		parentAddr := parent.getAddress()
+		addr := address.NewWithParent(name, system.Name(), parentAddr.Host(), parentAddr.Port(), parentAddr)
+		return &PID{address: addr, path: newPath(addr), actorSystem: system}
+	}
+
+	newTreeWithCousins := func(t *testing.T) (*tree, *PID, *PID) {
+		t.Helper()
+		system, _ := NewActorSystem("TestSys")
+		tree := newTree()
+		root := newPIDAt(system, "root", 1)
+		p1 := newChildPID(system, "p1", root)
+		p2 := newChildPID(system, "p2", root)
+		first := newChildPID(system, "kid", p1)
+		second := newChildPID(system, "kid", p2)
+		require.NoError(t, tree.addRootNode(root))
+		require.NoError(t, tree.addNode(root, p1))
+		require.NoError(t, tree.addNode(root, p2))
+		require.NoError(t, tree.addNode(p1, first))
+		require.NoError(t, tree.addNode(p2, second))
+		t.Cleanup(tree.reset)
+		return tree, first, second
+	}
+
+	t.Run("resolves each same-named child by its qualified name", func(t *testing.T) {
+		tree, first, second := newTreeWithCousins(t)
+
+		node, ok := tree.nodeByQualifiedName("root/p1/kid")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+
+		node, ok = tree.nodeByQualifiedName("root/p2/kid")
+		require.True(t, ok)
+		require.Equal(t, second.ID(), node.id)
+
+		// the bare name is not a qualified name of any nested node
+		node, ok = tree.nodeByQualifiedName("kid")
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+
+	t.Run("deleting one child keeps the other", func(t *testing.T) {
+		tree, first, second := newTreeWithCousins(t)
+		tree.deleteNode(second)
+
+		node, ok := tree.nodeByQualifiedName("root/p2/kid")
+		require.False(t, ok)
+		require.Nil(t, node)
+
+		node, ok = tree.nodeByQualifiedName("root/p1/kid")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+	})
+
+	t.Run("reset clears the index", func(t *testing.T) {
+		tree, _, _ := newTreeWithCousins(t)
+		tree.reset()
+
+		node, ok := tree.nodeByQualifiedName("root/p1/kid")
+		require.False(t, ok)
+		require.Nil(t, node)
+	})
+
+	t.Run("the node caches the qualified name of its PID", func(t *testing.T) {
+		tree, first, _ := newTreeWithCousins(t)
+
+		node, ok := tree.node(first.ID())
+		require.True(t, ok)
+		require.Equal(t, "root/p1/kid", node.qualifiedName)
+		require.Equal(t, "root/p1/kid", first.qualifiedName())
+	})
+
+	t.Run("a PID without a path has no qualified name", func(t *testing.T) {
+		pid := &PID{address: address.New("orphan", "TestSys", "host", 1)}
+		require.Empty(t, pid.qualifiedName())
+	})
 }
 
 func TestTreeResetPreservesNoSender(t *testing.T) {

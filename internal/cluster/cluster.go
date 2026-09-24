@@ -172,17 +172,21 @@ type Cluster interface {
 	Start(ctx context.Context) error
 	// Stop gracefully shuts down the cluster engine and frees resources.
 	Stop(ctx context.Context) error
-	// PutActor stores the provided actor metadata within the cluster state.
+	// PutActor stores the provided actor metadata within the cluster state,
+	// keyed by the qualified name of the actor.
 	PutActor(ctx context.Context, actor *internalpb.Actor) error
 	// PutActorIfAbsent stores the actor metadata only when no record already
-	// exists under its name and returns ErrActorAlreadyExists otherwise.
+	// exists under its qualified name and returns ErrActorAlreadyExists
+	// otherwise.
 	PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error
-	// GetActor retrieves actor metadata by name.
-	GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error)
-	// RemoveActor deletes an actor entry from the cluster store.
-	RemoveActor(ctx context.Context, actorName string) error
-	// ActorExists checks whether the specified actor is registered.
-	ActorExists(ctx context.Context, actorName string) (bool, error)
+	// GetActor retrieves actor metadata by qualified name: the actor's name for
+	// a top-level actor, parent/name for a child.
+	GetActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error)
+	// RemoveActor deletes the actor entry stored under the qualified name.
+	RemoveActor(ctx context.Context, qualifiedName string) error
+	// ActorExists checks whether an actor is registered under the qualified
+	// name.
+	ActorExists(ctx context.Context, qualifiedName string) (bool, error)
 	// Actors enumerates all actors tracked by the cluster.
 	Actors(ctx context.Context, timeout time.Duration) ([]*internalpb.Actor, error)
 	// ActorsByHost streams the registry and returns only the actors owned by the
@@ -218,7 +222,8 @@ type Cluster interface {
 	Peers(ctx context.Context) ([]*Peer, error)
 	// IsLeader reports whether the local node acts as the cluster coordinator.
 	IsLeader(ctx context.Context) bool
-	// GetPartition determines the partition assigned to the actor name.
+	// GetPartition determines the partition assigned to the actor's qualified
+	// name.
 	GetPartition(actorName string) uint64
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
@@ -528,7 +533,9 @@ func (x *cluster) Stop(ctx context.Context) error {
 }
 
 // PutActor persists the supplied actor metadata into the cluster state and
-// updates the local peer cache.
+// updates the local peer cache. The record is keyed by the qualified name of the
+// actor, so two children with the same name under different parents keep two
+// records.
 func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
@@ -539,7 +546,7 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 
 	// no need to check for nil address as it is validated during actor creation
 	addr, _ := address.Parse(actor.GetAddress())
-	key := addr.Name()
+	key := addr.QualifiedName()
 
 	encoded, err := encode(actor)
 	if err != nil {
@@ -550,9 +557,9 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 }
 
 // PutActorIfAbsent stores the actor metadata only when no record exists under
-// its name, making cluster-wide name uniqueness atomic for callers that must
+// its qualified name, making cluster-wide name uniqueness atomic for callers that must
 // not overwrite a concurrent registration. It returns ErrActorAlreadyExists
-// when another record already holds the name.
+// when another record already holds the qualified name.
 func (x *cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
@@ -563,7 +570,7 @@ func (x *cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor)
 
 	// no need to check for nil address as it is validated during actor creation
 	addr, _ := address.Parse(actor.GetAddress())
-	key := addr.Name()
+	key := addr.QualifiedName()
 
 	encoded, err := encode(actor)
 	if err != nil {
@@ -581,8 +588,9 @@ func (x *cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor)
 	return nil
 }
 
-// GetActor fetches actor metadata by name from the unified map.
-func (x *cluster) GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error) {
+// GetActor fetches actor metadata by qualified name from the unified map: the
+// actor's name for a top-level actor, parent/name for a child.
+func (x *cluster) GetActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error) {
 	if !x.running.Load() {
 		return nil, ErrEngineNotRunning
 	}
@@ -590,7 +598,7 @@ func (x *cluster) GetActor(ctx context.Context, actorName string) (*internalpb.A
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	value, err := x.getRecord(ctx, namespaceActors, actorName)
+	value, err := x.getRecord(ctx, namespaceActors, qualifiedName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
 			return nil, ErrActorNotFound
@@ -601,8 +609,9 @@ func (x *cluster) GetActor(ctx context.Context, actorName string) (*internalpb.A
 	return decode(value)
 }
 
-// RemoveActor deletes an actor entry from the unified map and peer cache.
-func (x *cluster) RemoveActor(ctx context.Context, actorName string) error {
+// RemoveActor deletes the actor entry stored under the qualified name from the
+// unified map and peer cache.
+func (x *cluster) RemoveActor(ctx context.Context, qualifiedName string) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
 	}
@@ -610,12 +619,12 @@ func (x *cluster) RemoveActor(ctx context.Context, actorName string) error {
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	return x.deleteRecord(ctx, namespaceActors, actorName)
+	return x.deleteRecord(ctx, namespaceActors, qualifiedName)
 }
 
-// ActorExists reports whether an actor with the given name exists in the
-// cluster.
-func (x *cluster) ActorExists(ctx context.Context, actorName string) (bool, error) {
+// ActorExists reports whether an actor is registered in the cluster under the
+// qualified name.
+func (x *cluster) ActorExists(ctx context.Context, qualifiedName string) (bool, error) {
 	if !x.running.Load() {
 		return false, ErrEngineNotRunning
 	}
@@ -623,7 +632,7 @@ func (x *cluster) ActorExists(ctx context.Context, actorName string) (bool, erro
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	_, err := x.getRecord(ctx, namespaceActors, actorName)
+	_, err := x.getRecord(ctx, namespaceActors, qualifiedName)
 	if err != nil {
 		if errors.Is(err, olric.ErrKeyNotFound) {
 			return false, nil
@@ -963,7 +972,7 @@ func (x *cluster) coordinatorAddress(ctx context.Context) string {
 }
 
 // GetPartition returns the partition identifier used to distribute the actor
-// key in the unified map.
+// key, the actor's qualified name, in the unified map.
 func (x *cluster) GetPartition(actorName string) uint64 {
 	if !x.running.Load() {
 		return 0

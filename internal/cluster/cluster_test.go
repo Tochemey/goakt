@@ -1407,6 +1407,63 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestMultipleNodes(t *testing.T) {
+	t.Run("With same-named children under different parents", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		owner, ownerProvider := startEngine(t, srv.Addr().String())
+		require.NotNil(t, owner)
+
+		// wait for the node to start properly
+		pause.For(2 * time.Second)
+
+		observer, observerProvider := startEngine(t, srv.Addr().String())
+		require.NotNil(t, observer)
+
+		// wait for the node to join the cluster
+		pause.For(time.Second)
+
+		// the two children share the name kid, so only their qualified names,
+		// p1/kid and p2/kid, tell their records apart
+		node := owner.(*cluster).node
+		first := address.NewWithParent("kid", "testSystem", node.Host, node.RemotingPort, address.New("p1", "testSystem", node.Host, node.RemotingPort))
+		second := address.NewWithParent("kid", "testSystem", node.Host, node.RemotingPort, address.New("p2", "testSystem", node.Host, node.RemotingPort))
+		firstRecord := internalpb.Actor_builder{Address: first.String()}.Build()
+		secondRecord := internalpb.Actor_builder{Address: second.String()}.Build()
+
+		require.NoError(t, owner.PutActor(ctx, firstRecord))
+		require.NoError(t, owner.PutActor(ctx, secondRecord))
+
+		// the other node reads each child's own record
+		actual, err := observer.GetActor(ctx, "p1/kid")
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(firstRecord, actual))
+
+		actual, err = observer.GetActor(ctx, "p2/kid")
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(secondRecord, actual))
+
+		_, err = observer.GetActor(ctx, "kid")
+		assert.ErrorIs(t, err, ErrActorNotFound)
+
+		// removing one child's record from the other node leaves the other's in place
+		require.NoError(t, observer.RemoveActor(ctx, "p2/kid"))
+
+		exists, err := owner.ActorExists(ctx, "p1/kid")
+		require.NoError(t, err)
+		assert.True(t, exists)
+
+		exists, err = owner.ActorExists(ctx, "p2/kid")
+		require.NoError(t, err)
+		assert.False(t, exists)
+
+		require.NoError(t, observer.Stop(ctx))
+		require.NoError(t, owner.Stop(ctx))
+		require.NoError(t, observerProvider.Close())
+		require.NoError(t, ownerProvider.Close())
+		srv.Shutdown()
+	})
+
 	t.Run("Without TLS", func(t *testing.T) {
 		ctx := context.TODO()
 

@@ -307,6 +307,10 @@ type ActorSystem interface {
 	// spawn leaves nothing behind.
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
+	//
+	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
+	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
+	// name on its own node.
 	Kill(ctx context.Context, name string) error
 	// ReSpawn recreates a given actor in the system.
 	//
@@ -317,6 +321,10 @@ type ActorSystem interface {
 	//
 	// This method is location-transparent: it works identically whether the actor is local or on a
 	// remote node (when clustering/remoting is enabled).
+	//
+	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
+	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
+	// name on its own node.
 	ReSpawn(ctx context.Context, name string) (*PID, error)
 	// NumActors returns the total number of active actors on a given running node.
 	// This does not account for the total number of actors in the cluster
@@ -329,13 +337,24 @@ type ActorSystem interface {
 	// error of type "actor not found" is returned.
 	//
 	// Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
+	//
+	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
+	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
+	// name on its own node.
 	ActorOf(ctx context.Context, actorName string) (*PID, error)
 	// ActorExists checks whether an actor with the given name exists in the system,
 	// either locally, or on another node in the cluster if clustering is enabled.
+	//
+	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
+	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
+	// name on its own node.
 	ActorExists(ctx context.Context, actorName string) (exists bool, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
-	// Partition returns the partition where a given actor is located
+	// Partition returns the partition where a given actor is located. The name
+	// is the actor's name for a top-level actor and its qualified name, its
+	// ancestors' names and its own joined by '/' (e.g. "parent/child"), for a
+	// child.
 	Partition(actorName string) uint64
 	// Subscribe creates an event subscriber to consume events from the actor system.
 	// Remember to use the Unsubscribe method to avoid resource leakage.
@@ -2012,7 +2031,8 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	return nil
 }
 
-// Partition returns the partition where a given actor is located
+// Partition returns the partition where a given actor is located. See the
+// ActorSystem interface for how actorName names a child.
 func (x *actorSystem) Partition(actorName string) uint64 {
 	if x.InCluster() {
 		return x.cluster.GetPartition(actorName)
@@ -2034,6 +2054,8 @@ func (x *actorSystem) NumActors() uint64 {
 }
 
 // Kill stops a given actor in the system
+//
+// See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	if !x.Running() {
 		return gerrors.ErrActorSystemNotStarted
@@ -2044,7 +2066,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return gerrors.NewErrActorNotFound(name)
 	}
 
-	pidNode, exist := x.actors.nodeByName(name)
+	pidNode, exist := x.localActor(name)
 	if exist {
 		pid := pidNode.value()
 		return pid.Shutdown(ctx)
@@ -2080,6 +2102,8 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 //
 // This method is location-transparent: it works identically whether the actor is local or on a
 // remote node (when clustering/remoting is enabled).
+//
+// See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -2090,7 +2114,7 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
-	node, exist := x.actors.nodeByName(name)
+	node, exist := x.localActor(name)
 	if exist {
 		pid := node.value()
 		if err := pid.Restart(ctx); err != nil {
@@ -2227,6 +2251,8 @@ func (x *actorSystem) PeersAddress() string {
 // "actor not found" is returned.
 //
 // Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
+//
+// See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -2241,7 +2267,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 	// The tree reference (x.actors) is immutable after construction, so no
 	// system lock is needed. This avoids the double-lock contention that
 	// dominated SendAsync/SendSync throughput under high parallelism.
-	if pidnode, ok := x.actors.nodeByName(actorName); ok {
+	if pidnode, ok := x.localActor(actorName); ok {
 		pid := pidnode.value()
 		if pid.IsStopping() {
 			return nil, gerrors.NewErrActorNotFound(actorName)
@@ -2300,7 +2326,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 // it over the network.
 func (x *actorSystem) pidOf(ctx context.Context, addr *address.Address) (*PID, error) {
 	if addr.System() == x.Name() && addr.Host() == x.Host() && addr.Port() == x.Port() {
-		return x.ActorOf(ctx, addr.Name())
+		return x.ActorOf(ctx, addr.QualifiedName())
 	}
 
 	return newRemotePID(addr, x.getRemoting()), nil
@@ -2308,6 +2334,8 @@ func (x *actorSystem) pidOf(ctx context.Context, addr *address.Address) (*PID, e
 
 // ActorExists checks whether an actor with the given name exists in the system,
 // either locally, or on another node in the cluster if clustering is enabled.
+//
+// See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
 	if !x.Running() {
 		return false, gerrors.ErrActorSystemNotStarted
@@ -2317,7 +2345,7 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 	defer x.locker.RUnlock()
 
 	// check locally
-	if node, ok := x.actors.nodeByName(actorName); ok {
+	if node, ok := x.localActor(actorName); ok {
 		pid := node.value()
 		if pid.IsStopping() {
 			return false, nil
@@ -2991,23 +3019,23 @@ func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
 	return nil
 }
 
-// removeActorIfIncarnation removes the registry record for name only when it
-// still carries incarnationID, following the releaseDepartedEntry ownership
-// rule: cleanup owned by one activation must never delete a record already
-// overwritten by a newer one. Best-effort by design, since every caller is
-// itself a rollback path whose primary error is already on its way to the
-// user; failures are logged for diagnosability.
-func (x *actorSystem) removeActorIfIncarnation(ctx context.Context, name, incarnationID string) {
+// removeActorIfIncarnation removes the registry record stored under
+// qualifiedName only when it still carries incarnationID, following the
+// releaseDepartedEntry ownership rule: cleanup owned by one activation must
+// never delete a record already overwritten by a newer one. Best-effort by
+// design, since every caller is itself a rollback path whose primary error is
+// already on its way to the user; failures are logged for diagnosability.
+func (x *actorSystem) removeActorIfIncarnation(ctx context.Context, qualifiedName, incarnationID string) {
 	registry := x.getCluster()
-	record, err := registry.GetActor(ctx, name)
+	record, err := registry.GetActor(ctx, qualifiedName)
 
 	switch {
 	case errors.Is(err, cluster.ErrActorNotFound):
 	case err != nil:
-		x.logger.Errorf("failed to load registry record for actor=%s during rollback: %v", name, err)
+		x.logger.Errorf("failed to load registry record for actor=%s during rollback: %v", qualifiedName, err)
 	case record.GetIncarnationId() == incarnationID:
-		if err := registry.RemoveActor(ctx, name); err != nil {
-			x.logger.Errorf("failed to remove registry record for actor=%s during rollback: %v", name, err)
+		if err := registry.RemoveActor(ctx, qualifiedName); err != nil {
+			x.logger.Errorf("failed to remove registry record for actor=%s during rollback: %v", qualifiedName, err)
 		}
 	}
 }
@@ -3237,7 +3265,7 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 			continue
 		}
 
-		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
+		if err := x.cluster.RemoveActor(ctx, addr.QualifiedName()); err != nil {
 			x.logger.Warnf("failed to remove stale cluster actor %s: %v", addr.String(), err)
 			continue
 		}
@@ -4438,6 +4466,34 @@ func (x *actorSystem) actorReference(name string) *address.Address {
 	return address.NewReference(name, x.name, x.remoteConfig.BindAddr(), x.remoteConfig.BindPort())
 }
 
+// localActor resolves a lookup name against the local actor tree. The name is
+// either an actor's qualified name or a bare child name. The qualified name is
+// tried first because it names exactly one actor: a top-level actor by its
+// name, a child by parent/child. The bare name comes second so that a child
+// still resolves by its own name on this node, and when several children share
+// that name the most recently spawned one is returned.
+func (x *actorSystem) localActor(name string) (*pidNode, bool) {
+	if node, ok := x.actors.nodeByQualifiedName(name); ok {
+		return node, true
+	}
+
+	return x.actors.nodeByName(name)
+}
+
+// topLevelActor resolves name to a top-level actor of the local tree only: its
+// qualified name must be its own name. Spawn paths use it to find an actor
+// already running under the name they create, so neither a child that shares
+// the name nor a child whose qualified name is passed as the name can satisfy
+// them; an invalid name is then rejected when the actor is configured.
+func (x *actorSystem) topLevelActor(name string) (*pidNode, bool) {
+	node, ok := x.actors.nodeByQualifiedName(name)
+	if !ok || node.name != name {
+		return nil, false
+	}
+
+	return node, true
+}
+
 // spawnRootGuardian creates the rootGuardian guardian
 func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	actorName := reservedName(rootGuardianType)
@@ -4556,7 +4612,8 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.deadletter)
 }
 
-// checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks
+// checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks.
+// actorName is a top-level name, which is also the actor's qualified name and registry key.
 func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string) error {
 	// here we make sure in cluster mode that the given actor is uniquely created
 	if x.clusterEnabled.Load() {
@@ -4580,7 +4637,7 @@ func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	// Remove all actors from the cluster
 	for _, pid := range pids {
 		eg.Go(func() error {
-			actorName := pid.Name()
+			actorName := pid.getAddress().QualifiedName()
 			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
 				x.logger.Errorf("failed to remove actor=%s from cluster: %v (hint: check cluster connectivity)", actorName, err)
 				return err

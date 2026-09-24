@@ -24,6 +24,7 @@ package actor
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -39,13 +40,16 @@ var errNodeAlreadyExists = errors.New("pid already exists")
 // returned to callers outside the tree lock (e.g. via node()/nodeByName()),
 // and concurrent deleteNode() calls can set pid to nil.
 type pidNode struct {
-	pid         atomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
-	parentNode  *pidNode            // Parent node; nil if root.
-	id          string              // Cached pid.ID() — avoids repeated string building.
-	name        string              // Cached pid.Name().
-	watchers    []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
-	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
-	descendants map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
+	pid        atomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
+	parentNode *pidNode            // Parent node; nil if root.
+	id         string              // Cached pid.ID() — avoids repeated string building.
+	name       string              // Cached pid.Name().
+	// qualifiedName caches pid.qualifiedName(), the node's key in the tree's
+	// qualifiedNames index, so removing the node never reads the PID.
+	qualifiedName string
+	watchers      []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
+	watchees      map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
+	descendants   map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
 }
 
 // value returns the PID stored in the node, or nil if cleared by deleteNode.
@@ -65,6 +69,7 @@ func newPidNode(pid *PID) *pidNode {
 	if pid != nil {
 		n.id = pid.ID()
 		n.name = pid.Name()
+		n.qualifiedName = pid.qualifiedName()
 	}
 
 	return n
@@ -131,9 +136,17 @@ type tree struct {
 	mu       sync.RWMutex
 	rootNode *pidNode            // Logical root node (its pid may be nil if cleared).
 	pids     map[string]*pidNode // Index: PID.ID() -> pidNode.
-	names    map[string]*pidNode // Index: PID.Name() -> pidNode.
-	counter  atomic.Int64        // Number of nodes currently registered.
-	noSender *PID                // Cached NoSender (set on first root add).
+	// names indexes nodes by PID.Name(). A name is unique among siblings only,
+	// so several nodes can share one; they are kept in insertion order and a
+	// lookup by name returns the most recently added node still in the tree.
+	names map[string][]*pidNode
+	// qualifiedNames indexes nodes by the qualified name of their actor, its
+	// ancestors' names and its own joined by '/'. Every node shares this
+	// system's host and port, so the qualified name identifies a node as
+	// uniquely as its ID, and lookups by it build no address.
+	qualifiedNames map[string]*pidNode
+	counter        atomic.Int64 // Number of nodes currently registered.
+	noSender       *PID         // Cached NoSender (set on first root add).
 }
 
 // newTree creates and returns a new PID tree.
@@ -141,9 +154,10 @@ type tree struct {
 // Space Complexity: O(1) (excluding the internal empty maps allocated).
 func newTree() *tree {
 	return &tree{
-		pids:     make(map[string]*pidNode),
-		names:    make(map[string]*pidNode),
-		rootNode: newPidNode(nil),
+		pids:           make(map[string]*pidNode),
+		names:          make(map[string][]*pidNode),
+		qualifiedNames: make(map[string]*pidNode),
+		rootNode:       newPidNode(nil),
 	}
 }
 
@@ -176,8 +190,10 @@ func (x *tree) addRootNode(pid *PID) error {
 	x.rootNode.pid.Store(pid)
 	x.rootNode.id = id
 	x.rootNode.name = name
+	x.rootNode.qualifiedName = pid.qualifiedName()
 	x.pids[id] = x.rootNode
-	x.names[name] = x.rootNode
+	x.names[name] = append(x.names[name], x.rootNode)
+	x.qualifiedNames[x.rootNode.qualifiedName] = x.rootNode
 	x.counter.Add(1)
 	return nil
 }
@@ -226,9 +242,10 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 
 	name := pid.Name()
 	childNode := &pidNode{
-		parentNode: parentNode,
-		id:         id,
-		name:       name,
+		parentNode:    parentNode,
+		id:            id,
+		name:          name,
+		qualifiedName: pid.qualifiedName(),
 	}
 	childNode.pid.Store(pid)
 
@@ -237,7 +254,8 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 	putWatcher(&childNode.watchers, parent)
 
 	x.pids[id] = childNode
-	x.names[name] = childNode
+	x.names[name] = append(x.names[name], childNode)
+	x.qualifiedNames[childNode.qualifiedName] = childNode
 	x.counter.Add(1)
 	return nil
 }
@@ -455,9 +473,12 @@ func (x *tree) deleteNode(pid *PID) {
 		}
 
 		delete(x.pids, n.id)
-		if current, ok := x.names[n.name]; ok && current == n {
-			delete(x.names, n.name)
+		x.removeNameLocked(n)
+
+		if current, ok := x.qualifiedNames[n.qualifiedName]; ok && current == n {
+			delete(x.qualifiedNames, n.qualifiedName)
 		}
+
 		n.parentNode = nil
 		n.pid.Store(nil)
 		x.counter.Add(-1)
@@ -474,17 +495,52 @@ func (x *tree) node(id string) (*pidNode, bool) {
 	return n, ok
 }
 
-// nodeByName returns the internal pidNode by actor name.
+// nodeByName returns the internal pidNode by actor name. When several nodes
+// share the name, which children of different parents may, it returns the most
+// recently added one.
 // Time Complexity: O(1) (amortized).
 // Space Complexity: O(1).
 func (x *tree) nodeByName(name string) (*pidNode, bool) {
 	if name == "" {
 		return nil, false
 	}
+
+	// the element is read under the lock: removeNameLocked compacts the
+	// backing array in place
 	x.mu.RLock()
-	node, ok := x.names[name]
+	defer x.mu.RUnlock()
+
+	nodes := x.names[name]
+	if len(nodes) == 0 {
+		return nil, false
+	}
+
+	return nodes[len(nodes)-1], true
+}
+
+// nodeByQualifiedName returns the internal pidNode by the qualified name of its
+// actor: the name of a top-level actor, parent/child for a child. It resolves
+// exactly one node, unlike nodeByName.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1).
+func (x *tree) nodeByQualifiedName(qualifiedName string) (*pidNode, bool) {
+	x.mu.RLock()
+	node, ok := x.qualifiedNames[qualifiedName]
 	x.mu.RUnlock()
 	return node, ok
+}
+
+// removeNameLocked drops n from the name index, leaving the other nodes that
+// share its name in place, and deletes the entry once no node carries the name.
+// The caller MUST hold x.mu (write).
+func (x *tree) removeNameLocked(n *pidNode) {
+	nodes := slices.DeleteFunc(x.names[n.name], func(node *pidNode) bool { return node == n })
+	if len(nodes) == 0 {
+		delete(x.names, n.name)
+		return
+	}
+
+	x.names[n.name] = nodes
 }
 
 // nodes returns all pidNodes currently registered.
@@ -623,6 +679,7 @@ func (x *tree) reset() {
 	x.rootNode = newPidNode(nil)
 	clear(x.pids)
 	clear(x.names)
+	clear(x.qualifiedNames)
 	x.counter.Store(0)
 	// Keep cached noSender (still valid for same ActorSystem instances).
 }

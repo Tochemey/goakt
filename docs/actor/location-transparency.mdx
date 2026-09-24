@@ -47,3 +47,9 @@ paths, or logging).
 
 `ActorOf(ctx, name)` returns a `*PID` whether the actor is local or remote. The framework looks up the actor in the
 local tree first, then in the cluster registry. You get a unified handle either way.
+
+For a top-level actor, `name` is its name. A child's name is unique only among its siblings, so two parents can each
+have a child called `worker`. A child is found by its qualified name, the names of its ancestors and its own joined by
+`/`, from any node: `ActorOf(ctx, "orders/worker")`. On the node that hosts it, a child is also found by its bare name;
+when several children on that node share it, the most recently spawned one is returned. `ActorExists`, `Kill` and
+`ReSpawn` resolve names the same way.

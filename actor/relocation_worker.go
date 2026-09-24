@@ -746,7 +746,7 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 		return nil
 	}
 
-	existing, gerr := system.getCluster().GetActor(ctx, addr.Name())
+	existing, gerr := system.getCluster().GetActor(ctx, addr.QualifiedName())
 	switch {
 	case gerr == nil:
 		if entry, perr := address.Parse(existing.GetAddress()); perr == nil && entry.HostPort() != departedNode {
@@ -759,7 +759,7 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 		return errors.NewInternalError(gerr)
 	}
 
-	if err := system.getCluster().RemoveActor(ctx, addr.Name()); err != nil {
+	if err := system.getCluster().RemoveActor(ctx, addr.QualifiedName()); err != nil {
 		return errors.NewInternalError(err)
 	}
 

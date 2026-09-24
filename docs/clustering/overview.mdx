@@ -186,9 +186,10 @@ which relocates a healthy node's actors for nothing. Keep the default unless the
 
 Actor and grain creation is synchronous with respect to the cluster registry: `Spawn`, `SpawnOn`, `SpawnSingleton`, and
 grain activation only return once the registry record is written to the cluster store. As soon as a creation call
-succeeds, the actor is resolvable by name (for example via `ActorOf`) and reachable from any node in the cluster, with
-no propagation window to retry around. When the registry write fails, the creation call returns the error and the actor
-or grain is stopped, so a failed creation leaves nothing behind.
+succeeds, the actor is resolvable by name, or by qualified name (`parent/child`) for a child, for example via
+`ActorOf`, and reachable from any node in the cluster, with no propagation window to retry around. When the registry
+write fails, the creation call returns the error and the actor or grain is stopped, so a failed creation leaves nothing
+behind.
 
 ## Placement
 

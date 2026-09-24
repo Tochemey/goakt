@@ -352,7 +352,7 @@ func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) 
 		x.logger.Errorf("failed to remove registry record for reliable controller of endpoint=%s during rollback: %v", endpoint.Name(), err)
 	}
 
-	x.removeActorIfIncarnation(ctx, endpoint.Name(), endpoint.incarnationID())
+	x.removeActorIfIncarnation(ctx, endpoint.getAddress().QualifiedName(), endpoint.incarnationID())
 }
 
 // releaseDepartedReliableCompanion removes the registry record of the
@@ -459,7 +459,7 @@ func (x *actorSystem) authenticateRemoteWorkPullingWorker(ctx context.Context, s
 	}
 
 	registry := x.getCluster()
-	record, err := registry.GetActor(ctx, sender.Name())
+	record, err := registry.GetActor(ctx, sender.getAddress().QualifiedName())
 	if err != nil {
 		return nil, "", fmt.Errorf("%w: companion=%s has no registry record: %v", errReliableCompanionUnavailable, sender.Name(), err)
 	}

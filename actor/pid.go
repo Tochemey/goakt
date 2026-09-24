@@ -1033,8 +1033,10 @@ func (pid *PID) Reinstate(cid *PID) error {
 	}
 
 	// this call is necessary because the reference to the actor may have been
-	// kept elsewhere and the actor may have been stopped and removed from the system
-	actual, err := pid.ActorSystem().ActorOf(ctx, cid.Name())
+	// kept elsewhere and the actor may have been stopped and removed from the system.
+	// The qualified name resolves exactly this actor, even when a sibling of
+	// another parent shares its name.
+	actual, err := pid.ActorSystem().ActorOf(ctx, cid.getAddress().QualifiedName())
 	if err != nil {
 		return err
 	}
@@ -1130,6 +1132,8 @@ func (pid *PID) PipeTo(ctx context.Context, to *PID, task func() (any, error), o
 
 // PipeToName runs task asynchronously and, on success, delivers the result to the named actor's mailbox.
 // The actor is resolved by name, providing location transparency: the caller does not need a PID.
+// The name is the actor's name for a top-level actor; a child is found by its qualified name
+// (e.g. "parent/child") from any node, and by its bare name on its own node.
 // On task failure the error is forwarded to the dead-letter queue.
 // Returns ErrNotLocal for remote PIDs and ErrUndefinedTask when task is nil.
 func (pid *PID) PipeToName(ctx context.Context, actorName string, task func() (any, error), opts ...PipeOption) error {
@@ -3738,6 +3742,17 @@ func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
 func (pid *PID) incarnationID() string {
 	if path := pid.Path(); path != nil {
 		return path.incarnationID()
+	}
+	return ""
+}
+
+// qualifiedName returns the actor's name qualified by its ancestors, read
+// through the path without taking fieldsLocker: the path and its address are
+// written once at construction. The actor tree calls it while holding its own
+// lock, and Children and Stop take the two locks in the opposite order.
+func (pid *PID) qualifiedName() string {
+	if p, ok := pid.Path().(*path); ok && p != nil {
+		return p.addr.QualifiedName()
 	}
 	return ""
 }
