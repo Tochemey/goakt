@@ -504,7 +504,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders").Return(nil).Once()
 
 		system.rollbackReliableSpawn(context.Background(), endpoint)
 	})
@@ -516,7 +516,7 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders").Return(nil).Once()
 
 		system.rollbackReliableSpawn(context.Background(), endpoint)
 	})

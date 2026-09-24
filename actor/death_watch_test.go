@@ -1098,7 +1098,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 
 		require.NoError(t, cid.Shutdown(ctx))
 	})
-	t.Run("Logging removal retry warning, success and give-up messages", func(t *testing.T) {
+	t.Run("Logging removal retry warning and give-up messages", func(t *testing.T) {
 		ctx := context.Background()
 		buf := &safeBuffer{}
 		logger := log.NewSlog(log.DebugLevel, buf)
@@ -1129,7 +1129,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		})
 
 		// retriedActor fails its first attempt (warning) and succeeds on the
-		// rescheduled one (debug); doomedActor fails its final attempt (error)
+		// rescheduled one; doomedActor fails its final attempt (error)
 		const retriedActor = "retried-actor"
 		const doomedActor = "doomed-actor"
 		clmock.EXPECT().RemoveActor(mock.Anything, retriedActor).Return(stdErrors.New("canceled")).Once()
@@ -1156,7 +1156,6 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		_ = logger.Flush()
 		logContent := buf.String()
 		require.Contains(t, logContent, fmt.Sprintf("removal retry=1/%d failed", deathWatchRemovalMaxRetries), "a failed attempt within the budget should log a warning")
-		require.Contains(t, logContent, "removed dead actor resource from cluster on retry=2", "a successful retry should log at debug level")
 		require.Contains(t, logContent, fmt.Sprintf("failed to remove dead actor from cluster after %d retries", deathWatchRemovalMaxRetries), "an exhausted budget should log an error")
 	})
 }

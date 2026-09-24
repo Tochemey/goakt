@@ -7748,7 +7748,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		actors := []*internalpb.Actor{
 			// included: relocatable actor on the departed node
 			internalpb.Actor_builder{Address: address.New("worker-1", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
-			// excluded: not relocatable
+			// released: non-relocatable actors are lost with the departed node
 			internalpb.Actor_builder{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false}.Build(),
 			// excluded: system actor
 			internalpb.Actor_builder{Address: address.New("GoAktSystemGuardian", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
@@ -7763,6 +7763,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(grains, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker-2").Return(nil).Once()
 
 		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
