@@ -107,8 +107,10 @@ size when larger); peers with different chunk sizes still interoperate. `WithMax
 effect if the peer advertises less.
 
 `WithLargeMessageDestinations` lists hierarchical actor-path glob patterns that route matching user traffic onto the
-large lane. Patterns match the path suffix after `host:port` (for example `orders/*`), not the full `goakt://` URI. It
-is a **performance and isolation** knob, not a correctness gate: an oversized message to an unlisted destination still
+large lane. Patterns match the path after `host:port`, not the full `goakt://` URI. The path lists every ancestor of
+the actor (for example `orders/cart/item` for the actor `item` under `cart` under `orders`), and each `*` matches
+exactly one segment: `orders/*` matches the direct children of `orders`, and `orders/*/*` their children. It is a
+**performance and isolation** knob, not a correctness gate: an oversized message to an unlisted destination still
 chunks in place on its ordinary lane and stays in order with surrounding small messages to that actor.
 
 ```go Large messages

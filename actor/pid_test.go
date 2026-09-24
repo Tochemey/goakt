@@ -2975,6 +2975,44 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(time.Second)
 		assert.NoError(t, testSystem.Stop(ctx))
 	})
+	t.Run("With nested children under parents sharing a name", func(t *testing.T) {
+		// two actors nested under same-named parents are distinct: the address
+		// of each carries every ancestor, so the tree keeps both
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		pause.For(time.Second)
+
+		first, err := actorSystem.Spawn(ctx, "first", NewMockSupervisor())
+		require.NoError(t, err)
+		second, err := actorSystem.Spawn(ctx, "second", NewMockSupervisor())
+		require.NoError(t, err)
+
+		firstMiddle, err := first.SpawnChild(ctx, "middle", NewMockSupervisor())
+		require.NoError(t, err)
+		secondMiddle, err := second.SpawnChild(ctx, "middle", NewMockSupervisor())
+		require.NoError(t, err)
+
+		firstLeaf, err := firstMiddle.SpawnChild(ctx, "leaf", NewMockSupervised())
+		require.NoError(t, err)
+		secondLeaf, err := secondMiddle.SpawnChild(ctx, "leaf", NewMockSupervised())
+		require.NoError(t, err)
+
+		require.NotSame(t, firstLeaf, secondLeaf)
+		require.True(t, strings.HasSuffix(firstLeaf.ID(), "/first/middle/leaf"), firstLeaf.ID())
+		require.True(t, strings.HasSuffix(secondLeaf.ID(), "/second/middle/leaf"), secondLeaf.ID())
+		require.False(t, firstLeaf.Path().Equals(secondLeaf.Path()))
+		require.Equal(t, "first", firstLeaf.Path().Parent().Parent().Name())
+		require.Equal(t, "second", secondLeaf.Path().Parent().Parent().Name())
+		require.True(t, firstLeaf.IsRunning())
+		require.True(t, secondLeaf.IsRunning())
+		require.Len(t, firstMiddle.Children(), 1)
+		require.Len(t, secondMiddle.Children(), 1)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
 }
 
 func TestSpawnChildInitTimeout(t *testing.T) {

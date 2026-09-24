@@ -162,6 +162,22 @@ func TestAddress(t *testing.T) {
 		assert.Equal(t, "goakt://system@host:1234/parent/child", child.String())
 	})
 
+	t.Run("With nested parents string", func(t *testing.T) {
+		grand := New("grand", "system", "host", 1234)
+		parent := NewWithParent("parent", "system", "host", 1234, grand)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		assert.Equal(t, "goakt://system@host:1234/grand/parent/child", child.String())
+	})
+
+	t.Run("With nested parents under different roots", func(t *testing.T) {
+		firstParent := NewWithParent("parent", "system", "host", 1234, New("first", "system", "host", 1234))
+		secondParent := NewWithParent("parent", "system", "host", 1234, New("second", "system", "host", 1234))
+		first := NewWithParent("child", "system", "host", 1234, firstParent)
+		second := NewWithParent("child", "system", "host", 1234, secondParent)
+		assert.Equal(t, "goakt://system@host:1234/first/parent/child", first.String())
+		assert.Equal(t, "goakt://system@host:1234/second/parent/child", second.String())
+	})
+
 	t.Run("Equals returns false when to be compared to is nil", func(t *testing.T) {
 		addr := New("name", "system", "host", 1234)
 		assert.False(t, addr.Equals(nil))
@@ -242,6 +258,26 @@ func TestParse(t *testing.T) {
 		}
 	})
 
+	t.Run("With nested parents", func(t *testing.T) {
+		addr, err := Parse("goakt://system@host:1234/grand/parent/child")
+		assert.NoError(t, err)
+		if assert.NotNil(t, addr) {
+			assert.Equal(t, "child", addr.Name())
+			assert.Equal(t, "goakt://system@host:1234/grand/parent/child", addr.String())
+			if assert.NotNil(t, addr.Parent()) {
+				assert.Equal(t, "parent", addr.Parent().Name())
+				assert.Equal(t, "goakt://system@host:1234/grand/parent", addr.Parent().String())
+				if assert.NotNil(t, addr.Parent().Parent()) {
+					assert.Equal(t, "grand", addr.Parent().Parent().Name())
+					assert.Equal(t, "system", addr.Parent().Parent().System())
+					assert.Equal(t, "host", addr.Parent().Parent().Host())
+					assert.EqualValues(t, 1234, addr.Parent().Parent().Port())
+					assert.Nil(t, addr.Parent().Parent().Parent())
+				}
+			}
+		}
+	})
+
 	t.Run("Round-trip with String", func(t *testing.T) {
 		// Parse(s).String() must equal s for any string Parse accepts.
 		// The receive path in actorSystem.deliverRemoteTellMessage relies on
@@ -250,6 +286,8 @@ func TestParse(t *testing.T) {
 		cases := []string{
 			"goakt://system@host:1234/name",
 			"goakt://system@host:1234/parent/child",
+			"goakt://system@host:1234/grand/parent/child",
+			"goakt://system@host:1234/root/grand/parent/child",
 			"goakt://orders@127.0.0.1:9000/checkout",
 			"goakt://orders@127.0.0.1:9000/root/checkout",
 			"goakt://Sys@HOST:1/Name",
@@ -279,8 +317,10 @@ func TestParse(t *testing.T) {
 			{name: "Missing path separator", addr: "goakt://system@host:1234", errContains: "address format is invalid"},
 			{name: "Missing host port separator", addr: "goakt://system@host1234/name", errContains: "address format is invalid"},
 			{name: "Invalid port", addr: "goakt://system@host:abc/name", errContains: "invalid syntax"},
-			{name: "Extra path segment", addr: "goakt://system@host:1234/parent/child/grandchild", errContains: "address format is invalid"},
+			{name: "Empty name", addr: "goakt://system@host:1234/", errContains: "address format is invalid"},
 			{name: "Double slash path", addr: "goakt://system@host:1234//child", errContains: "address format is invalid"},
+			{name: "Empty middle segment", addr: "goakt://system@host:1234/parent//child", errContains: "address format is invalid"},
+			{name: "Trailing slash", addr: "goakt://system@host:1234/parent/child/", errContains: "address format is invalid"},
 			{name: "Extra scheme separator", addr: "goakt://system@host://1234/name", errContains: "address format is invalid"},
 			{name: "Extra system separator", addr: "goakt://system@host@other:1234/name", errContains: "address format is invalid"},
 		}

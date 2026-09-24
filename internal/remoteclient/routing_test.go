@@ -47,6 +47,22 @@ func TestRouteUserMatchesHierarchicalLargeDestination(t *testing.T) {
 	role, index := routeUser(receiver, 4, []string{"orders/*"})
 	assert.Equal(t, internalpb.LaneRole_LANE_ROLE_LARGE, role)
 	assert.Zero(t, index)
+
+	// a nested actor presents every ancestor, and each '*' matches one segment
+	nested := "goakt://system@127.0.0.1:8080/orders/bulk-ingest/worker"
+	assert.Equal(t, "/orders/bulk-ingest/worker", hierarchicalPath(nested))
+
+	role, index = routeUser(nested, 4, []string{"orders/*"})
+	assert.Equal(t, internalpb.LaneRole_LANE_ROLE_ORDINARY, role)
+	assert.Less(t, index, uint32(4))
+
+	role, index = routeUser(nested, 4, []string{"orders/*/*"})
+	assert.Equal(t, internalpb.LaneRole_LANE_ROLE_LARGE, role)
+	assert.Zero(t, index)
+
+	role, index = routeUser(nested, 4, []string{"orders/bulk-ingest/*"})
+	assert.Equal(t, internalpb.LaneRole_LANE_ROLE_LARGE, role)
+	assert.Zero(t, index)
 }
 
 func TestMatchesLargeDestinationEmptyPatterns(t *testing.T) {
