@@ -1043,12 +1043,10 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 	}
 
 	if !props.GetRelocatable() {
-		// A non-relocatable reliable endpoint is lost with its node by design,
-		// but its registry records must not outlive it: reliable endpoints
-		// publish with if-absent semantics, so a leaked record would block the
-		// name cluster-wide instead of merely going stale. Withdraw the
-		// endpoint and controller records; ordinary non-relocatable actors
-		// keep their historical registry semantics.
+		// Non-relocatable actors are lost with their node by design. Their
+		// atomic name claims are withdrawn by departed-node registry recovery;
+		// reliable endpoints also own an internal controller record which this
+		// relocation path must withdraw alongside the endpoint.
 		if props.GetReliableDelivery() != nil {
 			if _, rerr := x.releaseDepartedEntry(ctx, addr.Name(), departedNode); rerr != nil {
 				x.logger.Errorf("failed to release registry record of the departed non-relocatable reliable endpoint=%s: %v", addr.Name(), rerr)
@@ -1098,7 +1096,10 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 // loudly rather than propagated, the respawn error itself is what the caller
 // reports.
 func (x *actorSystem) restoreDepartedEntry(ctx context.Context, props *internalpb.Actor) {
-	if err := x.cluster.PutActor(ctx, props); err != nil {
+	if err := cluster.StoreActor(ctx, x.cluster, props); err != nil {
+		if errors.Is(err, cluster.ErrActorAlreadyExists) {
+			return
+		}
 		x.logger.Errorf("failed to restore registry record for actor=%s after a failed respawn: %v (hint: the actor may be unrecoverable)", props.GetAddress(), err)
 	}
 }
@@ -1122,8 +1123,12 @@ func (x *actorSystem) releaseDepartedEntry(ctx context.Context, name, departedNo
 			return false, nil
 		}
 
-		if rerr := x.cluster.RemoveActor(ctx, name); rerr != nil {
+		current, rerr := cluster.ReleaseActor(ctx, x.cluster, name, existing.GetIncarnationId())
+		if rerr != nil {
 			return false, gerrors.NewInternalError(rerr)
+		}
+		if current != nil {
+			return false, nil
 		}
 
 		return true, nil

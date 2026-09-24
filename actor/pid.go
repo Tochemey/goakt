@@ -3836,10 +3836,11 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
 		AddRunner(func() error { return actorSystem.putActorOnCluster(ctx, pid) }).
 		Run(); err != nil {
-		// disable messages processing so a failed restart does not leave a
-		// re-inited but unpublished actor running
+		// disable messages processing and remove the failed reattach so local
+		// lookup cannot hide a newer cluster owner
 		pid.setState(stoppingState, true)
 		pid.setState(runningState, false)
+		tree.deleteNode(pid)
 		return err
 	}
 

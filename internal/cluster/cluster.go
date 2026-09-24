@@ -111,6 +111,9 @@ const (
 	namespaceActors recordNamespace = "actors"
 	namespaceGrains recordNamespace = "grains"
 	namespaceJobs   recordNamespace = "jobs"
+	// namespaceActorLocks serializes ownership-changing lifecycle mutations of
+	// one named actor without changing the low-level actor registry CRUD API.
+	namespaceActorLocks recordNamespace = "actor-locks"
 	// namespaceScheduleFire stores the short-lived fire claims used to arbitrate which node
 	// delivers a given tick of a cluster-wide cron schedule (see actor.ScheduleWithCron).
 	namespaceScheduleFire recordNamespace = "schedule-fire"
@@ -611,6 +614,141 @@ func (x *cluster) RemoveActor(ctx context.Context, actorName string) error {
 	defer x.mu.RUnlock()
 
 	return x.deleteRecord(ctx, namespaceActors, actorName)
+}
+
+// ClaimActor atomically reserves an actor name for initial publication.
+// The built-in cluster serializes the claim with StoreActor and ReleaseActor
+// for the same name. Test doubles and alternative internal implementations keep
+// their historical publication behavior.
+func ClaimActor(ctx context.Context, cl Cluster, actor *internalpb.Actor) error {
+	c, ok := cl.(*cluster)
+	if !ok {
+		if actor.GetReliableDelivery() != nil || actor.GetReliableCompanion() != nil {
+			return cl.PutActorIfAbsent(ctx, actor)
+		}
+		return cl.PutActor(ctx, actor)
+	}
+
+	if !c.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	addr, _ := address.Parse(actor.GetAddress())
+	key := addr.Name()
+	encoded, err := encode(actor)
+	if err != nil {
+		return err
+	}
+
+	unlock, err := c.lockActor(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	if err := c.putRecordIfAbsent(ctx, namespaceActors, key, encoded); err != nil {
+		if errors.Is(err, olric.ErrKeyFound) {
+			return ErrActorAlreadyExists
+		}
+		return err
+	}
+	return nil
+}
+
+// StoreActor writes an already-owned actor activation. Built-in clusters
+// serialize the update with ClaimActor and ReleaseActor and refuse to overwrite
+// a different incarnation.
+func StoreActor(ctx context.Context, cl Cluster, actor *internalpb.Actor) error {
+	c, ok := cl.(*cluster)
+	if !ok {
+		return cl.PutActor(ctx, actor)
+	}
+
+	if !c.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	addr, _ := address.Parse(actor.GetAddress())
+	key := addr.Name()
+	encoded, err := encode(actor)
+	if err != nil {
+		return err
+	}
+
+	unlock, err := c.lockActor(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	value, err := c.getRecord(ctx, namespaceActors, key)
+	switch {
+	case errors.Is(err, olric.ErrKeyNotFound):
+		return c.putRecord(ctx, namespaceActors, key, encoded)
+	case err != nil:
+		return err
+	}
+
+	current, err := decode(value)
+	if err != nil {
+		return err
+	}
+	if current.GetIncarnationId() != actor.GetIncarnationId() {
+		return ErrActorAlreadyExists
+	}
+
+	return c.putRecord(ctx, namespaceActors, key, encoded)
+}
+
+// ReleaseActor deletes name only while the current registry record still
+// belongs to incarnationID. It returns the current record when another
+// incarnation owns the name, and nil when the expected record was removed or
+// was already absent.
+func ReleaseActor(ctx context.Context, cl Cluster, name, incarnationID string) (*internalpb.Actor, error) {
+	c, ok := cl.(*cluster)
+	if !ok {
+		if err := cl.RemoveActor(ctx, name); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
+	if !c.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	unlock, err := c.lockActor(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
+	value, err := c.getRecord(ctx, namespaceActors, name)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	current, err := decode(value)
+	if err != nil {
+		return nil, err
+	}
+	if current.GetIncarnationId() != incarnationID {
+		return current, nil
+	}
+
+	return nil, c.deleteRecord(ctx, namespaceActors, name)
 }
 
 // ActorExists reports whether an actor with the given name exists in the
@@ -1845,6 +1983,25 @@ func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, k
 
 	_, err := x.dmap.Delete(ctx, composeKey(namespace, key))
 	return err
+}
+
+// lockActor takes the cluster-wide lifecycle lock for one actor name.
+func (x *cluster) lockActor(ctx context.Context, name string) (func(), error) {
+	ctx = context.WithoutCancel(ctx)
+	lease := 2 * (x.readTimeout + x.writeTimeout)
+	lock, err := x.dmap.LockWithTimeout(ctx, composeKey(namespaceActorLocks, name), lease, x.writeTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	return func() {
+		unlockCtx, cancel := context.WithTimeout(ctx, x.writeTimeout)
+		defer cancel()
+
+		if err := lock.Unlock(unlockCtx); err != nil {
+			x.logger.Warnf("failed to release the lock of actor=%s: %v", name, err)
+		}
+	}, nil
 }
 
 // lockGrain takes the cluster-wide lock of the grain and returns the function

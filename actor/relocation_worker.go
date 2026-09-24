@@ -733,9 +733,9 @@ func (w *relocationWorker) sendBatch(ctx context.Context, target *cluster.Peer, 
 // departed node (or is missing). An entry pointing anywhere else means the
 // singleton was already recreated on a survivor, so this is a stale re-run (a
 // duplicate NodeLeft against a peer-state snapshot that a failed DeletePeerState
-// left behind, or a leadership change) and the unconditional RemoveActor +
-// SpawnSingleton below would tear down and double-spawn the live singleton.
-// Skipping in that case keeps the relocation idempotent.
+// left behind, or a leadership change). The conditional release below preserves
+// a newer owner if the record changes after this read, keeping relocation
+// idempotent.
 func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
@@ -753,14 +753,20 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 			// already recreated on a survivor; do not tear it down and respawn
 			return nil
 		}
+
+		current, releaseErr := cluster.ReleaseActor(ctx, system.getCluster(), addr.Name(), existing.GetIncarnationId())
+		if releaseErr != nil {
+			return errors.NewInternalError(releaseErr)
+		}
+		if current != nil {
+			// The name was re-owned after the read above. Leave the newer
+			// singleton intact instead of deleting it as stale relocation state.
+			return nil
+		}
 	case stderrors.Is(gerr, cluster.ErrActorNotFound):
 		// no registry entry; fall through and (re-)establish the singleton
 	default:
 		return errors.NewInternalError(gerr)
-	}
-
-	if err := system.getCluster().RemoveActor(ctx, addr.Name()); err != nil {
-		return errors.NewInternalError(err)
 	}
 
 	actor, err := system.getReflection().instantiateActor(props.GetType())

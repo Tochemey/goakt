@@ -1,5 +1,11 @@
 # Unreleased
 
+## 🔧 Fixes
+
+- **Cluster-unique named actor activation** ([#1377](https://github.com/Tochemey/goakt/issues/1377)).
+  Concurrent `SpawnOn` calls now claim ordinary actor names atomically and keep cleanup fenced by
+  actor incarnation, preventing duplicate live activations under one cluster-global name.
+
 ## ✨ Features
 
 - **Message scheduling for grains** ([#1372](https://github.com/Tochemey/goakt/issues/1372)). `ScheduleGrainOnce`, `ScheduleGrain` and `ScheduleGrainWithCron` deliver a message to a grain once after a delay, at a fixed interval, or on a cron expression. Delivery is a one-way `TellGrain`: it reaches the grain wherever it lives and activates it again if it has passivated. Grain schedules share references, `CancelSchedule`, `PauseSchedule`, `ResumeSchedule`, metrics and cluster rules with actor schedules, and `ListSchedules` reports them through the new `ScheduleInfo.Grain` field. They outlive the grain's activation and, like actor schedules, are not persisted.

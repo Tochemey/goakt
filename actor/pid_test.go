@@ -7429,6 +7429,8 @@ func TestRestartPublishFailureFailsRestart(t *testing.T) {
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
 	assert.False(t, pid.IsRunning(), "a failed restart must leave the actor non-running")
+	_, ok := actorSystem.actors.node(pid.ID())
+	require.False(t, ok, "a failed restart must not leave a local tree node behind")
 }
 
 func TestBackoffDelay(t *testing.T) {

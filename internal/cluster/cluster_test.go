@@ -4489,3 +4489,72 @@ func TestReleaseGrainReportsUnlockFailure(t *testing.T) {
 	require.Equal(t, 1, lock.unlocks)
 	require.Contains(t, logs.String(), "failed to release the lock of grain=grain-id")
 }
+
+func TestActorLifecycleOwnership(t *testing.T) {
+	ctx := context.Background()
+	server := startNatsServer(t)
+	cl, provider := startEngine(t, server.Addr().String())
+
+	t.Cleanup(func() {
+		require.NoError(t, cl.Stop(context.WithoutCancel(ctx)))
+		require.NoError(t, provider.Close())
+		server.Shutdown()
+	})
+
+	impl := cl.(*cluster)
+	name := uuid.NewString()
+	addr := address.New(name, "testSystem", impl.node.Host, impl.node.RemotingPort)
+	firstIncarnation := uuid.NewString()
+	first := internalpb.Actor_builder{
+		Address:       addr.String(),
+		IncarnationId: firstIncarnation,
+		Type:          "first",
+	}.Build()
+
+	require.NoError(t, ClaimActor(ctx, cl, first))
+
+	duplicate := internalpb.Actor_builder{
+		Address:       addr.String(),
+		IncarnationId: uuid.NewString(),
+		Type:          "duplicate",
+	}.Build()
+	require.ErrorIs(t, ClaimActor(ctx, cl, duplicate), ErrActorAlreadyExists)
+
+	updated := internalpb.Actor_builder{
+		Address:       addr.String(),
+		IncarnationId: firstIncarnation,
+		Type:          "updated",
+	}.Build()
+	require.NoError(t, StoreActor(ctx, cl, updated))
+
+	actual, err := cl.GetActor(ctx, name)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(updated, actual))
+
+	newIncarnation := uuid.NewString()
+	reowned := internalpb.Actor_builder{
+		Address:       addr.String(),
+		IncarnationId: newIncarnation,
+		Type:          "reowned",
+	}.Build()
+	// Simulate a later owner already installed by another lifecycle. Release of
+	// the old incarnation must observe and preserve it.
+	require.NoError(t, cl.PutActor(ctx, reowned))
+	require.ErrorIs(t, StoreActor(ctx, cl, updated), ErrActorAlreadyExists)
+
+	current, err := ReleaseActor(ctx, cl, name, firstIncarnation)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(reowned, current))
+
+	actual, err = cl.GetActor(ctx, name)
+	require.NoError(t, err)
+	require.True(t, proto.Equal(reowned, actual))
+
+	current, err = ReleaseActor(ctx, cl, name, newIncarnation)
+	require.NoError(t, err)
+	require.Nil(t, current)
+
+	actual, err = cl.GetActor(ctx, name)
+	require.Nil(t, actual)
+	require.ErrorIs(t, err, ErrActorNotFound)
+}

@@ -2964,15 +2964,13 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 	return pid, nil
 }
 
-// publishSpawnedActor writes the initial registry record of a completed
-// spawn. A reliable endpoint publishes atomically with PutActorIfAbsent so a
-// concurrent spawn of the same name on another node can never be overwritten,
-// turning the non-atomic precondition read into a real uniqueness guarantee;
-// every other actor keeps the plain publication path, whose overwrite
-// semantics restarts and relocation rely on.
+// publishSpawnedActor atomically claims the initial cluster registry name of a
+// completed spawn. Restarts and registry repair keep using putActorOnCluster's
+// overwrite semantics because they update an already-owned activation; initial
+// activation must never overwrite a concurrent winner.
 func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
-	if pid.reliableDelivery() == nil || !x.clusterEnabled.Load() {
-		return x.putActorOnCluster(ctx, pid)
+	if !x.clusterEnabled.Load() || (isSystemName(pid.Name()) && pid.reliableCompanion() == nil) {
+		return nil
 	}
 
 	actor, err := pid.toSerialize()
@@ -2980,7 +2978,7 @@ func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
 		return err
 	}
 
-	if err := x.getCluster().PutActorIfAbsent(ctx, actor); err != nil {
+	if err := cluster.ClaimActor(ctx, x.getCluster(), actor); err != nil {
 		if errors.Is(err, cluster.ErrActorAlreadyExists) {
 			return gerrors.NewErrActorAlreadyExists(pid.Name())
 		}
@@ -2989,27 +2987,6 @@ func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
 	}
 
 	return nil
-}
-
-// removeActorIfIncarnation removes the registry record for name only when it
-// still carries incarnationID, following the releaseDepartedEntry ownership
-// rule: cleanup owned by one activation must never delete a record already
-// overwritten by a newer one. Best-effort by design, since every caller is
-// itself a rollback path whose primary error is already on its way to the
-// user; failures are logged for diagnosability.
-func (x *actorSystem) removeActorIfIncarnation(ctx context.Context, name, incarnationID string) {
-	registry := x.getCluster()
-	record, err := registry.GetActor(ctx, name)
-
-	switch {
-	case errors.Is(err, cluster.ErrActorNotFound):
-	case err != nil:
-		x.logger.Errorf("failed to load registry record for actor=%s during rollback: %v", name, err)
-	case record.GetIncarnationId() == incarnationID:
-		if err := registry.RemoveActor(ctx, name); err != nil {
-			x.logger.Errorf("failed to remove registry record for actor=%s during rollback: %v", name, err)
-		}
-	}
 }
 
 // rollbackSpawn stops a partially spawned actor so a failed spawn leaves
@@ -3040,7 +3017,7 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 		return err
 	}
 
-	return x.getCluster().PutActor(ctx, actor)
+	return cluster.StoreActor(ctx, x.getCluster(), actor)
 }
 
 // putGrainOnCluster synchronously writes the grain's registry record to the
@@ -3237,12 +3214,9 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 			continue
 		}
 
-		if err := x.cluster.RemoveActor(ctx, addr.Name()); err != nil {
+		if _, err := cluster.ReleaseActor(ctx, x.cluster, addr.Name(), actor.GetIncarnationId()); err != nil {
 			x.logger.Warnf("failed to remove stale cluster actor %s: %v", addr.String(), err)
-			continue
 		}
-
-		x.logger.Debugf("removed stale cluster actor %s", addr.String())
 	}
 
 	if recovered > 0 {
@@ -3950,8 +3924,9 @@ func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress 
 // The returned PeerState mirrors the graceful-shutdown snapshot: Host/PeersPort
 // match the NodeLeft event's peers address so relocation bookkeeping stays keyed
 // on it, RemotingPort carries the resolved remoting port so the recreate gating
-// matches stale registry entries, and only relocatable actors are included
-// (non-relocatable actors are lost with the node by design). All matching grains
+// matches stale registry entries. Relocatable actors are included for recovery;
+// ordinary non-relocatable actor claims are conditionally released here because
+// they are lost with the node by design. All matching grains
 // are included; the relocation worker filters and splits them by their own
 // relocation flags.
 //
@@ -4017,21 +3992,23 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	var wireActors map[string]*internalpb.Actor
 
 	for _, actor := range registryActors {
-		// Only relocatable actors are recovered; the rest are lost with the
-		// node by design. A non-relocatable reliable endpoint still joins the
-		// set so the relocation worker withdraws its registry records: the
-		// endpoint publishes with if-absent semantics, so a leaked record
-		// would block the name cluster-wide instead of merely going stale.
-		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
-			continue
-		}
-
 		addr, perr := address.Parse(actor.GetAddress())
 		if perr != nil {
 			continue
 		}
 
 		if isSystemName(addr.Name()) {
+			continue
+		}
+
+		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
+			// Initial ordinary actor publication is now an atomic name claim.
+			// A crashed non-relocatable owner must therefore release its stale
+			// claim instead of leaving the name permanently reserved.
+			if _, releaseErr := cluster.ReleaseActor(ctx, x.cluster, addr.Name(), actor.GetIncarnationId()); releaseErr != nil {
+				x.logger.Errorf("node=%s failed to release non-relocatable actor=%s owned by departed node=%s: %v", x.String(), addr.Name(), peerAddress, releaseErr)
+				return nil, false
+			}
 			continue
 		}
 
@@ -4577,15 +4554,16 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
-	// Remove all actors from the cluster
+	// Release only registry records owned by these local PID incarnations.
+	// ReleaseActor is safe for actors that were never published or already lost
+	// ownership: absent records are a no-op and newer incarnations are preserved.
 	for _, pid := range pids {
 		eg.Go(func() error {
 			actorName := pid.Name()
-			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
+			if _, err := cluster.ReleaseActor(ctx, x.cluster, actorName, pid.incarnationID()); err != nil {
 				x.logger.Errorf("failed to remove actor=%s from cluster: %v (hint: check cluster connectivity)", actorName, err)
 				return err
 			}
-			x.logger.Debugf("actor=%s removed from cluster", actorName)
 
 			// A reliable endpoint's controller companion carries a reserved
 			// name, so it is absent from pids and the per-actor death watch

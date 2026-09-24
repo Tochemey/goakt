@@ -49,8 +49,9 @@ const (
 // scheduler machinery instead of a dedicated goroutine, and each message
 // carries its own state so DeathWatch itself stays stateless.
 type retryDeadActorRemoval struct {
-	actorName string
-	attempt   int
+	actorName     string
+	incarnationID string
+	attempt       int
 }
 
 // clusterCleanupError signals a failed removal of a dead actor's cluster
@@ -153,31 +154,19 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 		actorTree.deleteNode(pid)
 		// system actors never publish registry records, with one exception:
 		// reliable-delivery controller companions do through their private
-		// publication path, so their records must leave the registry with them
+		// publication path, so their records must leave the registry with them.
 		removable := !pid.isStateSet(systemState) || pid.reliableCompanion() != nil
 		removeFromCluster := actorSys.InCluster() && removable && !actorSys.isStopping()
 
 		if removeFromCluster {
 			cctx := ctx.withoutCancel()
-			cl := actorSys.getCluster()
-
-			if err := cl.RemoveActor(cctx, actorName); err != nil {
+			_, err := cluster.ReleaseActor(cctx, actorSys.getCluster(), actorName, pid.incarnationID())
+			if err != nil {
 				if logger.Enabled(log.ErrorLevel) {
 					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", path, err)
 				}
-				// a failed registry cleanup is not a DeathWatch failure: the
-				// removal often runs while the cluster is still digesting the
-				// membership change that terminated the actor, so the error is
-				// usually transient. Report it as clusterCleanupError, which the
-				// DeathWatch supervisor resumes on (see spawnDeathWatch) instead
-				// of escalating to the system guardian and stopping an otherwise
-				// healthy node, and schedule a bounded removal retry so the
-				// stale record does not keep the actor name reserved once the
-				// cluster settles. A stopped engine is the one failure no retry
-				// can outlive (it means the system began stopping after the
-				// gate above), so only that skips the retry outright.
 				if !errors.Is(err, cluster.ErrEngineNotRunning) {
-					x.scheduleRemovalRetry(ctx, actorName, 1)
+					x.scheduleRemovalRetry(ctx, actorName, pid.incarnationID(), 1)
 				}
 				return newClusterCleanupError(err)
 			}
@@ -211,10 +200,8 @@ func (x *deathWatch) handleRetryDeadActorRemoval(ctx *ReceiveContext) {
 		return
 	}
 
-	cl := actorSys.getCluster()
-	if err := cl.RemoveActor(ctx.withoutCancel(), msg.actorName); err != nil {
-		// a stopped engine cannot recover within the retry budget: the system
-		// is going down and its registry records are reconciled elsewhere
+	_, err := cluster.ReleaseActor(ctx.withoutCancel(), actorSys.getCluster(), msg.actorName, msg.incarnationID)
+	if err != nil {
 		if errors.Is(err, cluster.ErrEngineNotRunning) {
 			return
 		}
@@ -230,12 +217,8 @@ func (x *deathWatch) handleRetryDeadActorRemoval(ctx *ReceiveContext) {
 			logger.Warnf("actor=%s removal retry=%d/%d failed: %v (retrying)", msg.actorName, msg.attempt, deathWatchRemovalMaxRetries, err)
 		}
 
-		x.scheduleRemovalRetry(ctx, msg.actorName, msg.attempt+1)
+		x.scheduleRemovalRetry(ctx, msg.actorName, msg.incarnationID, msg.attempt+1)
 		return
-	}
-
-	if logger.Enabled(log.DebugLevel) {
-		logger.Debugf("actor=%s removed dead actor resource from cluster on retry=%d", msg.actorName, msg.attempt)
 	}
 }
 
@@ -245,9 +228,9 @@ func (x *deathWatch) handleRetryDeadActorRemoval(ctx *ReceiveContext) {
 // mailbox is never blocked waiting out a backoff. A scheduling failure is only
 // logged: it means the scheduler is no longer running, which only happens when
 // the actor system itself is going down.
-func (x *deathWatch) scheduleRemovalRetry(ctx *ReceiveContext, actorName string, attempt int) {
+func (x *deathWatch) scheduleRemovalRetry(ctx *ReceiveContext, actorName, incarnationID string, attempt int) {
 	delay := deathWatchRemovalRetryDelay << (attempt - 1)
-	message := &retryDeadActorRemoval{actorName: actorName, attempt: attempt}
+	message := &retryDeadActorRemoval{actorName: actorName, incarnationID: incarnationID, attempt: attempt}
 
 	if err := ctx.ActorSystem().ScheduleOnce(ctx.withoutCancel(), message, ctx.Self(), delay); err != nil {
 		logger := ctx.Logger()

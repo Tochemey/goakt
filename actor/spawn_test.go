@@ -855,6 +855,76 @@ func TestSpawn(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("SpawnOn concurrent same-name activation is cluster unique", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+		systems, providers := startNATsSystems(t, srv.Addr().String(), 2)
+		pause.For(time.Second)
+
+		t.Cleanup(func() {
+			for i, system := range systems {
+				assert.NoError(t, system.Stop(context.WithoutCancel(ctx)))
+				assert.NoError(t, providers[i].Close())
+			}
+			srv.Shutdown()
+		})
+
+		const contenders = 32
+		for round := range 10 {
+			actorName := fmt.Sprintf("same-name-race-%d", round)
+			start := make(chan struct{})
+			failures := make(chan error, contenders)
+			var wg sync.WaitGroup
+
+			for i := range contenders {
+				system := systems[i%len(systems)]
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+
+					_, err := system.SpawnOn(
+						ctx,
+						actorName,
+						NewMockActor(),
+						WithPlacement(LeastLoad),
+						WithRelocationDisabled(),
+					)
+					if err != nil && !errors.Is(err, gerrors.ErrActorAlreadyExists) {
+						failures <- err
+					}
+				}()
+			}
+
+			close(start)
+			wg.Wait()
+			close(failures)
+			for err := range failures {
+				require.NoError(t, err)
+			}
+
+			// A CAS loser is stopped synchronously, while DeathWatch removes its
+			// local tree node asynchronously. Wait for that removal rather than
+			// merely observing IsRunning=false on the losing PID.
+			require.Eventually(t, func() bool {
+				localOwners := 0
+				for _, system := range systems {
+					impl := system.(*actorSystem)
+					if node, ok := impl.actors.nodeByName(actorName); ok && node.value() != nil {
+						localOwners++
+					}
+				}
+				return localOwners == 1
+			}, 5*time.Second, 10*time.Millisecond, "same-name activation must leave one local owner")
+
+			first, err := systems[0].ActorOf(ctx, actorName)
+			require.NoError(t, err)
+			second, err := systems[1].ActorOf(ctx, actorName)
+			require.NoError(t, err)
+			require.True(t, first.Equals(second), "both nodes must resolve the same actor identity")
+		}
+	})
+
 	t.Run("SpawnOn when actor system not started", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2257,6 +2327,56 @@ func TestSpawnPublishFailureStopsActor(t *testing.T) {
 
 	_, ok := actorSystem.actors.nodeByName(actorName)
 	require.False(t, ok, "failed spawn must leave no actor behind")
+}
+
+func TestSpawnPublishFailureRetriesRegistryCleanup(t *testing.T) {
+	ctx := context.Background()
+	sys, err := NewActorSystem("spawn-publish-cleanup-retry", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	actorSystem := sys.(*actorSystem)
+	require.NoError(t, actorSystem.Start(ctx))
+
+	pause.For(time.Second)
+
+	clusterMock := mockcluster.NewCluster(t)
+
+	actorSystem.locker.Lock()
+	actorSystem.cluster = clusterMock
+	actorSystem.locker.Unlock()
+	actorSystem.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		actorSystem.clusterEnabled.Store(false)
+		actorSystem.locker.Lock()
+		actorSystem.cluster = nil
+		actorSystem.locker.Unlock()
+		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	const actorName = "publish-cleanup-retry"
+	removed := make(chan struct{}, 1)
+	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(errors.New("transient registry error")).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).RunAndReturn(func(context.Context, string) error {
+		removed <- struct{}{}
+		return nil
+	}).Once()
+
+	pid, err := actorSystem.Spawn(ctx, actorName, NewMockActor())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, assert.AnError)
+	assert.Nil(t, pid)
+
+	select {
+	case <-removed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("failed spawn must retry registry cleanup")
+	}
+
+	_, ok := actorSystem.actors.nodeByName(actorName)
+	require.False(t, ok, "failed spawn must remove the local actor before retrying registry cleanup")
 }
 
 func TestSpawnSingletonPublishFailureLeavesNothingBehind(t *testing.T) {
