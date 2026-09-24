@@ -1281,7 +1281,6 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 
 	departedNode := address.FormatHostPort("127.0.0.1", 8080)
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
 
 	spy := &MockSpawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)

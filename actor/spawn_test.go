@@ -2827,10 +2827,9 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
 	clusterMock.EXPECT().GetActor(mock.Anything, oldCompanion).Return(companionRecord, nil).Once()
 	clusterMock.EXPECT().RemoveActor(mock.Anything, oldCompanion).Return(nil).Once()
-	// the respawn publishes the endpoint atomically and its fresh companion
+	// the respawn atomically publishes both the endpoint and its fresh companion
 	clusterMock.EXPECT().ActorExists(mock.Anything, "orders-producer").Return(false, nil).Once()
-	clusterMock.EXPECT().PutActorIfAbsent(mock.Anything, mock.Anything).Return(nil).Once()
-	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActorIfAbsent(mock.Anything, mock.Anything).Return(nil).Twice()
 
 	require.NoError(t, actorSystem.recreateActorFromWire(ctx, record, departedNode))
 

@@ -8136,6 +8136,7 @@ func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
 		Return([]*internalpb.Actor{relocatable, pinned, reliable, companion}, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 7777, mock.Anything).
 		Return(nil, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "pinned").Return(nil).Once()
 
 	peerState, ok := system.deriveRelocationSetFromRegistry(context.Background(), peerAddress)
 	require.True(t, ok)
