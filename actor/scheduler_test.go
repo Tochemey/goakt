@@ -2780,17 +2780,10 @@ func TestGrainSchedulerCounters(t *testing.T) {
 // NATS-backed cluster: cron single fire across nodes, node-local interval schedules, and a
 // one-shot registered on a node that does not own the Grain. The Grain is activated on node1
 // only, so every delivery from another node travels through TellGrain's remote routing.
-//
-// The nodes use the WAN network profile. Under the LAN profile's 500ms probe timeout a
-// CPU-starved runner (race detector on a small CI machine) can declare node1 dead while it is
-// alive; relocation then releases the Grain's registry record, another node activates a second
-// instance, and node1 keeps delivering to its own, so deliveries split between two instances.
 func TestGrainSchedulerMultiNode(t *testing.T) {
 	ctx := context.TODO()
 	srv := startNatsServer(t)
-	systems, providers := startNATsSystems(t, srv.Addr().String(), 3,
-		withTestExtraGrains(new(MockCountingGrain)),
-		withTestNetworkProfile(NetworkProfileWAN))
+	systems, providers := startNATsSystems(t, srv.Addr().String(), 3, withTestExtraGrains(new(MockCountingGrain)))
 	node1, node2, node3 := systems[0], systems[1], systems[2]
 
 	// let the membership settle before registering anything

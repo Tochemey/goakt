@@ -444,9 +444,6 @@ type testClusterConfig struct {
 	readQuorum        uint32             // replicas that must answer a registry read
 	bootstrapTimeout  time.Duration      // window allowed for the initial partition sync
 	protocolPin       remote.ProtocolPin // remoting wire protocol every node is pinned to
-	// networkProfile tunes the failure detector; the zero value is NetworkProfileLAN, the
-	// library default
-	networkProfile NetworkProfile
 }
 
 // testClusterOption mutates a testClusterConfig before the fixture builds a node.
@@ -491,15 +488,6 @@ func withTestReplication(replicaCount, writeQuorum, readQuorum uint32) testClust
 func withTestBootstrapTimeout(timeout time.Duration) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.bootstrapTimeout = timeout
-	}
-}
-
-// withTestNetworkProfile sets the network profile of every node built by the fixture. The WAN
-// profile's slower failure detector keeps a CPU-starved node (a race-enabled CI runner) from being
-// declared dead while it is alive, which a test asserting single activation cannot tolerate.
-func withTestNetworkProfile(profile NetworkProfile) testClusterOption {
-	return func(tc *testClusterConfig) {
-		tc.networkProfile = profile
 	}
 }
 
@@ -683,7 +671,6 @@ func newClusterSystem(t *testing.T, factory providerFactory, opts ...testCluster
 		WithClusterStateSyncInterval(300 * time.Millisecond).
 		WithClusterBalancerInterval(100 * time.Millisecond).
 		WithRoles(cfg.roles...).
-		WithNetworkProfile(cfg.networkProfile).
 		WithDiscovery(provider)
 
 	if cfg.crdtEnabled {

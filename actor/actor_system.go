@@ -3890,6 +3890,17 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 			return
 		}
 
+		// The departure may have been transient: a node whose bootstrap attempt
+		// failed and was retried, or one briefly cut off, comes back at the same
+		// address while this gate is still waiting. Its actors and grains never
+		// left it, and any it registers after rejoining would show up in the
+		// scan below as if they were stranded, so relocating them would create a
+		// second live instance of each. A member is never recovered from.
+		if x.isPeerAlive(ctx, peerAddress) {
+			x.logger.Warnf("leader=%s skipping crash recovery for node=%s: the node rejoined the cluster (hint: a transient departure; its actors and grains are still hosted there)", x.String(), peerAddress)
+			return
+		}
+
 		var ok bool
 		if peerState, ok = x.deriveRelocationSetFromRegistry(ctx, peerAddress); ok {
 			break
@@ -3914,6 +3925,13 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		return
 	}
 
+	// the scan itself can take a while on a large registry, so check once more
+	// that the node has not come back before its records are acted on
+	if x.isPeerAlive(ctx, peerAddress) {
+		x.logger.Warnf("leader=%s skipping crash recovery for node=%s: the node rejoined the cluster while its relocation set was derived (hint: a transient departure; its actors and grains are still hosted there)", x.String(), peerAddress)
+		return
+	}
+
 	// surface the best-effort nature of registry-derived recovery on the events
 	// stream: records lost with the crashed node's partitions cannot be listed,
 	// so subscribers holding an external record of placements can diff against
@@ -3922,6 +3940,28 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	x.publishRelocationStarted(peerAddress, peerState, true)
 
 	x.dispatchDerivedRebalance(ctx, peerAddress, peerState)
+}
+
+// isPeerAlive reports whether the node at peerAddress, a peers address in
+// the host:port form the membership events carry, is currently a member of the
+// cluster. It is the check that keeps a transient departure from being treated
+// as a crash. A failed membership read is reported as not a member: recovery
+// then proceeds exactly as it did before the check existed, which is the safer
+// default while the cluster is churning.
+func (x *actorSystem) isPeerAlive(ctx context.Context, peerAddress string) bool {
+	peers, err := x.cluster.Peers(ctx)
+	if err != nil {
+		x.logger.Warnf("leader=%s could not read the cluster members before recovering node=%s: %v (hint: proceeding as if the node is gone)", x.String(), peerAddress, err)
+		return false
+	}
+
+	for _, peer := range peers {
+		if net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort)) == peerAddress {
+			return true
+		}
+	}
+
+	return false
 }
 
 // awaitRelocationQuiescence blocks until no olric rebalance event has been

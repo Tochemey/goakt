@@ -7475,8 +7475,9 @@ func TestSpawnChildPublishFailure(t *testing.T) {
 	// the parent publication succeeds, the child publication fails
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
-	// the rollback stops the child, whose death watch removes it asynchronously
-	clusterMock.EXPECT().RemoveActor(mock.Anything, childName).Return(nil).Maybe()
+	// the rollback stops the child, whose death watch removes its registry
+	// record, keyed by the child's qualified name, asynchronously
+	clusterMock.EXPECT().RemoveActor(mock.Anything, parentName+"/"+childName).Return(nil).Maybe()
 
 	parent, err := actorSystem.Spawn(ctx, parentName, NewMockSupervisor())
 	require.NoError(t, err)
