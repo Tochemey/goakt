@@ -1029,8 +1029,8 @@ func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers [
 // through recreateSingletonFromWire, and non-relocatable actors are lost with
 // their node by design, so their registry entry must not be touched here. The
 // one exception is a non-relocatable reliable endpoint, whose endpoint and
-// controller records are withdrawn (never respawned) because their if-absent
-// publication would otherwise block the endpoint name cluster-wide.
+// controller records are withdrawn (never respawned) because they would
+// otherwise keep the endpoint name reserved cluster-wide.
 //
 // A relocated reliable endpoint additionally releases the departed
 // activation's controller record before the respawn: the companion identity
@@ -1048,11 +1048,10 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 
 	if !props.GetRelocatable() {
 		// A non-relocatable reliable endpoint is lost with its node by design,
-		// but its registry records must not outlive it: reliable endpoints
-		// publish with if-absent semantics, so a leaked record would block the
-		// name cluster-wide instead of merely going stale. Withdraw the
-		// endpoint and controller records; ordinary non-relocatable actors
-		// keep their historical registry semantics.
+		// but its registry records must not outlive it, or they keep the
+		// endpoint name reserved cluster-wide. Withdraw the endpoint and
+		// controller records; ordinary non-relocatable actors keep their
+		// historical registry semantics.
 		if props.GetReliableDelivery() != nil {
 			if _, rerr := x.releaseDepartedEntry(ctx, addr.QualifiedName(), departedNode); rerr != nil {
 				x.logger.Errorf("failed to release registry record of the departed non-relocatable reliable endpoint=%s: %v", addr.Name(), rerr)
@@ -1100,9 +1099,15 @@ func (x *actorSystem) recreateActorFromWire(ctx context.Context, props *internal
 // the node's own restart reconciliation), so dropping it would turn a transient
 // failure into a permanent silent loss. Best-effort: a failed restore is logged
 // loudly rather than propagated, the respawn error itself is what the caller
-// reports.
+// reports. A name that another incarnation claimed while the respawn ran is
+// left to its new owner: the restore must not undo a live activation.
 func (x *actorSystem) restoreDepartedEntry(ctx context.Context, props *internalpb.Actor) {
 	if err := x.cluster.PutActor(ctx, props); err != nil {
+		if errors.Is(err, cluster.ErrActorAlreadyExists) {
+			x.logger.Debugf("skipping restore of registry record for actor=%s after a failed respawn: the name is owned by another incarnation", props.GetAddress())
+			return
+		}
+
 		x.logger.Errorf("failed to restore registry record for actor=%s after a failed respawn: %v (hint: the actor may be unrecoverable)", props.GetAddress(), err)
 	}
 }
@@ -1114,7 +1119,9 @@ func (x *actorSystem) restoreDepartedEntry(ctx context.Context, props *internalp
 // there (concurrent relocation or a client respawn), so respawning it here
 // would be a double spawn. Logged rather than silent so a rare stale entry (e.g. a lost
 // replication write pointing at a previous owner) is diagnosable. A missing
-// entry proceeds as-is.
+// entry proceeds as-is. The removal is fenced by the incarnation the entry
+// carried when it was read, so an entry that another incarnation claimed in
+// between is left to its new owner and reported the same way.
 func (x *actorSystem) releaseDepartedEntry(ctx context.Context, qualifiedName, departedNode string) (bool, error) {
 	existing, err := x.cluster.GetActor(ctx, qualifiedName)
 
@@ -1126,8 +1133,14 @@ func (x *actorSystem) releaseDepartedEntry(ctx context.Context, qualifiedName, d
 			return false, nil
 		}
 
-		if rerr := x.cluster.RemoveActor(ctx, qualifiedName); rerr != nil {
+		reowned, rerr := x.cluster.RemoveActor(ctx, qualifiedName, existing.GetIncarnationId())
+		if rerr != nil {
 			return false, gerrors.NewInternalError(rerr)
+		}
+
+		if reowned != nil {
+			x.logger.Debugf("node=%s skipping relocation of actor=%s: registry entry was claimed by another incarnation at %s", x.String(), qualifiedName, reowned.GetAddress())
+			return false, nil
 		}
 
 		return true, nil

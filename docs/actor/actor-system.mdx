@@ -50,6 +50,10 @@ Details: [Coordinated Shutdown](/advanced/coordinated-shutdown), [Quickstart](/g
 - **SpawnSingleton**: Cluster singleton; one instance per name across the cluster, hosted on the oldest node. See
   [Singletons](/actor/singletons).
 
+In cluster mode an actor name identifies one actor across the cluster. Spawning a name that is already taken returns
+`ErrActorAlreadyExists`, and when several nodes spawn the same name at the same time, one spawn succeeds. A child's
+name is unique within its parent. See [Placement](/clustering/placement).
+
 See [Actor Lifecycle](/actor/lifecycle), [Routers](/actor/routers), [Singletons](/actor/singletons),
 [Clustering](/clustering/overview).
 

@@ -855,6 +855,77 @@ func TestSpawn(t *testing.T) {
 		// shutdown the nats server gracefully
 		srv.Shutdown()
 	})
+	t.Run("With the same name spawned on two nodes at once", func(t *testing.T) {
+		ctx := context.Background()
+		srv := startNatsServer(t)
+		t.Cleanup(srv.Shutdown)
+
+		systems, providers := startNATsSystems(t, srv.Addr().String(), 3)
+		nodes, observer := []ActorSystem{systems[0], systems[1]}, systems[2]
+
+		t.Cleanup(func() {
+			for i, system := range systems {
+				assert.NoError(t, system.Stop(context.WithoutCancel(ctx)))
+				assert.NoError(t, providers[i].Close())
+			}
+		})
+
+		// let membership settle before the nodes place actors
+		pause.For(time.Second)
+
+		// each spawn waits in PreStart until the other has entered PreStart
+		// too, so both pass the duplicate check before either publishes
+		const actorName = "contested"
+		overlap := newSpawnOverlap(2)
+		pids := make([]*PID, len(nodes))
+		errs := make([]error, len(nodes))
+
+		var wg sync.WaitGroup
+		for i, node := range nodes {
+			wg.Go(func() {
+				pids[i], errs[i] = node.SpawnOn(ctx, actorName, &MockOverlapActor{overlap: overlap}, WithPlacement(Local), WithRelocationDisabled(), WithInitTimeout(2*otherSpawnsTimeout))
+			})
+		}
+		wg.Wait()
+
+		require.True(t, overlap.allSpawnsEntered(), "both spawns must pass the duplicate check before either publishes")
+
+		// exactly one spawn claims the name; the other fails with the error a
+		// taken name returns and leaves no actor behind
+		winner := -1
+		for i, err := range errs {
+			if err == nil {
+				winner = i
+				continue
+			}
+
+			require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+			require.Nil(t, pids[i])
+		}
+
+		require.NotEqual(t, -1, winner, "one of the two spawns must succeed")
+		require.True(t, pids[winner].IsRunning())
+
+		loser := nodes[1-winner].(*actorSystem)
+		require.Eventually(t, func() bool {
+			_, ok := loser.actors.nodeByName(actorName)
+			return !ok
+		}, 5*time.Second, 100*time.Millisecond, "the losing spawn must leave no local actor behind")
+
+		// the loser's cleanup is fenced by its own incarnation: once it has
+		// run, the winner's record is still the one every node resolves
+		pause.For(time.Second)
+
+		resolved, err := observer.ActorOf(ctx, actorName)
+		require.NoError(t, err)
+		require.Equal(t, pids[winner].ID(), resolved.ID())
+
+		for _, system := range systems {
+			exists, err := system.ActorExists(ctx, actorName)
+			require.NoError(t, err)
+			require.True(t, exists)
+		}
+	})
 	t.Run("SpawnOn when actor system not started", func(t *testing.T) {
 		// create a context
 		ctx := context.TODO()
@@ -2192,7 +2263,7 @@ func TestRecreateActorFromWireRestoresRecordOnFailure(t *testing.T) {
 	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix", mock.Anything).Return(nil, nil).Once()
 	// the restore after the failed instantiation
 	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
 
@@ -2217,7 +2288,7 @@ func TestRecreateActorFromWireRestoreFailureKeepsRespawnError(t *testing.T) {
 	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix", mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(assert.AnError).Once()
 
 	err := system.recreateActorFromWire(context.Background(), record, departedNode)
@@ -2246,7 +2317,7 @@ func TestRecreateActorFromWireRestoresRecordOnSpawnOptionsFailure(t *testing.T) 
 	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "phoenix").Return(record, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix").Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "phoenix", mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
 
 	err := system.recreateActorFromWire(context.Background(), record, departedNode)
@@ -2286,9 +2357,9 @@ func TestSpawnPublishFailureStopsActor(t *testing.T) {
 	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 	// the rollback stops the actor, whose death watch removes it from the cluster
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).RunAndReturn(func(context.Context, string) error {
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName, mock.Anything).RunAndReturn(func(context.Context, string, string) (*internalpb.Actor, error) {
 		removed <- struct{}{}
-		return nil
+		return nil, nil
 	}).Once()
 
 	pid, err := actorSystem.Spawn(ctx, actorName, NewMockActor())
@@ -2338,7 +2409,7 @@ func TestSpawnSingletonPublishFailureLeavesNothingBehind(t *testing.T) {
 	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
 	// the death watch removes the failed actor from the cluster best-effort
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName, mock.Anything).Return(nil, nil).Maybe()
 
 	pid, err := actorSystem.spawnSingletonOnLocal(ctx, actorName, NewMockActor(), nil, time.Second, 100*time.Millisecond, 1, nil)
 	require.Error(t, err)
@@ -2750,15 +2821,16 @@ func TestRecreateActorFromWireReliableEndpoint(t *testing.T) {
 		IncarnationId: uuid.NewString(),
 	}.Build()
 
-	// the endpoint and departed companion records are released before the respawn
+	// the endpoint and departed companion records are released before the
+	// respawn, each removal fenced by the incarnation its record carried
 	clusterMock.EXPECT().GetActor(mock.Anything, "orders-producer").Return(record, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer", oldIncarnation).Return(nil, nil).Once()
 	clusterMock.EXPECT().GetActor(mock.Anything, oldCompanion).Return(companionRecord, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, oldCompanion).Return(nil).Once()
-	// the respawn publishes the endpoint atomically and its fresh companion
+	clusterMock.EXPECT().RemoveActor(mock.Anything, oldCompanion, companionRecord.GetIncarnationId()).Return(nil, nil).Once()
+	// the respawn publishes the endpoint and its fresh companion, each write
+	// claiming its own name
 	clusterMock.EXPECT().ActorExists(mock.Anything, "orders-producer").Return(false, nil).Once()
-	clusterMock.EXPECT().PutActorIfAbsent(mock.Anything, mock.Anything).Return(nil).Once()
-	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Twice()
 
 	require.NoError(t, actorSystem.recreateActorFromWire(ctx, record, departedNode))
 
@@ -2803,9 +2875,9 @@ func TestRecreateActorFromWireNonRelocatableReliableEndpoint(t *testing.T) {
 	}.Build()
 
 	clusterMock.EXPECT().GetActor(mock.Anything, "orders-consumer").Return(record, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-consumer").Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-consumer", mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GetActor(mock.Anything, companionName).Return(companionRecord, nil).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, mock.Anything).Return(nil, nil).Once()
 
 	require.NoError(t, system.recreateActorFromWire(context.Background(), record, departedNode))
 
@@ -2964,12 +3036,60 @@ func TestReleaseDepartedEntryBranches(t *testing.T) {
 	t.Run("With a remove failure", func(t *testing.T) {
 		clusterMock := mockcluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/goner"}.Build(), nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "goner").Return(errors.New("registry down")).Once()
+		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/goner", IncarnationId: uuid.NewString()}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, "goner").Return(record, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "goner", record.GetIncarnationId()).Return(nil, errors.New("registry down")).Once()
 
 		proceed, err := system.releaseDepartedEntry(context.Background(), "goner", "10.0.0.2:9000")
 		require.Error(t, err)
 		assert.False(t, proceed)
+	})
+
+	t.Run("With the record claimed by another incarnation since the read", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/taken", IncarnationId: uuid.NewString()}.Build()
+		reowned := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.9:9000/taken", IncarnationId: uuid.NewString()}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, "taken").Return(record, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "taken", record.GetIncarnationId()).Return(reowned, nil).Once()
+
+		// the actor lives under its new owner: no respawn, no error
+		proceed, err := system.releaseDepartedEntry(context.Background(), "taken", "10.0.0.2:9000")
+		require.NoError(t, err)
+		assert.False(t, proceed)
+	})
+}
+
+func TestRestoreDepartedEntry(t *testing.T) {
+	record := internalpb.Actor_builder{Address: "goakt://test-replication@10.0.0.2:9000/restored", IncarnationId: uuid.NewString()}.Build()
+
+	t.Run("With the name owned by another incarnation", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
+		clusterMock.EXPECT().PutActor(mock.Anything, record).Return(cluster.ErrActorAlreadyExists).Once()
+
+		// the live activation keeps the name: the restore is skipped and not
+		// reported as a failure
+		system.restoreDepartedEntry(context.Background(), record)
+		_ = logger.Flush()
+		require.Contains(t, buf.String(), "skipping restore of registry record")
+		require.NotContains(t, buf.String(), "failed to restore registry record")
+	})
+
+	t.Run("With a restore failure", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
+		clusterMock.EXPECT().PutActor(mock.Anything, record).Return(assert.AnError).Once()
+
+		system.restoreDepartedEntry(context.Background(), record)
+		_ = logger.Flush()
+		require.Contains(t, buf.String(), "failed to restore registry record")
 	})
 }
 

@@ -733,9 +733,11 @@ func (w *relocationWorker) sendBatch(ctx context.Context, target *cluster.Peer, 
 // departed node (or is missing). An entry pointing anywhere else means the
 // singleton was already recreated on a survivor, so this is a stale re-run (a
 // duplicate NodeLeft against a peer-state snapshot that a failed DeletePeerState
-// left behind, or a leadership change) and the unconditional RemoveActor +
-// SpawnSingleton below would tear down and double-spawn the live singleton.
-// Skipping in that case keeps the relocation idempotent.
+// left behind, or a leadership change) and the removal and SpawnSingleton below
+// would tear down and double-spawn the live singleton. Skipping in that case
+// keeps the relocation idempotent, and so does the removal itself: it is
+// fenced by the incarnation the entry carried when it was read, so an entry
+// that another incarnation claimed in between is left to its new owner.
 func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *internalpb.Actor, departedNode string) error {
 	addr, err := address.Parse(props.GetAddress())
 	if err != nil {
@@ -753,14 +755,22 @@ func recreateSingletonFromWire(ctx context.Context, system ActorSystem, props *i
 			// already recreated on a survivor; do not tear it down and respawn
 			return nil
 		}
+
+		// release the departed node's entry so the respawn's duplicate check
+		// does not see it
+		reowned, rerr := system.getCluster().RemoveActor(ctx, addr.QualifiedName(), existing.GetIncarnationId())
+		if rerr != nil {
+			return errors.NewInternalError(rerr)
+		}
+
+		if reowned != nil {
+			// claimed by another incarnation since the read; it is the live singleton
+			return nil
+		}
 	case stderrors.Is(gerr, cluster.ErrActorNotFound):
 		// no registry entry; fall through and (re-)establish the singleton
 	default:
 		return errors.NewInternalError(gerr)
-	}
-
-	if err := system.getCluster().RemoveActor(ctx, addr.QualifiedName()); err != nil {
-		return errors.NewInternalError(err)
 	}
 
 	actor, err := system.getReflection().instantiateActor(props.GetType())

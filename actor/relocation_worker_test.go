@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -1280,8 +1281,8 @@ func TestRecreateSingletonFromWireUsesSingletonSpec(t *testing.T) {
 	}.Build()
 
 	departedNode := address.FormatHostPort("127.0.0.1", 8080)
+	// no registry entry: nothing to release before the respawn
 	clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(nil, cluster.ErrActorNotFound).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton").Return(nil).Once()
 
 	spy := &MockSpawnSingletonSpy{actorSystem: system}
 	err := recreateSingletonFromWire(ctx, spy, props, departedNode)
@@ -1338,7 +1339,88 @@ func TestRecreateSingletonFromWireSkipsWhenAlreadyRelocated(t *testing.T) {
 
 	// no teardown and no re-spawn: the live singleton is left untouched
 	assert.False(t, spy.called)
-	clusterMock.AssertNotCalled(t, "RemoveActor", mock.Anything, mock.Anything)
+	clusterMock.AssertNotCalled(t, "RemoveActor", mock.Anything, mock.Anything, mock.Anything)
+}
+
+// TestRecreateSingletonFromWireReleasesDepartedEntry verifies the release of the
+// departed node's registry entry before the respawn: it is fenced by the
+// incarnation the entry carried when it was read, so an entry that another
+// incarnation claimed in between is left to its new owner and the respawn is
+// skipped.
+func TestRecreateSingletonFromWireReleasesDepartedEntry(t *testing.T) {
+	newProps := func(system *actorSystem) *internalpb.Actor {
+		return internalpb.Actor_builder{
+			Address:       address.New("singleton", system.Name(), "127.0.0.9", 7000).String(),
+			Type:          types.Name(new(MockActor)),
+			IncarnationId: uuid.NewString(),
+			Singleton:     &internalpb.SingletonSpec{},
+		}.Build()
+	}
+
+	t.Run("With the entry still owned by the departed node", func(t *testing.T) {
+		ctx := context.Background()
+		system := newSingletonClusterSystem(t)
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		props := newProps(system)
+		departedNode := address.FormatHostPort("127.0.0.9", 7000)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(props, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton", props.GetIncarnationId()).Return(nil, nil).Once()
+
+		spy := &MockSpawnSingletonSpy{actorSystem: system}
+		require.NoError(t, recreateSingletonFromWire(ctx, spy, props, departedNode))
+		assert.True(t, spy.called)
+	})
+
+	t.Run("With the entry claimed by another incarnation since the read", func(t *testing.T) {
+		ctx := context.Background()
+		system := newSingletonClusterSystem(t)
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		props := newProps(system)
+		departedNode := address.FormatHostPort("127.0.0.9", 7000)
+		reowned := internalpb.Actor_builder{
+			Address:       address.New("singleton", system.Name(), "127.0.0.2", 9002).String(),
+			IncarnationId: uuid.NewString(),
+		}.Build()
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(props, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton", props.GetIncarnationId()).Return(reowned, nil).Once()
+
+		spy := &MockSpawnSingletonSpy{actorSystem: system}
+		require.NoError(t, recreateSingletonFromWire(ctx, spy, props, departedNode))
+		assert.False(t, spy.called)
+	})
+
+	t.Run("With a release failure", func(t *testing.T) {
+		ctx := context.Background()
+		system := newSingletonClusterSystem(t)
+		clusterMock := mockscluster.NewCluster(t)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		system.registry.Register(new(MockActor))
+		props := newProps(system)
+		departedNode := address.FormatHostPort("127.0.0.9", 7000)
+
+		clusterMock.EXPECT().GetActor(mock.Anything, "singleton").Return(props, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "singleton", props.GetIncarnationId()).Return(nil, assert.AnError).Once()
+
+		spy := &MockSpawnSingletonSpy{actorSystem: system}
+		err := recreateSingletonFromWire(ctx, spy, props, departedNode)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.False(t, spy.called)
+	})
 }
 
 func TestRetryRelocationItem(t *testing.T) {

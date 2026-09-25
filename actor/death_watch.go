@@ -53,6 +53,10 @@ type retryDeadActorRemoval struct {
 	// by every ancestor name, so a child's retry never removes the record of a
 	// same-named child under another parent.
 	qualifiedName string
+	// incarnationID is the incarnation of the dead actor: the retry removes the
+	// record only while it still carries it, so a name claimed again in the
+	// meantime keeps its new owner's record.
+	incarnationID string
 	attempt       int
 }
 
@@ -155,6 +159,7 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 		// the registry keys records by qualified name, so two children with the
 		// same name under different parents never remove each other's record
 		qualifiedName := pid.getAddress().QualifiedName()
+		incarnationID := pid.incarnationID()
 		actorTree.deleteNode(pid)
 		// system actors never publish registry records, with one exception:
 		// reliable-delivery controller companions do through their private
@@ -166,7 +171,11 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 			cctx := ctx.withoutCancel()
 			cl := actorSys.getCluster()
 
-			if err := cl.RemoveActor(cctx, qualifiedName); err != nil {
+			// the removal is fenced by the dead actor's incarnation: a name
+			// that another incarnation claimed in the meantime keeps its new
+			// owner's record
+			reowned, err := cl.RemoveActor(cctx, qualifiedName, incarnationID)
+			if err != nil {
 				if logger.Enabled(log.ErrorLevel) {
 					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", path, err)
 				}
@@ -182,9 +191,13 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 				// can outlive (it means the system began stopping after the
 				// gate above), so only that skips the retry outright.
 				if !errors.Is(err, cluster.ErrEngineNotRunning) {
-					x.scheduleRemovalRetry(ctx, qualifiedName, 1)
+					x.scheduleRemovalRetry(ctx, qualifiedName, incarnationID, 1)
 				}
 				return newClusterCleanupError(err)
+			}
+
+			if reowned != nil && logger.Enabled(log.DebugLevel) {
+				logger.Debugf("actor=%s record is owned by another incarnation, left in cluster", path)
 			}
 		}
 
@@ -217,7 +230,8 @@ func (x *deathWatch) handleRetryDeadActorRemoval(ctx *ReceiveContext) {
 	}
 
 	cl := actorSys.getCluster()
-	if err := cl.RemoveActor(ctx.withoutCancel(), msg.qualifiedName); err != nil {
+	reowned, err := cl.RemoveActor(ctx.withoutCancel(), msg.qualifiedName, msg.incarnationID)
+	if err != nil {
 		// a stopped engine cannot recover within the retry budget: the system
 		// is going down and its registry records are reconciled elsewhere
 		if errors.Is(err, cluster.ErrEngineNotRunning) {
@@ -235,24 +249,31 @@ func (x *deathWatch) handleRetryDeadActorRemoval(ctx *ReceiveContext) {
 			logger.Warnf("actor=%s removal retry=%d/%d failed: %v (retrying)", msg.qualifiedName, msg.attempt, deathWatchRemovalMaxRetries, err)
 		}
 
-		x.scheduleRemovalRetry(ctx, msg.qualifiedName, msg.attempt+1)
+		x.scheduleRemovalRetry(ctx, msg.qualifiedName, msg.incarnationID, msg.attempt+1)
 		return
 	}
 
-	if logger.Enabled(log.DebugLevel) {
-		logger.Debugf("actor=%s removed dead actor resource from cluster on retry=%d", msg.qualifiedName, msg.attempt)
+	if !logger.Enabled(log.DebugLevel) {
+		return
 	}
+
+	if reowned != nil {
+		logger.Debugf("actor=%s record is owned by another incarnation, left in cluster on retry=%d", msg.qualifiedName, msg.attempt)
+		return
+	}
+
+	logger.Debugf("actor=%s removed dead actor resource from cluster on retry=%d", msg.qualifiedName, msg.attempt)
 }
 
-// scheduleRemovalRetry books the attempt-th removal retry for qualifiedName with
-// the system scheduler, doubling the delay on each attempt. Scheduling rides
-// the scheduler's own machinery, so no goroutine is spawned and DeathWatch's
-// mailbox is never blocked waiting out a backoff. A scheduling failure is only
-// logged: it means the scheduler is no longer running, which only happens when
-// the actor system itself is going down.
-func (x *deathWatch) scheduleRemovalRetry(ctx *ReceiveContext, qualifiedName string, attempt int) {
+// scheduleRemovalRetry books the attempt-th removal retry for qualifiedName,
+// fenced by incarnationID, with the system scheduler, doubling the delay on
+// each attempt. Scheduling rides the scheduler's own machinery, so no goroutine
+// is spawned and DeathWatch's mailbox is never blocked waiting out a backoff. A
+// scheduling failure is only logged: it means the scheduler is no longer
+// running, which only happens when the actor system itself is going down.
+func (x *deathWatch) scheduleRemovalRetry(ctx *ReceiveContext, qualifiedName, incarnationID string, attempt int) {
 	delay := deathWatchRemovalRetryDelay << (attempt - 1)
-	message := &retryDeadActorRemoval{qualifiedName: qualifiedName, attempt: attempt}
+	message := &retryDeadActorRemoval{qualifiedName: qualifiedName, incarnationID: incarnationID, attempt: attempt}
 
 	if err := ctx.ActorSystem().ScheduleOnce(ctx.withoutCancel(), message, ctx.Self(), delay); err != nil {
 		logger := ctx.Logger()

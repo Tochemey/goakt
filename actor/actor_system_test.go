@@ -5936,6 +5936,18 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.AssertExpectations(t)
 	})
 
+	t.Run("name owned by another incarnation returns ErrActorAlreadyExists", func(t *testing.T) {
+		clusterMock := new(mockscluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "claimed")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+
+		err := system.putActorOnCluster(ctx, pid)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		clusterMock.AssertExpectations(t)
+	})
+
 	t.Run("singleton with role publishes its registry record", func(t *testing.T) {
 		clusterMock := new(mockscluster.Cluster)
 		system := newReplicationSystem(clusterMock)
@@ -6005,7 +6017,7 @@ func TestCompleteSpawnStopFailureAfterFailedPublication(t *testing.T) {
 	actorName := "rollback-stop-failure"
 	clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(assert.AnError).Once()
-	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName).Return(nil).Maybe()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, actorName, mock.Anything).Return(nil, nil).Maybe()
 
 	// MockPostStop fails its PostStop hook, so the rollback Shutdown errors too
 	pid, err := actorSystem.Spawn(ctx, actorName, &MockPostStopFailingActor{})
@@ -6118,9 +6130,31 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name(), mock.Anything).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+	})
+
+	t.Run("leaves a stale record owned by another incarnation", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.actors = newTree()
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
+
+		// the record read by the scan carries the previous incarnation; by the
+		// time it is removed another incarnation owns the name and keeps it
+		staleAddr := address.New("stale", system.name, "127.0.0.1", 8080)
+		stale := internalpb.Actor_builder{Address: staleAddr.String(), IncarnationId: uuid.NewString()}.Build()
+		reowned := internalpb.Actor_builder{Address: staleAddr.String(), IncarnationId: uuid.NewString()}.Build()
+
+		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{stale}, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name(), stale.GetIncarnationId()).Return(reowned, nil).Once()
+
+		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
+		_ = logger.Flush()
+		require.Contains(t, buf.String(), "is owned by another incarnation, leaving its record")
 	})
 
 	t.Run("removal failure does not fail cleanup", func(t *testing.T) {
@@ -6132,7 +6166,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		actors := []*internalpb.Actor{internalpb.Actor_builder{Address: staleAddr.String()}.Build()}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(assert.AnError).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name(), mock.Anything).Return(nil, assert.AnError).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
 	})
@@ -6152,7 +6186,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		}.Build()}
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return(actors, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name(), mock.Anything).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
 	})
@@ -6175,7 +6209,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		// the respawn path releases the entry, fails to instantiate the
 		// unregistered type, and restores the record
 		clusterMock.EXPECT().GetActor(mock.Anything, staleAddr.Name()).Return(record, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name()).Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, staleAddr.Name(), mock.Anything).Return(nil, nil).Once()
 		clusterMock.EXPECT().PutActor(mock.Anything, record).Return(nil).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
@@ -6280,6 +6314,40 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	defer dependency.AssertExpectations(t)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, assert.AnError)
+}
+
+func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
+	clusterMock := new(mockscluster.Cluster)
+	system := newReplicationSystem(clusterMock)
+
+	system.locker.Lock()
+	system.actors = newTree()
+	system.actors.noSender = system.noSender
+	system.locker.Unlock()
+
+	for _, name := range []string{"resync-lost", "resync-kept"} {
+		addr := address.New(name, system.name, "127.0.0.1", int(system.remoteConfig.BindPort()))
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      addr,
+			path:         newPath(addr),
+			dependencies: xsync.NewMap[string, extension.Dependency](),
+			actorSystem:  system,
+		}
+		pid.setState(runningState, true)
+
+		node := newPidNode(pid)
+		system.actors.pids[node.id] = node
+		system.actors.counter.Add(1)
+	}
+
+	// the first repair meets a name owned by another incarnation and is
+	// skipped; the second actor is still repaired
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+	require.NoError(t, system.resyncActors())
+	clusterMock.AssertExpectations(t)
 }
 
 func TestResyncGrains_Success(t *testing.T) {
@@ -6442,7 +6510,7 @@ func TestCleanupCluster_RemoveActorFailure(t *testing.T) {
 		actorSystem: system,
 	}
 
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name(), mock.Anything).Return(nil, assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
 	err := system.cleanupCluster(context.Background(), []*PID{pid})
@@ -6465,7 +6533,7 @@ func TestCleanupCluster_ReleasesGrains(t *testing.T) {
 	grain := &grainPID{identity: grainID, actorSystem: system}
 	system.grains.Set(grainID.String(), grain)
 
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name(), mock.Anything).Return(nil, nil)
 	// the record is released only while it still names this node
 	clusterMock.EXPECT().ReleaseGrain(mock.Anything, grainID.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
@@ -6488,7 +6556,7 @@ func TestCleanupCluster_ReleaseGrainFailure(t *testing.T) {
 	grain := &grainPID{identity: grainID, actorSystem: system}
 	system.grains.Set(grainID.String(), grain)
 
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(nil)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name(), mock.Anything).Return(nil, nil)
 	clusterMock.EXPECT().ReleaseGrain(mock.Anything, grainID.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, assert.AnError)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
@@ -6531,7 +6599,7 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 
 	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
 	// and persistPeerStateToPeers is skipped.
-	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name()).Return(assert.AnError)
+	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name(), mock.Anything).Return(nil, assert.AnError)
 	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
@@ -8134,64 +8202,6 @@ func TestResetSynchronizesWithGuardedGetters(t *testing.T) {
 	assert.Nil(t, sys.getClusterStore())
 }
 
-func TestRemoveActorIfIncarnation(t *testing.T) {
-	newSystem := func(t *testing.T, clusterMock *mockscluster.Cluster) *actorSystem {
-		t.Helper()
-
-		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-		require.NoError(t, err)
-
-		sysImpl := sys.(*actorSystem)
-		sysImpl.cluster = clusterMock
-		return sysImpl
-	}
-
-	t.Run("With a matching incarnation", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		record := internalpb.Actor_builder{IncarnationId: "incarnation-1"}.Build()
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(nil)
-
-		system := newSystem(t, clusterMock)
-		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
-	})
-
-	t.Run("With a newer incarnation", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		record := internalpb.Actor_builder{IncarnationId: "incarnation-2"}.Build()
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
-
-		system := newSystem(t, clusterMock)
-		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
-	})
-
-	t.Run("With a missing record", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, cluster.ErrActorNotFound)
-
-		system := newSystem(t, clusterMock)
-		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
-	})
-
-	t.Run("With a load failure", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(nil, assert.AnError)
-
-		system := newSystem(t, clusterMock)
-		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
-	})
-
-	t.Run("With a removal failure", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		record := internalpb.Actor_builder{IncarnationId: "incarnation-1"}.Build()
-		clusterMock.EXPECT().GetActor(mock.Anything, "endpoint").Return(record, nil)
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "endpoint").Return(assert.AnError)
-
-		system := newSystem(t, clusterMock)
-		system.removeActorIfIncarnation(context.TODO(), "endpoint", "incarnation-1")
-	})
-}
-
 func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 	newEndpointPID := func(system *actorSystem, name string) *PID {
 		addr := address.New(name, system.name, "127.0.0.1", 8080)
@@ -8210,8 +8220,25 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 		endpoint := newEndpointPID(system, "orders-producer")
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+		// the endpoint record is removed only while it carries this activation's
+		// incarnation; the companion name already identifies the activation
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer", endpoint.incarnationID()).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, cluster.AnyIncarnation).Return(nil, nil).Once()
+
+		require.NoError(t, system.cleanupCluster(context.Background(), []*PID{endpoint}))
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("leaves an endpoint record owned by another incarnation", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		endpoint := newEndpointPID(system, "orders-producer")
+		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
+		reowned := internalpb.Actor_builder{Address: endpoint.getAddress().String(), IncarnationId: uuid.NewString()}.Build()
+
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer", endpoint.incarnationID()).Return(reowned, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, cluster.AnyIncarnation).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupCluster(context.Background(), []*PID{endpoint}))
 		clusterMock.AssertExpectations(t)
@@ -8224,8 +8251,8 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 		endpoint := newEndpointPID(system, "orders-producer")
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
 
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer").Return(nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders-producer", endpoint.incarnationID()).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, cluster.AnyIncarnation).Return(nil, assert.AnError).Once()
 
 		require.Error(t, system.cleanupCluster(context.Background(), []*PID{endpoint}))
 	})
@@ -8237,7 +8264,7 @@ func TestCleanupClusterRemovesReliableCompanionRecord(t *testing.T) {
 		addr := address.New("worker", system.name, "127.0.0.1", 8080)
 		plain := &PID{address: addr, path: newPath(addr), actorSystem: system}
 
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker").Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker", plain.incarnationID()).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupCluster(context.Background(), []*PID{plain}))
 		clusterMock.AssertExpectations(t)
@@ -8263,7 +8290,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, mock.Anything).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
 		clusterMock.AssertExpectations(t)
@@ -8317,7 +8344,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		}.Build()
 
 		clusterMock.EXPECT().Actors(mock.Anything, mock.Anything).Return([]*internalpb.Actor{record}, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, mock.Anything).Return(nil, nil).Once()
 
 		require.NoError(t, system.cleanupStaleLocalActors(context.Background()))
 		clusterMock.AssertExpectations(t)

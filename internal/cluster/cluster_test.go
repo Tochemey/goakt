@@ -84,7 +84,8 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	_, err := cluster.GetActor(ctx, "actor")
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 
-	require.ErrorIs(t, cluster.RemoveActor(ctx, "actor"), ErrEngineNotRunning)
+	_, err = cluster.RemoveActor(ctx, "actor", AnyIncarnation)
+	require.ErrorIs(t, err, ErrEngineNotRunning)
 
 	actorExists, err := cluster.ActorExists(ctx, "actor")
 	require.False(t, actorExists)
@@ -508,6 +509,128 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
+	t.Run("With PutActor and RemoveActor fenced by incarnation", func(t *testing.T) {
+		ctx := t.Context()
+
+		nodePorts := dynaport.Get(3)
+		discoveryPort := nodePorts[0]
+		clusterPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		addrs := []string{
+			fmt.Sprintf("127.0.0.1:%d", discoveryPort),
+		}
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return(addrs, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: discoveryPort,
+			PeersPort:     clusterPort,
+			RemotingPort:  remotingPort,
+		}
+
+		// a short write timeout bounds the wait for a held lock below
+		engine := New("test", provider, &hostNode, WithLogger(log.DiscardLogger), WithWriteTimeout(200*time.Millisecond))
+		require.NotNil(t, engine)
+		require.NoError(t, engine.Start(ctx))
+
+		actorName := uuid.NewString()
+		addr := address.New(actorName, "testSystem", host, remotingPort)
+		owner := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString(), Type: "owner"}.Build()
+		other := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString(), Type: "other"}.Build()
+
+		// the first write claims the name
+		require.NoError(t, engine.PutActor(ctx, owner))
+
+		// a write by another incarnation is refused and leaves the record untouched
+		require.ErrorIs(t, engine.PutActor(ctx, other), ErrActorAlreadyExists)
+
+		actual, err := engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(owner, actual))
+
+		// a write by the owning incarnation updates the record
+		updated := internalpb.Actor_builder{Address: addr.String(), IncarnationId: owner.GetIncarnationId(), Type: "updated"}.Build()
+		require.NoError(t, engine.PutActor(ctx, updated))
+
+		actual, err = engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(updated, actual))
+
+		// a write while another operation holds the name's lock waits for it
+		// and fails once the wait is over, leaving the record untouched
+		unlock, err := engine.(*cluster).lockActor(ctx, actorName)
+		require.NoError(t, err)
+
+		require.ErrorIs(t, engine.PutActor(ctx, other), olric.ErrLockNotAcquired)
+		unlock()
+
+		actual, err = engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(updated, actual))
+
+		// a removal on behalf of another incarnation returns the owner's
+		// record and keeps it
+		reowned, err := engine.RemoveActor(ctx, actorName, other.GetIncarnationId())
+		require.NoError(t, err)
+		require.True(t, proto.Equal(updated, reowned))
+
+		exists, err := engine.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		// a removal by the owning incarnation deletes the record
+		reowned, err = engine.RemoveActor(ctx, actorName, owner.GetIncarnationId())
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+
+		exists, err = engine.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		// a removal of an absent record is a no-op
+		reowned, err = engine.RemoveActor(ctx, actorName, owner.GetIncarnationId())
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+
+		// once the name is free another incarnation claims it without
+		// waiting for the name's lock, and AnyIncarnation removes the record
+		// whatever incarnation it carries
+		unlock, err = engine.(*cluster).lockActor(ctx, actorName)
+		require.NoError(t, err)
+
+		require.NoError(t, engine.PutActor(ctx, other))
+		unlock()
+
+		reowned, err = engine.RemoveActor(ctx, actorName, AnyIncarnation)
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+
+		exists, err = engine.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		// a record that cannot be decoded fails the claim and the removal
+		require.NoError(t, engine.(*cluster).dmap.Put(ctx, composeKey(namespaceActors, actorName), []byte{0xff}))
+		require.Error(t, engine.PutActor(ctx, other))
+
+		reowned, err = engine.RemoveActor(ctx, actorName, other.GetIncarnationId())
+		require.Error(t, err)
+		require.Nil(t, reowned)
+
+		pause.For(time.Second)
+		require.NoError(t, engine.Stop(ctx))
+		provider.AssertExpectations(t)
+	})
 	t.Run("With RemoveActor", func(t *testing.T) {
 		// create the context
 		ctx := context.TODO()
@@ -554,7 +677,7 @@ func TestSingleNode(t *testing.T) {
 		// create an actor
 		actorName := uuid.NewString()
 		addr := address.New(actorName, "system", host, remotingPort)
-		actor := internalpb.Actor_builder{Address: addr.String()}.Build()
+		actor := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString()}.Build()
 		// replicate the actor in the Node
 		err = cluster.PutActor(ctx, actor)
 		require.NoError(t, err)
@@ -571,8 +694,9 @@ func TestSingleNode(t *testing.T) {
 		require.NotZero(t, partition)
 
 		// let us remove the actor
-		err = cluster.RemoveActor(ctx, actorName)
+		reowned, err := cluster.RemoveActor(ctx, actorName, actor.GetIncarnationId())
 		require.NoError(t, err)
+		require.Nil(t, reowned)
 
 		actual, err = cluster.GetActor(ctx, actorName)
 		require.Nil(t, actual)
@@ -627,7 +751,7 @@ func TestSingleNode(t *testing.T) {
 		require.Error(t, err)
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
-		err = cluster.RemoveActor(ctx, "actorName")
+		_, err = cluster.RemoveActor(ctx, "actorName", AnyIncarnation)
 		require.Error(t, err)
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
@@ -1407,6 +1531,80 @@ func TestSingleNode(t *testing.T) {
 }
 
 func TestMultipleNodes(t *testing.T) {
+	t.Run("With concurrent claims of one name", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, provider1 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node1)
+
+		// wait for the node to start properly
+		pause.For(2 * time.Second)
+
+		node2, provider2 := startEngine(t, srv.Addr().String())
+		require.NotNil(t, node2)
+
+		// wait for the node to join the cluster
+		pause.For(time.Second)
+
+		// every contender publishes its own incarnation of one name from both
+		// nodes at once: exactly one claim wins, the others are refused, and
+		// the record read from either node carries the winner's incarnation
+		type claim struct {
+			incarnationID string
+			err           error
+		}
+
+		const contendersPerNode = 8
+		nodes := []Cluster{node1, node2}
+		actorName := uuid.NewString()
+		start := make(chan types.Unit)
+		claims := make(chan claim, contendersPerNode*len(nodes))
+
+		for _, node := range nodes {
+			engine := node.(*cluster)
+			addr := address.New(actorName, "testSystem", engine.node.Host, engine.node.RemotingPort)
+
+			for range contendersPerNode {
+				record := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString()}.Build()
+
+				go func() {
+					<-start
+					claims <- claim{incarnationID: record.GetIncarnationId(), err: node.PutActor(ctx, record)}
+				}()
+			}
+		}
+
+		close(start)
+
+		var winner string
+		winners := 0
+
+		for range cap(claims) {
+			outcome := <-claims
+			if outcome.err == nil {
+				winners++
+				winner = outcome.incarnationID
+				continue
+			}
+
+			require.ErrorIs(t, outcome.err, ErrActorAlreadyExists)
+		}
+
+		require.Equal(t, 1, winners)
+
+		for _, node := range nodes {
+			actual, err := node.GetActor(ctx, actorName)
+			require.NoError(t, err)
+			require.Equal(t, winner, actual.GetIncarnationId())
+		}
+
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, provider2.Close())
+		require.NoError(t, provider1.Close())
+		srv.Shutdown()
+	})
 	t.Run("With same-named children under different parents", func(t *testing.T) {
 		ctx := context.TODO()
 		srv := startNatsServer(t)
@@ -1428,8 +1626,8 @@ func TestMultipleNodes(t *testing.T) {
 		node := owner.(*cluster).node
 		first := address.NewWithParent("kid", "testSystem", node.Host, node.RemotingPort, address.New("p1", "testSystem", node.Host, node.RemotingPort))
 		second := address.NewWithParent("kid", "testSystem", node.Host, node.RemotingPort, address.New("p2", "testSystem", node.Host, node.RemotingPort))
-		firstRecord := internalpb.Actor_builder{Address: first.String()}.Build()
-		secondRecord := internalpb.Actor_builder{Address: second.String()}.Build()
+		firstRecord := internalpb.Actor_builder{Address: first.String(), IncarnationId: uuid.NewString()}.Build()
+		secondRecord := internalpb.Actor_builder{Address: second.String(), IncarnationId: uuid.NewString()}.Build()
 
 		require.NoError(t, owner.PutActor(ctx, firstRecord))
 		require.NoError(t, owner.PutActor(ctx, secondRecord))
@@ -1447,7 +1645,9 @@ func TestMultipleNodes(t *testing.T) {
 		assert.ErrorIs(t, err, ErrActorNotFound)
 
 		// removing one child's record from the other node leaves the other's in place
-		require.NoError(t, observer.RemoveActor(ctx, "p2/kid"))
+		reowned, err := observer.RemoveActor(ctx, "p2/kid", secondRecord.GetIncarnationId())
+		require.NoError(t, err)
+		require.Nil(t, reowned)
 
 		exists, err := owner.ActorExists(ctx, "p1/kid")
 		require.NoError(t, err)
@@ -2238,12 +2438,8 @@ func TestPutGrainIfAbsentFallbackCallsPutGrain(t *testing.T) {
 
 func TestPutActorPropagatesDMapError(t *testing.T) {
 	putErr := errors.New("put failure")
-	cl := &cluster{
-		running:      atomic.NewBool(true),
-		dmap:         &MockDMap{putErr: putErr},
-		logger:       log.DiscardLogger,
-		writeTimeout: time.Second,
-	}
+	// no lockFn: a claim that fails for a reason other than a taken name never takes the lock
+	cl := newMockEngine(log.DiscardLogger, &MockDMap{putErr: putErr})
 
 	actor := &internalpb.Actor{}
 	err := cl.PutActor(context.Background(), actor)
@@ -2281,57 +2477,287 @@ func TestNextRoundRobinValueReturnsErrorForInvalidKey(t *testing.T) {
 	require.EqualError(t, err, "invalid round-robin key: invalid-key")
 }
 
-func TestPutActorIfAbsent(t *testing.T) {
-	record := internalpb.Actor_builder{Address: address.New("endpoint", "testSystem", "127.0.0.1", 9000).String()}.Build()
+// newMockEngine returns a running engine over dmap with one-second timeouts,
+// the fixture shared by the tests of the actor claim and release paths that
+// the mock can drive: the lock, the read and the write or delete that follow.
+func newMockEngine(logger log.Logger, dmap *MockDMap) *cluster {
+	return &cluster{
+		running:      atomic.NewBool(true),
+		logger:       logger,
+		readTimeout:  time.Second,
+		writeTimeout: time.Second,
+		dmap:         dmap,
+	}
+}
 
-	t.Run("With an absent record", func(t *testing.T) {
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			logger:       log.DiscardLogger,
-			writeTimeout: time.Second,
-			dmap: &MockDMap{
-				putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error { // nolint
-					require.Equal(t, composeKey(namespaceActors, "endpoint"), key)
-					// the write must carry the NX option that makes it conditional
-					require.Len(t, options, 1)
-					return nil
-				},
+func TestPutActor(t *testing.T) {
+	const actorName = "endpoint"
+	record := internalpb.Actor_builder{Address: address.New(actorName, "testSystem", "127.0.0.1", 9000).String(), IncarnationId: uuid.NewString()}.Build()
+	recordKey := composeKey(namespaceActors, actorName)
+	lockKey := composeKey(namespaceActorLocks, actorName)
+
+	// writes returns a Put hook that answers the writes of one PutActor call
+	// with results in order and fails the test on any further write. Every
+	// write the mock can observe is a conditional claim: the in-place update
+	// of a record needs a decodable read, which only the engine tests provide.
+	writes := func(t *testing.T, results ...error) func(context.Context, string, any, ...olric.PutOption) error {
+		calls := 0
+
+		return func(_ context.Context, key string, _ any, options ...olric.PutOption) error {
+			require.Equal(t, recordKey, key)
+			require.Len(t, options, 1)
+			require.Less(t, calls, len(results))
+			result := results[calls]
+			calls++
+			return result
+		}
+	}
+
+	// absentReads returns a Get hook that reports the name free and counts its calls.
+	absentReads := func(t *testing.T, calls *int) func(context.Context, string) (*olric.GetResponse, error) {
+		return func(_ context.Context, key string) (*olric.GetResponse, error) {
+			require.Equal(t, recordKey, key)
+			*calls++
+			return nil, olric.ErrKeyNotFound
+		}
+	}
+
+	t.Run("With a free name", func(t *testing.T) {
+		// no lockFn and no getFn: a free name is claimed by the conditional write alone
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{putFn: writes(t, nil)})
+
+		require.NoError(t, cl.PutActor(context.Background(), record))
+	})
+
+	t.Run("With a name freed since the claim", func(t *testing.T) {
+		reads := 0
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
+				require.Equal(t, lockKey, key)
+				return lock, nil
 			},
-		}
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, nil),
+		})
 
-		require.NoError(t, cl.PutActorIfAbsent(context.Background(), record))
+		require.NoError(t, cl.PutActor(context.Background(), record))
+		require.Equal(t, 1, reads)
+		require.Equal(t, 1, lock.unlocks)
 	})
 
-	t.Run("With an existing record", func(t *testing.T) {
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			logger:       log.DiscardLogger,
-			writeTimeout: time.Second,
-			dmap:         &MockDMap{putErr: olric.ErrKeyFound},
-		}
+	t.Run("With a name claimed and removed again since the read", func(t *testing.T) {
+		reads := 0
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, olric.ErrKeyFound),
+		})
 
-		err := cl.PutActorIfAbsent(context.Background(), record)
-		require.ErrorIs(t, err, ErrActorAlreadyExists)
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), ErrActorAlreadyExists)
+		require.Equal(t, 2, reads)
+		require.Equal(t, 1, lock.unlocks)
 	})
 
-	t.Run("With a backend failure", func(t *testing.T) {
+	t.Run("With a read failure after a lost claim", func(t *testing.T) {
+		reads := 0
+		readErr := errors.New("get failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, recordKey, key)
+				reads++
+				if reads == 1 {
+					return nil, olric.ErrKeyNotFound
+				}
+
+				return nil, readErr
+			},
+			putFn: writes(t, olric.ErrKeyFound, olric.ErrKeyFound),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
+		require.Equal(t, 2, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a lock failure", func(t *testing.T) {
+		lockErr := errors.New("lock failure")
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return nil, lockErr
+			},
+			putFn: writes(t, olric.ErrKeyFound),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), lockErr)
+	})
+
+	t.Run("With a read failure", func(t *testing.T) {
+		readErr := errors.New("get failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, readErr
+			},
+			putFn: writes(t, olric.ErrKeyFound),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a write failure under the lock", func(t *testing.T) {
+		reads := 0
 		putErr := errors.New("put failure")
-		cl := &cluster{
-			running:      atomic.NewBool(true),
-			logger:       log.DiscardLogger,
-			writeTimeout: time.Second,
-			dmap:         &MockDMap{putErr: putErr},
-		}
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, putErr),
+		})
 
-		err := cl.PutActorIfAbsent(context.Background(), record)
-		require.ErrorIs(t, err, putErr)
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), putErr)
+		require.Equal(t, 1, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With an unlock failure", func(t *testing.T) {
+		reads := 0
+		var logs bytes.Buffer
+		lock := &MockLockContext{unlockErr: errors.New("unlock failure")}
+		cl := newMockEngine(log.NewSlog(log.WarningLevel, &logs), &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, nil),
+		})
+
+		require.NoError(t, cl.PutActor(context.Background(), record))
+		require.Equal(t, 1, lock.unlocks)
+		require.Contains(t, logs.String(), "failed to release the lock of actor=endpoint")
 	})
 
 	t.Run("With the engine not running", func(t *testing.T) {
 		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
 
-		err := cl.PutActorIfAbsent(context.Background(), record)
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), ErrEngineNotRunning)
+	})
+}
+
+func TestRemoveActor(t *testing.T) {
+	const actorName = "endpoint"
+	incarnationID := uuid.NewString()
+	recordKey := composeKey(namespaceActors, actorName)
+	lockKey := composeKey(namespaceActorLocks, actorName)
+
+	t.Run("With an absent record", func(t *testing.T) {
+		lock := &MockLockContext{}
+		// no deleteFn: a delete of an absent record would panic
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
+				require.Equal(t, lockKey, key)
+				return lock, nil
+			},
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, recordKey, key)
+				return nil, olric.ErrKeyNotFound
+			},
+		})
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, incarnationID)
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With AnyIncarnation", func(t *testing.T) {
+		lock := &MockLockContext{}
+		// no getFn: the record is deleted whatever it carries, so a read would panic
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
+				require.Equal(t, lockKey, key)
+				return lock, nil
+			},
+			deleteFn: func(_ context.Context, keys ...string) (int, error) {
+				require.Equal(t, []string{recordKey}, keys)
+				return 1, nil
+			},
+		})
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, AnyIncarnation)
+		require.NoError(t, err)
+		require.Nil(t, reowned)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a delete failure", func(t *testing.T) {
+		deleteErr := errors.New("delete failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			deleteFn: func(context.Context, ...string) (int, error) {
+				return 0, deleteErr
+			},
+		})
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, AnyIncarnation)
+		require.ErrorIs(t, err, deleteErr)
+		require.Nil(t, reowned)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a lock failure", func(t *testing.T) {
+		lockErr := errors.New("lock failure")
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return nil, lockErr
+			},
+		})
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, incarnationID)
+		require.ErrorIs(t, err, lockErr)
+		require.Nil(t, reowned)
+	})
+
+	t.Run("With a read failure", func(t *testing.T) {
+		readErr := errors.New("get failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, readErr
+			},
+		})
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, incarnationID)
+		require.ErrorIs(t, err, readErr)
+		require.Nil(t, reowned)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With the engine not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
+
+		reowned, err := cl.RemoveActor(context.Background(), actorName, incarnationID)
 		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.Nil(t, reowned)
 	})
 }
 

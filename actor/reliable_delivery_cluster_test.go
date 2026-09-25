@@ -25,6 +25,7 @@ package actor
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -212,9 +214,11 @@ func TestReliableCompanionClusterResolution(t *testing.T) {
 	})
 
 	t.Run("With the companion record missing", func(t *testing.T) {
-		require.NoError(t, registry.RemoveActor(ctx, companionName))
+		reowned, err := registry.RemoveActor(ctx, companionName, cluster.AnyIncarnation)
+		require.NoError(t, err)
+		require.Nil(t, reowned)
 
-		_, err := node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
+		_, err = node2.resolveReliableCompanion(ctx, "orders-producer", ReliableControllerRoleProducer, nil)
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 
 		require.NoError(t, registry.PutActor(ctx, companionRecord))
@@ -287,4 +291,62 @@ func TestReliableClusterSpawnRollback(t *testing.T) {
 	duplicate, err := node2.Spawn(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
 	require.Error(t, err)
 	assert.Nil(t, duplicate)
+}
+
+// TestReliableClusterSpawnRace verifies that two nodes spawning one reliable
+// endpoint name at the same time leave one endpoint: the losing spawn fails
+// with ErrActorAlreadyExists and its rollback, fenced by its own incarnation,
+// leaves the winner's endpoint and companion records for every node to resolve.
+func TestReliableClusterSpawnRace(t *testing.T) {
+	ctx, systems := newReliableClusterFixture(t)
+	nodes, observer := []*actorSystem{systems[0], systems[1]}, systems[2]
+
+	// each spawn waits in PreStart until the other has entered PreStart too,
+	// so both pass the duplicate check before either publishes
+	const actorName = "orders-consumer"
+	overlap := newSpawnOverlap(2)
+	pids := make([]*PID, len(nodes))
+	errs := make([]error, len(nodes))
+
+	var wg sync.WaitGroup
+	for i, node := range nodes {
+		wg.Go(func() {
+			pids[i], errs[i] = node.SpawnOn(ctx, actorName, &MockOverlapActor{overlap: overlap}, WithPlacement(Local), WithRelocationDisabled(), WithInitTimeout(2*otherSpawnsTimeout), AsReliableConsumer("orders-producer"))
+		})
+	}
+	wg.Wait()
+
+	require.True(t, overlap.allSpawnsEntered(), "both spawns must pass the duplicate check before either publishes")
+
+	winner := -1
+	for i, err := range errs {
+		if err == nil {
+			winner = i
+			continue
+		}
+
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		require.Nil(t, pids[i])
+	}
+
+	require.NotEqual(t, -1, winner, "one of the two spawns must succeed")
+	require.True(t, pids[winner].IsRunning())
+
+	loser := nodes[1-winner]
+	require.Eventually(t, func() bool {
+		_, ok := loser.actors.nodeByName(actorName)
+		return !ok
+	}, 5*time.Second, 100*time.Millisecond, "the losing spawn must leave no local actor behind")
+
+	// once the loser's cleanup has run, the winner's endpoint and its
+	// companion still resolve from the third node
+	pause.For(time.Second)
+
+	resolved, err := observer.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	require.Equal(t, pids[winner].ID(), resolved.ID())
+
+	companion, err := observer.resolveReliableCompanion(ctx, actorName, ReliableControllerRoleConsumer, nil)
+	require.NoError(t, err)
+	require.NotNil(t, companion)
 }

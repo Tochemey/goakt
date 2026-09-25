@@ -19,10 +19,19 @@ func NewCluster(t interface {
 	mock.TestingT
 	Cleanup(func())
 }) *Cluster {
+	if helper, ok := t.(interface{ Helper() }); ok {
+		helper.Helper()
+	}
+
 	mock := &Cluster{}
 	mock.Mock.Test(t)
 
-	t.Cleanup(func() { mock.AssertExpectations(t) })
+	t.Cleanup(func() {
+		if helper, ok := t.(interface{ Helper() }); ok {
+			helper.Helper()
+		}
+		mock.AssertExpectations(t)
+	})
 
 	return mock
 }
@@ -41,8 +50,8 @@ func (_m *Cluster) EXPECT() *Cluster_Expecter {
 }
 
 // ActorExists provides a mock function for the type Cluster
-func (_mock *Cluster) ActorExists(ctx context.Context, actorName string) (bool, error) {
-	ret := _mock.Called(ctx, actorName)
+func (_mock *Cluster) ActorExists(ctx context.Context, qualifiedName string) (bool, error) {
+	ret := _mock.Called(ctx, qualifiedName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ActorExists")
@@ -51,15 +60,15 @@ func (_mock *Cluster) ActorExists(ctx context.Context, actorName string) (bool, 
 	var r0 bool
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
-		return returnFunc(ctx, actorName)
+		return returnFunc(ctx, qualifiedName)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
-		r0 = returnFunc(ctx, actorName)
+		r0 = returnFunc(ctx, qualifiedName)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, actorName)
+		r1 = returnFunc(ctx, qualifiedName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -73,12 +82,12 @@ type Cluster_ActorExists_Call struct {
 
 // ActorExists is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actorName string
-func (_e *Cluster_Expecter) ActorExists(ctx any, actorName any) *Cluster_ActorExists_Call {
-	return &Cluster_ActorExists_Call{Call: _e.mock.On("ActorExists", ctx, actorName)}
+//   - qualifiedName string
+func (_e *Cluster_Expecter) ActorExists(ctx any, qualifiedName any) *Cluster_ActorExists_Call {
+	return &Cluster_ActorExists_Call{Call: _e.mock.On("ActorExists", ctx, qualifiedName)}
 }
 
-func (_c *Cluster_ActorExists_Call) Run(run func(ctx context.Context, actorName string)) *Cluster_ActorExists_Call {
+func (_c *Cluster_ActorExists_Call) Run(run func(ctx context.Context, qualifiedName string)) *Cluster_ActorExists_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -101,7 +110,7 @@ func (_c *Cluster_ActorExists_Call) Return(b bool, err error) *Cluster_ActorExis
 	return _c
 }
 
-func (_c *Cluster_ActorExists_Call) RunAndReturn(run func(ctx context.Context, actorName string) (bool, error)) *Cluster_ActorExists_Call {
+func (_c *Cluster_ActorExists_Call) RunAndReturn(run func(ctx context.Context, qualifiedName string) (bool, error)) *Cluster_ActorExists_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -489,8 +498,8 @@ func (_c *Cluster_Events_Call) RunAndReturn(run func() <-chan *cluster.Event) *C
 }
 
 // GetActor provides a mock function for the type Cluster
-func (_mock *Cluster) GetActor(ctx context.Context, actorName string) (*internalpb.Actor, error) {
-	ret := _mock.Called(ctx, actorName)
+func (_mock *Cluster) GetActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error) {
+	ret := _mock.Called(ctx, qualifiedName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetActor")
@@ -499,17 +508,17 @@ func (_mock *Cluster) GetActor(ctx context.Context, actorName string) (*internal
 	var r0 *internalpb.Actor
 	var r1 error
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*internalpb.Actor, error)); ok {
-		return returnFunc(ctx, actorName)
+		return returnFunc(ctx, qualifiedName)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *internalpb.Actor); ok {
-		r0 = returnFunc(ctx, actorName)
+		r0 = returnFunc(ctx, qualifiedName)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(*internalpb.Actor)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = returnFunc(ctx, actorName)
+		r1 = returnFunc(ctx, qualifiedName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -523,12 +532,12 @@ type Cluster_GetActor_Call struct {
 
 // GetActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actorName string
-func (_e *Cluster_Expecter) GetActor(ctx any, actorName any) *Cluster_GetActor_Call {
-	return &Cluster_GetActor_Call{Call: _e.mock.On("GetActor", ctx, actorName)}
+//   - qualifiedName string
+func (_e *Cluster_Expecter) GetActor(ctx any, qualifiedName any) *Cluster_GetActor_Call {
+	return &Cluster_GetActor_Call{Call: _e.mock.On("GetActor", ctx, qualifiedName)}
 }
 
-func (_c *Cluster_GetActor_Call) Run(run func(ctx context.Context, actorName string)) *Cluster_GetActor_Call {
+func (_c *Cluster_GetActor_Call) Run(run func(ctx context.Context, qualifiedName string)) *Cluster_GetActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -551,7 +560,7 @@ func (_c *Cluster_GetActor_Call) Return(actor *internalpb.Actor, err error) *Clu
 	return _c
 }
 
-func (_c *Cluster_GetActor_Call) RunAndReturn(run func(ctx context.Context, actorName string) (*internalpb.Actor, error)) *Cluster_GetActor_Call {
+func (_c *Cluster_GetActor_Call) RunAndReturn(run func(ctx context.Context, qualifiedName string) (*internalpb.Actor, error)) *Cluster_GetActor_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1343,63 +1352,6 @@ func (_c *Cluster_PutActor_Call) RunAndReturn(run func(ctx context.Context, acto
 	return _c
 }
 
-// PutActorIfAbsent provides a mock function for the type Cluster
-func (_mock *Cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error {
-	ret := _mock.Called(ctx, actor)
-
-	if len(ret) == 0 {
-		panic("no return value specified for PutActorIfAbsent")
-	}
-
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, *internalpb.Actor) error); ok {
-		r0 = returnFunc(ctx, actor)
-	} else {
-		r0 = ret.Error(0)
-	}
-	return r0
-}
-
-// Cluster_PutActorIfAbsent_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PutActorIfAbsent'
-type Cluster_PutActorIfAbsent_Call struct {
-	*mock.Call
-}
-
-// PutActorIfAbsent is a helper method to define mock.On call
-//   - ctx context.Context
-//   - actor *internalpb.Actor
-func (_e *Cluster_Expecter) PutActorIfAbsent(ctx any, actor any) *Cluster_PutActorIfAbsent_Call {
-	return &Cluster_PutActorIfAbsent_Call{Call: _e.mock.On("PutActorIfAbsent", ctx, actor)}
-}
-
-func (_c *Cluster_PutActorIfAbsent_Call) Run(run func(ctx context.Context, actor *internalpb.Actor)) *Cluster_PutActorIfAbsent_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 context.Context
-		if args[0] != nil {
-			arg0 = args[0].(context.Context)
-		}
-		var arg1 *internalpb.Actor
-		if args[1] != nil {
-			arg1 = args[1].(*internalpb.Actor)
-		}
-		run(
-			arg0,
-			arg1,
-		)
-	})
-	return _c
-}
-
-func (_c *Cluster_PutActorIfAbsent_Call) Return(err error) *Cluster_PutActorIfAbsent_Call {
-	_c.Call.Return(err)
-	return _c
-}
-
-func (_c *Cluster_PutActorIfAbsent_Call) RunAndReturn(run func(ctx context.Context, actor *internalpb.Actor) error) *Cluster_PutActorIfAbsent_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // PutGrain provides a mock function for the type Cluster
 func (_mock *Cluster) PutGrain(ctx context.Context, grain *internalpb.Grain) error {
 	ret := _mock.Called(ctx, grain)
@@ -1595,20 +1547,31 @@ func (_c *Cluster_ReleaseGrain_Call) RunAndReturn(run func(ctx context.Context, 
 }
 
 // RemoveActor provides a mock function for the type Cluster
-func (_mock *Cluster) RemoveActor(ctx context.Context, actorName string) error {
-	ret := _mock.Called(ctx, actorName)
+func (_mock *Cluster) RemoveActor(ctx context.Context, qualifiedName string, incarnationID string) (*internalpb.Actor, error) {
+	ret := _mock.Called(ctx, qualifiedName, incarnationID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for RemoveActor")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, string) error); ok {
-		r0 = returnFunc(ctx, actorName)
-	} else {
-		r0 = ret.Error(0)
+	var r0 *internalpb.Actor
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) (*internalpb.Actor, error)); ok {
+		return returnFunc(ctx, qualifiedName, incarnationID)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string, string) *internalpb.Actor); ok {
+		r0 = returnFunc(ctx, qualifiedName, incarnationID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*internalpb.Actor)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
+		r1 = returnFunc(ctx, qualifiedName, incarnationID)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // Cluster_RemoveActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveActor'
@@ -1618,12 +1581,13 @@ type Cluster_RemoveActor_Call struct {
 
 // RemoveActor is a helper method to define mock.On call
 //   - ctx context.Context
-//   - actorName string
-func (_e *Cluster_Expecter) RemoveActor(ctx any, actorName any) *Cluster_RemoveActor_Call {
-	return &Cluster_RemoveActor_Call{Call: _e.mock.On("RemoveActor", ctx, actorName)}
+//   - qualifiedName string
+//   - incarnationID string
+func (_e *Cluster_Expecter) RemoveActor(ctx any, qualifiedName any, incarnationID any) *Cluster_RemoveActor_Call {
+	return &Cluster_RemoveActor_Call{Call: _e.mock.On("RemoveActor", ctx, qualifiedName, incarnationID)}
 }
 
-func (_c *Cluster_RemoveActor_Call) Run(run func(ctx context.Context, actorName string)) *Cluster_RemoveActor_Call {
+func (_c *Cluster_RemoveActor_Call) Run(run func(ctx context.Context, qualifiedName string, incarnationID string)) *Cluster_RemoveActor_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		var arg0 context.Context
 		if args[0] != nil {
@@ -1633,20 +1597,25 @@ func (_c *Cluster_RemoveActor_Call) Run(run func(ctx context.Context, actorName 
 		if args[1] != nil {
 			arg1 = args[1].(string)
 		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
 		run(
 			arg0,
 			arg1,
+			arg2,
 		)
 	})
 	return _c
 }
 
-func (_c *Cluster_RemoveActor_Call) Return(err error) *Cluster_RemoveActor_Call {
-	_c.Call.Return(err)
+func (_c *Cluster_RemoveActor_Call) Return(actor *internalpb.Actor, err error) *Cluster_RemoveActor_Call {
+	_c.Call.Return(actor, err)
 	return _c
 }
 
-func (_c *Cluster_RemoveActor_Call) RunAndReturn(run func(ctx context.Context, actorName string) error) *Cluster_RemoveActor_Call {
+func (_c *Cluster_RemoveActor_Call) RunAndReturn(run func(ctx context.Context, qualifiedName string, incarnationID string) (*internalpb.Actor, error)) *Cluster_RemoveActor_Call {
 	_c.Call.Return(run)
 	return _c
 }

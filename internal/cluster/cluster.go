@@ -118,7 +118,29 @@ const (
 	// ReleaseGrain so the comparison of the record with the expected owner and
 	// its deletion cannot interleave with another release of the same grain.
 	namespaceGrainLocks recordNamespace = "grain-locks"
+	// namespaceActorLocks holds the cluster-wide lock of an actor record, taken
+	// by PutActor and RemoveActor so the comparison of the record with the
+	// caller's incarnation and the write or deletion that follows cannot
+	// interleave with another publication or removal of the same name.
+	namespaceActorLocks recordNamespace = "actor-locks"
 )
+
+// lockSubject names the kind of record a cluster-wide lock protects. It is the
+// noun printed in the warning logged when the release of the lock fails.
+type lockSubject string
+
+const (
+	lockSubjectGrain lockSubject = "grain"
+	lockSubjectActor lockSubject = "actor"
+)
+
+// AnyIncarnation, passed to RemoveActor in place of an incarnation, removes the
+// record whatever incarnation it carries. It is reserved for names that
+// identify a single activation by construction, such as the reliable
+// controller companions, whose name embeds the incarnation of their endpoint,
+// so that a fence would protect nothing. Every other removal names the
+// incarnation it owns.
+const AnyIncarnation = ""
 
 // scheduleFireClaimValue is the placeholder payload for a schedule-fire claim entry; only the
 // key's existence matters for arbitration.
@@ -173,17 +195,19 @@ type Cluster interface {
 	// Stop gracefully shuts down the cluster engine and frees resources.
 	Stop(ctx context.Context) error
 	// PutActor stores the provided actor metadata within the cluster state,
-	// keyed by the qualified name of the actor.
+	// keyed by the qualified name of the actor. The first write claims the
+	// name: a record of another incarnation is left untouched and
+	// ErrActorAlreadyExists is returned. A write by the incarnation that owns
+	// the record updates it.
 	PutActor(ctx context.Context, actor *internalpb.Actor) error
-	// PutActorIfAbsent stores the actor metadata only when no record already
-	// exists under its qualified name and returns ErrActorAlreadyExists
-	// otherwise.
-	PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error
 	// GetActor retrieves actor metadata by qualified name: the actor's name for
 	// a top-level actor, parent/name for a child.
 	GetActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error)
-	// RemoveActor deletes the actor entry stored under the qualified name.
-	RemoveActor(ctx context.Context, qualifiedName string) error
+	// RemoveActor deletes the actor entry stored under the qualified name only
+	// while it still carries incarnationID. It returns the record when another
+	// incarnation owns the name, and nil when the record was deleted or is
+	// absent. AnyIncarnation removes the record whatever it carries.
+	RemoveActor(ctx context.Context, qualifiedName, incarnationID string) (*internalpb.Actor, error)
 	// ActorExists checks whether an actor is registered under the qualified
 	// name.
 	ActorExists(ctx context.Context, qualifiedName string) (bool, error)
@@ -532,18 +556,23 @@ func (x *cluster) Stop(ctx context.Context) error {
 	return nil
 }
 
-// PutActor persists the supplied actor metadata into the cluster state and
-// updates the local peer cache. The record is keyed by the qualified name of the
-// actor, so two children with the same name under different parents keep two
-// records.
+// PutActor persists the supplied actor metadata into the cluster state. The
+// record is keyed by the qualified name of the actor, so two children with the
+// same name under different parents keep two records.
+//
+// The write is a claim on the name. A free name is claimed with one
+// conditional write, which the owner of the key applies to at most one of two
+// concurrent claims. A taken name is decided under the actor's cluster-wide
+// lock, shared with RemoveActor: a record of the same incarnation is updated,
+// which is how a restart or a registry repair republishes an actor the node
+// already owns, and a record of another incarnation is left untouched and
+// ErrActorAlreadyExists is returned, so two nodes spawning one name at the
+// same time cannot both publish.
 func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
 	}
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
 	// no need to check for nil address as it is validated during actor creation
 	addr, _ := address.Parse(actor.GetAddress())
 	key := addr.QualifiedName()
@@ -551,41 +580,68 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	encoded, err := encode(actor)
 	if err != nil {
 		return err
+	}
+
+	// The read lock only, as in ReleaseGrain: atomicity comes from the
+	// conditional write and the cluster-wide lock, and holding the write lock
+	// while waiting for the latter would stall every registry access behind
+	// one actor's publication.
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	err = x.putRecordIfAbsent(ctx, namespaceActors, key, encoded)
+	if !errors.Is(err, olric.ErrKeyFound) {
+		return err
+	}
+
+	return x.updateActor(ctx, key, actor.GetIncarnationId(), encoded)
+}
+
+// updateActor writes the record of an actor whose name was taken when its claim
+// was attempted. It runs under the name's cluster-wide lock, which every write
+// of an existing record and every removal take, so the only write it can race
+// is the claim of a free name, which is conditional and never locks. The record
+// decides by incarnation: another incarnation owns the name, the same
+// incarnation is updated in place. A name freed since the claim is claimed
+// again with a conditional write, and when that claim loses to one that landed
+// since the read, the record that landed decides instead.
+func (x *cluster) updateActor(ctx context.Context, key, incarnationID string, encoded []byte) error {
+	unlock, err := x.lockActor(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	defer unlock()
+
+	current, err := x.readActor(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	if current == nil {
+		err = x.putRecordIfAbsent(ctx, namespaceActors, key, encoded)
+		if !errors.Is(err, olric.ErrKeyFound) {
+			return err
+		}
+
+		// a claim landed since the read, so the record it wrote decides. It
+		// cannot be removed while this lock is held, so a missing record
+		// means the map lost the key; the name is refused rather than taken.
+		current, err = x.readActor(ctx, key)
+		if err != nil {
+			return err
+		}
+
+		if current == nil {
+			return ErrActorAlreadyExists
+		}
+	}
+
+	if current.GetIncarnationId() != incarnationID {
+		return ErrActorAlreadyExists
 	}
 
 	return x.putRecord(ctx, namespaceActors, key, encoded)
-}
-
-// PutActorIfAbsent stores the actor metadata only when no record exists under
-// its qualified name, making cluster-wide name uniqueness atomic for callers that must
-// not overwrite a concurrent registration. It returns ErrActorAlreadyExists
-// when another record already holds the qualified name.
-func (x *cluster) PutActorIfAbsent(ctx context.Context, actor *internalpb.Actor) error {
-	if !x.running.Load() {
-		return ErrEngineNotRunning
-	}
-
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	// no need to check for nil address as it is validated during actor creation
-	addr, _ := address.Parse(actor.GetAddress())
-	key := addr.QualifiedName()
-
-	encoded, err := encode(actor)
-	if err != nil {
-		return err
-	}
-
-	if err := x.putRecordIfAbsent(ctx, namespaceActors, key, encoded); err != nil {
-		if errors.Is(err, olric.ErrKeyFound) {
-			return ErrActorAlreadyExists
-		}
-
-		return err
-	}
-
-	return nil
 }
 
 // GetActor fetches actor metadata by qualified name from the unified map: the
@@ -598,28 +654,72 @@ func (x *cluster) GetActor(ctx context.Context, qualifiedName string) (*internal
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	value, err := x.getRecord(ctx, namespaceActors, qualifiedName)
+	actor, err := x.readActor(ctx, qualifiedName)
 	if err != nil {
-		if errors.Is(err, olric.ErrKeyNotFound) {
-			return nil, ErrActorNotFound
-		}
 		return nil, err
 	}
 
-	return decode(value)
+	if actor == nil {
+		return nil, ErrActorNotFound
+	}
+
+	return actor, nil
 }
 
-// RemoveActor deletes the actor entry stored under the qualified name from the
-// unified map and peer cache.
-func (x *cluster) RemoveActor(ctx context.Context, qualifiedName string) error {
+// RemoveActor deletes the actor entry stored under the qualified name only
+// while it still carries incarnationID, so the cleanup of one activation never
+// deletes the record of a newer one. It returns the record when another
+// incarnation owns the name, and nil when the record was deleted or is absent.
+// AnyIncarnation skips the comparison and removes the record whatever it
+// carries. The comparison and the deletion run under the actor's cluster-wide
+// lock, shared with PutActor.
+func (x *cluster) RemoveActor(ctx context.Context, qualifiedName, incarnationID string) (*internalpb.Actor, error) {
 	if !x.running.Load() {
-		return ErrEngineNotRunning
+		return nil, ErrEngineNotRunning
 	}
 
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	return x.deleteRecord(ctx, namespaceActors, qualifiedName)
+	unlock, err := x.lockActor(ctx, qualifiedName)
+	if err != nil {
+		return nil, err
+	}
+
+	defer unlock()
+
+	if incarnationID == AnyIncarnation {
+		return nil, x.deleteRecord(ctx, namespaceActors, qualifiedName)
+	}
+
+	current, err := x.readActor(ctx, qualifiedName)
+	if err != nil {
+		return nil, err
+	}
+
+	switch {
+	case current == nil:
+		return nil, nil
+	case current.GetIncarnationId() != incarnationID:
+		return current, nil
+	}
+
+	return nil, x.deleteRecord(ctx, namespaceActors, qualifiedName)
+}
+
+// readActor returns the record stored under the qualified name, or nil when no
+// actor holds the name. Callers hold x.mu.
+func (x *cluster) readActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error) {
+	value, err := x.getRecord(ctx, namespaceActors, qualifiedName)
+	if err != nil {
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return nil, nil
+		}
+
+		return nil, err
+	}
+
+	return decode(value)
 }
 
 // ActorExists reports whether an actor is registered in the cluster under the
@@ -1857,15 +1957,27 @@ func (x *cluster) deleteRecord(ctx context.Context, namespace recordNamespace, k
 }
 
 // lockGrain takes the cluster-wide lock of the grain and returns the function
-// releasing it. The lock is a lease that outlives the longest critical section
-// (one read and one delete, each bounded by the engine timeouts), so a holder
-// that dies mid-release frees the grain once the lease expires. The wait for
-// the lock is bounded like a write; a lock still held past it fails the
-// release, which its caller retries.
+// releasing it; see lockRecord.
 func (x *cluster) lockGrain(ctx context.Context, identity string) (func(), error) {
+	return x.lockRecord(ctx, namespaceGrainLocks, lockSubjectGrain, identity)
+}
+
+// lockActor takes the cluster-wide lock of the actor name and returns the
+// function releasing it; see lockRecord.
+func (x *cluster) lockActor(ctx context.Context, qualifiedName string) (func(), error) {
+	return x.lockRecord(ctx, namespaceActorLocks, lockSubjectActor, qualifiedName)
+}
+
+// lockRecord takes the cluster-wide lock stored under namespace for key and
+// returns the function releasing it. The lock is a lease that covers the
+// longest critical section (at most two reads and two writes or deletes, each
+// bounded by the engine timeouts), so a holder that dies mid-operation frees
+// the key once the lease expires. The wait for the lock is bounded like a write; a lock
+// still held past it fails the operation, which its caller retries.
+func (x *cluster) lockRecord(ctx context.Context, namespace recordNamespace, subject lockSubject, key string) (func(), error) {
 	ctx = context.WithoutCancel(ctx)
 	lease := 2 * (x.readTimeout + x.writeTimeout)
-	lock, err := x.dmap.LockWithTimeout(ctx, composeKey(namespaceGrainLocks, identity), lease, x.writeTimeout)
+	lock, err := x.dmap.LockWithTimeout(ctx, composeKey(namespace, key), lease, x.writeTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -1875,7 +1987,7 @@ func (x *cluster) lockGrain(ctx context.Context, identity string) (func(), error
 		defer cancel()
 
 		if err := lock.Unlock(unlockCtx); err != nil {
-			x.logger.Warnf("failed to release the lock of grain=%s: %v", identity, err)
+			x.logger.Warnf("failed to release the lock of %s=%s: %v", subject, key, err)
 		}
 	}, nil
 }
