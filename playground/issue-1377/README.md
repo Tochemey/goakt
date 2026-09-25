@@ -56,7 +56,7 @@ In scenario 4, the count of successful `SpawnOn` calls per run is not the defect
 
 ## After the fix
 
-The registry write of a spawn claims the name under a cluster-wide per-name lock, and every later update or removal of the record is accepted only from the activation that owns it. Scenario 1 prints `OK`: exactly one spawn succeeds, the other fails with `ErrActorAlreadyExists`, and the observer still resolves the winner once the loser has been cleaned up. Scenario 2 is skipped, because there is no duplicate to stop. Scenario 3 prints `OK`: the loser's rollback leaves the winner's record in place. Scenario 4 prints `OK`: every run ends with both nodes resolving the same PID.
+The registry write of a spawn claims the name with a conditional write that only one of two concurrent spawns can win, and every later update or removal of the record is accepted only from the activation that owns it. Scenario 1 prints `OK`: exactly one spawn succeeds, the other fails with `ErrActorAlreadyExists`, and the observer still resolves the winner once the loser has been cleaned up. Scenario 2 is skipped, because there is no duplicate to stop. Scenario 3 prints `OK`: the loser's rollback leaves the winner's record in place. Scenario 4 prints `OK`: every run ends with both nodes resolving the same PID.
 
 Output of scenarios 1 to 3 on the fix (ports vary):
 

@@ -602,9 +602,14 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, reowned)
 
-		// once the name is free another incarnation claims it, and
-		// AnyIncarnation removes the record whatever incarnation it carries
+		// once the name is free another incarnation claims it without
+		// waiting for the name's lock, and AnyIncarnation removes the record
+		// whatever incarnation it carries
+		unlock, err = engine.(*cluster).lockActor(ctx, actorName)
+		require.NoError(t, err)
+
 		require.NoError(t, engine.PutActor(ctx, other))
+		unlock()
 
 		reowned, err = engine.RemoveActor(ctx, actorName, AnyIncarnation)
 		require.NoError(t, err)
@@ -2433,21 +2438,12 @@ func TestPutGrainIfAbsentFallbackCallsPutGrain(t *testing.T) {
 
 func TestPutActorPropagatesDMapError(t *testing.T) {
 	putErr := errors.New("put failure")
-	lock := &MockLockContext{}
-	cl := newMockEngine(log.DiscardLogger, &MockDMap{
-		lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
-			return lock, nil
-		},
-		getFn: func(context.Context, string) (*olric.GetResponse, error) {
-			return nil, olric.ErrKeyNotFound
-		},
-		putErr: putErr,
-	})
+	// no lockFn: a claim that fails for a reason other than a taken name never takes the lock
+	cl := newMockEngine(log.DiscardLogger, &MockDMap{putErr: putErr})
 
 	actor := &internalpb.Actor{}
 	err := cl.PutActor(context.Background(), actor)
 	require.ErrorIs(t, err, putErr)
-	require.Equal(t, 1, lock.unlocks)
 }
 
 func TestNextRoundRobinValuePropagatesIncrError(t *testing.T) {
@@ -2500,26 +2496,94 @@ func TestPutActor(t *testing.T) {
 	recordKey := composeKey(namespaceActors, actorName)
 	lockKey := composeKey(namespaceActorLocks, actorName)
 
+	// writes returns a Put hook that answers the writes of one PutActor call
+	// with results in order and fails the test on any further write. Every
+	// write the mock can observe is a conditional claim: the in-place update
+	// of a record needs a decodable read, which only the engine tests provide.
+	writes := func(t *testing.T, results ...error) func(context.Context, string, any, ...olric.PutOption) error {
+		calls := 0
+
+		return func(_ context.Context, key string, _ any, options ...olric.PutOption) error {
+			require.Equal(t, recordKey, key)
+			require.Len(t, options, 1)
+			require.Less(t, calls, len(results))
+			result := results[calls]
+			calls++
+			return result
+		}
+	}
+
+	// absentReads returns a Get hook that reports the name free and counts its calls.
+	absentReads := func(t *testing.T, calls *int) func(context.Context, string) (*olric.GetResponse, error) {
+		return func(_ context.Context, key string) (*olric.GetResponse, error) {
+			require.Equal(t, recordKey, key)
+			*calls++
+			return nil, olric.ErrKeyNotFound
+		}
+	}
+
 	t.Run("With a free name", func(t *testing.T) {
+		// no lockFn and no getFn: a free name is claimed by the conditional write alone
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{putFn: writes(t, nil)})
+
+		require.NoError(t, cl.PutActor(context.Background(), record))
+	})
+
+	t.Run("With a name freed since the claim", func(t *testing.T) {
+		reads := 0
 		lock := &MockLockContext{}
 		cl := newMockEngine(log.DiscardLogger, &MockDMap{
 			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
 				require.Equal(t, lockKey, key)
 				return lock, nil
 			},
-			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
-				require.Equal(t, recordKey, key)
-				return nil, olric.ErrKeyNotFound
-			},
-			putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error { // nolint
-				require.Equal(t, recordKey, key)
-				// the claim is decided under the lock, so the write itself is unconditional
-				require.Empty(t, options)
-				return nil
-			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, nil),
 		})
 
 		require.NoError(t, cl.PutActor(context.Background(), record))
+		require.Equal(t, 1, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a name claimed and removed again since the read", func(t *testing.T) {
+		reads := 0
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, olric.ErrKeyFound),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), ErrActorAlreadyExists)
+		require.Equal(t, 2, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a read failure after a lost claim", func(t *testing.T) {
+		reads := 0
+		readErr := errors.New("get failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, recordKey, key)
+				reads++
+				if reads == 1 {
+					return nil, olric.ErrKeyNotFound
+				}
+
+				return nil, readErr
+			},
+			putFn: writes(t, olric.ErrKeyFound, olric.ErrKeyFound),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
+		require.Equal(t, 2, reads)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
@@ -2529,6 +2593,7 @@ func TestPutActor(t *testing.T) {
 			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
 				return nil, lockErr
 			},
+			putFn: writes(t, olric.ErrKeyFound),
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), lockErr)
@@ -2544,22 +2609,40 @@ func TestPutActor(t *testing.T) {
 			getFn: func(context.Context, string) (*olric.GetResponse, error) {
 				return nil, readErr
 			},
+			putFn: writes(t, olric.ErrKeyFound),
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
+	t.Run("With a write failure under the lock", func(t *testing.T) {
+		reads := 0
+		putErr := errors.New("put failure")
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, putErr),
+		})
+
+		require.ErrorIs(t, cl.PutActor(context.Background(), record), putErr)
+		require.Equal(t, 1, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
 	t.Run("With an unlock failure", func(t *testing.T) {
+		reads := 0
 		var logs bytes.Buffer
 		lock := &MockLockContext{unlockErr: errors.New("unlock failure")}
 		cl := newMockEngine(log.NewSlog(log.WarningLevel, &logs), &MockDMap{
 			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
 				return lock, nil
 			},
-			getFn: func(context.Context, string) (*olric.GetResponse, error) {
-				return nil, olric.ErrKeyNotFound
-			},
+			getFn: absentReads(t, &reads),
+			putFn: writes(t, olric.ErrKeyFound, nil),
 		})
 
 		require.NoError(t, cl.PutActor(context.Background(), record))

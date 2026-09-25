@@ -169,6 +169,14 @@ go test -run=^$ -bench=^BenchmarkGrainMemoryFootprint$ -benchtime=1x ./benchmark
 go test -run=^$ -bench=^BenchmarkRemoteTellThroughput$ -benchtime=1x ./benchmark/
 ```
 
+### ClusterSpawn: named spawn in a three-node cluster, sequential and parallel
+
+A spawn in cluster mode claims the actor name in the registry before it returns, so on top of the local activation it pays registry round trips over the network. Three nodes run in one process on loopback; one of them spawns actors under names no earlier spawn used, so every spawn is a first claim. The sequential variant is the latency of one spawn; cite it as the cost of a spawn in a cluster. The parallel variant spawns from GOMAXPROCS goroutines at once, and its aggregate rate shows how far spawns of distinct names overlap in the registry. Both variants and every repeat share one cluster, so the registry holds every actor spawned so far; run a fixed number of iterations to keep that population bounded.
+
+```
+go test -run=^$ -bench=^BenchmarkClusterSpawn$ -benchtime=500x -count=5 ./benchmark/
+```
+
 ### MillionActorsSustainedLoad — 1M actors processing under sustained load
 
 A single-node scale test (not a benchmark) that spawns one million actors, keeps every one of them processing messages for a fixed window, and reports memory (bytes/actor, HeapInuse, GC) and CPU (consumed CPU time, average cores, GC CPU fraction, throughput). It is build-tagged behind `scale` so it stays out of the normal suite, and needs a machine with enough memory: one supervision goroutine per actor means ~1M goroutines, so budget several GB of RAM.

@@ -560,13 +560,14 @@ func (x *cluster) Stop(ctx context.Context) error {
 // record is keyed by the qualified name of the actor, so two children with the
 // same name under different parents keep two records.
 //
-// The write is a claim on the name. It succeeds when no record holds the name,
-// or when the record carries the same incarnation, which is how a restart or a
-// registry repair updates an actor the node already owns. A record of another
-// incarnation is left untouched and ErrActorAlreadyExists is returned, so two
-// nodes spawning one name at the same time cannot both publish. The comparison
-// and the write run under the actor's cluster-wide lock, shared with
-// RemoveActor.
+// The write is a claim on the name. A free name is claimed with one
+// conditional write, which the owner of the key applies to at most one of two
+// concurrent claims. A taken name is decided under the actor's cluster-wide
+// lock, shared with RemoveActor: a record of the same incarnation is updated,
+// which is how a restart or a registry repair republishes an actor the node
+// already owns, and a record of another incarnation is left untouched and
+// ErrActorAlreadyExists is returned, so two nodes spawning one name at the
+// same time cannot both publish.
 func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	if !x.running.Load() {
 		return ErrEngineNotRunning
@@ -582,11 +583,29 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 	}
 
 	// The read lock only, as in ReleaseGrain: atomicity comes from the
-	// cluster-wide lock, and holding the write lock while waiting for it would
-	// stall every registry access behind one actor's publication.
+	// conditional write and the cluster-wide lock, and holding the write lock
+	// while waiting for the latter would stall every registry access behind
+	// one actor's publication.
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
+	err = x.putRecordIfAbsent(ctx, namespaceActors, key, encoded)
+	if !errors.Is(err, olric.ErrKeyFound) {
+		return err
+	}
+
+	return x.updateActor(ctx, key, actor.GetIncarnationId(), encoded)
+}
+
+// updateActor writes the record of an actor whose name was taken when its claim
+// was attempted. It runs under the name's cluster-wide lock, which every write
+// of an existing record and every removal take, so the only write it can race
+// is the claim of a free name, which is conditional and never locks. The record
+// decides by incarnation: another incarnation owns the name, the same
+// incarnation is updated in place. A name freed since the claim is claimed
+// again with a conditional write, and when that claim loses to one that landed
+// since the read, the record that landed decides instead.
+func (x *cluster) updateActor(ctx context.Context, key, incarnationID string, encoded []byte) error {
 	unlock, err := x.lockActor(ctx, key)
 	if err != nil {
 		return err
@@ -599,7 +618,26 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		return err
 	}
 
-	if current != nil && current.GetIncarnationId() != actor.GetIncarnationId() {
+	if current == nil {
+		err = x.putRecordIfAbsent(ctx, namespaceActors, key, encoded)
+		if !errors.Is(err, olric.ErrKeyFound) {
+			return err
+		}
+
+		// a claim landed since the read, so the record it wrote decides. It
+		// cannot be removed while this lock is held, so a missing record
+		// means the map lost the key; the name is refused rather than taken.
+		current, err = x.readActor(ctx, key)
+		if err != nil {
+			return err
+		}
+
+		if current == nil {
+			return ErrActorAlreadyExists
+		}
+	}
+
+	if current.GetIncarnationId() != incarnationID {
 		return ErrActorAlreadyExists
 	}
 
@@ -1931,10 +1969,10 @@ func (x *cluster) lockActor(ctx context.Context, qualifiedName string) (func(), 
 }
 
 // lockRecord takes the cluster-wide lock stored under namespace for key and
-// returns the function releasing it. The lock is a lease that outlives the
-// longest critical section (one read and one write or delete, each bounded by
-// the engine timeouts), so a holder that dies mid-operation frees the key once
-// the lease expires. The wait for the lock is bounded like a write; a lock
+// returns the function releasing it. The lock is a lease that covers the
+// longest critical section (at most two reads and two writes or deletes, each
+// bounded by the engine timeouts), so a holder that dies mid-operation frees
+// the key once the lease expires. The wait for the lock is bounded like a write; a lock
 // still held past it fails the operation, which its caller retries.
 func (x *cluster) lockRecord(ctx context.Context, namespace recordNamespace, subject lockSubject, key string) (func(), error) {
 	ctx = context.WithoutCancel(ctx)
