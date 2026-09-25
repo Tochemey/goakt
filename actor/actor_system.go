@@ -2983,61 +2983,13 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 	}
 	x.actors.addWatcher(pid, x.deathWatch)
 
-	if err := x.publishSpawnedActor(ctx, pid); err != nil {
+	if err := x.putActorOnCluster(ctx, pid); err != nil {
 		x.rollbackSpawn(ctx, pid, "failed cluster publication")
 		return nil, err
 	}
 
 	x.recordActorSpawned(pid)
 	return pid, nil
-}
-
-// publishSpawnedActor writes the initial registry record of a completed
-// spawn. A reliable endpoint publishes atomically with PutActorIfAbsent so a
-// concurrent spawn of the same name on another node can never be overwritten,
-// turning the non-atomic precondition read into a real uniqueness guarantee;
-// every other actor keeps the plain publication path, whose overwrite
-// semantics restarts and relocation rely on.
-func (x *actorSystem) publishSpawnedActor(ctx context.Context, pid *PID) error {
-	if pid.reliableDelivery() == nil || !x.clusterEnabled.Load() {
-		return x.putActorOnCluster(ctx, pid)
-	}
-
-	actor, err := pid.toSerialize()
-	if err != nil {
-		return err
-	}
-
-	if err := x.getCluster().PutActorIfAbsent(ctx, actor); err != nil {
-		if errors.Is(err, cluster.ErrActorAlreadyExists) {
-			return gerrors.NewErrActorAlreadyExists(pid.Name())
-		}
-
-		return err
-	}
-
-	return nil
-}
-
-// removeActorIfIncarnation removes the registry record stored under
-// qualifiedName only when it still carries incarnationID, following the
-// releaseDepartedEntry ownership rule: cleanup owned by one activation must
-// never delete a record already overwritten by a newer one. Best-effort by
-// design, since every caller is itself a rollback path whose primary error is
-// already on its way to the user; failures are logged for diagnosability.
-func (x *actorSystem) removeActorIfIncarnation(ctx context.Context, qualifiedName, incarnationID string) {
-	registry := x.getCluster()
-	record, err := registry.GetActor(ctx, qualifiedName)
-
-	switch {
-	case errors.Is(err, cluster.ErrActorNotFound):
-	case err != nil:
-		x.logger.Errorf("failed to load registry record for actor=%s during rollback: %v", qualifiedName, err)
-	case record.GetIncarnationId() == incarnationID:
-		if err := registry.RemoveActor(ctx, qualifiedName); err != nil {
-			x.logger.Errorf("failed to remove registry record for actor=%s during rollback: %v", qualifiedName, err)
-		}
-	}
 }
 
 // rollbackSpawn stops a partially spawned actor so a failed spawn leaves
@@ -3053,6 +3005,10 @@ func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string
 // putActorOnCluster synchronously writes the actor's registry record to the
 // cluster store. It only returns nil once the record is durably written, so a
 // successful spawn implies the actor is resolvable by name from any node.
+// The first publication of an actor claims its name and every later one, a
+// restart or a registry repair, updates the record; when another incarnation
+// owns the name nothing is written and ErrActorAlreadyExists is returned, so
+// two nodes spawning one name at the same time never both publish.
 // No-op when clustering is disabled or for system actors, with one exception:
 // reliable-delivery controller companions publish despite their reserved
 // names, because cluster resolution must find an endpoint's controller from
@@ -3068,7 +3024,15 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 		return err
 	}
 
-	return x.getCluster().PutActor(ctx, actor)
+	if err := x.getCluster().PutActor(ctx, actor); err != nil {
+		if errors.Is(err, cluster.ErrActorAlreadyExists) {
+			return gerrors.NewErrActorAlreadyExists(pid.Name())
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 // putGrainOnCluster synchronously writes the grain's registry record to the
@@ -3265,8 +3229,14 @@ func (x *actorSystem) cleanupStaleLocalActors(ctx context.Context) error {
 			continue
 		}
 
-		if err := x.cluster.RemoveActor(ctx, addr.QualifiedName()); err != nil {
+		reowned, err := x.cluster.RemoveActor(ctx, addr.QualifiedName(), actor.GetIncarnationId())
+		if err != nil {
 			x.logger.Warnf("failed to remove stale cluster actor %s: %v", addr.String(), err)
+			continue
+		}
+
+		if reowned != nil {
+			x.logger.Debugf("stale cluster actor %s is owned by another incarnation, leaving its record", addr.String())
 			continue
 		}
 
@@ -3633,6 +3603,14 @@ func (x *actorSystem) resyncActors() error {
 
 	for _, actor := range actors {
 		if err := x.putActorOnCluster(ctx, actor); err != nil {
+			// this node's copy lost its name to another incarnation: repairing
+			// its record would overwrite the owner's, so it is skipped and the
+			// remaining actors are still repaired
+			if errors.Is(err, gerrors.ErrActorAlreadyExists) {
+				x.logger.Warnf("skipping resync of actor=%s: its name is owned by another incarnation (hint: this node's copy is stale)", pathString(actor.Path()))
+				continue
+			}
+
 			x.logger.Errorf("failed to resync actor=%s: %v (hint: check cluster connectivity)", pathString(actor.Path()), err)
 			return fmt.Errorf("failed to resync Actor (%s): %w", pathString(actor.Path()), err)
 		}
@@ -4087,9 +4065,9 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	for _, actor := range registryActors {
 		// Only relocatable actors are recovered; the rest are lost with the
 		// node by design. A non-relocatable reliable endpoint still joins the
-		// set so the relocation worker withdraws its registry records: the
-		// endpoint publishes with if-absent semantics, so a leaked record
-		// would block the name cluster-wide instead of merely going stale.
+		// set so the relocation worker withdraws its endpoint and controller
+		// records, which would otherwise keep the endpoint name reserved
+		// cluster-wide.
 		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
 			continue
 		}
@@ -4652,8 +4630,12 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 	return x.actors.addNode(x.systemGuardian, x.deadletter)
 }
 
-// checkSpawnPreconditions make sure before an actor is created some pre-conditions are checks.
-// actorName is a top-level name, which is also the actor's qualified name and registry key.
+// checkSpawnPreconditions rejects a spawn before the actor is built when its
+// name is already registered in the cluster. It is the first line of the name
+// uniqueness rule, not the whole of it: two spawns of one name can both pass
+// this read, and the registry write in putActorOnCluster, which claims the
+// name, then decides between them. actorName is a top-level name, which is
+// also the actor's qualified name and registry key.
 func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName string) error {
 	// here we make sure in cluster mode that the given actor is uniquely created
 	if x.clusterEnabled.Load() {
@@ -4674,28 +4656,39 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 func (x *actorSystem) cleanupCluster(ctx context.Context, pids []*PID) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
-	// Remove all actors from the cluster
+	// Remove the records these actors own from the cluster; a record that
+	// another incarnation owns by now is the live one and stays
 	for _, pid := range pids {
 		eg.Go(func() error {
 			actorName := pid.getAddress().QualifiedName()
-			if err := x.cluster.RemoveActor(ctx, actorName); err != nil {
+			reowned, err := x.cluster.RemoveActor(ctx, actorName, pid.incarnationID())
+			if err != nil {
 				x.logger.Errorf("failed to remove actor=%s from cluster: %v (hint: check cluster connectivity)", actorName, err)
 				return err
 			}
-			x.logger.Debugf("actor=%s removed from cluster", actorName)
+
+			if reowned != nil {
+				x.logger.Debugf("actor=%s record is owned by another incarnation, left in cluster", actorName)
+			} else {
+				x.logger.Debugf("actor=%s removed from cluster", actorName)
+			}
 
 			// A reliable endpoint's controller companion carries a reserved
 			// name, so it is absent from pids and the per-actor death watch
 			// removal is disabled while the system stops. Withdraw its record
-			// here or it outlives the node in the registry.
+			// here or it outlives the node in the registry. The companion name
+			// embeds the endpoint's incarnation, so no other activation can own
+			// the record and the removal needs no fence.
 			if pid.reliableDelivery() != nil {
 				companionName := reliableCompanionName(pid.reliableDelivery().role(), pid.incarnationID())
-				if err := x.cluster.RemoveActor(ctx, companionName); err != nil {
+				if _, err := x.cluster.RemoveActor(ctx, companionName, cluster.AnyIncarnation); err != nil {
 					x.logger.Errorf("failed to remove reliable controller=%s of endpoint=%s from cluster: %v (hint: check cluster connectivity)", companionName, actorName, err)
 					return err
 				}
+
 				x.logger.Debugf("reliable controller=%s removed from cluster", companionName)
 			}
+
 			return nil
 		})
 	}

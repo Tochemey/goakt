@@ -2791,7 +2791,7 @@ func TestRelocateBatchHandler(t *testing.T) {
 		// instead of failing the batch)
 		clusterMock.EXPECT().GetActor(mock.Anything, "stale").
 			Return(internalpb.Actor_builder{Address: address.New("stale", sys.Name(), "127.0.0.1", 8080).String()}.Build(), nil).Times(relocationItemMaxAttempts)
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale").Return(nil).Times(relocationItemMaxAttempts)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "stale", mock.Anything).Return(nil, nil).Times(relocationItemMaxAttempts)
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Times(relocationItemMaxAttempts)
 
 		request := internalpb.RelocateBatchRequest_builder{

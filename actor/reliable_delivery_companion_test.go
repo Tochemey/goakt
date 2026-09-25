@@ -503,8 +503,8 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 		endpoint := newStoppedEndpoint(system)
 
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(assert.AnError).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, cluster.AnyIncarnation).Return(nil, assert.AnError).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders", endpoint.incarnationID()).Return(nil, assert.AnError).Once()
 
 		system.rollbackReliableSpawn(context.Background(), endpoint)
 	})
@@ -514,9 +514,11 @@ func TestRollbackReliableSpawnClusterCleanup(t *testing.T) {
 		system := newReplicationSystem(clusterMock)
 		endpoint := newStoppedEndpoint(system)
 
+		// the companion name identifies the activation by itself; the endpoint
+		// record is removed only while it carries this activation's incarnation
 		companionName := reliableCompanionName(ReliableControllerRoleProducer, endpoint.incarnationID())
-		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName).Return(nil).Once()
-		clusterMock.EXPECT().GetActor(mock.Anything, "orders").Return(nil, cluster.ErrActorNotFound).Maybe()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, companionName, cluster.AnyIncarnation).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orders", endpoint.incarnationID()).Return(nil, nil).Once()
 
 		system.rollbackReliableSpawn(context.Background(), endpoint)
 	})

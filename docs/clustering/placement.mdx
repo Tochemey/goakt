@@ -80,6 +80,10 @@ if err != nil {
 The returned PID is a live local PID when the actor landed on the calling node and a lightweight remote PID otherwise.
 Both are transparent for messaging; use `pid.IsLocal()` / `pid.IsRemote()` when the physical location matters.
 
+An actor name identifies one actor across the cluster. Spawning a name that is already taken returns
+`ErrActorAlreadyExists`. When several nodes spawn the same name at the same time, one spawn succeeds and the others
+return `ErrActorAlreadyExists` and leave nothing behind. Stopping an actor never removes another actor's registration.
+
 <Note>
   Strategies see the topology at spawn time. `RoundRobin` gives an even spread over a stable membership, but actors do
   not move when nodes join later; redistribution only happens through [relocation](/actor/relocation) when a node

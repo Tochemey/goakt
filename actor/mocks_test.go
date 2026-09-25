@@ -42,6 +42,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
@@ -52,6 +53,12 @@ import (
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/types/known/structpb"
 )
+
+// otherSpawnsTimeout bounds how long the PreStart of a MockOverlapActor waits
+// for the other spawns of its name to enter PreStart. A spawn whose partner
+// never shows up starts after it instead of failing, so the init timeout of
+// such a spawn must exceed it.
+const otherSpawnsTimeout = 3 * time.Second
 
 var (
 	_ Actor                = (*MockActor)(nil)
@@ -104,6 +111,7 @@ var (
 	_ grainTimerSink       = (*MockTimerSink)(nil)
 	_ Actor                = (*MockRestartMarkerActor)(nil)
 	_ Actor                = (*MockMailboxBlockingActor)(nil)
+	_ Actor                = (*MockOverlapActor)(nil)
 )
 
 // postStartCount counts the PostStart messages observed by MockPostStartCountingActor.
@@ -4082,4 +4090,72 @@ type MockCallbackCapturingMeterProvider struct {
 // Meter returns the capturing meter.
 func (x *MockCallbackCapturingMeterProvider) Meter(string, ...otelmetric.MeterOption) otelmetric.Meter {
 	return x.meter
+}
+
+// spawnOverlap makes concurrent spawns of one name overlap in time. Each
+// spawn's PreStart calls enterAndWait, which blocks until every expected spawn
+// has entered PreStart. PreStart runs after the duplicate check and before the
+// registry write, so when all spawns have entered PreStart, every one of them
+// has passed the duplicate check and none has written to the registry yet.
+type spawnOverlap struct {
+	// expected is the number of spawns that must enter PreStart.
+	expected int32
+	// entered is the number of spawns that have entered PreStart so far.
+	entered *atomic.Int32
+	// allEntered is closed when the last expected spawn enters PreStart.
+	allEntered chan types.Unit
+}
+
+// newSpawnOverlap returns a spawnOverlap that waits for expected spawns.
+func newSpawnOverlap(expected int32) *spawnOverlap {
+	return &spawnOverlap{expected: expected, entered: atomic.NewInt32(0), allEntered: make(chan types.Unit)}
+}
+
+// enterAndWait records that one more spawn has entered PreStart, then blocks
+// until every expected spawn has entered PreStart or otherSpawnsTimeout
+// elapses, whichever comes first.
+func (x *spawnOverlap) enterAndWait() {
+	if x.entered.Inc() == x.expected {
+		close(x.allEntered)
+	}
+
+	select {
+	case <-x.allEntered:
+	case <-time.After(otherSpawnsTimeout):
+	}
+}
+
+// allSpawnsEntered reports whether every expected spawn entered PreStart
+// before any of them was allowed to continue.
+func (x *spawnOverlap) allSpawnsEntered() bool {
+	select {
+	case <-x.allEntered:
+		return true
+	default:
+		return false
+	}
+}
+
+// MockOverlapActor is an actor spawned under a contested name. Its PreStart
+// waits, through overlap, until the other spawns of the same name have also
+// entered PreStart, which puts every one of them past the duplicate check
+// before any of them publishes its registry record.
+type MockOverlapActor struct {
+	MockNoopActor
+	// overlap, when set, is shared by the spawns that must overlap in time.
+	overlap *spawnOverlap
+}
+
+// PreStart waits for the other spawns of the same name, when overlap is set.
+func (x *MockOverlapActor) PreStart(*Context) error {
+	if x.overlap != nil {
+		x.overlap.enterAndWait()
+	}
+
+	return nil
+}
+
+// Receive ignores every message; the actor only needs to exist.
+func (x *MockOverlapActor) Receive(ctx *ReceiveContext) {
+	ctx.Unhandled()
 }

@@ -32,6 +32,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -348,11 +349,13 @@ func (x *actorSystem) rollbackReliableSpawn(ctx context.Context, endpoint *PID) 
 	ctx = context.WithoutCancel(ctx)
 	name := reliableCompanionName(endpoint.reliableDelivery().role(), endpoint.incarnationID())
 
-	if err := x.getCluster().RemoveActor(ctx, name); err != nil {
+	if _, err := x.getCluster().RemoveActor(ctx, name, cluster.AnyIncarnation); err != nil {
 		x.logger.Errorf("failed to remove registry record for reliable controller of endpoint=%s during rollback: %v", endpoint.Name(), err)
 	}
 
-	x.removeActorIfIncarnation(ctx, endpoint.getAddress().QualifiedName(), endpoint.incarnationID())
+	if _, err := x.getCluster().RemoveActor(ctx, endpoint.getAddress().QualifiedName(), endpoint.incarnationID()); err != nil {
+		x.logger.Errorf("failed to remove registry record for reliable endpoint=%s during rollback: %v", endpoint.Name(), err)
+	}
 }
 
 // releaseDepartedReliableCompanion removes the registry record of the

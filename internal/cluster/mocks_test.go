@@ -285,18 +285,15 @@ func (x *MockCluster) PutActor(context.Context, *internalpb.Actor) error {
 	panic("unexpected call")
 }
 
-// PutActorIfAbsent panics because no test exercises it.
-func (x *MockCluster) PutActorIfAbsent(context.Context, *internalpb.Actor) error {
-	panic("unexpected call")
-}
-
 // GetActor panics because no test exercises it.
 func (x *MockCluster) GetActor(context.Context, string) (*internalpb.Actor, error) {
 	panic("unexpected call")
 }
 
 // RemoveActor panics because no test exercises it.
-func (x *MockCluster) RemoveActor(context.Context, string) error { panic("unexpected call") }
+func (x *MockCluster) RemoveActor(context.Context, string, string) (*internalpb.Actor, error) {
+	panic("unexpected call")
+}
 
 // ActorExists panics because no test exercises it.
 func (x *MockCluster) ActorExists(context.Context, string) (bool, error) {
