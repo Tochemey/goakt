@@ -35,6 +35,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
@@ -815,6 +816,8 @@ func TestRequestNameRemoteTellError(t *testing.T) {
 
 	remoteAddr := address.New("remote-actor", "remote-system", "127.0.0.1", 9001).String()
 	clusterMock.EXPECT().GetActor(mock.Anything, "remote-actor").Return(internalpb.Actor_builder{Address: remoteAddr}.Build(), nil)
+	// the record is non-relocatable, so the lookup confirms its node is a member
+	clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", RemotingPort: 9001}}, nil)
 
 	pid := &PID{
 		actorSystem: sys,

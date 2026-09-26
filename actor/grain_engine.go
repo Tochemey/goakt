@@ -549,27 +549,15 @@ func isTransportFailure(ctx context.Context, err error) bool {
 }
 
 // grainOwnerDeparted reports whether the node recorded as the grain owner is
-// absent from the current cluster membership; see nodeDeparted.
+// absent from the current cluster membership; see isEndpointAlive in
+// actor_system.go.
 func (x *actorSystem) grainOwnerDeparted(ctx context.Context, owner *internalpb.Grain) (bool, error) {
-	return x.nodeDeparted(ctx, owner.GetHost(), int(owner.GetPort()))
-}
-
-// nodeDeparted reports whether no current cluster member serves remoting at
-// host and port. Membership is the only authority on node liveness; a failed
-// request to the node is not.
-func (x *actorSystem) nodeDeparted(ctx context.Context, host string, port int) (bool, error) {
-	members, err := x.getCluster().Members(ctx)
+	alive, err := x.isEndpointAlive(ctx, owner.GetHost(), int(owner.GetPort()))
 	if err != nil {
 		return false, err
 	}
 
-	for _, member := range members {
-		if member.Host == host && member.RemotingPort == port {
-			return false, nil
-		}
-	}
-
-	return true, nil
+	return !alive, nil
 }
 
 // activateGrainLocally ensures a local grain exists, claims ownership when needed, and activates it.

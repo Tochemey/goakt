@@ -206,7 +206,7 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 
 	actorName := request.GetName()
 	if !isSystemName(actorName) && x.clusterEnabled.Load() {
-		actor, err := x.cluster.GetActor(ctx, actorName)
+		actor, err := x.getActorRecord(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				err := gerrors.NewErrAddressNotFound(actorName)
