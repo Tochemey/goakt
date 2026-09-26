@@ -3930,11 +3930,6 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		return
 	}
 
-	// the node is confirmed gone: the claims its non-relocatable actors left
-	// behind are released before the rebalance is dispatched, so a relocated
-	// parent that recreates its children never collides with their records
-	x.releaseStaleClaims(ctx, peerAddress, claims)
-
 	// surface the best-effort nature of registry-derived recovery on the events
 	// stream: records lost with the crashed node's partitions cannot be listed,
 	// so subscribers holding an external record of placements can diff against
@@ -3943,6 +3938,14 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	x.publishRelocationStarted(peerAddress, peerState, true)
 
 	x.dispatchDerivedRebalance(ctx, peerAddress, peerState)
+
+	// The node is confirmed gone: the claims its non-relocatable actors left
+	// behind are released once the rebalance is on its way, so a node that
+	// owned many of them never delays the recreation of the relocatable ones.
+	// The dispatch is a mailbox hand-off, and a relocated parent that recreates
+	// a child before the child's claim is released reclaims it at publication
+	// (see putActorOnCluster).
+	x.releaseStaleClaims(ctx, peerAddress, claims)
 }
 
 // releaseStaleClaims removes the registry claims that the non-relocatable
@@ -4746,9 +4749,12 @@ func (x *actorSystem) checkOrdinarySpawnPreconditions(ctx context.Context, actor
 		return err
 	}
 
+	// a failed reclaim keeps the conflict the check already found, so a
+	// taken name never fails with a registry error instead
 	free, rerr := x.reclaimDepartedName(ctx, actorName)
 	if rerr != nil {
-		return rerr
+		x.logger.Warnf("node=%s could not reclaim the registry name of actor=%s: %v (hint: the name is reported as taken)", x.String(), actorName, rerr)
+		return err
 	}
 
 	if !free {

@@ -3354,6 +3354,69 @@ func TestPeersReturnsClientError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+func TestIsMember(t *testing.T) {
+	ctx := context.Background()
+	self := &discovery.Node{Host: "127.0.0.1", PeersPort: 9000}
+
+	t.Run("reports the engine as not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger, node: self}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.False(t, member)
+	})
+
+	t.Run("reports a missing client", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(true), logger: log.DiscardLogger, node: self}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.Error(t, err)
+		require.False(t, member)
+	})
+
+	t.Run("returns the membership error", func(t *testing.T) {
+		expectedErr := errors.New("members failure")
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			client:  &MockMembersClient{MockClient: &MockClient{membersErr: expectedErr}},
+			logger:  log.DiscardLogger,
+			node:    self,
+		}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.ErrorIs(t, err, expectedErr)
+		require.False(t, member)
+	})
+
+	t.Run("matches a member by its name or by its advertised peers address", func(t *testing.T) {
+		other := &discovery.Node{Host: "127.0.0.2", PeersPort: 9000}
+		otherMeta, err := json.Marshal(other)
+		require.NoError(t, err)
+
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			client: &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{
+				{Name: "127.0.0.1:9000"},
+				{Name: "memberlist-name", Meta: string(otherMeta)},
+			}},
+			logger: log.DiscardLogger,
+			node:   self,
+		}
+
+		byName, err := cl.IsMember(ctx, "127.0.0.1:9000")
+		require.NoError(t, err)
+		require.True(t, byName)
+
+		byMeta, err := cl.IsMember(ctx, other.PeersAddress())
+		require.NoError(t, err)
+		require.True(t, byMeta)
+
+		absent, err := cl.IsMember(ctx, "127.0.0.3:9000")
+		require.NoError(t, err)
+		require.False(t, absent)
+	})
+}
+
 // nolint
 func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 	expectedErr := errors.New("members failure")

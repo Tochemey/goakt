@@ -6247,6 +6247,17 @@ func TestReclaimDepartedName(t *testing.T) {
 		require.ErrorIs(t, err, assert.AnError)
 		assert.False(t, free)
 	})
+
+	t.Run("a record with an unparseable address is an error and stays untouched", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		malformed := internalpb.Actor_builder{Address: "not-an-address", IncarnationId: "dead"}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(malformed, nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.Error(t, err)
+		assert.False(t, free)
+	})
 }
 
 func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
@@ -6292,14 +6303,14 @@ func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
 		require.ErrorIs(t, err, assert.AnError)
 	})
 
-	t.Run("a reclaim failure is returned", func(t *testing.T) {
+	t.Run("a reclaim failure keeps the conflict", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, assert.AnError).Once()
 
 		err := system.checkOrdinarySpawnPreconditions(ctx, name)
-		require.ErrorIs(t, err, assert.AnError)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 
 	t.Run("no-op when clustering is disabled", func(t *testing.T) {

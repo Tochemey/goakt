@@ -2806,6 +2806,18 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 		require.ErrorIs(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode), storeErr)
 	})
 
+	t.Run("skips system grains without touching the cluster", func(t *testing.T) {
+		sys, _, _, _ := newActivationTestSystem(t, &MockGrain{}, "lazy-release-system", false)
+		wire := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Kind: "k", Name: reservedNames[deathWatchType], Value: "k/" + reservedNames[deathWatchType]}.Build(),
+			Host:    "127.0.0.9",
+			Port:    16000,
+		}.Build()
+
+		// no ReleaseGrain expectation: the method must return early
+		require.NoError(t, sys.releaseGrainForLazyRelocation(ctx, wire, departedNode))
+	})
+
 	t.Run("releases relocation-disabled grains like any other", func(t *testing.T) {
 		sys, cl, _, identity := newActivationTestSystem(t, &MockGrain{}, "lazy-release-disabled", false)
 		wire := grainOnDeparted(identity)
@@ -2821,6 +2833,18 @@ func TestReleaseGrainForLazyRelocation(t *testing.T) {
 func TestRecreateGrainFromWire(t *testing.T) {
 	ctx := context.Background()
 	departedNode := address.FormatHostPort("127.0.0.9", 16000)
+
+	t.Run("skips system grains without touching the cluster", func(t *testing.T) {
+		sys, _, _, _ := newActivationTestSystem(t, NewMockGrain(), "recreate-wire-system", true)
+		wire := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Kind: "k", Name: reservedNames[deathWatchType], Value: "k/" + reservedNames[deathWatchType]}.Build(),
+			Host:    "127.0.0.9",
+			Port:    16000,
+		}.Build()
+
+		// no ReleaseGrain expectation: the method must return early
+		require.NoError(t, sys.recreateGrainFromWire(ctx, wire, departedNode))
+	})
 
 	t.Run("releases relocation-disabled grains instead of recreating them", func(t *testing.T) {
 		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "recreate-wire-disabled", true)
