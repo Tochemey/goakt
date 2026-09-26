@@ -388,6 +388,9 @@ func (x *MockCluster) JobKey(context.Context, string) ([]byte, error) { panic("u
 // Members panics because no test exercises it.
 func (x *MockCluster) Members(context.Context) ([]*Peer, error) { panic("unexpected call") }
 
+// IsMember panics because no test exercises it.
+func (x *MockCluster) IsMember(context.Context, string) (bool, error) { panic("unexpected call") }
+
 // NextRoundRobinValue panics because no test exercises it.
 func (x *MockCluster) NextRoundRobinValue(context.Context, string) (int, error) {
 	panic("unexpected call")

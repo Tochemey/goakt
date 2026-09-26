@@ -378,7 +378,9 @@ func WithGrainMailboxCapacity(capacity int64) GrainOption {
 //   - If the hosting node leaves or crashes, the grain instance is lost and will
 //     not be migrated elsewhere.
 //   - The grain can be re-created on another node by addressing it by its Grain ID,
-//     but any in-memory state is gone.
+//     but any in-memory state is gone. Crash recovery releases the directory entry
+//     of the lost grain, so the next message or activation re-creates it instead
+//     of failing against the departed node.
 //   - To recover state after node loss, persist grain state externally (e.g. DB,
 //     key/value store, event log).
 //

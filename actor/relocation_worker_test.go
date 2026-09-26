@@ -297,6 +297,64 @@ func TestRelocationWorkerReleasesLazyGrains(t *testing.T) {
 	require.Empty(t, collectRelocationFailedEvents(consumer))
 }
 
+func TestRelocationWorkerReleasesPinnedGrains(t *testing.T) {
+	// a grain that opted out of relocation is never recreated, but the leader
+	// releases its directory entry so the next message re-creates it instead
+	// of failing against the dead owner; it is not allocated to any peer
+	ctx := context.Background()
+
+	system, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+
+	sys := system.(*actorSystem)
+
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "kind/pinned", address.FormatHostPort("127.0.0.1", 8080)).Return(nil, nil).Once()
+
+	store := &MockRecordingPeerStateStore{}
+	sys.cluster = clusterMock
+	sys.clusterStore = store
+	sys.relocationEnabled.Store(true)
+
+	peerState := internalpb.PeerState_builder{
+		Host:         "127.0.0.1",
+		PeersPort:    9000,
+		RemotingPort: 8080,
+		Grains: map[string]*internalpb.Grain{
+			"pinned": internalpb.Grain_builder{
+				GrainId:           internalpb.GrainId_builder{Kind: "kind", Name: "pinned", Value: "kind/pinned"}.Build(),
+				DisableRelocation: true,
+				EagerRelocation:   true,
+			}.Build(),
+		},
+	}.Build()
+	require.True(t, sys.beginRelocation("127.0.0.1:9000", peerState))
+
+	stream := eventstream.New()
+	consumer := stream.AddSubscriber()
+	stream.Subscribe(consumer, eventsTopic)
+	sys.eventsStream = stream
+
+	worker := &relocationWorker{
+		remoting: remoteclient.NewClient(),
+		pid: &PID{
+			actorSystem: system,
+		},
+		logger: log.DiscardLogger,
+	}
+
+	receiveCtx := newReceiveContext(ctx, nil, worker.pid, internalpb.Rebalance_builder{PeerState: peerState}.Build())
+	worker.relocate(receiveCtx, peerState)
+
+	_, inflight := sys.relocationJob("127.0.0.1:9000")
+	require.False(t, inflight)
+	require.True(t, store.deleteCalled)
+
+	// releasing a pinned grain is not an item loss, so no RelocationFailed event
+	require.Empty(t, collectRelocationFailedEvents(consumer))
+}
+
 // TestRelocationRPCScaling pins the O(peers) RPC guarantee of the relocation
 // redesign (architecture review, "Expected impact" table): relocating 10,000
 // actors across 10 surviving peers must cost exactly
@@ -785,8 +843,10 @@ func TestReportAbortedRelocation(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	system := newReplicationSystem(clusterMock)
 
-	// the lazy grain still points at the departed node, so it is released
+	// the lazy grain still points at the departed node, so it is released; so
+	// is the relocation-disabled grain, which is never recreated
 	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "k/lazy", address.FormatHostPort(host, remoting)).Return(nil, nil).Once()
+	clusterMock.EXPECT().ReleaseGrain(mock.Anything, "k/disabled", address.FormatHostPort(host, remoting)).Return(nil, nil).Once()
 
 	stream := eventstream.New()
 	consumer := stream.AddSubscriber()
@@ -820,7 +880,7 @@ func TestReportAbortedRelocation(t *testing.T) {
 
 	require.Len(t, events, 1)
 	assert.Equal(t, []string{"actor-1"}, events[0].Actors())
-	// eager grain reported, lazy released (not reported), disabled excluded
+	// eager grain reported, lazy and disabled released (not reported)
 	assert.Equal(t, []string{"k/eager"}, events[0].Grains())
 }
 
@@ -1000,7 +1060,7 @@ func TestRelocatableGrains(t *testing.T) {
 		}.Build(),
 	}
 
-	relocatable := relocatableGrains(grains)
+	relocatable, pinned := relocatableGrains(grains)
 
 	require.Len(t, relocatable, 2)
 
@@ -1009,6 +1069,9 @@ func TestRelocatableGrains(t *testing.T) {
 		relocatable[1].GetGrainId().GetValue(),
 	}
 	assert.ElementsMatch(t, []string{"eager", "lazy"}, values)
+
+	require.Len(t, pinned, 1)
+	assert.Equal(t, "disabled", pinned[0].GetGrainId().GetValue())
 }
 
 // TestAllocateGrainsSlice verifies allocateGrains distributes an eager grain

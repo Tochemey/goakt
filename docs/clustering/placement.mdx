@@ -158,7 +158,7 @@ See [Multi Datacenter](/clustering/multi-datacenter) for control plane setup and
 
 When a node leaves the cluster, its relocatable actors are recreated on surviving nodes; role constraints are honored
 during that redistribution. Use `WithRelocationDisabled` to pin an actor to the node it was placed on, accepting that it
-is lost if that node goes down. See [Relocation](/actor/relocation).
+is lost if that node goes down; its name is released so it can be spawned again. See [Relocation](/actor/relocation).
 
 ## Grain placement
 

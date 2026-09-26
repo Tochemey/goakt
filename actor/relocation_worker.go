@@ -220,7 +220,7 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 	// allocated across the leader and the peers, each target dispatching on the
 	// grain's own eager_relocation flag, so the cleanup fan-out scales out
 	// instead of being issued entirely by this node.
-	grains := relocatableGrains(peerState.GetGrains())
+	grains, pinned := relocatableGrains(peerState.GetGrains())
 
 	// The load scan only seeds actor placement, so a departed node with no
 	// actors to place skips the registry scan entirely.
@@ -252,6 +252,25 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 
 	eg := new(errgroup.Group)
 	eg.SetLimit(defaultRelocationConcurrency)
+
+	// Grains that opted out of relocation are lost with the node and never
+	// recreated, but their directory entries must not outlive it, or Tell and
+	// Ask keep failing against the dead owner until an activation call. The
+	// leader releases them itself: no peer is asked to recreate a grain that
+	// must not come back.
+	for _, wireGrain := range pinned {
+		eg.Go(func() error {
+			err := retryRelocationItem(rctx, func() error {
+				return system.releaseGrainForLazyRelocation(rctx, wireGrain, departedNode)
+			})
+			if err != nil {
+				w.logger.Errorf("failed to release relocation-disabled grain=%s directory entry: %v (hint: grain may be unreachable until re-registered; check cluster quorum)", wireGrain.GetGrainId().GetValue(), err)
+				failures.record(wireGrain.GetGrainId().GetValue(), true, err)
+			}
+
+			return nil
+		})
+	}
 
 	// recreate the leader's share locally through the shared dispatch so the
 	// leader-side and peer-side (RelocateBatch handler) paths cannot drift in
@@ -287,10 +306,11 @@ func (w *relocationWorker) relocate(ctx *ReceiveContext, peerState *internalpb.P
 
 	failed := failures.items()
 
-	// relocated = every relocatable item minus the ones that failed. Lazy
-	// grains that self-heal are counted as relocated (they were handled and are
-	// not reported as failures), matching the failure-reporting semantics.
-	relocatedCount := max((len(peerState.GetActors())+len(grains))-len(failed), 0)
+	// relocated = every handled item minus the ones that failed. Lazy and
+	// pinned grains that self-heal are counted as relocated (they were handled
+	// and are not reported as failures), matching the failure-reporting
+	// semantics.
+	relocatedCount := max((len(peerState.GetActors())+len(grains)+len(pinned))-len(failed), 0)
 	system.recordRelocationMetrics(rctx, peersAddress, time.Since(start), relocatedCount, len(failed))
 
 	if len(failed) > 0 {
@@ -982,26 +1002,31 @@ func allocateActors(leaderRoles []string, peers []*cluster.Peer, nodeLeftState *
 }
 
 // relocatableGrains returns the departed node's grains that participate in
-// relocation. Grains that opted out entirely (WithGrainDisableRelocation) are
-// skipped: they are lost with the node and re-addressing makes a fresh
-// instance, so relocation never touches them.
+// relocation, and separately the grains that opted out of relocation entirely
+// (WithGrainDisableRelocation). The latter are pinned: they are lost with the
+// node and never recreated, so they are never allocated to a relocation
+// target, but their directory entries must still be released or the next
+// message to them keeps failing against the dead owner.
 //
-// Whether a returned grain is reactivated upfront (eager,
+// Whether a relocatable grain is reactivated upfront (eager,
 // WithGrainEagerRelocation) or only has its directory entry released so it
 // re-activates on next use (lazy, the default) is decided by each relocation
 // target from the grain's own eager_relocation flag.
-func relocatableGrains(grains map[string]*internalpb.Grain) []*internalpb.Grain {
+func relocatableGrains(grains map[string]*internalpb.Grain) ([]*internalpb.Grain, []*internalpb.Grain) {
 	relocatable := make([]*internalpb.Grain, 0, len(grains))
+
+	var pinned []*internalpb.Grain
 
 	for _, grain := range grains {
 		if grain.GetDisableRelocation() {
+			pinned = append(pinned, grain)
 			continue
 		}
 
 		relocatable = append(relocatable, grain)
 	}
 
-	return relocatable
+	return relocatable, pinned
 }
 
 // allocateGrains distributes grains among the leader and peers for rebalancing.

@@ -139,7 +139,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 
 	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
 		// check some preconditions
-		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+		if err := x.checkOrdinarySpawnPreconditions(ctx, name); err != nil {
 			return nil, err
 		}
 
@@ -188,7 +188,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 
 	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
 		// check some preconditions
-		if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+		if err := x.checkOrdinarySpawnPreconditions(ctx, name); err != nil {
 			return nil, err
 		}
 
@@ -291,7 +291,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 	}
 
 	// check some preconditions
-	if err := x.checkSpawnPreconditions(ctx, name); err != nil {
+	if err := x.checkOrdinarySpawnPreconditions(ctx, name); err != nil {
 		return nil, err
 	}
 

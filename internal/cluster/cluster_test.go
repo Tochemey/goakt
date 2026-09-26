@@ -4655,9 +4655,10 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	// a lagging member can replay a dead notification for a node that already
 	// restarted; the coordinator observed that departure and still converged
-	// with the node as a member
+	// with the node as a member, and the node is a member right now
 	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9600"
+	cl.client = &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{{Name: node}}}
 	converge(cl, 1, node)
 
 	announceLeft(cl, node, 1)
@@ -4673,6 +4674,47 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	converge(cl, 3, node)
 	require.Contains(t, cl.pendingLeaves, node)
 	require.Empty(t, cl.events)
+}
+
+func TestDepartureOfAbsentNodeSurvivesConvergenceListingIt(t *testing.T) {
+	// the coordinator completes a rebalance epoch on live members only and
+	// announces the member set the epoch started with: an epoch that started
+	// before a crash and completed after it carries a newer generation and
+	// still lists the dead node. That convergence must not be taken for a
+	// restart when the node is not a member; the departure stays pending and
+	// the next convergence without the node releases it
+	cl := newEventCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9610"
+	cl.client = &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{{Name: cl.node.PeersAddress()}}}
+	converge(cl, 1, node)
+
+	announceLeft(cl, node, 1)
+	timer := cl.pendingLeaves[node].timer
+	converge(cl, 2, node)
+	require.Contains(t, cl.pendingLeaves, node)
+	require.Empty(t, cl.events)
+	require.True(t, timer.Stop(), "the bounded wait must still be armed")
+
+	converge(cl, 3)
+	requireEmitted(t, cl, NodeLeft, node)
+	require.Empty(t, cl.pendingLeaves)
+}
+
+func TestDepartureKeptWhenMembershipCannotBeRead(t *testing.T) {
+	// a drop cannot be undone and a wait is bounded, so a failed membership
+	// read keeps the departure pending
+	cl := newEventCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9620"
+	cl.client = &MockMembersClient{MockClient: &MockClient{membersErr: errors.New("boom")}}
+	converge(cl, 1, node)
+
+	announceLeft(cl, node, 1)
+	converge(cl, 2, node)
+	require.Contains(t, cl.pendingLeaves, node)
+	require.Empty(t, cl.events)
+
+	converge(cl, 3)
+	requireEmitted(t, cl, NodeLeft, node)
 }
 
 func TestRestartedNodeDepartsAgain(t *testing.T) {
