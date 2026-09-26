@@ -22,7 +22,7 @@ require (
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/consul v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/etcd v0.44.0
-	github.com/tochemey/olric v0.3.21
+	github.com/tochemey/olric v0.3.22
 	github.com/zeebo/xxh3 v1.1.0
 	go.etcd.io/bbolt v1.5.0
 	go.etcd.io/etcd/api/v3 v3.7.2
