@@ -743,6 +743,8 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
 		}.Build(), nil)
+		// the record is non-relocatable, so the lookup confirms its node is a member
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: remoteHost, RemotingPort: remotePort}}, nil)
 		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).Return(nil, nil)
 
 		pid, err := system.ReSpawn(ctx, actorName)
@@ -777,6 +779,8 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
 		}.Build(), nil)
+		// the record is non-relocatable, so the lookup confirms its node is a member
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: remoteHost, RemotingPort: remotePort}}, nil)
 		remotingMock.EXPECT().RemoteReSpawn(mock.Anything, remoteHost, remotePort, actorName).
 			Return(nil, assert.AnError)
 
@@ -1127,10 +1131,35 @@ func TestActorSystem(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
 			Address: addr.String(),
 		}.Build(), nil)
+		// the record is non-relocatable, so the lookup confirms its node is a member
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: remoteHost, RemotingPort: remotePort}}, nil)
 		remotingMock.EXPECT().RemoteStop(mock.Anything, remoteHost, remotePort, actorName).Return(nil)
 
 		err := system.Kill(ctx, actorName)
 		require.NoError(t, err)
+	})
+	t.Run("With Kill: remote actor on a departed node is not found", func(t *testing.T) {
+		ctx := context.TODO()
+		actorName := "remoteActor"
+
+		clusterMock := mockscluster.NewCluster(t)
+		remotingMock := mocksremote.NewClient(t)
+		system := newReplicationSystem(clusterMock)
+
+		system.locker.Lock()
+		system.actors = newTree()
+		system.remoting = remotingMock
+		system.locker.Unlock()
+
+		addr := address.New(actorName, "test-replication", "10.0.0.1", 9090)
+		clusterMock.EXPECT().GetActor(mock.Anything, actorName).Return(internalpb.Actor_builder{
+			Address: addr.String(),
+		}.Build(), nil)
+		// the node is no longer a member: nothing is sent to it
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil)
+
+		err := system.Kill(ctx, actorName)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
 	})
 	t.Run("With kill: stop remote actor", func(t *testing.T) {
 		// create a context
@@ -6319,6 +6348,183 @@ func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
 		system.clusterEnabled.Store(false)
 
 		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
+	})
+}
+
+func TestGetActorRecord(t *testing.T) {
+	ctx := context.Background()
+	const name = "worker"
+
+	// wireActor builds a record of name on the node departedWireActor uses,
+	// with the given relocation and singleton flags.
+	wireActor := func(relocatable, singleton bool) *internalpb.Actor {
+		builder := internalpb.Actor_builder{
+			Address:       address.New(name, "test-replication", "127.0.0.2", 7000).String(),
+			IncarnationId: uuid.NewString(),
+			Relocatable:   relocatable,
+		}
+
+		if singleton {
+			builder.Singleton = &internalpb.SingletonSpec{}
+		}
+
+		return builder.Build()
+	}
+
+	t.Run("a non-relocatable record on a departed node is not found", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, false), nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Twice()
+
+		pid, err := system.ActorOf(ctx, name)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Nil(t, pid)
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("a non-relocatable record on a live member is returned", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, false), nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Twice()
+
+		pid, err := system.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+		assert.Equal(t, "127.0.0.2", pid.getAddress().Host())
+		assert.Equal(t, 7000, pid.getAddress().Port())
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("a member on the same host with another remoting port does not keep the record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, false), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.2", PeersPort: 9000, RemotingPort: 7001}}, nil).Once()
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, exists)
+	})
+
+	t.Run("a relocatable record on a departed node is returned without a membership read", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(true, false), nil).Twice()
+
+		pid, err := system.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("a singleton record on a departed node is returned without a membership read", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, true), nil).Twice()
+
+		pid, err := system.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("a failed membership read keeps the record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, false), nil).Twice()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError).Twice()
+
+		pid, err := system.ActorOf(ctx, name)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+		assert.True(t, pid.IsRemote())
+
+		exists, err := system.ActorExists(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("a registry read failure surfaces from ActorExists", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, assert.AnError).Once()
+
+		exists, err := system.ActorExists(ctx, name)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.False(t, exists)
+	})
+
+	t.Run("a nil record is not found", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, nil).Once()
+
+		actor, err := system.getActorRecord(ctx, name)
+		require.ErrorIs(t, err, cluster.ErrActorNotFound)
+		require.Nil(t, actor)
+	})
+
+	t.Run("an unparseable record address is returned unchecked", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		record := internalpb.Actor_builder{Address: "not-an-address", IncarnationId: uuid.NewString()}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(record, nil).Once()
+
+		actor, err := system.getActorRecord(ctx, name)
+		require.NoError(t, err)
+		require.Same(t, record, actor)
+	})
+
+	t.Run("the remote lookup handler hides a departed owner", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.remotingEnabled.Store(true)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(wireActor(false, false), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+
+		resp, err := system.remoteLookupHandler(ctx, nullConn, internalpb.RemoteLookupRequest_builder{
+			Host: "127.0.0.1",
+			Port: 8080,
+			Name: name,
+		}.Build())
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("the remote lookup handler returns a live owner", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.remotingEnabled.Store(true)
+		record := wireActor(false, false)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(record, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
+
+		resp, err := system.remoteLookupHandler(ctx, nullConn, internalpb.RemoteLookupRequest_builder{
+			Host: "127.0.0.1",
+			Port: 8080,
+			Name: name,
+		}.Build())
+		require.NoError(t, err)
+		lookup, ok := resp.(*internalpb.RemoteLookupResponse)
+		require.True(t, ok)
+		assert.Equal(t, record.GetAddress(), lookup.GetAddress())
 	})
 }
 

@@ -308,6 +308,9 @@ type ActorSystem interface {
 	SpawnSingleton(ctx context.Context, name string, actor Actor, opts ...ClusterSingletonOption) (*PID, error)
 	// Kill stops a given actor in the system either locally or on a remote node(when clustering is enabled)
 	//
+	// In cluster mode, an actor spawned with WithRelocationDisabled whose node has left the cluster
+	// membership is reported as not found: there is nothing left to stop.
+	//
 	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
 	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
 	// name on its own node.
@@ -338,12 +341,21 @@ type ActorSystem interface {
 	//
 	// Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
 	//
+	// In cluster mode, an actor spawned with WithRelocationDisabled whose node has left the cluster
+	// membership is reported as not found as soon as the node is gone, before the leader has released
+	// its registry name claim: it is not recreated anywhere. Relocatable actors and singletons stay
+	// resolvable while they are recreated on a surviving node.
+	//
 	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
 	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
 	// name on its own node.
 	ActorOf(ctx context.Context, actorName string) (*PID, error)
 	// ActorExists checks whether an actor with the given name exists in the system,
 	// either locally, or on another node in the cluster if clustering is enabled.
+	//
+	// In cluster mode, an actor spawned with WithRelocationDisabled whose node has left the cluster
+	// membership is reported as absent as soon as the node is gone, before the leader has released its
+	// registry name claim, so the name can be spawned again right away.
 	//
 	// The name is the actor's name for a top-level actor. A child is found by its qualified name, its
 	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
@@ -2055,6 +2067,10 @@ func (x *actorSystem) NumActors() uint64 {
 
 // Kill stops a given actor in the system
 //
+// In cluster mode the registry record is read through getActorRecord, so a non-relocatable actor
+// whose node has left the cluster membership is reported as not found instead of being stopped over
+// the network.
+//
 // See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	if !x.Running() {
@@ -2073,7 +2089,7 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	}
 
 	if x.InCluster() {
-		actor, err := x.cluster.GetActor(ctx, name)
+		actor, err := x.getActorRecord(ctx, name)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Warnf("actor=%s not found", name)
@@ -2252,6 +2268,9 @@ func (x *actorSystem) PeersAddress() string {
 //
 // Use pid.IsLocal() / pid.IsRemote() to distinguish the two cases when location matters.
 //
+// In cluster mode the registry record is read through getActorRecord, which hides the record of a
+// non-relocatable actor whose node has left the cluster membership.
+//
 // See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, error) {
 	if !x.Running() {
@@ -2275,42 +2294,33 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 		return pid, nil
 	}
 
-	// Slow path: actor not found locally. Acquire the system lock for
-	// cluster and remote lookups which access mutable system state.
-	x.locker.RLock()
-
-	// check in the cluster
+	// Slow path: actor not found locally, ask the cluster registry. The engine
+	// and the remoting handle are read through their accessors, so no system
+	// lock is held across the registry and membership reads.
 	if x.clusterEnabled.Load() {
-		actor, err := x.cluster.GetActor(ctx, actorName)
+		actor, err := x.getActorRecord(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
 				x.logger.Warnf("actor=%s not found", actorName)
-				x.locker.RUnlock()
 				return nil, gerrors.NewErrActorNotFound(actorName)
 			}
 
-			x.locker.RUnlock()
 			return nil, fmt.Errorf("failed to fetch remote actor=%s: %w", actorName, err)
 		}
-
-		// Capture remoting before releasing the lock.
-		remoting := x.remoting
-		x.locker.RUnlock()
 
 		addr, err := addressFromActor(actor)
 		if err != nil {
 			return nil, err
 		}
-		return newRemotePID(addr, remoting), nil
+
+		return newRemotePID(addr, x.getRemoting()), nil
 	}
 
 	if x.remotingEnabled.Load() {
-		x.locker.RUnlock()
 		return nil, gerrors.ErrMethodCallNotAllowed
 	}
 
 	x.logger.Warnf("actor=%s not found", actorName)
-	x.locker.RUnlock()
 	return nil, gerrors.NewErrActorNotFound(actorName)
 }
 
@@ -2335,14 +2345,14 @@ func (x *actorSystem) pidOf(ctx context.Context, addr *address.Address) (*PID, e
 // ActorExists checks whether an actor with the given name exists in the system,
 // either locally, or on another node in the cluster if clustering is enabled.
 //
+// In cluster mode the registry record is read through getActorRecord, which hides the record of a
+// non-relocatable actor whose node has left the cluster membership.
+//
 // See the ActorSystem interface for how name resolves a child.
 func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, error) {
 	if !x.Running() {
 		return false, gerrors.ErrActorSystemNotStarted
 	}
-
-	x.locker.RLock()
-	defer x.locker.RUnlock()
 
 	// check locally
 	if node, ok := x.localActor(actorName); ok {
@@ -2355,7 +2365,81 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 
 	// check in the cluster
 	if x.clusterEnabled.Load() {
-		return x.cluster.ActorExists(ctx, actorName)
+		if _, err := x.getActorRecord(ctx, actorName); err != nil {
+			if errors.Is(err, cluster.ErrActorNotFound) {
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// getActorRecord reads the registry record of qualifiedName on behalf of a
+// lookup and returns it only when it can still stand for an actor on a live
+// node. A record whose node has left the cluster membership, and whose actor
+// cannot come back there, is hidden.
+// A relocatable actor is recreated on a survivor under the same name and a
+// singleton is re-arbitrated by the leader, so their records are returned as
+// they are and no membership is read for them. Any other record is checked
+// against the membership, the evidence a spawn reclaims on (see
+// reclaimDepartedName), and a departed owner reads as cluster.ErrActorNotFound.
+// The record is only read, never released: the leader's crash recovery and the
+// next spawn of the name do that. When the membership cannot be read, or the
+// record's address cannot be parsed, the record is returned as it is, so a
+// lookup never hides an actor on missing evidence.
+func (x *actorSystem) getActorRecord(ctx context.Context, qualifiedName string) (*internalpb.Actor, error) {
+	actor, err := x.getCluster().GetActor(ctx, qualifiedName)
+	if err != nil {
+		return nil, err
+	}
+
+	if actor == nil {
+		return nil, cluster.ErrActorNotFound
+	}
+
+	if actor.GetRelocatable() || actor.GetSingleton() != nil {
+		return actor, nil
+	}
+
+	// An address that cannot be parsed cannot be checked; the caller's own
+	// parse of the record reports it.
+	addr, err := addressFromActor(actor)
+	if err != nil {
+		return actor, nil
+	}
+
+	alive, err := x.isEndpointAlive(ctx, addr.Host(), addr.Port())
+	if err != nil {
+		x.logger.Warnf("actor=%s: cannot read the cluster membership to confirm its node %s:%d: %v", qualifiedName, addr.Host(), addr.Port(), err)
+		return actor, nil
+	}
+
+	if !alive {
+		return nil, cluster.ErrActorNotFound
+	}
+
+	return actor, nil
+}
+
+// isEndpointAlive reports whether a current cluster member serves remoting at
+// host and port. It is the remoting-endpoint counterpart of isPeerAlive, which
+// keys on the peers address. Membership is the only authority on node
+// liveness; a failed request to the endpoint is not.
+func (x *actorSystem) isEndpointAlive(ctx context.Context, host string, port int) (bool, error) {
+	members, err := x.getCluster().Members(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	for _, member := range members {
+		if member.Host == host && member.RemotingPort == port {
+			return true, nil
+		}
 	}
 
 	return false, nil
@@ -4800,13 +4884,13 @@ func (x *actorSystem) reclaimDepartedName(ctx context.Context, qualifiedName str
 		return false, nil
 	}
 
-	departed, err := x.nodeDeparted(ctx, owner.Host(), owner.Port())
+	alive, err := x.isEndpointAlive(ctx, owner.Host(), owner.Port())
 	if err != nil {
 		x.logger.Warnf("node=%s could not check the membership of node=%s holding actor=%s: %v (hint: the name is reported as taken)", x.String(), owner.HostPort(), qualifiedName, err)
 		return false, nil
 	}
 
-	if !departed {
+	if alive {
 		return false, nil
 	}
 

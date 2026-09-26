@@ -196,7 +196,10 @@ Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` 
 their registry name claims once crash recovery has confirmed the node is gone, so a later spawn can take the name again. The
 release is fenced by the actor incarnation: a name that a newer actor has already claimed is never removed. A spawn that
 meets such a stale claim before the leader released it reclaims it on the spot, after checking that the node holding it is
-no longer a cluster member. System actors (e.g. dead letter, scheduler) are never relocated.
+no longer a cluster member. Lookups apply the same membership check: as soon as the node is gone, `ActorOf` and `Kill`
+report such an actor as not found and `ActorExists` reports its name as free, even before the leader has released the claim.
+Relocatable actors and singletons stay resolvable while they are recreated. System actors (e.g. dead letter, scheduler)
+are never relocated.
 
 Placement is **load-aware**: before distributing the departed node's actors, the leader scans the replicated cluster
 registry once and seeds each target's "load" with the number of actors it already hosts. The departed node's actors then

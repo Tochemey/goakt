@@ -43,25 +43,32 @@
 //     grain with WithGrainDisableRelocation, and prints a ready line.
 //  3. The survivor resolves both actors and the grain remotely, kills the
 //     owner, and waits until membership reports zero peers.
-//  4. The survivor spawns a fresh actor under the first name right away: a
+//  4. The survivor looks the second name up right away: ActorOf and
+//     ActorExists must not report the dead owner, even before the leader has
+//     released its record. A read that fails while the registry is under
+//     repair is retried within a short probe window.
+//  5. The survivor spawns a fresh actor under the first name right away: a
 //     spawn that meets a name held by a node that is no longer a member
 //     reclaims it on the spot.
-//  5. The survivor sends to the grain with the identity it resolved before
+//  6. The survivor sends to the grain with the identity it resolved before
 //     the crash until a message is delivered: crash recovery releases the
 //     grain's directory entry and the next message re-creates it locally.
-//  6. The survivor waits for ActorExists to report the second name as free,
+//  7. The survivor waits for ActorExists to report the second name as free,
 //     which the leader's crash recovery does once the node is confirmed gone,
 //     then spawns a fresh actor under it.
 //
-// It exits with status 1 when any of the three names stays owned by the dead
-// node, and prints an OK line and exits with status 0 once all three are
-// reusable. Status 2 means the setup itself failed.
+// It exits with status 1 when a lookup reports the dead owner or any of the
+// three names stays owned by the dead node, and prints an OK line and exits
+// with status 0 once the lookups are clean and all three are reusable. Status
+// 2 means the setup itself failed, or the registry gave the lookups no
+// definitive answer within the probe window.
 package main
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,6 +81,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/static"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	goaktlog "github.com/tochemey/goakt/v4/log"
@@ -108,10 +116,18 @@ const (
 	// releaseWait bounds what crash recovery releases: it scans the registry
 	// only once olric's partition repair has been quiet for three seconds,
 	// and waits at most thirty for that.
+	//
+	// probeWindow bounds the lookups made right after the departure. A read
+	// can fail with a context error while olric repairs its partitions, and
+	// such a failure says nothing about the name, so a lookup is retried until
+	// the registry answers. The window stays shorter than the three quiet
+	// seconds of the crash-recovery gate, so the leader's release can never
+	// pass for a departure-aware lookup.
 	peerWait       = 20 * time.Second
 	lookupWait     = 10 * time.Second
 	respawnWait    = 10 * time.Second
 	releaseWait    = 45 * time.Second
+	probeWindow    = 2 * time.Second
 	operationLimit = time.Second
 	pollInterval   = 100 * time.Millisecond
 	readyLine      = "ready "
@@ -260,6 +276,11 @@ func runSurvivor() int {
 	waitForPeerCount(ctx, survivor, 0, peerWait)
 	fmt.Println("owner process killed; survivor membership now reports zero peers")
 
+	// The lookups run before anything else: the leader releases the record a
+	// few seconds after the departure, and the sample must observe the name
+	// before that release to tell a departure-aware lookup from the release.
+	lookups := probeLookups(ctx, survivor)
+
 	eagerPID, eagerElapsed, eagerErr := waitForSpawn(ctx, survivor, eagerActorName, respawnWait)
 	if eagerErr != nil {
 		fmt.Printf("immediate respawn of %s: err=%v\n", eagerActorName, eagerErr)
@@ -296,12 +317,17 @@ func runSurvivor() int {
 	eagerOK := eagerErr == nil && eagerPID.IsLocal() && !eagerPID.IsRelocatable()
 	stableOK := released && stableErr == nil && stablePID.IsLocal() && !stablePID.IsRelocatable()
 
-	if !eagerOK || !stableOK || grainErr != nil {
-		fmt.Println("REPRO (broken): the dead node still owns a non-relocatable actor name or grain entry")
+	if lookups.broken || !eagerOK || !stableOK || grainErr != nil {
+		fmt.Println("REPRO (broken): a lookup still reports the dead node, or it still owns a non-relocatable actor name or grain entry")
 		return 1
 	}
 
-	fmt.Println("OK: the dead node owns nothing anymore; both names were respawned and the grain is reachable again")
+	if lookups.inconclusive {
+		fmt.Printf("INCONCLUSIVE: the registry gave a lookup no answer within %s of the departure; rerun the sample\n", probeWindow)
+		return 2
+	}
+
+	fmt.Println("OK: the dead node owns nothing anymore; the lookups never reported it, both names were respawned and the grain is reachable again")
 	return 0
 }
 
@@ -466,6 +492,88 @@ func waitForActor(ctx context.Context, system actor.ActorSystem, name string, ti
 
 	fatal("actor %q did not become visible within %s", name, timeout)
 	return nil
+}
+
+// lookupOutcome is what the survivor observed when it looked the stable name
+// up right after the departure.
+type lookupOutcome struct {
+	// broken is set when a lookup reported the dead owner.
+	broken bool
+	// inconclusive is set when the registry gave a lookup no definitive
+	// answer within probeWindow, which proves nothing either way.
+	inconclusive bool
+}
+
+// probeLookups looks stableActorName up with ActorOf and ActorExists right
+// after the departure, prints what each reported, and returns the outcome.
+func probeLookups(ctx context.Context, system actor.ActorSystem) lookupOutcome {
+	deadline := time.Now().Add(probeWindow)
+	outcome := lookupOutcome{}
+
+	stalePID, err := probeActorOf(ctx, system, stableActorName, deadline)
+
+	switch {
+	case err != nil:
+		fmt.Printf("ActorOf right after departure: no answer within %s (last error: %v)\n", probeWindow, err)
+		outcome.inconclusive = true
+	case stalePID == nil:
+		fmt.Println("ActorOf right after departure: actor not found")
+	default:
+		fmt.Printf("ActorOf right after departure: %s (remote=%t)\n", stalePID.ID(), stalePID.IsRemote())
+		outcome.broken = true
+	}
+
+	exists, err := probeActorExists(ctx, system, stableActorName, deadline)
+	if err != nil {
+		fmt.Printf("ActorExists right after departure: no answer within %s (last error: %v)\n", probeWindow, err)
+		outcome.inconclusive = true
+		return outcome
+	}
+
+	fmt.Printf("ActorExists right after departure: %t\n", exists)
+	outcome.broken = outcome.broken || exists
+
+	return outcome
+}
+
+// probeActorOf calls ActorOf for name until it either returns the actor or
+// reports the name as not found, retrying any other failure until deadline. A
+// nil actor with a nil error means not found; a non-nil error means the
+// registry gave no definitive answer and carries the last failure.
+func probeActorOf(ctx context.Context, system actor.ActorSystem, name string, deadline time.Time) (*actor.PID, error) {
+	for {
+		lookupCtx, cancel := context.WithTimeout(ctx, operationLimit)
+		pid, err := system.ActorOf(lookupCtx, name)
+		cancel()
+
+		switch {
+		case err == nil:
+			return pid, nil
+		case errors.Is(err, gerrors.ErrActorNotFound):
+			return nil, nil
+		case !time.Now().Before(deadline):
+			return nil, err
+		}
+
+		pause.For(pollInterval)
+	}
+}
+
+// probeActorExists calls ActorExists for name until it answers, retrying any
+// failure until deadline. A non-nil error means the registry gave no
+// definitive answer and carries the last failure.
+func probeActorExists(ctx context.Context, system actor.ActorSystem, name string, deadline time.Time) (bool, error) {
+	for {
+		lookupCtx, cancel := context.WithTimeout(ctx, operationLimit)
+		exists, err := system.ActorExists(lookupCtx, name)
+		cancel()
+
+		if err == nil || !time.Now().Before(deadline) {
+			return exists, err
+		}
+
+		pause.For(pollInterval)
+	}
 }
 
 // waitForSpawn retries the spawn of a non-relocatable actor under name until
