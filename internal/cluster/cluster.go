@@ -1023,6 +1023,10 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 // IsMember reports whether the node at peersAddress, a peers address in the
 // host:port form the membership events carry, is a current cluster member.
 func (x *cluster) IsMember(ctx context.Context, peersAddress string) (bool, error) {
+	if !x.running.Load() {
+		return false, ErrEngineNotRunning
+	}
+
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
