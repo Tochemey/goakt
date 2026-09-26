@@ -3008,7 +3008,9 @@ func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string
 // The first publication of an actor claims its name and every later one, a
 // restart or a registry repair, updates the record; when another incarnation
 // owns the name nothing is written and ErrActorAlreadyExists is returned, so
-// two nodes spawning one name at the same time never both publish.
+// two nodes spawning one name at the same time never both publish. A name
+// held by a node that is no longer a member is reclaimed once before the
+// conflict is reported (see reclaimDepartedName).
 // No-op when clustering is disabled or for system actors, with one exception:
 // reliable-delivery controller companions publish despite their reserved
 // names, because cluster resolution must find an endpoint's controller from
@@ -3024,7 +3026,23 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 		return err
 	}
 
-	if err := x.getCluster().PutActor(ctx, actor); err != nil {
+	err = x.getCluster().PutActor(ctx, actor)
+	if errors.Is(err, cluster.ErrActorAlreadyExists) {
+		// The name may be held by a node that died without releasing it, which
+		// the top-level spawn precondition never sees for a child, a restart or
+		// a registry repair. Reclaim it once and publish again; a failed reclaim
+		// keeps the conflict this publication already has.
+		free, rerr := x.reclaimDepartedName(ctx, pid.getAddress().QualifiedName())
+		if rerr != nil {
+			x.logger.Warnf("node=%s could not reclaim the registry name of actor=%s: %v (hint: the name is reported as taken)", x.String(), pid.Name(), rerr)
+		}
+
+		if free {
+			err = x.getCluster().PutActor(ctx, actor)
+		}
+	}
+
+	if err != nil {
 		if errors.Is(err, cluster.ErrActorAlreadyExists) {
 			return gerrors.NewErrActorAlreadyExists(pid.Name())
 		}
@@ -3863,6 +3881,8 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 
 	var peerState *internalpb.PeerState
 
+	var claims []staleClaim
+
 	for attempt := 1; ; attempt++ {
 		if !x.awaitRelocationQuiescence(peerAddress) {
 			return
@@ -3880,7 +3900,7 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		}
 
 		var ok bool
-		if peerState, ok = x.deriveRelocationSetFromRegistry(ctx, peerAddress); ok {
+		if peerState, claims, ok = x.deriveRelocationSetFromRegistry(ctx, peerAddress); ok {
 			break
 		}
 
@@ -3918,6 +3938,54 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	x.publishRelocationStarted(peerAddress, peerState, true)
 
 	x.dispatchDerivedRebalance(ctx, peerAddress, peerState)
+
+	// The node is confirmed gone: the claims its non-relocatable actors left
+	// behind are released once the rebalance is on its way, so a node that
+	// owned many of them never delays the recreation of the relocatable ones.
+	// The dispatch is a mailbox hand-off, and a relocated parent that recreates
+	// a child before the child's claim is released reclaims it at publication
+	// (see putActorOnCluster).
+	x.releaseStaleClaims(ctx, peerAddress, claims)
+}
+
+// releaseStaleClaims removes the registry claims that the non-relocatable
+// actors of a crashed node left behind, so their names can be spawned again.
+// Each removal is fenced by the incarnation the scan read, so a name that a
+// newer incarnation has taken by now is left to its owner. The fan-out is
+// bounded like the relocation worker's. A failed removal is logged and
+// skipped rather than retried: the rebalance must not wait on it, and the
+// next spawn of the name reclaims it (see reclaimDepartedName).
+func (x *actorSystem) releaseStaleClaims(ctx context.Context, peerAddress string, claims []staleClaim) {
+	if len(claims) == 0 {
+		return
+	}
+
+	var released atomic.Int64
+
+	eg := new(errgroup.Group)
+	eg.SetLimit(defaultRelocationConcurrency)
+
+	for _, claim := range claims {
+		eg.Go(func() error {
+			reowned, err := x.cluster.RemoveActor(ctx, claim.qualifiedName, claim.incarnationID)
+			if err != nil {
+				x.logger.Errorf("leader=%s failed to release the registry claim of actor=%s held by crashed node=%s: %v (hint: the next spawn of the name reclaims it)", x.String(), claim.qualifiedName, peerAddress, err)
+				return nil
+			}
+
+			if reowned != nil {
+				x.logger.Debugf("leader=%s left the registry claim of actor=%s alone: another incarnation at %s took the name", x.String(), claim.qualifiedName, reowned.GetAddress())
+				return nil
+			}
+
+			released.Add(1)
+			return nil
+		})
+	}
+
+	_ = eg.Wait()
+
+	x.logger.Infof("leader=%s released %d of %d registry claim(s) left by the non-relocatable actors of crashed node=%s", x.String(), released.Load(), len(claims), peerAddress)
 }
 
 // isPeerAlive reports whether the node at peerAddress, a peers address in
@@ -3927,19 +3995,13 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 // then proceeds exactly as it did before the check existed, which is the safer
 // default while the cluster is churning.
 func (x *actorSystem) isPeerAlive(ctx context.Context, peerAddress string) bool {
-	peers, err := x.cluster.Peers(ctx)
+	member, err := x.cluster.IsMember(ctx, peerAddress)
 	if err != nil {
 		x.logger.Warnf("leader=%s could not read the cluster members before recovering node=%s: %v (hint: proceeding as if the node is gone)", x.String(), peerAddress, err)
 		return false
 	}
 
-	for _, peer := range peers {
-		if net.JoinHostPort(peer.Host, strconv.Itoa(peer.PeersPort)) == peerAddress {
-			return true
-		}
-	}
-
-	return false
+	return member
 }
 
 // awaitRelocationQuiescence blocks until no olric rebalance event has been
@@ -3987,6 +4049,15 @@ func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress 
 	}
 }
 
+// staleClaim is the registry claim of an actor that was lost with its crashed
+// node and is never recreated: its record stays behind and keeps the name
+// reserved until it is released. incarnationID fences the release, so a name
+// that a newer incarnation has taken by then is left to its owner.
+type staleClaim struct {
+	qualifiedName string
+	incarnationID string
+}
+
 // deriveRelocationSetFromRegistry reconstructs a departed node's relocation set
 // from the replicated cluster registry when no graceful-shutdown snapshot is
 // available (the node crashed). It resolves the departed node's remoting address
@@ -3996,32 +4067,35 @@ func (x *actorSystem) dispatchDerivedRebalance(ctx context.Context, peerAddress 
 // The returned PeerState mirrors the graceful-shutdown snapshot: Host/PeersPort
 // match the NodeLeft event's peers address so relocation bookkeeping stays keyed
 // on it, RemotingPort carries the resolved remoting port so the recreate gating
-// matches stale registry entries, and only relocatable actors are included
-// (non-relocatable actors are lost with the node by design). All matching grains
-// are included; the relocation worker filters and splits them by their own
-// relocation flags.
+// matches stale registry entries, and only relocatable actors and
+// non-relocatable reliable endpoints are included. Ordinary non-relocatable
+// actors are lost with the node by design; their registry claims are returned
+// separately so the caller releases them once the node is confirmed gone (see
+// releaseStaleClaims), and nothing is deleted during the scan. All matching
+// grains are included; the relocation worker filters and splits them by their
+// own relocation flags.
 //
 // It returns ok=false when the remoting port cannot be resolved (the node was
 // never observed alive by this leader) or the registry scan fails, so the caller
 // skips the rebalance rather than acting on an incomplete set. Registry lookups
 // are a full scan here; a per-host index is a later optimization.
-func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerAddress string) (*internalpb.PeerState, bool) {
+func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerAddress string) (*internalpb.PeerState, []staleClaim, bool) {
 	host, peersPortStr, err := net.SplitHostPort(peerAddress)
 	if err != nil {
 		x.logger.Errorf("node=%s cannot parse departed peer address=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	peersPort, err := strconv.Atoi(peersPortStr)
 	if err != nil {
 		x.logger.Errorf("node=%s cannot parse departed peer port from address=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	remotingPort, ok := x.peerRemotingPort(peerAddress)
 	if !ok {
 		x.logger.Warnf("node=%s has no cached remoting port for departed node=%s (never observed alive); cannot derive its registry records", x.String(), peerAddress)
-		return nil, false
+		return nil, nil, false
 	}
 
 	// Bounds-checked conversions keep an out-of-range port from silently
@@ -4029,13 +4103,13 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	peersPort32, err := strconvx.Int2Int32(peersPort)
 	if err != nil {
 		x.logger.Errorf("node=%s derived an invalid peers port from address=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	remotingPort32, err := strconvx.Int2Int32(remotingPort)
 	if err != nil {
 		x.logger.Errorf("node=%s derived an invalid remoting port for departed node=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	// recovery-sized budget: the user-configured read timeout is honored when
@@ -4049,35 +4123,42 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	registryActors, err := x.cluster.ActorsByHost(ctx, host, remotingPort, timeout)
 	if err != nil {
 		x.logger.Errorf("node=%s failed to scan cluster actors while deriving relocation set for node=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	registryGrains, err := x.cluster.GrainsByHost(ctx, host, remotingPort, timeout)
 	if err != nil {
 		x.logger.Errorf("node=%s failed to scan cluster grains while deriving relocation set for node=%s: %v", x.String(), peerAddress, err)
-		return nil, false
+		return nil, nil, false
 	}
 
 	// nil maps until the first match: most departures own a small fraction of
 	// the registry, so the common case allocates nothing here.
 	var wireActors map[string]*internalpb.Actor
 
-	for _, actor := range registryActors {
-		// Only relocatable actors are recovered; the rest are lost with the
-		// node by design. A non-relocatable reliable endpoint still joins the
-		// set so the relocation worker withdraws its endpoint and controller
-		// records, which would otherwise keep the endpoint name reserved
-		// cluster-wide.
-		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
-			continue
-		}
+	var claims []staleClaim
 
+	for _, actor := range registryActors {
 		addr, perr := address.Parse(actor.GetAddress())
 		if perr != nil {
 			continue
 		}
 
 		if isSystemName(addr.Name()) {
+			continue
+		}
+
+		// Only relocatable actors are recovered; the rest are lost with the
+		// node by design, but their registry claims must not outlive it. A
+		// non-relocatable reliable endpoint still joins the set so the
+		// relocation worker withdraws its endpoint and controller records. A
+		// singleton is re-arbitrated by the leader on demand, and a record
+		// without an incarnation cannot be fenced, so both are left alone.
+		if !actor.GetRelocatable() && actor.GetReliableDelivery() == nil {
+			if actor.GetSingleton() == nil && actor.GetIncarnationId() != "" {
+				claims = append(claims, staleClaim{qualifiedName: addr.QualifiedName(), incarnationID: actor.GetIncarnationId()})
+			}
+
 			continue
 		}
 
@@ -4105,12 +4186,16 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	// replica count of 1 the registry partitions owned by the crashed node are
 	// lost with it, so its records may be unrecoverable. Surface it loudly
 	// instead of silently skipping the rebalance downstream.
-	if len(wireActors) == 0 && len(wireGrains) == 0 {
+	switch {
+	case len(wireActors) == 0 && len(wireGrains) == 0 && len(claims) == 0:
 		x.logger.Warnf("leader=%s derived an empty relocation set for crashed node=%s (remoting=%s:%d); its registry records may have been lost with it (raise the cluster replica count above 1 to make crash recovery reliable)",
 			x.String(), peerAddress, host, remotingPort)
-	} else {
-		x.logger.Infof("leader=%s derived relocation set for crashed node=%s (remoting=%s:%d): actors=%d grains=%d",
-			x.String(), peerAddress, host, remotingPort, len(wireActors), len(wireGrains))
+	case len(wireActors) == 0 && len(wireGrains) == 0:
+		x.logger.Infof("leader=%s derived no relocatable records for crashed node=%s (remoting=%s:%d); registry claims of non-relocatable actors to release: %d",
+			x.String(), peerAddress, host, remotingPort, len(claims))
+	default:
+		x.logger.Infof("leader=%s derived relocation set for crashed node=%s (remoting=%s:%d): actors=%d grains=%d, registry claims of non-relocatable actors to release: %d",
+			x.String(), peerAddress, host, remotingPort, len(wireActors), len(wireGrains), len(claims))
 	}
 
 	peerState := &internalpb.PeerState{}
@@ -4119,7 +4204,7 @@ func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerA
 	peerState.SetRemotingPort(remotingPort32)
 	peerState.SetActors(wireActors)
 	peerState.SetGrains(wireGrains)
-	return peerState, true
+	return peerState, claims, true
 }
 
 // publishRelocationStarted emits a RelocationStarted event for a departed node
@@ -4650,6 +4735,93 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 	}
 
 	return nil
+}
+
+// checkOrdinarySpawnPreconditions is checkSpawnPreconditions for a spawn that
+// is not a singleton: a name found taken is reclaimed when the node holding it
+// has left the cluster (see reclaimDepartedName), so a name left behind by a
+// crashed owner can be spawned again. Singleton spawns keep the plain check;
+// their conflict handler resolves the record itself and a singleton claim is
+// never reclaimed.
+func (x *actorSystem) checkOrdinarySpawnPreconditions(ctx context.Context, actorName string) error {
+	err := x.checkSpawnPreconditions(ctx, actorName)
+	if !errors.Is(err, gerrors.ErrActorAlreadyExists) {
+		return err
+	}
+
+	// a failed reclaim keeps the conflict the check already found, so a
+	// taken name never fails with a registry error instead
+	free, rerr := x.reclaimDepartedName(ctx, actorName)
+	if rerr != nil {
+		x.logger.Warnf("node=%s could not reclaim the registry name of actor=%s: %v (hint: the name is reported as taken)", x.String(), actorName, rerr)
+		return err
+	}
+
+	if !free {
+		return err
+	}
+
+	return nil
+}
+
+// reclaimDepartedName reports whether the registry name qualifiedName is free
+// to claim, releasing it first when the node holding it is no longer a cluster
+// member. Such a claim is left behind by an owner that died without running
+// its shutdown. Crash recovery on the leader releases it too, but only once
+// its quiescence gate opens and only when it runs at all, so a spawn that
+// meets the stale claim first releases it here and never fails on a dead
+// owner. The removal is fenced by the incarnation the record carried when it
+// was read, so a name that another incarnation took in between is left to its
+// new owner and reported as taken. A singleton claim is never reclaimed, the
+// leader re-arbitrates singletons on demand. A claim held by this node or by
+// a live member is taken, and so is one whose owner cannot be checked because
+// the membership read failed, which keeps the conflict the caller would have
+// reported anyway.
+func (x *actorSystem) reclaimDepartedName(ctx context.Context, qualifiedName string) (bool, error) {
+	existing, err := x.getCluster().GetActor(ctx, qualifiedName)
+	if err != nil {
+		if errors.Is(err, cluster.ErrActorNotFound) {
+			return true, nil
+		}
+
+		return false, err
+	}
+
+	if existing.GetSingleton() != nil {
+		return false, nil
+	}
+
+	owner, err := address.Parse(existing.GetAddress())
+	if err != nil {
+		return false, err
+	}
+
+	if owner.Host() == x.Host() && owner.Port() == x.Port() {
+		return false, nil
+	}
+
+	departed, err := x.nodeDeparted(ctx, owner.Host(), owner.Port())
+	if err != nil {
+		x.logger.Warnf("node=%s could not check the membership of node=%s holding actor=%s: %v (hint: the name is reported as taken)", x.String(), owner.HostPort(), qualifiedName, err)
+		return false, nil
+	}
+
+	if !departed {
+		return false, nil
+	}
+
+	reowned, err := x.getCluster().RemoveActor(ctx, qualifiedName, existing.GetIncarnationId())
+	if err != nil {
+		return false, err
+	}
+
+	if reowned != nil {
+		x.logger.Debugf("node=%s left the registry claim of actor=%s alone: another incarnation at %s took the name", x.String(), qualifiedName, reowned.GetAddress())
+		return false, nil
+	}
+
+	x.logger.Warnf("node=%s released the registry claim of actor=%s held by departed node=%s", x.String(), qualifiedName, owner.HostPort())
+	return true, nil
 }
 
 // cleanupCluster cleans up the cluster
@@ -5546,11 +5718,10 @@ func (x *actorSystem) reportAbortedRelocation(ctx context.Context, pid *PID, pee
 	eg.SetLimit(defaultRelocationConcurrency)
 
 	for id, grain := range peerState.GetGrains() {
-		if grain.GetDisableRelocation() {
-			continue
-		}
-
-		if grain.GetEagerRelocation() {
+		// an eager grain is reported as failed, since it was to be recreated
+		// and was not; a relocation-disabled grain is never recreated, so its
+		// entry is released like a lazy grain's whatever its eager flag says
+		if grain.GetEagerRelocation() && !grain.GetDisableRelocation() {
 			failedGrains[id] = grain
 			continue
 		}

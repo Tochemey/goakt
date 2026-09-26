@@ -402,6 +402,9 @@ func WithLongLived() SpawnOption {
 // is not redeployed after a node failure, such as for actors with node-specific state or dependencies that
 // cannot be easily replicated.
 //
+// The actor is lost with its node, but its name is not: once the cluster has confirmed the node is gone, the
+// registry claim of the lost actor is released, so the same name can be spawned again on any node.
+//
 // Returns:
 //   - SpawnOption that disables relocation for the actor.
 func WithRelocationDisabled() SpawnOption {

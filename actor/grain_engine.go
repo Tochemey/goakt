@@ -549,16 +549,22 @@ func isTransportFailure(ctx context.Context, err error) bool {
 }
 
 // grainOwnerDeparted reports whether the node recorded as the grain owner is
-// absent from the current cluster membership. Membership is the only authority
-// on node liveness; a failed request to the owner is not.
+// absent from the current cluster membership; see nodeDeparted.
 func (x *actorSystem) grainOwnerDeparted(ctx context.Context, owner *internalpb.Grain) (bool, error) {
+	return x.nodeDeparted(ctx, owner.GetHost(), int(owner.GetPort()))
+}
+
+// nodeDeparted reports whether no current cluster member serves remoting at
+// host and port. Membership is the only authority on node liveness; a failed
+// request to the node is not.
+func (x *actorSystem) nodeDeparted(ctx context.Context, host string, port int) (bool, error) {
 	members, err := x.getCluster().Members(ctx)
 	if err != nil {
 		return false, err
 	}
 
 	for _, member := range members {
-		if member.Host == owner.GetHost() && member.RemotingPort == int(owner.GetPort()) {
+		if member.Host == host && member.RemotingPort == port {
 			return false, nil
 		}
 	}
@@ -1555,11 +1561,19 @@ func (x *actorSystem) sendRemoteTellGrainRequest(ctx context.Context, grain *int
 // cluster. A stale cluster registry entry still pointing at that address is
 // removed before reactivation; an entry pointing anywhere else means the grain
 // has already been reactivated by a concurrent relocation or an incoming call,
-// so it is skipped. System grains and grains that opted out of relocation are
-// skipped as well.
+// so it is skipped. System grains are skipped as well. A grain that opted out
+// of relocation is released instead of recreated (see
+// releaseGrainForLazyRelocation).
 func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
-	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+	if isSystemName(grain.GetGrainId().GetName()) {
 		return nil
+	}
+
+	// A grain that opted out of relocation is lost with its node by design,
+	// but its directory entry must not outlive it: release it so the next
+	// message or activation re-creates the grain on demand.
+	if grain.GetDisableRelocation() {
+		return x.releaseGrainForLazyRelocation(ctx, grain, departedNode)
 	}
 
 	identity := grain.GetGrainId().GetValue()
@@ -1590,9 +1604,11 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 // Cluster.ReleaseGrain): the entry is only deleted when it still points at the
 // departed node. The message paths never release an entry, so this cleanup is
 // what lets Tell/Ask reach a departed owner's grains again without an
-// activation call.
+// activation call. A grain that opted out of relocation is released like any
+// other: it is lost with its node, and re-creating it on the next message is
+// the documented way to recover it.
 func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
-	if isSystemName(grain.GetGrainId().GetName()) || grain.GetDisableRelocation() {
+	if isSystemName(grain.GetGrainId().GetName()) {
 		return nil
 	}
 

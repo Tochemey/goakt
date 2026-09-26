@@ -3354,6 +3354,69 @@ func TestPeersReturnsClientError(t *testing.T) {
 	require.ErrorIs(t, err, expectedErr)
 }
 
+func TestIsMember(t *testing.T) {
+	ctx := context.Background()
+	self := &discovery.Node{Host: "127.0.0.1", PeersPort: 9000}
+
+	t.Run("reports the engine as not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger, node: self}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.False(t, member)
+	})
+
+	t.Run("reports a missing client", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(true), logger: log.DiscardLogger, node: self}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.Error(t, err)
+		require.False(t, member)
+	})
+
+	t.Run("returns the membership error", func(t *testing.T) {
+		expectedErr := errors.New("members failure")
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			client:  &MockMembersClient{MockClient: &MockClient{membersErr: expectedErr}},
+			logger:  log.DiscardLogger,
+			node:    self,
+		}
+
+		member, err := cl.IsMember(ctx, "127.0.0.2:9000")
+		require.ErrorIs(t, err, expectedErr)
+		require.False(t, member)
+	})
+
+	t.Run("matches a member by its name or by its advertised peers address", func(t *testing.T) {
+		other := &discovery.Node{Host: "127.0.0.2", PeersPort: 9000}
+		otherMeta, err := json.Marshal(other)
+		require.NoError(t, err)
+
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			client: &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{
+				{Name: "127.0.0.1:9000"},
+				{Name: "memberlist-name", Meta: string(otherMeta)},
+			}},
+			logger: log.DiscardLogger,
+			node:   self,
+		}
+
+		byName, err := cl.IsMember(ctx, "127.0.0.1:9000")
+		require.NoError(t, err)
+		require.True(t, byName)
+
+		byMeta, err := cl.IsMember(ctx, other.PeersAddress())
+		require.NoError(t, err)
+		require.True(t, byMeta)
+
+		absent, err := cl.IsMember(ctx, "127.0.0.3:9000")
+		require.NoError(t, err)
+		require.False(t, absent)
+	})
+}
+
 // nolint
 func TestIsLeaderReturnsFalseOnMembersError(t *testing.T) {
 	expectedErr := errors.New("members failure")
@@ -4655,9 +4718,10 @@ func TestNodePendingAsJoinedAndDeparted(t *testing.T) {
 func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	// a lagging member can replay a dead notification for a node that already
 	// restarted; the coordinator observed that departure and still converged
-	// with the node as a member
+	// with the node as a member, and the node is a member right now
 	cl := newEventCluster("127.0.0.1", 4000)
 	node := "127.0.0.1:9600"
+	cl.client = &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{{Name: node}}}
 	converge(cl, 1, node)
 
 	announceLeft(cl, node, 1)
@@ -4673,6 +4737,47 @@ func TestStaleDepartureOfLiveMemberIsDropped(t *testing.T) {
 	converge(cl, 3, node)
 	require.Contains(t, cl.pendingLeaves, node)
 	require.Empty(t, cl.events)
+}
+
+func TestDepartureOfAbsentNodeSurvivesConvergenceListingIt(t *testing.T) {
+	// the coordinator completes a rebalance epoch on live members only and
+	// announces the member set the epoch started with: an epoch that started
+	// before a crash and completed after it carries a newer generation and
+	// still lists the dead node. That convergence must not be taken for a
+	// restart when the node is not a member; the departure stays pending and
+	// the next convergence without the node releases it
+	cl := newEventCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9610"
+	cl.client = &MockMembersClient{MockClient: &MockClient{}, members: []olric.Member{{Name: cl.node.PeersAddress()}}}
+	converge(cl, 1, node)
+
+	announceLeft(cl, node, 1)
+	timer := cl.pendingLeaves[node].timer
+	converge(cl, 2, node)
+	require.Contains(t, cl.pendingLeaves, node)
+	require.Empty(t, cl.events)
+	require.True(t, timer.Stop(), "the bounded wait must still be armed")
+
+	converge(cl, 3)
+	requireEmitted(t, cl, NodeLeft, node)
+	require.Empty(t, cl.pendingLeaves)
+}
+
+func TestDepartureKeptWhenMembershipCannotBeRead(t *testing.T) {
+	// a drop cannot be undone and a wait is bounded, so a failed membership
+	// read keeps the departure pending
+	cl := newEventCluster("127.0.0.1", 4000)
+	node := "127.0.0.1:9620"
+	cl.client = &MockMembersClient{MockClient: &MockClient{membersErr: errors.New("boom")}}
+	converge(cl, 1, node)
+
+	announceLeft(cl, node, 1)
+	converge(cl, 2, node)
+	require.Contains(t, cl.pendingLeaves, node)
+	require.Empty(t, cl.events)
+
+	converge(cl, 3)
+	requireEmitted(t, cl, NodeLeft, node)
 }
 
 func TestRestartedNodeDepartsAgain(t *testing.T) {

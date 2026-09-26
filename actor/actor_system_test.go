@@ -4288,7 +4288,7 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
 	// the departed node stays gone
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 
@@ -4314,7 +4314,7 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
 	// the departed node stays gone
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	// the first scan fails transiently, the retry succeeds
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Once()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
@@ -4346,7 +4346,7 @@ func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
 	// the departed node stays gone
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Maybe()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Times(relocationDeriveMaxAttempts)
 
 	system.gateCrashRecovery(peer)
@@ -4372,7 +4372,7 @@ func TestGateCrashRecoverySkipsRejoinedNode(t *testing.T) {
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
 	// the departed address is a member again; no ActorsByHost or GrainsByHost
 	// expectation is set, so a scan fails the test as an unexpected call
-	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 3320}}, nil).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(true, nil).Once()
 
 	system.gateCrashRecovery(peer)
 
@@ -4400,10 +4400,10 @@ func TestGateCrashRecoverySkipsNodeRejoinedDuringDerivation(t *testing.T) {
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
 	// gone before the scan, back before the dispatch
-	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 4000}}, nil).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Once()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
-	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 3320}}, nil).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(true, nil).Once()
 
 	system.gateCrashRecovery(peer)
 
@@ -4414,6 +4414,99 @@ func TestGateCrashRecoverySkipsNodeRejoinedDuringDerivation(t *testing.T) {
 
 	_, cached := system.peerRemotingPort(peer)
 	require.False(t, cached, "recovery must prune the cache entry when it skips")
+}
+
+func TestGateCrashRecoveryReleasesStaleClaims(t *testing.T) {
+	// the claims left by a crashed node's non-relocatable actors are released
+	// once the node is confirmed gone, even when there is nothing to relocate,
+	// and the recovery still publishes its (empty) relocation set
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+	pinned := internalpb.Actor_builder{Address: address.New("pinned", system.name, "127.0.0.1", 9090).String(), Relocatable: false, IncarnationId: "dead"}.Build()
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the departed node stays gone
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return([]*internalpb.Actor{pinned}, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().RemoveActor(mock.Anything, "pinned", "dead").Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	var started []*RelocationStarted
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			started = append(started, msg)
+		}
+	}
+
+	require.Len(t, started, 1)
+	assert.Empty(t, started[0].Actors(), "a released claim is not a relocated actor")
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery must prune the cache entry once done")
+}
+
+func TestGateCrashRecoveryKeepsClaimsOfRejoinedNode(t *testing.T) {
+	// a node that rejoins while its records are being derived still hosts its
+	// non-relocatable actors: their claims must not be released
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+	pinned := internalpb.Actor_builder{Address: address.New("pinned", system.name, "127.0.0.1", 9090).String(), Relocatable: false, IncarnationId: "alive"}.Build()
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// gone before the scan, back before the release; RemoveActor is not
+	// expected, so a release fails the test as an unexpected call
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return([]*internalpb.Actor{pinned}, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(true, nil).Once()
+
+	system.gateCrashRecovery(peer)
+}
+
+func TestReleaseStaleClaims(t *testing.T) {
+	ctx := context.Background()
+	const peer = "127.0.0.1:3320"
+
+	t.Run("no claims touch the registry", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		system.releaseStaleClaims(ctx, peer, nil)
+	})
+
+	t.Run("a name re-taken by another incarnation is left to it", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "pinned", "dead").Return(departedWireActor("pinned", "newer"), nil).Once()
+
+		system.releaseStaleClaims(ctx, peer, []staleClaim{{qualifiedName: "pinned", incarnationID: "dead"}})
+	})
+
+	t.Run("a failed removal is skipped and the others still released", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "broken", "dead").Return(nil, assert.AnError).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "pinned", "dead").Return(nil, nil).Once()
+
+		system.releaseStaleClaims(ctx, peer, []staleClaim{
+			{qualifiedName: "broken", incarnationID: "dead"},
+			{qualifiedName: "pinned", incarnationID: "dead"},
+		})
+	})
 }
 
 func TestGateCrashRecoveryProceedsWhenMembershipReadFails(t *testing.T) {
@@ -4430,7 +4523,7 @@ func TestGateCrashRecoveryProceedsWhenMembershipReadFails(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
-	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError).Times(2)
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, assert.AnError).Times(2)
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 
@@ -5942,10 +6035,14 @@ func TestPutActorOnCluster(t *testing.T) {
 
 		pid := newTestPID(system, "claimed")
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		// the holder is a live member, so the name stays taken
+		clusterMock.EXPECT().GetActor(mock.Anything, "claimed").Return(departedWireActor("claimed", "live"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
 
 		err := system.putActorOnCluster(ctx, pid)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 		clusterMock.AssertExpectations(t)
+		clusterMock.AssertNotCalled(t, "RemoveActor", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("singleton with role publishes its registry record", func(t *testing.T) {
@@ -5984,6 +6081,244 @@ func TestPutActorOnCluster(t *testing.T) {
 		pid := newTestPID(system, "no-cluster")
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
 		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
+	})
+
+	t.Run("name held by a departed node is reclaimed and published", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "orphaned")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "orphaned").Return(departedWireActor("orphaned", "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "orphaned", "dead").Return(nil, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+	})
+
+	t.Run("reclaim failure keeps the conflict", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "unreadable")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "unreadable").Return(nil, assert.AnError).Once()
+
+		err := system.putActorOnCluster(ctx, pid)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("a second conflict after the reclaim is reported", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "contended")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Twice()
+		clusterMock.EXPECT().GetActor(mock.Anything, "contended").Return(departedWireActor("contended", "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "contended", "dead").Return(nil, nil).Once()
+
+		err := system.putActorOnCluster(ctx, pid)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+}
+
+// departedWireActor returns the registry record of a top-level actor hosted on
+// the remoting endpoint 127.0.0.2:7000 of a node that newReplicationSystem
+// does not run, under the given incarnation.
+func departedWireActor(name, incarnation string) *internalpb.Actor {
+	return internalpb.Actor_builder{
+		Address:       address.New(name, "test-replication", "127.0.0.2", 7000).String(),
+		IncarnationId: incarnation,
+	}.Build()
+}
+
+// liveHolderMembers returns a membership in which the node hosting
+// departedWireActor records is alive.
+func liveHolderMembers() []*cluster.Peer {
+	return []*cluster.Peer{{Host: "127.0.0.2", PeersPort: 9000, RemotingPort: 7000}}
+}
+
+func TestReclaimDepartedName(t *testing.T) {
+	ctx := context.Background()
+	const name = "worker"
+
+	t.Run("a free name is reported free", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, cluster.ErrActorNotFound).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, free)
+	})
+
+	t.Run("a name held by a departed node is released", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, free)
+	})
+
+	t.Run("a name held by a live member is taken", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "live"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, free)
+	})
+
+	t.Run("a singleton claim is never reclaimed", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		singleton := departedWireActor(name, "dead")
+		singleton.SetSingleton(internalpb.SingletonSpec_builder{MaxRetries: 1}.Build())
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(singleton, nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, free)
+	})
+
+	t.Run("a name held by this node is taken", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		own := internalpb.Actor_builder{
+			Address:       address.New(name, system.name, system.Host(), system.Port()).String(),
+			IncarnationId: "other",
+		}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(own, nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, free)
+	})
+
+	t.Run("a failed membership read reports the name as taken", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, free)
+	})
+
+	t.Run("a name re-taken by another incarnation is left to it", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(departedWireActor(name, "newer"), nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.NoError(t, err)
+		assert.False(t, free)
+	})
+
+	t.Run("a failed removal is returned", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, assert.AnError).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.False(t, free)
+	})
+
+	t.Run("a failed read is returned", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, assert.AnError).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.ErrorIs(t, err, assert.AnError)
+		assert.False(t, free)
+	})
+
+	t.Run("a record with an unparseable address is an error and stays untouched", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		malformed := internalpb.Actor_builder{Address: "not-an-address", IncarnationId: "dead"}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(malformed, nil).Once()
+
+		free, err := system.reclaimDepartedName(ctx, name)
+		require.Error(t, err)
+		assert.False(t, free)
+	})
+}
+
+func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
+	ctx := context.Background()
+	const name = "worker"
+
+	t.Run("a free name passes without a record read", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(false, nil).Once()
+
+		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
+	})
+
+	t.Run("a name held by a departed node is reclaimed", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, nil).Once()
+
+		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
+	})
+
+	t.Run("a name held by a live member is rejected", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "live"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
+
+		err := system.checkOrdinarySpawnPreconditions(ctx, name)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("a lookup failure is returned", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(false, assert.AnError).Once()
+
+		err := system.checkOrdinarySpawnPreconditions(ctx, name)
+		require.ErrorIs(t, err, assert.AnError)
+	})
+
+	t.Run("a reclaim failure keeps the conflict", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, assert.AnError).Once()
+
+		err := system.checkOrdinarySpawnPreconditions(ctx, name)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("no-op when clustering is disabled", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.clusterEnabled.Store(false)
+
+		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
 	})
 }
 
@@ -6341,9 +6676,12 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 		system.actors.counter.Add(1)
 	}
 
-	// the first repair meets a name owned by another incarnation and is
-	// skipped; the second actor is still repaired
+	// the first repair meets a name owned by another incarnation on a live
+	// member, so it is not reclaimed and is skipped; the second actor is
+	// still repaired
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+	clusterMock.EXPECT().GetActor(mock.Anything, "resync-lost").Return(departedWireActor("resync-lost", "other"), nil).Once()
+	clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
 	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 	require.NoError(t, system.resyncActors())
@@ -7981,8 +8319,8 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		actors := []*internalpb.Actor{
 			// included: relocatable actor on the departed node
 			internalpb.Actor_builder{Address: address.New("worker-1", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
-			// excluded: not relocatable
-			internalpb.Actor_builder{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false}.Build(),
+			// excluded from the set, returned as a stale claim: not relocatable
+			internalpb.Actor_builder{Address: address.New("worker-2", system.name, departedHost, departedRemoting).String(), Relocatable: false, IncarnationId: "stale"}.Build(),
 			// excluded: system actor
 			internalpb.Actor_builder{Address: address.New("GoAktSystemGuardian", system.name, departedHost, departedRemoting).String(), Relocatable: true}.Build(),
 		}
@@ -7997,7 +8335,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(grains, nil).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, claims, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
 		require.NotNil(t, state)
 
@@ -8012,6 +8350,54 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		require.Len(t, state.GetGrains(), 1)
 		_, hasG1 := state.GetGrains()["k/g1"]
 		assert.True(t, hasG1)
+
+		// the scan only collects the claim; RemoveActor is not expected on the
+		// mock, so a removal here fails the test as an unexpected call
+		require.Len(t, claims, 1)
+		assert.Equal(t, staleClaim{qualifiedName: "worker-2", incarnationID: "stale"}, claims[0])
+	})
+
+	t.Run("leaves singletons and unfenced records out of the claims", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
+
+		singleton := internalpb.Actor_builder{Address: address.New("single", system.name, departedHost, departedRemoting).String(), Relocatable: false, IncarnationId: "s"}.Build()
+		singleton.SetSingleton(internalpb.SingletonSpec_builder{MaxRetries: 1}.Build())
+		unfenced := internalpb.Actor_builder{Address: address.New("legacy", system.name, departedHost, departedRemoting).String(), Relocatable: false}.Build()
+
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return([]*internalpb.Actor{singleton, unfenced}, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
+
+		state, claims, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.True(t, ok)
+		require.NotNil(t, state)
+		assert.Empty(t, state.GetActors())
+		assert.Empty(t, claims)
+	})
+
+	t.Run("keeps a non-relocatable reliable endpoint in the set without a claim", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.peerRemotingPorts.Set(departedPeerAddress, departedRemoting)
+
+		endpoint := internalpb.Actor_builder{
+			Address:          address.New("orders", system.name, departedHost, departedRemoting).String(),
+			Relocatable:      false,
+			IncarnationId:    "e",
+			ReliableDelivery: producerDeliveryConfig("orders-consumer").toProto(),
+		}.Build()
+
+		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return([]*internalpb.Actor{endpoint}, nil).Once()
+		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
+
+		state, claims, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		require.True(t, ok)
+		require.NotNil(t, state)
+		require.Len(t, state.GetActors(), 1)
+		_, hasEndpoint := state.GetActors()["orders"]
+		assert.True(t, hasEndpoint)
+		assert.Empty(t, claims)
 	})
 
 	t.Run("returns false when a port does not fit int32", func(t *testing.T) {
@@ -8022,13 +8408,13 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		// rejected by the bounds-checked conversion instead of truncating
 		// silently into the wire record
 		system.peerRemotingPorts.Set("127.0.0.2:2147483648", departedRemoting)
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:2147483648")
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:2147483648")
 		require.False(t, ok)
 		assert.Nil(t, state)
 
 		// an out-of-range cached remoting port is rejected the same way
 		system.peerRemotingPorts.Set(departedPeerAddress, math.MaxInt32+1)
-		state, ok = system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok = system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8038,7 +8424,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		system := newReplicationSystem(clusterMock)
 		// no cache entry for the departed peer address
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		assert.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8047,7 +8433,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "not-an-address")
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), "not-an-address")
 		assert.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8056,7 +8442,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:notaport")
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), "127.0.0.2:notaport")
 		assert.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8073,7 +8459,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, relocationDeriveScanTimeout).Return(nil, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, relocationDeriveScanTimeout).Return(nil, nil).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
 		require.NotNil(t, state)
 	})
@@ -8089,7 +8475,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, readTimeout).Return(nil, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, readTimeout).Return(nil, nil).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
 		require.NotNil(t, state)
 	})
@@ -8106,7 +8492,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(actors, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
 		require.NotNil(t, state)
 		assert.Empty(t, state.GetActors())
@@ -8119,7 +8505,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, assert.AnError).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		assert.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8132,7 +8518,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, assert.AnError).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		assert.False(t, ok)
 		assert.Nil(t, state)
 	})
@@ -8145,7 +8531,7 @@ func TestDeriveRelocationSetFromRegistry(t *testing.T) {
 		clusterMock.EXPECT().ActorsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
 		clusterMock.EXPECT().GrainsByHost(mock.Anything, departedHost, departedRemoting, mock.Anything).Return(nil, nil).Once()
 
-		state, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
+		state, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), departedPeerAddress)
 		require.True(t, ok)
 		require.NotNil(t, state)
 		assert.Empty(t, state.GetActors())
@@ -8386,7 +8772,7 @@ func TestDeriveRelocationSetIncludesReliableRecords(t *testing.T) {
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 7777, mock.Anything).
 		Return(nil, nil).Once()
 
-	peerState, ok := system.deriveRelocationSetFromRegistry(context.Background(), peerAddress)
+	peerState, _, ok := system.deriveRelocationSetFromRegistry(context.Background(), peerAddress)
 	require.True(t, ok)
 	require.NotNil(t, peerState)
 

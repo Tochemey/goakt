@@ -12,7 +12,7 @@ other nodes so the cluster remains available.
   Relocation works for both graceful and abrupt departures. On a graceful shutdown the departing node replicates a `PeerState` snapshot to
   its oldest peers. On a crash (`kill -9`, OOM, network partition) that snapshot never gets written, so the leader instead reconstructs the
   departed node's relocation set from the replicated cluster registry. Actors spawned with `WithRelocationDisabled` are still lost with the
-  node either way.
+  node either way, but their registry name claims are released once the node is confirmed gone, so the same name can be spawned again.
 </Note>
 
 ## When relocation happens
@@ -192,8 +192,11 @@ See [Event Streams](/advanced/event-streams) for the full subscriber API and the
 - **Singleton**: Leader node only.
 - **Non-singleton**: Least-loaded eligible target across leader + peers.
 
-Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` are skipped. System actors (e.g. dead
-letter, scheduler) are never relocated.
+Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` are not recreated, but the leader releases
+their registry name claims once crash recovery has confirmed the node is gone, so a later spawn can take the name again. The
+release is fenced by the actor incarnation: a name that a newer actor has already claimed is never removed. A spawn that
+meets such a stale claim before the leader released it reclaims it on the spot, after checking that the node holding it is
+no longer a cluster member. System actors (e.g. dead letter, scheduler) are never relocated.
 
 Placement is **load-aware**: before distributing the departed node's actors, the leader scans the replicated cluster
 registry once and seeds each target's "load" with the number of actors it already hosts. The departed node's actors then
@@ -298,7 +301,9 @@ then chunks to peers), so it does not funnel through a single node.
 Grains opted into eager relocation with `WithGrainEagerRelocation` are instead recreated up front on their target node,
 the same way actors are - including [role-aware allocation](#role-aware-allocation): an eager grain activated with
 `WithActivationRole` is only reactivated on a node advertising that role, and is reported in `RelocationFailed` when no
-surviving node qualifies. Grains with `WithGrainDisableRelocation` are skipped entirely; they are lost with the node.
+surviving node qualifies. Grains with `WithGrainDisableRelocation` are never recreated, but their directory entries are
+released like a lazy grain's, so the next `TellGrain`, `AskGrain` or `GrainIdentity` call re-creates the grain on a live
+node instead of failing against the departed owner.
 
 ## Configuration
 

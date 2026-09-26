@@ -269,6 +269,11 @@ type Cluster interface {
 	JobKey(ctx context.Context, jobID string) ([]byte, error)
 	// Members lists all cluster members including the local node.
 	Members(ctx context.Context) ([]*Peer, error)
+	// IsMember reports whether the node at peersAddress, a peers address in
+	// the host:port form the membership events carry, is a current cluster
+	// member. Membership is the only authority on node liveness; a failed
+	// request to the node is not.
+	IsMember(ctx context.Context, peersAddress string) (bool, error)
 	// NextRoundRobinValue returns the next value in a round-robin sequence for the given key.
 	// The key here is either actors or grains. When the node that owns the key goes down,
 	// the sequence may be reset.
@@ -1015,6 +1020,39 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 	return peers, nil
 }
 
+// IsMember reports whether the node at peersAddress, a peers address in the
+// host:port form the membership events carry, is a current cluster member.
+func (x *cluster) IsMember(ctx context.Context, peersAddress string) (bool, error) {
+	if !x.running.Load() {
+		return false, ErrEngineNotRunning
+	}
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	if x.client == nil {
+		return false, errors.New("cluster client is not initialized")
+	}
+
+	members, err := x.client.Members(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	for _, member := range members {
+		if member.Name == peersAddress {
+			return true, nil
+		}
+
+		meta := new(discovery.Node)
+		if json.Unmarshal([]byte(member.Meta), meta) == nil && meta.PeersAddress() == peersAddress {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // IsLeader reports whether the local node is the cluster coordinator.
 func (x *cluster) IsLeader(ctx context.Context) bool {
 	if !x.running.Load() {
@@ -1752,8 +1790,21 @@ func (x *cluster) announceConvergedLocked(node string, assume bool) {
 			x.releaseLocked(node, x.pendingLeaves, x.emitNodeLeftLocked)
 			x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
 		case leftReflected && x.reflectedLocked(left, false):
-			x.logger.Debugf("dropping stale departure of node=%s: the routing table converged with it as a member", node)
-			x.discardLocked(node, x.pendingLeaves)
+			// A convergence that still lists the node is not proof that the
+			// node is alive. The coordinator completes a rebalance epoch on
+			// live members only and announces the member set the epoch
+			// started with, so an epoch that started before the departure
+			// and completed after it carries a newer generation and still
+			// lists the node. Only the current membership tells a restarted
+			// node from one that is gone: a member's departure is a stale
+			// copy and is dropped, a non-member's stays pending until a
+			// convergence without it, or the bounded wait, releases it. A
+			// failed membership read keeps it pending too: a drop cannot be
+			// undone, a wait is bounded.
+			if x.memberLocked(node) {
+				x.logger.Debugf("dropping stale departure of node=%s: the routing table converged with it as a member", node)
+				x.discardLocked(node, x.pendingLeaves)
+			}
 		case joinReflected:
 			x.releaseLocked(node, x.pendingJoins, x.emitNodeJoinedLocked)
 		}
@@ -1806,6 +1857,24 @@ func (x *cluster) releaseLocked(node string, pending map[string]pendingEvent, em
 func (x *cluster) discardLocked(node string, pending map[string]pendingEvent) {
 	pending[node].timer.Stop()
 	delete(pending, node)
+}
+
+// memberLocked reports whether node, a peers address, is a current cluster
+// member. It reads the membership within the read timeout, like
+// detectLeaderChangeLocked, and reports false when the read fails, which the
+// callers treat as unknown rather than absent. It must be called while
+// holding eventsLock.
+func (x *cluster) memberLocked(node string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
+	defer cancel()
+
+	member, err := x.IsMember(ctx, node)
+	if err != nil {
+		x.logger.Warnf("could not check whether node=%s is a cluster member: %v (hint: its departure stays pending)", node, err)
+		return false
+	}
+
+	return member
 }
 
 // detectLeaderChangeLocked emits a LeaderChanged event when the cluster

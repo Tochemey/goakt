@@ -949,6 +949,72 @@ func (_c *Cluster_IsLeader_Call) RunAndReturn(run func(ctx context.Context) bool
 	return _c
 }
 
+// IsMember provides a mock function for the type Cluster
+func (_mock *Cluster) IsMember(ctx context.Context, peersAddress string) (bool, error) {
+	ret := _mock.Called(ctx, peersAddress)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IsMember")
+	}
+
+	var r0 bool
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (bool, error)); ok {
+		return returnFunc(ctx, peersAddress)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) bool); ok {
+		r0 = returnFunc(ctx, peersAddress)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, peersAddress)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_IsMember_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsMember'
+type Cluster_IsMember_Call struct {
+	*mock.Call
+}
+
+// IsMember is a helper method to define mock.On call
+//   - ctx context.Context
+//   - peersAddress string
+func (_e *Cluster_Expecter) IsMember(ctx any, peersAddress any) *Cluster_IsMember_Call {
+	return &Cluster_IsMember_Call{Call: _e.mock.On("IsMember", ctx, peersAddress)}
+}
+
+func (_c *Cluster_IsMember_Call) Run(run func(ctx context.Context, peersAddress string)) *Cluster_IsMember_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_IsMember_Call) Return(b bool, err error) *Cluster_IsMember_Call {
+	_c.Call.Return(b, err)
+	return _c
+}
+
+func (_c *Cluster_IsMember_Call) RunAndReturn(run func(ctx context.Context, peersAddress string) (bool, error)) *Cluster_IsMember_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // IsRunning provides a mock function for the type Cluster
 func (_mock *Cluster) IsRunning() bool {
 	ret := _mock.Called()
