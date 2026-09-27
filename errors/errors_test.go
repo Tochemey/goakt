@@ -116,6 +116,13 @@ func TestNewErrReservedName(t *testing.T) {
 	assert.ErrorIs(t, err, ErrReservedName)
 }
 
+func TestNewErrInvalidActorName(t *testing.T) {
+	err := NewErrInvalidActorName("orders/cart", errors.New("must match the pattern"))
+	require.Error(t, err)
+	require.EqualError(t, err, `(name="orders/cart") invalid actor name: must match the pattern`)
+	assert.ErrorIs(t, err, ErrInvalidActorName)
+}
+
 func TestNewErrActorNotFound(t *testing.T) {
 	err := NewErrActorNotFound("/user/actor")
 	require.Error(t, err)

@@ -115,6 +115,7 @@ type Path interface {
     Port() int
     Name() string
     Parent() Path
+    QualifiedName() string
     String() string
     System() string
     Equals(other Path) bool

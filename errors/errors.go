@@ -35,6 +35,11 @@ var (
 	// hyphens or underscores that are not leading.
 	ErrInvalidActorSystemName = errors.New("invalid ActorSystem name, must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 
+	// ErrInvalidActorName is returned when a name cannot name an actor: it is
+	// empty, longer than 255 characters or contains characters other than word
+	// characters and non-leading '-', '_' or '.'.
+	ErrInvalidActorName = errors.New("invalid actor name")
+
 	// ErrDead indicates that the actor is no longer alive or has been terminated.
 	ErrDead = errors.New("actor is not alive")
 
@@ -377,6 +382,12 @@ func NewErrInvalidGrainIdentity(err error) error {
 // NewErrReservedName formats an ErrReservedName with the given name.
 func NewErrReservedName(name string) error {
 	return fmt.Errorf("name=(%s) %w", name, ErrReservedName)
+}
+
+// NewErrInvalidActorName formats an ErrInvalidActorName with the offending name
+// and the rule it broke.
+func NewErrInvalidActorName(name string, err error) error {
+	return fmt.Errorf("(name=%q) %w: %w", name, ErrInvalidActorName, err)
 }
 
 // NewErrActorNotFound formats an ErrActorNotFound with the given actor path.
