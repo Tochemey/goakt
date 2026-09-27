@@ -43,13 +43,17 @@ See the [examples repository](https://github.com/Tochemey/goakt-examples) for ru
 
 ## In Production
 
-This framework is used in production by the following projects/companies:
+These systems run GoAkt in production:
 
-- [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories.
-- [Event Processor](https://www.v-app.io/iot-builder-3/): Clustered Complex Event Processor (CEP) for IoT data streams.
-- [Analytics Platform](https://github.com/Tochemey/goakt/discussions/1259): Self-hosted analytics platform running a single Go monolith on Kubernetes at roughly 31 pods, with GoAkt as the entire distribution layer. Read the production report.
+- [Baki Money](https://www.baki.money/): AI-powered expense tracking platform that turns receipts into stories. Actors cache the app's data today, with wider use of the framework planned.
+- [Analytics platform](https://github.com/Tochemey/goakt/discussions/1259): a self-hosted analytics platform that collects behavioural and telemetry data across several product lines. It runs as one Go monolith on Kubernetes at about 31 pods, with GoAkt as the entire distribution layer: no message broker, no service mesh and no external actor registry. Inbound WebSocket and SSE connections are cluster-named actors, outbound integrations are single-activation grains, reporting fans out over messages, and cluster single-fire cron lets an external scheduler retire. In their words, "the actor core has not been a source of surprises". Read the full production report.
 
-Running GoAkt in production? [Write a short report](https://github.com/Tochemey/goakt/discussions/new?category=show-and-tell&title=Production%20report%3A%20) to be listed here.
+Being built on GoAkt:
+
+- [V-App IoT Builder](https://www.v-app.io/iot-builder-3/): a clustered Complex Event Processor that lets end users graphically design rules applied to incoming sensor data and react to environment changes.
+- [Galaxy](https://github.com/Tochemey/goakt/discussions/1361): a distributed real-time game platform. It uses clustered actors and grains for player state, matchmaking lobbies, game sessions, authoritative clocks, persistence and node relocation, with NATS JetStream for durable state, event logs and reliable WebSocket delivery.
+
+Running GoAkt in production? [Write a short report](https://github.com/Tochemey/goakt/discussions/new?category=show-and-tell&title=Production%20report%3A%20) to be listed here, or tell us how it is going in the [feedback discussion](https://github.com/Tochemey/goakt/discussions/1361).
 
 ## Security
 
