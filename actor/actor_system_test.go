@@ -6866,6 +6866,8 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 	system.actors.noSender = system.noSender
 	system.locker.Unlock()
 
+	ids := map[string]string{}
+
 	for _, name := range []string{"resync-lost", "resync-kept"} {
 		addr := address.New(name, system.name, "127.0.0.1", int(system.remoteConfig.BindPort()))
 		pid := &PID{
@@ -6880,15 +6882,21 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 		node := newPidNode(pid)
 		system.actors.pids[node.id] = node
 		system.actors.counter.Add(1)
+		ids[name] = pid.ID()
 	}
 
-	// the first repair meets a name owned by another incarnation on a live
-	// member, so it is not reclaimed and is skipped; the second actor is
-	// still repaired
-	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+	// the repair of resync-lost meets a name owned by another incarnation on a
+	// live member, so it is not reclaimed and is skipped; resync-kept is still
+	// repaired. The tree lists actors in map order, so each publication is
+	// matched by its address rather than by the order it happens in.
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.MatchedBy(func(actor *internalpb.Actor) bool {
+		return actor.GetAddress() == ids["resync-lost"]
+	})).Return(cluster.ErrActorAlreadyExists).Once()
 	clusterMock.EXPECT().GetActor(mock.Anything, "resync-lost").Return(departedWireActor("resync-lost", "other"), nil).Once()
 	clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
-	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.MatchedBy(func(actor *internalpb.Actor) bool {
+		return actor.GetAddress() == ids["resync-kept"]
+	})).Return(nil).Once()
 
 	require.NoError(t, system.resyncActors())
 	clusterMock.AssertExpectations(t)
