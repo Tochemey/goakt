@@ -3751,8 +3751,8 @@ func (pid *PID) incarnationID() string {
 // written once at construction. The actor tree calls it while holding its own
 // lock, and Children and Stop take the two locks in the opposite order.
 func (pid *PID) qualifiedName() string {
-	if p, ok := pid.Path().(*path); ok && p != nil {
-		return p.addr.QualifiedName()
+	if p := pid.Path(); p != nil {
+		return p.QualifiedName()
 	}
 	return ""
 }

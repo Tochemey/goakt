@@ -37,6 +37,11 @@ type Path interface {
 	Name() string
 	// Parent returns the Path of the actor's parent, or nil if there is no parent.
 	Parent() Path
+	// QualifiedName returns the name that identifies the actor within its actor
+	// system: the names of its ancestors from the root down and its own name,
+	// joined by "/". A top-level actor's qualified name is its name. It is the
+	// name ActorOf, ActorExists, Kill and ReSpawn resolve, locally and in a cluster.
+	QualifiedName() string
 	// String returns the full string representation of the actor path.
 	String() string
 	// System returns the name of the actor system this actor belongs to.
@@ -106,6 +111,15 @@ func (x *path) Parent() Path {
 		return nil
 	}
 	return x.parent
+}
+
+// QualifiedName returns the actor name qualified by its ancestors, read through
+// the underlying address, which computes it once at construction.
+func (x *path) QualifiedName() string {
+	if x == nil {
+		return ""
+	}
+	return x.addr.QualifiedName()
 }
 
 // String returns the canonical string representation of the underlying address.

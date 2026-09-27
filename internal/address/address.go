@@ -48,6 +48,7 @@ package address
 import (
 	"errors"
 	"net"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,8 +59,28 @@ import (
 	"github.com/tochemey/goakt/v4/internal/validation"
 )
 
-// scheme defines the Go-Akt addressing scheme
-const scheme = "goakt"
+const (
+	// scheme defines the Go-Akt addressing scheme
+	scheme = "goakt"
+	// qualifiedNameSeparator joins the names of an actor's ancestors and its own
+	// name into its qualified name.
+	qualifiedNameSeparator = "/"
+	// namePattern is the pattern an actor system name and an actor name must
+	// match: a word character followed by word characters, '-', '_' or '.'.
+	namePattern = "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
+	// maxNameLength bounds the length of an actor name.
+	maxNameLength = 255
+)
+
+// nameRegexp is namePattern compiled once, so validating a name does not
+// compile it again on every call.
+var nameRegexp = regexp.MustCompile(namePattern)
+
+// msgNameTooLong reports a name longer than maxNameLength.
+var msgNameTooLong = "actor name is too long. Maximum length is " + strconv.Itoa(maxNameLength)
+
+// errInvalidNamePattern reports a name that does not match namePattern.
+var errInvalidNamePattern = errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 
 // zeroAddress means that there is no sender
 var zeroAddress = &Address{}
@@ -310,7 +331,36 @@ func (x *Address) buildQualifiedName() string {
 	}
 
 	slices.Reverse(names)
-	return strings.Join(names, "/")
+	return JoinNames(names...)
+}
+
+// JoinNames returns the qualified name formed by names: the names of an actor's
+// ancestors from the root down and its own name, joined by the qualified name
+// separator. It performs no validation; see ValidateName.
+func JoinNames(names ...string) string {
+	return strings.Join(names, qualifiedNameSeparator)
+}
+
+// ValidateName reports whether name may name an actor: it must not be empty,
+// must be at most maxNameLength characters long and must match namePattern.
+// These are the rules Validate applies to an address's name, so a name this
+// function accepts is one Spawn accepts. The pattern is matched with the
+// precompiled nameRegexp, so the check is cheap enough for a send path.
+func ValidateName(name string) error {
+	err := validation.
+		New(validation.FailFast()).
+		AddValidator(validation.NewEmptyStringValidator("name", name)).
+		AddAssertion(len(name) <= maxNameLength, msgNameTooLong).
+		Validate()
+	if err != nil {
+		return err
+	}
+
+	if !nameRegexp.MatchString(strings.TrimSpace(name)) {
+		return errInvalidNamePattern
+	}
+
+	return nil
 }
 
 // buildString computes the canonical string representation.
@@ -439,16 +489,14 @@ func (x *Address) Validate() error {
 	if x == nil || x.Equals(NoSender()) {
 		return nil
 	}
-	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
-	customErr := errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 	verr := validation.
 		New(validation.FailFast()).
 		AddValidator(validation.NewTCPAddressValidator(net.JoinHostPort(x.Host(), strconv.Itoa(x.Port())))).
 		AddValidator(validation.NewEmptyStringValidator("system", x.System())).
 		AddValidator(validation.NewEmptyStringValidator("name", x.Name())).
-		AddAssertion(len(x.Name()) <= 255, "actor name is too long. Maximum length is 255").
-		AddValidator(validation.NewPatternValidator(pattern, x.System(), customErr)).
-		AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(x.Name()), customErr)).
+		AddAssertion(len(x.Name()) <= maxNameLength, msgNameTooLong).
+		AddValidator(validation.NewPatternValidator(namePattern, x.System(), errInvalidNamePattern)).
+		AddValidator(validation.NewPatternValidator(namePattern, strings.TrimSpace(x.Name()), errInvalidNamePattern)).
 		AddAssertion(uuid.Validate(x.IncarnationID()) == nil, "actor incarnation ID is invalid").
 		Validate()
 

@@ -29,14 +29,16 @@ type Path interface {
     Port() int
     Name() string
     Parent() Path
+    QualifiedName() string
     String() string
     System() string
     Equals(other Path) bool
 }
 ```
 
-Use `Path()` for host, port, name, and string representation. Guard for nil when the sender is unknown (e.g.,
-`NoSender`).
+Use `Path()` for host, port, name, and string representation. `QualifiedName()` returns the name that identifies the
+actor within its system, `parent/child` for a child, which is the name `ActorOf`, `ActorExists`, `Kill` and `ReSpawn`
+resolve. Guard for nil when the sender is unknown (e.g., `NoSender`).
 
 ## When location matters
 
@@ -50,6 +52,7 @@ local tree first, then in the cluster registry. You get a unified handle either 
 
 For a top-level actor, `name` is its name. A child's name is unique only among its siblings, so two parents can each
 have a child called `worker`. A child is found by its qualified name, the names of its ancestors and its own joined by
-`/`, from any node: `ActorOf(ctx, "orders/worker")`. On the node that hosts it, a child is also found by its bare name;
-when several children on that node share it, the most recently spawned one is returned. `ActorExists`, `Kill` and
-`ReSpawn` resolve names the same way.
+`/`, from any node: `ActorOf(ctx, "orders/worker")`. `actor.QualifiedName("orders", "worker")` builds that name and
+rejects a name `Spawn` would reject, and `pid.Path().QualifiedName()` reports it for a running actor. On the node that
+hosts it, a child is also found by its bare name; when several children on that node share it, the most recently
+spawned one is returned. `ActorExists`, `Kill` and `ReSpawn` resolve names the same way.

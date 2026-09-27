@@ -434,3 +434,35 @@ func TestFormatHostPort(t *testing.T) {
 		})
 	}
 }
+
+func TestJoinNames(t *testing.T) {
+	assert.Equal(t, "", JoinNames())
+	assert.Equal(t, "orders", JoinNames("orders"))
+	assert.Equal(t, "orders/cart/item", JoinNames("orders", "cart", "item"))
+}
+
+func TestValidateName(t *testing.T) {
+	t.Run("accepts a valid name", func(t *testing.T) {
+		assert.NoError(t, ValidateName("orders-cart_v2.1"))
+	})
+
+	t.Run("rejects an empty name", func(t *testing.T) {
+		assert.Error(t, ValidateName(""))
+	})
+
+	t.Run("rejects a name that is too long", func(t *testing.T) {
+		assert.Error(t, ValidateName(strings.Repeat("a", 256)))
+	})
+
+	t.Run("rejects a name with characters outside the pattern", func(t *testing.T) {
+		assert.Error(t, ValidateName("orders/cart"))
+		assert.Error(t, ValidateName("-orders"))
+		assert.Error(t, ValidateName("or ders"))
+	})
+
+	t.Run("agrees with Validate on an address name", func(t *testing.T) {
+		addr := New("orders/cart", "sys", "127.0.0.1", 9000)
+		assert.Error(t, addr.Validate())
+		assert.Error(t, ValidateName(addr.Name()))
+	})
+}

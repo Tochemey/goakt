@@ -3516,6 +3516,9 @@ func (x *MockPath) Name() string { return "" }
 // Parent reports that the path has no parent.
 func (x *MockPath) Parent() Path { return nil }
 
+// QualifiedName returns an empty qualified name.
+func (x *MockPath) QualifiedName() string { return "" }
+
 // String returns the configured path string.
 func (x *MockPath) String() string { return x.s }
 

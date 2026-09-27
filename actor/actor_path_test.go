@@ -94,6 +94,7 @@ func TestPathViewOverAddress(t *testing.T) {
 		assert.Equal(t, addr.Port(), p.Port())
 		assert.Equal(t, addr.HostPort(), p.HostPort())
 		assert.Equal(t, addr.Name(), p.Name())
+		assert.Equal(t, addr.QualifiedName(), p.QualifiedName())
 		assert.Equal(t, addr.System(), p.System())
 		assert.Equal(t, addr.IncarnationID(), p.incarnationID())
 		assert.Equal(t, addr.String(), p.String())
@@ -179,6 +180,7 @@ func TestPath_NilReceiver(t *testing.T) {
 	assert.Equal(t, "", p.HostPort())
 	assert.Equal(t, 0, p.Port())
 	assert.Equal(t, "", p.Name())
+	assert.Equal(t, "", p.QualifiedName())
 	assert.Equal(t, "", p.incarnationID())
 	assert.Nil(t, p.Parent())
 	assert.Equal(t, "", p.String())
@@ -241,5 +243,27 @@ func TestPathToAddress(t *testing.T) {
 		require.NotNil(t, addr)
 		assert.Equal(t, "actor1", addr.Name())
 		assert.Equal(t, "system1", addr.System())
+	})
+}
+
+func TestPathQualifiedName(t *testing.T) {
+	t.Run("top-level actor is its own name", func(t *testing.T) {
+		p := newPath(address.New("orders", "system1", "127.0.0.1", 9000))
+		require.NotNil(t, p)
+		assert.Equal(t, "orders", p.QualifiedName())
+	})
+
+	t.Run("child is qualified by every ancestor from the root down", func(t *testing.T) {
+		root := address.New("orders", "system1", "127.0.0.1", 9000)
+		cart := address.NewWithParent("cart", "system1", "127.0.0.1", 9000, root)
+		item := address.NewWithParent("item", "system1", "127.0.0.1", 9000, cart)
+
+		assert.Equal(t, "orders/cart", newPath(cart).QualifiedName())
+		assert.Equal(t, "orders/cart/item", newPath(item).QualifiedName())
+	})
+
+	t.Run("nil path returns empty string", func(t *testing.T) {
+		var p *path
+		assert.Equal(t, "", p.QualifiedName())
 	})
 }
