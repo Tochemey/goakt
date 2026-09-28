@@ -1686,6 +1686,69 @@ func (_c *Cluster_RemoveActor_Call) RunAndReturn(run func(ctx context.Context, q
 	return _c
 }
 
+// ReplaceActor provides a mock function for the type Cluster
+func (_mock *Cluster) ReplaceActor(ctx context.Context, actor *internalpb.Actor, staleIncarnationID string) error {
+	ret := _mock.Called(ctx, actor, staleIncarnationID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ReplaceActor")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *internalpb.Actor, string) error); ok {
+		r0 = returnFunc(ctx, actor, staleIncarnationID)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// Cluster_ReplaceActor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplaceActor'
+type Cluster_ReplaceActor_Call struct {
+	*mock.Call
+}
+
+// ReplaceActor is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actor *internalpb.Actor
+//   - staleIncarnationID string
+func (_e *Cluster_Expecter) ReplaceActor(ctx any, actor any, staleIncarnationID any) *Cluster_ReplaceActor_Call {
+	return &Cluster_ReplaceActor_Call{Call: _e.mock.On("ReplaceActor", ctx, actor, staleIncarnationID)}
+}
+
+func (_c *Cluster_ReplaceActor_Call) Run(run func(ctx context.Context, actor *internalpb.Actor, staleIncarnationID string)) *Cluster_ReplaceActor_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 *internalpb.Actor
+		if args[1] != nil {
+			arg1 = args[1].(*internalpb.Actor)
+		}
+		var arg2 string
+		if args[2] != nil {
+			arg2 = args[2].(string)
+		}
+		run(
+			arg0,
+			arg1,
+			arg2,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_ReplaceActor_Call) Return(err error) *Cluster_ReplaceActor_Call {
+	_c.Call.Return(err)
+	return _c
+}
+
+func (_c *Cluster_ReplaceActor_Call) RunAndReturn(run func(ctx context.Context, actor *internalpb.Actor, staleIncarnationID string) error) *Cluster_ReplaceActor_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function for the type Cluster
 func (_mock *Cluster) Start(ctx context.Context) error {
 	ret := _mock.Called(ctx)

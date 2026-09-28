@@ -42,6 +42,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/tochemey/goakt/v4/discovery"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -200,6 +201,11 @@ type Cluster interface {
 	// ErrActorAlreadyExists is returned. A write by the incarnation that owns
 	// the record updates it.
 	PutActor(ctx context.Context, actor *internalpb.Actor) error
+	// ReplaceActor writes the actor's record over the record of the
+	// incarnation staleIncarnationID, which a node that left the cluster
+	// left behind. A record of any other incarnation is left untouched and
+	// ErrActorAlreadyExists is returned; a free name is claimed.
+	ReplaceActor(ctx context.Context, actor *internalpb.Actor, staleIncarnationID string) error
 	// GetActor retrieves actor metadata by qualified name: the actor's name for
 	// a top-level actor, parent/name for a child.
 	GetActor(ctx context.Context, qualifiedName string) (*internalpb.Actor, error)
@@ -599,18 +605,55 @@ func (x *cluster) PutActor(ctx context.Context, actor *internalpb.Actor) error {
 		return err
 	}
 
-	return x.updateActor(ctx, key, actor.GetIncarnationId(), encoded)
+	return x.updateActor(ctx, key, encoded, actor.GetIncarnationId())
 }
 
-// updateActor writes the record of an actor whose name was taken when its claim
-// was attempted. It runs under the name's cluster-wide lock, which every write
-// of an existing record and every removal take, so the only write it can race
-// is the claim of a free name, which is conditional and never locks. The record
-// decides by incarnation: another incarnation owns the name, the same
-// incarnation is updated in place. A name freed since the claim is claimed
-// again with a conditional write, and when that claim loses to one that landed
-// since the read, the record that landed decides instead.
-func (x *cluster) updateActor(ctx context.Context, key, incarnationID string, encoded []byte) error {
+// ReplaceActor writes the actor's registry record over the record of the
+// incarnation staleIncarnationID, left behind by a node that is no longer a
+// cluster member. It is PutActor with one more incarnation allowed to lose
+// the name; any other incarnation keeps it with ErrActorAlreadyExists. The
+// stale record is written over, not deleted first: a delete is refused while
+// a copy lives on a node the routing table has not dropped yet, whereas a
+// write goes through and wins over that copy if it is ever merged back.
+func (x *cluster) ReplaceActor(ctx context.Context, actor *internalpb.Actor, staleIncarnationID string) error {
+	if !x.running.Load() {
+		return ErrEngineNotRunning
+	}
+
+	// no need to check for nil address as it is validated during actor creation
+	addr, _ := address.Parse(actor.GetAddress())
+	key := addr.QualifiedName()
+
+	encoded, err := encode(actor)
+	if err != nil {
+		return err
+	}
+
+	// the read lock only, for the reason given on PutActor
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	return x.updateActor(ctx, key, encoded, actor.GetIncarnationId(), staleIncarnationID)
+}
+
+// updateActor writes the record of an actor whose name was taken when its
+// claim was attempted, on behalf of the incarnations in incarnationIDs: the
+// actor's own (a restart or a repair) and any the caller may write over (see
+// ReplaceActor). Any other incarnation is refused from a read outside the
+// lock: nothing is written, and a lock taken for nothing stays held for its
+// lease when its release is refused. The write is decided under the name's
+// cluster-wide lock from a fresh read; a name freed in between is claimed
+// with a conditional write.
+func (x *cluster) updateActor(ctx context.Context, key string, encoded []byte, incarnationIDs ...string) error {
+	current, err := x.readActor(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	if current != nil && !slices.Contains(incarnationIDs, current.GetIncarnationId()) {
+		return ErrActorAlreadyExists
+	}
+
 	unlock, err := x.lockActor(ctx, key)
 	if err != nil {
 		return err
@@ -618,7 +661,7 @@ func (x *cluster) updateActor(ctx context.Context, key, incarnationID string, en
 
 	defer unlock()
 
-	current, err := x.readActor(ctx, key)
+	current, err = x.readActor(ctx, key)
 	if err != nil {
 		return err
 	}
@@ -642,7 +685,7 @@ func (x *cluster) updateActor(ctx context.Context, key, incarnationID string, en
 		}
 	}
 
-	if current.GetIncarnationId() != incarnationID {
+	if !slices.Contains(incarnationIDs, current.GetIncarnationId()) {
 		return ErrActorAlreadyExists
 	}
 
@@ -2001,15 +2044,18 @@ func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespa
 	return x.dmap.Put(ctx, composeKey(namespace, key), value, append([]olric.PutOption{olric.NX()}, options...)...)
 }
 
-// getRecord fetches a namespaced record from the unified map.
-func (x *cluster) getRecord(ctx context.Context, namespace recordNamespace, key string) ([]byte, error) {
-	ctx = context.WithoutCancel(ctx)
+// getRecord fetches a namespaced record from the unified map. The read runs
+// under the engine read timeout, detached from the caller's cancellation, so a
+// read that runs out of that timeout while callerCtx is still alive is reported
+// as ErrClusterRegistryTimeout (see registryReadError).
+func (x *cluster) getRecord(callerCtx context.Context, namespace recordNamespace, key string) ([]byte, error) {
+	ctx := context.WithoutCancel(callerCtx)
 	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
 	defer cancel()
 
 	resp, err := x.dmap.Get(ctx, composeKey(namespace, key))
 	if err != nil {
-		return nil, err
+		return nil, registryReadError(callerCtx, err)
 	}
 	return resp.Byte()
 }
@@ -2180,4 +2226,18 @@ func collectScan[T any](ctx context.Context, x *cluster, timeout time.Duration, 
 	}
 
 	return out, nil
+}
+
+// registryReadError marks a registry read that ran out of the engine read
+// timeout while callerCtx is still alive with ErrClusterRegistryTimeout, so the
+// caller can tell the registry's internal timeout from its own deadline. The
+// deadline error stays wrapped, so errors.Is(err, context.DeadlineExceeded)
+// keeps matching. Any other error, and a timeout once callerCtx is done, is
+// returned as it is.
+func registryReadError(callerCtx context.Context, err error) error {
+	if !errors.Is(err, context.DeadlineExceeded) || callerCtx.Err() != nil {
+		return err
+	}
+
+	return fmt.Errorf("%w: %w", gerrors.ErrClusterRegistryTimeout, err)
 }

@@ -195,11 +195,46 @@ See [Event Streams](/advanced/event-streams) for the full subscriber API and the
 Only **relocatable** actors are recreated. Actors with `WithRelocationDisabled` are not recreated, but the leader releases
 their registry name claims once crash recovery has confirmed the node is gone, so a later spawn can take the name again. The
 release is fenced by the actor incarnation: a name that a newer actor has already claimed is never removed. A spawn that
-meets such a stale claim before the leader released it reclaims it on the spot, after checking that the node holding it is
-no longer a cluster member. Lookups apply the same membership check: as soon as the node is gone, `ActorOf` and `Kill`
-report such an actor as not found and `ActorExists` reports its name as free, even before the leader has released the claim.
+meets such a stale claim before the leader released it writes its own record over it, after checking that the node holding
+it is no longer a cluster member. The write is fenced by the incarnation of the stale record and needs no delete first: the
+registry refuses to delete a record while a copy of it lives on a node its routing table has not dropped yet, which is the
+case for a while after a crash, whereas a write goes through. The takeover is decided by the cluster membership alone,
+not by the registry's routing table: once membership has dropped a node, its claims can be written over. Lookups apply
+the same membership check: as soon as the node is gone, `ActorOf` and `Kill` report such an actor as not found and `ActorExists` reports its name as free, even before the leader has released the claim.
 Relocatable actors and singletons stay resolvable while they are recreated. System actors (e.g. dead letter, scheduler)
 are never relocated.
+
+While the cluster converges after a node loss, a registry read can briefly time out even though your own context is still
+alive. `ActorOf`, `ActorExists` and `Kill` then return an error that matches both `errors.ErrClusterRegistryTimeout` and
+`context.DeadlineExceeded`. The lookup is inconclusive and can be retried.
+
+```go
+import (
+	"context"
+	"errors"
+
+	"github.com/tochemey/goakt/v4/actor"
+	goakterrors "github.com/tochemey/goakt/v4/errors"
+)
+
+// resolve returns the actor when a live node holds name and nil when nobody does.
+// A registry read that timed out while ctx is still alive is returned as it is:
+// the lookup was inconclusive, so retry it before spawning the actor.
+func resolve(ctx context.Context, system actor.ActorSystem, name string) (*actor.PID, error) {
+	pid, err := system.ActorOf(ctx, name)
+
+	switch {
+	case err == nil:
+		return pid, nil
+	case errors.Is(err, goakterrors.ErrActorNotFound):
+		return nil, nil
+	case errors.Is(err, goakterrors.ErrClusterRegistryTimeout):
+		return nil, err
+	default:
+		return nil, err
+	}
+}
+```
 
 Placement is **load-aware**: before distributing the departed node's actors, the leader scans the replicated cluster
 registry once and seeds each target's "load" with the number of actors it already hosts. The departed node's actors then
