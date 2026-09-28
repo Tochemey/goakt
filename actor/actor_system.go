@@ -2386,8 +2386,8 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 // A relocatable actor is recreated on a survivor under the same name and a
 // singleton is re-arbitrated by the leader, so their records are returned as
 // they are and no membership is read for them. Any other record is checked
-// against the membership, the evidence a spawn reclaims on (see
-// reclaimDepartedName), and a departed owner reads as cluster.ErrActorNotFound.
+// against the membership, the evidence a spawn takes a name over on (see
+// departedClaim), and a departed owner reads as cluster.ErrActorNotFound.
 // The record is only read, never released: the leader's crash recovery and the
 // next spawn of the name do that. When the membership cannot be read, or the
 // record's address cannot be parsed, the record is returned as it is, so a
@@ -3086,20 +3086,13 @@ func (x *actorSystem) rollbackSpawn(ctx context.Context, pid *PID, reason string
 	}
 }
 
-// putActorOnCluster synchronously writes the actor's registry record to the
-// cluster store. It only returns nil once the record is durably written, so a
-// successful spawn implies the actor is resolvable by name from any node.
-// The first publication of an actor claims its name and every later one, a
-// restart or a registry repair, updates the record; when another incarnation
-// owns the name nothing is written and ErrActorAlreadyExists is returned, so
-// two nodes spawning one name at the same time never both publish. A name
-// held by a node that is no longer a member is reclaimed once before the
-// conflict is reported (see reclaimDepartedName).
-// No-op when clustering is disabled or for system actors, with one exception:
-// reliable-delivery controller companions publish despite their reserved
-// names, because cluster resolution must find an endpoint's controller from
-// any node. Their records carry the ownership spec and leave the registry
-// through the same metadata gate in the death watch.
+// putActorOnCluster writes the actor's registry record and returns once it is
+// durably stored. The first write claims the name, a later one (a restart or
+// a repair) updates it, and a name another incarnation owns is refused with
+// ErrActorAlreadyExists, unless a departed node holds it: that claim is
+// written over once (see departedClaim). No-op when clustering is disabled or
+// for system actors, except reliable-delivery controller companions, which
+// must resolve from any node.
 func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 	if !x.clusterEnabled.Load() || (isSystemName(pid.Name()) && pid.reliableCompanion() == nil) {
 		return nil
@@ -3114,15 +3107,24 @@ func (x *actorSystem) putActorOnCluster(ctx context.Context, pid *PID) error {
 	if errors.Is(err, cluster.ErrActorAlreadyExists) {
 		// The name may be held by a node that died without releasing it, which
 		// the top-level spawn precondition never sees for a child, a restart or
-		// a registry repair. Reclaim it once and publish again; a failed reclaim
-		// keeps the conflict this publication already has.
-		free, rerr := x.reclaimDepartedName(ctx, pid.getAddress().QualifiedName())
-		if rerr != nil {
-			x.logger.Warnf("node=%s could not reclaim the registry name of actor=%s: %v (hint: the name is reported as taken)", x.String(), pid.Name(), rerr)
-		}
+		// a registry repair. Write over such a claim once, or claim a name
+		// freed in between; a claim that cannot be resolved keeps the conflict
+		// this publication already has.
+		qualifiedName := pid.getAddress().QualifiedName()
+		stale, free, cerr := x.departedClaim(ctx, qualifiedName)
 
-		if free {
+		switch {
+		case cerr != nil:
+			x.logger.Warnf("node=%s could not resolve the registry claim of actor=%s: %v (hint: the name is reported as taken)", x.String(), qualifiedName, cerr)
+		case !free:
+			// a live member, this node or a singleton holds the name
+		case stale == nil:
 			err = x.getCluster().PutActor(ctx, actor)
+		default:
+			err = x.getCluster().ReplaceActor(ctx, actor, stale.GetIncarnationId())
+			if err == nil {
+				x.logger.Warnf("node=%s took over the registry claim of actor=%s held by departed node=%s", x.String(), qualifiedName, stale.GetAddress())
+			}
 		}
 	}
 
@@ -4038,7 +4040,7 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 // newer incarnation has taken by now is left to its owner. The fan-out is
 // bounded like the relocation worker's. A failed removal is logged and
 // skipped rather than retried: the rebalance must not wait on it, and the
-// next spawn of the name reclaims it (see reclaimDepartedName).
+// next spawn of the name writes over it (see departedClaim).
 func (x *actorSystem) releaseStaleClaims(ctx context.Context, peerAddress string, claims []staleClaim) {
 	if len(claims) == 0 {
 		return
@@ -4822,22 +4824,23 @@ func (x *actorSystem) checkSpawnPreconditions(ctx context.Context, actorName str
 }
 
 // checkOrdinarySpawnPreconditions is checkSpawnPreconditions for a spawn that
-// is not a singleton: a name found taken is reclaimed when the node holding it
-// has left the cluster (see reclaimDepartedName), so a name left behind by a
-// crashed owner can be spawned again. Singleton spawns keep the plain check;
-// their conflict handler resolves the record itself and a singleton claim is
-// never reclaimed.
+// is not a singleton: a name found taken passes when the node holding it has
+// left the cluster (see departedClaim), so a name left behind by a crashed
+// owner can be spawned again; the spawn's publication then writes over the
+// claim (see putActorOnCluster). Singleton spawns keep the plain check; their
+// conflict handler resolves the record itself and a singleton claim is never
+// taken over.
 func (x *actorSystem) checkOrdinarySpawnPreconditions(ctx context.Context, actorName string) error {
 	err := x.checkSpawnPreconditions(ctx, actorName)
 	if !errors.Is(err, gerrors.ErrActorAlreadyExists) {
 		return err
 	}
 
-	// a failed reclaim keeps the conflict the check already found, so a
-	// taken name never fails with a registry error instead
-	free, rerr := x.reclaimDepartedName(ctx, actorName)
-	if rerr != nil {
-		x.logger.Warnf("node=%s could not reclaim the registry name of actor=%s: %v (hint: the name is reported as taken)", x.String(), actorName, rerr)
+	// a claim that cannot be resolved keeps the conflict the check already
+	// found, so a taken name never fails with a registry error instead
+	_, free, cerr := x.departedClaim(ctx, actorName)
+	if cerr != nil {
+		x.logger.Warnf("node=%s could not resolve the registry claim of actor=%s: %v (hint: the name is reported as taken)", x.String(), actorName, cerr)
 		return err
 	}
 
@@ -4848,64 +4851,55 @@ func (x *actorSystem) checkOrdinarySpawnPreconditions(ctx context.Context, actor
 	return nil
 }
 
-// reclaimDepartedName reports whether the registry name qualifiedName is free
-// to claim, releasing it first when the node holding it is no longer a cluster
-// member. Such a claim is left behind by an owner that died without running
-// its shutdown. Crash recovery on the leader releases it too, but only once
-// its quiescence gate opens and only when it runs at all, so a spawn that
-// meets the stale claim first releases it here and never fails on a dead
-// owner. The removal is fenced by the incarnation the record carried when it
-// was read, so a name that another incarnation took in between is left to its
-// new owner and reported as taken. A singleton claim is never reclaimed, the
-// leader re-arbitrates singletons on demand. A claim held by this node or by
-// a live member is taken, and so is one whose owner cannot be checked because
-// the membership read failed, which keeps the conflict the caller would have
+// departedClaim reports whether the registry name qualifiedName is free to
+// claim on behalf of a spawn that found it taken, and returns the record a
+// node that is no longer a cluster member still holds when the name is free
+// only by writing over that record. Such a claim is left behind by an owner
+// that died without running its shutdown, and the spawn writes its own record
+// over it (see cluster.ReplaceActor), fenced by the incarnation the record
+// carries, so a name that another incarnation takes in between is left to its
+// new owner. Crash recovery on the leader releases such claims too, but only
+// once its quiescence gate opens and only when it runs at all, so a spawn that
+// meets the claim first never fails on a dead owner. A name that is not found
+// is free with no record. A singleton claim is never taken over, the leader
+// re-arbitrates singletons on demand. A claim held by this node or by a live
+// member is taken, and so is one whose owner cannot be checked because the
+// membership read failed, which keeps the conflict the caller would have
 // reported anyway.
-func (x *actorSystem) reclaimDepartedName(ctx context.Context, qualifiedName string) (bool, error) {
+func (x *actorSystem) departedClaim(ctx context.Context, qualifiedName string) (*internalpb.Actor, bool, error) {
 	existing, err := x.getCluster().GetActor(ctx, qualifiedName)
 	if err != nil {
 		if errors.Is(err, cluster.ErrActorNotFound) {
-			return true, nil
+			return nil, true, nil
 		}
 
-		return false, err
+		return nil, false, err
 	}
 
 	if existing.GetSingleton() != nil {
-		return false, nil
+		return nil, false, nil
 	}
 
 	owner, err := address.Parse(existing.GetAddress())
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
 	if owner.Host() == x.Host() && owner.Port() == x.Port() {
-		return false, nil
+		return nil, false, nil
 	}
 
 	alive, err := x.isEndpointAlive(ctx, owner.Host(), owner.Port())
 	if err != nil {
 		x.logger.Warnf("node=%s could not check the membership of node=%s holding actor=%s: %v (hint: the name is reported as taken)", x.String(), owner.HostPort(), qualifiedName, err)
-		return false, nil
+		return nil, false, nil
 	}
 
 	if alive {
-		return false, nil
+		return nil, false, nil
 	}
 
-	reowned, err := x.getCluster().RemoveActor(ctx, qualifiedName, existing.GetIncarnationId())
-	if err != nil {
-		return false, err
-	}
-
-	if reowned != nil {
-		x.logger.Debugf("node=%s left the registry claim of actor=%s alone: another incarnation at %s took the name", x.String(), qualifiedName, reowned.GetAddress())
-		return false, nil
-	}
-
-	x.logger.Warnf("node=%s released the registry claim of actor=%s held by departed node=%s", x.String(), qualifiedName, owner.HostPort())
-	return true, nil
+	return existing, true, nil
 }
 
 // cleanupCluster cleans up the cluster

@@ -295,6 +295,11 @@ func (x *MockCluster) RemoveActor(context.Context, string, string) (*internalpb.
 	panic("unexpected call")
 }
 
+// ReplaceActor panics because no test exercises it.
+func (x *MockCluster) ReplaceActor(context.Context, *internalpb.Actor, string) error {
+	panic("unexpected call")
+}
+
 // ActorExists panics because no test exercises it.
 func (x *MockCluster) ActorExists(context.Context, string) (bool, error) {
 	panic("unexpected call")

@@ -48,6 +48,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/discovery/nats"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
@@ -509,7 +510,7 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, cluster.Stop(ctx))
 		provider.AssertExpectations(t)
 	})
-	t.Run("With PutActor and RemoveActor fenced by incarnation", func(t *testing.T) {
+	t.Run("With PutActor, ReplaceActor and RemoveActor fenced by incarnation", func(t *testing.T) {
 		ctx := t.Context()
 
 		nodePorts := dynaport.Get(3)
@@ -566,13 +567,44 @@ func TestSingleNode(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, proto.Equal(updated, actual))
 
-		// a write while another operation holds the name's lock waits for it
-		// and fails once the wait is over, leaving the record untouched
+		// a write by the owning incarnation while another operation holds
+		// the name's lock waits for it and fails once the wait is over,
+		// leaving the record untouched; a write by another incarnation is
+		// refused without waiting for the lock, since it writes nothing
 		unlock, err := engine.(*cluster).lockActor(ctx, actorName)
 		require.NoError(t, err)
 
-		require.ErrorIs(t, engine.PutActor(ctx, other), olric.ErrLockNotAcquired)
+		require.ErrorIs(t, engine.PutActor(ctx, updated), olric.ErrLockNotAcquired)
+		require.ErrorIs(t, engine.PutActor(ctx, other), ErrActorAlreadyExists)
 		unlock()
+
+		actual, err = engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(updated, actual))
+
+		// a write over the owning incarnation's record on behalf of another
+		// takes the name over; the incarnation it names then fences a later
+		// write over it, which is refused without waiting for the name's
+		// lock and leaves the new record untouched
+		require.NoError(t, engine.ReplaceActor(ctx, other, owner.GetIncarnationId()))
+
+		actual, err = engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(other, actual))
+
+		third := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString(), Type: "third"}.Build()
+		unlock, err = engine.(*cluster).lockActor(ctx, actorName)
+		require.NoError(t, err)
+
+		require.ErrorIs(t, engine.ReplaceActor(ctx, third, owner.GetIncarnationId()), ErrActorAlreadyExists)
+		unlock()
+
+		actual, err = engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, proto.Equal(other, actual))
+
+		// the record is handed back to the owning incarnation the same way
+		require.NoError(t, engine.ReplaceActor(ctx, updated, other.GetIncarnationId()))
 
 		actual, err = engine.GetActor(ctx, actorName)
 		require.NoError(t, err)
@@ -2542,7 +2574,7 @@ func TestPutActor(t *testing.T) {
 		})
 
 		require.NoError(t, cl.PutActor(context.Background(), record))
-		require.Equal(t, 1, reads)
+		require.Equal(t, 2, reads)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
@@ -2558,7 +2590,7 @@ func TestPutActor(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), ErrActorAlreadyExists)
-		require.Equal(t, 2, reads)
+		require.Equal(t, 3, reads)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
@@ -2573,7 +2605,7 @@ func TestPutActor(t *testing.T) {
 			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
 				require.Equal(t, recordKey, key)
 				reads++
-				if reads == 1 {
+				if reads <= 2 {
 					return nil, olric.ErrKeyNotFound
 				}
 
@@ -2583,29 +2615,29 @@ func TestPutActor(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
-		require.Equal(t, 2, reads)
+		require.Equal(t, 3, reads)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
 	t.Run("With a lock failure", func(t *testing.T) {
+		reads := 0
 		lockErr := errors.New("lock failure")
 		cl := newMockEngine(log.DiscardLogger, &MockDMap{
 			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
 				return nil, lockErr
 			},
+			getFn: absentReads(t, &reads),
 			putFn: writes(t, olric.ErrKeyFound),
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), lockErr)
+		require.Equal(t, 1, reads)
 	})
 
 	t.Run("With a read failure", func(t *testing.T) {
 		readErr := errors.New("get failure")
-		lock := &MockLockContext{}
+		// no lockFn: the read that decides whether the lock is needed fails first
 		cl := newMockEngine(log.DiscardLogger, &MockDMap{
-			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
-				return lock, nil
-			},
 			getFn: func(context.Context, string) (*olric.GetResponse, error) {
 				return nil, readErr
 			},
@@ -2613,7 +2645,6 @@ func TestPutActor(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), readErr)
-		require.Equal(t, 1, lock.unlocks)
 	})
 
 	t.Run("With a write failure under the lock", func(t *testing.T) {
@@ -2629,7 +2660,7 @@ func TestPutActor(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), putErr)
-		require.Equal(t, 1, reads)
+		require.Equal(t, 2, reads)
 		require.Equal(t, 1, lock.unlocks)
 	})
 
@@ -2654,6 +2685,58 @@ func TestPutActor(t *testing.T) {
 		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
 
 		require.ErrorIs(t, cl.PutActor(context.Background(), record), ErrEngineNotRunning)
+	})
+}
+
+func TestReplaceActor(t *testing.T) {
+	const actorName = "endpoint"
+	record := internalpb.Actor_builder{Address: address.New(actorName, "testSystem", "127.0.0.1", 9000).String(), IncarnationId: uuid.NewString()}.Build()
+	recordKey := composeKey(namespaceActors, actorName)
+	lockKey := composeKey(namespaceActorLocks, actorName)
+
+	t.Run("With a free name", func(t *testing.T) {
+		// the name is read before and under the lock, then claimed with one
+		// conditional write
+		reads := 0
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(_ context.Context, key string, _, _ time.Duration) (olric.LockContext, error) {
+				require.Equal(t, lockKey, key)
+				return lock, nil
+			},
+			getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, recordKey, key)
+				reads++
+				return nil, olric.ErrKeyNotFound
+			},
+			putFn: func(_ context.Context, key string, _ any, options ...olric.PutOption) error {
+				require.Equal(t, recordKey, key)
+				require.Len(t, options, 1)
+				return nil
+			},
+		})
+
+		require.NoError(t, cl.ReplaceActor(context.Background(), record, uuid.NewString()))
+		require.Equal(t, 2, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With a read failure", func(t *testing.T) {
+		readErr := errors.New("get failure")
+		// no lockFn: the read that decides whether the lock is needed fails first
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, readErr
+			},
+		})
+
+		require.ErrorIs(t, cl.ReplaceActor(context.Background(), record, uuid.NewString()), readErr)
+	})
+
+	t.Run("With the engine not running", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false), logger: log.DiscardLogger}
+
+		require.ErrorIs(t, cl.ReplaceActor(context.Background(), record, uuid.NewString()), ErrEngineNotRunning)
 	})
 }
 
@@ -5076,4 +5159,61 @@ func TestReleaseGrainReportsUnlockFailure(t *testing.T) {
 	require.Nil(t, reowned)
 	require.Equal(t, 1, lock.unlocks)
 	require.Contains(t, logs.String(), "failed to release the lock of grain=grain-id")
+}
+
+func TestGetActorRegistryReadTimeout(t *testing.T) {
+	// blockingGet serves a Get that only returns once the engine's read
+	// timeout ends it.
+	blockingGet := func(ctx context.Context, _ string) (*olric.GetResponse, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	t.Run("an engine read timeout under a live caller context is a registry timeout", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: 10 * time.Millisecond,
+			dmap:        &MockDMap{getFn: blockingGet},
+		}
+
+		ctx := context.Background()
+		actor, err := cl.GetActor(ctx, "worker")
+		require.Nil(t, actor)
+		require.ErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NoError(t, ctx.Err())
+	})
+
+	t.Run("a timeout once the caller context is done is returned as it is", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: time.Second,
+			dmap: &MockDMap{getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, context.DeadlineExceeded
+			}},
+		}
+
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+		defer cancel()
+
+		actor, err := cl.GetActor(ctx, "worker")
+		require.Nil(t, actor)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+	})
+
+	t.Run("any other read failure is returned as it is", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: time.Second,
+			dmap: &MockDMap{getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, assert.AnError
+			}},
+		}
+
+		exists, err := cl.ActorExists(context.Background(), "worker")
+		require.False(t, exists)
+		require.ErrorIs(t, err, assert.AnError)
+		require.NotErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+	})
 }

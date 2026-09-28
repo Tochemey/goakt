@@ -222,6 +222,14 @@ var (
 	// ErrClusterQuorum is returned when the cluster cannot reach the minimum member quorum.
 	ErrClusterQuorum = errors.New("cluster quorum cannot be reached")
 
+	// ErrClusterRegistryTimeout is returned when a cluster registry read runs out of its own
+	// read timeout while the caller's context is still alive, typically while the cluster
+	// converges after a node loss. It always wraps context.DeadlineExceeded, so existing
+	// errors.Is(err, context.DeadlineExceeded) checks keep matching; test for this sentinel to
+	// tell the registry's internal timeout apart from the caller's own deadline. The lookup is
+	// inconclusive and can be retried.
+	ErrClusterRegistryTimeout = errors.New("cluster registry read timed out")
+
 	// ErrDependencyTypeNotRegistered is returned when a cluster-aware dependency type is not registered.
 	ErrDependencyTypeNotRegistered = errors.New("dependency type is not registered")
 

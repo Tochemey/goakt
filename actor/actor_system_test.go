@@ -6112,7 +6112,7 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.AssertNotCalled(t, "PutActor", mock.Anything, mock.Anything)
 	})
 
-	t.Run("name held by a departed node is reclaimed and published", func(t *testing.T) {
+	t.Run("name held by a departed node is written over", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 
@@ -6120,13 +6120,37 @@ func TestPutActorOnCluster(t *testing.T) {
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "orphaned").Return(departedWireActor("orphaned", "dead"), nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "orphaned", "dead").Return(nil, nil).Once()
+		clusterMock.EXPECT().ReplaceActor(mock.Anything, mock.Anything, "dead").Return(nil).Once()
+
+		require.NoError(t, system.putActorOnCluster(ctx, pid))
+	})
+
+	t.Run("name freed since the conflict is claimed", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "freed")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "freed").Return(nil, cluster.ErrActorNotFound).Once()
 		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
 
 		require.NoError(t, system.putActorOnCluster(ctx, pid))
 	})
 
-	t.Run("reclaim failure keeps the conflict", func(t *testing.T) {
+	t.Run("name held by a live member keeps the conflict", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "held")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "held").Return(departedWireActor("held", "live"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
+
+		err := system.putActorOnCluster(ctx, pid)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("a claim that cannot be resolved keeps the conflict", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 
@@ -6138,18 +6162,33 @@ func TestPutActorOnCluster(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 
-	t.Run("a second conflict after the reclaim is reported", func(t *testing.T) {
+	t.Run("a name taken by another incarnation in between is reported", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 
 		pid := newTestPID(system, "contended")
-		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Twice()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, "contended").Return(departedWireActor("contended", "dead"), nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, "contended", "dead").Return(nil, nil).Once()
+		clusterMock.EXPECT().ReplaceActor(mock.Anything, mock.Anything, "dead").Return(cluster.ErrActorAlreadyExists).Once()
 
 		err := system.putActorOnCluster(ctx, pid)
 		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+	})
+
+	t.Run("a write-over failure other than a conflict is returned as it is", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+
+		pid := newTestPID(system, "unwritable")
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(cluster.ErrActorAlreadyExists).Once()
+		clusterMock.EXPECT().GetActor(mock.Anything, "unwritable").Return(departedWireActor("unwritable", "dead"), nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
+		clusterMock.EXPECT().ReplaceActor(mock.Anything, mock.Anything, "dead").Return(assert.AnError).Once()
+
+		err := system.putActorOnCluster(ctx, pid)
+		require.ErrorIs(t, err, assert.AnError)
+		require.NotErrorIs(t, err, gerrors.ErrActorAlreadyExists)
 	})
 }
 
@@ -6169,30 +6208,32 @@ func liveHolderMembers() []*cluster.Peer {
 	return []*cluster.Peer{{Host: "127.0.0.2", PeersPort: 9000, RemotingPort: 7000}}
 }
 
-func TestReclaimDepartedName(t *testing.T) {
+func TestDepartedClaim(t *testing.T) {
 	ctx := context.Background()
 	const name = "worker"
 
-	t.Run("a free name is reported free", func(t *testing.T) {
+	t.Run("a free name is reported free with no record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, cluster.ErrActorNotFound).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.True(t, free)
+		assert.Nil(t, stale)
 	})
 
-	t.Run("a name held by a departed node is released", func(t *testing.T) {
+	t.Run("a name held by a departed node is free with its record", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
+		record := departedWireActor(name, "dead")
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(record, nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, nil).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.True(t, free)
+		assert.Same(t, record, stale)
 	})
 
 	t.Run("a name held by a live member is taken", func(t *testing.T) {
@@ -6201,21 +6242,23 @@ func TestReclaimDepartedName(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "live"), nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(liveHolderMembers(), nil).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 
-	t.Run("a singleton claim is never reclaimed", func(t *testing.T) {
+	t.Run("a singleton claim is never taken over", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		singleton := departedWireActor(name, "dead")
 		singleton.SetSingleton(internalpb.SingletonSpec_builder{MaxRetries: 1}.Build())
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(singleton, nil).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 
 	t.Run("a name held by this node is taken", func(t *testing.T) {
@@ -6227,9 +6270,10 @@ func TestReclaimDepartedName(t *testing.T) {
 		}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(own, nil).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 
 	t.Run("a failed membership read reports the name as taken", func(t *testing.T) {
@@ -6238,33 +6282,10 @@ func TestReclaimDepartedName(t *testing.T) {
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, assert.AnError).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.False(t, free)
-	})
-
-	t.Run("a name re-taken by another incarnation is left to it", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		system := newReplicationSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
-		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(departedWireActor(name, "newer"), nil).Once()
-
-		free, err := system.reclaimDepartedName(ctx, name)
-		require.NoError(t, err)
-		assert.False(t, free)
-	})
-
-	t.Run("a failed removal is returned", func(t *testing.T) {
-		clusterMock := mockscluster.NewCluster(t)
-		system := newReplicationSystem(clusterMock)
-		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
-		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, assert.AnError).Once()
-
-		free, err := system.reclaimDepartedName(ctx, name)
-		require.ErrorIs(t, err, assert.AnError)
-		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 
 	t.Run("a failed read is returned", func(t *testing.T) {
@@ -6272,20 +6293,22 @@ func TestReclaimDepartedName(t *testing.T) {
 		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(nil, assert.AnError).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.ErrorIs(t, err, assert.AnError)
 		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 
-	t.Run("a record with an unparseable address is an error and stays untouched", func(t *testing.T) {
+	t.Run("a record with an unparseable address is an error", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		malformed := internalpb.Actor_builder{Address: "not-an-address", IncarnationId: "dead"}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(malformed, nil).Once()
 
-		free, err := system.reclaimDepartedName(ctx, name)
+		stale, free, err := system.departedClaim(ctx, name)
 		require.Error(t, err)
 		assert.False(t, free)
+		assert.Nil(t, stale)
 	})
 }
 
@@ -6301,13 +6324,12 @@ func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
 		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
 	})
 
-	t.Run("a name held by a departed node is reclaimed", func(t *testing.T) {
+	t.Run("a name held by a departed node passes without a registry write", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(departedWireActor(name, "dead"), nil).Once()
 		clusterMock.EXPECT().Members(mock.Anything).Return(nil, nil).Once()
-		clusterMock.EXPECT().RemoveActor(mock.Anything, name, "dead").Return(nil, nil).Once()
 
 		require.NoError(t, system.checkOrdinarySpawnPreconditions(ctx, name))
 	})
@@ -6332,7 +6354,7 @@ func TestCheckOrdinarySpawnPreconditions(t *testing.T) {
 		require.ErrorIs(t, err, assert.AnError)
 	})
 
-	t.Run("a reclaim failure keeps the conflict", func(t *testing.T) {
+	t.Run("a claim that cannot be resolved keeps the conflict", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
 		clusterMock.EXPECT().ActorExists(mock.Anything, name).Return(true, nil).Once()
