@@ -2301,7 +2301,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 		actor, err := x.getActorRecord(ctx, actorName)
 		if err != nil {
 			if errors.Is(err, cluster.ErrActorNotFound) {
-				x.logger.Warnf("actor=%s not found", actorName)
 				return nil, gerrors.NewErrActorNotFound(actorName)
 			}
 
@@ -2320,7 +2319,6 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 		return nil, gerrors.ErrMethodCallNotAllowed
 	}
 
-	x.logger.Warnf("actor=%s not found", actorName)
 	return nil, gerrors.NewErrActorNotFound(actorName)
 }
 
