@@ -4327,6 +4327,27 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 	require.False(t, cached, "recovery owns the cache entry and must prune it on completion")
 }
 
+func TestGateCrashRecoveryAbandonsAStoppedSystem(t *testing.T) {
+	// the recovery goroutine can outlive a shutdown, asleep in its retry
+	// backoff: shutdown's reset clears shuttingDown, so on waking it must
+	// recognize the stopped system and touch nothing, not carry on against
+	// a stopped cluster
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+	system.started.Store(false)
+	system.shuttingDown.Store(false)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	// no cluster expectations: any call fails the test
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery still prunes the cache entry it owns")
+}
+
 func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 	// the derivation's registry scan can transiently fail on an unreachable
 	// member while the cluster churns: the quiesce-then-derive cycle must be

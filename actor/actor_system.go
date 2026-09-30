@@ -2784,6 +2784,14 @@ func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
 }
 
+// isStoppingOrStopped reports whether the actor system is shutting down or
+// has already stopped. shutdown resets shuttingDown at its end, so work that
+// can outlive a stop, like a retry loop asleep in its backoff, must check
+// this rather than isStopping before touching the cluster again.
+func (x *actorSystem) isStoppingOrStopped() bool {
+	return x.shuttingDown.Load() || !x.started.Load()
+}
+
 func (x *actorSystem) decreaseActorsCounter() {
 	x.actorsCounter.Dec()
 }
@@ -3996,14 +4004,15 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		x.logger.Warnf("leader=%s could not derive relocation set for node=%s (attempt %d/%d); retrying in %s", x.String(), peerAddress, attempt, relocationDeriveMaxAttempts, relocationDeriveRetryBackoff)
 		pause.For(relocationDeriveRetryBackoff)
 
-		if x.isStopping() {
+		if x.isStoppingOrStopped() {
 			return
 		}
 	}
 
-	// the retries above can keep this goroutine alive across a shutdown: never
-	// publish or dispatch on a system that is stopping
-	if x.isStopping() {
+	// the retries above can keep this goroutine alive across a shutdown, and
+	// past it: never publish or dispatch on a system that is stopping or
+	// stopped
+	if x.isStoppingOrStopped() {
 		return
 	}
 
@@ -4096,9 +4105,13 @@ func (x *actorSystem) isPeerAlive(ctx context.Context, peerAddress string) bool 
 func (x *actorSystem) awaitRelocationQuiescence(peerAddress string) bool {
 	deadline := time.Now().Add(relocationQuiescenceMaxWait)
 
-	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
-		if x.isStopping() {
+	for {
+		if x.isStoppingOrStopped() {
 			return false
+		}
+
+		if time.Since(x.cluster.LastRebalanceEvent()) >= relocationQuiescenceWindow {
+			break
 		}
 
 		if time.Now().After(deadline) {
