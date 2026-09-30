@@ -71,6 +71,21 @@ func (m *grainMailbox) Enqueue(value *GrainContext) error {
 	return nil
 }
 
+// EnqueueSystem places value at the tail of the mailbox whatever the capacity,
+// so a system message such as the shutdown PoisonPill reaches a grain whose
+// bounded mailbox is full. It counts toward Len, so user enqueues keep failing
+// until the mailbox drains below capacity. Safe for concurrent producers.
+func (m *grainMailbox) EnqueueSystem(value *GrainContext) {
+	// Count before linking, like a bounded reservation, so the consumer never
+	// dequeues the node before it is counted and Len never dips below the
+	// messages actually queued.
+	m.len.Add(1)
+
+	value.next.Store(nil)
+	prev := m.tail.Swap(value)
+	prev.next.Store(value)
+}
+
 // Dequeue removes and returns the next GrainContext, or nil when empty.
 // Must be called from a single consumer goroutine.
 //

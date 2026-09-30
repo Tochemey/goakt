@@ -2104,9 +2104,10 @@ func TestGrainGetLogger(t *testing.T) {
 	require.Equal(t, log.DiscardLogger, pid.getLogger())
 }
 
-// TestGrainEnqueuePoisonPill covers the three answers a poison pill gets: the
-// ack after OnDeactivate ran, the immediate ack for a grain that was never
-// activated, and the rejection from a full bounded mailbox.
+// TestGrainEnqueuePoisonPill covers how a poison pill is answered: the ack
+// after OnDeactivate ran, the immediate ack for a grain that was never
+// activated, and a full bounded mailbox that queues the pill past its
+// capacity instead of rejecting it.
 func TestGrainEnqueuePoisonPill(t *testing.T) {
 	ctx := context.Background()
 
@@ -2159,9 +2160,10 @@ func TestGrainEnqueuePoisonPill(t *testing.T) {
 		require.False(t, pid.isActive())
 	})
 
-	t.Run("full mailbox acks the rejection", func(t *testing.T) {
-		// The dispatcher is never started, so nothing drains the mailbox and
-		// the rejection is the only thing that can reach the ack channel.
+	t.Run("full mailbox takes the pill past its capacity", func(t *testing.T) {
+		// The dispatcher is never started, so nothing drains the mailbox: the
+		// pill must be queued, not rejected, and no ack may arrive before the
+		// grain handles it.
 		pid := &grainPID{
 			identity:    &GrainIdentity{kind: "Kind", name: "full"},
 			actorSystem: &actorSystem{logger: log.DiscardLogger},
@@ -2172,7 +2174,14 @@ func TestGrainEnqueuePoisonPill(t *testing.T) {
 		require.NoError(t, pid.boundedMailbox.Enqueue(new(GrainContext)))
 
 		ack := pid.enqueuePoisonPill(ctx)
-		require.ErrorIs(t, <-ack, gerrors.ErrMailboxFull)
+		require.EqualValues(t, 2, pid.boundedMailbox.Len())
+		require.ErrorIs(t, pid.enqueueMessage(new(GrainContext)), gerrors.ErrMailboxFull)
+
+		select {
+		case err := <-ack:
+			t.Fatalf("the pill was acknowledged before the grain handled it: %v", err)
+		default:
+		}
 	})
 }
 

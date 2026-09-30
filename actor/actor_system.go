@@ -3637,13 +3637,13 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 
 // poisonAllGrains sends a PoisonPill to every active grain and waits, bounded
 // by ctx, for each pill's acknowledgment: sent after OnDeactivate ran on the
-// grain's own turn, at once for a grain already deactivated, and with the
-// error for a pill a full bounded mailbox rejected. A rejected pill's grain is
-// dropped from the registry and named in the returned error, since its
-// OnDeactivate did not run, while shutdown proceeds with the rest. Returns
-// ctx.Err() when the deadline expires first; the grains still pending keep
-// their pill in the mailbox and lose it when the dispatcher stops, so their
-// OnDeactivate does not run.
+// grain's own turn, behind the messages queued before the pill, or at once for
+// a grain already deactivated. The pill goes past the capacity of a bounded
+// mailbox, so a grain busy under backpressure drains and deactivates like any
+// other. A grain whose OnDeactivate failed is named in the returned error.
+// Returns ctx.Err() as well when the deadline expires first; the grains still
+// pending keep their pill in the mailbox and lose it when the dispatcher
+// stops, so their OnDeactivate does not run.
 func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 	if x.grains.Len() == 0 {
 		return nil
@@ -3673,7 +3673,7 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 		pending = append(pending, pendingPill{grain: grain, ack: grain.enqueuePoisonPill(ctx)})
 	}
 
-	var rejected []error
+	var failed []error
 	for _, pill := range pending {
 		select {
 		case err := <-pill.ack:
@@ -3681,13 +3681,9 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 			putGrainErrorChannel(pill.grain.ctxShard, pill.ack)
 			x.grains.Delete(pill.grain.getIdentity().String())
 
-			if errors.Is(err, gerrors.ErrMailboxFull) {
-				rejected = append(rejected, fmt.Errorf("grain=%s: OnDeactivate skipped, %w", pill.grain.getIdentity().String(), err))
-				continue
-			}
-
 			if err != nil {
 				x.logger.Errorf("grain=%s was not deactivated cleanly: %v", pill.grain.getIdentity().String(), err)
+				failed = append(failed, fmt.Errorf("grain=%s: %w", pill.grain.getIdentity().String(), err))
 				continue
 			}
 
@@ -3699,11 +3695,16 @@ func (x *actorSystem) poisonAllGrains(ctx context.Context) error {
 				"shutdown context expired before grain=%s finished deactivating (hint: OnDeactivate will not run for remaining grains)",
 				pill.grain.getIdentity().String(),
 			)
-			return ctx.Err()
+
+			if len(failed) == 0 {
+				return ctx.Err()
+			}
+
+			return errors.Join(append(failed, ctx.Err())...)
 		}
 	}
 
-	return errors.Join(rejected...)
+	return errors.Join(failed...)
 }
 
 // resyncActors resyncs all actors in the actor system.

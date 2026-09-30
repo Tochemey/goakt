@@ -9314,11 +9314,11 @@ func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
 	require.EqualValues(t, 1, system.membersLeftCount.Load())
 }
 
-// TestPoisonAllGrainsReportsRejectedPill drives shutdown against a grain whose
-// bounded mailbox is full: the pill is rejected, shutdown finishes with the
-// remaining grains instead of waiting out its deadline, and the grain whose
-// OnDeactivate never ran is named in the error Stop returns.
-func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
+// TestPoisonAllGrainsDrainsAFullMailbox drives shutdown against a grain whose
+// bounded mailbox is full: the pill goes past the capacity, the grain handles
+// the queued message once its turn is released, OnDeactivate runs, and Stop
+// returns clean.
+func TestPoisonAllGrainsDrainsAFullMailbox(t *testing.T) {
 	ctx := context.Background()
 	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
@@ -9326,10 +9326,13 @@ func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
 
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
+	handled := atomic.NewInt32(0)
 
 	blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
-		entered <- struct{}{}
-		<-release
+		if handled.Inc() == 1 {
+			entered <- struct{}{}
+			<-release
+		}
 		gctx.NoErr()
 	}}
 
@@ -9339,11 +9342,13 @@ func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
 	require.NoError(t, err)
 
 	// The first message parks the turn inside OnReceive and the second one
-	// fills the bounded mailbox, so the shutdown pill has nowhere to go. Both
-	// sends block on their own acknowledgment, hence the goroutines.
-	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	// fills the bounded mailbox. Both sends block on their own
+	// acknowledgment, hence the goroutines.
+	parkedAck := make(chan error, 1)
+	go func() { parkedAck <- system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
 	<-entered
-	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	queuedAck := make(chan error, 1)
+	go func() { queuedAck <- system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
 
 	pid, ok := system.(*actorSystem).grains.Get(identity.String())
 	require.True(t, ok)
@@ -9354,19 +9359,82 @@ func TestPoisonAllGrainsReportsRejectedPill(t *testing.T) {
 	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	started := time.Now()
-	stopErr := system.Stop(stopCtx)
-	require.Less(t, time.Since(started), 5*time.Second)
+	stopped := make(chan error, 1)
+	go func() { stopped <- system.Stop(stopCtx) }()
 
-	// the pill never reached the grain, so shutdown names it instead of
-	// reporting a clean deactivation
-	require.ErrorIs(t, stopErr, gerrors.ErrMailboxFull)
-	require.Contains(t, stopErr.Error(), identity.String())
+	// the pill is queued past the capacity, behind the queued message
+	require.Eventually(t, func() bool {
+		return pid.boundedMailbox.Len() == 2
+	}, 2*time.Second, 10*time.Millisecond)
+	close(release)
+
+	require.NoError(t, <-stopped)
+	require.NoError(t, <-parkedAck)
+	require.NoError(t, <-queuedAck)
+	require.EqualValues(t, 2, handled.Load())
+	require.EqualValues(t, 1, blocking.deactivations.Load())
 
 	_, ok = system.(*actorSystem).grains.Get(identity.String())
 	require.False(t, ok)
+}
 
-	close(release)
+// TestPoisonAllGrainsReportsFailedDeactivation drives shutdown against a grain
+// whose OnDeactivate fails: Stop names the grain in its error instead of only
+// logging it, and the grain is still removed from the registry.
+func TestPoisonAllGrainsReportsFailedDeactivation(t *testing.T) {
+	ctx := context.Background()
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+
+	identity, err := system.GrainIdentity(ctx, "failing-grain", func(context.Context) (Grain, error) {
+		return NewMockDeactivationFailingGrain(), nil
+	})
+	require.NoError(t, err)
+
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	stopErr := system.Stop(stopCtx)
+	require.ErrorIs(t, stopErr, gerrors.ErrGrainDeactivationFailure)
+	require.Contains(t, stopErr.Error(), identity.String())
+
+	_, ok := system.(*actorSystem).grains.Get(identity.String())
+	require.False(t, ok)
+}
+
+// TestPoisonAllGrainsGivesUpOnAStuckGrainAtTheDeadline drives shutdown
+// against a grain that never leaves OnReceive: the pill waits behind it, and
+// the shutdown context bounds how long Stop waits.
+func TestPoisonAllGrainsGivesUpOnAStuckGrainAtTheDeadline(t *testing.T) {
+	ctx := context.Background()
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		entered <- struct{}{}
+		<-release
+		gctx.NoErr()
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "stuck-grain", func(context.Context) (Grain, error) {
+		return blocking, nil
+	}, WithGrainMailboxCapacity(1))
+	require.NoError(t, err)
+
+	go func() { _ = system.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	<-entered
+
+	stopCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+
+	require.ErrorIs(t, system.Stop(stopCtx), context.DeadlineExceeded)
+	require.Zero(t, blocking.deactivations.Load())
 }
 
 func TestRemotingWildcardBindAddress(t *testing.T) {
