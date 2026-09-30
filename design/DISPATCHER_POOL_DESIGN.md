@@ -299,8 +299,9 @@ slot and are not aware of the system mailbox.
 ### 8.1 Start
 
 `NewActorSystem` constructs the dispatcher with
-`workerCount = max(GOMAXPROCS, 2)` and `throughput = 32` (overridable per
-system with `WithThroughputBudget`). `actorSystem.Start` calls
+`workerCount = max(GOMAXPROCS, 2)` (overridable per system with
+`WithDispatcherPoolSize`, for handlers that block in their turn) and
+`throughput = 32` (overridable per system with `WithThroughputBudget`). `actorSystem.Start` calls
 `dispatcher.start()`, which spawns the worker goroutines and the shared
 supervision consumer. Both `start` and `signalStop` are idempotent.
 
@@ -367,10 +368,18 @@ when benchmarks demand it:
 
 | Constant                | Value                                                       | Location                                          |
 |-------------------------|-------------------------------------------------------------|---------------------------------------------------|
-| Worker pool size        | `max(GOMAXPROCS, 2)`                                        | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
+| Worker pool size        | `max(GOMAXPROCS, 2)` (default; `WithDispatcherPoolSize` overrides per system) | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
 | Throughput budget       | `32` (default; `WithThroughputBudget` overrides per system) | `dispatcherThroughput` in `actor/dispatcher.go`   |
 | Local-ring capacity     | `256`                                                       | `localQueueCap` in `actor/ready_queue.go`         |
 | Global-ring initial cap | `64` (doubles on grow)                                      | `globalQueueInitialCap` in `actor/ready_queue.go` |
+
+A pool larger than `GOMAXPROCS` is for handlers that block in their turn.
+It costs dispatch throughput for handlers that do not: `claimIdleWorker`
+scans the idle flags of every worker on each wake and `trySteal` probes
+every sibling ring, both linear in the pool size. On the benchmark suite,
+256 workers on 8 CPUs cut request/reply throughput by about 40% and grain
+tells by 10 to 25%, with the per-actor heap unchanged; the measured table
+is in `docs/architecture/dispatcher-pool.mdx`.
 
 The worker count is floored at 2 so work-stealing always has at least one
 sibling to probe. The throughput budget is chosen to amortise Go's

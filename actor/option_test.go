@@ -24,6 +24,7 @@ package actor
 
 import (
 	"crypto/tls"
+	"runtime"
 	"testing"
 	"time"
 
@@ -263,6 +264,50 @@ func TestWithDefaultSupervisor(t *testing.T) {
 		opt.Apply(system)
 
 		assert.Same(t, custom, system.defaultSupervisor)
+	})
+}
+
+func TestWithDispatcherPoolSize(t *testing.T) {
+	t.Run("When value is positive it overrides the default", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPoolSize(256).Apply(system)
+
+		assert.Equal(t, 256, system.dispatcherWorkers)
+	})
+
+	t.Run("When value is zero the default is retained", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPoolSize(0).Apply(system)
+
+		assert.Equal(t, 0, system.dispatcherWorkers)
+	})
+
+	t.Run("When value is negative the default is retained", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPoolSize(-1).Apply(system)
+
+		assert.Equal(t, 0, system.dispatcherWorkers)
+	})
+
+	t.Run("The actor system builds its dispatcher with that many workers", func(t *testing.T) {
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPoolSize(7))
+		require.NoError(t, err)
+		assert.Len(t, system.(*actorSystem).dispatcher.workers, 7)
+	})
+
+	t.Run("The actor system floors the pool at two workers", func(t *testing.T) {
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPoolSize(1))
+		require.NoError(t, err)
+		assert.Len(t, system.(*actorSystem).dispatcher.workers, 2)
+	})
+
+	t.Run("The actor system defaults to one worker per OS thread, at least two", func(t *testing.T) {
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		assert.Len(t, system.(*actorSystem).dispatcher.workers, max(runtime.GOMAXPROCS(0), 2))
 	})
 }
 
