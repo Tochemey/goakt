@@ -23,11 +23,13 @@
 package actor
 
 import (
+	"reflect"
 	"time"
 
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/hash"
 	"github.com/tochemey/goakt/v4/internal/metric"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -550,6 +552,55 @@ func WithDispatcherPoolSize(n int) Option {
 		if n > 0 {
 			system.dispatcherWorkers = n
 		}
+	})
+}
+
+// WithGrainDefaultOptions declares the grain options every grain of kind T is
+// configured with, unless a GrainOf call for that grain says otherwise.
+//
+// Without it, the options are properties of the GrainOf call: a bare
+// AskGrain or TellGrain that finds the grain passivated reactivates it with
+// the package defaults, an unbounded mailbox and the default idle timeout,
+// whatever an earlier GrainOf said, and a grain activated on another node,
+// by relocation or a remote activation, gets the default idle timeout. The
+// only safe pattern is then to call GrainOf with the full option list
+// before every send, which costs an activation round trip for a grain on
+// another node.
+//
+// With the defaults declared once per kind, a bare send is safe, and GrainOf
+// is only needed for a grain that must be placed or activated with other
+// options than its kind's. Each kind gets its own declaration:
+//
+//	system, err := NewActorSystem("orders",
+//	    WithGrainDefaultOptions[*UserGrain](
+//	        WithGrainMailboxCapacity(2),
+//	        WithGrainDeactivateAfter(5*time.Minute),
+//	    ),
+//	    WithGrainDefaultOptions[*OrderGrain](
+//	        WithGrainMailboxCapacity(64),
+//	        WithGrainDeactivateAfter(time.Hour),
+//	        WithGrainEagerRelocation(),
+//	    ),
+//	)
+//
+// The defaults apply wherever a grain of the kind is configured: under the
+// options of a GrainOf call, under the options a registry record carries,
+// and alone for a bare send that creates the grain. The kind is derived
+// from T as GrainOf derives it; T must be a pointer to a struct, anything
+// else is ignored. Declaring the same kind twice keeps the last declaration.
+func WithGrainDefaultOptions[T Grain](opts ...GrainOption) Option {
+	return OptionFunc(func(system *actorSystem) {
+		rtype := reflect.TypeFor[T]()
+		if rtype.Kind() != reflect.Pointer || rtype.Elem().Kind() != reflect.Struct {
+			return
+		}
+
+		var prototype T
+		if system.grainDefaultOptions == nil {
+			system.grainDefaultOptions = make(map[string][]GrainOption)
+		}
+
+		system.grainDefaultOptions[types.Name(prototype)] = opts
 	})
 }
 

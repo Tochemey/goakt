@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/discovery"
@@ -3901,4 +3902,76 @@ func TestTellGrainOneWayDeadletters(t *testing.T) {
 		_, ok := message.Payload().(*Deadletter)
 		require.False(t, ok, "neither an acknowledged tell nor a nil error must produce a deadletter")
 	}
+}
+
+// TestGrainDefaults_ABareSendAfterPassivationKeepsTheKindsOptions passivates a
+// grain, then reaches it with a bare AskGrain: the grain it reactivates must
+// carry the kind's options, not the package defaults.
+func TestGrainDefaults_ABareSendAfterPassivationKeepsTheKindsOptions(t *testing.T) {
+	ctx := t.Context()
+	testSystem, err := NewActorSystem("testSys",
+		WithLogger(log.DiscardLogger),
+		WithGrainDefaultOptions[*MockGrain](WithGrainMailboxCapacity(3), WithGrainDeactivateAfter(time.Hour)),
+	)
+	require.NoError(t, err)
+	require.NoError(t, testSystem.Start(ctx))
+	t.Cleanup(func() { _ = testSystem.Stop(ctx) })
+
+	// activated with the kind's options and a short idle timeout for the test
+	identity, err := GrainOf[*MockGrain](ctx, testSystem, "defaults-grain", WithGrainDeactivateAfter(100*time.Millisecond))
+	require.NoError(t, err)
+	pid, ok := testSystem.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	require.EqualValues(t, 3, pid.config.capacity)
+	require.Equal(t, 100*time.Millisecond, pid.config.deactivateAfter)
+
+	// passivated
+	require.Eventually(t, func() bool {
+		_, ok := testSystem.(*actorSystem).grains.Get(identity.String())
+		return !ok
+	}, 5*time.Second, 20*time.Millisecond)
+
+	// reactivated by a bare send: the kind's options, not the package's
+	_, err = testSystem.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	pid, ok = testSystem.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	require.EqualValues(t, 3, pid.config.capacity)
+	require.Equal(t, time.Hour, pid.config.deactivateAfter)
+}
+
+// TestGrainDefaults_ARemoteActivationKeepsTheKindsOptions activates a grain on
+// another node: the registry record carries no idle timeout, so the kind's
+// defaults must supply it on the activating node.
+func TestGrainDefaults_ARemoteActivationKeepsTheKindsOptions(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	name := "remote-defaults-grain"
+	identity := newGrainIdentity(grain, name)
+	localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 16800, RemotingPort: 8484}
+
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+	sys := newClusterReadySystem(rem, cl, node)
+	sys.registry.Register(grain)
+	WithGrainDefaultOptions[*MockGrain](WithGrainMailboxCapacity(3), WithGrainDeactivateAfter(time.Hour)).Apply(sys)
+
+	// the record another node claimed for this one: options as the wire
+	// carries them, with no idle timeout, and a mailbox capacity of its own
+	record := internalpb.Grain_builder{
+		GrainId:           internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:              localPeer.Host,
+		Port:              int32(localPeer.RemotingPort),
+		ActivationTimeout: durationpb.New(DefaultInitTimeout),
+		ActivationRetries: DefaultInitMaxRetries,
+		MailboxCapacity:   proto.Int64(8),
+	}.Build()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+	require.NoError(t, sys.recreateGrain(ctx, record))
+	pid, ok := sys.grains.Get(identity.String())
+	require.True(t, ok)
+	require.EqualValues(t, 8, pid.config.capacity, "the record's option wins")
+	require.Equal(t, time.Hour, pid.config.deactivateAfter, "the kind's default fills what the record does not carry")
 }

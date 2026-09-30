@@ -65,6 +65,31 @@ if err != nil {
 response, err := system.AskGrain(ctx, identity, request, time.Second)
 ```
 
+### Options per kind
+
+Grain options such as `WithGrainMailboxCapacity` and `WithGrainDeactivateAfter` can be given to `GrainOf`, but they
+then belong to that call: a bare `AskGrain` or `TellGrain` that finds the grain passivated reactivates it with the
+package defaults, and a grain activated on another node gets the default idle timeout. Declare them once per kind with
+`WithGrainDefaultOptions` on the actor system instead; a `GrainOf` call can still override them for one grain. Each
+kind gets its own declaration:
+
+```go Options per kind
+system, err := actor.NewActorSystem("orders",
+    actor.WithGrainDefaultOptions[*UserGrain](
+        actor.WithGrainMailboxCapacity(2),
+        actor.WithGrainDeactivateAfter(5*time.Minute),
+    ),
+    actor.WithGrainDefaultOptions[*OrderGrain](
+        actor.WithGrainMailboxCapacity(64),
+        actor.WithGrainDeactivateAfter(time.Hour),
+        actor.WithGrainEagerRelocation(),
+    ),
+)
+```
+
+With the defaults declared, a bare send is safe and `GrainOf` is only needed to place or activate a grain with other
+options than its kind's.
+
 ### Tell: acknowledged or one-way
 
 `TellGrain` never returns a response payload, but by default it does wait for the grain to acknowledge the message:
