@@ -192,8 +192,10 @@ and `OnDeactivate` last.
 
 ### During shutdown
 
-When the actor system stops, every active grain is deactivated after its message in progress, and the node activates
-no new grains from the moment shutdown begins:
+When the actor system stops, every active grain handles the messages already in its mailbox, then is deactivated. This
+holds for a full bounded mailbox too: the shutdown request goes past its capacity instead of being refused. A grain
+whose `OnDeactivate` fails is named in the error `Stop` returns, and a grain still busy when the shutdown timeout
+expires is abandoned without running `OnDeactivate`. The node activates no new grains from the moment shutdown begins:
 
 - Local calls to `GrainOf`, `TellGrain` and `AskGrain` fail.
 - Requests from other nodes are refused with `ErrSystemShuttingDown` when they would activate a grain, while grains

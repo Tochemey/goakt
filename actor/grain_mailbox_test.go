@@ -121,6 +121,28 @@ func TestGrainMailboxBounded_FullReturnsError(t *testing.T) {
 	require.EqualValues(t, 2, mailbox.Len())
 }
 
+func TestGrainMailboxBounded_EnqueueSystemGoesPastCapacity(t *testing.T) {
+	mailbox := newGrainMailbox(1)
+
+	user := &GrainContext{}
+	system := &GrainContext{}
+	require.NoError(t, mailbox.Enqueue(user))
+	mailbox.EnqueueSystem(system)
+
+	// the system message is queued and counted, and user enqueues stay refused
+	require.EqualValues(t, 2, mailbox.Len())
+	require.ErrorIs(t, mailbox.Enqueue(&GrainContext{}), gerrors.ErrMailboxFull)
+
+	// FIFO: the user message queued first is handled first
+	require.Same(t, user, mailbox.Dequeue())
+	require.EqualValues(t, 1, mailbox.Len())
+	require.ErrorIs(t, mailbox.Enqueue(&GrainContext{}), gerrors.ErrMailboxFull)
+
+	require.Same(t, system, mailbox.Dequeue())
+	require.True(t, mailbox.IsEmpty())
+	require.NoError(t, mailbox.Enqueue(&GrainContext{}))
+}
+
 func TestGrainMailboxBounded_DoesNotOvershootCapacity_Concurrent(t *testing.T) {
 	const capacity = 64
 	const producers = 16

@@ -15,7 +15,7 @@ When `Stop(ctx)` is called, the system:
 3. Stops datacenter services (if enabled)
 4. Snapshots cluster state (if clustered)
 5. Shuts down user actors depth-first (children before parents)
-6. Deactivates all grains, each after its message in progress
+6. Deactivates all grains, each after the messages already in its mailbox
 7. Shuts down system actors
 8. Leaves cluster and stops remoting
 

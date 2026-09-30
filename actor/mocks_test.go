@@ -2120,13 +2120,19 @@ func (x *MockGrainPipeSystem) Logger() log.Logger {
 type MockScriptedGrain struct {
 	// receive handles every message.
 	receive func(*GrainContext)
+	// deactivations counts OnDeactivate calls, so a test can tell the grain
+	// was deactivated rather than dropped.
+	deactivations atomic.Int32
 }
 
 // OnActivate does nothing.
 func (x *MockScriptedGrain) OnActivate(context.Context, *GrainProps) error { return nil }
 
-// OnDeactivate does nothing.
-func (x *MockScriptedGrain) OnDeactivate(context.Context, *GrainProps) error { return nil }
+// OnDeactivate records the call.
+func (x *MockScriptedGrain) OnDeactivate(context.Context, *GrainProps) error {
+	x.deactivations.Add(1)
+	return nil
+}
 
 // OnReceive defers to the receive function.
 func (x *MockScriptedGrain) OnReceive(gctx *GrainContext) { x.receive(gctx) }
