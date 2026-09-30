@@ -2105,6 +2105,18 @@ func TestRemoteActivateGrainHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
 	})
+
+	t.Run("shutting down returns CODE_FAILED_PRECONDITION with ErrSystemShuttingDown", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.shuttingDown.Store(true)
+		req := internalpb.RemoteActivateGrainRequest_builder{
+			Grain: internalpb.Grain_builder{Host: host, Port: int32(port)}.Build(),
+		}.Build()
+		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+		require.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrSystemShuttingDown.Error())
+	})
 }
 
 func TestPersistPeerStateHandler(t *testing.T) {

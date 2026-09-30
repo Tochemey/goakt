@@ -492,27 +492,42 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 // failure puts its liveness in question, and only the cluster membership can
 // settle it, so the entry is released solely when the owner's node has left.
 func (x *actorSystem) releaseUnreachableGrainOwner(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error) error {
-	if !isTransportFailure(ctx, sendErr) {
-		return sendErr
-	}
-
 	node := address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))
-	departed, err := x.grainOwnerDeparted(ctx, owner)
-	if err != nil {
-		x.logger.Warnf("failed to check membership of owner=%s for grain=%s: %v", node, identity.String(), err)
+
+	switch {
+	case ownerIsLeaving(sendErr):
+		// The owner answered: it is shutting down, or its remoting is off,
+		// which a cluster node only turns off on its way out. Its record is
+		// released without waiting for membership to notice, so the next
+		// activation does not have to wait for a connection to be refused.
+		x.logger.Warnf("owner=%s for grain=%s is leaving the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
+	case isTransportFailure(ctx, sendErr):
+		departed, err := x.grainOwnerDeparted(ctx, owner)
+		if err != nil {
+			x.logger.Warnf("failed to check membership of owner=%s for grain=%s: %v", node, identity.String(), err)
+			return sendErr
+		}
+
+		if !departed {
+			return sendErr
+		}
+
+		x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
+	default:
 		return sendErr
 	}
 
-	if !departed {
-		return sendErr
-	}
-
-	x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
 	if _, err := x.getCluster().ReleaseGrain(ctx, identity.String(), node); err != nil {
 		return fmt.Errorf("failed to release registry entry of grain=%s owned by departed node=%s: %w", identity.String(), node, err)
 	}
 
 	return nil
+}
+
+// ownerIsLeaving reports whether err is the owner's own answer that it is on
+// its way out of the cluster: shutting down, or with remoting already off.
+func ownerIsLeaving(err error) bool {
+	return errors.Is(err, gerrors.ErrSystemShuttingDown) || errors.Is(err, gerrors.ErrRemotingDisabled)
 }
 
 // isTransportFailure reports whether err means the remote node never answered

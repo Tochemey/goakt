@@ -352,6 +352,60 @@ func TestGrainIdentity_DepartedOwnerReleasedAndClaimedLocally(t *testing.T) {
 	require.True(t, process.isActive())
 }
 
+func TestGrainIdentity_LeavingOwnerReleasedAndClaimedLocally(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		answer error
+	}{
+		{name: "owner is shutting down", answer: gerrors.ErrSystemShuttingDown},
+		{name: "owner stopped remoting", answer: gerrors.ErrRemotingDisabled},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			grain := NewMockGrain()
+			name := "leaving-owner-grain"
+			identity := newGrainIdentity(grain, name)
+			localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 16700, RemotingPort: 8383}
+
+			cl := mockcluster.NewCluster(t)
+			rem := mockremote.NewClient(t)
+			node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+			sys := newClusterReadySystem(rem, cl, node)
+
+			// the registry names a node that is on its way out but still a
+			// member, and still answers over an open connection
+			leavingOwner := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
+				Host:    "192.0.2.24",
+				Port:    18004,
+			}.Build()
+
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(leavingOwner, nil).Once()
+			rem.EXPECT().RemoteActivateGrain(ctx, leavingOwner.GetHost(), int(leavingOwner.GetPort()), mock.Anything).Return(tc.answer).Once()
+			// the owner said so itself: its entry is released without a
+			// membership check, and the grain is claimed here
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(leavingOwner.GetHost(), int(leavingOwner.GetPort()))).Return(nil, nil).Once()
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+			cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+				return actual != nil && actual.GetGrainId().GetValue() == identity.String() &&
+					actual.GetHost() == localPeer.Host && int(actual.GetPort()) == localPeer.RemotingPort
+			})).Return(nil).Twice()
+
+			got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+				return grain, nil
+			})
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.Equal(t, identity.String(), got.String())
+
+			process, ok := sys.grains.Get(identity.String())
+			require.True(t, ok)
+			require.True(t, process.isActive())
+		})
+	}
+}
+
 func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
 	ctx := t.Context()
 	grain := NewMockGrain()
@@ -3738,4 +3792,56 @@ func TestTellGrainOneWayDeadletters(t *testing.T) {
 		_, ok := message.Payload().(*Deadletter)
 		require.False(t, ok, "neither an acknowledged tell nor a nil error must produce a deadletter")
 	}
+}
+
+// TestGrainIdentity_StaleRecordOfAStoppedNodeIsReleasedOverAnOpenConnection
+// plants the record a node leaves behind when it accepted an activation while
+// stopping (#1396), and resolves the grain from a node that still holds a
+// connection to it: the stopped node answers that its remoting is off over
+// that connection, which must release the record and let the grain activate
+// here, instead of failing until the connection is refused.
+func TestGrainIdentity_StaleRecordOfAStoppedNodeIsReleasedOverAnOpenConnection(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 2)
+	node1, node2 := systems[0], systems[1]
+	t.Cleanup(func() { _ = node1.Stop(ctx) })
+	require.Eventually(t, func() bool {
+		peers, err := node1.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 1
+	}, 10*time.Second, 100*time.Millisecond)
+
+	const name = "stale-owner-grain"
+	factory := func(context.Context) (Grain, error) { return NewMockGrain(), nil }
+	identity, err := node2.GrainIdentity(ctx, name, factory)
+	require.NoError(t, err)
+
+	// node1 sends to the grain on node2, which opens its connection to node2
+	_, err = node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+
+	// node2 stops: its grains deactivate and release their records
+	record, err := node1.(*actorSystem).getCluster().GetGrain(ctx, identity.String())
+	require.NoError(t, err)
+	require.Equal(t, node2.Host(), record.GetHost())
+	require.Equal(t, node2.Port(), int(record.GetPort()))
+	require.NoError(t, node2.Stop(ctx))
+
+	// the record a late activation leaves behind, naming the stopped node
+	require.NoError(t, node1.(*actorSystem).getCluster().PutGrain(ctx, record))
+
+	// node1 resolves the grain through its open connection to the stopped
+	// node, releases the stale record and activates the grain locally
+	got, err := node1.GrainIdentity(ctx, name, factory)
+	require.NoError(t, err)
+	require.Equal(t, identity.String(), got.String())
+	process, ok := node1.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	require.True(t, process.isActive())
+
+	response, err := node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.IsType(t, new(testpb.Reply), response)
 }

@@ -2842,6 +2842,9 @@ func parseFailedPrecondition(msg string) error {
 	if strings.Contains(msg, gerrors.ErrRemotingDisabled.Error()) {
 		return gerrors.ErrRemotingDisabled
 	}
+	if strings.Contains(msg, gerrors.ErrSystemShuttingDown.Error()) {
+		return gerrors.ErrSystemShuttingDown
+	}
 	if strings.Contains(msg, gerrors.ErrClusterDisabled.Error()) {
 		return gerrors.ErrClusterDisabled
 	}

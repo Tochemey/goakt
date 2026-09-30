@@ -1527,6 +1527,13 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
 
+	// A node that is shutting down takes no new grains: an activation claimed
+	// now would leave a registry record pointing at a node that is about to
+	// be gone. The caller releases the record and activates elsewhere.
+	if x.shuttingDown.Load() {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrSystemShuttingDown), nil
+	}
+
 	// Extract context metadata and apply context propagation if configured.
 	var err error
 	ctx, err = x.extractContextWithPropagator(ctx)

@@ -1201,6 +1201,11 @@ func TestParseFailedPrecondition(t *testing.T) {
 		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
 	})
 
+	t.Run("ErrSystemShuttingDown substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrSystemShuttingDown.Error())
+		assert.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+	})
+
 	t.Run("unknown message returns generic error", func(t *testing.T) {
 		err := parseFailedPrecondition("something unexpected")
 		require.Error(t, err)
