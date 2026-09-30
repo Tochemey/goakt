@@ -13,11 +13,13 @@ A grain is written against three promises: one activation per identity, one mess
 
 The sample runs one node. The bug is local to a grain, so no cluster is needed.
 
+The grain never blocks inside `OnReceive`. Its slow message is a request to a second grain, the gate, which stands in for a database that answers only when the sample tells it to. The grain uses `StashNonReentrant` reentrancy, so it takes no other message while that request is in flight, and it answers the caller of the slow message from the request's continuation with a reply it took ownership of through `DeferResponse`. The gate hands the reply of every request it gets to the sample through a channel; its own `OnReceive` returns at once.
+
 1. Start the node.
-2. Activate a grain that passivates after 300ms idle.
-3. Send it a slow message that holds `OnReceive` open for longer than the idle timeout.
-4. While the slow message is still running, send two more messages.
-5. Let the slow message finish, then report what the grain saw.
+2. Activate the gate and a grain that passivates after 300ms idle.
+3. Send the grain a slow message: it sends the gate a request and waits on the reply for longer than the idle timeout.
+4. While the slow message is still in progress, send two more messages.
+5. Let the gate answer, so the slow message finishes, then report what the grain saw.
 
 ## Running it
 
@@ -27,33 +29,23 @@ go run ./playground/issue-1397
 
 Exit status: `1` means the bug is present, `0` means every promise held, `2` means the setup failed.
 
-## Output with the bug
+## Output before the fix
 
-```text
-step 2: grain activated, it passivates after 300ms idle
-step 3: the slow message has been running for 900ms, longer than the idle timeout
-step 4: sent two more messages while the slow one is still running
-step 5: message 1 was answered
-step 5: message 2 was answered
-step 5: a message sent again was answered by a fresh activation
-
-BUG: OnDeactivate ran while OnReceive was still handling the slow message.
-BUG: 2 instances of the grain handled messages at the same time.
-```
+The failure needed a message held inside `OnReceive`, which the sample no longer does: a grain waiting on a request was already left alone by the passivation manager before the fix, so the sample passes on the commit before the fix as well. It keeps the three promises under watch with a handler that does not block.
 
 ## Output with the fix
 
 ```text
 step 2: grain activated, it passivates after 300ms idle
-step 3: the slow message has been running for 900ms, longer than the idle timeout
-step 4: sent two more messages while the slow one is still running
+step 3: the slow message has been in progress for 900ms, longer than the idle timeout
+step 4: sent two more messages while the slow one is still in progress
 step 5: message 1 was answered
 step 5: message 2 was answered
 
 OK: one activation at a time, one message at a time, and OnDeactivate last.
 ```
 
-With the fix, passivation waits for the slow message to finish. When it runs, the two other messages are already waiting in the mailbox, so the grain is not idle: passivation is skipped and the same instance answers both. The grain passivates later, once it really is idle.
+Passivation leaves the grain alone while its request is in flight. When the gate answers, the two other messages are already waiting in the mailbox, so the grain is not idle: the same instance answers both. The grain passivates later, once it really is idle.
 
 ## Where it happens in the code
 

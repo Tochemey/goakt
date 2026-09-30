@@ -20,26 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Package main reproduces github.com/Tochemey/goakt/issues/1397: grain
-// passivation can run OnDeactivate while the grain is still handling a
-// message, and a second activation of the same grain can start while the
-// first is still running.
-//
-// A grain is written against three promises: one activation per identity,
-// one message at a time, and OnDeactivate last. The sample checks all three.
-//
-// Steps:
-//
-//  1. Start one node. The bug is local to a grain, so no cluster is needed.
-//  2. Activate a grain that passivates after idleTimeout.
-//  3. Send it a slow message that holds OnReceive open past idleTimeout.
-//  4. While the slow message is still running, send two more messages.
-//  5. Let the slow message finish, and report what the grain saw.
-//
-// Run it with: go run ./playground/issue-1397
-//
-// Exit status 1 means the bug is still there, 0 means every promise held,
-// and 2 means the setup failed.
 package main
 
 import (
@@ -52,6 +32,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -59,22 +40,25 @@ import (
 const idleTimeout = 300 * time.Millisecond
 
 var (
-	// slowMessageStarted is closed when the grain starts handling the slow message.
-	slowMessageStarted = make(chan struct{})
+	// gateIdentity is the grain the slow message waits on. It stands in for a
+	// database: it answers only when the sample tells it to.
+	gateIdentity *actor.GrainIdentity
 
-	// releaseSlowMessage lets the slow message finish.
-	releaseSlowMessage = make(chan struct{})
+	// gateReplies receives the deferred reply of every request the gate gets.
+	// Receiving from it tells the sample that the slow message is in progress.
+	gateReplies = make(chan *actor.GrainReply, 1)
 
-	// messagesInProgress counts messages inside OnReceive across every instance
-	// of the grain. A grain handles one message at a time, so more than one
-	// means two instances were running at once.
+	// messagesInProgress counts messages the grain is handling, from the start
+	// of OnReceive to the reply, across every instance of the grain. A grain
+	// handles one message at a time, so more than one means two instances
+	// were running at once.
 	messagesInProgress atomic.Int32
 
 	// maxMessagesInProgress is the highest value messagesInProgress reached.
 	maxMessagesInProgress atomic.Int32
 
-	// deactivatedDuringReceive is set when OnDeactivate ran while OnReceive was running.
-	deactivatedDuringReceive atomic.Bool
+	// deactivatedDuringSlowMessage is set when OnDeactivate ran while the slow message was still in progress.
+	deactivatedDuringSlowMessage atomic.Bool
 
 	// receivedAfterDeactivate is set when an instance handled a message after its OnDeactivate.
 	receivedAfterDeactivate atomic.Bool
@@ -95,27 +79,37 @@ func main() {
 
 	defer func() { _ = system.Stop(ctx) }()
 
-	// Step 2: activate a grain that passivates after idleTimeout.
-	identity, err := actor.GrainOf[*slowGrain](ctx, system, "slow-grain", actor.WithGrainDeactivateAfter(idleTimeout))
+	// Step 2: activate the gate and a grain that passivates after idleTimeout.
+	// The grain uses StashNonReentrant reentrancy so that it takes no other
+	// message while it waits on the gate.
+	gateIdentity, err = actor.GrainOf[*gateGrain](ctx, system, "gate")
+	if err != nil {
+		fail("activate gate: %v", err)
+	}
+
+	identity, err := actor.GrainOf[*slowGrain](ctx, system, "slow-grain",
+		actor.WithGrainDeactivateAfter(idleTimeout),
+		actor.WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))),
+	)
 	if err != nil {
 		fail("activate grain: %v", err)
 	}
 
 	fmt.Printf("step 2: grain activated, it passivates after %s idle\n", idleTimeout)
 
-	// Step 3: send the slow message and wait until OnReceive holds it.
+	// Step 3: send the slow message and wait until the grain is waiting on the gate.
 	slowResult := make(chan error, 1)
 	go func() {
 		_, err := system.AskGrain(ctx, identity, new(testpb.TestWait), 10*time.Second)
 		slowResult <- err
 	}()
-	<-slowMessageStarted
+	gateReply := <-gateReplies
 
 	pause.For(3 * idleTimeout)
 
-	fmt.Printf("step 3: the slow message has been running for %s, longer than the idle timeout\n", 3*idleTimeout)
+	fmt.Printf("step 3: the slow message has been in progress for %s, longer than the idle timeout\n", 3*idleTimeout)
 
-	// Step 4: send two more messages while the slow one is still running.
+	// Step 4: send two more messages while the slow one is still in progress.
 	fastResults := make(chan error, 2)
 	for range 2 {
 		go func() {
@@ -126,10 +120,10 @@ func main() {
 
 	pause.For(idleTimeout)
 
-	fmt.Println("step 4: sent two more messages while the slow one is still running")
+	fmt.Println("step 4: sent two more messages while the slow one is still in progress")
 
-	// Step 5: let the slow message finish and collect every answer.
-	close(releaseSlowMessage)
+	// Step 5: let the gate answer, so the slow message finishes, and collect every answer.
+	gateReply.Response(new(testpb.Reply))
 	if err := <-slowResult; err != nil {
 		fail("slow message: %v", err)
 	}
@@ -143,8 +137,8 @@ func main() {
 	}
 
 	bugs := 0
-	if deactivatedDuringReceive.Load() {
-		fmt.Println("\nBUG: OnDeactivate ran while OnReceive was still handling the slow message.")
+	if deactivatedDuringSlowMessage.Load() {
+		fmt.Println("\nBUG: OnDeactivate ran while the slow message was still in progress.")
 		bugs++
 	}
 
@@ -165,9 +159,10 @@ func main() {
 	fmt.Println("\nOK: one activation at a time, one message at a time, and OnDeactivate last.")
 }
 
-// slowGrain holds a TestWait message in OnReceive until releaseSlowMessage is
-// closed, and answers every other message at once. It records any broken
-// promise in the package-level flags.
+// slowGrain waits on the gate for a TestWait message, and answers every other
+// message at once. OnReceive never blocks: the slow message is a request to
+// the gate, and the reply to the caller is completed when the gate answers.
+// It records any broken promise in the package-level flags.
 type slowGrain struct {
 	// deactivated is set when this instance's OnDeactivate runs.
 	deactivated atomic.Bool
@@ -183,27 +178,62 @@ func (g *slowGrain) OnActivate(context.Context, *actor.GrainProps) error {
 // OnReceive handles the slow message and the fast ones.
 func (g *slowGrain) OnReceive(ctx *actor.GrainContext) {
 	recordMessageStart()
-	defer messagesInProgress.Add(-1)
 
 	if g.deactivated.Load() {
 		receivedAfterDeactivate.Store(true)
 	}
 
 	if _, ok := ctx.Message().(*testpb.TestWait); ok {
-		close(slowMessageStarted)
-		<-releaseSlowMessage
+		// The slow message waits on the gate the way a handler waits on a
+		// database: the request goes out, OnReceive returns, and the caller is
+		// answered from the continuation once the gate has replied. Meanwhile
+		// the grain takes no other message.
+		reply := ctx.DeferResponse()
+		ctx.RequestGrain(gateIdentity, new(testpb.TestWait)).Then(func(_ any, err error) {
+			if g.deactivated.Load() {
+				deactivatedDuringSlowMessage.Store(true)
+			}
 
-		if g.deactivated.Load() {
-			deactivatedDuringReceive.Store(true)
-		}
+			messagesInProgress.Add(-1)
+			if err != nil {
+				reply.Err(err)
+				return
+			}
+
+			reply.Response(new(testpb.Reply))
+		})
+		return
 	}
 
+	messagesInProgress.Add(-1)
 	ctx.Response(new(testpb.Reply))
 }
 
 // OnDeactivate marks this instance as deactivated.
 func (g *slowGrain) OnDeactivate(context.Context, *actor.GrainProps) error {
 	g.deactivated.Store(true)
+	return nil
+}
+
+// gateGrain stands in for a database. It takes ownership of the reply to every
+// request it gets and hands it to the sample, which answers when it chooses.
+// Its OnReceive returns at once.
+type gateGrain struct{}
+
+var _ actor.Grain = (*gateGrain)(nil)
+
+// OnActivate does nothing.
+func (g *gateGrain) OnActivate(context.Context, *actor.GrainProps) error {
+	return nil
+}
+
+// OnReceive hands the reply to the sample.
+func (g *gateGrain) OnReceive(ctx *actor.GrainContext) {
+	gateReplies <- ctx.DeferResponse()
+}
+
+// OnDeactivate does nothing.
+func (g *gateGrain) OnDeactivate(context.Context, *actor.GrainProps) error {
 	return nil
 }
 

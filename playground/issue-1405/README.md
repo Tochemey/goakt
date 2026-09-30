@@ -2,11 +2,14 @@
 
 https://github.com/Tochemey/goakt/issues/1405
 
-One grain with a mailbox of one. The first message parks inside `OnReceive`,
-the second one fills the mailbox, and the actor system stops while it is
-full. Once the first message is released, both messages must have been
-handled and answered, `OnDeactivate` must have run and `Stop` must return
-nil.
+One grain with a mailbox of one. On the first message the grain sends a
+request to a gate grain that never answers, standing in for a database, and
+its `OnReceive` returns; with `StashNonReentrant` reentrancy the grain takes
+no other message while that request is in flight. The second message fills
+the mailbox, and the actor system stops while it is full. The sample then
+cancels the request, which completes it on the grain itself and so stays
+possible while the system is stopping. Both messages must have been handled
+and answered, `OnDeactivate` must have run and `Stop` must return nil.
 
 ## Actual (before the fix)
 

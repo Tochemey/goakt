@@ -20,28 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Reproduction for https://github.com/Tochemey/goakt/issues/1405
-//
-// A grain whose bounded mailbox is full when the actor system stops used to
-// reject the shutdown PoisonPill like any other message: the grain was
-// dropped without OnDeactivate and Stop returned ErrMailboxFull.
-//
-// One grain with a mailbox of one. The first message parks inside OnReceive,
-// the second one fills the mailbox, and the system stops while it is full.
-// Once the first message is released, both messages must have been handled
-// and answered, OnDeactivate must have run and Stop must return nil.
 package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -56,23 +49,39 @@ func main() {
 		fail("%v", err)
 	}
 
-	identity, err := actor.GrainOf[*slowGrain](ctx, actorSystem, "slow", actor.WithGrainMailboxCapacity(1))
+	gateIdentity, err = actor.GrainOf[*gateGrain](ctx, actorSystem, "gate")
 	if err != nil {
 		fail("%v", err)
 	}
 
-	// The first message parks the turn inside OnReceive and the second one
-	// fills the mailbox. Both sends wait for their acknowledgment.
-	parkedAck := make(chan error, 1)
-	go func() { parkedAck <- actorSystem.TellGrain(ctx, identity, new(testpb.TestSend)) }()
-	<-firstMessageEntered
+	// The grain has a mailbox of one and takes no other message while a
+	// request of its own is in flight.
+	identity, err := actor.GrainOf[*slowGrain](ctx, actorSystem, "slow",
+		actor.WithGrainMailboxCapacity(1),
+		actor.WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))),
+	)
+	if err != nil {
+		fail("%v", err)
+	}
+
+	// The first message leaves the grain waiting on the gate and the second
+	// one fills the mailbox. Both sends wait for their acknowledgment.
+	firstAck := make(chan error, 1)
+	go func() { firstAck <- actorSystem.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	request := <-firstRequest
 
 	queuedAck := make(chan error, 1)
 	go func() { queuedAck <- actorSystem.TellGrain(ctx, identity, new(testpb.TestSend)) }()
 	pause.For(100 * time.Millisecond)
 
+	if err := actorSystem.TellGrain(ctx, identity, new(testpb.TestSend), actor.WithOneWay()); !errors.Is(err, gerrors.ErrMailboxFull) {
+		fail("the mailbox should be full before the system stops, got: %v", err)
+	}
+
 	// The system stops while the mailbox is full, so the pill meets the
-	// capacity; the first message is released only after that.
+	// capacity; the grain is released only after that. Cancelling the request
+	// completes it on the grain itself, which is the one path that stays open
+	// while the system is stopping.
 	stopped := make(chan error, 1)
 	go func() {
 		stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -80,7 +89,9 @@ func main() {
 		stopped <- actorSystem.Stop(stopCtx)
 	}()
 	pause.For(200 * time.Millisecond)
-	close(releaseFirstMessage)
+	if err := request.Cancel(); err != nil {
+		fail("release the grain: %v", err)
+	}
 
 	bugs := 0
 	if err := <-stopped; err != nil {
@@ -88,7 +99,7 @@ func main() {
 		bugs++
 	}
 
-	if !answered("parked", parkedAck) {
+	if !answered("first", firstAck) {
 		bugs++
 	}
 
@@ -113,27 +124,33 @@ func main() {
 	fmt.Println("OK: both messages handled, OnDeactivate ran and Stop returned nil although the mailbox was full when the system stopped.")
 }
 
-// The grain is constructed by GoAkt, so the sample observes it through
+// The grains are constructed by GoAkt, so the sample observes them through
 // package-level state.
 var (
-	firstMessageEntered = make(chan struct{}, 1)
-	releaseFirstMessage = make(chan struct{})
-	handled             atomic.Int32
-	deactivated         atomic.Bool
+	// gateIdentity is the grain the first message waits on. It stands in for a
+	// database that has not answered yet.
+	gateIdentity *actor.GrainIdentity
+
+	// firstRequest receives the request the first message makes to the gate
+	// once it is in flight. Cancelling it releases the grain.
+	firstRequest = make(chan actor.RequestCall, 1)
+
+	handled     atomic.Int32
+	deactivated atomic.Bool
 )
 
-// slowGrain parks its first message inside OnReceive until releaseFirstMessage
-// is closed and answers every later message at once.
+// slowGrain waits on the gate for its first message and acknowledges every
+// message at once. OnReceive never blocks: the wait is a request in flight,
+// during which the grain takes no other message.
 type slowGrain struct{}
 
 // OnActivate does nothing.
 func (x *slowGrain) OnActivate(context.Context, *actor.GrainProps) error { return nil }
 
-// OnReceive parks the first message until released and acknowledges every message.
+// OnReceive sends the gate a request on the first message and acknowledges every message.
 func (x *slowGrain) OnReceive(ctx *actor.GrainContext) {
 	if handled.Add(1) == 1 {
-		firstMessageEntered <- struct{}{}
-		<-releaseFirstMessage
+		firstRequest <- ctx.RequestGrain(gateIdentity, new(testpb.TestSend))
 	}
 	ctx.NoErr()
 }
@@ -143,6 +160,19 @@ func (x *slowGrain) OnDeactivate(context.Context, *actor.GrainProps) error {
 	deactivated.Store(true)
 	return nil
 }
+
+// gateGrain stands in for a database that never answers: it takes ownership
+// of the reply and drops it. Its OnReceive returns at once.
+type gateGrain struct{}
+
+// OnActivate does nothing.
+func (x *gateGrain) OnActivate(context.Context, *actor.GrainProps) error { return nil }
+
+// OnReceive takes the reply away from the turn and never completes it.
+func (x *gateGrain) OnReceive(ctx *actor.GrainContext) { ctx.DeferResponse() }
+
+// OnDeactivate does nothing.
+func (x *gateGrain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
 
 // answered reports whether the sender of the named message got its
 // acknowledgment, waiting at most a second so a dropped message does not hold
