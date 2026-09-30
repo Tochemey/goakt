@@ -125,6 +125,10 @@ consistency, and memory footprint.
 - **WithMinimumPeersQuorum**: Members required before the cluster serves operations. Also the quorum the grain
   activation barrier waits for. Keep it `<= replicaCount`. Default: 1.
 - **WithTableSize**: In-memory size of the registry key/value store on this node. Default: 4 MB.
+- **WithStoreDir**: Directory for the node's cluster store, the BoltDB file that holds peer state while the node runs.
+  The file is created on start and deleted on stop, so an ephemeral writable volume (for example an `emptyDir`) is
+  enough. Set it when the home directory is not writable, such as a pod with a read-only root filesystem or a sandbox
+  without `$HOME`. Default: `~/.goakt/cluster`.
 
 <Warning>
   `WithReplicaCount(1)` keeps no backups: registry partitions owned by a crashed node are lost with it, crash recovery
