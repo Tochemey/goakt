@@ -475,6 +475,12 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 			node := address.FormatHostPort(peer.Host, peer.RemotingPort)
 			if _, rerr := x.getCluster().ReleaseGrain(ctx, identity.String(), node); rerr != nil {
 				x.logger.Errorf("failed to roll back claim of grain=%s for peer=%s after a rejected activation: %v (hint: check cluster quorum)", identity.String(), node, rerr)
+				return false, err
+			}
+
+			// the peer is shutting down: activate the grain here instead
+			if errors.Is(err, gerrors.ErrSystemShuttingDown) {
+				return false, nil
 			}
 		}
 		return false, err
@@ -488,26 +494,35 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 // must report. A nil result means the entry no longer names the owner and
 // local activation may proceed through the atomic claim.
 //
-// A failed request alone says nothing about the owner: only a transport
-// failure puts its liveness in question, and only the cluster membership can
-// settle it, so the entry is released solely when the owner's node has left.
+// The entry is released when the owner answered that it is shutting down or
+// that its remoting is off, or when the owner is unreachable and the
+// membership confirms it has left.
 func (x *actorSystem) releaseUnreachableGrainOwner(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error) error {
-	if !isTransportFailure(ctx, sendErr) {
-		return sendErr
-	}
-
 	node := address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))
-	departed, err := x.grainOwnerDeparted(ctx, owner)
-	if err != nil {
-		x.logger.Warnf("failed to check membership of owner=%s for grain=%s: %v", node, identity.String(), err)
+
+	switch {
+	case errors.Is(sendErr, gerrors.ErrSystemShuttingDown):
+		// the owner is shutting down and does not have the grain active
+		x.logger.Infof("owner=%s for grain=%s is shutting down, releasing its registry entry", node, identity.String())
+	case errors.Is(sendErr, gerrors.ErrRemotingDisabled):
+		// a cluster node turns its remoting off only at the end of its shutdown
+		x.logger.Infof("owner=%s for grain=%s has shut down, releasing its registry entry", node, identity.String())
+	case isTransportFailure(ctx, sendErr):
+		departed, err := x.grainOwnerDeparted(ctx, owner)
+		if err != nil {
+			x.logger.Warnf("failed to check membership of owner=%s for grain=%s: %v", node, identity.String(), err)
+			return sendErr
+		}
+
+		if !departed {
+			return sendErr
+		}
+
+		x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
+	default:
 		return sendErr
 	}
 
-	if !departed {
-		return sendErr
-	}
-
-	x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
 	if _, err := x.getCluster().ReleaseGrain(ctx, identity.String(), node); err != nil {
 		return fmt.Errorf("failed to release registry entry of grain=%s owned by departed node=%s: %w", identity.String(), node, err)
 	}
@@ -596,7 +611,10 @@ func (x *actorSystem) activateGrainLocally(ctx context.Context, identity *GrainI
 
 		activatedHere := false
 		if !pid.isActive() {
-			if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+			if err := x.admitGrainActivation(ctx); err != nil {
+				if claimed && x.InCluster() {
+					x.rollbackGrainClaim(ctx, identity.String())
+				}
 				return nil, err
 			}
 
@@ -830,6 +848,7 @@ func (x *actorSystem) localOneWayTellGrain(ctx context.Context, pid *grainPID, i
 func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any, timeout time.Duration) (any, error) {
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(ctx, pid, x, id, message, grainAsk)
+	grainContext.timeout = timeout
 
 	responseCh := grainContext.response
 	shard := grainContext.poolShard
@@ -866,6 +885,7 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 func (x *actorSystem) localTellGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any, timeout time.Duration) error {
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(ctx, pid, x, id, message, grainTell)
+	grainContext.timeout = timeout
 
 	errCh := grainContext.err
 	shard := grainContext.poolShard
@@ -1268,7 +1288,7 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 	}
 
 	if !process.isActive() {
-		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+		if err := x.admitGrainActivation(ctx); err != nil {
 			return nil, err
 		}
 
@@ -1296,7 +1316,7 @@ func (x *actorSystem) ensureExistingGrainProcess(ctx context.Context, id *GrainI
 
 func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdentity) (*grainPID, error) {
 	// No local process yet: create one from the registry and follow the same cluster-claim flow.
-	if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+	if err := x.admitGrainActivation(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1417,12 +1437,18 @@ func (x *actorSystem) rollbackGrainClaim(ctx context.Context, identity string) {
 // performed the activation (activatedHere), and its cluster claim is released
 // only when this call made the claim (claimed). A grain that was already
 // active on entry is left untouched, so a failed publication never disturbs a
-// running grain.
+// running grain. It also rolls back an activation that finishes once the node
+// is shutting down.
 func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grainPID, claimed, activatedHere bool) error {
 	key := process.getIdentity().String()
 	x.grains.Set(key, process)
 
 	err := x.putGrainOnCluster(ctx, process)
+	if err == nil && activatedHere && x.InCluster() && x.isStopping() {
+		// the shutdown cleanup may have missed this record, so roll it back
+		err = gerrors.ErrSystemShuttingDown
+	}
+
 	if err == nil {
 		return nil
 	}
@@ -1684,7 +1710,7 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 	process, ok = x.grains.Get(identity.String())
 	if !ok {
-		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+		if err := x.admitGrainActivation(ctx); err != nil {
 			return nil, err
 		}
 
@@ -1721,7 +1747,7 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 
 	activatedHere := false
 	if !process.isActive() {
-		if err := x.waitForGrainActivationBarrier(ctx); err != nil {
+		if err := x.admitGrainActivation(ctx); err != nil {
 			return nil, err
 		}
 
@@ -1911,4 +1937,14 @@ func (x *actorSystem) waitForGrainActivationBarrier(ctx context.Context) error {
 		return nil
 	}
 	return barrier.wait(ctx)
+}
+
+// admitGrainActivation refuses new activations with ErrSystemShuttingDown once
+// the node is shutting down, otherwise it waits for the activation barrier.
+func (x *actorSystem) admitGrainActivation(ctx context.Context) error {
+	if x.isStopping() {
+		return gerrors.ErrSystemShuttingDown
+	}
+
+	return x.waitForGrainActivationBarrier(ctx)
 }

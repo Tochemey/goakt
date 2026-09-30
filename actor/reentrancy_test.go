@@ -1074,6 +1074,8 @@ func TestRequestStateRequesterContract(t *testing.T) {
 func TestAsyncErrorFromString(t *testing.T) {
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestTimeout.Error()), gerrors.ErrRequestTimeout)
 	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrRequestCanceled.Error()), gerrors.ErrRequestCanceled)
+	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrDead.Error()), gerrors.ErrDead)
+	require.ErrorIs(t, asyncErrorFromString(gerrors.ErrSystemShuttingDown.Error()), gerrors.ErrSystemShuttingDown)
 	require.EqualError(t, asyncErrorFromString("boom"), "boom")
 }
 

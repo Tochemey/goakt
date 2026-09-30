@@ -1196,6 +1196,11 @@ func TestParseFailedPrecondition(t *testing.T) {
 		assert.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
 	})
 
+	t.Run("ErrSystemShuttingDown substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrSystemShuttingDown.Error())
+		assert.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+	})
+
 	t.Run("ErrClusterDisabled substring", func(t *testing.T) {
 		err := parseFailedPrecondition(gerrors.ErrClusterDisabled.Error())
 		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)

@@ -1426,6 +1426,11 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 
 	reply, err := x.localSendGrain(ctx, identity, message, timeout.AsDuration(), grainAsk)
 	if err != nil {
+		// refused because this node is shutting down
+		if errors.Is(err, gerrors.ErrSystemShuttingDown) {
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
+		}
+
 		logger.Errorf("failed to send to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
@@ -1506,6 +1511,11 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 
 	_, err = x.localSendGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
 	if err != nil {
+		// refused because this node is shutting down
+		if errors.Is(err, gerrors.ErrSystemShuttingDown) {
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
+		}
+
 		logger.Errorf("failed to send message to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}
@@ -1548,6 +1558,11 @@ func (x *actorSystem) remoteActivateGrainHandler(ctx context.Context, conn inet.
 	defer cancel()
 
 	if err := x.recreateGrain(ctx, grain); err != nil {
+		// refused because this node is shutting down
+		if errors.Is(err, gerrors.ErrSystemShuttingDown) {
+			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
+		}
+
 		logger.Errorf("failed to recreate grain=%s on host=%s port=%d: %v", grain.GetGrainId().GetValue(), host, port, err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}

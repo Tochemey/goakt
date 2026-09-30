@@ -15,9 +15,11 @@ When `Stop(ctx)` is called, the system:
 3. Stops datacenter services (if enabled)
 4. Snapshots cluster state (if clustered)
 5. Shuts down user actors depth-first (children before parents)
-6. Deactivates all grains
+6. Deactivates all grains, each after its message in progress
 7. Shuts down system actors
 8. Leaves cluster and stops remoting
+
+From the first step on, the node activates no new grains. See [Grain lifecycle](/grains/overview#during-shutdown).
 
 Shutdown is best-effort: it continues even if individual steps fail, collecting errors. A configurable `shutdownTimeout`
 (default: 3 minutes) bounds the total time.

@@ -31,6 +31,7 @@ import (
 	"strings"
 	"sync"
 	syncatomic "sync/atomic"
+	"testing"
 	"time"
 
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -2129,6 +2130,102 @@ func (x *MockScriptedGrain) OnDeactivate(context.Context, *GrainProps) error { r
 
 // OnReceive defers to the receive function.
 func (x *MockScriptedGrain) OnReceive(gctx *GrainContext) { x.receive(gctx) }
+
+// gatedGrainState is the state every MockGatedGrain instance shares. A fresh
+// activation is built as a zero value, so per-test state lives here.
+type gatedGrainState struct {
+	// entered receives a signal each time OnReceive starts.
+	entered chan struct{}
+	// gate is closed by release to let OnReceive return.
+	gate chan struct{}
+	// releaseOnce makes release safe to call more than once.
+	releaseOnce sync.Once
+	// activations counts OnActivate calls across instances.
+	activations syncatomic.Int32
+	// deactivations counts OnDeactivate calls across instances.
+	deactivations syncatomic.Int32
+	// deactivatedDuringReceive is set when OnDeactivate ran while OnReceive was waiting.
+	deactivatedDuringReceive syncatomic.Bool
+	// receivedAfterDeactivate is set when an instance handled a message after its OnDeactivate.
+	receivedAfterDeactivate syncatomic.Bool
+}
+
+// release closes the gate. It is safe to call more than once.
+func (x *gatedGrainState) release() {
+	x.releaseOnce.Do(func() { close(x.gate) })
+}
+
+// gatedGrainStatePtr holds the state of the running test.
+var gatedGrainStatePtr syncatomic.Pointer[gatedGrainState]
+
+// newGatedGrainState installs fresh shared state for MockGatedGrain and
+// releases the gate when the test ends.
+func newGatedGrainState(t *testing.T) *gatedGrainState {
+	t.Helper()
+
+	state := &gatedGrainState{entered: make(chan struct{}, 16), gate: make(chan struct{})}
+	gatedGrainStatePtr.Store(state)
+	t.Cleanup(state.release)
+	return state
+}
+
+// MockGatedGrain holds each message in OnReceive until the shared gate is
+// released, and records broken lifecycle promises in the shared state.
+type MockGatedGrain struct {
+	// deactivated is set when this instance's OnDeactivate runs.
+	deactivated syncatomic.Bool
+}
+
+// OnActivate counts the activation.
+func (x *MockGatedGrain) OnActivate(context.Context, *GrainProps) error {
+	gatedGrainStatePtr.Load().activations.Add(1)
+	return nil
+}
+
+// OnDeactivate records that this instance was deactivated.
+func (x *MockGatedGrain) OnDeactivate(context.Context, *GrainProps) error {
+	x.deactivated.Store(true)
+	gatedGrainStatePtr.Load().deactivations.Add(1)
+	return nil
+}
+
+// OnReceive signals entered, waits for the gate and replies.
+func (x *MockGatedGrain) OnReceive(gctx *GrainContext) {
+	state := gatedGrainStatePtr.Load()
+	if x.deactivated.Load() {
+		state.receivedAfterDeactivate.Store(true)
+	}
+
+	select {
+	case state.entered <- struct{}{}:
+	default:
+	}
+	<-state.gate
+
+	if x.deactivated.Load() {
+		state.deactivatedDuringReceive.Store(true)
+	}
+
+	gctx.Response(new(testpb.Reply))
+}
+
+// orderedGrainMessages receives, in handling order, the content of every
+// Reply message a MockOrderedGrain handles.
+var orderedGrainMessages = make(chan string, 16)
+
+// MockOrderedGrain records the order in which it handles Reply messages.
+type MockOrderedGrain struct {
+	MockNoopGrain
+}
+
+// OnReceive records a Reply's content and acknowledges.
+func (x *MockOrderedGrain) OnReceive(gctx *GrainContext) {
+	if reply, ok := gctx.Message().(*testpb.Reply); ok {
+		orderedGrainMessages <- reply.GetContent()
+	}
+
+	gctx.NoErr()
+}
 
 // activationProbe is the shared state MockActivationProbeGrain reports its activations through.
 type activationProbe struct {

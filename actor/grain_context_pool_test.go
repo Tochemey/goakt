@@ -169,6 +169,10 @@ func TestNextGrainContextShard_CoversAllShards(t *testing.T) {
 }
 
 func TestGrainContextPool_ReleaseReturnsToHomeShard(t *testing.T) {
+	// The shard ring is FIFO and process-global: drain what earlier tests
+	// left behind so the get below can only return the context released here.
+	drainGrainContextShard(6)
+
 	gctx := getGrainContext(6)
 	gctx.message = "message"
 	gctx.requestID = "request"
@@ -180,6 +184,17 @@ func TestGrainContextPool_ReleaseReturnsToHomeShard(t *testing.T) {
 
 	reused := getGrainContext(6)
 	assert.Same(t, gctx, reused)
+}
+
+// drainGrainContextShard empties shard of grainContextPool so a test asserting
+// on release-then-get reuse starts from an empty ring.
+func drainGrainContextShard(shard uint32) {
+	i := shard & grainContextPool.mask
+	for {
+		if grainContextPool.shards[i].pop() == nil {
+			return
+		}
+	}
 }
 
 // drainGrainChannelShard empties shard of pool so a test asserting on

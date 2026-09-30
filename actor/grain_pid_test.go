@@ -60,17 +60,419 @@ func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 }
 
 func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
-	pid := &grainPID{
-		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
-		actorSystem:        &actorSystem{logger: log.DiscardLogger},
-		grain:              &MockDeactivationFailingGrain{},
-		config:             newGrainConfig(),
-		passivationManager: nil,
+	system := newRequestTestSystem(t)
+
+	identity, err := system.GrainIdentity(context.Background(), "failing-grain", func(context.Context) (Grain, error) {
+		return &MockDeactivationFailingGrain{}, nil
+	}, WithGrainDeactivateAfter(time.Minute))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	// without reentrancy the decision also travels as a pill, and a failed
+	// OnDeactivate is logged on the turn instead of panicking
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+	require.True(t, pid.passivationTry("deactivate failure"))
+	require.Eventually(t, func() bool { return !pid.isActive() }, 2*time.Second, 10*time.Millisecond)
+}
+
+// newGatedGrainTestSystem starts an actor system with a short shutdown timeout,
+// so a test that fails while a gated grain is stuck still stops promptly.
+func newGatedGrainTestSystem(t *testing.T) *actorSystem {
+	t.Helper()
+
+	system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithShutdownTimeout(2*time.Second))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(context.Background()))
+	t.Cleanup(func() { _ = system.Stop(context.Background()) })
+
+	return system.(*actorSystem)
+}
+
+func TestGrainPassivationWaitsForTheMessageInProgress(t *testing.T) {
+	system := newGatedGrainTestSystem(t)
+	state := newGatedGrainState(t)
+	ctx := context.Background()
+
+	identity, err := GrainOf[*MockGatedGrain](ctx, system, "gated-grain", WithGrainDeactivateAfter(100*time.Millisecond))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	replied := make(chan error, 1)
+	go func() {
+		_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 5*time.Second)
+		replied <- err
+	}()
+	<-state.entered
+
+	// the idle deadline passes while OnReceive is still running
+	pause.For(500 * time.Millisecond)
+	require.Zero(t, state.deactivations.Load(), "OnDeactivate must not run during OnReceive")
+	require.True(t, pid.isActive())
+
+	state.release()
+	require.NoError(t, <-replied)
+
+	require.Eventually(t, func() bool { return state.deactivations.Load() == 1 }, 2*time.Second, 10*time.Millisecond)
+	require.False(t, state.deactivatedDuringReceive.Load())
+}
+
+func TestGrainMessagesQueuedBehindAPill(t *testing.T) {
+	passivationPill := func(_ context.Context, pid *grainPID) bool { return pid.passivationTry("idle") }
+	shutdownPill := func(ctx context.Context, pid *grainPID) bool { return pid.enqueuePoisonPill(ctx) != nil }
+	stashNonReentrant := WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant)))
+
+	cases := []struct {
+		name string
+		pill func(ctx context.Context, pid *grainPID) bool
+		opts []GrainOption
+		// stopping marks the node as shutting down before the pill is handled.
+		stopping bool
+		// wantErr is the error every queued ask gets; nil means they are answered.
+		wantErr error
+		// wantActivations and wantDeactivations are the lifecycle calls expected.
+		wantActivations   int32
+		wantDeactivations int32
+	}{
+		{name: "passivation pill skipped while messages wait", pill: passivationPill, wantActivations: 1},
+		{name: "passivation pill skipped while messages wait with reentrancy", pill: passivationPill, opts: []GrainOption{stashNonReentrant}, wantActivations: 1},
+		{name: "deactivation forwards queued messages to a fresh activation", pill: shutdownPill, wantActivations: 2, wantDeactivations: 1},
+		{name: "deactivation forwards queued messages to a fresh activation with reentrancy", pill: shutdownPill, opts: []GrainOption{stashNonReentrant}, wantActivations: 2, wantDeactivations: 1},
+		{name: "shutdown refuses queued messages", pill: shutdownPill, stopping: true, wantErr: gerrors.ErrSystemShuttingDown, wantActivations: 1, wantDeactivations: 1},
+		{name: "shutdown refuses queued messages with reentrancy", pill: shutdownPill, opts: []GrainOption{stashNonReentrant}, stopping: true, wantErr: gerrors.ErrSystemShuttingDown, wantActivations: 1, wantDeactivations: 1},
 	}
 
-	pid.activated.Store(true)
-	pid.onPoisonPill.Store(false)
-	require.False(t, pid.passivationTry("deactivate failure"))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			system := newGatedGrainTestSystem(t)
+			state := newGatedGrainState(t)
+			ctx := context.Background()
+
+			opts := append([]GrainOption{WithGrainDeactivateAfter(time.Minute)}, tc.opts...)
+			identity, err := GrainOf[*MockGatedGrain](ctx, system, "queued-behind-pill", opts...)
+			require.NoError(t, err)
+
+			pid, ok := system.grains.Get(identity.String())
+			require.True(t, ok)
+
+			// hold a turn open so the pill and two asks queue behind it
+			first := make(chan error, 1)
+			go func() {
+				_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 5*time.Second)
+				first <- err
+			}()
+			<-state.entered
+
+			// queuing the pill must not wait for the message in progress
+			queuedPill := make(chan bool, 1)
+			go func() { queuedPill <- tc.pill(ctx, pid) }()
+
+			select {
+			case ok := <-queuedPill:
+				require.True(t, ok)
+			case <-time.After(2 * time.Second):
+				state.release()
+				t.Fatal("the pill waited for the message in progress")
+			}
+
+			queued := make(chan error, 2)
+			for range 2 {
+				go func() {
+					_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 5*time.Second)
+					queued <- err
+				}()
+			}
+
+			require.Eventually(t, func() bool {
+				return (*embeddedGrainMailbox)(pid).Len() == 3
+			}, 2*time.Second, 10*time.Millisecond)
+
+			// the idle deadline has passed by the time the pill is handled
+			pid.latestReceiveTimeNano.Store(time.Now().Add(-2 * time.Minute).UnixNano())
+			if tc.stopping {
+				system.shuttingDown.Store(true)
+				t.Cleanup(func() { system.shuttingDown.Store(false) })
+			}
+
+			state.release()
+
+			require.NoError(t, <-first)
+			for range 2 {
+				err := <-queued
+				if tc.wantErr == nil {
+					require.NoError(t, err)
+					continue
+				}
+
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+
+			require.Equal(t, tc.wantActivations, state.activations.Load())
+			require.Equal(t, tc.wantDeactivations, state.deactivations.Load())
+			require.False(t, state.receivedAfterDeactivate.Load(), "a deactivated instance must not handle queued messages")
+		})
+	}
+}
+
+// deactivatedGrainFixture activates a MockGrain, deactivates it, and returns
+// the system, the grain identity and the deactivated instance.
+func deactivatedGrainFixture(t *testing.T) (*actorSystem, *GrainIdentity, *grainPID) {
+	t.Helper()
+
+	system := newGatedGrainTestSystem(t)
+	ctx := context.Background()
+
+	identity, err := GrainOf[*MockGrain](ctx, system, "late-message-grain")
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+	require.NoError(t, pid.deactivate(ctx))
+	return system, identity, pid
+}
+
+// sendLateMessage hands message to the deactivated instance as its mailbox would.
+func sendLateMessage(ctx context.Context, system *actorSystem, identity *GrainIdentity, pid *grainPID, message any, mode grainContextMode) *GrainContext {
+	grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, message, mode)
+	pid.handleGrainContext(grainContext, time.Now())
+	return grainContext
+}
+
+func TestGrainLateMessageForwarding(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("ask is answered by a fresh activation", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainAsk)
+		response := grainContext.response
+		pid.handleGrainContext(grainContext, time.Now())
+
+		select {
+		case reply := <-response:
+			require.IsType(t, new(testpb.Reply), reply)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the forwarded ask was not answered")
+		}
+
+		fresh, ok := system.grains.Get(identity.String())
+		require.True(t, ok)
+		require.NotSame(t, pid, fresh)
+		require.True(t, fresh.isActive())
+	})
+
+	t.Run("ask failure reaches the caller", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestLogin), grainAsk)
+		response := grainContext.response
+		pid.handleGrainContext(grainContext, time.Now())
+
+		select {
+		case reply := <-response:
+			replyErr, ok := reply.(grainReplyError)
+			require.True(t, ok)
+			require.ErrorIs(t, replyErr.err, gerrors.ErrUnhanledMessage)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the forwarded ask was not answered")
+		}
+	})
+
+	t.Run("tell acknowledgement reaches the caller", func(t *testing.T) {
+		cases := []struct {
+			name    string
+			message any
+			wantErr error
+		}{
+			{"success", new(testpb.TestSend), nil},
+			{"failure", new(testpb.TestLogin), gerrors.ErrUnhanledMessage},
+		}
+
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				system, identity, pid := deactivatedGrainFixture(t)
+				grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, tc.message, grainTell)
+				ack := grainContext.err
+				pid.handleGrainContext(grainContext, time.Now())
+
+				select {
+				case err := <-ack:
+					if tc.wantErr == nil {
+						require.NoError(t, err)
+						return
+					}
+
+					require.ErrorIs(t, err, tc.wantErr)
+				case <-time.After(2 * time.Second):
+					t.Fatal("the forwarded tell was not acknowledged")
+				}
+			})
+		}
+	})
+
+	t.Run("one-way message reaches a fresh activation", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		sendLateMessage(ctx, system, identity, pid, new(testpb.TestSend), grainOneWay)
+
+		require.Eventually(t, func() bool {
+			fresh, ok := system.grains.Get(identity.String())
+			return ok && fresh != pid && fresh.isActive()
+		}, 2*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("one-way message that cannot be forwarded becomes a deadletter", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		consumer, err := system.Subscribe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = system.Unsubscribe(consumer) })
+
+		// the fresh activation fails because the kind is no longer registered
+		require.NoError(t, system.DeregisterGrainKind(ctx, &MockGrain{}))
+		sendLateMessage(ctx, system, identity, pid, new(testpb.TestSend), grainOneWay)
+
+		require.Eventually(t, func() bool {
+			for message := range consumer.Iterator() {
+				if deadletter, ok := message.Payload().(*Deadletter); ok && deadletter.Receiver().Name() == identity.String() {
+					return true
+				}
+			}
+			return false
+		}, 2*time.Second, 50*time.Millisecond)
+	})
+
+	t.Run("shutdown refuses the late message", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		system.shuttingDown.Store(true)
+		t.Cleanup(func() { system.shuttingDown.Store(false) })
+
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainAsk)
+		response := grainContext.response
+		pid.handleGrainContext(grainContext, time.Now())
+
+		reply := <-response
+		replyErr, ok := reply.(grainReplyError)
+		require.True(t, ok)
+		require.ErrorIs(t, replyErr.err, gerrors.ErrSystemShuttingDown)
+	})
+
+	t.Run("late messages keep their arrival order", func(t *testing.T) {
+		system := newGatedGrainTestSystem(t)
+		identity, err := GrainOf[*MockOrderedGrain](ctx, system, "ordered-grain")
+		require.NoError(t, err)
+
+		pid, ok := system.grains.Get(identity.String())
+		require.True(t, ok)
+		require.NoError(t, pid.deactivate(ctx))
+
+		for _, content := range []string{"first", "second", "third"} {
+			sendLateMessage(ctx, system, identity, pid, testpb.Reply_builder{Content: content}.Build(), grainOneWay)
+		}
+
+		for _, want := range []string{"first", "second", "third"} {
+			select {
+			case got := <-orderedGrainMessages:
+				require.Equal(t, want, got)
+			case <-time.After(2 * time.Second):
+				t.Fatalf("late message %q was not delivered", want)
+			}
+		}
+	})
+}
+
+func TestGrainLateMessageEnvelopeForwardFailureReachesTheCaller(t *testing.T) {
+	system := newGatedGrainTestSystem(t)
+	state := newGatedGrainState(t)
+	ctx := context.Background()
+
+	stashNonReentrant := WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant)))
+	identity, err := GrainOf[*MockGatedGrain](ctx, system, "envelope-forward-failure", WithGrainDeactivateAfter(time.Minute), stashNonReentrant)
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 5*time.Second)
+		first <- err
+	}()
+	<-state.entered
+
+	require.NotNil(t, pid.enqueuePoisonPill(ctx))
+
+	queued := make(chan error, 1)
+	go func() {
+		_, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 5*time.Second)
+		queued <- err
+	}()
+
+	require.Eventually(t, func() bool {
+		return (*embeddedGrainMailbox)(pid).Len() == 2
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// the fresh activation fails because the kind is no longer registered
+	require.NoError(t, system.DeregisterGrainKind(ctx, &MockGatedGrain{}))
+	state.release()
+
+	require.NoError(t, <-first)
+	err = <-queued
+	require.Error(t, err)
+	require.NotErrorIs(t, err, gerrors.ErrDead)
+}
+
+func TestGrainLateMessageSendTimeout(t *testing.T) {
+	t.Run("uses the caller's timeout first", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
+		late := &GrainContext{ctx: ctx, timeout: 30 * time.Second}
+		require.Equal(t, 30*time.Second, late.lateSendTimeout())
+	})
+
+	t.Run("uses the time left on the caller's context", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+
+		timeout := (&GrainContext{ctx: ctx}).lateSendTimeout()
+		require.Greater(t, timeout, 50*time.Second)
+		require.LessOrEqual(t, timeout, time.Minute)
+	})
+
+	t.Run("falls back to the default grain request timeout", func(t *testing.T) {
+		require.Equal(t, DefaultGrainRequestTimeout, (&GrainContext{ctx: context.Background()}).lateSendTimeout())
+	})
+}
+
+func TestGrainLateAskHonorsTheCallerTimeout(t *testing.T) {
+	system := newGatedGrainTestSystem(t)
+	newGatedGrainState(t)
+	ctx := context.Background()
+
+	identity, err := GrainOf[*MockGatedGrain](ctx, system, "late-ask-timeout")
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+	require.NoError(t, pid.deactivate(ctx))
+
+	// the fresh activation holds the message at the gate, so the forward can
+	// only end on the caller's timeout, which is far shorter than the default
+	grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainAsk)
+	grainContext.timeout = 100 * time.Millisecond
+	response := grainContext.response
+	started := time.Now()
+	pid.handleGrainContext(grainContext, time.Now())
+
+	select {
+	case reply := <-response:
+		replyErr, ok := reply.(grainReplyError)
+		require.True(t, ok)
+		require.ErrorIs(t, replyErr.err, gerrors.ErrRequestTimeout)
+		require.Less(t, time.Since(started), DefaultGrainRequestTimeout)
+	case <-time.After(DefaultGrainRequestTimeout):
+		t.Fatal("the forwarded ask did not honor the caller's timeout")
+	}
 }
 
 func TestGrainPIDStartPassivationSkipsWhenAutoDisabled(t *testing.T) {

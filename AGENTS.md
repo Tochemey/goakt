@@ -8,6 +8,7 @@ This repository (<https://github.com/Tochemey/goakt>) enforces strict contributi
 * **Require an Issue:** DO NOT create a Pull Request unless there is an existing, open, and approved GitHub Issue that explicitly requests this work.
 * **No "Drive-By" Refactoring:** Do not submit unsolicited PRs that only contain minor stylistic changes, variable renames, or typo fixes across the codebase unless tied to an approved `chore` issue.
 * **No Hallucinated URLs:** Do not include fabricated links, hallucinated documentation, or fake GitHub usernames in the PR description or code comments. Please double-check any link, quote or code block that is included into the PR.
+* **No AI Authorship:** Do not credit an AI tool, model, or bot as an author anywhere in a contribution. This includes `Co-Authored-By` commit trailers (e.g. `Co-Authored-By: Claude ...`), "Generated with ..." footers in PR descriptions, and any other attribution to an AI tool in commits, PR descriptions, issues, code, or comments. If your tooling adds such lines by default, remove them before committing and before opening the PR. The human who submits the PR is its sole author and must be able to explain and defend every line of it in review. PRs that credit an AI tool as an author will not be reviewed until the attribution is removed.
 
 ## 2. Contribution Requirements
 
@@ -60,3 +61,4 @@ The site under `docs/` is a [Mintlify](https://mintlify.com) project (`docs.json
 2. Write code matching GoAkt standards, including unit tests.
 3. Run `make lint` and `make test`; run `make protogen` / `make proto-lint` only if `.proto` files changed, and `make mock` only if mocked interfaces or `.mockery.yml` changed.
 4. Format the PR title properly (e.g., `fix: resolve panic in remote scheduler on rebalance (#1234)`).
+5. Remove any AI authorship from commits and the PR description (`Co-Authored-By` trailers, "Generated with ..." footers).

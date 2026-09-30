@@ -3951,6 +3951,10 @@ func asyncErrorFromString(err string) error {
 		return gerrors.ErrRequestCanceled
 	case gerrors.ErrUnhanledMessage.Error():
 		return gerrors.ErrUnhanledMessage
+	case gerrors.ErrDead.Error():
+		return gerrors.ErrDead
+	case gerrors.ErrSystemShuttingDown.Error():
+		return gerrors.ErrSystemShuttingDown
 	default:
 		// Unhandled replies carry the offending message type behind the
 		// sentinel; restore the identity so errors.Is keeps working across the

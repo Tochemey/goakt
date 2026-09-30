@@ -166,10 +166,48 @@ targets). Methods, failure semantics, options, and a complete example are on the
 
 ## Grain lifecycle
 
-1. First message arrives → framework activates the grain (calls `OnActivate`)
-2. Messages are routed to the grain's `OnReceive`
-3. After idle timeout (passivation) → grain is deactivated (`OnDeactivate`)
-4. Next message → grain is reactivated
+The framework keeps three promises to a grain: at most one activation per identity at a time, one message at a time,
+and `OnDeactivate` last.
+
+<Warning>
+  `OnDeactivate` runs when a grain is passivated or its node shuts down cleanly. It does not run when a node crashes or
+  is killed. Do not rely on `OnDeactivate` as the only place a grain saves its state.
+</Warning>
+
+1. **Activation.** The first message for an identity activates the grain and calls `OnActivate`. If `OnActivate` fails,
+   the caller gets the error.
+2. **Messages.** Each message runs through `OnReceive`, one at a time, in the order it reached the mailbox.
+3. **Passivation.** Once the grain has been idle for its deactivation timeout (`WithGrainDeactivateAfter`), it is
+   deactivated and `OnDeactivate` runs.
+   - Passivation waits for the message in progress to finish. `OnDeactivate` never runs during `OnReceive`.
+   - Passivation is skipped when messages are waiting in the mailbox, because the grain is not idle. The idle timer
+     starts again.
+   - A reentrant grain is not passivated while a request is in flight. See [Reentrancy](/grains/reentrancy).
+4. **Messages that arrive during deactivation** are not handled by the deactivating instance. Once `OnDeactivate` has
+   finished, they are sent to a fresh activation in arrival order, and their callers get the reply from it. A caller
+   that reached the instance in the last instant before it deactivated can still get `ErrDead`; sending again reaches
+   the fresh activation.
+5. **Reactivation.** After passivation, the next message for the identity activates the grain again, on a new
+   instance. While the grain is active, a message goes straight to it and `GrainOf` activates nothing.
+
+### During shutdown
+
+When the actor system stops, every active grain is deactivated after its message in progress, and the node activates
+no new grains from the moment shutdown begins:
+
+- Local calls to `GrainOf`, `TellGrain` and `AskGrain` fail.
+- Requests from other nodes are refused with `ErrSystemShuttingDown` when they would activate a grain, while grains
+  that are still active keep handling them until they are deactivated.
+- Messages queued behind a grain's deactivation are refused with `ErrSystemShuttingDown` instead of being sent to a
+  fresh activation.
+
+In a cluster, `GrainOf` and `GrainIdentity` treat that refusal as a sign the node is leaving and activate the grain on
+a live node.
+
+<Tip>
+  A message refused with `ErrSystemShuttingDown` was not processed, so it is safe to send it again. During a rolling
+  restart, retry such calls: in a cluster the retry reaches the grain on a live node.
+</Tip>
 
 ## Activation guarantee
 
@@ -177,10 +215,16 @@ In cluster mode, the system claims grain ownership in the cluster registry using
 before activating locally. If another node already owns the grain, requests are forwarded to that owner. If local
 activation fails after a successful claim, the claim is removed.
 
-A failed request to a remote owner never displaces that owner on its own. An activation error reported by the owner,
-or a request abandoned by the caller's own context, is returned to the caller and the registry entry is kept. Only a
-transport failure, where the owner never answered, makes the activating node consult the cluster membership, and the
-entry is released, letting the grain re-activate elsewhere, only if the owner's node has left the cluster.
+A failed request to a remote owner rarely displaces that owner. An activation error reported by the owner, or a
+request abandoned by the caller's own context, is returned to the caller and the registry entry is kept. The entry is
+released, letting the grain re-activate elsewhere, in two cases only:
+
+- the owner answers that it is shutting down or has shut down;
+- a transport failure occurs, where the owner never answered, and the cluster membership confirms the owner's node has
+  left.
+
+A node that is shutting down takes no new grains (see [During shutdown](#during-shutdown)). A grain activation that
+finishes after the shutdown began is rolled back, so its registry entry does not outlive the node.
 
 A claim made on behalf of a remote peer follows the same rule. When the peer rejects the activation, the claim is
 rolled back so the next activation can pick another node. When the outcome is unknown, after a transport failure or an

@@ -35,6 +35,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/tochemey/goakt/v4/discovery"
@@ -2104,6 +2105,100 @@ func TestRemoteActivateGrainHandler(t *testing.T) {
 		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_INVALID_ARGUMENT)
+	})
+}
+
+func TestRemoteGrainHandlersOnAShuttingDownNode(t *testing.T) {
+	const host = "127.0.0.1"
+	ctx := context.Background()
+
+	startShuttingDownSystem := func(t *testing.T) *actorSystem {
+		port := inet.Get(1)[0]
+		sys, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, port)), WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		impl := sys.(*actorSystem)
+		require.NoError(t, impl.Start(ctx))
+		require.NoError(t, impl.RegisterGrainKind(ctx, &MockGrain{}))
+		t.Cleanup(func() {
+			impl.shuttingDown.Store(false)
+			_ = impl.Stop(ctx)
+		})
+		return impl
+	}
+
+	wireGrain := func(sys *actorSystem, identity *GrainIdentity) *internalpb.Grain {
+		return internalpb.Grain_builder{
+			Host:    host,
+			Port:    int32(sys.Port()),
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		}.Build()
+	}
+
+	requireRefused := func(t *testing.T, resp proto.Message) {
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+		require.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrSystemShuttingDown.Error())
+	}
+
+	t.Run("activate refuses a new grain", func(t *testing.T) {
+		sys := startShuttingDownSystem(t)
+		identity := newGrainIdentity(&MockGrain{}, "shutting-down-activate")
+		sys.shuttingDown.Store(true)
+
+		req := internalpb.RemoteActivateGrainRequest_builder{Grain: wireGrain(sys, identity)}.Build()
+		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireRefused(t, resp)
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok)
+	})
+
+	t.Run("activate still serves an already-active grain", func(t *testing.T) {
+		sys := startShuttingDownSystem(t)
+		identity, err := GrainOf[*MockGrain](ctx, sys, "shutting-down-active")
+		require.NoError(t, err)
+		sys.shuttingDown.Store(true)
+
+		req := internalpb.RemoteActivateGrainRequest_builder{Grain: wireGrain(sys, identity)}.Build()
+		resp, err := sys.remoteActivateGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		require.IsType(t, new(internalpb.RemoteActivateGrainResponse), resp)
+	})
+
+	t.Run("tell refuses a grain that is not active", func(t *testing.T) {
+		sys := startShuttingDownSystem(t)
+		identity := newGrainIdentity(&MockGrain{}, "shutting-down-tell")
+		sys.shuttingDown.Store(true)
+
+		message := new(testpb.TestSend)
+		payload, err := sys.remoting.Serializer(message).Serialize(message)
+		require.NoError(t, err)
+
+		req := internalpb.RemoteTellGrainRequest_builder{Grain: wireGrain(sys, identity), Message: payload, OneWay: true}.Build()
+		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireRefused(t, resp)
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok)
+	})
+
+	t.Run("ask refuses a grain that is not active", func(t *testing.T) {
+		sys := startShuttingDownSystem(t)
+		identity := newGrainIdentity(&MockGrain{}, "shutting-down-ask")
+		sys.shuttingDown.Store(true)
+
+		message := new(testpb.TestReply)
+		payload, err := sys.remoting.Serializer(message).Serialize(message)
+		require.NoError(t, err)
+
+		req := internalpb.RemoteAskGrainRequest_builder{Grain: wireGrain(sys, identity), Message: payload, RequestTimeout: durationpb.New(time.Second)}.Build()
+		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireRefused(t, resp)
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok)
 	})
 }
 
