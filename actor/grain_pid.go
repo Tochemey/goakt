@@ -965,6 +965,16 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 // turn's shared activity timestamp.
 func (pid *grainPID) handleGrainContext(grainContext *GrainContext, now time.Time) {
 	defer pid.recovery(grainContext)
+
+	// A passivation pill earlier in this turn may have deactivated the grain
+	// while messages were still queued behind it. Those messages must not
+	// reach an instance whose OnDeactivate already ran: refuse them so the
+	// caller retries against a fresh activation.
+	if !pid.isActive() {
+		grainContext.Err(gerrors.ErrDead)
+		return
+	}
+
 	pid.processedCount.Inc()
 	pid.markActivity(now)
 	pid.grain.OnReceive(grainContext)
@@ -1204,26 +1214,16 @@ func (pid *grainPID) passivationTry(reason string) bool {
 		return false
 	}
 
-	// A reentrancy-capable grain serializes the deactivation decision with its
-	// turn: deciding here, on the manager goroutine, is check-then-act against
-	// a concurrently running turn that can register a request after the check.
-	// The pill travels through the mailbox so the decision and request
-	// registration execute on the same serialized turn stream.
-	if pid.reentrancy.Load() != nil {
-		return pid.enqueuePassivationPill()
-	}
-
+	// The deactivation decision is serialized with the grain's turn: deciding
+	// here, on the manager goroutine, is check-then-act against a
+	// concurrently running turn, which may be inside OnReceive or, for a
+	// reentrancy-capable grain, register a request after the check. The pill
+	// travels through the mailbox so the decision executes on the same
+	// serialized turn stream, after the message in progress.
 	if pid.getLogger().Enabled(log.DebugLevel) {
-		pid.getLogger().Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
+		pid.getLogger().Debugf("grain=%s reason=%s passivation requested", pid.identity.String(), reason)
 	}
-
-	if err := pid.deactivate(context.Background()); err != nil {
-		if pid.getLogger().Enabled(log.ErrorLevel) {
-			pid.getLogger().Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
-		}
-		return false
-	}
-	return true
+	return pid.enqueuePassivationPill()
 }
 
 // enqueuePassivationPill hands the deactivation decision to the grain's turn

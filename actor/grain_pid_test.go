@@ -59,18 +59,20 @@ func TestGrainPIDPassivationTrySkipsWhenInactive(t *testing.T) {
 	require.False(t, pid.passivationTry("no-op"))
 }
 
-func TestGrainPIDPassivationTryFailsOnDeactivateError(t *testing.T) {
+func TestGrainPIDPassivationPillDeactivatesDespiteDeactivateError(t *testing.T) {
 	pid := &grainPID{
 		identity:           &GrainIdentity{kind: "Kind", name: "Name"},
 		actorSystem:        &actorSystem{logger: log.DiscardLogger},
 		grain:              &MockDeactivationFailingGrain{},
-		config:             newGrainConfig(),
+		config:             newGrainConfig(WithGrainDeactivateAfter(time.Millisecond)),
 		passivationManager: nil,
 	}
 
 	pid.activated.Store(true)
 	pid.onPoisonPill.Store(false)
-	require.False(t, pid.passivationTry("deactivate failure"))
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Second).UnixNano())
+	pid.handlePassivationPill()
+	require.False(t, pid.isActive())
 }
 
 func TestGrainPIDStartPassivationSkipsWhenAutoDisabled(t *testing.T) {
