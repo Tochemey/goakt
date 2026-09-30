@@ -1124,6 +1124,13 @@ type actorSystem struct {
 	// dispatcher at construction time. Set via WithThroughputBudget.
 	dispatcherThroughput int
 
+	// grainDefaults holds the grain options declared per kind with
+	// WithGrainDefaults, keyed by the kind's name. They apply wherever a
+	// grain of the kind is configured: under the options of a GrainOf call,
+	// under the options a registry record carries, and alone for a bare
+	// send that creates the grain.
+	grainDefaults map[string][]GrainOption
+
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 

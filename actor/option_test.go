@@ -266,6 +266,53 @@ func TestWithDefaultSupervisor(t *testing.T) {
 	})
 }
 
+func TestWithGrainDefaults(t *testing.T) {
+	t.Run("declares the options of a kind", func(t *testing.T) {
+		system := new(actorSystem)
+		WithGrainDefaults[*MockGrain](WithGrainMailboxCapacity(2), WithGrainDeactivateAfter(time.Minute)).Apply(system)
+
+		kind := newGrainIdentity(new(MockGrain), "any").Kind()
+		config := newGrainConfig(system.grainKindOptions(kind)...)
+		assert.EqualValues(t, 2, config.capacity)
+		assert.Equal(t, time.Minute, config.deactivateAfter)
+	})
+
+	t.Run("a call's options win over the kind's", func(t *testing.T) {
+		system := new(actorSystem)
+		WithGrainDefaults[*MockGrain](WithGrainMailboxCapacity(2), WithGrainDeactivateAfter(time.Minute)).Apply(system)
+
+		kind := newGrainIdentity(new(MockGrain), "any").Kind()
+		config := newGrainConfig(system.grainKindOptions(kind, WithGrainMailboxCapacity(8))...)
+		assert.EqualValues(t, 8, config.capacity)
+		assert.Equal(t, time.Minute, config.deactivateAfter)
+	})
+
+	t.Run("the last declaration of a kind wins", func(t *testing.T) {
+		system := new(actorSystem)
+		WithGrainDefaults[*MockGrain](WithGrainMailboxCapacity(2)).Apply(system)
+		WithGrainDefaults[*MockGrain](WithGrainMailboxCapacity(4)).Apply(system)
+
+		kind := newGrainIdentity(new(MockGrain), "any").Kind()
+		config := newGrainConfig(system.grainKindOptions(kind)...)
+		assert.EqualValues(t, 4, config.capacity)
+	})
+
+	t.Run("another kind is not affected", func(t *testing.T) {
+		system := new(actorSystem)
+		WithGrainDefaults[*MockGrain](WithGrainMailboxCapacity(2)).Apply(system)
+
+		kind := newGrainIdentity(new(MockScriptedGrain), "any").Kind()
+		config := newGrainConfig(system.grainKindOptions(kind)...)
+		assert.EqualValues(t, 0, config.capacity)
+	})
+
+	t.Run("a kind that is not a pointer to a struct is ignored", func(t *testing.T) {
+		system := new(actorSystem)
+		WithGrainDefaults[Grain](WithGrainMailboxCapacity(2)).Apply(system)
+		assert.Empty(t, system.grainDefaults)
+	})
+}
+
 func TestWithThroughputBudget(t *testing.T) {
 	t.Run("When value is positive it overrides the default", func(t *testing.T) {
 		system := new(actorSystem)
