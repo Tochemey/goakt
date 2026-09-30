@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -31,8 +32,11 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	"github.com/tochemey/goakt/v4/hash"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/size"
+	"github.com/tochemey/goakt/v4/log"
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
+	"github.com/tochemey/goakt/v4/remote"
 )
 
 func TestClusterConfig(t *testing.T) {
@@ -58,6 +62,7 @@ func TestClusterConfig(t *testing.T) {
 			WithShutdownTimeout(10*time.Second).
 			WithReadTimeout(10*time.Second).
 			WithBootstrapTimeout(10*time.Second).
+			WithStoreDir("/var/lib/goakt").
 			WithClusterStateSyncInterval(10*time.Second).
 			WithGrainActivationBarrier(5*time.Second).
 			WithClusterBalancerInterval(5*time.Second).
@@ -75,6 +80,7 @@ func TestClusterConfig(t *testing.T) {
 		require.NoError(t, config.Validate())
 		assert.EqualValues(t, 3220, config.discoveryPort)
 		assert.EqualValues(t, 3222, config.peersPort)
+		assert.Equal(t, "/var/lib/goakt", config.storeDir)
 		assert.EqualValues(t, 1, config.minimumPeersQuorum)
 		assert.EqualValues(t, 1, config.replicaCount)
 		assert.EqualValues(t, 1, config.readQuorum)
@@ -212,4 +218,40 @@ func TestClusterConfig(t *testing.T) {
 		assert.EqualValues(t, 1, config.writeQuorum)
 		assert.EqualValues(t, 1, config.minimumPeersQuorum)
 	})
+}
+
+func TestClusterConfig_WithStoreDirStartsWithoutAHomeDirectory(t *testing.T) {
+	// a pod with a read-only root filesystem, or a sandbox: no writable home
+	t.Setenv("HOME", "/dev/null")
+	t.Setenv("USERPROFILE", "/dev/null")
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	ports := dynaport.Get(3)
+	discoveryPort, remotingPort, peersPort := ports[0], ports[1], ports[2]
+	provider := createNATsProvider(srv.Addr().String())(t, "127.0.0.1", discoveryPort)
+	dir := filepath.Join(t.TempDir(), "goakt")
+	clusterConfig := NewClusterConfig().
+		WithKinds(new(MockActor)).
+		WithDiscoveryPort(discoveryPort).
+		WithPeersPort(peersPort).
+		WithReplicaCount(1).
+		WithMinimumPeersQuorum(1).
+		WithBootstrapTimeout(5 * time.Second).
+		WithStoreDir(dir).
+		WithDiscovery(provider)
+
+	sys, err := NewActorSystem("storeDir",
+		WithLogger(log.DiscardLogger),
+		WithRemote(remote.NewConfig("127.0.0.1", remotingPort)),
+		WithCluster(clusterConfig),
+	)
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	files, err := filepath.Glob(filepath.Join(dir, "peers-*.db"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
 }

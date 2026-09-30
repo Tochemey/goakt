@@ -59,7 +59,7 @@ func useTempHome(t *testing.T) {
 }
 
 // withBoltPathGenerator swaps the package bolt path generator for fn and restores it when the test ends.
-func withBoltPathGenerator(t *testing.T, fn func() (string, error)) {
+func withBoltPathGenerator(t *testing.T, fn func(string) (string, error)) {
 	t.Helper()
 	original := boltPathGenerator
 	boltPathGenerator = fn

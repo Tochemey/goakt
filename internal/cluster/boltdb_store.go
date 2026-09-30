@@ -54,7 +54,7 @@ var (
 	defaultBoltOptions = &bbolt.Options{Timeout: boltTimeout, NoGrowSync: true}
 	errBoltStoreClosed = errors.New("cluster: boltdb store is closed")
 	// boltPathGenerator allows tests to override BoltDB path generation.
-	boltPathGenerator = defaultBoltPath
+	boltPathGenerator = boltPath
 )
 
 // BoltStore implements Store using go.etcd.io/bbolt for durable persistence.
@@ -77,13 +77,14 @@ type BoltStore struct {
 var _ Store = (*BoltStore)(nil)
 
 // NewBoltStore opens (or creates) a BoltDB-backed Store. Each invocation reserves
-// a unique database file rooted under the user's home directory
-// ("~/.goakt/cluster/peers-*.db"), allowing multiple stores to coexist across
-// processes without clashing on file locks. The database is configured with
-// production defaults (short open timeout, NoGrowSync). Closing the store closes
-// the underlying Bolt database and deletes the backing file.
-func NewBoltStore() (Store, error) {
-	path, err := boltPathGenerator()
+// a unique database file ("peers-*.db") under dir, or, when dir is empty, under
+// the user's home directory ("~/.goakt/cluster"), allowing multiple stores to
+// coexist across processes without clashing on file locks. The database is
+// configured with production defaults (short open timeout, NoGrowSync).
+// Closing the store closes the underlying Bolt database and deletes the
+// backing file.
+func NewBoltStore(dir string) (Store, error) {
+	path, err := boltPathGenerator(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -245,12 +246,16 @@ func peerKey(peer *internalpb.PeerState) string {
 	return net.JoinHostPort(host, port)
 }
 
-func defaultBoltPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cluster: determine user home directory: %w", err)
+// boltPath reserves a database file under dir, or under the default
+// directory in the user's home when dir is empty.
+func boltPath(dir string) (string, error) {
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cluster: determine user home directory: %w", err)
+		}
+		dir = filepath.Join(home, boltFolder, boltClusterFolder)
 	}
-	dir := filepath.Join(home, boltFolder, boltClusterFolder)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("cluster: unable to create boltdb directory: %w", err)
 	}

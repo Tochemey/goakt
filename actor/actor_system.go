@@ -3217,7 +3217,7 @@ func (x *actorSystem) setupCluster() error {
 	)
 
 	var err error
-	x.clusterStore, err = cluster.NewBoltStore()
+	x.clusterStore, err = cluster.NewBoltStore(x.clusterConfig.storeDir)
 	if err != nil {
 		x.logger.Errorf("failed to initialize cluster store: %v (hint: check disk space, BoltDB path permissions)", err)
 		return err

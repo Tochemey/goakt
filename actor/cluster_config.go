@@ -96,6 +96,9 @@ type ClusterConfig struct {
 	// networkProfile is the network the cluster nodes share. It tunes failure
 	// detection for that network.
 	networkProfile NetworkProfile
+	// storeDir is where the node keeps its cluster store; empty means the
+	// default under the user's home directory.
+	storeDir string
 }
 
 type grainActivationBarrierConfig struct {
@@ -301,6 +304,23 @@ func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfi
 // Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithBootstrapTimeout(timeout time.Duration) *ClusterConfig {
 	x.bootstrapTimeout = timeout
+	return x
+}
+
+// WithStoreDir sets the directory the node keeps its cluster store in: the
+// file that holds the node's peer state while it runs. The file is created on
+// start and deleted on stop. The directory is created when missing. By default
+// it is "~/.goakt/cluster", which fails on a pod with a read-only root
+// filesystem, in a sandbox without a home directory, or wherever the home
+// directory is not writable; point it at a writable volume there.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithStoreDir("/var/lib/goakt")
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithStoreDir(dir string) *ClusterConfig {
+	x.storeDir = dir
 	return x
 }
 
