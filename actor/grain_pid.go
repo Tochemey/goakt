@@ -445,6 +445,17 @@ func (pid *grainPID) enqueueMessage(grainContext *GrainContext) error {
 	return nil
 }
 
+// enqueueSystemMessage appends a system message to the grain's mailbox,
+// past the capacity of a bounded one: it never rejects.
+func (pid *grainPID) enqueueSystemMessage(grainContext *GrainContext) {
+	if pid.boundedMailbox != nil {
+		pid.boundedMailbox.EnqueueSystem(grainContext)
+		return
+	}
+
+	(*embeddedGrainMailbox)(pid).Enqueue(grainContext)
+}
+
 // dequeueMessage pops the next user message, or nil when the mailbox is empty.
 // Consumer turn only.
 func (pid *grainPID) dequeueMessage() *GrainContext {
@@ -1253,9 +1264,9 @@ func (pid *grainPID) enqueuePassivationPill() bool {
 // the channel its acknowledgment arrives on, the same Tell ack channel every
 // grainTell context carries. Unlike receive it does not check that the grain
 // is active: handlePoisonPill acknowledges an already deactivated grain
-// itself, so the caller always gets an answer, and a rejected enqueue (full
-// bounded mailbox) is acknowledged with its error right away. Shutdown uses
-// it to wait for OnDeactivate without a per-grain channel. The caller returns
+// itself, so the caller always gets an answer, and the pill goes past the
+// capacity of a bounded mailbox, so it is never rejected. Shutdown uses it
+// to wait for OnDeactivate without a per-grain channel. The caller returns
 // the channel to its shard with putGrainErrorChannel once the ack arrived,
 // and abandons it when it stopped waiting.
 func (pid *grainPID) enqueuePoisonPill(ctx context.Context) chan error {
@@ -1267,11 +1278,11 @@ func (pid *grainPID) enqueuePoisonPill(ctx context.Context) chan error {
 	// grainContext.err is not safe to touch afterwards.
 	ack := grainContext.err
 
-	if err := pid.enqueueMessage(grainContext); err != nil {
-		grainContext.Err(err)
-		releaseGrainContext(grainContext)
-		return ack
-	}
+	// The pill is a system message: a full bounded mailbox is backpressure,
+	// not a reason to skip OnDeactivate and drop the queued messages, so it
+	// goes past the capacity and the grain drains what is queued before it.
+	// A grain that never drains is bounded by the shutdown context instead.
+	pid.enqueueSystemMessage(grainContext)
 
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)
