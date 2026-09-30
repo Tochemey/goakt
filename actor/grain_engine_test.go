@@ -3739,3 +3739,54 @@ func TestTellGrainOneWayDeadletters(t *testing.T) {
 		require.False(t, ok, "neither an acknowledged tell nor a nil error must produce a deadletter")
 	}
 }
+
+// cborAskRequest is a plain Go request a grain answers with a proto message.
+type cborAskRequest struct {
+	Amount int
+}
+
+// mixedReplyGrain answers a CBOR request with a proto reply.
+type mixedReplyGrain struct {
+	MockNoopGrain
+}
+
+func (g *mixedReplyGrain) OnReceive(ctx *GrainContext) {
+	switch ctx.Message().(type) {
+	case *cborAskRequest:
+		ctx.Response(new(testpb.Reply))
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer asks a grain on another
+// node with a CBOR request and gets a proto reply: the reply must be decoded
+// with its own serializer, not the request's.
+func TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 2,
+		withTestSerializables(new(cborAskRequest)),
+		withTestExtraGrains(new(mixedReplyGrain)),
+	)
+	node1, node2 := systems[0], systems[1]
+	t.Cleanup(func() {
+		_ = node2.Stop(ctx)
+		_ = node1.Stop(ctx)
+	})
+	require.Eventually(t, func() bool {
+		peers, err := node1.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 1
+	}, 10*time.Second, 100*time.Millisecond)
+
+	identity, err := node2.GrainIdentity(ctx, "mixed-reply-grain", func(context.Context) (Grain, error) {
+		return new(mixedReplyGrain), nil
+	})
+	require.NoError(t, err)
+
+	reply, err := node1.AskGrain(ctx, identity, &cborAskRequest{Amount: 1}, time.Second)
+	require.NoError(t, err)
+	require.IsType(t, new(testpb.Reply), reply)
+}

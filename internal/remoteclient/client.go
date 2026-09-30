@@ -1808,7 +1808,11 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 		return nil, errors.New("invalid response type")
 	}
 
-	deserialized, err := serializer.Deserialize(askResp.GetMessage())
+	// The reply is whatever the grain answered with, which need not share
+	// the request's serializer: a CBOR request may get a proto reply. It is
+	// decoded the way the receiving node decodes requests, by trying every
+	// registered serializer.
+	deserialized, err := r.resolveSerializer(nil).Deserialize(askResp.GetMessage())
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}
