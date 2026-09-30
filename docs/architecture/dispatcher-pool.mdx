@@ -213,7 +213,7 @@ with active-actor count.
 
 ## Tuning constants
 
-- **Worker pool size**: Value: `max`. Where: `dispatcherWorkerCount` in `actor/dispatcher.go`.
+- **Worker pool size**: Value: `max(GOMAXPROCS, 2)` (default; `WithDispatcherPoolSize` overrides per system). Where: `dispatcherWorkerCount` in `actor/dispatcher.go`.
 - **Throughput budget**: Value: `32` (default). Where: `dispatcherThroughput` in `actor/dispatcher.go`.
 - **Local-ring capacity**: Value: `256`. Where: `localQueueCap` in `actor/ready_queue.go`.
 - **Global-ring initial cap**: Value: `64` (doubles on grow). Where: `globalQueueInitialCap` in `actor/ready_queue.go`.
@@ -224,7 +224,7 @@ can impose on its peers.
 
 ### Tuning the throughput budget
 
-The per-turn message budget is the one knob exposed to users, via `WithThroughputBudget` on `NewActorSystem`:
+The per-turn message budget is set with `WithThroughputBudget` on `NewActorSystem`:
 
 ```go Tuning the throughput budget
 system, err := NewActorSystem("my-system",
@@ -242,6 +242,52 @@ system, err := NewActorSystem("my-system",
 
 Per-actor FIFO ordering and the single-threaded-per-actor execution invariant hold regardless of the budget: a yield is
 a pause, not a reorder.
+
+### Sizing the worker pool
+
+The pool defaults to one worker per OS thread, which is right for handlers that compute and yield. A handler that
+blocks in its turn, on a database call or a synchronous request, holds its worker for the whole wait, so with the
+default no more than `GOMAXPROCS` actors and grains make progress at once, whatever their number. On a two-CPU
+container that is two. `WithDispatcherPoolSize` sets the pool size for the system:
+
+```go Sizing the worker pool
+system, err := NewActorSystem("orders",
+    WithLogger(logger),
+    WithDispatcherPoolSize(256), // grains that wait on the database in their turn
+)
+```
+
+Values of zero or less keep the default, and a value of one is raised to two, the floor of the default. Single-threaded execution per actor and per grain and per-actor FIFO ordering
+are unchanged: the option only says how many actors and grains may be in a turn at the same time.
+
+<Warning>
+A larger pool is not free. Every actor and grain shares it, and producers scan the pool for a parked worker on each
+wake, so a pool much larger than `GOMAXPROCS` slows dispatch for handlers that do not block. Raise the pool only when
+handlers wait in their turn, and prefer `PipeTo` where the wait can leave the turn.
+</Warning>
+
+#### Impact on message processing throughput
+
+The table shows the [benchmark suite](https://github.com/Tochemey/goakt/tree/main/benchmark) with the default pool
+and with `WithDispatcherPoolSize(256)`, on an 8-CPU Apple M1 with `GOMAXPROCS=8`, five runs each. These handlers do
+not block, so the numbers are the pure dispatch cost of the larger pool. Per-actor and per-grain heap did not change.
+
+| Benchmark        | Default pool  | 256 workers   | Change    |
+|------------------|---------------|---------------|-----------|
+| Ask              | 1.38M msg/s   | 0.82M msg/s   | -41%      |
+| GrainAsk         | 1.34M msg/s   | 0.80M msg/s   | -40%      |
+| AskPairwise      | 3.23M msg/s   | 2.22M msg/s   | -31%      |
+| GrainTellFanOut  | 2.48M msg/s   | 1.89M msg/s   | -24%      |
+| GrainTell        | 2.09M msg/s   | 1.87M msg/s   | -10%      |
+| TellSinglePair   | 13.5M msg/s   | 13.3M msg/s   | -2%       |
+| TellPairwise     | 31.9M msg/s   | 32.0M msg/s   | unchanged |
+
+Request/reply pays the most because every round trip wakes a parked worker, and with a large pool that is usually a
+cold one. Plain tells to a busy actor are unaffected: the worker never parks.
+
+The gain on the other side is what the option exists for. With 200 grains that each wait 10 ms in their turn, five
+messages each and all 1000 asks in flight, a node with `GOMAXPROCS=2` takes 5.5 s with the default pool and 53 ms with
+256 workers, because the 200 grains wait at the same time instead of two at a time.
 
 ## References
 
