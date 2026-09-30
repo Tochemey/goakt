@@ -67,21 +67,24 @@ const (
 
 // ClusterConfig defines the cluster mode settings
 type ClusterConfig struct {
-	discovery                discovery.Provider
-	partitionCount           uint64
-	minimumPeersQuorum       uint32
-	replicaCount             uint32
-	writeQuorum              uint32
-	readQuorum               uint32
-	discoveryPort            int
-	peersPort                int
-	kinds                    *xsync.Map[string, Actor]
-	grains                   *xsync.Map[string, Grain]
-	tableSize                uint64
-	writeTimeout             time.Duration
-	readTimeout              time.Duration
-	shutdownTimeout          time.Duration
-	bootstrapTimeout         time.Duration
+	discovery          discovery.Provider
+	partitionCount     uint64
+	minimumPeersQuorum uint32
+	replicaCount       uint32
+	writeQuorum        uint32
+	readQuorum         uint32
+	discoveryPort      int
+	peersPort          int
+	kinds              *xsync.Map[string, Actor]
+	grains             *xsync.Map[string, Grain]
+	tableSize          uint64
+	writeTimeout       time.Duration
+	readTimeout        time.Duration
+	shutdownTimeout    time.Duration
+	bootstrapTimeout   time.Duration
+	// storeDir is where the node keeps its cluster store; empty means the
+	// default under the user's home directory.
+	storeDir                 string
 	clusterStateSyncInterval time.Duration
 	grainActivationBarrier   *grainActivationBarrierConfig
 	roles                    []string
@@ -301,6 +304,23 @@ func (x *ClusterConfig) WithShutdownTimeout(timeout time.Duration) *ClusterConfi
 // Returns the updated ClusterConfig instance for chaining.
 func (x *ClusterConfig) WithBootstrapTimeout(timeout time.Duration) *ClusterConfig {
 	x.bootstrapTimeout = timeout
+	return x
+}
+
+// WithStoreDir sets the directory the node keeps its cluster store in: the
+// file that persists the node's peer state across a restart. The directory is
+// created when missing. By default it is "~/.goakt/cluster", which fails on a
+// pod with a read-only root filesystem, in a sandbox without a home
+// directory, or wherever the home directory is not writable; point it at a
+// writable volume there.
+//
+// Example:
+//
+//	cfg := NewClusterConfig().WithStoreDir("/var/lib/goakt")
+//
+// Returns the updated ClusterConfig instance for chaining.
+func (x *ClusterConfig) WithStoreDir(dir string) *ClusterConfig {
+	x.storeDir = dir
 	return x
 }
 

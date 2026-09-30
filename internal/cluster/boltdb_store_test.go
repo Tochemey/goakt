@@ -42,7 +42,7 @@ import (
 func TestBoltDBStoreLifecycle(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	impl, ok := store.(*BoltStore)
 	require.True(t, ok)
@@ -75,7 +75,7 @@ func TestBoltDBStoreLifecycle(t *testing.T) {
 func TestBoltDBStoreCloseIsIdempotent(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 	require.NoError(t, store.Close())
@@ -84,7 +84,7 @@ func TestBoltDBStoreCloseIsIdempotent(t *testing.T) {
 func TestBoltDBStoreNilPeerIsNoop(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -94,7 +94,7 @@ func TestBoltDBStoreNilPeerIsNoop(t *testing.T) {
 func TestBoltDBStoreContextCancellation(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -114,7 +114,7 @@ func TestBoltDBStoreContextCancellation(t *testing.T) {
 func TestBoltDBStoreOperationsAfterClose(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 
@@ -131,7 +131,7 @@ func TestBoltDBStoreOperationsAfterClose(t *testing.T) {
 func TestBoltDBStoreMissingBucket(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -152,11 +152,30 @@ func TestBoltDBStoreMissingBucket(t *testing.T) {
 	require.Error(t, store.DeletePeerState(context.Background(), peerAddr))
 }
 
+func TestNewBoltStoreInDirectory(t *testing.T) {
+	// no home directory at all, as in a container with a read-only root
+	// filesystem, or a sandbox
+	t.Setenv("HOME", "/dev/null")
+	t.Setenv("USERPROFILE", "/dev/null")
+	dir := filepath.Join(t.TempDir(), "cluster")
+
+	store, err := NewBoltStore(dir)
+	require.NoError(t, err)
+	require.NotNil(t, store)
+
+	files, err := filepath.Glob(filepath.Join(dir, boltFilePrefix+"-*"+boltFileExtension))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	require.NoError(t, store.Close())
+	_, err = os.Stat(files[0])
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
 func TestNewBoltStoreMkdirError(t *testing.T) {
 	t.Setenv("HOME", "/dev/null")
 	t.Setenv("USERPROFILE", "/dev/null")
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.Error(t, err)
 	require.Nil(t, store)
 }
@@ -169,7 +188,7 @@ func TestNewBoltStoreDefaultBoltPathError(t *testing.T) {
 	t.Setenv("HOMEPATH", "")
 	t.Setenv("GODEBUG", "osusergo=1")
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	if err == nil {
 		t.Skip("os.UserHomeDir resolved successfully; cannot force failure on this platform")
 	}
@@ -181,9 +200,9 @@ func TestNewBoltStoreOpenError(t *testing.T) {
 	useTempHome(t)
 
 	badPath := t.TempDir()
-	withBoltPathGenerator(t, func() (string, error) { return badPath, nil })
+	withBoltPathGenerator(t, func(string) (string, error) { return badPath, nil })
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.Error(t, err)
 	require.Nil(t, store)
 }
@@ -198,7 +217,7 @@ func TestNewBoltStoreBucketInitializationError(t *testing.T) {
 	defaultBoltOptions = &optsCopy
 	defer func() { defaultBoltOptions = original }()
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.Error(t, err)
 	require.Nil(t, store)
 }
@@ -206,7 +225,7 @@ func TestNewBoltStoreBucketInitializationError(t *testing.T) {
 func TestBoltDBStoreGetPeerStateUnmarshalError(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = store.Close() })
 
@@ -225,7 +244,7 @@ func TestBoltDBStoreGetPeerStateUnmarshalError(t *testing.T) {
 func TestBoltDBStoreCloseRemoveError(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 
 	impl := store.(*BoltStore)
@@ -242,7 +261,7 @@ func TestBoltDBStoreCloseRemoveError(t *testing.T) {
 func TestBoltDBStoreCloseJoinErrors(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 
 	impl := store.(*BoltStore)
@@ -263,7 +282,7 @@ func TestBoltDBStoreCloseJoinErrors(t *testing.T) {
 func TestBoltDBStoreCloseRemoveErrNotExist(t *testing.T) {
 	useTempHome(t)
 
-	store, err := NewBoltStore()
+	store, err := NewBoltStore("")
 	require.NoError(t, err)
 	impl := store.(*BoltStore)
 
