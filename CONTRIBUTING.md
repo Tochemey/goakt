@@ -62,6 +62,12 @@ Run `make help` to list every target. The common ones are:
 5. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
 6. Follow the instructions in the `playground` package to leave a working sample in case it is a bug or a new feature. This will help reviewers understand your changes and verify that they work as expected.
 
+### Authorship
+
+Whoever submits a change has to be able to explain it and defend it in review. You are the author of your pull request, and you own it after it is merged.
+
+Do not credit an AI tool as an author. This means no `Co-Authored-By` trailers naming an AI tool in your commits, no "Generated with ..." lines in your pull request description, and no other AI attribution in code, comments, or issues. If your tooling adds these lines by default, remove them before you commit. Pull requests that credit an AI tool as an author will not be reviewed until the attribution is removed.
+
 ### Changelog entries
 
 Document user-facing changes by creating or updating [`changelogs/unreleased.md`](changelogs/unreleased.md). Maintainers can only create or update `changelogs/unreleased.md` for pending release notes.

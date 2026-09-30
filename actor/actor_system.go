@@ -999,6 +999,10 @@ type ActorSystem interface {
 	// deliverAsyncEnvelope routes an async envelope to the grain that must
 	// process it, activating the grain or forwarding to its owning node.
 	deliverAsyncEnvelope(ctx context.Context, id *GrainIdentity, envelope any) error
+	// getLateGrainMessages returns the queues of messages that reached a grain instance after it deactivated.
+	getLateGrainMessages() *lateGrainMessages
+	// localSendGrain delivers a message to the grain on this node, activating it when needed.
+	localSendGrain(ctx context.Context, id *GrainIdentity, message any, timeout time.Duration, mode grainContextMode) (any, error)
 	recreateGrain(ctx context.Context, props *internalpb.Grain) error
 	grainOf(ctx context.Context, grainType Grain, name string, opts ...GrainOption) (*GrainIdentity, error)
 	decreaseActorsCounter()
@@ -1217,6 +1221,9 @@ type actorSystem struct {
 
 	shuttingDown atomic.Bool
 	grains       *xsync.Map[string, *grainPID]
+	// lateGrainMessages queues the messages that reached a grain instance
+	// after it deactivated until they are sent to a fresh activation.
+	lateGrainMessages lateGrainMessages
 	// Caches parsed sender addresses of inbound remote messages so the hot
 	// receive path skips address.Parse. Addresses are immutable, so entries
 	// never go stale; the cache is flushed wholesale when it reaches
@@ -2903,6 +2910,12 @@ func (x *actorSystem) getClusterStore() cluster.Store {
 	store := x.clusterStore
 	x.locker.RUnlock()
 	return store
+}
+
+// getLateGrainMessages returns the queues of messages that reached a grain
+// instance after it deactivated.
+func (x *actorSystem) getLateGrainMessages() *lateGrainMessages {
+	return &x.lateGrainMessages
 }
 
 // getGrains returns the grains map of the actor system

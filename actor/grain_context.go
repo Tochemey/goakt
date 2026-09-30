@@ -102,6 +102,11 @@ type GrainContext struct {
 	requestID      string
 	requestReplyTo *commands.AsyncReplyTo
 
+	// timeout is how long the caller of an ask or acknowledged tell waits for
+	// the answer. A late message copies it so its forward waits as long.
+	// It sits before the bools so they pack with poolShard into one word.
+	timeout time.Duration
+
 	// replyDeferred records that DeferResponse transferred reply ownership to
 	// a handle: the turn's own reply methods become no-ops. replySent makes
 	// the async reply one-shot, mirroring the CAS guard of the channel path.
@@ -951,6 +956,7 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.requestReplyTo = nil
 	gctx.replyDeferred = false
 	gctx.replySent = false
+	gctx.timeout = 0
 
 	// Reset CAS guard so Response()/NoErr() succeed for the new message.
 	gctx.responseClosed.Store(false)
@@ -989,6 +995,7 @@ func (gctx *GrainContext) reset() {
 	gctx.requestReplyTo = nil
 	gctx.replyDeferred = false
 	gctx.replySent = false
+	gctx.timeout = 0
 	// Note: responseClosed is not reset here because build() always sets it
 	// to false for the next message. Avoiding this atomic store saves ~5ns
 	// per message on the release path.

@@ -964,6 +964,13 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 // handleGrainContext runs a user message through OnReceive. now is the
 // turn's shared activity timestamp.
 func (pid *grainPID) handleGrainContext(grainContext *GrainContext, now time.Time) {
+	// a message queued behind a passivation or shutdown pill must not reach
+	// the deactivated grain
+	if !pid.isActive() {
+		pid.redirectLateMessage(grainContext)
+		return
+	}
+
 	defer pid.recovery(grainContext)
 	pid.processedCount.Inc()
 	pid.markActivity(now)
@@ -1199,31 +1206,20 @@ func (pid *grainPID) passivationLatestActivity() time.Time {
 	return time.Unix(0, nanos)
 }
 
+// passivationTry is called by the passivation manager when the grain is idle.
+// It hands the decision to the grain's turn stream through a passivation pill.
 func (pid *grainPID) passivationTry(reason string) bool {
 	if !pid.isActive() || pid.onPoisonPill.Load() {
 		return false
 	}
 
-	// A reentrancy-capable grain serializes the deactivation decision with its
-	// turn: deciding here, on the manager goroutine, is check-then-act against
-	// a concurrently running turn that can register a request after the check.
-	// The pill travels through the mailbox so the decision and request
-	// registration execute on the same serialized turn stream.
-	if pid.reentrancy.Load() != nil {
-		return pid.enqueuePassivationPill()
-	}
-
 	if pid.getLogger().Enabled(log.DebugLevel) {
-		pid.getLogger().Debugf("grain=%s reason=%s passivation triggered", pid.identity.String(), reason)
+		pid.getLogger().Debugf("grain=%s reason=%s passivation requested", pid.identity.String(), reason)
 	}
 
-	if err := pid.deactivate(context.Background()); err != nil {
-		if pid.getLogger().Enabled(log.ErrorLevel) {
-			pid.getLogger().Errorf("failed to passivate grain=%s: %v (hint: check OnPassivate implementation)", pid.identity.String(), err)
-		}
-		return false
-	}
-	return true
+	// The pill travels through the mailbox so OnDeactivate runs on the grain's
+	// turn stream, after the message in progress, never during OnReceive.
+	return pid.enqueuePassivationPill()
 }
 
 // enqueuePassivationPill hands the deactivation decision to the grain's turn
@@ -1287,8 +1283,9 @@ func (pid *grainPID) enqueuePoisonPill(ctx context.Context) chan error {
 //     manager entry for a deactivated grain would fire forever;
 //   - in-flight or paused: do nothing, the last-completion path owns re-entry
 //     into passivation (resumePassivation);
-//   - recently active: re-register with a fresh idle deadline;
-//   - otherwise deactivate, exactly like the direct passivation path.
+//   - messages waiting in the mailbox or recently active: re-register with a
+//     fresh idle deadline;
+//   - otherwise deactivate.
 func (pid *grainPID) handlePassivationPill() {
 	if !pid.isActive() || pid.onPoisonPill.Load() {
 		return
@@ -1296,6 +1293,12 @@ func (pid *grainPID) handlePassivationPill() {
 
 	reentrant := pid.reentrancy.Load()
 	if (reentrant != nil && reentrant.inFlightCount.Load() > 0) || pid.paused() {
+		return
+	}
+
+	// messages are waiting, so the grain is not idle
+	if !pid.mailboxEmpty() {
+		pid.startPassivation()
 		return
 	}
 

@@ -295,6 +295,8 @@ func TestIsTransportFailure(t *testing.T) {
 		{"bare context canceled", live, context.Canceled, false},
 		{"remote activation failure", live, gerrors.NewErrGrainActivationFailure(errors.New("OnActivate failed")), false},
 		{"opaque wire error", live, errors.New("remote activate failed"), false},
+		{"owner shutting down", live, gerrors.ErrSystemShuttingDown, false},
+		{"owner remoting disabled", live, gerrors.ErrRemotingDisabled, false},
 	}
 
 	for _, tc := range cases {
@@ -350,6 +352,94 @@ func TestGrainIdentity_DepartedOwnerReleasedAndClaimedLocally(t *testing.T) {
 	process, ok := sys.grains.Get(identity.String())
 	require.True(t, ok)
 	require.True(t, process.isActive())
+}
+
+func TestGrainIdentity_ShuttingDownOwnerReleasedAndClaimedLocally(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer error
+	}{
+		{"owner is shutting down", gerrors.ErrSystemShuttingDown},
+		{"owner has shut down", gerrors.ErrRemotingDisabled},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := t.Context()
+			grain := NewMockGrain()
+			name := "shutting-down-owner-grain"
+			identity := newGrainIdentity(grain, name)
+			localPeer := &cluster.Peer{Host: "127.0.0.1", PeersPort: 16700, RemotingPort: 8383}
+
+			cl := mockcluster.NewCluster(t)
+			rem := mockremote.NewClient(t)
+			node := &discovery.Node{Host: localPeer.Host, PeersPort: localPeer.PeersPort, RemotingPort: localPeer.RemotingPort}
+			sys := newClusterReadySystem(rem, cl, node)
+
+			// the owner is still a cluster member but answers over an open connection
+			owner := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String()}.Build(),
+				Host:    "192.0.2.24",
+				Port:    18004,
+			}.Build()
+
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+			rem.EXPECT().RemoteActivateGrain(ctx, owner.GetHost(), int(owner.GetPort()), mock.Anything).Return(tc.answer).Once()
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+			cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
+				return actual != nil && actual.GetGrainId().GetValue() == identity.String() &&
+					actual.GetHost() == localPeer.Host && int(actual.GetPort()) == localPeer.RemotingPort
+			})).Return(nil).Twice()
+
+			got, err := sys.GrainIdentity(ctx, name, func(context.Context) (Grain, error) {
+				return grain, nil
+			})
+			require.NoError(t, err)
+			require.Equal(t, identity.String(), got.String())
+
+			process, ok := sys.grains.Get(identity.String())
+			require.True(t, ok)
+			require.True(t, process.isActive())
+			// the owner answered for itself, so membership is not consulted
+			cl.AssertNotCalled(t, "Members", mock.Anything)
+		})
+	}
+}
+
+func TestActivateGrainLocally_ShuttingDownReleasesClaim(t *testing.T) {
+	ctx := t.Context()
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "activate-locally-shutting-down", true)
+	sys.shuttingDown.Store(true)
+
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
+
+	err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
+	require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+	process, ok := sys.grains.Get(identity.String())
+	require.False(t, ok && process.isActive())
+}
+
+func TestAdmitGrainActivation(t *testing.T) {
+	cl := mockcluster.NewCluster(t)
+	rem := mockremote.NewClient(t)
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14001, RemotingPort: 15001}
+
+	t.Run("admits when the node is running", func(t *testing.T) {
+		sys := newClusterReadySystem(rem, cl, node)
+		require.NoError(t, sys.admitGrainActivation(t.Context()))
+	})
+
+	t.Run("refuses when the node is shutting down", func(t *testing.T) {
+		sys := newClusterReadySystem(rem, cl, node)
+		sys.shuttingDown.Store(true)
+		require.ErrorIs(t, sys.admitGrainActivation(t.Context()), gerrors.ErrSystemShuttingDown)
+	})
 }
 
 func TestGrainIdentity_RemoteActivationWireEncodingError(t *testing.T) {
@@ -788,6 +878,38 @@ func TestTryPeerActivation(t *testing.T) {
 				require.False(t, handled)
 			})
 		}
+	})
+
+	t.Run("activates here when the peer is shutting down", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "peer-shutting-down", true)
+		peer := &cluster.Peer{Host: "192.0.2.66", PeersPort: 15066, RemotingPort: 16066}
+
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		rem.EXPECT().RemoteActivateGrain(ctx, peer.Host, peer.RemotingPort, mock.Anything).Return(gerrors.ErrSystemShuttingDown).Once()
+		cl.EXPECT().ReleaseGrain(ctx, identity.String(), address.FormatHostPort(peer.Host, peer.RemotingPort)).Return(nil, nil).Once()
+
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
+		require.NoError(t, err)
+		require.False(t, handled)
+	})
+
+	t.Run("reports the refusal when the claim cannot be rolled back", func(t *testing.T) {
+		ctx := t.Context()
+		grain := NewMockGrain()
+		sys, cl, rem, identity := newActivationTestSystem(t, grain, "peer-shutting-down-no-rollback", true)
+		peer := &cluster.Peer{Host: "192.0.2.67", PeersPort: 15067, RemotingPort: 16067}
+
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		rem.EXPECT().RemoteActivateGrain(ctx, peer.Host, peer.RemotingPort, mock.Anything).Return(gerrors.ErrSystemShuttingDown).Once()
+		cl.EXPECT().ReleaseGrain(ctx, identity.String(), address.FormatHostPort(peer.Host, peer.RemotingPort)).Return(nil, assert.AnError).Once()
+
+		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.False(t, handled)
 	})
 
 	t.Run("rollback leaves a record re-owned elsewhere alone", func(t *testing.T) {
@@ -2998,6 +3120,47 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		require.True(t, ok, "an already-active grain must stay registered")
 		require.True(t, got.isActive(), "an already-active grain must not be deactivated")
 		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("rolls back an activation that finishes once the node is shutting down", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+		system.shuttingDown.Store(true)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-shutting-down")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, true)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+		_, ok := system.grains.Get(identity.String())
+		require.False(t, ok, "the late activation must leave no grain behind")
+		clusterMock.AssertExpectations(t)
+	})
+
+	t.Run("keeps an already-active grain while the node is shutting down", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+		system.shuttingDown.Store(true)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-shutting-down-active")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+		require.NoError(t, system.finalizeGrainActivation(ctx, process, false, false))
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok)
+		require.True(t, got.isActive())
+		clusterMock.AssertNotCalled(t, "ReleaseGrain", mock.Anything, mock.Anything, mock.Anything)
 	})
 
 	t.Run("publish failure without claim or activation only returns the error", func(t *testing.T) {
