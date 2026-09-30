@@ -494,6 +494,54 @@ func WithThroughputBudget(n int) Option {
 	})
 }
 
+// WithDispatcherWorkerCount sets the size of the dispatcher's worker pool: the
+// number of goroutines that run actor and grain turns. It bounds how many
+// actors and grains handle a message at the same time.
+//
+// The default is max(GOMAXPROCS, 2): one worker per OS thread, which is right
+// for handlers that compute and yield. A handler that blocks, on a database
+// call, an HTTP request or another synchronous wait, holds its worker for the
+// whole wait, so with the default no more than GOMAXPROCS actors and grains
+// make progress at once whatever their number: on a two-CPU container, two.
+// A larger pool lets that many blocking handlers wait at the same time, at
+// the cost of one parked goroutine each, which is cheap.
+//
+// How to choose a value:
+//
+//   - Default: handlers that do not block, or systems where PipeTo moves the
+//     waiting off the turn.
+//   - The number of concurrent blocking calls the system should sustain: for
+//     handlers that call a database or a service synchronously and must keep
+//     the message in its turn, as a grain does to handle one message at a
+//     time. Size it like a connection pool, for example 64 to 512, from the
+//     latency of the call and the throughput wanted (workers ≈ throughput ×
+//     latency).
+//
+// Guarantees that are NOT affected by this option:
+//
+//   - Single-threaded execution per actor and per grain is preserved. Only
+//     one worker ever processes a given actor or grain at a time, whatever
+//     the pool size.
+//   - Per-actor FIFO message ordering is preserved.
+//
+// Validation:
+//
+// Values less than or equal to zero are ignored and the default is retained.
+//
+// Example:
+//
+//	system, err := NewActorSystem("my-system",
+//	    WithLogger(logger),
+//	    WithDispatcherWorkerCount(256), // grains that wait on the database in their turn
+//	)
+func WithDispatcherWorkerCount(n int) Option {
+	return OptionFunc(func(system *actorSystem) {
+		if n > 0 {
+			system.dispatcherWorkers = n
+		}
+	})
+}
+
 // WithDefaultSupervisor configures the ActorSystem-wide supervisor used for actors that
 // are spawned without an explicit supervisor.
 //

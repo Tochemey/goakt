@@ -299,8 +299,9 @@ slot and are not aware of the system mailbox.
 ### 8.1 Start
 
 `NewActorSystem` constructs the dispatcher with
-`workerCount = max(GOMAXPROCS, 2)` and `throughput = 32` (overridable per
-system with `WithThroughputBudget`). `actorSystem.Start` calls
+`workerCount = max(GOMAXPROCS, 2)` (overridable per system with
+`WithDispatcherWorkerCount`, for handlers that block in their turn) and
+`throughput = 32` (overridable per system with `WithThroughputBudget`). `actorSystem.Start` calls
 `dispatcher.start()`, which spawns the worker goroutines and the shared
 supervision consumer. Both `start` and `signalStop` are idempotent.
 
@@ -367,7 +368,7 @@ when benchmarks demand it:
 
 | Constant                | Value                                                       | Location                                          |
 |-------------------------|-------------------------------------------------------------|---------------------------------------------------|
-| Worker pool size        | `max(GOMAXPROCS, 2)`                                        | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
+| Worker pool size        | `max(GOMAXPROCS, 2)` (default; `WithDispatcherWorkerCount` overrides per system) | `dispatcherWorkerCount` in `actor/dispatcher.go`  |
 | Throughput budget       | `32` (default; `WithThroughputBudget` overrides per system) | `dispatcherThroughput` in `actor/dispatcher.go`   |
 | Local-ring capacity     | `256`                                                       | `localQueueCap` in `actor/ready_queue.go`         |
 | Global-ring initial cap | `64` (doubles on grow)                                      | `globalQueueInitialCap` in `actor/ready_queue.go` |
