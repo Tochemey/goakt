@@ -381,8 +381,22 @@ func (x *actorSystem) prepareGrainIdentity(ctx context.Context, name string, fac
 	return grain, identity, config, nil
 }
 
+// grainKindOptions returns the options a grain of kind is configured with:
+// the kind's defaults (WithGrainDefaultOptions), then opts, so that what a caller
+// or a registry record says wins over the defaults.
+func (x *actorSystem) grainKindOptions(kind string, opts ...GrainOption) []GrainOption {
+	defaults := x.grainDefaultOptions[kind]
+	if len(defaults) == 0 {
+		return opts
+	}
+
+	merged := make([]GrainOption, 0, len(defaults)+len(opts))
+	merged = append(merged, defaults...)
+	return append(merged, opts...)
+}
+
 // validateGrainActivation validates the grain identity and builds the grain
-// configuration from the provided options.
+// configuration from the kind's defaults and the provided options.
 func (x *actorSystem) validateGrainActivation(identity *GrainIdentity, opts ...GrainOption) (*grainConfig, error) {
 	if err := identity.Validate(); err != nil {
 		return nil, err
@@ -393,7 +407,7 @@ func (x *actorSystem) validateGrainActivation(identity *GrainIdentity, opts ...G
 		return nil, gerrors.NewErrReservedName(identity.String())
 	}
 
-	config := newGrainConfig(opts...)
+	config := newGrainConfig(x.grainKindOptions(identity.Kind(), opts...)...)
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -1337,6 +1351,8 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 	// A record naming this node while no process exists is a claim made on
 	// this node's behalf (tryPeerActivation) whose activation request did not
 	// complete; it carries the caller's configuration, which is honored here.
+	// Without a record, as after a passivation, the kind's defaults are all
+	// the configuration there is.
 	var options []GrainOption
 	if owner != nil {
 		if options, err = x.grainOptionsFromWire(owner); err != nil {
@@ -1344,7 +1360,7 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 		}
 	}
 
-	config := newGrainConfig(options...)
+	config := newGrainConfig(x.grainKindOptions(id.Kind(), options...)...)
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -1724,7 +1740,7 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			return nil, err
 		}
 
-		config := newGrainConfig(options...)
+		config := newGrainConfig(x.grainKindOptions(identity.Kind(), options...)...)
 		if err := config.Validate(); err != nil {
 			return nil, err
 		}
