@@ -4985,11 +4985,20 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 		if x.cluster != nil {
 			// Persist peer state to all cluster peers before leaving membership.
 			// This ensures state is available for relocation when NodeLeft event
-			// is processed. Errors are returned but we proceed with shutdown to
-			// ensure resources are freed (chain uses WithRunAll).
+			// is processed. The snapshot is best effort: a survivor that has none
+			// derives the relocation set from the registry (crash recovery), so a
+			// failure to hand it over, as on a node whose listed peers are
+			// already gone, is reported but does not fail the stop. Other errors
+			// are returned but we proceed with shutdown to ensure resources are
+			// freed (chain uses WithRunAll).
 			if err := chain.
 				New(chain.WithRunAll(), chain.WithContext(ctx)).
-				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
+				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error {
+					if err := x.persistPeerStateToPeers(cctx, peerState); err != nil {
+						x.logger.Warnf("node=%s could not hand its state to a peer, survivors will recover it from the registry: %v", x.PeersAddress(), err)
+					}
+					return nil
+				}).
 				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
 				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
 				AddContextRunnerIf(x.clusterStore != nil, func(_ context.Context) error { return x.clusterStore.Close() }).

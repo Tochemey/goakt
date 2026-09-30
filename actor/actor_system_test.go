@@ -8174,6 +8174,30 @@ func TestPreShutdown(t *testing.T) {
 	})
 }
 
+func TestShutdownClusterDoesNotFailWhenNoPeerTakesTheState(t *testing.T) {
+	// the last node of a scale-down still lists peers that are already gone:
+	// handing its state over fails, which is not a failure of the stop, as
+	// survivors recover from the registry
+	ctx := context.TODO()
+	clusterMock := mockscluster.NewCluster(t)
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8081, PeersPort: 9001, CreatedAt: 1000},
+		{Host: "127.0.0.1", RemotingPort: 8082, PeersPort: 9002, CreatedAt: 2000},
+	}, nil)
+	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(assert.AnError)
+	remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(assert.AnError)
+
+	system := newReplicationSystem(clusterMock)
+	system.remoting = remotingMock
+	system.relocatingEndpoints = xsync.NewTTLMap[string, types.Unit](relocationHandoffWindow)
+
+	peerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
+	require.NoError(t, system.shutdownCluster(ctx, nil, peerState))
+}
+
 func TestPersistPeerStateToPeers(t *testing.T) {
 	// replicationPeers returns the three peers selectOldestPeers keeps for a
 	// replication factor of three, oldest first.
