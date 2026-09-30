@@ -143,6 +143,9 @@ concern.
 - **Advanced**
   - **WithThroughputBudget**: Messages an actor may process per scheduler turn (default: 32). See
     [Dispatcher Pool](/architecture/dispatcher-pool#tuning-the-throughput-budget) for tuning profiles.
+  - **WithDispatcherPoolSize**: Size of the worker pool that runs actor and grain turns (default:
+    `max(GOMAXPROCS, 2)`), for handlers that block in their turn. See
+    [Dispatcher Pool](/architecture/dispatcher-pool#sizing-the-worker-pool) for the trade-off.
   - **WithPartitionHasher**: Deprecated: use `ClusterConfig.WithPartitionHasher`. See
     [Partition Hashing](/clustering/partition-hashing).
 

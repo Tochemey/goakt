@@ -1128,6 +1128,11 @@ type actorSystem struct {
 	// dispatcher at construction time. Set via WithThroughputBudget.
 	dispatcherThroughput int
 
+	// dispatcherWorkers is the size of the dispatcher's worker pool, applied
+	// at construction time. Zero means dispatcherWorkerCount. Set via
+	// WithDispatcherPoolSize.
+	dispatcherWorkers int
+
 	// manages passivation deadlines without per-actor goroutines
 	passivator *passivationManager
 
@@ -1374,7 +1379,15 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	}
 
 	// build the dispatcher after options so tuning knobs like WithThroughputBudget take effect.
-	system.dispatcher = newDispatcher(dispatcherWorkerCount(), system.dispatcherThroughput)
+	// The floor of two keeps a sibling for work-stealing, and a worker free
+	// while another one is held by a handler that waits inside its turn.
+	workers := system.dispatcherWorkers
+	if workers <= 0 {
+		workers = dispatcherWorkerCount()
+	}
+
+	workers = max(workers, 2)
+	system.dispatcher = newDispatcher(workers, system.dispatcherThroughput)
 
 	if err := system.validate(); err != nil {
 		return nil, err
