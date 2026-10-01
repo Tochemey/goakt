@@ -1859,6 +1859,184 @@ func TestSpawn(t *testing.T) {
 
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("With Kill then Spawn returning a new running actor", func(t *testing.T) {
+		// one processor keeps the death watch from handling the killed actor's
+		// Terminated before the name is spawned again
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		killed, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		actors := system.NumActors()
+
+		require.NoError(t, system.Kill(ctx, "worker"))
+
+		spawned, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, killed, spawned)
+		require.True(t, spawned.IsRunning())
+		require.Equal(t, actors, system.NumActors())
+
+		// the death watch handling the old Terminated leaves the new actor in place
+		pause.For(100 * time.Millisecond)
+		found, err := system.ActorOf(ctx, "worker")
+		require.NoError(t, err)
+		require.Same(t, spawned, found)
+		require.Equal(t, actors, system.NumActors())
+	})
+	t.Run("With Kill then lookups finding no actor", func(t *testing.T) {
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		_, err = system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		actors := system.NumActors()
+
+		require.NoError(t, system.Kill(ctx, "worker"))
+
+		_, err = system.ActorOf(ctx, "worker")
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+
+		exists, err := system.ActorExists(ctx, "worker")
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		require.ErrorIs(t, system.Kill(ctx, "worker"), gerrors.ErrActorNotFound)
+		require.Equal(t, actors-1, system.NumActors())
+	})
+	t.Run("With Kill then Spawn in cluster mode writing over the stopped actor's record", func(t *testing.T) {
+		// one processor keeps the death watch from removing the killed actor's
+		// registry record before the name is spawned again
+		singleProcessor(t)
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node, sd := startNATsSystem(t, srv.Addr().String())
+		require.NotNil(t, sd)
+
+		killed, err := node.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NoError(t, node.Kill(ctx, "worker"))
+
+		spawned, err := node.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, killed, spawned)
+		require.True(t, spawned.IsRunning())
+
+		// the death watch removal is fenced by the killed incarnation, so the
+		// new actor's record survives it
+		pause.For(time.Second)
+		exists, err := node.(*actorSystem).getCluster().ActorExists(ctx, "worker")
+		require.NoError(t, err)
+		require.True(t, exists)
+
+		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, sd.Close())
+		srv.Shutdown()
+	})
+	t.Run("With a name held by an actor that is not running", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		// an actor that holds its name without running is alive or not gone
+		// yet, so the name is taken whichever of these states it is in
+		states := map[string]pidState{
+			"suspended":   suspendedState,
+			"stopping":    stoppingState,
+			"passivating": passivatingState,
+		}
+
+		for label, state := range states {
+			holder, err := system.Spawn(ctx, label, NewMockActor())
+			require.NoError(t, err)
+			actors := system.NumActors()
+			holder.setState(state, true)
+			t.Cleanup(func() { holder.setState(state, false) })
+			require.False(t, holder.IsRunning(), label)
+
+			second := NewMockRestartFailingActor()
+			pid, err := system.Spawn(ctx, label, second)
+			require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists, label)
+			require.Nil(t, pid, label)
+
+			fromFunc, err := system.SpawnNamedFromFunc(ctx, label, func(context.Context, any) error { return nil })
+			require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists, label)
+			require.Nil(t, fromFunc, label)
+
+			// no second actor was started, and the holder still owns the name
+			require.Zero(t, second.starts.Load(), label)
+			require.Equal(t, actors, system.NumActors(), label)
+			node, ok := system.tree().node(holder.ID())
+			require.True(t, ok, label)
+			require.Same(t, holder, node.value(), label)
+
+			// once the holder runs again, a spawn of the name returns it
+			holder.setState(state, false)
+			pid, err = system.Spawn(ctx, label, second)
+			require.NoError(t, err, label)
+			require.Same(t, holder, pid, label)
+			require.Zero(t, second.starts.Load(), label)
+		}
+	})
+	t.Run("With a suspended actor killed then spawned again", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		suspended, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		suspended.suspend("test")
+
+		_, err = system.Spawn(ctx, "worker", NewMockActor())
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+
+		// killing the suspended actor frees the name
+		require.NoError(t, system.Kill(ctx, "worker"))
+
+		spawned, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, suspended, spawned)
+		require.True(t, spawned.IsRunning())
+	})
+	t.Run("With SpawnSingleton on a name held by a suspended actor", func(t *testing.T) {
+		ctx := context.Background()
+		system := newSingletonClusterSystem(t)
+		clusterMock := mockcluster.NewCluster(t)
+
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+
+		// one claim only: the second spawn is refused before it builds an actor
+		clusterMock.EXPECT().ActorExists(mock.Anything, "singleton").Return(false, nil).Twice()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		holder, err := system.spawnSingletonOnLocal(ctx, "singleton", NewMockActor(), nil, time.Second, 100*time.Millisecond, 1, nil)
+		require.NoError(t, err)
+		// this bare system has no singleton manager to parent the actor, so it
+		// is registered in the tree by hand
+		require.NoError(t, system.tree().addRootNode(holder))
+		holder.setState(suspendedState, true)
+
+		second := NewMockRestartFailingActor()
+		pid, err := system.spawnSingletonOnLocal(ctx, "singleton", second, nil, time.Second, 100*time.Millisecond, 1, nil)
+		require.ErrorIs(t, err, gerrors.ErrActorAlreadyExists)
+		require.Nil(t, pid)
+		require.Zero(t, second.starts.Load())
+	})
 }
 
 func TestSpawnInitTimeoutOption(t *testing.T) {
