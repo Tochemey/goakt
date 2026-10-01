@@ -1816,7 +1816,7 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 		return nil, errors.New("invalid response type")
 	}
 
-	deserialized, err := serializer.Deserialize(askResp.GetMessage())
+	deserialized, err := r.deserializeReplyFrame(askResp.GetMessage(), serializer)
 	if err != nil {
 		return nil, gerrors.NewErrInvalidMessage(err)
 	}

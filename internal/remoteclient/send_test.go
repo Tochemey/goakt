@@ -303,6 +303,77 @@ func TestSendAskLegacyPreservesTimeout(t *testing.T) {
 	assert.Equal(t, 750*time.Millisecond, got)
 }
 
+// TestDeserializeReplyOfAnotherSerializer covers the reply decoding rule: the
+// request's serializer goes first, the dispatching serializer takes over when
+// it fails, and the request serializer's error comes back when both fail.
+func TestDeserializeReplyOfAnotherSerializer(t *testing.T) {
+	cbor := remote.NewCBORSerializer()
+	json := remote.NewJSONSerializer()
+	protoSer := remote.NewProtoSerializer()
+
+	// CBOR is registered ahead of JSON, so the dispatching serializer tries it first.
+	r := NewClient(
+		WithClientSerializers(new(replyOther), cbor),
+		WithClientSerializers(new(replyCount), json),
+	).(*client)
+	defer r.Close()
+
+	count := replyCount(5)
+	jsonFrame, err := json.Serialize(&count)
+	require.NoError(t, err)
+	cborFrame, err := cbor.Serialize(&replyOther{Amount: 2})
+	require.NoError(t, err)
+	protoFrame, err := protoSer.Serialize(durationpb.New(time.Second))
+	require.NoError(t, err)
+
+	// envelope wraps a frame as the duplex REPLY envelope the server sends.
+	envelope := func(frame []byte, serializerID byte) inet.ReplyEnvelope {
+		name, ok := frameTypeName(frame)
+		require.True(t, ok)
+		return inet.ReplyEnvelope{TypeName: string(name), SerializerID: serializerID, Payload: frame}
+	}
+
+	t.Run("a reply of the request's serializer is decoded by it", func(t *testing.T) {
+		// CBOR would decode the JSON frame to another value; the request's
+		// serializer must win.
+		got, err := r.deserializeReplyFrame(jsonFrame, json)
+		require.NoError(t, err)
+		assert.Equal(t, &count, got)
+
+		got, err = r.deserializeUserReply(envelope(jsonFrame, inet.SerializerIDJSON), json)
+		require.NoError(t, err)
+		assert.Equal(t, &count, got)
+	})
+
+	t.Run("a reply of another serializer is decoded by the dispatching serializer", func(t *testing.T) {
+		got, err := r.deserializeReplyFrame(protoFrame, cbor)
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(durationpb.New(time.Second), got.(*durationpb.Duration)))
+
+		got, err = r.deserializeReplyFrame(cborFrame, protoSer)
+		require.NoError(t, err)
+		assert.Equal(t, &replyOther{Amount: 2}, got)
+
+		got, err = r.deserializeUserReply(envelope(protoFrame, inet.SerializerIDPublicProto), cbor)
+		require.NoError(t, err)
+		assert.True(t, proto.Equal(durationpb.New(time.Second), got.(*durationpb.Duration)))
+
+		got, err = r.deserializeUserReply(envelope(cborFrame, inet.SerializerIDCBOR), protoSer)
+		require.NoError(t, err)
+		assert.Equal(t, &replyOther{Amount: 2}, got)
+	})
+
+	t.Run("a reply no serializer decodes returns the request serializer's error", func(t *testing.T) {
+		garbage := []byte("not-a-frame")
+
+		_, err := r.deserializeReplyFrame(garbage, protoSer)
+		require.ErrorIs(t, err, remote.ErrInvalidFrame)
+
+		_, err = r.deserializeUserReply(inet.ReplyEnvelope{SerializerID: inet.SerializerIDPublicProto, Payload: garbage}, protoSer)
+		require.ErrorIs(t, err, remote.ErrInvalidFrame)
+	})
+}
+
 func TestIsControlBulk(t *testing.T) {
 	assert.True(t, isControlBulk(new(internalpb.RelocateBatchRequest)))
 	assert.True(t, isControlBulk(new(internalpb.PersistPeerStateRequest)))

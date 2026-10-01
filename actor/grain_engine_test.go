@@ -4035,3 +4035,46 @@ func TestRemoteGrainSend_KeepsTheSentinelsAcrossNodes(t *testing.T) {
 	_, err = node1.AskGrain(ctx, silent, new(testpb.TestReply), 200*time.Millisecond)
 	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 }
+
+// TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer asks a grain from the
+// other nodes of a three-node cluster with a CBOR request it answers with a
+// proto reply, and with a proto request it answers with a CBOR reply: each
+// reply must be decoded with its own serializer, not the request's.
+func TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 3, withTestSerializables(new(MockCBORRequest), new(MockCBORReply)))
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+	t.Cleanup(func() {
+		_ = node3.Stop(ctx)
+		_ = node2.Stop(ctx)
+		_ = node1.Stop(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		peers, err := node1.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 2
+	}, 10*time.Second, 100*time.Millisecond)
+
+	grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(crossedSerializerReply(gctx.Message()))
+	}}
+
+	identity, err := node3.GrainIdentity(ctx, "crossed-reply-grain", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+
+	require.NoError(t, err)
+
+	for _, node := range []ActorSystem{node1, node2} {
+		reply, err := node.AskGrain(ctx, identity, &MockCBORRequest{Amount: 1}, time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.Reply), reply)
+
+		reply, err = node.AskGrain(ctx, identity, new(testpb.TestSend), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, &MockCBORReply{Amount: 1}, reply)
+	}
+}
