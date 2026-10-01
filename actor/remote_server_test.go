@@ -1923,6 +1923,28 @@ func TestRemoteAskGrainHandler(t *testing.T) {
 	})
 }
 
+func TestGrainSendError(t *testing.T) {
+	sys := newRemoteServerTestSystem("127.0.0.1", 9007)
+	identity := &GrainIdentity{kind: "Kind", name: "Name"}
+	for _, tc := range []struct {
+		err  error
+		code internalpb.Code
+	}{
+		{err: gerrors.ErrMailboxFull, code: internalpb.Code_CODE_RESOURCE_EXHAUSTED},
+		{err: gerrors.ErrRequestTimeout, code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
+		{err: errors.Join(context.DeadlineExceeded, gerrors.ErrRequestTimeout), code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
+		{err: gerrors.ErrDead, code: internalpb.Code_CODE_FAILED_PRECONDITION},
+		{err: gerrors.ErrSystemShuttingDown, code: internalpb.Code_CODE_FAILED_PRECONDITION},
+		{err: errors.New("the grain's own error"), code: internalpb.Code_CODE_INTERNAL_ERROR},
+	} {
+		t.Run(tc.err.Error(), func(t *testing.T) {
+			resp := sys.grainSendError(identity, "127.0.0.1", 9007, tc.err)
+			requireProtoError(t, resp, tc.code)
+			require.Contains(t, resp.GetMessage(), tc.err.Error())
+		})
+	}
+}
+
 func TestRemoteTellGrainHandler(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9008
@@ -2011,7 +2033,7 @@ func TestRemoteTellGrainHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("one-way request reports a full mailbox as CODE_INTERNAL_ERROR", func(t *testing.T) {
+	t.Run("one-way request reports a full mailbox as CODE_RESOURCE_EXHAUSTED", func(t *testing.T) {
 		p := inet.Get(1)[0]
 		sys, err := NewActorSystem("testSys",
 			WithRemote(remote.NewConfig(host, p)),
@@ -2070,7 +2092,24 @@ func TestRemoteTellGrainHandler(t *testing.T) {
 
 		resp, err = impl.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
-		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
+		requireProtoError(t, resp, internalpb.Code_CODE_RESOURCE_EXHAUSTED)
+		require.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrMailboxFull.Error())
+
+		// An async request rides the same mailbox, so it is rejected with
+		// the same code.
+		envelope := &commands.AsyncRequest{CorrelationID: "full", Message: new(testpb.TestReply)}
+		marshaled, err := (&commands.AsyncRequestSerializer{}).Serialize(envelope)
+		require.NoError(t, err)
+
+		envelopeReq := internalpb.RemoteTellGrainRequest_builder{
+			Grain:   req.GetGrain(),
+			Message: marshaled,
+		}.Build()
+
+		resp, err = impl.remoteTellGrainHandler(ctx, nullConn, envelopeReq)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_RESOURCE_EXHAUSTED)
+		require.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrMailboxFull.Error())
 	})
 }
 

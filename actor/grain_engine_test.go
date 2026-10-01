@@ -3975,3 +3975,63 @@ func TestGrainDefaults_ARemoteActivationKeepsTheKindsOptions(t *testing.T) {
 	require.EqualValues(t, 8, pid.config.capacity, "the record's option wins")
 	require.Equal(t, time.Hour, pid.config.deactivateAfter, "the kind's default fills what the record does not carry")
 }
+
+// TestRemoteGrainSend_KeepsTheSentinelsAcrossNodes sends to grains on another
+// node. A grain whose bounded mailbox is full answers ErrMailboxFull and a
+// grain that does not reply in time answers ErrRequestTimeout: the sentinels
+// a local caller gets, instead of an untyped internal error carrying their
+// text.
+func TestRemoteGrainSend_KeepsTheSentinelsAcrossNodes(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 2)
+	node1, node2 := systems[0], systems[1]
+	t.Cleanup(func() {
+		_ = node2.Stop(ctx)
+		_ = node1.Stop(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		peers, err := node1.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 1
+	}, 10*time.Second, 100*time.Millisecond)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+
+	blocking := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		entered <- struct{}{}
+		<-release
+		gctx.NoErr()
+	}}
+
+	identity, err := node2.GrainIdentity(ctx, "remote-full-grain", func(context.Context) (Grain, error) {
+		return blocking, nil
+	}, WithGrainMailboxCapacity(1))
+
+	require.NoError(t, err)
+
+	// the first message parks the grain's turn, the second fills its mailbox
+	go func() { _ = node2.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	<-entered
+	go func() { _ = node2.TellGrain(ctx, identity, new(testpb.TestSend)) }()
+	pid, ok := node2.(*actorSystem).grains.Get(identity.String())
+	require.True(t, ok)
+	require.Eventually(t, func() bool { return pid.boundedMailbox.Len() == 1 }, 2*time.Second, 10*time.Millisecond)
+
+	_, err = node1.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.ErrorIs(t, err, gerrors.ErrMailboxFull)
+	require.ErrorIs(t, node1.TellGrain(ctx, identity, new(testpb.TestSend)), gerrors.ErrMailboxFull)
+
+	// a second grain on node 2 takes the ask and does not reply in time
+	silent, err := node2.GrainIdentity(ctx, "remote-silent-grain", func(context.Context) (Grain, error) {
+		return blocking, nil
+	})
+
+	require.NoError(t, err)
+	_, err = node1.AskGrain(ctx, silent, new(testpb.TestReply), 200*time.Millisecond)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+}

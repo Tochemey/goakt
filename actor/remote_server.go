@@ -71,6 +71,30 @@ type coalescedFailure struct {
 	cause    error
 }
 
+// grainSendError maps the failure of a send to a local grain to the proto
+// error a remote caller gets. The outcomes a caller handles by design,
+// backpressure, a timeout and a grain that is gone, get their own codes so
+// the remoting client hands back the same sentinels a local caller sees, and
+// are reported at debug level: they are not failures of this node. Anything
+// else stays an internal error, logged as such.
+func (x *actorSystem) grainSendError(identity *GrainIdentity, host string, port int32, err error) *internalpb.Error {
+	var code internalpb.Code
+	switch {
+	case errors.Is(err, gerrors.ErrMailboxFull):
+		code = internalpb.Code_CODE_RESOURCE_EXHAUSTED
+	case errors.Is(err, gerrors.ErrRequestTimeout), errors.Is(err, context.DeadlineExceeded):
+		code = internalpb.Code_CODE_DEADLINE_EXCEEDED
+	case errors.Is(err, gerrors.ErrDead), errors.Is(err, gerrors.ErrSystemShuttingDown):
+		code = internalpb.Code_CODE_FAILED_PRECONDITION
+	default:
+		x.logger.Errorf("failed to send to grain=%s on host=%s port=%d: %v", identity.String(), host, port, err)
+		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err)
+	}
+
+	x.logger.Debugf("send to grain=%s on host=%s port=%d rejected: %v", identity.String(), host, port, err)
+	return toProtoError(code, err)
+}
+
 // toProtoError creates an internalpb.Error message with the specified code and error message.
 // This is the standard way to return errors from proto TCP handlers to match the error
 // semantics of the existing ConnectRPC implementation.
@@ -1380,8 +1404,6 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
 	}
 
-	logger := x.logger
-
 	if !x.remotingEnabled.Load() {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
 	}
@@ -1426,13 +1448,7 @@ func (x *actorSystem) remoteAskGrainHandler(ctx context.Context, conn inet.Conne
 
 	reply, err := x.localSendGrain(ctx, identity, message, timeout.AsDuration(), grainAsk)
 	if err != nil {
-		// refused because this node is shutting down
-		if errors.Is(err, gerrors.ErrSystemShuttingDown) {
-			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
-		}
-
-		logger.Errorf("failed to send to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
-		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+		return x.grainSendError(identity, request.GetGrain().GetHost(), request.GetGrain().GetPort(), err), nil
 	}
 
 	response, err := x.remoting.Serializer(reply).Serialize(reply)
@@ -1451,8 +1467,6 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 	if !ok {
 		return toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, errors.New("invalid request type")), nil
 	}
-
-	logger := x.logger
 
 	if !x.remotingEnabled.Load() {
 		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled), nil
@@ -1496,8 +1510,7 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 	switch message.(type) {
 	case *commands.AsyncRequest, *commands.AsyncResponse:
 		if err := x.deliverAsyncEnvelope(ctx, identity, message); err != nil {
-			logger.Errorf("failed to deliver async envelope to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
-			return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+			return x.grainSendError(identity, request.GetGrain().GetHost(), request.GetGrain().GetPort(), err), nil
 		}
 		return new(internalpb.RemoteTellGrainResponse), nil
 	}
@@ -1511,13 +1524,7 @@ func (x *actorSystem) remoteTellGrainHandler(ctx context.Context, conn inet.Conn
 
 	_, err = x.localSendGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
 	if err != nil {
-		// refused because this node is shutting down
-		if errors.Is(err, gerrors.ErrSystemShuttingDown) {
-			return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, err), nil
-		}
-
-		logger.Errorf("failed to send message to grain=%s on host=%s port=%d: %v", identity.String(), request.GetGrain().GetHost(), request.GetGrain().GetPort(), err)
-		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
+		return x.grainSendError(identity, request.GetGrain().GetHost(), request.GetGrain().GetPort(), err), nil
 	}
 
 	return new(internalpb.RemoteTellGrainResponse), nil
