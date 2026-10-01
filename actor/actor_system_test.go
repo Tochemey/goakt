@@ -6261,19 +6261,51 @@ func TestDepartedClaim(t *testing.T) {
 		assert.Nil(t, stale)
 	})
 
-	t.Run("a name held by this node is taken", func(t *testing.T) {
+	t.Run("a name held by this node is taken while a local actor holds it", func(t *testing.T) {
 		clusterMock := mockscluster.NewCluster(t)
 		system := newReplicationSystem(clusterMock)
-		own := internalpb.Actor_builder{
-			Address:       address.New(name, system.name, system.Host(), system.Port()).String(),
-			IncarnationId: "other",
-		}.Build()
+		addr := address.New(name, system.name, system.Host(), system.Port())
+		local := &PID{address: addr, path: newPath(addr), actorSystem: system}
+		require.NoError(t, system.actors.addRootNode(local))
+		own := internalpb.Actor_builder{Address: addr.String(), IncarnationId: local.incarnationID()}.Build()
 		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(own, nil).Once()
 
 		stale, free, err := system.departedClaim(ctx, name)
 		require.NoError(t, err)
 		assert.False(t, free)
 		assert.Nil(t, stale)
+	})
+
+	t.Run("a name held by this node for another incarnation is free with its record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		// the local actor is a new incarnation whose spawn is publishing over
+		// the record a stopped one left
+		addr := address.New(name, system.name, system.Host(), system.Port())
+		require.NoError(t, system.actors.addRootNode(&PID{address: addr, path: newPath(addr), actorSystem: system}))
+		own := internalpb.Actor_builder{Address: addr.String(), IncarnationId: "stopped"}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(own, nil).Once()
+
+		stale, free, err := system.departedClaim(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, free)
+		assert.Same(t, own, stale)
+	})
+
+	t.Run("a name held by this node with no local actor is free with its record", func(t *testing.T) {
+		clusterMock := mockscluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		// a stopped incarnation whose record the death watch has not removed yet
+		own := internalpb.Actor_builder{
+			Address:       address.New(name, system.name, system.Host(), system.Port()).String(),
+			IncarnationId: "stopped",
+		}.Build()
+		clusterMock.EXPECT().GetActor(mock.Anything, name).Return(own, nil).Once()
+
+		stale, free, err := system.departedClaim(ctx, name)
+		require.NoError(t, err)
+		assert.True(t, free)
+		assert.Same(t, own, stale)
 	})
 
 	t.Run("a failed membership read reports the name as taken", func(t *testing.T) {

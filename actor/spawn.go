@@ -56,8 +56,11 @@ import (
 // Spawn creates and starts a new actor in the local actor system.
 //
 // The actor will be registered under the given `name`, allowing other actors
-// or components to send messages to it using the returned *PID. If an actor
-// with the same name already exists in the local system, an error will be returned.
+// or components to send messages to it using the returned *PID. If a running
+// actor already holds the name in the local system, that actor is returned and
+// no new actor is created. If the actor holding the name is not running,
+// because it is suspended, stopping or restarting, ErrActorAlreadyExists is
+// returned.
 //
 // This method is location-transparent: with options such as WithHostAndPort, the actor
 // may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
@@ -145,8 +148,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 
 		// only a top-level actor: a child that shares the name is not this actor
 		if pidNode, exist := x.topLevelActor(name); exist {
-			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
-				return pid, nil
+			if pid, err := nameResolver(pidNode, name); pid != nil || err != nil {
+				return pid, err
 			}
 		}
 
@@ -171,7 +174,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 //   - [WithFuncMailbox] overrides the default mailbox.
 //
 // The name must be unique within the actor system. If an actor with the same name already exists and is
-// running, that actor is returned and no new actor is created.
+// running, that actor is returned and no new actor is created. If it is not running, because it is
+// suspended, stopping or restarting, ErrActorAlreadyExists is returned.
 //
 // The created actor is not relocatable: when running in a cluster it will not be redeployed to another node
 // if its host node leaves the cluster.
@@ -194,8 +198,8 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 
 		// only a top-level actor: a child that shares the name is not this actor
 		if pidNode, exist := x.topLevelActor(name); exist {
-			if pid := pidNode.value(); pid != nil && pid.IsRunning() {
-				return pid, nil
+			if pid, err := nameResolver(pidNode, name); pid != nil || err != nil {
+				return pid, err
 			}
 		}
 
@@ -854,8 +858,8 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		// it instead of creating (and immediately discarding) a duplicate.
 		// only a top-level actor: a child that shares the name is not the singleton
 		if node, exist := x.topLevelActor(name); exist {
-			if pid := node.value(); pid != nil && pid.IsRunning() {
-				return pid, nil
+			if pid, err := nameResolver(node, name); pid != nil || err != nil {
+				return pid, err
 			}
 		}
 
@@ -876,6 +880,27 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		// add the given actor to the tree, supervise it and publish it to the cluster
 		return x.completeSpawn(ctx, x.singletonManager, pid)
 	})
+}
+
+// nameResolver resolves a spawn against the actor that holds its name in the
+// local tree. A running holder is returned: spawning a taken name hands back
+// the actor that owns it. A holder that is not running, because it is
+// suspended, stopping, passivating or restarting, is alive or not gone yet, so
+// the name is still taken: the spawn is refused with ErrActorAlreadyExists
+// rather than starting a second actor the tree has no place for. A nil PID
+// with a nil error means the node holds no actor any more and the name is
+// free.
+func nameResolver(node *pidNode, name string) (*PID, error) {
+	pid := node.value()
+	if pid == nil {
+		return nil, nil
+	}
+
+	if !pid.IsRunning() {
+		return nil, gerrors.NewErrActorAlreadyExists(name)
+	}
+
+	return pid, nil
 }
 
 // defaultSingletonSupervisor returns the supervisor attached to singleton actors when

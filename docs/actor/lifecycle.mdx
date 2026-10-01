@@ -28,6 +28,39 @@ Use `pid.IsRunning()`, `pid.IsSuspended()`, `pid.IsStopping()` to query state wh
 
 When a parent stops, all children stop first (depth-first). The order among descendants is not guaranteed.
 
+The name of a stopped actor is free as soon as the stop returns. Once `Kill`, `Shutdown`, or a parent's `Stop` of a
+child returns, `ActorOf` and `ActorExists` no longer find the actor, and spawning the same name creates a new actor.
+This holds even when `PostStop` returns an error: the actor is dead, its watchers still receive `Terminated`, and the
+error is returned to the caller. Passivation frees the name the same way.
+
+A restart does not free the name. The restarted actor and the children it restarts keep their names, and in cluster
+mode their registry records, for the whole restart, so a lookup from another node keeps resolving them. If the restart
+fails, for example because `PreStart` returns an error, the whole subtree is stopped: no actor of it is left running,
+their watchers receive `Terminated`, and their names are free.
+
+```go
+if err := system.Kill(ctx, "projection"); err != nil {
+    return err
+}
+
+// the name is free: this spawns a new, running actor
+pid, err := system.Spawn(ctx, "projection", NewProjection())
+if err != nil {
+    return err
+}
+```
+
+Spawning a name that a running actor holds returns that actor. Spawning a name held by an actor that is not running,
+because it is suspended, stopping or restarting, fails with `ErrActorAlreadyExists` and starts nothing: reinstate,
+restart or stop that actor first.
+
+<Note>
+In cluster mode the stopped actor's registry record is removed in the background. A spawn of the same name on the
+same node writes its own record over it, so `Kill` followed by `Spawn` works on one node as it does without a cluster.
+A spawn of the name on another node can still see the old record for a short while and fail with
+`ErrActorAlreadyExists`.
+</Note>
+
 ## Lifecycle hooks (Actor interface)
 
 The `Actor` interface defines three lifecycle hooks. See [Actor Model](/actor/actor-model#the-actor-interface) for the

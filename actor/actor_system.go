@@ -4894,10 +4894,13 @@ func (x *actorSystem) checkOrdinarySpawnPreconditions(ctx context.Context, actor
 // once its quiescence gate opens and only when it runs at all, so a spawn that
 // meets the claim first never fails on a dead owner. A name that is not found
 // is free with no record. A singleton claim is never taken over, the leader
-// re-arbitrates singletons on demand. A claim held by this node or by a live
-// member is taken, and so is one whose owner cannot be checked because the
-// membership read failed, which keeps the conflict the caller would have
-// reported anyway.
+// re-arbitrates singletons on demand. A claim held by this node is taken
+// while the local actor under the name is the incarnation the record names;
+// otherwise it was left by a stopped incarnation whose record the death watch
+// has not removed yet, and it is free with its record like a departed node's
+// claim. A claim held by a live member is taken, and so is one whose owner
+// cannot be checked because the membership read failed, which keeps the
+// conflict the caller would have reported anyway.
 func (x *actorSystem) departedClaim(ctx context.Context, qualifiedName string) (*internalpb.Actor, bool, error) {
 	existing, err := x.getCluster().GetActor(ctx, qualifiedName)
 	if err != nil {
@@ -4918,7 +4921,16 @@ func (x *actorSystem) departedClaim(ctx context.Context, qualifiedName string) (
 	}
 
 	if owner.Host() == x.Host() && owner.Port() == x.Port() {
-		return nil, false, nil
+		// a stopped actor leaves the tree before its stop returns, so the
+		// record is live only while the local actor under the name is the
+		// incarnation the record names
+		if node, ok := x.actors.nodeByQualifiedName(qualifiedName); ok {
+			if pid := node.value(); pid != nil && pid.incarnationID() == existing.GetIncarnationId() {
+				return nil, false, nil
+			}
+		}
+
+		return existing, true, nil
 	}
 
 	alive, err := x.isEndpointAlive(ctx, owner.Host(), owner.Port())

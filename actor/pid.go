@@ -886,8 +886,9 @@ func (pid *PID) Path() Path {
 // without a prior shutdown step; non-running descendants are skipped entirely.
 // Mailboxes are not preserved — queued or in-flight messages may be dropped.
 //
-// If any descendant fails to restart, Restart returns that error and the subtree
-// may be only partially recovered. The target actor is left non-running on failure.
+// If the target or any descendant fails to restart, Restart returns that error
+// and the whole subtree is stopped: no actor of it is left running, their names
+// are free and their watchers are told.
 //
 // When pid is remote, Restart delegates to RemoteReSpawn via the remoting layer.
 // Returns ErrRemotingDisabled when pid is remote but remoting is not configured,
@@ -914,7 +915,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	deathWatch := actorSystem.getDeathWatch()
 
 	// snapshot all alive descendants before shutdown so we can rebuild the full subtree
-	// even after the death watch removes entries from the tree.
+	// after the teardown has detached the children from their parents.
 	subtree := buildRestartSubtree(pid, tree)
 	// get the parent node of the actor
 	parent := pid.ActorSystem().NoSender()
@@ -922,7 +923,18 @@ func (pid *PID) Restart(ctx context.Context) error {
 		parent = ppid
 	}
 
-	return restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem)
+	// The teardown of the target stops its descendants too. Marking the whole
+	// subtree up front makes each of those stops part of the restart, so every
+	// actor keeps its name and its registry record while it is down.
+	subtree.setRestarting(true)
+	defer subtree.setRestarting(false)
+
+	if err := restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem); err != nil {
+		subtree.terminate(ctx)
+		return err
+	}
+
+	return nil
 }
 
 // RestartCount returns the total number of times this actor has been restarted.
@@ -987,6 +999,7 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 
 // SpawnChild creates, starts, and supervises a child actor with the given name.
 // If a running child with the same name already exists, its PID is returned without creating a new one.
+// If that child is not running, because it is suspended, stopping or restarting, ErrActorAlreadyExists is returned.
 // Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	config := newSpawnConfig(opts...)
@@ -2696,9 +2709,21 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 	logger := pid.getLogger()
 	logger.Debugf("freeing all actor %s's watchers", pid.Name())
 
+	// The death watch removes the registry record of a dead actor. An actor
+	// torn down by a restart is not dead: it keeps its record, which the
+	// restart updates in place, so the death watch is neither told nor released.
+	var deathWatch *PID
+	if pid.isStateSet(restartingState) {
+		deathWatch = pid.ActorSystem().getDeathWatch()
+	}
+
 	tree := pid.ActorSystem().tree()
 	watchers := tree.watchers(pid)
 	for _, watcher := range watchers {
+		if watcher == deathWatch {
+			continue
+		}
+
 		terminated := NewTerminated(pid.Path())
 
 		if watcher.IsRunning() {
@@ -2914,37 +2939,60 @@ func (pid *PID) unsetBehaviorStacked() {
 	pid.fieldsLocker.Unlock()
 }
 
-// doStop stops the actor
+// doStop stops the actor: it releases the actors it watches, stops its
+// children and runs PostStop. Whatever the outcome, the actor is dead once
+// doStop returns, so the watchers are always told and the actor gives its name
+// back before it is marked as not running. A caller that sees the stop return
+// can therefore spawn the name again, and a lookup never finds the dead actor.
 func (pid *PID) doStop(ctx context.Context) error {
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 
 	defer func() {
+		pid.releaseName()
 		pid.setState(runningState, false)
 		pid.reset()
 	}()
 
-	if err := chain.
+	err := chain.
 		New(chain.WithFailFast()).
 		AddRunner(func() error { return pid.freeWatchees(ctx) }).
 		AddRunner(func() error { return pid.freeChildren(ctx) }).
-		Run(); err != nil {
-		return err
-	}
+		AddRunner(func() error {
+			stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
+			return pid.actor.PostStop(stopContext)
+		}).
+		Run()
 
-	stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
+	// let watchers know you are terminated
+	pid.freeWatchers(ctx)
 
-	// run the PostStop hook and let watchers know
-	// you are terminated
-	if err := chain.
-		New(chain.WithFailFast()).
-		AddRunner(func() error { return pid.actor.PostStop(stopContext) }).
-		AddRunner(func() error { pid.freeWatchers(ctx); return nil }).
-		Run(); err != nil {
+	if err != nil {
 		return err
 	}
 
 	pid.getLogger().Debugf("shutdown process completed for actor %s", pid.Name())
 	return nil
+}
+
+// releaseName removes the stopped actor from the actor tree and from the live
+// actors count, which frees its name on this node. The teardown inside a
+// restart keeps both: the restart re-initializes the same PID in place, and
+// releasing the name in between would let a concurrent spawn take it.
+// Removing the actor's cluster registry record is left to the death watch,
+// because it can fail and is retried.
+func (pid *PID) releaseName() {
+	if pid.isStateSet(restartingState) {
+		return
+	}
+
+	system := pid.ActorSystem()
+	if system == nil {
+		return
+	}
+
+	if system.tree().deleteNode(pid) && !pid.isStateSet(systemState) {
+		system.decreaseActorsCounter()
+	}
 }
 
 // notifyParent sends a notification to the parent actor
@@ -3178,14 +3226,12 @@ func (pid *PID) handleStopDirective(cid *PID, includeSiblings bool) {
 		eg.Go(func() error {
 			// TODO: revisit this
 			//pid.UnWatch(spid)
+			// A failed shutdown still leaves the actor dead and out of the
+			// tree (see PID.doStop), so there is nothing left to suspend.
 			if err := spid.Shutdown(ctx); err != nil {
 				pid.getLogger().Error(fmt.Errorf("failed to shutdown Actor (%s): %w", spid.Name(), err))
-				// we need to suspend the actor since its shutdown is the result of
-				// one of its faulty siblings
-				spid.suspend(err.Error())
-				return nil
 			}
-			tree.deleteNode(spid)
+
 			return nil
 		})
 	}
@@ -3691,15 +3737,15 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 
 	childAddress := pid.childAddress(name)
 	tree := pid.actorSystem.tree()
-	if existing, ok := pid.findRunningChild(tree, childAddress.String()); ok {
-		return existing, nil
+	if existing, err := pid.childNameResolver(tree, childAddress.String(), name); existing != nil || err != nil {
+		return existing, err
 	}
 
 	// Serialize concurrent spawns of the same child so only one PID is created
 	// and inserted; concurrent callers coalesce onto the winner and share it.
 	return pid.actorSystem.runSpawnActivation(ctx, childAddress.String(), func() (*PID, error) {
-		if existing, ok := pid.findRunningChild(tree, childAddress.String()); ok {
-			return existing, nil
+		if existing, err := pid.childNameResolver(tree, childAddress.String(), name); existing != nil || err != nil {
+			return existing, err
 		}
 
 		if config.dependencies != nil {
@@ -3716,9 +3762,16 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 			return nil, err
 		}
 
-		// attach the child to the tree, supervise it and publish it to the cluster
-		if _, err := pid.ActorSystem().completeSpawn(ctx, pid, cid); err != nil {
+		// attach the child to the tree, supervise it and publish it to the cluster.
+		// The tree may already hold this child, in which case completeSpawn
+		// returns that one and the caller must get it, not the duplicate.
+		spawned, err := pid.ActorSystem().completeSpawn(ctx, pid, cid)
+		if err != nil {
 			return nil, err
+		}
+
+		if spawned != cid {
+			return spawned, nil
 		}
 
 		// the event is published only after successful cluster publication, so it
@@ -3732,21 +3785,17 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 	})
 }
 
-// findRunningChild returns the child PID registered at childAddress in tree
-// when it exists and is still running. The boolean return distinguishes a missing
-// node from a known-but-stopped child so callers can decide whether to reuse or
-// recreate.
-func (pid *PID) findRunningChild(tree *tree, childAddress string) (*PID, bool) {
+// childNameResolver resolves a child spawn against the child registered at
+// childAddress in tree. It returns the child when it is running,
+// ErrActorAlreadyExists when it holds the name without running, and a nil PID
+// with a nil error when the name is free (see nameResolver).
+func (pid *PID) childNameResolver(tree *tree, childAddress, name string) (*PID, error) {
 	cnode, ok := tree.node(childAddress)
 	if !ok {
-		return nil, false
+		return nil, nil
 	}
 
-	cid := cnode.value()
-	if !cid.IsRunning() {
-		return nil, false
-	}
-	return cid, true
+	return nameResolver(cnode, name)
 }
 
 // buildChildOptions translates a spawn config into the pidOption list used
@@ -3796,10 +3845,53 @@ func (pid *PID) incarnationID() string {
 // written once at construction. The actor tree calls it while holding its own
 // lock, and Children and Stop take the two locks in the opposite order.
 func (pid *PID) qualifiedName() string {
-	if p := pid.Path(); p != nil {
-		return p.QualifiedName()
+	if path := pid.Path(); path != nil {
+		return path.QualifiedName()
 	}
 	return ""
+}
+
+// setRestarting raises or clears the restarting marker on every actor of the
+// subtree.
+func (x *restartNode) setRestarting(enabled bool) {
+	x.pid.setState(restartingState, enabled)
+
+	for _, child := range x.children {
+		child.setRestarting(enabled)
+	}
+}
+
+// terminate ends every actor of a subtree whose restart failed. Nothing is
+// rolled back: the actors cannot return to the state they had before the
+// restart, so all of them end up dead with their names free. Children are
+// ended before their parent.
+//
+// At this point an actor of the subtree is in one of two states:
+//   - Not running: the restart tore it down, and it either failed to start
+//     again or was never reached. It is already dead, so it only tells its
+//     watchers and frees its name. Telling the death watch is what removes
+//     its registry record.
+//   - Running: it was started again before another actor of the subtree
+//     failed. A child does not outlive its parent, so it is stopped like any
+//     other actor.
+func (x *restartNode) terminate(ctx context.Context) {
+	for _, child := range x.children {
+		child.terminate(ctx)
+	}
+
+	pid := x.pid
+	pid.setState(restartingState, false)
+
+	if pid.isStateSet(runningState) {
+		if err := pid.Shutdown(ctx); err != nil {
+			pid.getLogger().Errorf("actor=%s failed to stop after a failed restart: %v (hint: check PostStop cleanup)", pid.Name(), err)
+		}
+
+		return
+	}
+
+	pid.freeWatchers(ctx)
+	pid.releaseName()
 }
 
 func buildRestartSubtree(root *PID, tree *tree) *restartNode {
@@ -3854,13 +3946,11 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 	_, wasInTree := tree.node(pid.ID())
-	didShutdown := false
 	if pid.IsRunning() {
 		if err := pid.Shutdown(ctx); err != nil {
 			return err
 		}
 
-		didShutdown = true
 		tk := ticker.New(10 * time.Millisecond)
 		tk.Start()
 		tickerStopSig := make(chan types.Unit, 1)
@@ -3928,7 +4018,10 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		pid.getEventsStream().Publish(eventsTopic, NewActorRestarted(pid.Path()))
 	}
 
-	if actorSystem != nil && !pid.isStateSet(systemState) && (didShutdown || !wasInTree) {
+	// the teardown of a restart keeps the actor in the tree and in the live
+	// actors count (see PID.releaseName), so only an actor that was not in the
+	// tree is counted again
+	if actorSystem != nil && !pid.isStateSet(systemState) && !wasInTree {
 		actorSystem.increaseActorsCounter()
 	}
 
