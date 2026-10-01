@@ -291,16 +291,19 @@ func TestDeathWatch(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
 		require.Error(t, err)
 		var cleanupErr *clusterCleanupError
 		require.ErrorAs(t, err, &cleanupErr)
 		require.Contains(t, err.Error(), clusterErr.Error())
-
-		require.NoError(t, cid.Shutdown(ctx))
 	})
 
 	t.Run("With Terminated removes singleton kind entry", func(t *testing.T) {
@@ -364,11 +367,113 @@ func TestDeathWatch(t *testing.T) {
 
 		clmock.EXPECT().RemoveActor(mock.Anything, actorName, mock.Anything).Return(nil, nil).Once()
 
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(singletonPID)
+		require.NoError(t, singletonPID.Shutdown(ctx))
+
 		terminated := NewTerminated(singletonPID.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), singletonPID, deathWatchPID, terminated)
 
 		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
-		require.NoError(t, singletonPID.Shutdown(ctx))
+	})
+
+	t.Run("With Terminated not sent by the dead actor leaving the registry untouched", func(t *testing.T) {
+		ctx := context.Background()
+		actorSys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		// the strict mock (no RemoveActor expectation) enforces that the
+		// registry is left untouched
+		clmock := mockscluster.NewCluster(t)
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		require.NoError(t, actorSys.Start(ctx))
+		pause.For(500 * time.Millisecond)
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		clmock.EXPECT().ActorExists(mock.Anything, mock.Anything).Return(false, nil).Twice()
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Twice()
+
+		dead, err := actorSys.Spawn(ctx, "dead-actor", NewMockActor())
+		require.NoError(t, err)
+		other, err := actorSys.Spawn(ctx, "other-actor", NewMockActor())
+		require.NoError(t, err)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		deathWatchPID.UnWatch(dead)
+		require.NoError(t, dead.Shutdown(ctx))
+
+		// only the dead actor itself can report its own death
+		for _, sender := range []*PID{nil, actorSys.NoSender(), other} {
+			receiveCtx := newReceiveContext(ctx, sender, deathWatchPID, NewTerminated(dead.Path()))
+			require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
+		}
+
+		deathWatchPID.UnWatch(other)
+		require.NoError(t, other.Shutdown(ctx))
+	})
+
+	t.Run("With Terminated from an actor that runs again leaving its record", func(t *testing.T) {
+		ctx := context.Background()
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		actorSys, err := NewActorSystem("testSys", WithLogger(logger))
+		require.NoError(t, err)
+
+		// the strict mock (no RemoveActor expectation) enforces that the
+		// record of the running actor stays in the registry
+		clmock := mockscluster.NewCluster(t)
+		sys := actorSys.(*actorSystem)
+		sys.locker.Lock()
+		sys.cluster = clmock
+		sys.locker.Unlock()
+
+		require.NoError(t, actorSys.Start(ctx))
+		pause.For(500 * time.Millisecond)
+		sys.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			sys.clusterEnabled.Store(false)
+			sys.locker.Lock()
+			sys.cluster = nil
+			sys.locker.Unlock()
+			require.NoError(t, actorSys.Stop(ctx))
+		})
+
+		const actorName = "restarted-actor"
+		clmock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+		clmock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Once()
+
+		cid, err := actorSys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+
+		deathWatchPID := actorSys.getDeathWatch()
+		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+
+		// a Terminated left over from a failed restart attempt reaches the
+		// death watch after a later attempt brought the actor back
+		buf.Reset()
+		receiveCtx := newReceiveContext(ctx, cid, deathWatchPID, NewTerminated(cid.Path()))
+		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
+
+		_ = logger.Flush()
+		require.Contains(t, buf.String(), "is running again, record left in cluster")
+
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
 	})
 
 	// Logging path tests: verify all log messages are emitted when logger is enabled.
@@ -416,7 +521,7 @@ func TestDeathWatch(t *testing.T) {
 		require.Contains(t, logContent, "GoAktDeathWatch", "handlePostStart should include deathWatch actor name")
 	})
 
-	t.Run("Logging handleTerminated logs when PID not found", func(t *testing.T) {
+	t.Run("Logging handleTerminated logs when the sender is not the dead actor", func(t *testing.T) {
 		ctx := context.Background()
 		buf := &safeBuffer{}
 		// handleTerminated diagnostics are per-actor lifecycle, logged at Debug.
@@ -444,8 +549,7 @@ func TestDeathWatch(t *testing.T) {
 		_ = logger.Flush()
 		logContent := buf.String()
 		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
-		require.Contains(t, logContent, "unable to locate dead actor resource", "should log when PID not found in tree")
-		require.Contains(t, logContent, "maybe already freed", "should log hint when PID not found")
+		require.Contains(t, logContent, "Terminated was not sent by the dead actor, nothing to remove", "should log when the sender is not the dead actor")
 
 		require.NoError(t, actorSys.Stop(ctx))
 	})
@@ -493,8 +597,13 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		buf.Reset()
 		err = deathWatchActor.handleTerminated(receiveCtx)
@@ -506,8 +615,6 @@ func TestDeathWatch(t *testing.T) {
 		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
 		require.Contains(t, logContent, "failed to remove dead actor from cluster", "should log when cluster removal fails")
 		require.Contains(t, logContent, "cluster failure", "should include error message in log")
-
-		require.NoError(t, cid.Shutdown(ctx))
 	})
 
 	t.Run("Logging handleTerminated logs when actor successfully removed", func(t *testing.T) {
@@ -532,8 +639,13 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchPID := actorSys.getDeathWatch()
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		buf.Reset()
 		err = deathWatchActor.handleTerminated(receiveCtx)
@@ -544,7 +656,6 @@ func TestDeathWatch(t *testing.T) {
 		require.Contains(t, logContent, "removing dead actor resource from system", "should log when starting to process Terminated")
 		require.Contains(t, logContent, "removed dead actor resource from system", "should log when actor successfully removed")
 
-		require.NoError(t, cid.Shutdown(ctx))
 		require.NoError(t, actorSys.Stop(ctx))
 	})
 }
@@ -715,8 +826,13 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
 		require.Error(t, err)
@@ -725,8 +841,6 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.ErrorIs(t, err, clusterErr)
 		require.Contains(t, err.Error(), "cluster cleanup error")
 		require.Contains(t, err.Error(), clusterErr.Error())
-
-		require.NoError(t, cid.Shutdown(ctx))
 	})
 	t.Run("With removal retry rescheduling until success", func(t *testing.T) {
 		ctx := context.Background()
@@ -874,8 +988,13 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		err = deathWatchActor.handleTerminated(receiveCtx)
 		require.Error(t, err)
@@ -884,8 +1003,6 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.ErrorIs(t, err, cluster.ErrEngineNotRunning)
 
 		pause.For(time.Second)
-
-		require.NoError(t, cid.Shutdown(ctx))
 	})
 	t.Run("With removal retry skipped when the system is stopping", func(t *testing.T) {
 		ctx := context.Background()
@@ -1160,15 +1277,18 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 		require.NotNil(t, deathWatchPID)
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 
+		// the death watch only acts on a dead actor: stop it without telling the
+		// death watch, so the only Terminated it handles is the one below
+		deathWatchPID.UnWatch(cid)
+		require.NoError(t, cid.Shutdown(ctx))
+
 		terminated := NewTerminated(cid.Path())
-		receiveCtx := newReceiveContext(context.Background(), actorSys.NoSender(), deathWatchPID, terminated)
+		receiveCtx := newReceiveContext(context.Background(), cid, deathWatchPID, terminated)
 
 		require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
 
 		// undo the simulated stopping state so the deferred Stop runs normally
 		sys.shuttingDown.Store(false)
-
-		require.NoError(t, cid.Shutdown(ctx))
 	})
 	t.Run("Logging removal retry warning, success and give-up messages", func(t *testing.T) {
 		ctx := context.Background()

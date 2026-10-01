@@ -136,7 +136,13 @@ func (x *deathWatch) handlePostStart(ctx *ReceiveContext) {
 	}
 }
 
-// handleTerminated handles Terminated message
+// handleTerminated removes a dead actor's record from the cluster registry.
+// The dead actor has already left the local actor tree and the live actors
+// count by itself (see PID.releaseName), so the name is free on this node
+// before its Terminated arrives here. The dead actor sends its own Terminated,
+// so the sender is the dead PID; the actor tree is never consulted, which
+// keeps a later incarnation of the same name out of reach. A Terminated from
+// any other sender names no actor this node can vouch for and is ignored.
 func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 	msg := ctx.Message().(*Terminated)
 
@@ -148,67 +154,74 @@ func (x *deathWatch) handleTerminated(ctx *ReceiveContext) error {
 		logger.Debugf("actor=%s removing dead actor resource from system", path)
 	}
 
-	actorTree := actorSys.tree()
-	if node, ok := actorTree.node(path.String()); ok {
-		pid := node.value()
-
-		if !pid.isStateSet(systemState) {
-			actorSys.decreaseActorsCounter()
-		}
-
-		// the registry keys records by qualified name, so two children with the
-		// same name under different parents never remove each other's record
-		qualifiedName := pid.getAddress().QualifiedName()
-		incarnationID := pid.incarnationID()
-		actorTree.deleteNode(pid)
-		// system actors never publish registry records, with one exception:
-		// reliable-delivery controller companions do through their private
-		// publication path, so their records must leave the registry with them
-		removable := !pid.isStateSet(systemState) || pid.reliableCompanion() != nil
-		removeFromCluster := actorSys.InCluster() && removable && !actorSys.isStopping()
-
-		if removeFromCluster {
-			cctx := ctx.withoutCancel()
-			cl := actorSys.getCluster()
-
-			// the removal is fenced by the dead actor's incarnation: a name
-			// that another incarnation claimed in the meantime keeps its new
-			// owner's record
-			reowned, err := cl.RemoveActor(cctx, qualifiedName, incarnationID)
-			if err != nil {
-				if logger.Enabled(log.ErrorLevel) {
-					logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", path, err)
-				}
-				// a failed registry cleanup is not a DeathWatch failure: the
-				// removal often runs while the cluster is still digesting the
-				// membership change that terminated the actor, so the error is
-				// usually transient. Report it as clusterCleanupError, which the
-				// DeathWatch supervisor resumes on (see spawnDeathWatch) instead
-				// of escalating to the system guardian and stopping an otherwise
-				// healthy node, and schedule a bounded removal retry so the
-				// stale record does not keep the actor name reserved once the
-				// cluster settles. A stopped engine is the one failure no retry
-				// can outlive (it means the system began stopping after the
-				// gate above), so only that skips the retry outright.
-				if !errors.Is(err, cluster.ErrEngineNotRunning) {
-					x.scheduleRemovalRetry(ctx, qualifiedName, incarnationID, 1)
-				}
-				return newClusterCleanupError(err)
-			}
-
-			if reowned != nil && logger.Enabled(log.DebugLevel) {
-				logger.Debugf("actor=%s record is owned by another incarnation, left in cluster", path)
-			}
-		}
-
+	pid := ctx.Sender()
+	if pid == nil || !pid.IsLocal() || pid.ID() != path.String() {
 		if logger.Enabled(log.DebugLevel) {
-			logger.Debugf("actor=%s removed dead actor resource from system", path)
+			logger.Debugf("actor=%s addr=%s Terminated was not sent by the dead actor, nothing to remove", ctx.Self().Name(), path)
 		}
+
 		return nil
 	}
-	if logger.Enabled(log.DebugLevel) {
-		logger.Debugf("actor=%s addr=%s unable to locate dead actor resource, maybe already freed", ctx.Self().Name(), path)
+
+	// A restart that failed reports the actor dead, and a later attempt can
+	// bring the same incarnation back before this message is handled. Its
+	// record is then the live one and must stay.
+	if pid.IsRunning() {
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s is running again, record left in cluster", path)
+		}
+
+		return nil
 	}
+
+	// the registry keys records by qualified name, so two children with the
+	// same name under different parents never remove each other's record
+	qualifiedName := pid.getAddress().QualifiedName()
+	incarnationID := pid.incarnationID()
+	// system actors never publish registry records, with one exception:
+	// reliable-delivery controller companions do through their private
+	// publication path, so their records must leave the registry with them
+	removable := !pid.isStateSet(systemState) || pid.reliableCompanion() != nil
+	removeFromCluster := actorSys.InCluster() && removable && !actorSys.isStopping()
+
+	if removeFromCluster {
+		cctx := ctx.withoutCancel()
+		cl := actorSys.getCluster()
+
+		// the removal is fenced by the dead actor's incarnation: a name
+		// that another incarnation claimed in the meantime keeps its new
+		// owner's record
+		reowned, err := cl.RemoveActor(cctx, qualifiedName, incarnationID)
+		if err != nil {
+			if logger.Enabled(log.ErrorLevel) {
+				logger.Errorf("actor=%s failed to remove dead actor from cluster: %v", path, err)
+			}
+			// a failed registry cleanup is not a DeathWatch failure: the
+			// removal often runs while the cluster is still digesting the
+			// membership change that terminated the actor, so the error is
+			// usually transient. Report it as clusterCleanupError, which the
+			// DeathWatch supervisor resumes on (see spawnDeathWatch) instead
+			// of escalating to the system guardian and stopping an otherwise
+			// healthy node, and schedule a bounded removal retry so the
+			// stale record does not keep the actor name reserved once the
+			// cluster settles. A stopped engine is the one failure no retry
+			// can outlive (it means the system began stopping after the
+			// gate above), so only that skips the retry outright.
+			if !errors.Is(err, cluster.ErrEngineNotRunning) {
+				x.scheduleRemovalRetry(ctx, qualifiedName, incarnationID, 1)
+			}
+			return newClusterCleanupError(err)
+		}
+
+		if reowned != nil && logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s record is owned by another incarnation, left in cluster", path)
+		}
+	}
+
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s removed dead actor resource from system", path)
+	}
+
 	return nil
 }
 

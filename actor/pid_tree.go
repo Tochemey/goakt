@@ -401,28 +401,31 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 // Time Complexity: O(k + e) where k is number of nodes in the subtree,
 // and e is the total number of watcher/watchee edges touching them.
 // Space Complexity: O(k) for traversal stacks plus O(1) auxiliary.
-// No-ops if pid is nil, NoSender, or unknown.
-func (x *tree) deleteNode(pid *PID) {
+// No-ops if pid is nil, NoSender, unknown, or no longer the PID its node
+// holds: a node that a later incarnation of the same name took over belongs to
+// that incarnation and is left in place.
+// It reports whether the node was removed.
+func (x *tree) deleteNode(pid *PID) bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
 	if pid == nil {
-		return
+		return false
 	}
 
 	if x.noSender != nil && pid.Equals(x.noSender) {
-		return
+		return false
 	} else if x.noSender == nil { // Defensive fallback.
 		noSender := pid.ActorSystem().NoSender()
 		if pid.Equals(noSender) {
-			return
+			return false
 		}
 	}
 
 	id := pid.ID()
 	node, ok := x.pids[id]
-	if !ok {
-		return
+	if !ok || node.pid.Load() != pid {
+		return false
 	}
 
 	// Iterative stack for subtree traversal (post-order style via two slices).
@@ -483,6 +486,8 @@ func (x *tree) deleteNode(pid *PID) {
 		n.pid.Store(nil)
 		x.counter.Add(-1)
 	}
+
+	return true
 }
 
 // node returns the internal pidNode by ID.

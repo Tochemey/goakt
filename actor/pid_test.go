@@ -456,6 +456,24 @@ func TestPassivation(t *testing.T) {
 		assert.ErrorIs(t, err, errors.ErrDead)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With passivation releasing the name", func(t *testing.T) {
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		pid, err := system.Spawn(ctx, "worker", NewMockActor(), WithPassivationStrategy(passivation.NewTimeBasedStrategy(50*time.Millisecond)))
+		require.NoError(t, err)
+		actors := system.NumActors()
+
+		require.Eventually(t, func() bool { return !pid.IsRunning() }, 2*time.Second, 10*time.Millisecond)
+
+		_, err = system.ActorOf(ctx, "worker")
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		require.Equal(t, actors-1, system.NumActors())
+	})
 }
 
 func TestRestart(t *testing.T) {
@@ -958,6 +976,231 @@ func TestRestart(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With a restart keeping the actor and its children in the tree", func(t *testing.T) {
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		pid, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		child, err := pid.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		actors := system.NumActors()
+
+		restarted, err := system.ReSpawn(ctx, "worker")
+		require.NoError(t, err)
+		require.Same(t, pid, restarted)
+
+		// the death watch has handled the Terminated of the restart teardown
+		pause.For(100 * time.Millisecond)
+
+		found, err := system.ActorOf(ctx, "worker")
+		require.NoError(t, err)
+		require.Same(t, pid, found)
+		require.True(t, found.IsRunning())
+
+		found, err = system.ActorOf(ctx, "worker/child")
+		require.NoError(t, err)
+		require.Same(t, child, found)
+		require.True(t, found.IsRunning())
+		require.Equal(t, actors, system.NumActors())
+	})
+	t.Run("With a restart tearing its children down as part of the restart", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		parent, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+
+		marker := &MockRestartMarkerActor{}
+		child, err := parent.SpawnChild(ctx, "child", marker)
+		require.NoError(t, err)
+		marker.self.Store(child)
+
+		require.NoError(t, parent.Restart(ctx))
+
+		// the child was stopped by its parent's teardown, and that stop must be
+		// seen as a restart so the child keeps its name while it is down
+		require.True(t, marker.markedAtStop.Load())
+		require.False(t, parent.isStateSet(restartingState))
+		require.False(t, child.isStateSet(restartingState))
+
+		found, err := system.ActorOf(ctx, "worker/child")
+		require.NoError(t, err)
+		require.Same(t, child, found)
+		require.True(t, child.IsRunning())
+		require.Len(t, parent.Children(), 1)
+	})
+	t.Run("With a failed restart stopping the subtree and freeing its names", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		watcher := NewMockLifecycleOrderActor()
+		watcherPID, err := system.Spawn(ctx, "watcher", watcher)
+		require.NoError(t, err)
+		require.Equal(t, "PostStart", nextHandled(t, watcher))
+
+		parent, err := system.Spawn(ctx, "worker", NewMockRestartFailingActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		watcherPID.Watch(parent)
+		actors := system.NumActors()
+
+		require.Error(t, parent.Restart(ctx))
+
+		require.False(t, parent.IsRunning())
+		require.False(t, child.IsRunning())
+		require.False(t, parent.isStateSet(restartingState))
+		require.False(t, child.isStateSet(restartingState))
+		require.Equal(t, "Terminated", nextHandled(t, watcher))
+
+		for _, name := range []string{"worker", "worker/child"} {
+			_, err = system.ActorOf(ctx, name)
+			require.ErrorIs(t, err, errors.ErrActorNotFound)
+		}
+
+		require.Equal(t, actors-2, system.NumActors())
+
+		// the name is free: a spawn creates a new running actor
+		spawned, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, parent, spawned)
+		require.True(t, spawned.IsRunning())
+	})
+	t.Run("With a failed child restart stopping the children restarted before it", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		parent, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		healthy, err := parent.SpawnChild(ctx, "healthy", NewMockActor())
+		require.NoError(t, err)
+		failing, err := parent.SpawnChild(ctx, "failing", NewMockRestartFailingActor())
+		require.NoError(t, err)
+		actors := system.NumActors()
+
+		require.Error(t, parent.Restart(ctx))
+
+		for _, pid := range []*PID{parent, healthy, failing} {
+			require.False(t, pid.IsRunning(), pid.Name())
+			require.False(t, pid.isStateSet(restartingState), pid.Name())
+		}
+
+		for _, name := range []string{"worker", "worker/healthy", "worker/failing"} {
+			_, err = system.ActorOf(ctx, name)
+			require.ErrorIs(t, err, errors.ErrActorNotFound)
+		}
+
+		require.Equal(t, actors-3, system.NumActors())
+	})
+	t.Run("With a restart keeping its registry records in cluster mode", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		// the strict mock fails the test on any registry call that is not expected
+		clusterMock := mockscluster.NewCluster(t)
+		system := sys.(*actorSystem)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+		system.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			system.clusterEnabled.Store(false)
+			system.locker.Lock()
+			system.cluster = nil
+			system.locker.Unlock()
+			require.NoError(t, sys.Stop(ctx))
+		})
+
+		// one claim per spawn and one update per restarted actor; no removal is
+		// expected, so the records stay in the registry throughout the restart
+		clusterMock.EXPECT().ActorExists(mock.Anything, "worker").Return(false, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Times(4)
+
+		parent, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+
+		require.NoError(t, parent.Restart(ctx))
+
+		// give the death watch time to act on a Terminated it must not receive
+		pause.For(200 * time.Millisecond)
+		require.True(t, parent.IsRunning())
+		require.True(t, child.IsRunning())
+	})
+	t.Run("With a failed restart removing its registry records in cluster mode", func(t *testing.T) {
+		ctx := context.Background()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		// the strict mock fails the test on any registry call that is not expected
+		clusterMock := mockscluster.NewCluster(t)
+		system := sys.(*actorSystem)
+		system.locker.Lock()
+		system.cluster = clusterMock
+		system.locker.Unlock()
+		system.clusterEnabled.Store(true)
+
+		t.Cleanup(func() {
+			system.clusterEnabled.Store(false)
+			system.locker.Lock()
+			system.cluster = nil
+			system.locker.Unlock()
+			require.NoError(t, sys.Stop(ctx))
+		})
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "worker").Return(false, nil).Once()
+		clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Twice()
+
+		parent, err := system.Spawn(ctx, "worker", NewMockRestartFailingActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+
+		removed := make(chan string, 2)
+		remove := func(_ context.Context, name, incarnationID string) (*internalpb.Actor, error) {
+			removed <- name + "@" + incarnationID
+			return nil, nil
+		}
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker", mock.Anything).RunAndReturn(remove).Once()
+		clusterMock.EXPECT().RemoveActor(mock.Anything, "worker/child", mock.Anything).RunAndReturn(remove).Once()
+
+		require.Error(t, parent.Restart(ctx))
+
+		// each removal is fenced by the incarnation of the actor that died
+		got := []string{}
+		for range 2 {
+			select {
+			case removal := <-removed:
+				got = append(got, removal)
+			case <-time.After(3 * time.Second):
+				require.FailNow(t, "the death watch did not remove the registry records")
+			}
+		}
+
+		require.ElementsMatch(t, []string{
+			"worker@" + parent.incarnationID(),
+			"worker/child@" + child.incarnationID(),
+		}, got)
+	})
 }
 
 func TestSupervisorStrategy(t *testing.T) {
@@ -990,10 +1233,17 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.Equal(t, parent.ID(), child.Parent().ID())
 
 		require.Len(t, parent.Children(), 1)
+		actors := actorSystem.NumActors()
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		pause.For(time.Second)
 		require.Zero(t, parent.ChildrenCount())
+
+		// the stopped child left the tree and the live actors count exactly once
+		require.Equal(t, actors-1, actorSystem.NumActors())
+		exists, err := actorSystem.ActorExists(ctx, "test/SpawnChild")
+		require.NoError(t, err)
+		require.False(t, exists)
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -1088,10 +1338,21 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(500 * time.Millisecond)
 
 		require.Len(t, parent.Children(), 2)
+		actors := actorSystem.NumActors()
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
 		pause.For(time.Second)
 		require.Zero(t, parent.ChildrenCount())
+
+		// the faulty child and its sibling each left the tree and the live
+		// actors count exactly once
+		require.Equal(t, actors-2, actorSystem.NumActors())
+
+		for _, name := range []string{"test/SpawnChild", "test/SpawnChild2"} {
+			exists, err := actorSystem.ActorExists(ctx, name)
+			require.NoError(t, err)
+			require.False(t, exists, name)
+		}
 
 		//stop the actor
 		err = parent.Shutdown(ctx)
@@ -1305,6 +1566,7 @@ func TestSupervisorStrategy(t *testing.T) {
 		pause.For(time.Second)
 
 		require.Len(t, parent.Children(), 1)
+		actors := actorSystem.NumActors()
 		// send a test panic message to the actor
 		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
 
@@ -1315,10 +1577,57 @@ func TestSupervisorStrategy(t *testing.T) {
 		require.False(t, child.IsRunning())
 		require.Len(t, parent.Children(), 0)
 
+		// a child whose PostStop fails is dead all the same: it left the tree
+		// and the live actors count, and its name is free
+		require.Equal(t, actors-1, actorSystem.NumActors())
+		exists, err := actorSystem.ActorExists(ctx, "test/SpawnChild")
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		respawned, err := parent.SpawnChild(ctx, "SpawnChild", NewMockSupervised(), WithSupervisor(stopStrategy))
+		require.NoError(t, err)
+		require.NotSame(t, child, respawned)
+		require.True(t, respawned.IsRunning())
+
 		//stop the actor
 		err = parent.Shutdown(ctx)
 		require.NoError(t, err)
 		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With stop as supervisor directive with ONE_FOR_ALL and a sibling shutdown failure", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, actorSystem.Stop(ctx)) })
+
+		parent, err := actorSystem.Spawn(ctx, "test", NewMockSupervisor())
+		require.NoError(t, err)
+
+		stopStrategy := supervisor.NewSupervisor(
+			supervisor.WithStrategy(supervisor.OneForAllStrategy),
+			supervisor.WithDirective(&errors.PanicError{}, supervisor.StopDirective),
+		)
+
+		child, err := parent.SpawnChild(ctx, "faulty", NewMockSupervised(), WithSupervisor(stopStrategy))
+		require.NoError(t, err)
+		sibling, err := parent.SpawnChild(ctx, "sibling", &MockPostStopFailingActor{}, WithSupervisor(stopStrategy))
+		require.NoError(t, err)
+		actors := actorSystem.NumActors()
+
+		require.NoError(t, Tell(ctx, child, new(testpb.TestPanic)))
+		require.Eventually(t, func() bool { return parent.ChildrenCount() == 0 }, 3*time.Second, 10*time.Millisecond)
+
+		// the sibling is dead although its PostStop failed: it is neither
+		// running nor reported as suspended, and both names are free
+		require.False(t, sibling.IsRunning())
+		require.False(t, sibling.IsSuspended())
+		require.Equal(t, actors-2, actorSystem.NumActors())
+
+		for _, name := range []string{"test/faulty", "test/sibling"} {
+			_, err = actorSystem.ActorOf(ctx, name)
+			require.ErrorIs(t, err, errors.ErrActorNotFound)
+		}
 	})
 	t.Run("With restart as supervisor strategy of a child actor", func(t *testing.T) {
 		ctx := context.TODO()
@@ -3072,6 +3381,73 @@ func TestSpawnChild(t *testing.T) {
 
 		require.NoError(t, sys.Stop(ctx))
 	})
+	t.Run("With Stop then SpawnChild returning a child the parent lists", func(t *testing.T) {
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		parent, err := system.Spawn(ctx, "parent", NewMockActor())
+		require.NoError(t, err)
+
+		stopped, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		require.NoError(t, parent.Stop(ctx, stopped))
+
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, stopped, child)
+		require.True(t, child.IsRunning())
+
+		pause.For(100 * time.Millisecond)
+		children := parent.Children()
+		require.Len(t, children, 1)
+		require.Same(t, child, children[0])
+	})
+	t.Run("With a child name held by a child that is not running", func(t *testing.T) {
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		parent, err := system.Spawn(ctx, "parent", NewMockActor())
+		require.NoError(t, err)
+
+		states := map[string]pidState{
+			"suspended":   suspendedState,
+			"stopping":    stoppingState,
+			"passivating": passivatingState,
+		}
+
+		for label, state := range states {
+			holder, err := parent.SpawnChild(ctx, label, NewMockActor())
+			require.NoError(t, err)
+			actors := system.NumActors()
+			holder.setState(state, true)
+			t.Cleanup(func() { holder.setState(state, false) })
+
+			second := NewMockRestartFailingActor()
+			cid, err := parent.SpawnChild(ctx, label, second)
+			require.ErrorIs(t, err, errors.ErrActorAlreadyExists, label)
+			require.Nil(t, cid, label)
+
+			// no second child was started, and the holder is still the child
+			require.Zero(t, second.starts.Load(), label)
+			require.Equal(t, actors, system.NumActors(), label)
+			node, ok := system.tree().node(holder.ID())
+			require.True(t, ok, label)
+			require.Same(t, holder, node.value(), label)
+
+			// once the holder runs again, a spawn of the name returns it
+			holder.setState(state, false)
+			cid, err = parent.SpawnChild(ctx, label, second)
+			require.NoError(t, err, label)
+			require.Same(t, holder, cid, label)
+		}
+	})
 }
 
 func TestSpawnChildInitTimeout(t *testing.T) {
@@ -3438,6 +3814,34 @@ func TestShutdown(t *testing.T) {
 		assert.Error(t, parent.Shutdown(ctx))
 		pause.For(2 * time.Second)
 		assert.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With a failed PostStop still releasing the name and telling the watchers", func(t *testing.T) {
+		singleProcessor(t)
+		ctx := context.Background()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, system.Stop(ctx)) })
+
+		watcher := NewMockLifecycleOrderActor()
+		watcherPID, err := system.Spawn(ctx, "watcher", watcher)
+		require.NoError(t, err)
+		require.Equal(t, "PostStart", nextHandled(t, watcher))
+
+		killed, err := system.Spawn(ctx, "worker", &MockPostStopFailingActor{})
+		require.NoError(t, err)
+		watcherPID.Watch(killed)
+		actors := system.NumActors()
+
+		require.Error(t, system.Kill(ctx, "worker"))
+		require.False(t, killed.IsRunning())
+		require.Equal(t, actors-1, system.NumActors())
+		require.Equal(t, "Terminated", nextHandled(t, watcher))
+
+		spawned, err := system.Spawn(ctx, "worker", NewMockActor())
+		require.NoError(t, err)
+		require.NotSame(t, killed, spawned)
+		require.True(t, spawned.IsRunning())
 	})
 }
 
