@@ -1796,6 +1796,14 @@ func (r *client) RemoteAskGrain(ctx context.Context, host string, port int, grai
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
+		// The grain did not answer within the ask timeout. The owner applies
+		// the same timeout, so the caller's deadline usually ends the round
+		// trip before the owner's answer arrives; report the sentinel a
+		// local ask returns.
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, errors.Join(err, gerrors.ErrRequestTimeout)
+		}
+
 		return nil, err
 	}
 
@@ -2822,6 +2830,11 @@ func checkProtoError(resp proto.Message) error {
 		return gerrors.ErrRemoteSendFailure
 	case internalpb.Code_CODE_FAILED_PRECONDITION:
 		return parseFailedPrecondition(msg)
+	case internalpb.Code_CODE_RESOURCE_EXHAUSTED:
+		if strings.Contains(msg, gerrors.ErrMailboxFull.Error()) {
+			return gerrors.ErrMailboxFull
+		}
+		return errors.New(msg)
 	case internalpb.Code_CODE_ALREADY_EXISTS:
 		return parseAlreadyExists(msg)
 	case internalpb.Code_CODE_INVALID_ARGUMENT:
@@ -2850,6 +2863,10 @@ func parseFailedPrecondition(msg string) error {
 
 	if strings.Contains(msg, gerrors.ErrClusterDisabled.Error()) {
 		return gerrors.ErrClusterDisabled
+	}
+
+	if strings.Contains(msg, gerrors.ErrDead.Error()) {
+		return gerrors.ErrDead
 	}
 
 	return errors.New(msg)

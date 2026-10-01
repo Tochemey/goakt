@@ -831,6 +831,40 @@ func TestRemoteAskGrain_InvalidResponseType(t *testing.T) {
 	<-done
 }
 
+// TestRemoteAskGrain_TimeoutReturnsErrRequestTimeout asks a grain whose owner
+// does not answer within the ask timeout: the caller's own deadline ends the
+// round trip and the error carries ErrRequestTimeout, as a local ask does.
+func TestRemoteAskGrain_TimeoutReturnsErrRequestTimeout(t *testing.T) {
+	release := make(chan struct{})
+	handler := func(_ context.Context, _ inet.Connection, _ proto.Message) (proto.Message, error) {
+		<-release
+		return &internalpb.RemoteAskGrainResponse{}, nil
+	}
+
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	grainReq := &remote.GrainRequest{Kind: "kind", Name: "name"}
+	_, err = r.RemoteAskGrain(context.Background(), host, port, grainReq, durationpb.New(time.Second), 100*time.Millisecond)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	close(release)
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
 func TestRemoteAskGrain_DeserializeError(t *testing.T) {
 	// Return valid RemoteAskGrainResponse but with message that will fail deserialization
 	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
@@ -1139,6 +1173,18 @@ func TestCheckProtoError(t *testing.T) {
 		require.ErrorIs(t, err, gerrors.ErrAddressNotFound)
 	})
 
+	t.Run("CODE_RESOURCE_EXHAUSTED returns ErrMailboxFull", func(t *testing.T) {
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, Message: gerrors.ErrMailboxFull.Error()}.Build()
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrMailboxFull)
+	})
+
+	t.Run("CODE_RESOURCE_EXHAUSTED with another message returns it", func(t *testing.T) {
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, Message: "too many"}.Build()
+		err := checkProtoError(resp)
+		assert.EqualError(t, err, "too many")
+	})
+
 	t.Run("CODE_DEADLINE_EXCEEDED returns ErrRequestTimeout", func(t *testing.T) {
 		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_DEADLINE_EXCEEDED}.Build()
 		err := checkProtoError(resp)
@@ -1204,6 +1250,11 @@ func TestParseFailedPrecondition(t *testing.T) {
 	t.Run("ErrClusterDisabled substring", func(t *testing.T) {
 		err := parseFailedPrecondition(gerrors.ErrClusterDisabled.Error())
 		assert.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+	})
+
+	t.Run("ErrDead substring", func(t *testing.T) {
+		err := parseFailedPrecondition(gerrors.ErrDead.Error())
+		assert.ErrorIs(t, err, gerrors.ErrDead)
 	})
 
 	t.Run("unknown message returns generic error", func(t *testing.T) {

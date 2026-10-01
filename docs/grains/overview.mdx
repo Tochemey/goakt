@@ -132,6 +132,9 @@ With `WithOneWay()`:
   without limit. Use `WithGrainMailboxCapacity` when the producer must be slowed down by `ErrMailboxFull`.
 </Note>
 
+A send that fails with `ErrMailboxFull`, `ErrRequestTimeout` or `ErrDead` returns the same error whether the grain is
+on the calling node or on another one, so `errors.Is` gives the same answer in both cases.
+
 When activation is needed, the framework constructs the grain as a zero value of its struct type. Put initialization
 logic in `OnActivate` and supply external resources (database handles, clients, configuration) through
 `WithGrainDependencies`; they are available from the `GrainProps` passed to `OnActivate`. This is the same construction
