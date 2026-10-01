@@ -32,6 +32,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"runtime"
 	"strconv"
 	"sync"
 	syncatomic "sync/atomic"
@@ -3268,4 +3269,35 @@ func requireConcreteHost(t *testing.T, sys ActorSystem) net.IP {
 	require.NotNil(t, ip, "advertised host %q is not an IP", sys.Host())
 	require.False(t, ip.IsUnspecified(), "advertised host must not be a wildcard")
 	return ip
+}
+
+// startPostStartTestSystem starts a quiet actor system for the PostStart tests.
+func startPostStartTestSystem(t *testing.T) ActorSystem {
+	t.Helper()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(context.Background()))
+	return actorSystem
+}
+
+// singleProcessor runs the rest of the test on one processor and restores the
+// previous setting when the test ends.
+func singleProcessor(t *testing.T) {
+	t.Helper()
+	previous := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() { runtime.GOMAXPROCS(previous) })
+}
+
+// nextHandled returns the next message name the actor reports, failing the
+// test when none arrives within a second.
+func nextHandled(t *testing.T, actor *MockLifecycleOrderActor) string {
+	t.Helper()
+
+	select {
+	case name := <-actor.Handled():
+		return name
+	case <-time.After(time.Second):
+		require.FailNow(t, "the actor handled no message")
+		return ""
+	}
 }

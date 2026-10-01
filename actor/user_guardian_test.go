@@ -47,6 +47,26 @@ func TestUserGuardian(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
+	t.Run("With a top-level actor killed before the guardian's first turn", func(t *testing.T) {
+		// Issue 1422: the actor's Terminated used to reach the guardian ahead
+		// of its PostStart, and the guardian panicked on its nil logger. One
+		// processor keeps the guardian's first turn from running before the
+		// kill.
+		singleProcessor(t)
+		ctx := context.Background()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+
+		_, err = actorSystem.Spawn(ctx, "actor", NewMockActor())
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Kill(ctx, "actor"))
+
+		pause.For(100 * time.Millisecond)
+		require.True(t, actorSystem.Running())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
 	t.Run("With unhandled message", func(t *testing.T) {
 		ctx := context.Background()
 		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

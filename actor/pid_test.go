@@ -7954,8 +7954,8 @@ func TestMailboxSize(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		// PostStart travels through the user mailbox too, so its own increment and
-		// decrement must have settled before the size is read as zero.
+		// PostStart bypasses the user mailbox and is never counted; waiting for it
+		// keeps the blocking actor's first turn out of the size reading below.
 		require.Eventually(t, func() bool {
 			return pid.ProcessedCount() >= 1
 		}, time.Second, 10*time.Millisecond)
@@ -8076,10 +8076,10 @@ func TestMailboxSize(t *testing.T) {
 			return pid.observedMailboxSize() == 0
 		}, time.Second, 10*time.Millisecond)
 
-		// the phantom backlog is gone: both counters restarted from zero and
-		// carry only the PostStart of the new incarnation.
-		require.EqualValues(t, 1, pid.mailboxEnqueued.Load())
-		require.EqualValues(t, 1, pid.mailboxDequeued.Load())
+		// the phantom backlog is gone: both counters restarted from zero, and
+		// the PostStart of the new incarnation bypasses the mailbox.
+		require.Zero(t, pid.mailboxEnqueued.Load())
+		require.Zero(t, pid.mailboxDequeued.Load())
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -8218,6 +8218,99 @@ func TestRestartPreservesSpawnTimeConfiguration(t *testing.T) {
 		require.True(t, parent.IsRunning())
 		require.True(t, parent.IsRelocatable())
 
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+}
+
+// TestPostStartIsTheFirstMessage pins the lifecycle rule behind issue 1422:
+// an incarnation handles its own PostStart before any other message, even a
+// control message that reaches it first.
+func TestPostStartIsTheFirstMessage(t *testing.T) {
+	t.Run("With a control and a user message sent before the turn", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem := startPostStartTestSystem(t)
+		actor := NewMockLifecycleOrderActor()
+
+		pid, err := actorSystem.Spawn(ctx, "actor", actor)
+		require.NoError(t, err)
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+
+		// Arm the PostStart of a new incarnation as init does, then let a
+		// Terminated, which rides the priority system queue, and a user
+		// message trigger the turn before PostStart is fired.
+		pid.armPostStart(ctx)
+		require.NoError(t, Tell(ctx, pid, NewTerminated(pid.Path())))
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+		require.Equal(t, "Terminated", nextHandled(t, actor))
+		require.Equal(t, "TestSend", nextHandled(t, actor))
+		require.Nil(t, pid.postStart.Load())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With PostStart armed while a turn is in flight", func(t *testing.T) {
+		// A restart can arm PostStart while a worker is still inside a turn
+		// of the actor. The turn must handle it before it ends, so nothing
+		// pushed meanwhile runs ahead of it.
+		ctx := context.Background()
+		actorSystem := startPostStartTestSystem(t)
+		gate := make(chan types.Unit)
+		actor := NewMockParkedLifecycleOrderActor(gate)
+
+		pid, err := actorSystem.Spawn(ctx, "actor", actor)
+		require.NoError(t, err)
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+
+		// The first message parks the turn; the next two wait in their
+		// queues. PostStart is armed while the turn is parked.
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		require.Equal(t, "TestSend", nextHandled(t, actor))
+		pid.armPostStart(ctx)
+		require.NoError(t, Tell(ctx, pid, NewTerminated(pid.Path())))
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		close(gate)
+
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+		require.Equal(t, "Terminated", nextHandled(t, actor))
+		require.Equal(t, "TestSend", nextHandled(t, actor))
+		require.Nil(t, pid.postStart.Load())
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With a child stopped before the parent's first turn", func(t *testing.T) {
+		// One processor keeps the dispatcher from running the parent's first
+		// turn while the test spawns and stops the child.
+		singleProcessor(t)
+		ctx := context.Background()
+		actorSystem := startPostStartTestSystem(t)
+		parent := NewMockLifecycleOrderActor()
+
+		parentPID, err := actorSystem.Spawn(ctx, "parent", parent)
+		require.NoError(t, err)
+
+		childPID, err := parentPID.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+		require.NoError(t, childPID.Shutdown(ctx))
+
+		require.Equal(t, "PostStart", nextHandled(t, parent))
+		require.Equal(t, "Terminated", nextHandled(t, parent))
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+
+	t.Run("With a restart", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem := startPostStartTestSystem(t)
+		actor := NewMockLifecycleOrderActor()
+
+		pid, err := actorSystem.Spawn(ctx, "actor", actor)
+		require.NoError(t, err)
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+
+		require.NoError(t, pid.Restart(ctx))
+		require.Equal(t, "PostStart", nextHandled(t, actor))
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		require.Equal(t, "TestSend", nextHandled(t, actor))
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }

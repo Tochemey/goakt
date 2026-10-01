@@ -722,6 +722,56 @@ func (x *MockOrderRecordingActor) Done() <-chan struct{} {
 	return x.done
 }
 
+// MockLifecycleOrderActor reports, in handling order, the name of every
+// PostStart, Terminated and TestSend it handles. Reporting through a channel
+// keeps the test off the actor's state.
+type MockLifecycleOrderActor struct {
+	MockNoopActor
+
+	// handled receives the message names in handling order. It is buffered
+	// generously so a report never blocks the actor's turn.
+	handled chan string
+
+	// gate, when set, parks the turn after the first TestSend is reported
+	// until the test closes it. It lets a test act while a turn is in flight.
+	gate chan types.Unit
+}
+
+// NewMockLifecycleOrderActor returns a MockLifecycleOrderActor.
+func NewMockLifecycleOrderActor() *MockLifecycleOrderActor {
+	return &MockLifecycleOrderActor{handled: make(chan string, 16)}
+}
+
+// NewMockParkedLifecycleOrderActor returns a MockLifecycleOrderActor whose
+// turn parks on the first TestSend until gate is closed.
+func NewMockParkedLifecycleOrderActor(gate chan types.Unit) *MockLifecycleOrderActor {
+	return &MockLifecycleOrderActor{handled: make(chan string, 16), gate: gate}
+}
+
+// Receive reports PostStart, Terminated and TestSend, and marks anything else unhandled.
+func (x *MockLifecycleOrderActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *PostStart:
+		x.handled <- "PostStart"
+	case *Terminated:
+		x.handled <- "Terminated"
+	case *testpb.TestSend:
+		x.handled <- "TestSend"
+
+		if x.gate != nil {
+			<-x.gate
+			x.gate = nil
+		}
+	default:
+		ctx.Unhandled()
+	}
+}
+
+// Handled returns the channel that receives the handled message names.
+func (x *MockLifecycleOrderActor) Handled() <-chan string {
+	return x.handled
+}
+
 // MockPingActor is an actor that answers TestPing with TestPong.
 type MockPingActor struct {
 	MockNoopActor

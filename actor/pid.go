@@ -168,6 +168,13 @@ type PID struct {
 	// and no sentinel, so an idle actor pays nothing for it; see systemQueue.
 	systemQueue systemQueue
 
+	// postStart holds the PostStart of the current incarnation until the
+	// actor's next turn handles it. runTurn handles it before the system queue
+	// and the mailbox, so PostStart is always the first message an
+	// incarnation processes, even when a child's Terminated or PanicSignal, or
+	// a user message, reached the actor first.
+	postStart atomic.Pointer[ReceiveContext]
+
 	// the actor actorSystem
 	actorSystem ActorSystem
 
@@ -392,7 +399,7 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.startPassivation()
 	pid.buildObserveOptions()
-	pid.fireSystemMessage(ctx, new(PostStart))
+	pid.firePostStart()
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
@@ -2106,6 +2113,11 @@ func (pid *PID) runTurn(w *worker) {
 	now := time.Now()
 	budget := w.dispatcher.throughput
 	for range budget {
+		// PostStart goes first at every message boundary, not only at the
+		// start of the turn: a restart can arm it while this turn is already
+		// running, and the messages still queued must not run ahead of it.
+		pid.runPendingPostStart(now)
+
 		if sysMsg := pid.systemQueue.pop(); sysMsg != nil {
 			pid.dispatchOne(sysMsg, now)
 			continue
@@ -2140,7 +2152,7 @@ func (pid *PID) runTurn(w *worker) {
 // does not allocate a method-bound closure on every turn end.
 func (pid *PID) finishOrReclaim() bool {
 	pid.schedState.reset()
-	if pid.mailbox.IsEmpty() && pid.systemQueue.isEmpty() {
+	if pid.mailbox.IsEmpty() && pid.systemQueue.isEmpty() && pid.postStart.Load() == nil {
 		return true
 	}
 
@@ -2586,6 +2598,10 @@ func (pid *PID) init(ctx context.Context) error {
 	// reset() closed it for the teardown drain embedded in a restart, and a
 	// live actor parks inbound remote credit again.
 	pid.setState(remoteHoldsClosedState, false)
+	// Arm PostStart before the actor is announced as running: from here on a
+	// sender can reach it, and the turn its message triggers must handle
+	// PostStart first.
+	pid.armPostStart(ctx)
 	pid.setState(runningState, true)
 	pid.getLogger().Debugf("actor=%s initialization successful", pid.Name())
 
@@ -3387,12 +3403,41 @@ func (pid *PID) getDeadlettersCount(ctx context.Context) int64 {
 	return 0
 }
 
-// fireSystemMessage sends a system-level message to the specified PID by creating a receive context and invoking the message handling logic.
-func (pid *PID) fireSystemMessage(ctx context.Context, message any) {
+// armPostStart stores the PostStart of a new incarnation for the actor's next
+// turn. The message enters neither the system queue nor the mailbox: runTurn
+// handles it before both, so no message can overtake it, and a full bounded
+// mailbox cannot refuse it. init calls it once PreStart has succeeded and
+// before the actor is marked running.
+func (pid *PID) armPostStart(ctx context.Context) {
 	receiveContext := getContext(pid.ctxShard)
-	noSender := pid.ActorSystem().NoSender()
-	receiveContext.build(ctx, noSender, pid, message, true)
-	pid.doReceive(receiveContext)
+	receiveContext.build(ctx, pid.ActorSystem().NoSender(), pid, new(PostStart), true)
+	pid.postStart.Store(receiveContext)
+}
+
+// firePostStart schedules a turn so the armed PostStart runs even when no
+// other message arrives. A turn that some other message already triggered
+// handles PostStart first, so this only ensures that one happens.
+func (pid *PID) firePostStart() {
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+}
+
+// runPendingPostStart runs the pending PostStart, if any, and releases its
+// context. The turn owner calls it before every message, so the common case,
+// nothing pending, costs one atomic load of a line the turn already has and
+// no write; the processing benchmarks show no measurable cost. Only the turn
+// owner clears the slot, so a pending message seen by the load is still
+// there for the swap. PostStart goes straight to the behavior and is never
+// stashed: no request can be in flight before an incarnation has started.
+func (pid *PID) runPendingPostStart(now time.Time) {
+	if pid.postStart.Load() == nil {
+		return
+	}
+
+	received := pid.postStart.Swap(nil)
+	pid.handleReceived(received, now)
+	recycleContext(received)
 }
 
 func (pid *PID) doReinstate() {
@@ -3878,7 +3923,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.startPassivation()
 
 	pid.restartCount.Inc()
-	pid.fireSystemMessage(ctx, new(PostStart))
+	pid.firePostStart()
 	if pid.getEventsStream() != nil {
 		pid.getEventsStream().Publish(eventsTopic, NewActorRestarted(pid.Path()))
 	}
