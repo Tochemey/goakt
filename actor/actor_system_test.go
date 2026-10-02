@@ -6810,10 +6810,10 @@ func TestCompleteSpawnStopFailureAfterFailedPublication(t *testing.T) {
 	actorSystem.clusterEnabled.Store(true)
 
 	t.Cleanup(func() {
+		// the death watch may still be handling the dead actor, and InCluster
+		// reads the cluster field without the lock: only the flag is cleared,
+		// the mock stays attached
 		actorSystem.clusterEnabled.Store(false)
-		actorSystem.locker.Lock()
-		actorSystem.cluster = nil
-		actorSystem.locker.Unlock()
 		_ = actorSystem.Stop(ctx)
 	})
 
