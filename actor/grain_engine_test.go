@@ -4078,3 +4078,64 @@ func TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer(t *testing.T) {
 		require.Equal(t, &MockCBORReply{Amount: 1}, reply)
 	}
 }
+
+func TestAskGrain_HandlerContextEndsWithTheAsk(t *testing.T) {
+	cases := []struct {
+		name      string
+		reentrant bool
+	}{
+		{"channel path", false},
+		{"envelope path", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			system := newRequestTestSystem(t)
+			ctx := context.Background()
+
+			seen := make(chan context.Context, 1)
+			grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+				seen <- gctx.Context()
+
+				if _, ok := gctx.Message().(*testpb.TestSend); ok {
+					gctx.NoErr()
+					return
+				}
+
+				gctx.Response(new(testpb.Reply))
+			}}
+
+			identity, err := system.GrainIdentity(ctx, "ask-deadline", func(context.Context) (Grain, error) {
+				return grain, nil
+			})
+			require.NoError(t, err)
+
+			if tc.reentrant {
+				pid, ok := system.grains.Get(identity.String())
+				require.True(t, ok)
+				pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
+				pid.attachResponseQueue()
+			}
+
+			sent := time.Now()
+			_, err = system.AskGrain(ctx, identity, new(testpb.TestReply), time.Minute)
+			require.NoError(t, err)
+
+			handlerCtx := <-seen
+			deadline, ok := handlerCtx.Deadline()
+			require.True(t, ok)
+			require.False(t, deadline.Before(sent.Add(time.Minute)))
+			require.False(t, deadline.After(time.Now().Add(time.Minute)))
+
+			// the context ends with the turn, long before the deadline
+			require.Eventually(t, func() bool {
+				return errors.Is(handlerCtx.Err(), context.Canceled)
+			}, 2*time.Second, 10*time.Millisecond)
+
+			// a tell carries no deadline
+			require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestSend)))
+			_, ok = (<-seen).Deadline()
+			require.False(t, ok)
+		})
+	}
+}

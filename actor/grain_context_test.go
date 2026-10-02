@@ -1754,3 +1754,72 @@ func TestGrainContextTellGrainOneWay(t *testing.T) {
 		t.Fatal("the target grain did not receive the one-way message")
 	}
 }
+
+func TestGrainContextCarriesTheAskDeadline(t *testing.T) {
+	type key struct{}
+	parent := context.WithValue(context.Background(), key{}, "value")
+
+	t.Run("a message without a deadline keeps its context", func(t *testing.T) {
+		gctx := &GrainContext{ctx: parent}
+		require.Equal(t, parent, gctx.Context())
+		require.Nil(t, gctx.cancelDeadline)
+
+		// nothing to release
+		gctx.releaseDeadlineContext()
+	})
+
+	t.Run("the context ends at the deadline and when the turn ends", func(t *testing.T) {
+		gctx := &GrainContext{ctx: parent, deadline: askDeadline(parent, time.Minute)}
+
+		derived := gctx.Context()
+		got, ok := derived.Deadline()
+		require.True(t, ok)
+		require.WithinDuration(t, time.Now().Add(time.Minute), got, time.Second)
+		require.Equal(t, "value", derived.Value(key{}))
+		require.NoError(t, derived.Err())
+
+		// one derived context per turn
+		require.Equal(t, derived, gctx.Context())
+
+		gctx.releaseDeadlineContext()
+		require.ErrorIs(t, derived.Err(), context.Canceled)
+		require.Nil(t, gctx.deadlineCtx)
+		require.Nil(t, gctx.cancelDeadline)
+	})
+
+	t.Run("a sender context that ends earlier is returned as is", func(t *testing.T) {
+		sender, cancel := context.WithTimeout(parent, time.Second)
+		t.Cleanup(cancel)
+
+		gctx := &GrainContext{ctx: sender, deadline: askDeadline(parent, time.Minute)}
+		require.Equal(t, sender, gctx.Context())
+		require.Nil(t, gctx.cancelDeadline)
+	})
+
+	t.Run("a deferred reply keeps the context past the turn", func(t *testing.T) {
+		gctx := &GrainContext{ctx: parent, deadline: askDeadline(parent, time.Minute), replyDeferred: true}
+		derived := gctx.Context()
+
+		gctx.releaseDeadlineContext()
+		require.NoError(t, derived.Err())
+		require.Nil(t, gctx.deadlineCtx)
+		require.Nil(t, gctx.cancelDeadline)
+	})
+
+	t.Run("a recycled context forgets the deadline", func(t *testing.T) {
+		gctx := getGrainContext(0)
+		gctx.build(parent, nil, nil, nil, new(testpb.TestReply), grainOneWay)
+		gctx.deadline = askDeadline(parent, time.Minute)
+		_ = gctx.Context()
+		gctx.releaseDeadlineContext()
+		releaseGrainContext(gctx)
+		require.Zero(t, gctx.deadline)
+
+		gctx = getGrainContext(0)
+		gctx.deadline = askDeadline(parent, time.Minute)
+		gctx.build(parent, nil, nil, nil, new(testpb.TestReply), grainOneWay)
+		require.Zero(t, gctx.deadline)
+		require.Equal(t, parent, gctx.Context())
+		releaseGrainContext(gctx)
+	})
+}

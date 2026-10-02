@@ -857,10 +857,16 @@ func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
 		return gerrors.ErrDead
 	}
 
-	var responses *grainMailbox
-	switch envelope.(type) {
+	var (
+		responses *grainMailbox
+		deadline  int64
+	)
+
+	switch envelope := envelope.(type) {
 	case *commands.AsyncRequest:
-		// a request rides the user mailbox with ordinary messages
+		// a request rides the user mailbox with ordinary messages, and keeps
+		// the deadline of the ask it carries
+		deadline = envelope.Deadline
 	case *commands.AsyncResponse:
 		responses = pid.responses.Load()
 		if responses == nil {
@@ -872,6 +878,7 @@ func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
 
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(context.WithoutCancel(ctx), pid, pid.actorSystem, pid.getIdentity(), envelope, grainEnvelope)
+	grainContext.deadline = deadline
 
 	var err error
 	if responses != nil {
@@ -989,7 +996,18 @@ func (pid *grainPID) handlePoisonPill(grainContext *GrainContext) {
 
 // handleGrainContext runs a user message through OnReceive. now is the
 // turn's shared activity timestamp.
+//
+// An ask whose sender stopped waiting while the message sat in the mailbox is
+// not handed to OnReceive: nobody reads the answer, and under load that work
+// is what keeps the grain behind. It is answered with ErrRequestTimeout, which
+// reaches a sender that is still on the reply route and is dropped otherwise.
+// An ask already in OnReceive when its sender gives up still runs to the end.
 func (pid *grainPID) handleGrainContext(grainContext *GrainContext, now time.Time) {
+	if grainContext.expired() {
+		grainContext.Err(gerrors.ErrRequestTimeout)
+		return
+	}
+
 	// a message queued behind a passivation or shutdown pill must not reach
 	// the deactivated grain
 	if !pid.isActive() {
@@ -998,6 +1016,7 @@ func (pid *grainPID) handleGrainContext(grainContext *GrainContext, now time.Tim
 	}
 
 	defer pid.recovery(grainContext)
+	defer grainContext.releaseDeadlineContext()
 	pid.processedCount.Inc()
 	pid.markActivity(now)
 	pid.grain.OnReceive(grainContext)

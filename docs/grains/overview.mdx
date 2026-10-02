@@ -35,6 +35,8 @@ Inside `OnReceive`, `GrainContext` provides:
 
 - **Message**: The message being processed.
 - **Self**: Grain identity.
+- **Context**: The context of the message; for an Ask it ends when the caller stops waiting, see
+  [Ask: the timeout reaches the grain](#ask-the-timeout-reaches-the-grain).
 - **Response**: Reply to an Ask.
 - **NoErr**: Signal success for Tell (no response).
 - **Err**: Signal failure.
@@ -89,6 +91,45 @@ system, err := actor.NewActorSystem("orders",
 
 With the defaults declared, a bare send is safe and `GrainOf` is only needed to place or activate a grain with other
 options than its kind's.
+
+### Ask: the timeout reaches the grain
+
+The timeout of `AskGrain` is not only how long the caller waits. The grain knows the moment the caller stops waiting:
+the ask timeout, or the deadline of the caller's context when that comes first.
+
+- **An ask that expired in the mailbox is skipped.** When the grain dequeues an ask whose caller already gave up, it
+  does not hand it to `OnReceive`. Under load this keeps a slow grain from spending its turns on answers nobody reads,
+  and a caller that timed out and retried does not get its work done twice.
+- **`Context()` ends with the ask.** Inside `OnReceive`, `ctx.Context()` carries that deadline, so a handler that passes
+  it to a database query or an HTTP call stops when nobody waits for the answer. The context also ends when `OnReceive`
+  returns, unless the reply was handed over with `DeferResponse`; in that case it ends at the deadline.
+
+```go Stop working when the caller is gone
+func (g *UserGrain) OnReceive(ctx *actor.GrainContext) {
+    switch msg := ctx.Message().(type) {
+    case *GetProfile:
+        profile, err := g.store.Load(ctx.Context(), msg.GetUserId())
+        if err != nil {
+            ctx.Err(err)
+            return
+        }
+
+        ctx.Response(profile)
+    default:
+        ctx.Unhandled()
+    }
+}
+```
+
+This holds whether the grain is on the calling node or on another one, with or without reentrancy. Tells are not
+affected: a tell is handled even when its sender no longer waits for the acknowledgement, and its context carries no
+deadline of its own.
+
+<Warning>
+  An ask that is already in `OnReceive` when its caller gives up still runs to the end, unless the handler watches
+  `ctx.Context()`. The caller sees `ErrRequestTimeout` while the work may have been done, so a handler whose callers
+  retry must be idempotent.
+</Warning>
 
 ### Tell: acknowledged or one-way
 

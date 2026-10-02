@@ -79,6 +79,12 @@ type AsyncRequest struct {
 	ReplyTo *AsyncReplyTo
 	// Message is the original user payload.
 	Message any
+	// Deadline is the moment the sender of an ask stops waiting, which lets
+	// the target grain skip a request nobody waits for. It is a reading of
+	// the node's monotonic ask clock, so it only has a meaning on the node
+	// that set it and the serializer does not send it. Zero when the request
+	// has none.
+	Deadline int64
 }
 
 // AsyncResponse delivers a response or an error for an AsyncRequest.
