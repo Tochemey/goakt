@@ -29,10 +29,23 @@ type Provider interface {
 	// Initialize initializes the service discovery provider.
 	Initialize() error
 	// Register registers the service discovery provider.
+	//
+	// The cluster calls it when the node boots, before DiscoverPeers. Once it
+	// has returned, DiscoverPeers on the other nodes must list this node, so
+	// that two nodes booting at the same moment cannot both miss each other.
 	Register() error
 	// Deregister de-registers the service discovery provider.
 	Deregister() error
 	// DiscoverPeers returns a list discovered nodes' addresses.
+	//
+	// The cluster calls it when the node boots and joins the nodes it returns.
+	// With the default minimum peers quorum of 1 it is not called again once
+	// it has succeeded. A list that holds no other node means that this node
+	// is alone and forms a cluster of one, and two clusters formed separately
+	// never merge. An error makes the cluster retry the call, once a second
+	// for ten seconds, before the node forms a cluster alone. A provider whose
+	// view may be incomplete must therefore return an error rather than a list
+	// without any other node.
 	DiscoverPeers() ([]string, error)
 	// Close closes the provider
 	Close() error

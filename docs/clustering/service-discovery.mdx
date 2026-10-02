@@ -26,7 +26,8 @@ type Provider interface {
 - **Initialize**: One-time setup (e.g., connect to backend).
 - **Register**: Register this node with the discovery backend.
 - **Deregister**: Remove this node on shutdown.
-- **DiscoverPeers**: Return peer addresses as `host:port` strings.
+- **DiscoverPeers**: Return peer addresses as `host:port` strings. Called when the node boots. See
+  [Discovery happens at boot](#discovery-happens-at-boot) for what an empty list and an error mean.
 - **Close**: Release resources.
 
 ## Built-in providers
@@ -292,7 +293,115 @@ system, _ := actor.NewActorSystem("app",
 
 The provider is used by the cluster to find peers. Remoting must be enabled (`WithRemote`) for cross-node communication.
 
+## Discovery happens at boot
+
+A node uses its provider when it boots, in this order: it starts listening for membership gossip, calls `Register`,
+then calls `DiscoverPeers` and joins the nodes it returns. From then on membership spreads through gossip between the
+members, not through the provider.
+
+What `DiscoverPeers` returns decides how the boot continues:
+
+| `DiscoverPeers` returns | What the node does |
+|---|---|
+| A list with at least one reachable node | Joins it and becomes a member of that cluster. |
+| An empty list, or a list with only the node itself | Takes it as "I am alone" and forms a cluster of one. |
+| An error | Retries once a second, ten times. If every attempt fails, it forms a cluster of one. |
+
+What happens after boot depends on `WithMinimumPeersQuorum`:
+
+- **Quorum of 1 (the default)**: the node serves as soon as it has booted and does not query the provider again. A
+  node that booted alone stays alone until another node joins it.
+- **Quorum of 2 or more**: the node serves nothing until the cluster has that many members, and while it is below the
+  quorum it queries the provider again every five seconds. A node that found nobody at boot keeps looking.
+
+<Warning>
+  Two clusters that formed separately never merge. If two nodes boot at the same moment and each one misses the other
+  in its single discovery read, each forms its own cluster, and every actor name and grain identity can then exist
+  once per cluster. With a quorum of 1 this depends entirely on the provider following the two rules below.
+</Warning>
+
+### The two rules a provider must follow
+
+Nodes that boot at the same moment end up in one cluster when the provider guarantees both of these:
+
+1. **A node is visible before it reads.** Once `Register` has returned on a node, `DiscoverPeers` on the other nodes
+   lists it.
+2. **Reads are consistent.** `DiscoverPeers` returns every node whose `Register` returned before the call.
+
+With both rules, two nodes cannot both miss each other: if node A reads before node B is visible, then node B reads
+after node A became visible, and joins it.
+
+A provider breaks rule 1 when it lists a node only after the node is ready to serve, for example by reading the Ready
+endpoints of a Kubernetes Service while the readiness probe waits for the actor system: no node is listed while it
+boots, so every node that boots at the same moment forms its own cluster. A provider breaks rule 2 when its backend
+answers from a view that lags behind the registrations, such as a DNS record that has not propagated yet or a
+registry read that allows stale results.
+
+Among the built-in providers, Static, Kubernetes, etcd and NATS with a single server follow both rules. DNS-SD, mDNS,
+the self-managed provider and Consul with `AllowStale` or `OnlyPassing` depend on how fast their backend propagates a
+new node. Use a quorum of 2 or more with those when nodes can boot at the same moment.
+
+### When the view may be incomplete, return an error
+
+A provider that cannot guarantee both rules must not answer with a list that holds no other node while its view may
+still be catching up. It returns an error instead, which makes the node retry for up to ten seconds. A node that is
+really alone, such as the first node of a new cluster or a single-node deployment, then boots after those ten seconds.
+
+The wrapper below adds that behavior to any provider:
+
+```go requirePeers
+package app
+
+import (
+    "errors"
+
+    "github.com/tochemey/goakt/v4/discovery"
+)
+
+// errNoPeerListed makes the cluster retry the join.
+var errNoPeerListed = errors.New("no peer is listed yet")
+
+// requirePeers wraps a discovery provider and fails the query while the
+// provider lists no node other than this one.
+type requirePeers struct {
+    discovery.Provider
+    // self is this node's discovery address, host:port, as the provider lists it.
+    self string
+}
+
+// DiscoverPeers returns the wrapped provider's peers, or errNoPeerListed
+// when none of them is another node.
+func (x *requirePeers) DiscoverPeers() ([]string, error) {
+    peers, err := x.Provider.DiscoverPeers()
+    if err != nil {
+        return nil, err
+    }
+
+    for _, peer := range peers {
+        if peer != x.self {
+            return peers, nil
+        }
+    }
+
+    return nil, errNoPeerListed
+}
+```
+
+```go Wiring
+clusterConfig := actor.NewClusterConfig().
+    WithDiscovery(&requirePeers{Provider: provider, self: "10.0.0.1:3322"})
+```
+
+<Note>
+  The wrapper covers a view that catches up within ten seconds. It does not help a provider that lists a node only
+  once it is ready: no node becomes ready while it is still retrying, so each one waits ten seconds and then boots
+  alone. Such a provider has to list nodes that are still booting.
+</Note>
+
+The sample in `playground/issue-1408` runs these cases with three nodes that boot at the same moment.
+
 ## Custom provider
 
 Implement `discovery.Provider` and pass it to `WithDiscovery`. See
-[Extending GoAkt](/contributing/extending#discovery-provider) for the interface and wiring.
+[Extending GoAkt](/contributing/extending#discovery-provider) for the interface and wiring. A custom provider must
+follow [the two rules](#the-two-rules-a-provider-must-follow), or return an error while its view may be incomplete.

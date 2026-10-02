@@ -32,6 +32,13 @@ type Provider interface {
 Create a sub-package under `discovery/`. Pass the provider to `ClusterConfig` when creating the actor system. See
 `discovery/selfmanaged` for a built-in zero-config provider using UDP broadcast.
 
+<Warning>
+  A node queries its provider when it boots, and with the default quorum of 1 it does not query it again. A provider
+  must list a node as soon as `Register` has returned and must not answer from a stale view, or it must return an
+  error while its view may be incomplete. Otherwise nodes that boot at the same moment can form separate clusters that
+  never merge. See [Discovery happens at boot](/clustering/service-discovery#discovery-happens-at-boot).
+</Warning>
+
 ## Mailbox
 
 ```go Mailbox
