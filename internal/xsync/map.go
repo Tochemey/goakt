@@ -102,6 +102,22 @@ func (s *Map[K, V]) LoadAndDelete(k K) (V, bool) {
 	return val, ok
 }
 
+// SetIfAbsent stores the key-value pair unless the key is already present, and
+// reports whether it stored it.
+//
+// The lookup and the store happen under a single write lock, so a value
+// another goroutine stored in the meantime is never overwritten, which Get
+// followed by Set cannot guarantee.
+func (s *Map[K, V]) SetIfAbsent(k K, v V) bool {
+	s.mu.Lock()
+	_, ok := s.data[k]
+	if !ok {
+		s.data[k] = v
+	}
+	s.mu.Unlock()
+	return !ok
+}
+
 // Len returns the number of key-value pairs currently stored in the Map.
 //
 // This method acquires a read lock to ensure safe concurrent access.
