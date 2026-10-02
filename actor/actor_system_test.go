@@ -7379,7 +7379,7 @@ func TestCleanupCluster_ReleaseGrainFailure(t *testing.T) {
 	assert.ErrorIs(t, err, assert.AnError)
 }
 
-func TestStopReturnsCleanupClusterError(t *testing.T) {
+func TestStopSucceedsWhenRegistryCleanupFails(t *testing.T) {
 	clusterMock := new(mockscluster.Cluster)
 	system := newReplicationSystem(clusterMock)
 	system.grains = xsync.NewMap[string, *grainPID]()
@@ -7413,13 +7413,87 @@ func TestStopReturnsCleanupClusterError(t *testing.T) {
 
 	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
 	// and persistPeerStateToPeers is skipped.
+	// The record cannot be removed, as when the node holding it is gone or
+	// stopping too. It stays behind for a node that is leaving, which the
+	// cluster tolerates, so the stop still succeeds and still leaves the
+	// cluster.
 	clusterMock.EXPECT().RemoveActor(mock.Anything, pid.Name(), mock.Anything).Return(nil, assert.AnError)
 	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
 	t.Cleanup(func() { clusterMock.AssertExpectations(t) })
 
-	err := system.Stop(context.Background())
-	require.Error(t, err)
-	assert.ErrorIs(t, err, assert.AnError)
+	require.NoError(t, system.Stop(context.Background()))
+}
+
+func TestShutdownClusterReturnsLeaveError(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+
+	// Leaving the cluster is not best effort: its failure is reported.
+	clusterMock.EXPECT().Stop(mock.Anything).Return(assert.AnError)
+
+	err := system.shutdownCluster(context.Background(), nil, nil)
+	require.ErrorIs(t, err, assert.AnError)
+	assert.False(t, system.clusterEnabled.Load())
+}
+
+func TestStopSucceedsWhenListedPeersAreLeaving(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.extensions = xsync.NewMap[string, extension.Extension]()
+	system.actors.noSender = nil
+	system.noSender = nil
+	system.topicActor = nil
+	system.remotingEnabled.Store(false)
+	system.relocationEnabled.Store(true)
+	system.shutdownTimeout = time.Minute
+
+	// Membership still lists two peers that stopped a moment ago: both answer
+	// on a connection left open that their remoting is off.
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8081, PeersPort: 9001, CreatedAt: 1000},
+		{Host: "127.0.0.1", RemotingPort: 8082, PeersPort: 9002, CreatedAt: 2000},
+	}, nil)
+	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+	remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+	system.remoting = remotingMock
+
+	require.NoError(t, system.Stop(context.Background()))
+	assert.False(t, system.clusterEnabled.Load())
+}
+
+func TestShutdownClusterClearsClusterStateOnFailure(t *testing.T) {
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.pubsubEnabled.Store(true)
+	system.peerRemotingPorts.Set("127.0.0.1:9001", 8081)
+	system.relocationJobs["127.0.0.1:9001"] = &internalpb.PeerState{}
+
+	// The only listed peer cannot be reached, which is a failed handover and
+	// not a leaving peer.
+	expectedErr := errors.New("peer unreachable")
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
+		{Host: "127.0.0.1", RemotingPort: 8081, PeersPort: 9001, CreatedAt: 1000},
+	}, nil)
+	clusterMock.EXPECT().Stop(mock.Anything).Return(nil)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(expectedErr)
+	system.remoting = remotingMock
+
+	peerState := internalpb.PeerState_builder{Host: "127.0.0.1", PeersPort: 9000}.Build()
+
+	err := system.shutdownCluster(context.Background(), nil, peerState)
+	require.ErrorIs(t, err, expectedErr)
+	assert.ErrorContains(t, err, "failed to replicate state to any peer")
+
+	// the failure is reported, and the stopped node is no longer clustered
+	assert.False(t, system.clusterEnabled.Load())
+	assert.False(t, system.pubsubEnabled.Load())
+	assert.Empty(t, system.relocationJobs)
+	assert.Zero(t, system.peerRemotingPorts.Len())
 }
 
 // nolint:revive
@@ -8542,6 +8616,212 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, "failed to replicate state to any peer")
 		assert.NotErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("returns nil when every peer is leaving the cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(replicationPeers(), nil)
+
+		// A stopping peer answers with one of the two sentinels, depending on
+		// how far its own shutdown is. The client hands them over wrapped or
+		// bare.
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrClusterDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(fmt.Errorf("peer answered: %w", gerrors.ErrRemotingDisabled))
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.NoError(t, err)
+	})
+
+	t.Run("hands the state to a younger peer when the oldest peers are leaving", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// The three oldest peers are stopping, the fourth keeps running. The
+		// fourth is only contacted once the first three have answered.
+		peers := append(replicationPeers(), &cluster.Peer{Host: "127.0.0.1", RemotingPort: 8084, PeersPort: 9004, CreatedAt: 4000})
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrClusterDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(syscall.ECONNREFUSED)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8084, mock.Anything).Return(nil)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.NoError(t, err)
+	})
+
+	t.Run("returns the failure of a younger peer when the oldest peers are leaving", func(t *testing.T) {
+		ctx := context.TODO()
+		expectedErr := errors.New("peer unreachable")
+
+		// The fourth peer may be a running node that never got the state, so
+		// the three leaving peers do not hide its failure.
+		peers := append(replicationPeers(), &cluster.Peer{Host: "127.0.0.1", RemotingPort: 8084, PeersPort: 9004, CreatedAt: 4000})
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8084, mock.Anything).Return(expectedErr)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.ErrorContains(t, err, "failed to replicate state to any peer")
+	})
+
+	t.Run("contacts only the oldest peers when they take the state", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// The fourth peer has no expectation: a call to it fails the test.
+		peers := append(replicationPeers(), &cluster.Peer{Host: "127.0.0.1", RemotingPort: 8084, PeersPort: 9004, CreatedAt: 4000})
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(peers, nil)
+
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(nil)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.NoError(t, err)
+	})
+
+	t.Run("returns nil when a stopped peer answers on a connection left open", func(t *testing.T) {
+		ctx := context.TODO()
+		port := dynaport.Get(1)[0]
+
+		// A real node that has stopped: it closed its remoting listener, but it
+		// keeps serving the connection the client opened before the stop.
+		peer, err := NewActorSystem("stoppedPeer", WithRemote(remote.NewConfig("127.0.0.1", port)), WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, peer.Start(ctx))
+
+		remoting := remoteclient.NewClient()
+		t.Cleanup(remoting.Close)
+
+		// the peer state sent while the peer runs opens the connection; the
+		// peer is not clustered, which it reports
+		err = remoting.PersistPeerState(ctx, "127.0.0.1", port, newPeerState())
+		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+
+		require.NoError(t, peer.Stop(ctx))
+
+		// this is the answer a node gets from a peer that membership still
+		// lists after it has stopped
+		err = remoting.PersistPeerState(ctx, "127.0.0.1", port, newPeerState())
+		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: port, PeersPort: 9001, CreatedAt: 1000},
+		}, nil)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remoting
+
+		require.NoError(t, system.persistPeerStateToPeers(ctx, newPeerState()))
+	})
+
+	t.Run("returns nil when the listed peers refuse the connection", func(t *testing.T) {
+		ctx := context.TODO()
+
+		// Nothing listens on these ports: the peers have closed their remoting
+		// server but membership still lists them. The real client is used so
+		// the refusal is the error a stopped peer produces on a new connection.
+		ports := dynaport.Get(2)
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
+			{Host: "127.0.0.1", RemotingPort: ports[0], PeersPort: 9001, CreatedAt: 1000},
+			{Host: "127.0.0.1", RemotingPort: ports[1], PeersPort: 9002, CreatedAt: 2000},
+		}, nil)
+
+		remoting := remoteclient.NewClient()
+		t.Cleanup(remoting.Close)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remoting
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.NoError(t, err)
+	})
+
+	t.Run("returns the failure of a peer that does not answer in time", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(replicationPeers(), nil)
+
+		// A peer that times out may be a running node behind a network fault,
+		// so it is a failed handover even next to peers that are gone.
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(syscall.ECONNREFUSED)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(gerrors.ErrRequestTimeout)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		assert.ErrorContains(t, err, "failed to replicate state to any peer")
+	})
+
+	t.Run("returns the failure of a peer that is not leaving", func(t *testing.T) {
+		ctx := context.TODO()
+		expectedErr := errors.New("peer unreachable")
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(replicationPeers(), nil)
+
+		// One peer may still be a survivor that never got the state, so the
+		// leaving peers do not hide its failure.
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(expectedErr)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.Error(t, err)
+		assert.ErrorIs(t, err, expectedErr)
+		assert.ErrorContains(t, err, "failed to replicate state to any peer")
+	})
+
+	t.Run("accepts one acknowledgement next to leaving peers", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().Peers(mock.Anything).Return(replicationPeers(), nil)
+
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8081, mock.Anything).Return(nil)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8082, mock.Anything).Return(gerrors.ErrRemotingDisabled)
+		remotingMock.EXPECT().PersistPeerState(mock.Anything, "127.0.0.1", 8083, mock.Anything).Return(gerrors.ErrClusterDisabled)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		err := system.persistPeerStateToPeers(ctx, newPeerState())
+		require.NoError(t, err)
 	})
 
 	t.Run("returns an error when the parent context is cancelled before any acknowledgement", func(t *testing.T) {

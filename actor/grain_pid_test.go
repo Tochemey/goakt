@@ -655,6 +655,33 @@ func TestGrainPIDDeactivateReportsFailedRegistryRelease(t *testing.T) {
 	require.False(t, ok)
 }
 
+func TestGrainPIDDeactivateToleratesFailedRegistryReleaseWhileStopping(t *testing.T) {
+	ctx := context.Background()
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "deactivate-release-error-stopping", true)
+
+	// a warning-level logger, so the record left behind is reported
+	var logs bytes.Buffer
+	sys.logger = log.NewSlog(log.WarningLevel, &logs)
+
+	pid := newGrainPID(identity, grain, sys, newGrainConfig())
+	require.NoError(t, pid.activate(ctx))
+	sys.grains.Set(identity.String(), pid)
+
+	// the node is stopping, and the node holding the record is gone or
+	// stopping too: the record stays behind for a node that is leaving, and
+	// the deactivation succeeds
+	sys.shuttingDown.Store(true)
+	cl.EXPECT().ReleaseGrain(ctx, identity.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, errors.New("release failed")).Once()
+
+	require.NoError(t, pid.deactivate(ctx))
+	require.Contains(t, logs.String(), "grain="+identity.String()+" left its registry record behind")
+	require.False(t, pid.isActive())
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
+}
+
 func TestGrainPIDDeactivateReturnsPanicErrorOnDeactivatePanic(t *testing.T) {
 	pid := &grainPID{
 		identity:    &GrainIdentity{kind: "Kind", name: "Name"},

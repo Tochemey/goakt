@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -5118,22 +5119,45 @@ func (x *actorSystem) getSetDeadlettersCount(ctx context.Context) {
 	}
 }
 
+// shutdownCluster takes this node out of the cluster: it hands the peer state
+// to its peers, withdraws the registry records of the given actors and of the
+// node's grains, leaves membership and closes the cluster store. Every step
+// runs whatever the previous ones returned, and the node's cluster state is
+// cleared in all cases, so a failed step is reported without leaving the
+// stopped node marked as clustered.
+//
+// The withdrawal of the registry records is best effort and never fails the
+// shutdown, here for the actors and in grainPID.deactivate for the grains. The registry is spread over the cluster nodes, so the removal of a
+// record fails when the node that holds it is gone or is stopping at the same
+// time, which is what happens when several nodes, or the whole cluster, stop
+// together. A record that stays behind names a node that is about to leave
+// membership, and the cluster is built to live with such a record, as it has
+// to after a crash: a lookup hides it (see getActorRecord), a spawn of the
+// name writes over it (see departedClaim), and so does the recreation of a
+// relocated actor (see putActorOnCluster).
 func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerState *internalpb.PeerState) error {
 	if x.clusterEnabled.Load() {
+		var err error
+
 		if x.cluster != nil {
 			// Persist peer state to all cluster peers before leaving membership.
 			// This ensures state is available for relocation when NodeLeft event
 			// is processed. Errors are returned but we proceed with shutdown to
 			// ensure resources are freed (chain uses WithRunAll).
-			if err := chain.
+			if err = chain.
 				New(chain.WithRunAll(), chain.WithContext(ctx)).
 				AddContextRunnerIf(peerState != nil, func(cctx context.Context) error { return x.persistPeerStateToPeers(cctx, peerState) }).
-				AddContextRunner(func(cctx context.Context) error { return x.cleanupCluster(cctx, actors) }).
+				AddContextRunner(func(cctx context.Context) error {
+					if cleanupErr := x.cleanupCluster(cctx, actors); cleanupErr != nil {
+						x.logger.Warnf("node=%s left registry records behind: %v (hint: they name a node that is leaving, so lookups skip them and the next spawn of a name replaces its record)", x.PeersAddress(), cleanupErr)
+					}
+
+					return nil
+				}).
 				AddContextRunner(func(cctx context.Context) error { return x.cluster.Stop(cctx) }).
 				AddContextRunnerIf(x.clusterStore != nil, func(_ context.Context) error { return x.clusterStore.Close() }).
 				Run(); err != nil {
 				x.logger.Errorf("failed to shutdown cleanly: %v (hint: check actor PostStop)", err)
-				return err
 			}
 		}
 
@@ -5149,6 +5173,8 @@ func (x *actorSystem) shutdownCluster(ctx context.Context, actors []*PID, peerSt
 		x.peerRemotingPorts.Reset()
 		x.relocatingEndpoints.Reset()
 		x.recentDepartures.Reset()
+
+		return err
 	}
 	return nil
 }
@@ -6032,21 +6058,27 @@ func (x *actorSystem) preShutdown() (*internalpb.PeerState, error) {
 	return peerState, nil
 }
 
-// persistPeerStateToPeers sends the peer state to the oldest cluster peers via RPC.
+// persistPeerStateToPeers hands the peer state to cluster peers via RPC.
 // This is called during shutdown before leaving membership to ensure state
 // is available for relocation.
 //
-// The function implements quorum-based replication with early termination:
-//   - Sends state to the K oldest peers (most likely to become leader)
-//   - Returns successfully once quorum (majority) acknowledges
-//   - Cancels remaining RPCs after quorum to avoid unnecessary waiting
-//   - Accepts partial success if at least one peer receives the state
+// The peers are tried oldest first, defaultReplicationFactor at a time (see
+// replicatePeerState). The oldest peers are the most likely to be or become
+// the leader, so the first group is normally the only one contacted. The next
+// group is only tried when every peer of the group before it is leaving the
+// cluster itself (see isPeerLeaving): a peer that is leaving cannot take the
+// state, and a younger peer that keeps running can.
+//
+// It returns nil once a group took the state, and also when every listed peer
+// is leaving: no node is left to take the state, the same outcome as a node
+// with no peers. It returns the error of the first group that failed for
+// another reason.
 func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *internalpb.PeerState) error {
 	if peerState == nil {
 		return nil
 	}
 
-	peers, err := x.selectOldestPeers(ctx, defaultReplicationFactor)
+	peers, err := x.selectOldestPeers(ctx, math.MaxInt)
 	if err != nil {
 		x.logger.Errorf("node=%s failed to get cluster peers: %v (hint: check cluster connectivity)", x.PeersAddress(), err)
 		return err
@@ -6057,6 +6089,35 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 		return nil
 	}
 
+	for start := 0; start < len(peers); start += defaultReplicationFactor {
+		group := peers[start:min(start+defaultReplicationFactor, len(peers))]
+
+		leaving, err := x.replicatePeerState(ctx, group, peerState)
+		if !leaving {
+			return err
+		}
+	}
+
+	// Every listed peer is leaving the cluster: membership still lists them,
+	// but no node is left to relocate this node's actors and grains
+	x.logger.Warnf("node=%s did not replicate its state: all %d listed peers are leaving the cluster", x.PeersAddress(), len(peers))
+
+	return nil
+}
+
+// replicatePeerState sends the peer state to the given peers in parallel and
+// reports how the group answered.
+//
+// It implements quorum-based replication with early termination:
+//   - Returns successfully once quorum (majority) acknowledges
+//   - Cancels remaining RPCs after quorum to avoid unnecessary waiting
+//   - Accepts partial success if at least one peer receives the state
+//
+// leaving is true, and the error nil, when every peer of the group answered
+// that it is leaving the cluster (see isPeerLeaving): none of them took the
+// state and none of them failed, so the caller may try other peers. Otherwise
+// leaving is false and the error tells whether the state was handed over.
+func (x *actorSystem) replicatePeerState(ctx context.Context, peers []*cluster.Peer, peerState *internalpb.PeerState) (leaving bool, err error) {
 	peerAddr := x.PeersAddress()
 	totalPeers := len(peers)
 	x.logger.Debugf("node=%s replicating state to peers=%d", peerAddr, totalPeers)
@@ -6072,35 +6133,45 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 	// Launch parallel RPCs to all selected peers
 	for _, peer := range peers {
 		go func() {
-			if err := x.remoting.PersistPeerState(rpcCtx, peer.Host, peer.RemotingPort, peerState); err != nil {
+			err := x.remoting.PersistPeerState(rpcCtx, peer.Host, peer.RemotingPort, peerState)
+
+			switch {
+			case err == nil:
+				x.logger.Debugf("node=%s persisted peer state to peer=%s:%d", peerAddr, peer.Host, peer.RemotingPort)
+			case isPeerLeaving(err):
+				x.logger.Debugf("node=%s skipped peer=%s:%d for its peer state: the peer is leaving the cluster", peerAddr, peer.Host, peer.RemotingPort)
+			default:
 				x.logger.Errorf("node=%s failed to persist peer state to peer=%s:%d: %v (hint: check peer reachability)", peerAddr, peer.Host, peer.RemotingPort, err)
-				results <- err
-				return
 			}
 
-			x.logger.Debugf("node=%s persisted peer state to peer=%s:%d", peerAddr, peer.Host, peer.RemotingPort)
-			results <- nil
+			results <- err
 		}()
 	}
 
 	// Collect results with early termination on quorum
 	var (
 		successCount int
+		leavingCount int
 		lastErr      error
 	)
 
 	for range totalPeers {
 		select {
 		case err := <-results:
-			if err == nil {
+			switch {
+			case err == nil:
 				successCount++
 				if successCount >= defaultReplicationQuorum {
 					// Quorum reached - cancel remaining RPCs and return success
 					cancelRPCs()
 					x.logger.Debugf("node=%s replication quorum reached peers=%d/%d", peerAddr, successCount, totalPeers)
-					return nil
+					return false, nil
 				}
-			} else if !errors.Is(err, context.Canceled) {
+			case isPeerLeaving(err):
+				// A peer that is leaving cannot take the state, but it did
+				// not fail either: it is counted apart from the failures
+				leavingCount++
+			case !errors.Is(err, context.Canceled):
 				// Don't count context cancellation as a real failure
 				lastErr = err
 			}
@@ -6108,24 +6179,44 @@ func (x *actorSystem) persistPeerStateToPeers(ctx context.Context, peerState *in
 			// Parent context cancelled (e.g., shutdown timeout)
 			x.logger.Warnf("node=%s replication interrupted: %v (successes=%d/%d)", peerAddr, ctx.Err(), successCount, totalPeers)
 			if successCount > 0 {
-				return nil // Partial success is acceptable
+				return false, nil // Partial success is acceptable
 			}
-			return fmt.Errorf("replication interrupted: %w", ctx.Err())
+			return false, fmt.Errorf("replication interrupted: %w", ctx.Err())
 		}
 	}
 
 	// All RPCs completed without reaching quorum
 	if successCount > 0 {
 		x.logger.Warnf("node=%s partial replication: peers=%d/%d acknowledged", peerAddr, successCount, totalPeers)
-		return nil // Partial success is acceptable
+		return false, nil // Partial success is acceptable
+	}
+
+	if leavingCount == totalPeers {
+		return true, nil
 	}
 
 	// Complete failure
 	if lastErr != nil {
-		return fmt.Errorf("failed to replicate state to any peer: %w", lastErr)
+		return false, fmt.Errorf("failed to replicate state to any peer: %w", lastErr)
 	}
 
-	return fmt.Errorf("failed to replicate state to any peer")
+	return false, fmt.Errorf("failed to replicate state to any peer")
+}
+
+// isPeerLeaving reports whether err shows that a peer is leaving the cluster
+// itself, or has already left it. A stopping node turns clustering off and
+// then remoting, and keeps answering on the connections it already has open,
+// so it refuses a peer state with ErrClusterDisabled or ErrRemotingDisabled.
+// Once its remoting server is closed, a new connection to it is refused: a
+// node that is running always listens on its remoting port, so a refused
+// connection means the peer is gone. Such a peer is not a node the state could
+// have been handed to, which sets it apart from a peer that failed to store
+// the state. A peer that does not answer in time is not counted as leaving:
+// it may be a running node behind a network fault.
+func isPeerLeaving(err error) bool {
+	return errors.Is(err, gerrors.ErrRemotingDisabled) ||
+		errors.Is(err, gerrors.ErrClusterDisabled) ||
+		errors.Is(err, syscall.ECONNREFUSED)
 }
 
 // selectOldestPeers returns up to k peers sorted by age (oldest first).
