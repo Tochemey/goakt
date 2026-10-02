@@ -59,6 +59,29 @@ func TestDelete(t *testing.T) {
 	sm.Delete(2) // just make sure this doesn't panic
 }
 
+func TestSetIfAbsent(t *testing.T) {
+	t.Run("stores the value when the key is absent", func(t *testing.T) {
+		sm := NewMap[int, string]()
+
+		require.True(t, sm.SetIfAbsent(1, "one"))
+
+		value, ok := sm.Get(1)
+		require.True(t, ok)
+		require.Equal(t, "one", value)
+	})
+
+	t.Run("keeps the stored value when the key is present", func(t *testing.T) {
+		sm := NewMap[int, string]()
+		sm.Set(1, "one")
+
+		require.False(t, sm.SetIfAbsent(1, "uno"))
+
+		value, ok := sm.Get(1)
+		require.True(t, ok)
+		require.Equal(t, "one", value)
+	})
+}
+
 func TestLoadAndDelete(t *testing.T) {
 	t.Run("returns the stored value and removes it", func(t *testing.T) {
 		sm := NewMap[int, string]()

@@ -4316,6 +4316,9 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the node is still gone when recovery is over: the membership read that
+	// guards the pruning of its cache entry lists no peer
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	// the departed node stays gone
 	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
@@ -4325,6 +4328,144 @@ func TestGateCrashRecoveryOwnsPortCachePruning(t *testing.T) {
 
 	_, cached := system.peerRemotingPort(peer)
 	require.False(t, cached, "recovery owns the cache entry and must prune it on completion")
+}
+
+func TestGateCrashRecoveryAbandonsStoppedSystem(t *testing.T) {
+	// shutdown clears the shutting-down flag once it is done, so a recovery
+	// that reaches a checkpoint after the stop sees a system that is not
+	// stopping: it must still recognize the stopped system and never read its
+	// cluster. The mock carries no expectation, so any cluster call fails the
+	// test.
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+	system.started.Store(false)
+	system.shuttingDown.Store(false)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery still prunes the cache entry it owns")
+}
+
+func TestGateCrashRecoveryRunsOnStartingSystem(t *testing.T) {
+	// the cluster events loop runs before a starting system is marked
+	// started: a departure handled in that window must be recovered, not
+	// mistaken for one that outlived a stop
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+	system.started.Store(false)
+	system.starting.Store(true)
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	var derived []*RelocationStarted
+
+	for event := range consumer.Iterator() {
+		if msg, ok := event.Payload().(*RelocationStarted); ok {
+			derived = append(derived, msg)
+		}
+	}
+
+	require.Len(t, derived, 1, "recovery must run on a system that is still starting")
+}
+
+func TestGateCrashRecoveryAbandonsSystemStoppedDuringFailedAttempt(t *testing.T) {
+	// an attempt can fail because the system stopped under it: the recovery
+	// must return at once instead of sleeping through a backoff first
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).RunAndReturn(func(context.Context, string, int, time.Duration) ([]*internalpb.Actor, error) {
+		system.started.Store(false)
+		return nil, assert.AnError
+	}).Once()
+
+	started := time.Now()
+	system.gateCrashRecovery(peer)
+
+	require.Less(t, time.Since(started), relocationDeriveRetryBackoff, "recovery must not wait for a backoff on a stopped system")
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery still prunes the cache entry it owns")
+}
+
+func TestGateCrashRecoveryAbandonsSystemStoppedDuringBackoff(t *testing.T) {
+	// the retry backoff can outlast a whole shutdown: a recovery that wakes
+	// up on a stopped system must not start another attempt
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Once()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Once()
+	// the first scan fails on a running system, which stops, start to finish,
+	// while the recovery sleeps; a second attempt would be an unexpected call
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).RunAndReturn(func(context.Context, string, int, time.Duration) ([]*internalpb.Actor, error) {
+		time.AfterFunc(relocationDeriveRetryBackoff/2, func() { system.started.Store(false) })
+		return nil, assert.AnError
+	}).Once()
+
+	system.gateCrashRecovery(peer)
+
+	_, cached := system.peerRemotingPort(peer)
+	require.False(t, cached, "recovery still prunes the cache entry it owns")
+}
+
+func TestGateCrashRecoveryAbandonsSystemStoppedDuringDerivation(t *testing.T) {
+	// the registry scan can take a while: a system that stopped meanwhile
+	// must not have the derived set published or dispatched
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	consumer := system.eventsStream.AddSubscriber()
+	system.eventsStream.Subscribe(consumer, eventsTopic)
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Once()
+	// a second membership read, made before a dispatch, would be an
+	// unexpected call
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Once()
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).RunAndReturn(func(context.Context, string, int, time.Duration) ([]*internalpb.Grain, error) {
+		system.started.Store(false)
+		return nil, nil
+	}).Once()
+
+	system.gateCrashRecovery(peer)
+
+	for event := range consumer.Iterator() {
+		_, started := event.Payload().(*RelocationStarted)
+		require.False(t, started, "no relocation must start on a stopped system")
+	}
 }
 
 func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
@@ -4342,6 +4483,9 @@ func TestGateCrashRecoveryRetriesDerivation(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the node is still gone when recovery is over: the membership read that
+	// guards the pruning of its cache entry lists no peer
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	// the departed node stays gone
 	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	// the first scan fails transiently, the retry succeeds
@@ -4374,6 +4518,9 @@ func TestGateCrashRecoveryGivesUpAfterMaxAttempts(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the node is still gone when recovery is over: the membership read that
+	// guards the pruning of its cache entry lists no peer
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	// the departed node stays gone
 	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, assert.AnError).Times(relocationDeriveMaxAttempts)
@@ -4410,8 +4557,10 @@ func TestGateCrashRecoverySkipsRejoinedNode(t *testing.T) {
 		require.False(t, started, "no relocation must start for a node that rejoined")
 	}
 
+	// the node's join refreshed the entry, which now describes the live node:
+	// pruning it would leave the node's next crash unrecoverable
 	_, cached := system.peerRemotingPort(peer)
-	require.False(t, cached, "recovery must prune the cache entry when it skips")
+	require.True(t, cached, "recovery must keep the cache entry of a node that rejoined")
 }
 
 func TestGateCrashRecoverySkipsNodeRejoinedDuringDerivation(t *testing.T) {
@@ -4441,8 +4590,61 @@ func TestGateCrashRecoverySkipsNodeRejoinedDuringDerivation(t *testing.T) {
 		require.False(t, started, "no relocation must start for a node that rejoined during derivation")
 	}
 
+	// the node's join refreshed the entry, which now describes the live node:
+	// pruning it would leave the node's next crash unrecoverable
 	_, cached := system.peerRemotingPort(peer)
-	require.False(t, cached, "recovery must prune the cache entry when it skips")
+	require.True(t, cached, "recovery must keep the cache entry of a node that rejoined")
+}
+
+func TestGateCrashRecoveryKeepsCacheEntryOfNodeRejoinedAfterLastCheck(t *testing.T) {
+	// recovery runs off the cluster events loop: a node can rejoin after the
+	// last membership check, while its relocation set is dispatched, and its
+	// join then refreshes the cache entry. Pruning that entry would leave the
+	// node's next crash unrecoverable.
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// gone at both membership checks
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Times(2)
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	// back by the time recovery is over, on another remoting port
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "127.0.0.1", PeersPort: 3320, RemotingPort: 9191}}, nil).Once()
+
+	system.gateCrashRecovery(peer)
+
+	port, cached := system.peerRemotingPort(peer)
+	require.True(t, cached, "recovery must not prune the cache entry of a node that is a member again")
+	require.Equal(t, 9191, port, "the entry must describe the node as it rejoined")
+}
+
+func TestGateCrashRecoveryKeepsCacheEntryWhenMembershipUnreadable(t *testing.T) {
+	// when the membership cannot be read, recovery cannot tell a node that is
+	// gone from one that rejoined: a stale cache entry is harmless, a missing
+	// one loses the node's next recovery, so the entry is kept
+	clusterMock := mockscluster.NewCluster(t)
+	system := newReplicationSystem(clusterMock)
+	system.eventsStream = eventstream.New()
+
+	peer := "127.0.0.1:3320"
+	system.peerRemotingPorts.Set(peer, 9090)
+
+	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Times(2)
+	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, assert.AnError).Once()
+
+	system.gateCrashRecovery(peer)
+
+	port, cached := system.peerRemotingPort(peer)
+	require.True(t, cached, "recovery must keep the cache entry when the membership cannot be read")
+	require.Equal(t, 9090, port)
 }
 
 func TestGateCrashRecoveryReleasesStaleClaims(t *testing.T) {
@@ -4461,6 +4663,9 @@ func TestGateCrashRecoveryReleasesStaleClaims(t *testing.T) {
 	pinned := internalpb.Actor_builder{Address: address.New("pinned", system.name, "127.0.0.1", 9090).String(), Relocatable: false, IncarnationId: "dead"}.Build()
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the node is still gone when recovery is over: the membership read that
+	// guards the pruning of its cache entry lists no peer
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	// the departed node stays gone
 	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, nil).Maybe()
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return([]*internalpb.Actor{pinned}, nil).Once()
@@ -4552,6 +4757,9 @@ func TestGateCrashRecoveryProceedsWhenMembershipReadFails(t *testing.T) {
 	system.peerRemotingPorts.Set(peer, 9090)
 
 	clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+	// the node is still gone when recovery is over: the membership read that
+	// guards the pruning of its cache entry lists no peer
+	clusterMock.EXPECT().Peers(mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().IsMember(mock.Anything, peer).Return(false, assert.AnError).Times(2)
 	clusterMock.EXPECT().ActorsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()
 	clusterMock.EXPECT().GrainsByHost(mock.Anything, "127.0.0.1", 9090, mock.Anything).Return(nil, nil).Once()

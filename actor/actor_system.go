@@ -2811,6 +2811,17 @@ func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
 }
 
+// isStoppingOrStopped reports whether the actor system is shutting down or has
+// already stopped. Shutdown clears the shutting-down flag once it is done, so
+// work that can outlive a stop, such as a retry loop asleep in its backoff,
+// must ask this rather than isStopping before it touches the cluster again.
+// A system that is still starting is neither: its cluster events loop runs
+// before the system is marked started, and the work those events trigger must
+// not be mistaken for work that outlived a stop.
+func (x *actorSystem) isStoppingOrStopped() bool {
+	return x.shuttingDown.Load() || (!x.started.Load() && !x.starting.Load())
+}
+
 func (x *actorSystem) decreaseActorsCounter() {
 	x.actorsCounter.Dec()
 }
@@ -3000,15 +3011,17 @@ func (x *actorSystem) endRelocation(peerAddress string) {
 // current live membership (peers plus self). It merges rather than replaces so a
 // node that has just departed remains resolvable until its NodeLeft is handled;
 // forgetPeerRemotingPort prunes the entry afterwards to keep the map bounded.
-func (x *actorSystem) cachePeerRemotingPorts(ctx context.Context) {
+// It reports whether the cache was refreshed: false means that the membership
+// could not be read and the cache was left as it was.
+func (x *actorSystem) cachePeerRemotingPorts(ctx context.Context) bool {
 	if !x.clusterEnabled.Load() || x.cluster == nil {
-		return
+		return false
 	}
 
 	peers, err := x.cluster.Peers(ctx)
 	if err != nil {
 		x.logger.Warnf("node=%s failed to refresh peer remoting ports: %v (hint: check cluster connectivity)", x.String(), err)
-		return
+		return false
 	}
 
 	// include self so a same-host layout (multiple nodes on one host) never
@@ -3018,6 +3031,8 @@ func (x *actorSystem) cachePeerRemotingPorts(ctx context.Context) {
 	for _, peer := range peers {
 		x.peerRemotingPorts.Set(peer.PeerAddress(), peer.RemotingPort)
 	}
+
+	return true
 }
 
 // peerRemotingPort returns the cached remoting port for a peers address.
@@ -3030,6 +3045,57 @@ func (x *actorSystem) peerRemotingPort(peerAddress string) (int, bool) {
 // and rejoins is re-added on the next membership refresh).
 func (x *actorSystem) forgetPeerRemotingPort(peerAddress string) {
 	x.peerRemotingPorts.Delete(peerAddress)
+}
+
+// forgetPeerUnlessRejoined removes the cache entry of the crashed node at
+// peerAddress at the end of its crash recovery, but only when the node has not
+// come back.
+//
+// The cache has one entry per node: the key is the node's peers address and
+// the value is its remoting port. Crash recovery needs that port to find the
+// node's actors and grains in the cluster registry, so a node without an
+// entry cannot be recovered when it crashes.
+//
+// Crash recovery takes several seconds, and the crashed node can restart at
+// the same address during that time. When it does, its NodeJoined event writes
+// a new entry for it. Removing that entry would break the recovery of the
+// node's next crash, so it has to survive this function.
+//
+// The function works in three steps:
+//
+//  1. Remove the entry, remembering the port it held.
+//  2. Read the current cluster members and write an entry for each of them
+//     (cachePeerRemotingPorts). When the node is a member again, this writes
+//     its entry back. When it is still gone, the entry stays removed.
+//  3. When the members cannot be read, there is no telling whether the node
+//     came back, so write the remembered port back. An entry kept for a node
+//     that is gone costs nothing; an entry missing for a live node loses that
+//     node's next recovery. The write is skipped when an entry is already
+//     there, because a NodeJoined event may have written a newer port in the
+//     meantime.
+//
+// The removal comes before the read on purpose. A node that rejoins before
+// the read is written back by step 2. A node that rejoins after the read gets
+// its entry from its own NodeJoined event, which runs after the removal. In
+// both orders the live node ends up with an entry.
+//
+// A system that is stopping or has stopped only does step 1: its cluster must
+// not be read, and shutdown clears the whole cache anyway.
+func (x *actorSystem) forgetPeerUnlessRejoined(ctx context.Context, peerAddress string) {
+	// step 1
+	port, cached := x.peerRemotingPorts.LoadAndDelete(peerAddress)
+
+	if x.isStoppingOrStopped() {
+		return
+	}
+
+	// step 2
+	refreshed := x.cachePeerRemotingPorts(ctx)
+
+	// step 3
+	if !refreshed && cached {
+		x.peerRemotingPorts.SetIfAbsent(peerAddress, port)
+	}
 }
 
 // completeSpawn finishes a local spawn: it attaches and publishes the actor
@@ -3991,11 +4057,21 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 // would permanently skip the rebalance and silently lose every actor of the
 // crashed node.
 func (x *actorSystem) gateCrashRecovery(peerAddress string) {
-	// this goroutine owns the departed node's remoting-port cache entry (see
-	// handleNodeLeftEvent): prune it only once recovery no longer needs it
-	defer x.forgetPeerRemotingPort(peerAddress)
-
 	ctx := context.Background()
+
+	// this goroutine owns the departed node's remoting-port cache entry (see
+	// handleNodeLeftEvent): prune it only once recovery no longer needs it.
+	// When recovery sees the node back as a member, the entry belongs to the
+	// live node and is left untouched. On every other path the node may still
+	// have rejoined without recovery noticing, so the entry is removed through
+	// forgetPeerUnlessRejoined, which keeps it in that case.
+	pruneCachedPort := true
+
+	defer func() {
+		if pruneCachedPort {
+			x.forgetPeerUnlessRejoined(ctx, peerAddress)
+		}
+	}()
 
 	var peerState *internalpb.PeerState
 
@@ -4014,12 +4090,20 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		// second live instance of each. A member is never recovered from.
 		if x.isPeerAlive(ctx, peerAddress) {
 			x.logger.Warnf("leader=%s skipping crash recovery for node=%s: the node rejoined the cluster (hint: a transient departure; its actors and grains are still hosted there)", x.String(), peerAddress)
+			pruneCachedPort = false
+
 			return
 		}
 
 		var ok bool
 		if peerState, claims, ok = x.deriveRelocationSetFromRegistry(ctx, peerAddress); ok {
 			break
+		}
+
+		// an attempt that failed because the system stopped under it is
+		// neither reported nor retried
+		if x.isStoppingOrStopped() {
+			return
 		}
 
 		if attempt >= relocationDeriveMaxAttempts {
@@ -4030,14 +4114,15 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 		x.logger.Warnf("leader=%s could not derive relocation set for node=%s (attempt %d/%d); retrying in %s", x.String(), peerAddress, attempt, relocationDeriveMaxAttempts, relocationDeriveRetryBackoff)
 		pause.For(relocationDeriveRetryBackoff)
 
-		if x.isStopping() {
+		if x.isStoppingOrStopped() {
 			return
 		}
 	}
 
-	// the retries above can keep this goroutine alive across a shutdown: never
-	// publish or dispatch on a system that is stopping
-	if x.isStopping() {
+	// the retries above can keep this goroutine alive across a shutdown, and
+	// past it: never publish or dispatch on a system that is stopping or has
+	// stopped
+	if x.isStoppingOrStopped() {
 		return
 	}
 
@@ -4045,6 +4130,8 @@ func (x *actorSystem) gateCrashRecovery(peerAddress string) {
 	// that the node has not come back before its records are acted on
 	if x.isPeerAlive(ctx, peerAddress) {
 		x.logger.Warnf("leader=%s skipping crash recovery for node=%s: the node rejoined the cluster while its relocation set was derived (hint: a transient departure; its actors and grains are still hosted there)", x.String(), peerAddress)
+		pruneCachedPort = false
+
 		return
 	}
 
@@ -4126,24 +4213,29 @@ func (x *actorSystem) isPeerAlive(ctx context.Context, peerAddress string) bool 
 // observed for relocationQuiescenceWindow, polling at
 // relocationQuiescencePoll and never waiting longer than
 // relocationQuiescenceMaxWait before proceeding anyway. It reports false when
-// the system started stopping, in which case recovery must be abandoned.
+// the system is stopping or has stopped, in which case recovery must be
+// abandoned. That is checked before every read of the cluster: a stop can
+// begin and end between two polls, and the cluster engine of a stopped system
+// must not be read.
 func (x *actorSystem) awaitRelocationQuiescence(peerAddress string) bool {
 	deadline := time.Now().Add(relocationQuiescenceMaxWait)
 
-	for time.Since(x.cluster.LastRebalanceEvent()) < relocationQuiescenceWindow {
-		if x.isStopping() {
+	for {
+		if x.isStoppingOrStopped() {
 			return false
+		}
+
+		if time.Since(x.cluster.LastRebalanceEvent()) >= relocationQuiescenceWindow {
+			return true
 		}
 
 		if time.Now().After(deadline) {
 			x.logger.Warnf("leader=%s proceeding with crash recovery for node=%s before partition repair went quiet (hint: recovery may be partial; affected items appear in RelocationFailed)", x.String(), peerAddress)
-			break
+			return true
 		}
 
 		pause.For(relocationQuiescencePoll)
 	}
-
-	return true
 }
 
 // dispatchDerivedRebalance hands a derived relocation set to the relocator,
