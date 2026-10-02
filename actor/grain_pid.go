@@ -386,6 +386,19 @@ func (pid *grainPID) deactivate(ctx context.Context) (err error) {
 		// re-owned by another node belongs to a live activation there
 		node := address.FormatHostPort(actorSystem.Host(), actorSystem.Port())
 		if _, err := actorSystem.getCluster().ReleaseGrain(ctx, pid.identity.String(), node); err != nil {
+			// A node that stops cannot release a record held by a node that
+			// is gone or is stopping too. The record then names a node that
+			// is about to leave membership, and the next activation of the
+			// grain releases it (see releaseUnreachableGrainOwner), so the
+			// grain is deactivated all the same and the stop does not fail.
+			if actorSystem.isStopping() {
+				if logger.Enabled(log.WarningLevel) {
+					logger.Warnf("grain=%s left its registry record behind: %v (hint: it names a node that is leaving, so the next activation of the grain replaces it)", pid.identity.String(), err)
+				}
+
+				return nil
+			}
+
 			if logger.Enabled(log.ErrorLevel) {
 				logger.Errorf("failed to release grain=%s from the cluster registry: %v (hint: check cluster connectivity)", pid.identity.String(), err)
 			}
