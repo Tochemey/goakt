@@ -1147,6 +1147,30 @@ func (x *MockReentrancyActor) Receive(ctx *ReceiveContext) {
 // PostStop does nothing.
 func (x *MockReentrancyActor) PostStop(*Context) error { return nil }
 
+// MockCBORRequest is a plain Go request serialized with CBOR.
+type MockCBORRequest struct {
+	Amount int
+}
+
+// MockCBORReply is a plain Go reply serialized with CBOR.
+type MockCBORReply struct {
+	Amount int
+}
+
+// crossedSerializerReply returns a reply of the other serializer than the one
+// message belongs to: a proto reply to a MockCBORRequest and a MockCBORReply
+// to a proto TestSend. It returns nil for any other message.
+func crossedSerializerReply(message any) any {
+	switch message.(type) {
+	case *MockCBORRequest:
+		return new(testpb.Reply)
+	case *testpb.TestSend:
+		return &MockCBORReply{Amount: 1}
+	default:
+		return nil
+	}
+}
+
 // produceSubmission commands the reliable producer mock to submit one
 // application message through its controller.
 type produceSubmission struct {

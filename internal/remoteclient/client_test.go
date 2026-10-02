@@ -2793,28 +2793,6 @@ func TestSerializePayload(t *testing.T) {
 
 // --- PersistPeerState tests ---
 
-// testPeerState builds the snapshot the PersistPeerState tests send, and whose
-// host and peers port the server-side handler asserts on.
-func testPeerState() *internalpb.PeerState {
-	return internalpb.PeerState_builder{
-		Host:         "127.0.0.1",
-		RemotingPort: 8080,
-		PeersPort:    9000,
-	}.Build()
-}
-
-// persistPeerStateHandler answers a PersistPeerStateRequest after checking that
-// the snapshot built by testPeerState survived the round trip intact.
-func persistPeerStateHandler(t *testing.T) inet.ProtoHandler {
-	t.Helper()
-	return func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
-		req := msg.(*internalpb.PersistPeerStateRequest)
-		assert.Equal(t, "127.0.0.1", req.GetPeerState().GetHost())
-		assert.EqualValues(t, 9000, req.GetPeerState().GetPeersPort())
-		return new(internalpb.PersistPeerStateResponse), nil
-	}
-}
-
 func TestPersistPeerState_Success(t *testing.T) {
 	ps := startRemotingServer(t,
 		inet.WithProtoHandler("internalpb.PersistPeerStateRequest", persistPeerStateHandler(t)),
@@ -2935,4 +2913,82 @@ func TestRemoteTellGrainOneWay_ConnectionRefused(t *testing.T) {
 
 	err := r.RemoteTellGrainOneWay(context.Background(), "host", 1000, grainReq, durationpb.New(time.Second))
 	assert.Error(t, err)
+}
+
+// TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer asks a grain whose reply
+// belongs to another serializer family than the request: the reply must be
+// decoded with its own serializer, not the request's.
+func TestRemoteAskGrain_DecodesAReplyOfAnotherSerializer(t *testing.T) {
+	cbor := remote.NewCBORSerializer()
+	handler := func(_ context.Context, _ inet.Connection, req proto.Message) (proto.Message, error) {
+		requestSerializerID := byte(inet.SerializerIDPublicProto)
+		if _, err := cbor.Deserialize(req.(*internalpb.RemoteAskGrainRequest).GetMessage()); err == nil {
+			requestSerializerID = inet.SerializerIDCBOR
+		}
+
+		frame, _ := crossedReply(t, requestSerializerID)
+		return internalpb.RemoteAskGrainResponse_builder{Message: frame}.Build(), nil
+	}
+
+	ps := startRemotingServer(t, inet.WithProtoHandler("internalpb.RemoteAskGrainRequest", handler))
+	host, port := serverHostPort(t, ps)
+	r := newCrossedReplyClient(t, remote.ProtocolPinAuto)
+	grainRequest := &remote.GrainRequest{Kind: "kind", Name: "name"}
+
+	for name, request := range crossedRequests() {
+		t.Run(name, func(t *testing.T) {
+			reply, err := r.RemoteAskGrain(context.Background(), host, port, grainRequest, request, time.Second)
+			require.NoError(t, err)
+			requireCrossedReply(t, request, reply)
+		})
+	}
+}
+
+// TestRemoteAsk_DecodesAReplyOfAnotherSerializer asks an actor whose reply
+// belongs to another serializer family than the request, on the duplex and on
+// the legacy transport.
+func TestRemoteAsk_DecodesAReplyOfAnotherSerializer(t *testing.T) {
+	transports := map[string]struct {
+		pin    remote.ProtocolPin
+		server []inet.RemotingServerOption
+	}{
+		"duplex": {
+			pin:    remote.ProtocolPinDuplex,
+			server: []inet.RemotingServerOption{inet.WithRemotingServerDuplexAskHandler(crossedDuplexAskHandler(t))},
+		},
+		"legacy": {
+			pin: remote.ProtocolPinLegacy,
+			server: []inet.RemotingServerOption{
+				inet.WithProtoHandler("internalpb.RemoteAskRequest", crossedLegacyAskHandler(t)),
+				inet.WithRemotingServerAcceptProtocol(inet.AcceptProtocolLegacy),
+			},
+		},
+	}
+
+	for transport, tc := range transports {
+		t.Run(transport, func(t *testing.T) {
+			ps := startRemotingServer(t, tc.server...)
+			host, port := serverHostPort(t, ps)
+			r := newCrossedReplyClient(t, tc.pin)
+			from := address.New("from", "sys", host, port)
+			to := address.New("to", "sys", host, port)
+
+			for name, request := range crossedRequests() {
+				t.Run(name, func(t *testing.T) {
+					reply, err := r.RemoteAsk(context.Background(), from, to, request, time.Second)
+					require.NoError(t, err)
+					requireCrossedReply(t, request, reply)
+				})
+			}
+
+			requests := []any{&cborReplyMessage{Amount: 1}, durationpb.New(time.Second)}
+			replies, err := r.RemoteBatchAsk(context.Background(), from, to, requests, time.Second)
+			require.NoError(t, err)
+			require.Len(t, replies, len(requests))
+
+			for i, request := range requests {
+				requireCrossedReply(t, request, replies[i])
+			}
+		})
+	}
 }

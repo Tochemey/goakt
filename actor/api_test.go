@@ -586,6 +586,54 @@ func TestAsk(t *testing.T) {
 	})
 }
 
+// TestAsk_DecodesARemoteReplyOfAnotherSerializer asks an actor from the other
+// nodes of a three-node cluster with a CBOR request it answers with a proto
+// reply, and with a proto request it answers with a CBOR reply: each reply
+// must be decoded with its own serializer, not the request's.
+func TestAsk_DecodesARemoteReplyOfAnotherSerializer(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 3, withTestSerializables(new(MockCBORRequest), new(MockCBORReply)))
+	node1, node2, node3 := systems[0], systems[1], systems[2]
+	t.Cleanup(func() {
+		_ = node3.Stop(ctx)
+		_ = node2.Stop(ctx)
+		_ = node1.Stop(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		peers, err := node1.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 2
+	}, 10*time.Second, 100*time.Millisecond)
+
+	const actorName = "crossed-reply-actor"
+	_, err := node3.Spawn(ctx, actorName, &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
+		rctx.Response(crossedSerializerReply(rctx.Message()))
+	}})
+
+	require.NoError(t, err)
+
+	for _, node := range []ActorSystem{node1, node2} {
+		var pid *PID
+		require.Eventually(t, func() bool {
+			pid, err = node.ActorOf(ctx, actorName)
+			return err == nil
+		}, 10*time.Second, 100*time.Millisecond)
+
+		require.True(t, pid.IsRemote())
+
+		reply, err := Ask(ctx, pid, &MockCBORRequest{Amount: 1}, time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.Reply), reply)
+
+		reply, err = Ask(ctx, pid, new(testpb.TestSend), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, &MockCBORReply{Amount: 1}, reply)
+	}
+}
+
 func TestTell(t *testing.T) {
 	t.Run("With nil PID", func(t *testing.T) {
 		ctx := context.Background()

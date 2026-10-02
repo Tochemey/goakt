@@ -438,6 +438,7 @@ type testClusterConfig struct {
 	compression       remote.Compression
 	roles             []string
 	contextPropagator remote.ContextPropagator
+	serializables     []any              // Go types the node serializes with CBOR, see remote.WithSerializables
 	extraGrains       []Grain            // grain kinds registered on top of the fixture defaults
 	extraKinds        []Actor            // actor kinds registered on top of the fixture defaults
 	replicaCount      uint32             // cluster registry replication factor
@@ -504,6 +505,13 @@ func withTestProtocolPin(pin remote.ProtocolPin) testClusterOption {
 func withTestContextPropagator(propagator remote.ContextPropagator) testClusterOption {
 	return func(tc *testClusterConfig) {
 		tc.contextPropagator = propagator
+	}
+}
+
+// withTestSerializables registers Go types the node serializes with CBOR.
+func withTestSerializables(types ...any) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.serializables = append(tc.serializables, types...)
 	}
 }
 
@@ -697,6 +705,10 @@ func newClusterSystem(t *testing.T, factory providerFactory, opts ...testCluster
 	}
 
 	remoteOpts := []remote.Option{remote.WithCompression(cfg.compression), remote.WithProtocolPin(cfg.protocolPin)}
+	if len(cfg.serializables) > 0 {
+		remoteOpts = append(remoteOpts, remote.WithSerializables(cfg.serializables...))
+	}
+
 	if cfg.contextPropagator != nil {
 		remoteOpts = append(remoteOpts, remote.WithContextPropagator(cfg.contextPropagator))
 	}

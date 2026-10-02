@@ -439,7 +439,7 @@ func (x *client) sendAskLegacy(ctx context.Context, host string, port int, param
 		return nil, nil
 	}
 
-	return serializer.Deserialize(askResp.GetMessages()[0])
+	return x.deserializeReplyFrame(askResp.GetMessages()[0], serializer)
 }
 
 // sendAskDuplex sends an expectsReply DATA frame on the ordinary lane, decodes
@@ -494,7 +494,7 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 		return nil, err
 	}
 
-	msg, err := deserializeReplyEnvelope(replyEnv, serializer)
+	msg, err := x.deserializeUserReply(replyEnv, serializer)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +695,7 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 				return
 			}
 
-			val, desErr := deserializeReplyEnvelope(replyEnv, ser)
+			val, desErr := x.deserializeUserReply(replyEnv, ser)
 			if desErr == nil {
 				if errResp, ok := val.(*internalpb.Error); ok {
 					desErr = checkProtoError(errResp)
@@ -779,7 +779,7 @@ func (x *client) sendBatchAskLegacy(ctx context.Context, host string, port int, 
 
 	responses := make([]any, 0, len(askResp.GetMessages()))
 	for i, msg := range askResp.GetMessages() {
-		des, desErr := serializers[i].Deserialize(msg)
+		des, desErr := x.deserializeReplyFrame(msg, serializers[i])
 		if desErr != nil {
 			return nil, desErr
 		}
@@ -850,6 +850,45 @@ func deserializeReplyEnvelope(env inet.ReplyEnvelope, serializer remote.Serializ
 
 		return msg, nil
 	}
+}
+
+// deserializeUserReply decodes a user REPLY envelope whose serializer may
+// differ from the request's. The reply is whatever the target answered with:
+// a CBOR request may get a proto reply. serializer, the request's, goes
+// first, so a reply of the request's serializer decodes exactly as it always
+// did. When it cannot decode the reply, the dispatching serializer tries
+// every registered one, the way the receiving node decodes requests. When
+// that fails too, the error of the request's serializer is returned.
+func (x *client) deserializeUserReply(env inet.ReplyEnvelope, serializer remote.Serializer) (any, error) {
+	msg, err := deserializeReplyEnvelope(env, serializer)
+	if err == nil {
+		return msg, nil
+	}
+
+	if msg, dispatchErr := deserializeReplyEnvelope(env, x.dispatcher); dispatchErr == nil {
+		return msg, nil
+	}
+
+	return nil, err
+}
+
+// deserializeReplyFrame decodes a reply that arrives as a bare serializer
+// frame (a legacy ask response or a grain ask response) with the rule
+// [client.deserializeUserReply] applies to a duplex REPLY envelope:
+// serializer, the request's, goes first and the dispatching serializer takes
+// over when it cannot decode the reply. When both fail, the error of the
+// request's serializer is returned.
+func (x *client) deserializeReplyFrame(data []byte, serializer remote.Serializer) (any, error) {
+	msg, err := serializer.Deserialize(data)
+	if err == nil {
+		return msg, nil
+	}
+
+	if msg, dispatchErr := x.dispatcher.Deserialize(data); dispatchErr == nil {
+		return msg, nil
+	}
+
+	return nil, err
 }
 
 // copyReplyPayload returns a heap copy of payload for serializers that may
