@@ -479,8 +479,36 @@ func TestRemoteAsk_TimeoutOnSwallowedResponse(t *testing.T) {
 	elapsed := time.Since(start)
 
 	require.Error(t, err)
+	// the timeout is recognized as it is for a local ask
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
 	assert.GreaterOrEqual(t, elapsed, timeout)
 	assert.Less(t, elapsed, 5*time.Second)
+}
+
+func TestAskTimeoutError(t *testing.T) {
+	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-expired.Done()
+
+	failure := fmt.Errorf("read failed")
+
+	t.Run("no error stays no error", func(t *testing.T) {
+		require.NoError(t, askTimeoutError(expired, nil))
+	})
+
+	t.Run("an error after the deadline carries ErrRequestTimeout", func(t *testing.T) {
+		err := askTimeoutError(expired, failure)
+		require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+		require.ErrorIs(t, err, failure)
+	})
+
+	t.Run("an error before the deadline is returned as is", func(t *testing.T) {
+		require.Equal(t, failure, askTimeoutError(context.Background(), failure))
+	})
+
+	t.Run("an error that already is a request timeout is returned as is", func(t *testing.T) {
+		require.Equal(t, gerrors.ErrRequestTimeout, askTimeoutError(expired, gerrors.ErrRequestTimeout))
+	})
 }
 
 func TestAskContext(t *testing.T) {

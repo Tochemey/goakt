@@ -2264,3 +2264,149 @@ func TestGrainPIDReceiveReturnsEnqueueOutcome(t *testing.T) {
 		require.ErrorIs(t, pid.receive(grainContext), gerrors.ErrDead)
 	})
 }
+
+func TestGrainSkipsAnAskWhoseSenderStoppedWaiting(t *testing.T) {
+	cases := []struct {
+		name string
+		// mode is the grain's reentrancy mode: Off sends asks down the channel
+		// path, any other mode down the envelope path.
+		mode reentrancy.Mode
+	}{
+		{"channel path", reentrancy.Off},
+		{"envelope path", reentrancy.AllowAll},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			system := newRequestTestSystem(t)
+			ctx := context.Background()
+
+			var handled atomic.Int32
+			grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+				handled.Add(1)
+				gctx.Response(new(testpb.Reply))
+			}}
+
+			identity, err := system.GrainIdentity(ctx, "expired-ask", func(context.Context) (Grain, error) {
+				return grain, nil
+			})
+			require.NoError(t, err)
+
+			pid, ok := system.grains.Get(identity.String())
+			require.True(t, ok)
+
+			pid.reentrancy.Store(newReentrancyState(tc.mode, 0))
+			pid.attachResponseQueue()
+
+			// a blocking request in flight keeps the grain from reading its mailbox
+			registerGrainRequestState(pid, "blocking", reentrancy.StashNonReentrant, nil)
+			require.True(t, pid.paused())
+
+			// the ask waits in the mailbox until its sender gives up
+			_, err = system.AskGrain(ctx, identity, new(testpb.TestReply), 50*time.Millisecond)
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+
+			require.NoError(t, pid.enqueueEnvelope(ctx, &commands.AsyncResponse{CorrelationID: "blocking"}))
+
+			// the timely ask is behind the expired one, so its answer means the
+			// expired one has been dealt with
+			reply, err := system.AskGrain(ctx, identity, new(testpb.TestReply), 2*time.Second)
+			require.NoError(t, err)
+			require.IsType(t, new(testpb.Reply), reply)
+			require.EqualValues(t, 1, handled.Load())
+			require.EqualValues(t, 1, pid.processedCount.Load())
+		})
+	}
+}
+
+func TestGrainAnswersAnExpiredAskWithARequestTimeout(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	grain := &MockScriptedGrain{receive: func(*GrainContext) {
+		t.Error("an expired ask reached OnReceive")
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "expired-ask-reply", func(context.Context) (Grain, error) {
+		return grain, nil
+	})
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	t.Run("on the reply channel", func(t *testing.T) {
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainAsk)
+		grainContext.deadline = askDeadline(ctx, -time.Second)
+		response := grainContext.response
+		pid.handleGrainContext(grainContext, time.Now())
+
+		select {
+		case reply := <-response:
+			replyErr, ok := reply.(grainReplyError)
+			require.True(t, ok)
+			require.ErrorIs(t, replyErr.err, gerrors.ErrRequestTimeout)
+		default:
+			t.Fatal("the expired ask was not answered")
+		}
+	})
+
+	t.Run("on the pending asks table", func(t *testing.T) {
+		slot := system.pendingAsks.Register("expired")
+		envelope := &commands.AsyncRequest{CorrelationID: "expired", Message: new(testpb.TestReply), Deadline: askDeadline(ctx, -time.Second)}
+		require.NoError(t, pid.enqueueEnvelope(ctx, envelope))
+
+		select {
+		case response := <-slot:
+			require.ErrorIs(t, asyncErrorFromString(response.Error), gerrors.ErrRequestTimeout)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the expired ask was not answered")
+		}
+	})
+
+	t.Run("a message without a deadline is never expired", func(t *testing.T) {
+		require.False(t, (&GrainContext{}).expired())
+		require.False(t, (&GrainContext{deadline: askDeadline(ctx, time.Minute)}).expired())
+		require.True(t, (&GrainContext{deadline: askDeadline(ctx, -time.Minute)}).expired())
+	})
+}
+
+func TestGrainLateAskKeepsItsDeadline(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("an expired late ask is answered without a fresh activation", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		late := &GrainContext{ctx: ctx, self: identity, actorSystem: system, message: new(testpb.TestReply), response: make(chan any, 1), synchronous: true, deadline: askDeadline(ctx, -time.Second)}
+		late.forwardLate()
+
+		reply := <-late.response
+		replyErr, ok := reply.(grainReplyError)
+		require.True(t, ok)
+		require.ErrorIs(t, replyErr.err, gerrors.ErrRequestTimeout)
+
+		fresh, ok := system.grains.Get(identity.String())
+		require.False(t, ok && fresh != pid)
+	})
+
+	t.Run("a late ask still in time is forwarded with its deadline", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainAsk)
+		grainContext.deadline = askDeadline(ctx, time.Minute)
+		response := grainContext.response
+		pid.handleGrainContext(grainContext, time.Now())
+
+		select {
+		case reply := <-response:
+			require.IsType(t, new(testpb.Reply), reply)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the forwarded ask was not answered")
+		}
+	})
+
+	t.Run("the forward waits for the time left, not a fresh timeout", func(t *testing.T) {
+		late := &GrainContext{ctx: ctx, timeout: time.Hour, deadline: askDeadline(ctx, time.Minute)}
+		timeout := late.lateSendTimeout()
+		require.Greater(t, timeout, 50*time.Second)
+		require.LessOrEqual(t, timeout, time.Minute)
+	})
+}

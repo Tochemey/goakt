@@ -95,6 +95,7 @@ func (pid *grainPID) redirectLateMessage(grainContext *GrainContext) {
 		requestID:      grainContext.requestID,
 		requestReplyTo: grainContext.requestReplyTo,
 		timeout:        grainContext.timeout,
+		deadline:       grainContext.deadline,
 	}
 
 	if system.getLateGrainMessages().push(pid, late) {
@@ -114,10 +115,16 @@ func (pid *grainPID) forwardLateMessages() {
 // forwardLate delivers this late message to a fresh activation and relays the
 // outcome to the original caller through the usual reply methods.
 func (x *GrainContext) forwardLate() {
+	// the sender gave up while the message waited: no activation for it
+	if x.expired() {
+		x.Err(gerrors.ErrRequestTimeout)
+		return
+	}
+
 	// a reentrant ask travels as an envelope; the new activation replies to
 	// the caller itself
 	if x.requestID != "" {
-		envelope := &commands.AsyncRequest{CorrelationID: x.requestID, ReplyTo: x.requestReplyTo, Message: x.message}
+		envelope := &commands.AsyncRequest{CorrelationID: x.requestID, ReplyTo: x.requestReplyTo, Message: x.message, Deadline: x.deadline}
 		if err := x.actorSystem.deliverAsyncEnvelope(x.ctx, x.self, envelope); err != nil {
 			x.Err(err)
 		}
@@ -144,9 +151,14 @@ func (x *GrainContext) forwardLate() {
 }
 
 // lateSendTimeout returns how long a late forward may wait for the fresh
-// activation: the caller's own timeout, else the time left on its context,
-// else the default grain request timeout.
+// activation: for an ask the time left until its sender stops waiting, so the
+// forward does not start the timeout over; otherwise the caller's own timeout,
+// else the time left on its context, else the default grain request timeout.
 func (x *GrainContext) lateSendTimeout() time.Duration {
+	if x.deadline != 0 {
+		return untilAskDeadline(x.deadline)
+	}
+
 	if x.timeout > 0 {
 		return x.timeout
 	}

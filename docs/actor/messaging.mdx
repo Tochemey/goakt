@@ -12,6 +12,28 @@ sidebarTitle: "Messaging"
 Use **Tell** when you don't need a reply: logging, notifications, commands that trigger side effects. Use **Ask** when
 you need a result: queries, computations, or any flow that depends on the response.
 
+### The Ask timeout reaches the actor
+
+The timeout of an Ask is not only how long the caller waits. The actor knows the moment the caller stops waiting: the
+ask timeout, or the deadline of the caller's context when that comes first.
+
+- **An Ask that expired before its turn is skipped.** When the actor dequeues an Ask whose caller already gave up, in
+  the mailbox or in the stash, it does not hand it to `Receive`. Under load this keeps a slow actor from spending its
+  turns on answers nobody reads, and a caller that timed out and retried does not get its work done twice.
+- **`Context()` ends with the Ask.** Inside `Receive`, `ctx.Context()` carries that deadline, so a handler that passes
+  it to a database query or an HTTP call stops when nobody waits for the answer. The context also ends when `Receive`
+  returns.
+- **A timeout is `ErrRequestTimeout` everywhere.** `errors.Is(err, errors.ErrRequestTimeout)` is true whether the actor
+  is on the calling node or on another one.
+
+A Tell is not affected: it is handled whenever its turn comes, and its context carries no deadline of its own.
+
+<Warning>
+  An Ask that is already in `Receive` when its caller gives up still runs to the end, unless the handler watches
+  `ctx.Context()`. The caller sees `ErrRequestTimeout` while the work may have been done, so a handler whose callers
+  retry must be idempotent.
+</Warning>
+
 ## Message types
 
 All message-passing APIs accept `any`. You can send:

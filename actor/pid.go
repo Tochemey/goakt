@@ -1240,6 +1240,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 
 	receiveContext := getContext(to.ctxShard)
 	receiveContext.build(ctx, pid, to, message, false)
+	receiveContext.deadline = askDeadline(ctx, timeout)
 	responseCh := receiveContext.response
 
 	// doReceive hands the context to the mailbox; it can be recycled and
@@ -2192,6 +2193,15 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 		}
 	}
 
+	// An Ask whose sender stopped waiting while the message sat in the
+	// mailbox or in the stash is not handled: nobody reads the answer, and
+	// under load that work is what keeps the actor behind. The sender
+	// recorded the timeout as a deadletter when it gave up. An Ask already
+	// in Receive when its sender gives up still runs to the end.
+	if askExpired(received.deadline) {
+		return
+	}
+
 	if pid.enableReentrancyStash(received) {
 		if err := pid.stash(received); err != nil {
 			pid.getLogger().Warn(err)
@@ -2220,6 +2230,12 @@ func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 // handleReceived picks the right behavior and processes the message
 func (pid *PID) handleReceived(received *ReceiveContext, now time.Time) {
 	defer pid.recovery(received)
+
+	// only an Ask can have a derived context to release
+	if received.deadline != 0 {
+		defer received.releaseDeadlineContext()
+	}
+
 	if behavior := pid.behaviorStack.Peek(); behavior != nil {
 		pid.markActivity(now)
 		pid.recordProcessedMessage()

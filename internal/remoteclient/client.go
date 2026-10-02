@@ -2111,7 +2111,8 @@ func (r *client) RemoteAsk(ctx context.Context, from, to *address.Address, messa
 		return nil, err
 	}
 
-	return r.sendAsk(ctx, to.Host(), to.Port(), askParams{tellParams: params, timeout: timeout}, serializer)
+	response, err = r.sendAsk(ctx, to.Host(), to.Port(), askParams{tellParams: params, timeout: timeout}, serializer)
+	return response, askTimeoutError(ctx, err)
 }
 
 // RemoteLookup resolves the address of an actor hosted on a remote node. A
@@ -2300,7 +2301,8 @@ func (r *client) RemoteBatchAsk(ctx context.Context, from, to *address.Address, 
 		return nil, err
 	}
 
-	return r.sendBatchAskDuplex(ctx, to.Host(), to.Port(), params, serializers)
+	responses, err = r.sendBatchAskDuplex(ctx, to.Host(), to.Port(), params, serializers)
+	return responses, askTimeoutError(ctx, err)
 }
 
 // RemoteSpawn creates an actor on a remote node using the provided spawn
@@ -2769,6 +2771,18 @@ func askContext(ctx context.Context, timeout time.Duration) (context.Context, co
 	}
 
 	return context.WithTimeout(ctx, timeout)
+}
+
+// askTimeoutError adds ErrRequestTimeout to the error of an ask that the
+// caller's deadline ended, so a timed out ask is recognized the same way
+// whether the actor is on the calling node or on another one. ctx is the
+// context askContext bounded with the ask timeout.
+func askTimeoutError(ctx context.Context, err error) error {
+	if err == nil || errors.Is(err, gerrors.ErrRequestTimeout) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return err
+	}
+
+	return errors.Join(err, gerrors.ErrRequestTimeout)
 }
 
 // enrichContext adds metadata to context if propagator is configured.

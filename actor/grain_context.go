@@ -107,6 +107,21 @@ type GrainContext struct {
 	// It sits before the bools so they pack with poolShard into one word.
 	timeout time.Duration
 
+	// deadline is the moment the sender of an ask stops waiting: the earlier
+	// of the sender's own context deadline and the enqueue time plus the ask
+	// timeout. The turn skips a message it dequeues after that moment, and
+	// Context ends at it. It is a reading of askClock, which costs less than
+	// a wall clock time on the ask path. Zero for every message that is
+	// not an ask.
+	deadline int64
+
+	// deadlineCtx is the context Context derives from ctx to carry deadline,
+	// and cancelDeadline releases its timer. Both are created on the first
+	// Context call of a turn and stay nil for a handler that never asks for
+	// the context, which spares the timer on that path. Turn-owned.
+	deadlineCtx    context.Context
+	cancelDeadline context.CancelFunc
+
 	// replyDeferred records that DeferResponse transferred reply ownership to
 	// a handle: the turn's own reply methods become no-ops. replySent makes
 	// the async reply one-shot, mirroring the CAS guard of the channel path.
@@ -130,8 +145,44 @@ type GrainContext struct {
 //
 // It carries deadlines, cancellation signals, and request-scoped values.
 // This method allows direct access to standard context operations.
+//
+// For a message sent with AskGrain the context ends when the sender stops
+// waiting: at the ask timeout, or at the deadline of the sender's own context
+// when that comes first. It also ends when OnReceive returns, unless the reply
+// was handed over with DeferResponse. A handler that passes it to the calls it
+// makes, a database query for instance, stops working once nobody waits for
+// the answer. For every other message it is the sender's context, detached
+// from the sender's cancellation where the sender does not wait.
+//
+// Call it from OnReceive, on the grain's turn.
 func (gctx *GrainContext) Context() context.Context {
-	return gctx.ctx
+	if gctx.deadline == 0 {
+		return gctx.ctx
+	}
+
+	if gctx.deadlineCtx != nil {
+		return gctx.deadlineCtx
+	}
+
+	gctx.deadlineCtx, gctx.cancelDeadline = askContext(gctx.ctx, gctx.deadline)
+	return gctx.deadlineCtx
+}
+
+// expired reports whether the sender of this ask has stopped waiting.
+func (gctx *GrainContext) expired() bool {
+	return askExpired(gctx.deadline)
+}
+
+// releaseDeadlineContext ends the context Context derived for this turn and
+// frees its timer. A reply handed over with DeferResponse is answered on a
+// later turn, so its context is left to end at the deadline by itself.
+func (gctx *GrainContext) releaseDeadlineContext() {
+	if gctx.cancelDeadline != nil && !gctx.replyDeferred {
+		gctx.cancelDeadline()
+	}
+
+	gctx.deadlineCtx = nil
+	gctx.cancelDeadline = nil
 }
 
 // Self returns the unique identifier of the Grain instance.
@@ -576,7 +627,7 @@ func (gctx *GrainContext) RequestActor(actorName string, message any, opts ...Re
 //	    // handle error
 //	}
 func (gctx *GrainContext) AskActor(actorName string, message any, timeout time.Duration) (any, error) {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.NoSender().SendSync(ctx, actorName, message, timeout)
 }
 
@@ -592,7 +643,7 @@ func (gctx *GrainContext) AskActor(actorName string, message any, timeout time.D
 //	    // handle error
 //	}
 func (gctx *GrainContext) TellActor(actorName string, message any) error {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.NoSender().SendAsync(ctx, actorName, message)
 }
 
@@ -609,7 +660,7 @@ func (gctx *GrainContext) TellActor(actorName string, message any) error {
 //	    // handle error
 //	}
 func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.Duration) (any, error) {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.AskGrain(ctx, to, message, timeout)
 }
 
@@ -631,7 +682,7 @@ func (gctx *GrainContext) AskGrain(to *GrainIdentity, message any, timeout time.
 //	// fire-and-forget
 //	err = ctx.TellGrain(otherGrainID, &MyNotification{}, actor.WithOneWay())
 func (gctx *GrainContext) TellGrain(to *GrainIdentity, message any, opts ...TellGrainOption) error {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.TellGrain(ctx, to, message, opts...)
 }
 
@@ -660,7 +711,7 @@ func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (any, error
 		return errors.NewErrInvalidGrainIdentity(err)
 	}
 
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	var config *pipeConfig
 	if len(opts) > 0 {
 		config = newPipeConfig(opts...)
@@ -685,7 +736,7 @@ func (gctx *GrainContext) PipeToGrain(to *GrainIdentity, task func() (any, error
 //
 // Use PipeOptions (e.g., WithTimeout, WithCircuitBreaker) to control execution.
 func (gctx *GrainContext) PipeToActor(actorName string, task func() (any, error), opts ...PipeOption) error {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.NoSender().PipeToName(ctx, actorName, task, opts...)
 }
 
@@ -819,7 +870,7 @@ func (gctx *GrainContext) CancelSchedule(reference string) error {
 // GrainOf derives the grain kind from its type parameter and requires no factory.
 // The factory-based path remains functional but will be removed in a future major release.
 func (gctx *GrainContext) GrainIdentity(name string, factory GrainFactory, opts ...GrainOption) (*GrainIdentity, error) {
-	ctx := context.WithoutCancel(gctx.Context())
+	ctx := context.WithoutCancel(gctx.ctx)
 	return gctx.actorSystem.GrainIdentity(ctx, name, factory, opts...)
 }
 
@@ -957,6 +1008,9 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	gctx.replyDeferred = false
 	gctx.replySent = false
 	gctx.timeout = 0
+	gctx.deadline = 0
+	gctx.deadlineCtx = nil
+	gctx.cancelDeadline = nil
 
 	// Reset CAS guard so Response()/NoErr() succeed for the new message.
 	gctx.responseClosed.Store(false)
@@ -996,6 +1050,9 @@ func (gctx *GrainContext) reset() {
 	gctx.replyDeferred = false
 	gctx.replySent = false
 	gctx.timeout = 0
+	gctx.deadline = 0
+	gctx.deadlineCtx = nil
+	gctx.cancelDeadline = nil
 	// Note: responseClosed is not reset here because build() always sets it
 	// to false for the next message. Avoiding this atomic store saves ~5ns
 	// per message on the release path.

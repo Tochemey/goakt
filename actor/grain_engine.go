@@ -863,6 +863,7 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 	grainContext := getGrainContext(pid.ctxShard)
 	grainContext.build(ctx, pid, x, id, message, grainAsk)
 	grainContext.timeout = timeout
+	grainContext.deadline = askDeadline(ctx, timeout)
 
 	responseCh := grainContext.response
 	shard := grainContext.poolShard
@@ -933,6 +934,7 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 	envelope := &commands.AsyncRequest{
 		CorrelationID: correlationID,
 		Message:       message,
+		Deadline:      askDeadline(ctx, timeout),
 	}
 
 	if err := pid.enqueueEnvelope(ctx, envelope); err != nil {

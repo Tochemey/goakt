@@ -253,6 +253,7 @@ func cloneContext(src *ReceiveContext) *ReceiveContext {
 	dst.requestID = src.requestID
 	dst.requestReplyTo = src.requestReplyTo
 	dst.err = src.err
+	dst.deadline = src.deadline
 
 	// reset() deliberately leaves responseClosed set, relying on build()
 	// to clear it. Clones bypass build(), so a context recycled after a

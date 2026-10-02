@@ -3403,3 +3403,81 @@ func TestReceiveContext(t *testing.T) {
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+func TestReceiveContextCarriesTheAskDeadline(t *testing.T) {
+	type key struct{}
+	parent := context.WithValue(context.Background(), key{}, "value")
+
+	t.Run("a message without a deadline keeps its context", func(t *testing.T) {
+		rctx := &ReceiveContext{ctx: parent}
+		require.Equal(t, parent, rctx.Context())
+		require.Nil(t, rctx.deadlineScope)
+
+		// nothing to release
+		rctx.releaseDeadlineContext()
+	})
+
+	t.Run("the context ends at the deadline and when the turn ends", func(t *testing.T) {
+		rctx := &ReceiveContext{ctx: parent, deadline: askDeadline(parent, time.Minute)}
+
+		derived := rctx.Context()
+		deadline, ok := derived.Deadline()
+		require.True(t, ok)
+		require.WithinDuration(t, time.Now().Add(time.Minute), deadline, time.Second)
+		require.Equal(t, "value", derived.Value(key{}))
+		require.NoError(t, derived.Err())
+
+		// one derived context per turn
+		require.Equal(t, derived, rctx.Context())
+
+		rctx.releaseDeadlineContext()
+		require.ErrorIs(t, derived.Err(), context.Canceled)
+		require.Nil(t, rctx.deadlineScope)
+	})
+
+	t.Run("a sender context that ends earlier is returned as is", func(t *testing.T) {
+		sender, cancel := context.WithTimeout(parent, time.Second)
+		t.Cleanup(cancel)
+
+		rctx := &ReceiveContext{ctx: sender, deadline: askDeadline(parent, time.Minute)}
+		require.Equal(t, sender, rctx.Context())
+		require.Nil(t, rctx.deadlineScope.cancel)
+
+		rctx.releaseDeadlineContext()
+		require.NoError(t, sender.Err())
+	})
+
+	t.Run("a recycled context forgets the deadline and a clone keeps it", func(t *testing.T) {
+		rctx := getContext(0)
+		rctx.ctx = parent
+		rctx.deadline = askDeadline(parent, time.Minute)
+		_ = rctx.Context()
+
+		clone := cloneContext(rctx)
+		require.Equal(t, rctx.deadline, clone.deadline)
+		require.Nil(t, clone.deadlineScope)
+
+		rctx.reset()
+		require.Zero(t, rctx.deadline)
+		require.Nil(t, rctx.deadlineScope)
+	})
+}
+
+func TestActorSkipsAnExpiredAskAtDispatch(t *testing.T) {
+	ctx := context.Background()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	worker, err := sys.Spawn(ctx, "worker", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.Reply); ok {
+			t.Error("an expired ask reached Receive")
+		}
+	}})
+	require.NoError(t, err)
+
+	received := &ReceiveContext{ctx: ctx, self: worker, sender: sys.NoSender(), message: new(testpb.Reply), deadline: askDeadline(ctx, -time.Second)}
+	worker.dispatchOne(received, time.Now())
+}

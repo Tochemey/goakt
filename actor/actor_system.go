@@ -2674,6 +2674,7 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 	message = decoded
 
 	receiveContext := toReceiveContext(ctx, from, to, message, false)
+	receiveContext.deadline = askDeadline(ctx, timeout)
 
 	responseCh := receiveContext.response
 

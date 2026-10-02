@@ -1662,3 +1662,104 @@ func TestDisableReentrancyPerCallOverride(t *testing.T) {
 		t.Fatal("override request never completed")
 	}
 }
+
+func TestActorSkipsAnAskThatExpiredWhileStashed(t *testing.T) {
+	ctx := context.Background()
+
+	// ask sends message to the actor through one of the three entry points
+	// of an Ask.
+	cases := []struct {
+		name string
+		ask  func(system *actorSystem, sender, to *PID, message any, timeout time.Duration) (any, error)
+	}{
+		{"package Ask", func(_ *actorSystem, _, to *PID, message any, timeout time.Duration) (any, error) {
+			return Ask(ctx, to, message, timeout)
+		}},
+		{"PID Ask", func(_ *actorSystem, sender, to *PID, message any, timeout time.Duration) (any, error) {
+			return sender.Ask(ctx, to, message, timeout)
+		}},
+		{"remote ask handler", func(system *actorSystem, _, to *PID, message any, timeout time.Duration) (any, error) {
+			return system.handleRemoteAsk(ctx, to, message, timeout)
+		}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			system := newRequestTestSystem(t)
+			sys := ActorSystem(system)
+
+			// the gate never answers, so the request below ends on its timeout
+			gate, err := sys.Spawn(ctx, "gate", &MockReentrancyActor{})
+			require.NoError(t, err)
+
+			sender, err := sys.Spawn(ctx, "sender", &MockReentrancyActor{})
+			require.NoError(t, err)
+
+			handled := make(chan string, 4)
+			worker, err := sys.Spawn(ctx, "worker", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
+				switch message := rctx.Message().(type) {
+				case *testpb.TestPing:
+					// a blocking request in flight stashes every message
+					// that follows until it ends
+					rctx.Request(gate, new(testpb.TestWait), WithRequestTimeout(300*time.Millisecond))
+					rctx.Response(new(testpb.TestPong))
+				case *testpb.Reply:
+					handled <- message.GetContent()
+					rctx.Response(new(testpb.TestPong))
+				}
+			}}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+			require.NoError(t, err)
+
+			_, err = Ask(ctx, worker, new(testpb.TestPing), time.Second)
+			require.NoError(t, err)
+
+			// the ask waits in the stash until its sender gives up
+			_, err = tc.ask(system, sender, worker, testpb.Reply_builder{Content: "expired"}.Build(), 50*time.Millisecond)
+			require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+
+			// the timely ask is stashed behind the expired one, so its answer
+			// means the expired one has been dealt with
+			_, err = tc.ask(system, sender, worker, testpb.Reply_builder{Content: "timely"}.Build(), 2*time.Second)
+			require.NoError(t, err)
+
+			require.Equal(t, "timely", <-handled)
+			require.Empty(t, handled)
+		})
+	}
+}
+
+func TestAsk_HandlerContextEndsWithTheAsk(t *testing.T) {
+	ctx := context.Background()
+
+	sys := newRequestTestSystem(t)
+
+	seen := make(chan context.Context, 1)
+	worker, err := sys.Spawn(ctx, "worker", &MockReentrancyActor{receive: func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.Reply); !ok {
+			return
+		}
+
+		seen <- rctx.Context()
+		rctx.Response(new(testpb.TestPong))
+	}})
+	require.NoError(t, err)
+
+	sent := time.Now()
+	_, err = Ask(ctx, worker, new(testpb.Reply), time.Minute)
+	require.NoError(t, err)
+
+	handlerCtx := <-seen
+	deadline, ok := handlerCtx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, sent.Add(time.Minute), deadline, 5*time.Second)
+
+	// the context ends with the turn, long before the deadline
+	require.Eventually(t, func() bool {
+		return errors.Is(handlerCtx.Err(), context.Canceled)
+	}, 2*time.Second, 10*time.Millisecond)
+
+	// a tell carries no deadline
+	require.NoError(t, Tell(ctx, worker, new(testpb.Reply)))
+	_, ok = (<-seen).Deadline()
+	require.False(t, ok)
+}

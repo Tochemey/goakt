@@ -97,6 +97,20 @@ type ReceiveContext struct {
 	self           *PID
 	err            error
 
+	// deadline is the moment the sender of an Ask stops waiting, as an
+	// askClock reading: the earlier of the sender's own context deadline and
+	// the enqueue time plus the ask timeout. The turn skips a message it
+	// dequeues after that moment, and Context ends at it. Zero for every
+	// message that is not an Ask.
+	deadline int64
+
+	// deadlineScope holds the context Context derives from ctx to carry
+	// deadline. It is created on the first Context call of a turn and stays
+	// nil for a handler that never asks for the context, which spares the
+	// timer on that path. A single pointer keeps the context small for the
+	// messages that are not an Ask. Turn-owned.
+	deadlineScope *askScope
+
 	// remoteHold, when non-nil, is the flow-control credit share held for
 	// this remote-originated message. It is released exactly once when the
 	// message reaches a terminal state: dequeued for dispatch, refused by a
@@ -191,9 +205,40 @@ func (rctx *ReceiveContext) Response(resp any) {
 // via ReceiveContext typically derive a non-cancelable context to avoid accidental
 // cancellation from the caller, so prefer using explicit timeouts on synchronous APIs.
 //
+// For a message sent with Ask the context ends when the sender stops waiting:
+// at the ask timeout, or at the deadline of the sender's own context when that
+// comes first. It also ends when Receive returns. A handler that passes it to
+// the calls it makes, a database query for instance, stops working once nobody
+// waits for the answer.
+//
 // Do not store this context beyond the current Receive invocation.
 func (rctx *ReceiveContext) Context() context.Context {
-	return rctx.ctx
+	if rctx.deadline == 0 {
+		return rctx.ctx
+	}
+
+	if rctx.deadlineScope == nil {
+		scope := new(askScope)
+		scope.ctx, scope.cancel = askContext(rctx.ctx, rctx.deadline)
+		rctx.deadlineScope = scope
+	}
+
+	return rctx.deadlineScope.ctx
+}
+
+// releaseDeadlineContext ends the context Context derived for this turn and
+// frees its timer.
+func (rctx *ReceiveContext) releaseDeadlineContext() {
+	scope := rctx.deadlineScope
+	if scope == nil {
+		return
+	}
+
+	if scope.cancel != nil {
+		scope.cancel()
+	}
+
+	rctx.deadlineScope = nil
 }
 
 // Sender returns the PID of the message sender.
@@ -836,6 +881,8 @@ func (rctx *ReceiveContext) reset() {
 	rctx.err = nil
 	rctx.requestID = ""
 	rctx.requestReplyTo = nil
+	rctx.deadline = 0
+	rctx.deadlineScope = nil
 
 	// responseClosed is not reset: build() overwrites it in the sync
 	// path, cloneContext() clears it for clones, and async (Tell) never
