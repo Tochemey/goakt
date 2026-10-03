@@ -94,9 +94,9 @@ func NewZap(level Level, writers ...io.Writer) *Zap {
 	zapLogger := zap.New(core,
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
-		zap.AddStacktrace(zapcore.PanicLevel),
-		zap.AddStacktrace(zapcore.ErrorLevel),
-		zap.AddStacktrace(zapcore.FatalLevel))
+		// AddStacktrace keeps only the last level it is given, so a single
+		// ErrorLevel covers error, panic and fatal lines alike.
+		zap.AddStacktrace(zapcore.ErrorLevel))
 
 	// create the instance of Log and returns it
 	return &Zap{
@@ -341,9 +341,11 @@ func (z *Zap) LogOutput() []io.Writer {
 	return z.outputs
 }
 
-// Flush flushes buffered log entries. Call this during a graceful shutdown
-// when no more log writes are expected. If no buffered outputs are configured,
-// Flush is a no-op.
+// Flush flushes buffered log entries. Call this during a graceful shutdown, and
+// at any other point where buffered file output must reach the disk. The logger
+// stays usable after Flush: lines logged later are buffered and flushed again
+// by the next Flush or by the periodic flush. If no buffered outputs are
+// configured, Flush is a no-op.
 //
 // For loggers created via NewZapFrom, GoAkt does not own the output writers, so
 // Flush delegates to the underlying logger's Sync, swallowing the benign errors
@@ -357,7 +359,10 @@ func (z *Zap) Flush() error {
 	}
 
 	if z.bufferedWriteSyncer != nil {
-		return z.bufferedWriteSyncer.Stop()
+		// Sync writes the buffer through and syncs the files behind it. Stop
+		// would do the same once and then ignore every later Flush, so the
+		// buffered syncer is never stopped here.
+		return z.bufferedWriteSyncer.Sync()
 	}
 
 	return syncFileOutputs(z.outputs)

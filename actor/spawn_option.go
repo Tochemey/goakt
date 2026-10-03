@@ -356,6 +356,12 @@ func (f spawnOption) Apply(c *spawnConfig) {
 // Use this option to specify a custom mailbox implementation, such as a priority mailbox.
 // Care should be taken to ensure the mailbox is compatible with the actor's message handling logic.
 //
+// Each actor needs its own mailbox value: a mailbox has a single consumer, so two actors must
+// never share one. The option applies only to an actor created on this node. A mailbox is a Go
+// value and does not travel: an actor that SpawnOn places on another node, that Spawn creates
+// there through WithHostAndPort, or that relocation re-creates after its node left, runs on the
+// default mailbox.
+//
 // Parameters:
 //   - mailbox: The Mailbox implementation to use.
 //
@@ -557,8 +563,11 @@ func WithReentrancy(reentrancy *reentrancy.Reentrancy) SpawnOption {
 }
 
 // WithInitTimeout returns a SpawnOption that overrides the actor system's init timeout
-// for this actor. The init timeout bounds how long the actor's PreStart hook may run
-// before initialization is considered failed.
+// for this actor. The init timeout bounds the retries of the actor's PreStart hook: a
+// failed PreStart is retried, up to the configured number of attempts, only while the
+// timeout has not elapsed. It does not interrupt a PreStart attempt in progress, and the
+// context PreStart receives carries no deadline from it: a PreStart that runs past the
+// timeout and then succeeds starts the actor.
 //
 // When set, this value takes precedence over the system-wide timeout configured via
 // WithActorInitTimeout for this actor only. Child actors and relocated actors honor an

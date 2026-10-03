@@ -246,6 +246,9 @@ type SupervisorSpec struct {
 	xxx_hidden_Timeout           *durationpb.Duration        `protobuf:"bytes,3,opt,name=timeout,proto3"`
 	xxx_hidden_Directives        *[]*SupervisorDirectiveRule `protobuf:"bytes,4,rep,name=directives,proto3"`
 	xxx_hidden_AnyErrorDirective SupervisorDirective         `protobuf:"varint,5,opt,name=any_error_directive,json=anyErrorDirective,proto3,enum=internalpb.SupervisorDirective,oneof"`
+	xxx_hidden_InitialDelay      *durationpb.Duration        `protobuf:"bytes,6,opt,name=initial_delay,json=initialDelay,proto3"`
+	xxx_hidden_MaxDelay          *durationpb.Duration        `protobuf:"bytes,7,opt,name=max_delay,json=maxDelay,proto3"`
+	xxx_hidden_BackoffResetAfter *durationpb.Duration        `protobuf:"bytes,8,opt,name=backoff_reset_after,json=backoffResetAfter,proto3"`
 	XXX_raceDetectHookData       protoimpl.RaceDetectHookData
 	XXX_presence                 [1]uint32
 	unknownFields                protoimpl.UnknownFields
@@ -316,6 +319,27 @@ func (x *SupervisorSpec) GetAnyErrorDirective() SupervisorDirective {
 	return SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
 }
 
+func (x *SupervisorSpec) GetInitialDelay() *durationpb.Duration {
+	if x != nil {
+		return x.xxx_hidden_InitialDelay
+	}
+	return nil
+}
+
+func (x *SupervisorSpec) GetMaxDelay() *durationpb.Duration {
+	if x != nil {
+		return x.xxx_hidden_MaxDelay
+	}
+	return nil
+}
+
+func (x *SupervisorSpec) GetBackoffResetAfter() *durationpb.Duration {
+	if x != nil {
+		return x.xxx_hidden_BackoffResetAfter
+	}
+	return nil
+}
+
 func (x *SupervisorSpec) SetStrategy(v SupervisorStrategy) {
 	x.xxx_hidden_Strategy = v
 }
@@ -334,7 +358,19 @@ func (x *SupervisorSpec) SetDirectives(v []*SupervisorDirectiveRule) {
 
 func (x *SupervisorSpec) SetAnyErrorDirective(v SupervisorDirective) {
 	x.xxx_hidden_AnyErrorDirective = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 5)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 4, 8)
+}
+
+func (x *SupervisorSpec) SetInitialDelay(v *durationpb.Duration) {
+	x.xxx_hidden_InitialDelay = v
+}
+
+func (x *SupervisorSpec) SetMaxDelay(v *durationpb.Duration) {
+	x.xxx_hidden_MaxDelay = v
+}
+
+func (x *SupervisorSpec) SetBackoffResetAfter(v *durationpb.Duration) {
+	x.xxx_hidden_BackoffResetAfter = v
 }
 
 func (x *SupervisorSpec) HasTimeout() bool {
@@ -351,6 +387,27 @@ func (x *SupervisorSpec) HasAnyErrorDirective() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 4)
 }
 
+func (x *SupervisorSpec) HasInitialDelay() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_InitialDelay != nil
+}
+
+func (x *SupervisorSpec) HasMaxDelay() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_MaxDelay != nil
+}
+
+func (x *SupervisorSpec) HasBackoffResetAfter() bool {
+	if x == nil {
+		return false
+	}
+	return x.xxx_hidden_BackoffResetAfter != nil
+}
+
 func (x *SupervisorSpec) ClearTimeout() {
 	x.xxx_hidden_Timeout = nil
 }
@@ -358,6 +415,18 @@ func (x *SupervisorSpec) ClearTimeout() {
 func (x *SupervisorSpec) ClearAnyErrorDirective() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 4)
 	x.xxx_hidden_AnyErrorDirective = SupervisorDirective_SUPERVISOR_DIRECTIVE_STOP
+}
+
+func (x *SupervisorSpec) ClearInitialDelay() {
+	x.xxx_hidden_InitialDelay = nil
+}
+
+func (x *SupervisorSpec) ClearMaxDelay() {
+	x.xxx_hidden_MaxDelay = nil
+}
+
+func (x *SupervisorSpec) ClearBackoffResetAfter() {
+	x.xxx_hidden_BackoffResetAfter = nil
 }
 
 type SupervisorSpec_builder struct {
@@ -373,6 +442,14 @@ type SupervisorSpec_builder struct {
 	Directives []*SupervisorDirectiveRule
 	// Specifies the directive to apply for any error.
 	AnyErrorDirective *SupervisorDirective
+	// Specifies the exponential backoff delay applied before the first restart.
+	// Unset when backoff is disabled.
+	InitialDelay *durationpb.Duration
+	// Specifies the upper bound of the exponential backoff delay.
+	MaxDelay *durationpb.Duration
+	// Specifies the fault-free period after which the consecutive failure
+	// counter of the exponential backoff resets.
+	BackoffResetAfter *durationpb.Duration
 }
 
 func (b0 SupervisorSpec_builder) Build() *SupervisorSpec {
@@ -384,9 +461,12 @@ func (b0 SupervisorSpec_builder) Build() *SupervisorSpec {
 	x.xxx_hidden_Timeout = b.Timeout
 	x.xxx_hidden_Directives = &b.Directives
 	if b.AnyErrorDirective != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 5)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 4, 8)
 		x.xxx_hidden_AnyErrorDirective = *b.AnyErrorDirective
 	}
+	x.xxx_hidden_InitialDelay = b.InitialDelay
+	x.xxx_hidden_MaxDelay = b.MaxDelay
+	x.xxx_hidden_BackoffResetAfter = b.BackoffResetAfter
 	return m0
 }
 
@@ -864,7 +944,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\x17SupervisorDirectiveRule\x12\x1d\n" +
 	"\n" +
 	"error_type\x18\x01 \x01(\tR\terrorType\x12=\n" +
-	"\tdirective\x18\x02 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveR\tdirective\"\xd5\x02\n" +
+	"\tdirective\x18\x02 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveR\tdirective\"\x98\x04\n" +
 	"\x0eSupervisorSpec\x12:\n" +
 	"\bstrategy\x18\x01 \x01(\x0e2\x1e.internalpb.SupervisorStrategyR\bstrategy\x12\x1f\n" +
 	"\vmax_retries\x18\x02 \x01(\rR\n" +
@@ -873,7 +953,10 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\n" +
 	"directives\x18\x04 \x03(\v2#.internalpb.SupervisorDirectiveRuleR\n" +
 	"directives\x12T\n" +
-	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01B\x16\n" +
+	"\x13any_error_directive\x18\x05 \x01(\x0e2\x1f.internalpb.SupervisorDirectiveH\x00R\x11anyErrorDirective\x88\x01\x01\x12>\n" +
+	"\rinitial_delay\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\finitialDelay\x126\n" +
+	"\tmax_delay\x18\a \x01(\v2\x19.google.protobuf.DurationR\bmaxDelay\x12I\n" +
+	"\x13backoff_reset_after\x18\b \x01(\v2\x19.google.protobuf.DurationR\x11backoffResetAfterB\x16\n" +
 	"\x14_any_error_directive\"\xe7\x05\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
@@ -945,21 +1028,24 @@ var file_internal_actor_proto_depIdxs = []int32{
 	7,  // 2: internalpb.SupervisorSpec.timeout:type_name -> google.protobuf.Duration
 	3,  // 3: internalpb.SupervisorSpec.directives:type_name -> internalpb.SupervisorDirectiveRule
 	1,  // 4: internalpb.SupervisorSpec.any_error_directive:type_name -> internalpb.SupervisorDirective
-	6,  // 5: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
-	8,  // 6: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
-	9,  // 7: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
-	4,  // 8: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
-	10, // 9: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
-	7,  // 10: internalpb.Actor.init_timeout:type_name -> google.protobuf.Duration
-	11, // 11: internalpb.Actor.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
-	12, // 12: internalpb.Actor.reliable_companion:type_name -> internalpb.ReliableCompanionSpec
-	7,  // 13: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
-	7,  // 14: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	7,  // 5: internalpb.SupervisorSpec.initial_delay:type_name -> google.protobuf.Duration
+	7,  // 6: internalpb.SupervisorSpec.max_delay:type_name -> google.protobuf.Duration
+	7,  // 7: internalpb.SupervisorSpec.backoff_reset_after:type_name -> google.protobuf.Duration
+	6,  // 8: internalpb.Actor.singleton:type_name -> internalpb.SingletonSpec
+	8,  // 9: internalpb.Actor.passivation_strategy:type_name -> internalpb.PassivationStrategy
+	9,  // 10: internalpb.Actor.dependencies:type_name -> internalpb.Dependency
+	4,  // 11: internalpb.Actor.supervisor:type_name -> internalpb.SupervisorSpec
+	10, // 12: internalpb.Actor.reentrancy:type_name -> internalpb.ReentrancyConfig
+	7,  // 13: internalpb.Actor.init_timeout:type_name -> google.protobuf.Duration
+	11, // 14: internalpb.Actor.reliable_delivery:type_name -> internalpb.ReliableDeliveryConfig
+	12, // 15: internalpb.Actor.reliable_companion:type_name -> internalpb.ReliableCompanionSpec
+	7,  // 16: internalpb.SingletonSpec.spawn_timeout:type_name -> google.protobuf.Duration
+	7,  // 17: internalpb.SingletonSpec.wait_interval:type_name -> google.protobuf.Duration
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_internal_actor_proto_init() }

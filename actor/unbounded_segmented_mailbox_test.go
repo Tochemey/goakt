@@ -298,3 +298,90 @@ func BenchmarkUnboundedSegmentedMailbox(b *testing.B) {
 	opsPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(opsPerSec, "ops/sec")
 }
+
+// TestUnboundedSegmentedMailbox_DrainedSegmentIsNotReused checks that a drained
+// segment is never handed to another mailbox: a producer that loaded the tail
+// before the segment filled up, and stalled, must not be able to reserve a slot
+// in another queue. The test replays Enqueue's two steps on that stale tail.
+func TestUnboundedSegmentedMailbox_DrainedSegmentIsNotReused(t *testing.T) {
+	first := NewUnboundedSegmentedMailbox()
+	stale := first.tail.Load()
+
+	for range segmentSize + 1 {
+		require.NoError(t, first.Enqueue(new(ReceiveContext)))
+	}
+
+	for range segmentSize + 1 {
+		require.NotNil(t, first.Dequeue())
+	}
+
+	second := NewUnboundedSegmentedMailbox()
+	require.NotSame(t, stale, second.head.Load())
+
+	// the stalled producer resumes on its stale tail: the segment is full, so
+	// it gets no slot there
+	idx := stale.writeIdx.Add(1) - 1
+	require.GreaterOrEqual(t, idx, uint64(segmentSize))
+	require.Nil(t, second.Dequeue())
+}
+
+// TestUnboundedSegmentedMailbox_ConcurrentMailboxesLoseNothing runs several
+// mailboxes, each with many producers and one consumer, and checks that every
+// mailbox delivers exactly what was enqueued into it. It covers the consumer
+// leaving a segment whose late reservations it had not seen yet.
+func TestUnboundedSegmentedMailbox_ConcurrentMailboxesLoseNothing(t *testing.T) {
+	const (
+		boxes     = 4
+		producers = 16
+		perProd   = 20000
+	)
+
+	mailboxes := make([]*UnboundedSegmentedMailbox, boxes)
+	for i := range mailboxes {
+		mailboxes[i] = NewUnboundedSegmentedMailbox()
+	}
+
+	var done [boxes]atomic.Bool
+	var received [boxes]atomic.Int64
+	var consumers, producersWG sync.WaitGroup
+
+	for b := range boxes {
+		consumers.Go(func() {
+			for {
+				if mailboxes[b].Dequeue() != nil {
+					received[b].Add(1)
+					continue
+				}
+
+				if done[b].Load() && mailboxes[b].IsEmpty() {
+					return
+				}
+
+				runtime.Gosched()
+			}
+		})
+
+		var perBox sync.WaitGroup
+		for range producers {
+			perBox.Add(1)
+			producersWG.Go(func() {
+				defer perBox.Done()
+				for range perProd {
+					_ = mailboxes[b].Enqueue(new(ReceiveContext))
+				}
+			})
+		}
+
+		go func() {
+			perBox.Wait()
+			done[b].Store(true)
+		}()
+	}
+
+	producersWG.Wait()
+	consumers.Wait()
+
+	for b := range boxes {
+		require.EqualValues(t, producers*perProd, received[b].Load(), "mailbox %d", b)
+	}
+}

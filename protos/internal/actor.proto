@@ -44,6 +44,14 @@ message SupervisorSpec {
   repeated SupervisorDirectiveRule directives = 4;
   // Specifies the directive to apply for any error.
   optional SupervisorDirective any_error_directive = 5;
+  // Specifies the exponential backoff delay applied before the first restart.
+  // Unset when backoff is disabled.
+  google.protobuf.Duration initial_delay = 6;
+  // Specifies the upper bound of the exponential backoff delay.
+  google.protobuf.Duration max_delay = 7;
+  // Specifies the fault-free period after which the consecutive failure
+  // counter of the exponential backoff resets.
+  google.protobuf.Duration backoff_reset_after = 8;
 }
 
 // Actor represents the actor information on the wire.

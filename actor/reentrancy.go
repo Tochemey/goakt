@@ -138,7 +138,10 @@ func WithReentrancyMode(mode reentrancy.Mode) RequestOption {
 // A value <= 0 disables the timeout for this request (no automatic expiry).
 //
 // Notes:
-//   - This option is per-request; there is no implicit/global default timeout.
+//   - This option is per-request. Without it, a request issued by an actor
+//     (ReceiveContext.Request and its variants) has no timeout, and a request
+//     issued by a grain (GrainContext.RequestGrain, GrainContext.RequestActor)
+//     times out after DefaultGrainRequestTimeout.
 //   - On completion (success, error, cancellation, or timeout) any registered
 //     continuation (Then) is invoked according to RequestCall's execution rules.
 //   - Cancel and timeout are independent signals; either may "win" depending on timing.

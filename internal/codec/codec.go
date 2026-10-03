@@ -35,6 +35,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -43,6 +44,11 @@ import (
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 )
+
+// anyErrorType is the error type name under which a supervisor stores its
+// catch-all rule: the non-pointer type string of errors.AnyError, as the
+// supervisor package keys its rules.
+var anyErrorType = reflect.TypeFor[gerrors.AnyError]().String()
 
 // EncodeDependencies transforms a list of dependencies into their serialized protobuf representations.
 // Returns a slice of internalpb.Dependency or an error if serialization fails.
@@ -171,10 +177,18 @@ func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorS
 	spec.SetMaxRetries(supervisor.MaxRetries())
 	spec.SetTimeout(durationpb.New(supervisor.Timeout()))
 
+	// a zero initial delay means backoff is disabled, so the fields stay unset
+	if supervisor.InitialDelay() > 0 {
+		spec.SetInitialDelay(durationpb.New(supervisor.InitialDelay()))
+		spec.SetMaxDelay(durationpb.New(supervisor.MaxDelay()))
+		spec.SetBackoffResetAfter(durationpb.New(supervisor.BackoffResetAfter()))
+	}
+
+	// the catch-all rule travels in its own field; the error-type specific
+	// rules, added after construction with SetDirectiveByType, travel in
+	// directives so that an exact-type match still wins on the receiving node
 	if directive, ok := supervisor.AnyErrorDirective(); ok {
-		encoded := encodeSupervisorDirective(directive)
-		spec.SetAnyErrorDirective(encoded)
-		return spec
+		spec.SetAnyErrorDirective(encodeSupervisorDirective(directive))
 	}
 
 	rules := supervisor.Rules()
@@ -184,7 +198,7 @@ func EncodeSupervisor(supervisor *supervisor.Supervisor) *internalpb.SupervisorS
 
 	directives := make([]*internalpb.SupervisorDirectiveRule, 0, len(rules))
 	for _, rule := range rules {
-		if rule.ErrorType == "" {
+		if rule.ErrorType == "" || rule.ErrorType == anyErrorType {
 			continue
 		}
 		sdr := &internalpb.SupervisorDirectiveRule{}
@@ -223,9 +237,14 @@ func DecodeSupervisor(spec *internalpb.SupervisorSpec) *supervisor.Supervisor {
 		opts = append(opts, supervisor.WithRetry(spec.GetMaxRetries(), timeout))
 	}
 
+	if spec.HasInitialDelay() {
+		opts = append(opts, supervisor.WithExponentialBackoff(spec.GetInitialDelay().AsDuration(), spec.GetMaxDelay().AsDuration(), spec.GetBackoffResetAfter().AsDuration()))
+	}
+
+	// the catch-all rule is applied by the constructor, which clears every
+	// other rule; the specific rules are applied afterwards so they are kept
 	if spec.HasAnyErrorDirective() {
 		opts = append(opts, supervisor.WithAnyErrorDirective(decodeSupervisorDirective(spec.GetAnyErrorDirective())))
-		return supervisor.NewSupervisor(opts...)
 	}
 
 	decoded := supervisor.NewSupervisor(opts...)

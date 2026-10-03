@@ -1206,11 +1206,14 @@ func (b0 CRDTDelta_builder) Build() *CRDTDelta {
 
 // CRDTDigestEntry is a single entry in an anti-entropy digest.
 type CRDTDigestEntry struct {
-	state              protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Key     *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
-	xxx_hidden_Version uint64                 `protobuf:"varint,2,opt,name=version,proto3"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key         *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Version     uint64                 `protobuf:"varint,2,opt,name=version,proto3"`
+	xxx_hidden_StateHash   uint64                 `protobuf:"fixed64,3,opt,name=state_hash,json=stateHash,proto3,oneof"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *CRDTDigestEntry) Reset() {
@@ -1252,12 +1255,24 @@ func (x *CRDTDigestEntry) GetVersion() uint64 {
 	return 0
 }
 
+func (x *CRDTDigestEntry) GetStateHash() uint64 {
+	if x != nil {
+		return x.xxx_hidden_StateHash
+	}
+	return 0
+}
+
 func (x *CRDTDigestEntry) SetKey(v *CRDTKey) {
 	x.xxx_hidden_Key = v
 }
 
 func (x *CRDTDigestEntry) SetVersion(v uint64) {
 	x.xxx_hidden_Version = v
+}
+
+func (x *CRDTDigestEntry) SetStateHash(v uint64) {
+	x.xxx_hidden_StateHash = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
 }
 
 func (x *CRDTDigestEntry) HasKey() bool {
@@ -1267,8 +1282,20 @@ func (x *CRDTDigestEntry) HasKey() bool {
 	return x.xxx_hidden_Key != nil
 }
 
+func (x *CRDTDigestEntry) HasStateHash() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
 func (x *CRDTDigestEntry) ClearKey() {
 	x.xxx_hidden_Key = nil
+}
+
+func (x *CRDTDigestEntry) ClearStateHash() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_StateHash = 0
 }
 
 type CRDTDigestEntry_builder struct {
@@ -1278,6 +1305,10 @@ type CRDTDigestEntry_builder struct {
 	Key *CRDTKey
 	// Specifies the local version of this key.
 	Version uint64
+	// Specifies the canonical content hash of the local value of this key.
+	// When set, the receiver compares it with the hash of its own value and
+	// ignores the version. A node that predates the field leaves it unset.
+	StateHash *uint64
 }
 
 func (b0 CRDTDigestEntry_builder) Build() *CRDTDigestEntry {
@@ -1286,15 +1317,20 @@ func (b0 CRDTDigestEntry_builder) Build() *CRDTDigestEntry {
 	_, _ = b, x
 	x.xxx_hidden_Key = b.Key
 	x.xxx_hidden_Version = b.Version
+	if b.StateHash != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_StateHash = *b.StateHash
+	}
 	return m0
 }
 
 // CRDTDigest is exchanged between Replicators during anti-entropy.
 type CRDTDigest struct {
-	state              protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Entries *[]*CRDTDigestEntry    `protobuf:"bytes,1,rep,name=entries,proto3"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries    *[]*CRDTDigestEntry    `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Tombstones *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *CRDTDigest) Reset() {
@@ -1331,8 +1367,21 @@ func (x *CRDTDigest) GetEntries() []*CRDTDigestEntry {
 	return nil
 }
 
+func (x *CRDTDigest) GetTombstones() []*CRDTTombstone {
+	if x != nil {
+		if x.xxx_hidden_Tombstones != nil {
+			return *x.xxx_hidden_Tombstones
+		}
+	}
+	return nil
+}
+
 func (x *CRDTDigest) SetEntries(v []*CRDTDigestEntry) {
 	x.xxx_hidden_Entries = &v
+}
+
+func (x *CRDTDigest) SetTombstones(v []*CRDTTombstone) {
+	x.xxx_hidden_Tombstones = &v
 }
 
 type CRDTDigest_builder struct {
@@ -1340,6 +1389,10 @@ type CRDTDigest_builder struct {
 
 	// Specifies the digest entries.
 	Entries []*CRDTDigestEntry
+	// Specifies the tombstones the sender still retains, so the receiver
+	// deletes the keys it has not seen deleted. A node that predates the
+	// field sends none.
+	Tombstones []*CRDTTombstone
 }
 
 func (b0 CRDTDigest_builder) Build() *CRDTDigest {
@@ -1347,6 +1400,7 @@ func (b0 CRDTDigest_builder) Build() *CRDTDigest {
 	b, x := &b0, m0
 	_, _ = b, x
 	x.xxx_hidden_Entries = &b.Entries
+	x.xxx_hidden_Tombstones = &b.Tombstones
 	return m0
 }
 
@@ -1448,10 +1502,11 @@ func (b0 CRDTFullStateEntry_builder) Build() *CRDTFullStateEntry {
 
 // CRDTFullState is the anti-entropy response containing full state for divergent keys.
 type CRDTFullState struct {
-	state              protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Entries *[]*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                 protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries    *[]*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Tombstones *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *CRDTFullState) Reset() {
@@ -1488,8 +1543,21 @@ func (x *CRDTFullState) GetEntries() []*CRDTFullStateEntry {
 	return nil
 }
 
+func (x *CRDTFullState) GetTombstones() []*CRDTTombstone {
+	if x != nil {
+		if x.xxx_hidden_Tombstones != nil {
+			return *x.xxx_hidden_Tombstones
+		}
+	}
+	return nil
+}
+
 func (x *CRDTFullState) SetEntries(v []*CRDTFullStateEntry) {
 	x.xxx_hidden_Entries = &v
+}
+
+func (x *CRDTFullState) SetTombstones(v []*CRDTTombstone) {
+	x.xxx_hidden_Tombstones = &v
 }
 
 type CRDTFullState_builder struct {
@@ -1497,6 +1565,10 @@ type CRDTFullState_builder struct {
 
 	// Specifies the full state entries.
 	Entries []*CRDTFullStateEntry
+	// Specifies the tombstones the responder retains for keys the digest
+	// listed, so the digest sender deletes them. A node that predates the
+	// field sends none.
+	Tombstones []*CRDTTombstone
 }
 
 func (b0 CRDTFullState_builder) Build() *CRDTFullState {
@@ -1504,6 +1576,7 @@ func (b0 CRDTFullState_builder) Build() *CRDTFullState {
 	b, x := &b0, m0
 	_, _ = b, x
 	x.xxx_hidden_Entries = &b.Entries
+	x.xxx_hidden_Tombstones = &b.Tombstones
 	return m0
 }
 
@@ -2444,18 +2517,27 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12\x1f\n" +
 	"\vorigin_node\x18\x02 \x01(\tR\n" +
 	"originNode\x12(\n" +
-	"\x04data\x18\x03 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"R\n" +
+	"\x04data\x18\x03 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"\x85\x01\n" +
 	"\x0fCRDTDigestEntry\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\x04R\aversion\"C\n" +
+	"\aversion\x18\x02 \x01(\x04R\aversion\x12\"\n" +
+	"\n" +
+	"state_hash\x18\x03 \x01(\x06H\x00R\tstateHash\x88\x01\x01B\r\n" +
+	"\v_state_hash\"~\n" +
 	"\n" +
 	"CRDTDigest\x125\n" +
-	"\aentries\x18\x01 \x03(\v2\x1b.internalpb.CRDTDigestEntryR\aentries\"e\n" +
+	"\aentries\x18\x01 \x03(\v2\x1b.internalpb.CRDTDigestEntryR\aentries\x129\n" +
+	"\n" +
+	"tombstones\x18\x02 \x03(\v2\x19.internalpb.CRDTTombstoneR\n" +
+	"tombstones\"e\n" +
 	"\x12CRDTFullStateEntry\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
-	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"I\n" +
+	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"\x84\x01\n" +
 	"\rCRDTFullState\x128\n" +
-	"\aentries\x18\x01 \x03(\v2\x1e.internalpb.CRDTFullStateEntryR\aentries\"\x88\x01\n" +
+	"\aentries\x18\x01 \x03(\v2\x1e.internalpb.CRDTFullStateEntryR\aentries\x129\n" +
+	"\n" +
+	"tombstones\x18\x02 \x03(\v2\x19.internalpb.CRDTTombstoneR\n" +
+	"tombstones\"\x88\x01\n" +
 	"\rCRDTTombstone\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\x12&\n" +
@@ -2546,25 +2628,27 @@ var file_internal_crdt_proto_depIdxs = []int32{
 	2,  // 18: internalpb.CRDTDelta.data:type_name -> internalpb.CRDTData
 	1,  // 19: internalpb.CRDTDigestEntry.key:type_name -> internalpb.CRDTKey
 	11, // 20: internalpb.CRDTDigest.entries:type_name -> internalpb.CRDTDigestEntry
-	1,  // 21: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
-	2,  // 22: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
-	13, // 23: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
-	1,  // 24: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
-	1,  // 25: internalpb.CRDTReadRequest.key:type_name -> internalpb.CRDTKey
-	1,  // 26: internalpb.CRDTReadResponse.key:type_name -> internalpb.CRDTKey
-	2,  // 27: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
-	1,  // 28: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
-	2,  // 29: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
-	10, // 30: internalpb.CRDTDeltaBatch.deltas:type_name -> internalpb.CRDTDelta
-	15, // 31: internalpb.CRDTDeltaBatch.tombstones:type_name -> internalpb.CRDTTombstone
-	27, // 32: internalpb.CRDTDeltaBatch.origin_dc:type_name -> internalpb.DataCenter
-	21, // 33: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
-	2,  // 34: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	15, // 21: internalpb.CRDTDigest.tombstones:type_name -> internalpb.CRDTTombstone
+	1,  // 22: internalpb.CRDTFullStateEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 23: internalpb.CRDTFullStateEntry.data:type_name -> internalpb.CRDTData
+	13, // 24: internalpb.CRDTFullState.entries:type_name -> internalpb.CRDTFullStateEntry
+	15, // 25: internalpb.CRDTFullState.tombstones:type_name -> internalpb.CRDTTombstone
+	1,  // 26: internalpb.CRDTTombstone.key:type_name -> internalpb.CRDTKey
+	1,  // 27: internalpb.CRDTReadRequest.key:type_name -> internalpb.CRDTKey
+	1,  // 28: internalpb.CRDTReadResponse.key:type_name -> internalpb.CRDTKey
+	2,  // 29: internalpb.CRDTReadResponse.data:type_name -> internalpb.CRDTData
+	1,  // 30: internalpb.CRDTSnapshotEntry.key:type_name -> internalpb.CRDTKey
+	2,  // 31: internalpb.CRDTSnapshotEntry.data:type_name -> internalpb.CRDTData
+	10, // 32: internalpb.CRDTDeltaBatch.deltas:type_name -> internalpb.CRDTDelta
+	15, // 33: internalpb.CRDTDeltaBatch.tombstones:type_name -> internalpb.CRDTTombstone
+	27, // 34: internalpb.CRDTDeltaBatch.origin_dc:type_name -> internalpb.DataCenter
+	21, // 35: internalpb.ORSetData.ORSetEntry.dots:type_name -> internalpb.ORSetData.ORSetDot
+	2,  // 36: internalpb.ORMapData.ORMapEntry.value:type_name -> internalpb.CRDTData
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_internal_crdt_proto_init() }
@@ -2582,6 +2666,7 @@ func file_internal_crdt_proto_init() {
 		(*cRDTData_Flag)(nil),
 		(*cRDTData_MvRegister)(nil),
 	}
+	file_internal_crdt_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

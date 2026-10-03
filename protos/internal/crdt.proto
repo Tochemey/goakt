@@ -145,12 +145,20 @@ message CRDTDigestEntry {
   CRDTKey key = 1;
   // Specifies the local version of this key.
   uint64 version = 2;
+  // Specifies the canonical content hash of the local value of this key.
+  // When set, the receiver compares it with the hash of its own value and
+  // ignores the version. A node that predates the field leaves it unset.
+  optional fixed64 state_hash = 3;
 }
 
 // CRDTDigest is exchanged between Replicators during anti-entropy.
 message CRDTDigest {
   // Specifies the digest entries.
   repeated CRDTDigestEntry entries = 1;
+  // Specifies the tombstones the sender still retains, so the receiver
+  // deletes the keys it has not seen deleted. A node that predates the
+  // field sends none.
+  repeated CRDTTombstone tombstones = 2;
 }
 
 // CRDTFullStateEntry is a single key's full state in an anti-entropy response.
@@ -165,6 +173,10 @@ message CRDTFullStateEntry {
 message CRDTFullState {
   // Specifies the full state entries.
   repeated CRDTFullStateEntry entries = 1;
+  // Specifies the tombstones the responder retains for keys the digest
+  // listed, so the digest sender deletes them. A node that predates the
+  // field sends none.
+  repeated CRDTTombstone tombstones = 2;
 }
 
 // CRDTTombstone marks a deleted CRDT key.

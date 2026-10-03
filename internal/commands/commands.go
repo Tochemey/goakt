@@ -95,6 +95,9 @@ type DeadlettersSnapshotResponse struct {
 	// pair. An address that dropped several message types appears once per
 	// type, so a total for that address is the sum of its entries.
 	Counts []DeadletterCount
+	// TotalCount is the number of deadletters recorded so far, every receiver
+	// included: receivers outside the actor tree are counted here only.
+	TotalCount int64
 }
 
 // HealthCheckRequest is sent internally to an actor (or actor system component) to verify that:

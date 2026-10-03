@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -4952,6 +4953,1295 @@ func TestReplicatorDataCenterFlushDrainsPendingBuffers(t *testing.T) {
 
 	err = sys.Stop(context.TODO())
 	assert.NoError(t, err)
+}
+
+// TestReplicatorChangedCarriesKey verifies that a Changed notification names
+// the key that changed, so an actor watching several keys can tell them apart.
+func TestReplicatorChangedCarriesKey(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+
+	repl := spawnTestReplicator(t, sys)
+
+	probe := NewMockMessageProbe()
+	watcher, err := sys.Spawn(ctx, "watcher", probe, WithLongLived())
+	require.NoError(t, err)
+
+	counterKey := crdt.PNCounterKey("watched-counter")
+	setKey := crdt.ORSetKey("watched-set")
+	require.NoError(t, watcher.Tell(ctx, repl, &crdt.Subscribe{Key: counterKey}))
+	require.NoError(t, watcher.Tell(ctx, repl, &crdt.Subscribe{Key: setKey}))
+
+	_, err = Ask(ctx, repl, &crdt.Update{
+		Key:     setKey,
+		Initial: crdt.NewORSet(),
+		Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+			return current.(*crdt.ORSet).Add("node-1", "session-1")
+		},
+	}, time.Second)
+	require.NoError(t, err)
+
+	_, err = Ask(ctx, repl, &crdt.Update{
+		Key:     counterKey,
+		Initial: crdt.NewPNCounter(),
+		Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+			return current.(*crdt.PNCounter).Increment("node-1", 5)
+		},
+	}, time.Second)
+	require.NoError(t, err)
+
+	for _, expected := range []crdt.Key{setKey, counterKey} {
+		select {
+		case message := <-probe.received:
+			changed, ok := message.(*crdt.Changed)
+			require.True(t, ok, "expected a Changed notification, got %T", message)
+			assert.Equal(t, expected, changed.Key)
+			assert.NotNil(t, changed.Data)
+		case <-time.After(3 * time.Second):
+			t.Fatalf("no Changed notification for key=%s", expected.ID())
+		}
+	}
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
+// TestReplicatorCoordinatedReadTracksUnknownKey verifies that a coordinated
+// read of a key only a peer holds records the key with its real data type:
+// the digest advertises that type and the snapshot still encodes.
+func TestReplicatorCoordinatedReadTracksUnknownKey(t *testing.T) {
+	ctx := context.TODO()
+	sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(nil), nil)
+
+	setKey := crdt.ORSetKey("peer-only-set")
+	peerData, err := ddata.EncodeCRDT(crdt.NewORSet().Add("node-2", "session-1"), ddata.NewCRDTValueSerializer())
+	require.NoError(t, err)
+
+	peerAddress := address.New("GoAktReplicator", "testSys", "10.0.0.2", 9090)
+	clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: "10.0.0.2", RemotingPort: 9090}}, nil)
+	remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(peerAddress, nil)
+	remotingMock.EXPECT().RemoteAsk(mock.Anything, mock.Anything, peerAddress, mock.Anything, mock.Anything).
+		Return(internalpb.CRDTReadResponse_builder{
+			Key:      codec.EncodeCRDTKey(setKey.ID(), setKey.Type()),
+			Data:     peerData,
+			FromNode: "node-2",
+		}.Build(), nil)
+
+	resp, err := Ask(ctx, repl, &crdt.Get{Key: setKey, ReadFrom: crdt.All}, 5*time.Second)
+	require.NoError(t, err)
+	set, ok := resp.(*crdt.GetResponse).Data.(*crdt.ORSet)
+	require.True(t, ok)
+	assert.Equal(t, []any{"session-1"}, set.Elements())
+
+	// the digest is what anti-entropy advertises to peers
+	resp, err = Ask(ctx, repl, &dataCenterDigestRequest{}, time.Second)
+	require.NoError(t, err)
+	digest, ok := resp.(*internalpb.CRDTDigest)
+	require.True(t, ok)
+	require.Len(t, digest.GetEntries(), 1)
+	keyID, dataType, err := codec.DecodeCRDTKey(digest.GetEntries()[0].GetKey())
+	require.NoError(t, err)
+	assert.Equal(t, setKey.ID(), keyID)
+	assert.Equal(t, crdt.ORSetType, dataType)
+
+	require.NoError(t, sys.Stop(ctx))
+
+	// the replicator is stopped: its state is no longer touched by a turn
+	entries, err := replActor.buildSnapshotEntries()
+	require.NoError(t, err)
+	require.Contains(t, entries, setKey.ID())
+	_, dataType, err = codec.DecodeCRDTKey(entries[setKey.ID()].GetKey())
+	require.NoError(t, err)
+	assert.Equal(t, crdt.ORSetType, dataType)
+}
+
+// TestReplicatorIgnoresSubscribeAck verifies that the confirmation the
+// TopicActor sends for the Replicator's own subscription is not reported as
+// an unhandled message.
+func TestReplicatorIgnoresSubscribeAck(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+
+	repl := spawnTestReplicator(t, sys)
+
+	require.NoError(t, Tell(ctx, repl, NewSubscribeAck(crdtTopic)))
+
+	// the mailbox is first-in first-out: once the read is answered the
+	// confirmation has been processed
+	_, err := Ask(ctx, repl, &crdt.Get{Key: crdt.GCounterKey("any")}, time.Second)
+	require.NoError(t, err)
+	assert.Zero(t, repl.unhandledCount.Load())
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
+// TestReplicatorAntiEntropyContentHash covers the digest exchange between a
+// replicator and a peer: the content hash of a key decides whether its state
+// is sent, and the version decides only for a peer that sends no hash.
+func TestReplicatorAntiEntropyContentHash(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+
+	repl := spawnTestReplicator(t, sys)
+	probe := NewMockMessageProbe()
+	peer, err := sys.Spawn(ctx, "peer", probe, WithLongLived())
+	require.NoError(t, err)
+
+	// this node holds {node-b: 7} at version 1
+	key := crdt.GCounterKey("visits")
+	local := crdt.NewGCounter().Increment("node-b", 7)
+	_, err = Ask(ctx, repl, &crdt.Update{
+		Key:     key,
+		Initial: crdt.NewGCounter(),
+		Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+			return current.(*crdt.GCounter).Increment("node-b", 7)
+		},
+	}, time.Second)
+	require.NoError(t, err)
+
+	entry := replicatorDigestEntry(t, repl, key.ID())
+	require.EqualValues(t, 1, entry.GetVersion())
+	require.True(t, entry.HasStateHash())
+	require.Equal(t, local.StateHash(), entry.GetStateHash())
+
+	digestOf := func(version uint64, hash *uint64) *internalpb.CRDTDigest {
+		return internalpb.CRDTDigest_builder{
+			Entries: []*internalpb.CRDTDigestEntry{
+				internalpb.CRDTDigestEntry_builder{
+					Key:       codec.EncodeCRDTKey(key.ID(), key.Type()),
+					Version:   version,
+					StateHash: hash,
+				}.Build(),
+			},
+		}.Build()
+	}
+
+	expectFullState := func(t *testing.T) {
+		t.Helper()
+
+		select {
+		case message := <-probe.received:
+			fullState, ok := message.(*internalpb.CRDTFullState)
+			require.True(t, ok, "expected a full state, got %T", message)
+			require.Len(t, fullState.GetEntries(), 1)
+			data, err := ddata.DecodeCRDT(fullState.GetEntries()[0].GetData(), ddata.NewCRDTValueSerializer())
+			require.NoError(t, err)
+			assert.EqualValues(t, 7, data.(*crdt.GCounter).Value())
+		case <-time.After(3 * time.Second):
+			t.Fatal("no full state sent to the peer")
+		}
+	}
+
+	t.Run("different hashes at equal versions send the state", func(t *testing.T) {
+		// the peer holds another value, {node-a: 5}, also at version 1
+		peerHash := crdt.NewGCounter().Increment("node-a", 5).StateHash()
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(1, &peerHash)))
+		expectFullState(t)
+	})
+
+	t.Run("different hashes send the state even to a peer with a higher version", func(t *testing.T) {
+		peerHash := crdt.NewGCounter().Increment("node-a", 5).StateHash()
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(42, &peerHash)))
+		expectFullState(t)
+	})
+
+	t.Run("equal hashes send nothing whatever the versions", func(t *testing.T) {
+		peerHash := local.StateHash()
+
+		for _, version := range []uint64{0, 1, 42} {
+			require.NoError(t, peer.Tell(ctx, repl, digestOf(version, &peerHash)))
+		}
+
+		replicatorDigestEntry(t, repl, key.ID())
+		probeIsQuiet(t, peer, probe)
+	})
+
+	t.Run("an entry without a hash follows the version rule", func(t *testing.T) {
+		// a peer at the same or a higher version is not behind
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(1, nil)))
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(42, nil)))
+		replicatorDigestEntry(t, repl, key.ID())
+		probeIsQuiet(t, peer, probe)
+
+		// a peer at a lower version is
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(0, nil)))
+		expectFullState(t)
+	})
+
+	t.Run("a key the peer lacks is sent", func(t *testing.T) {
+		require.NoError(t, peer.Tell(ctx, repl, internalpb.CRDTDigest_builder{}.Build()))
+		expectFullState(t)
+	})
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
+// TestReplicatorAntiEntropyRepairsEqualVersions runs the digest exchange
+// between two replicators that hold different values of a key at the same
+// version, the case a version comparison cannot see.
+func TestReplicatorAntiEntropyRepairsEqualVersions(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+
+	// The system has no TopicActor, so the two replicators exchange no delta.
+	// Their schedules are off: the references are per system, and the rounds
+	// are driven by hand below.
+	config := crdt.NewConfig(crdt.WithAntiEntropyInterval(0), crdt.WithPruneInterval(0))
+	sys.(*actorSystem).extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
+
+	replA, err := sys.Spawn(ctx, "replicator-a", newReplicatorActor(), WithLongLived())
+	require.NoError(t, err)
+	replB, err := sys.Spawn(ctx, "replicator-b", newReplicatorActor(), WithLongLived())
+	require.NoError(t, err)
+
+	key := crdt.GCounterKey("visits")
+	increment := func(repl *PID, nodeID string, value uint64) {
+		_, err := Ask(ctx, repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment(nodeID, value)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	valueOn := func(repl *PID) uint64 {
+		resp, err := Ask(ctx, repl, &crdt.Get{Key: key}, time.Second)
+		require.NoError(t, err)
+		return resp.(*crdt.GetResponse).Data.(*crdt.GCounter).Value()
+	}
+
+	// pull runs one anti-entropy round: from sends its digest to to, which
+	// answers with the state from needs. The two reads that follow are
+	// answered after the digest and the answer have been processed.
+	pull := func(from, to *PID) {
+		resp, err := Ask(ctx, from, &dataCenterDigestRequest{}, time.Second)
+		require.NoError(t, err)
+		require.NoError(t, from.Tell(ctx, to, resp))
+		valueOn(to)
+		valueOn(from)
+	}
+
+	increment(replA, "node-a", 5)
+	increment(replB, "node-b", 7)
+
+	entryA := replicatorDigestEntry(t, replA, key.ID())
+	entryB := replicatorDigestEntry(t, replB, key.ID())
+	require.Equal(t, entryA.GetVersion(), entryB.GetVersion())
+	require.NotEqual(t, entryA.GetStateHash(), entryB.GetStateHash())
+
+	// A pulls from B, then B pulls from A
+	pull(replA, replB)
+	assert.EqualValues(t, 12, valueOn(replA))
+	assert.EqualValues(t, 7, valueOn(replB))
+
+	pull(replB, replA)
+	assert.EqualValues(t, 12, valueOn(replB))
+
+	entryA = replicatorDigestEntry(t, replA, key.ID())
+	entryB = replicatorDigestEntry(t, replB, key.ID())
+	assert.Equal(t, entryA.GetStateHash(), entryB.GetStateHash())
+
+	// the two nodes agree: further rounds exchange nothing and count nothing
+	pull(replA, replB)
+	pull(replB, replA)
+	assert.Equal(t, entryA.GetVersion(), replicatorDigestEntry(t, replA, key.ID()).GetVersion())
+	assert.Equal(t, entryB.GetVersion(), replicatorDigestEntry(t, replB, key.ID()).GetVersion())
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
+// TestReplicatorUnchangedMergeIsSilent verifies that a delta or a full state
+// that leaves the stored value as it was neither advances the key's version
+// nor notifies its watchers.
+func TestReplicatorUnchangedMergeIsSilent(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+
+	repl := spawnTestReplicator(t, sys)
+	probe := NewMockMessageProbe()
+	watcher, err := sys.Spawn(ctx, "watcher", probe, WithLongLived())
+	require.NoError(t, err)
+
+	key := crdt.GCounterKey("visits")
+	_, err = Ask(ctx, repl, &crdt.Update{
+		Key:     key,
+		Initial: crdt.NewGCounter(),
+		Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+			return current.(*crdt.GCounter).Increment("node-b", 7)
+		},
+	}, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, watcher.Tell(ctx, repl, &crdt.Subscribe{Key: key}))
+
+	expectChanged := func(t *testing.T, value uint64) {
+		t.Helper()
+
+		select {
+		case message := <-probe.received:
+			changed, ok := message.(*crdt.Changed)
+			require.True(t, ok, "expected a Changed notification, got %T", message)
+			assert.EqualValues(t, value, changed.Data.(*crdt.GCounter).Value())
+		case <-time.After(3 * time.Second):
+			t.Fatal("no Changed notification")
+		}
+	}
+
+	t.Run("a duplicate delta counts once", func(t *testing.T) {
+		delta := &crdtDelta{KeyID: key.ID(), DataType: key.Type(), Delta: crdt.NewGCounter().Increment("node-a", 5), Origin: "node-a"}
+		require.NoError(t, Tell(ctx, repl, delta))
+		require.NoError(t, Tell(ctx, repl, delta))
+
+		// one local update and one effective delta
+		assert.EqualValues(t, 2, replicatorDigestEntry(t, repl, key.ID()).GetVersion())
+		expectChanged(t, 12)
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("a full state that changes nothing counts for nothing", func(t *testing.T) {
+		// what a peer that is behind sends back: a part of what is held here
+		stale, err := ddata.EncodeCRDT(crdt.NewGCounter().Increment("node-a", 5), ddata.NewCRDTValueSerializer())
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, repl, internalpb.CRDTFullState_builder{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				internalpb.CRDTFullStateEntry_builder{Key: codec.EncodeCRDTKey(key.ID(), key.Type()), Data: stale}.Build(),
+			},
+		}.Build()))
+
+		assert.EqualValues(t, 2, replicatorDigestEntry(t, repl, key.ID()).GetVersion())
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("a full state that adds something counts once", func(t *testing.T) {
+		ahead, err := ddata.EncodeCRDT(crdt.NewGCounter().Increment("node-c", 1), ddata.NewCRDTValueSerializer())
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, repl, internalpb.CRDTFullState_builder{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				internalpb.CRDTFullStateEntry_builder{Key: codec.EncodeCRDTKey(key.ID(), key.Type()), Data: ahead}.Build(),
+			},
+		}.Build()))
+
+		assert.EqualValues(t, 3, replicatorDigestEntry(t, repl, key.ID()).GetVersion())
+		expectChanged(t, 13)
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	assert.NoError(t, sys.Stop(ctx))
+}
+
+// TestReplicatorDataCenterPendingBuffers covers what a replicator keeps for
+// the remote datacenters: one entry per key, kept until a flush reached them.
+func TestReplicatorDataCenterPendingBuffers(t *testing.T) {
+	records := []datacenter.DataCenterRecord{
+		{
+			ID:         "zrremote",
+			DataCenter: datacenter.DataCenter{Name: "remote", Region: "r", Zone: "z"},
+			Endpoints:  []string{"10.0.0.1:9090"},
+			State:      datacenter.DataCenterActive,
+			Version:    1,
+		},
+	}
+
+	increment := func(t *testing.T, repl *PID, key crdt.Key, value uint64) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", value)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	// flush runs one flush tick and returns once the replicator handled it
+	flush := func(t *testing.T, repl *PID) {
+		t.Helper()
+		require.NoError(t, Tell(context.TODO(), repl, &dataCenterFlushTick{}))
+		_, err := Ask(context.TODO(), repl, &crdt.Get{Key: crdt.GCounterKey("barrier")}, 5*time.Second)
+		require.NoError(t, err)
+	}
+
+	t.Run("a batch that could not be sent is kept and sent on a later tick", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+
+		remote := address.New("GoAktReplicator", "remoteSys", "10.0.0.1", 9090)
+		batches := make(chan *internalpb.CRDTDeltaBatch, 4)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.1", 9090, "GoAktReplicator").Return(nil, errors.New("lookup failed")).Once()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.1", 9090, "GoAktReplicator").Return(remote, nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, remote, mock.Anything).
+			RunAndReturn(func(_ context.Context, _, _ *address.Address, message any) error {
+				batches <- message.(*internalpb.CRDTDeltaBatch)
+				return nil
+			})
+
+		key := crdt.PNCounterKey("orders")
+		increment(t, repl, key, 5)
+
+		// the lookup fails: nothing is sent and the delta stays
+		flush(t, repl)
+		assert.Zero(t, replActor.crossDCSendCount.Load())
+		assert.Len(t, replActor.pendingDeltas, 1)
+
+		// a change made in between joins the pending one
+		increment(t, repl, key, 2)
+
+		// the lookup works: the batch goes out and the buffer empties
+		flush(t, repl)
+		assert.EqualValues(t, 1, replActor.crossDCSendCount.Load())
+		assert.Empty(t, replActor.pendingDeltas)
+
+		batch := <-batches
+		require.Len(t, batch.GetDeltas(), 1)
+		assert.Equal(t, key.ID(), batch.GetDeltas()[0].GetKey().GetId())
+		data, err := ddata.DecodeCRDT(batch.GetDeltas()[0].GetData(), ddata.NewCRDTValueSerializer())
+		require.NoError(t, err)
+		assert.EqualValues(t, 7, data.(*crdt.PNCounter).Value())
+
+		// nothing is left to send
+		flush(t, repl)
+		assert.EqualValues(t, 1, replActor.crossDCSendCount.Load())
+
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("a batch is kept when there is no datacenter to send it to", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, _ := spawnReplicatorWithDCController(t, remoteRecords(nil), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true)
+
+		increment(t, repl, crdt.PNCounterKey("orders"), 5)
+		flush(t, repl)
+		assert.Len(t, replActor.pendingDeltas, 1)
+
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("a non-leader keeps one entry per key", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, _ := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false)
+
+		const keys = 5
+		for i := range 500 {
+			increment(t, repl, crdt.PNCounterKey(fmt.Sprintf("orders-%d", i%keys)), 1)
+		}
+
+		flush(t, repl)
+		require.Len(t, replActor.pendingDeltas, keys)
+
+		// each entry holds everything its key received
+		for _, pending := range replActor.pendingDeltas {
+			assert.EqualValues(t, 100, pending.Delta.(*crdt.PNCounter).Value())
+		}
+
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("a tombstone replaces the pending delta of its key", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, _ := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Maybe()
+
+		deleted := crdt.PNCounterKey("deleted")
+		kept := crdt.PNCounterKey("kept")
+		increment(t, repl, deleted, 5)
+		increment(t, repl, kept, 5)
+
+		_, err := Ask(context.TODO(), repl, &crdt.Delete{Key: deleted}, time.Second)
+		require.NoError(t, err)
+		_, err = Ask(context.TODO(), repl, &crdt.Delete{Key: deleted}, time.Second)
+		require.NoError(t, err)
+
+		// while the tombstone lives the store rejects updates of the key,
+		// so no delta joins the buffer either
+		increment(t, repl, deleted, 1)
+
+		require.Len(t, replActor.pendingDeltas, 1)
+		assert.Contains(t, replActor.pendingDeltas, kept.ID())
+		require.Len(t, replActor.pendingTombstones, 1)
+		assert.Contains(t, replActor.pendingTombstones, deleted.ID())
+
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("a key recreated while its tombstone is pending is sent as both", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "node-1"
+		r.serializer = ddata.NewCRDTValueSerializer()
+
+		// the local tombstone has expired, so the store accepted the update
+		key := crdt.PNCounterKey("recreated")
+		r.bufferTombstone(key.ID(), internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey(key.ID(), key.Type()),
+			DeletedAtNanos: time.Now().Add(-2 * r.config.TombstoneTTL()).UnixNano(),
+			DeletedByNode:  r.nodeID,
+		}.Build())
+		r.bufferDelta(key.ID(), key.Type(), crdt.NewPNCounter().Increment("node-1", 2))
+
+		encoded, err := r.encodeDelta(r.pendingDeltas[key.ID()].crdtDelta)
+		require.NoError(t, err)
+		deltas := map[string]*internalpb.CRDTDelta{key.ID(): encoded}
+
+		// a datacenter that has accepted neither is sent both in one batch
+		batch, highest := r.buildPendingBatch(deltas, 0)
+		require.Len(t, batch.GetTombstones(), 1)
+		require.Len(t, batch.GetDeltas(), 1)
+		assert.Equal(t, key.ID(), batch.GetTombstones()[0].GetKey().GetId())
+		assert.Equal(t, key.ID(), batch.GetDeltas()[0].GetKey().GetId())
+		assert.EqualValues(t, 2, highest)
+
+		// one that has accepted the tombstone is sent the delta alone
+		batch, highest = r.buildPendingBatch(deltas, r.pendingTombstones[key.ID()].seq)
+		assert.Empty(t, batch.GetTombstones())
+		require.Len(t, batch.GetDeltas(), 1)
+		assert.EqualValues(t, 2, highest)
+
+		// one that has accepted both is sent nothing
+		_, highest = r.buildPendingBatch(deltas, 2)
+		assert.Zero(t, highest)
+	})
+
+	t.Run("a tombstone from a peer drops the pending delta of its key", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, _ := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(false).Maybe()
+
+		key := crdt.PNCounterKey("deleted-elsewhere")
+		increment(t, repl, key, 5)
+
+		require.NoError(t, Tell(context.TODO(), repl, internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey(key.ID(), key.Type()),
+			DeletedAtNanos: time.Now().UnixNano(),
+			DeletedByNode:  "node-2",
+		}.Build()))
+
+		flush(t, repl)
+		assert.Empty(t, replActor.pendingDeltas)
+		assert.Empty(t, replActor.pendingTombstones)
+
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+}
+
+// TestReplicatorAntiEntropyDeletions covers deletions in the anti-entropy
+// exchange: a node that retains a tombstone makes every peer it exchanges
+// with drop the key, whichever side sent the digest.
+func TestReplicatorAntiEntropyDeletions(t *testing.T) {
+	key := crdt.GCounterKey("visits")
+
+	increment := func(t *testing.T, repl *PID, nodeID string, value uint64) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment(nodeID, value)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	remove := func(t *testing.T, repl *PID) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Delete{Key: key}, time.Second)
+		require.NoError(t, err)
+	}
+
+	holds := func(t *testing.T, repl *PID) bool {
+		t.Helper()
+		resp, err := Ask(context.TODO(), repl, &crdt.Get{Key: key}, time.Second)
+		require.NoError(t, err)
+		return resp.(*crdt.GetResponse).Data != nil
+	}
+
+	tombstoneOf := func(deletedAt time.Time, deletedBy string) *internalpb.CRDTTombstone {
+		return internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey(key.ID(), key.Type()),
+			DeletedAtNanos: deletedAt.UnixNano(),
+			DeletedByNode:  deletedBy,
+		}.Build()
+	}
+
+	// digestListing is the digest of a peer that holds the given value of the key
+	digestListing := func(value *crdt.GCounter, tombstones ...*internalpb.CRDTTombstone) *internalpb.CRDTDigest {
+		hash := value.StateHash()
+		return internalpb.CRDTDigest_builder{
+			Entries: []*internalpb.CRDTDigestEntry{
+				internalpb.CRDTDigestEntry_builder{Key: codec.EncodeCRDTKey(key.ID(), key.Type()), Version: 1, StateHash: &hash}.Build(),
+			},
+			Tombstones: tombstones,
+		}.Build()
+	}
+
+	single := func(t *testing.T) (ActorSystem, *PID, *MockMessageProbe, *PID) {
+		t.Helper()
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		repl := spawnTestReplicator(t, sys)
+		probe := NewMockMessageProbe()
+		peer, err := sys.Spawn(ctx, "peer", probe, WithLongLived())
+		require.NoError(t, err)
+		return sys, repl, probe, peer
+	}
+
+	expectTombstoneAnswer := func(t *testing.T, probe *MockMessageProbe) {
+		t.Helper()
+
+		select {
+		case message := <-probe.received:
+			fullState, ok := message.(*internalpb.CRDTFullState)
+			require.True(t, ok, "expected a full state, got %T", message)
+			assert.Empty(t, fullState.GetEntries())
+			require.Len(t, fullState.GetTombstones(), 1)
+			assert.Equal(t, key.ID(), fullState.GetTombstones()[0].GetKey().GetId())
+		case <-time.After(3 * time.Second):
+			t.Fatal("the peer was not told of the deletion")
+		}
+	}
+
+	t.Run("a peer that still holds a deleted key is answered with the tombstone", func(t *testing.T) {
+		_, repl, probe, peer := single(t)
+		increment(t, repl, "node-b", 7)
+		remove(t, repl)
+
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestListing(crdt.NewGCounter().Increment("node-b", 7))))
+		expectTombstoneAnswer(t, probe)
+	})
+
+	t.Run("a tombstone in the digest deletes the key and is retained", func(t *testing.T) {
+		ctx := context.TODO()
+		_, repl, probe, peer := single(t)
+		increment(t, repl, "node-b", 7)
+
+		// the peer deleted the key and holds nothing else
+		digest := internalpb.CRDTDigest_builder{Tombstones: []*internalpb.CRDTTombstone{tombstoneOf(time.Now(), "node-a")}}.Build()
+		require.NoError(t, peer.Tell(ctx, repl, digest))
+		assert.False(t, holds(t, repl))
+
+		// the key is not sent back, and a late delta for it is rejected
+		probeIsQuiet(t, peer, probe)
+		require.NoError(t, Tell(ctx, repl, &crdtDelta{KeyID: key.ID(), DataType: key.Type(), Delta: crdt.NewGCounter().Increment("node-c", 1), Origin: "node-c"}))
+		assert.False(t, holds(t, repl))
+	})
+
+	t.Run("the deletion wins over a value written after it, in both directions", func(t *testing.T) {
+		ctx := context.TODO()
+		_, repl, probe, peer := single(t)
+		earlier := time.Now().Add(-time.Hour)
+
+		// the peer deleted the key an hour ago; this node wrote it just now
+		increment(t, repl, "node-b", 7)
+		require.NoError(t, peer.Tell(ctx, repl, internalpb.CRDTDigest_builder{Tombstones: []*internalpb.CRDTTombstone{tombstoneOf(earlier, "node-a")}}.Build()))
+		assert.False(t, holds(t, repl))
+
+		// this node deleted the key an hour ago; the peer wrote it just now
+		_, repl2, probe2, peer2 := single(t)
+		increment(t, repl2, "node-b", 7)
+		remove(t, repl2)
+		require.NoError(t, peer2.Tell(ctx, repl2, digestListing(crdt.NewGCounter().Increment("node-b", 7).Increment("node-c", 1))))
+		expectTombstoneAnswer(t, probe2)
+		assert.False(t, holds(t, repl2))
+
+		probeIsQuiet(t, peer, probe)
+	})
+
+	t.Run("a digest without tombstones deletes nothing", func(t *testing.T) {
+		_, repl, probe, peer := single(t)
+		increment(t, repl, "node-b", 7)
+
+		// an older node holds the same value and lists it without the field
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestListing(crdt.NewGCounter().Increment("node-b", 7))))
+		assert.True(t, holds(t, repl))
+		probeIsQuiet(t, peer, probe)
+	})
+
+	t.Run("an expired tombstone is not sent", func(t *testing.T) {
+		r := newTestReplicator()
+		r.tombstones[key.ID()] = &tombstone{keyID: key.ID(), dataType: key.Type(), deletedAt: time.Now().Add(-2 * r.config.TombstoneTTL()), deletedBy: "node-a"}
+		r.tombstones["fresh"] = &tombstone{keyID: "fresh", dataType: key.Type(), deletedAt: time.Now(), deletedBy: "node-a"}
+
+		digest := r.buildDigest()
+		require.Len(t, digest.GetTombstones(), 1)
+		assert.Equal(t, "fresh", digest.GetTombstones()[0].GetKey().GetId())
+	})
+
+	t.Run("two replicators converge to no key in either order and then stay put", func(t *testing.T) {
+		for _, firstPuller := range []string{"the node that deleted", "the node that still holds"} {
+			t.Run(firstPuller+" pulls first", func(t *testing.T) {
+				ctx := context.TODO()
+				sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+				require.NoError(t, sys.Start(ctx))
+				t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+				replA, replB, actorA, actorB := spawnReplicatorPair(t, sys)
+				increment(t, replA, "node-a", 5)
+				increment(t, replB, "node-b", 7)
+
+				watcher := NewMockMessageProbe()
+				watcherPID, err := sys.Spawn(ctx, "watcher", watcher, WithLongLived())
+				require.NoError(t, err)
+				require.NoError(t, watcherPID.Tell(ctx, replB, &crdt.Subscribe{Key: key}))
+
+				remove(t, replA)
+
+				if firstPuller == "the node that deleted" {
+					pullFrom(t, replA, replB)
+				} else {
+					pullFrom(t, replB, replA)
+				}
+
+				assert.False(t, holds(t, replA))
+				assert.False(t, holds(t, replB))
+
+				// both retain the same deletion, and further rounds change nothing
+				tombstoneA, tombstoneB := actorA.tombstones[key.ID()], actorB.tombstones[key.ID()]
+				require.NotNil(t, tombstoneA)
+				require.NotNil(t, tombstoneB)
+				assert.Equal(t, tombstoneA.deletedAt.UnixNano(), tombstoneB.deletedAt.UnixNano())
+
+				pullFrom(t, replA, replB)
+				pullFrom(t, replB, replA)
+				pullFrom(t, replA, replB)
+				assert.Same(t, tombstoneA, actorA.tombstones[key.ID()])
+				assert.Same(t, tombstoneB, actorB.tombstones[key.ID()])
+				assert.Empty(t, actorA.store)
+				assert.Empty(t, actorB.store)
+
+				// the watcher heard nothing: a deletion is not a change
+				probeIsQuiet(t, watcherPID, watcher)
+			})
+		}
+	})
+
+	t.Run("an expired tombstone deletes nothing on the peer", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		// the tombstone expires at once but is not pruned: the prune schedule is off
+		replA, replB, actorA, _ := spawnReplicatorPair(t, sys, crdt.WithTombstoneTTL(time.Nanosecond))
+		increment(t, replA, "node-a", 5)
+		increment(t, replB, "node-b", 7)
+		remove(t, replA)
+		require.Contains(t, actorA.tombstones, key.ID())
+
+		pullFrom(t, replA, replB)
+		pullFrom(t, replB, replA)
+		assert.True(t, holds(t, replB))
+	})
+
+	// crossDC starts a leader with a datacenter controller listing one remote
+	// datacenter, and a replicator standing for a node of that datacenter. The
+	// digest the leader's round sends is handed to that node by the test, and
+	// the node's answer back to the leader, since the remoting client is a mock.
+	crossDC := func(t *testing.T) (leader, remote, leaderStandIn *PID, probe *MockMessageProbe, sent chan any) {
+		t.Helper()
+		ctx := context.TODO()
+		records := []datacenter.DataCenterRecord{
+			{
+				ID:         "zreast",
+				DataCenter: datacenter.DataCenter{Name: "east", Region: "r", Zone: "z"},
+				Endpoints:  []string{"10.0.0.1:9090"},
+				State:      datacenter.DataCenterActive,
+				Version:    1,
+			},
+		}
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		sent = make(chan any, 4)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.1", 9090, "GoAktReplicator").
+			Return(address.New("GoAktReplicator", "remoteSys", "10.0.0.1", 9090), nil).Maybe()
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _, _ *address.Address, message any) error {
+				sent <- message
+				return nil
+			}).Maybe()
+
+		remoteSys, _ := NewActorSystem("remoteSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, remoteSys.Start(ctx))
+		t.Cleanup(func() { _ = remoteSys.Stop(ctx) })
+		remote = spawnTestReplicatorWithDC(t, remoteSys, "east", "r", "z")
+		probe = NewMockMessageProbe()
+		leaderStandIn, err := remoteSys.Spawn(ctx, "leader-stand-in", probe, WithLongLived())
+		require.NoError(t, err)
+		return repl, remote, leaderStandIn, probe, sent
+	}
+
+	t.Run("the cross-datacenter round carries the leader's deletion", func(t *testing.T) {
+		ctx := context.TODO()
+		leader, remote, leaderStandIn, probe, sent := crossDC(t)
+		increment(t, leader, "node-a", 5)
+		increment(t, remote, "node-a", 5)
+		remove(t, leader)
+
+		require.NoError(t, Tell(ctx, leader, &dataCenterAntiEntropyTick{}))
+		digest, ok := (<-sent).(*internalpb.CRDTDigest)
+		require.True(t, ok)
+		require.Len(t, digest.GetTombstones(), 1)
+
+		require.NoError(t, leaderStandIn.Tell(ctx, remote, digest))
+		assert.False(t, holds(t, remote))
+		probeIsQuiet(t, leaderStandIn, probe)
+	})
+
+	t.Run("the cross-datacenter round brings the remote deletion back", func(t *testing.T) {
+		ctx := context.TODO()
+		leader, remote, leaderStandIn, probe, sent := crossDC(t)
+		increment(t, leader, "node-a", 5)
+		increment(t, remote, "node-a", 5)
+		remove(t, remote)
+
+		require.NoError(t, Tell(ctx, leader, &dataCenterAntiEntropyTick{}))
+		digest, ok := (<-sent).(*internalpb.CRDTDigest)
+		require.True(t, ok)
+		require.Len(t, digest.GetEntries(), 1)
+
+		require.NoError(t, leaderStandIn.Tell(ctx, remote, digest))
+		answer := <-probe.received
+		fullState, ok := answer.(*internalpb.CRDTFullState)
+		require.True(t, ok, "expected a full state, got %T", answer)
+		assert.Empty(t, fullState.GetEntries())
+		require.Len(t, fullState.GetTombstones(), 1)
+
+		require.NoError(t, Tell(ctx, leader, fullState))
+		assert.False(t, holds(t, leader))
+	})
+}
+
+// TestReplicatorDataCenterAcceptedMarks covers the flush towards several
+// remote datacenters: each one is sent what it has not accepted yet, and an
+// entry leaves the buffer once every datacenter on record has accepted it.
+func TestReplicatorDataCenterAcceptedMarks(t *testing.T) {
+	const (
+		eastHost = "10.0.0.1"
+		westHost = "10.0.0.2"
+	)
+
+	east := datacenter.DataCenterRecord{
+		ID:         "zreast",
+		DataCenter: datacenter.DataCenter{Name: "east", Region: "r", Zone: "z"},
+		Endpoints:  []string{eastHost + ":9090"},
+		State:      datacenter.DataCenterActive,
+		Version:    1,
+	}
+	west := datacenter.DataCenterRecord{
+		ID:         "zrwest",
+		DataCenter: datacenter.DataCenter{Name: "west", Region: "r", Zone: "z"},
+		Endpoints:  []string{westHost + ":9090"},
+		State:      datacenter.DataCenterActive,
+		Version:    1,
+	}
+
+	// fixture is a replicator whose leadership and remote datacenters are
+	// driven by the test
+	type fixture struct {
+		sys       ActorSystem
+		repl      *PID
+		replActor *replicatorActor
+		// leader is what the cluster answers to IsLeader
+		leader *atomic.Bool
+		// westDown makes every send to the west datacenter fail
+		westDown *atomic.Bool
+		// received holds the batches each datacenter accepted, by host
+		received map[string]chan *internalpb.CRDTDeltaBatch
+	}
+
+	setup := func(t *testing.T, records ...datacenter.DataCenterRecord) *fixture {
+		t.Helper()
+
+		f := &fixture{
+			leader:   new(atomic.Bool),
+			westDown: new(atomic.Bool),
+			received: map[string]chan *internalpb.CRDTDeltaBatch{
+				eastHost: make(chan *internalpb.CRDTDeltaBatch, 16),
+				westHost: make(chan *internalpb.CRDTDeltaBatch, 16),
+			},
+		}
+		f.leader.Store(true)
+
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		f.sys, f.repl, f.replActor = sys, repl, replActor
+
+		clusterMock.EXPECT().IsLeader(mock.Anything).RunAndReturn(func(context.Context) bool {
+			return f.leader.Load()
+		}).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, mock.Anything, 9090, "GoAktReplicator").
+			RunAndReturn(func(_ context.Context, host string, port int, name string) (*address.Address, error) {
+				return address.New(name, "remoteSys", host, port), nil
+			}).Maybe()
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+			RunAndReturn(func(_ context.Context, _, to *address.Address, message any) error {
+				if to.Host() == westHost && f.westDown.Load() {
+					return errors.New("west is unreachable")
+				}
+
+				f.received[to.Host()] <- message.(*internalpb.CRDTDeltaBatch)
+				return nil
+			}).Maybe()
+
+		t.Cleanup(func() { require.NoError(t, f.sys.Stop(context.TODO())) })
+		return f
+	}
+
+	// flush runs one flush tick and returns once the replicator handled it.
+	// The sends happen inside that turn, so every batch of the tick is in
+	// the channels by then.
+	flush := func(t *testing.T, f *fixture) {
+		t.Helper()
+		require.NoError(t, Tell(context.TODO(), f.repl, &dataCenterFlushTick{}))
+		_, err := Ask(context.TODO(), f.repl, &crdt.Get{Key: crdt.GCounterKey("barrier")}, 5*time.Second)
+		require.NoError(t, err)
+	}
+
+	add := func(t *testing.T, f *fixture, key crdt.Key, element string) {
+		t.Helper()
+		_, err := Ask(context.TODO(), f.repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewORSet(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.ORSet).Add("node-1", element)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	// applied merges the deltas of the batches into the value a datacenter holds
+	applied := func(t *testing.T, held *crdt.ORSet, batches ...*internalpb.CRDTDeltaBatch) *crdt.ORSet {
+		t.Helper()
+
+		for _, batch := range batches {
+			for _, delta := range batch.GetDeltas() {
+				data, err := ddata.DecodeCRDT(delta.GetData(), ddata.NewCRDTValueSerializer())
+				require.NoError(t, err)
+				held = held.Merge(data).(*crdt.ORSet)
+			}
+		}
+
+		return held
+	}
+
+	key := crdt.ORSetKey("sessions")
+
+	t.Run("a datacenter that accepted is not sent the batch again while another one fails", func(t *testing.T) {
+		f := setup(t, east, west)
+		f.westDown.Store(true)
+		add(t, f, key, "a")
+
+		// east accepts, west does not: the entry stays for west
+		flush(t, f)
+		require.Len(t, f.received[eastHost], 1)
+		assert.Len(t, f.replActor.pendingDeltas, 1)
+		assert.EqualValues(t, 1, f.replActor.crossDCSendCount.Load())
+		assert.Equal(t, map[string]uint64{east.ID: 1}, f.replActor.dataCenterAccepted)
+
+		// the next tick sends east nothing and tries west again
+		flush(t, f)
+		assert.Len(t, f.received[eastHost], 1)
+		assert.Empty(t, f.received[westHost])
+		assert.Len(t, f.replActor.pendingDeltas, 1)
+		assert.EqualValues(t, 1, f.replActor.crossDCSendCount.Load())
+
+		// west accepts: every datacenter has the entry and it leaves the buffer
+		f.westDown.Store(false)
+		flush(t, f)
+		assert.Len(t, f.received[eastHost], 1)
+		require.Len(t, f.received[westHost], 1)
+		assert.Empty(t, f.replActor.pendingDeltas)
+		assert.EqualValues(t, 2, f.replActor.crossDCSendCount.Load())
+
+		// nothing is pending: a tick sends nothing
+		flush(t, f)
+		assert.Len(t, f.received[eastHost], 1)
+		assert.Len(t, f.received[westHost], 1)
+	})
+
+	t.Run("an entry changed after a datacenter accepted it is sent to it again and converges", func(t *testing.T) {
+		f := setup(t, east, west)
+		f.westDown.Store(true)
+
+		add(t, f, key, "a")
+		flush(t, f)
+		require.Len(t, f.received[eastHost], 1)
+
+		// the entry is still pending for west; a further change joins it
+		add(t, f, key, "b")
+		flush(t, f)
+		require.Len(t, f.received[eastHost], 2)
+		assert.Equal(t, map[string]uint64{east.ID: 2}, f.replActor.dataCenterAccepted)
+
+		f.westDown.Store(false)
+		flush(t, f)
+		require.Len(t, f.received[westHost], 1)
+		assert.Empty(t, f.replActor.pendingDeltas)
+
+		resp, err := Ask(context.TODO(), f.repl, &crdt.Get{Key: key}, time.Second)
+		require.NoError(t, err)
+		sender := resp.(*crdt.GetResponse).Data.(*crdt.ORSet)
+
+		// east merged two forms of the entry, west the last one only
+		heldEast := applied(t, crdt.NewORSet(), <-f.received[eastHost], <-f.received[eastHost])
+		heldWest := applied(t, crdt.NewORSet(), <-f.received[westHost])
+		assert.ElementsMatch(t, []any{"a", "b"}, heldEast.Elements())
+		assert.Equal(t, sender.StateHash(), heldEast.StateHash())
+		assert.Equal(t, sender.StateHash(), heldWest.StateHash())
+	})
+
+	t.Run("a datacenter that leaves the records no longer holds entries back", func(t *testing.T) {
+		f := setup(t, east, west)
+		f.westDown.Store(true)
+		add(t, f, key, "a")
+
+		flush(t, f)
+		require.Len(t, f.replActor.pendingDeltas, 1)
+
+		replaceDataCenterRecords(t, f.sys, east)
+
+		// east has the entry and is the only datacenter on record
+		flush(t, f)
+		assert.Empty(t, f.replActor.pendingDeltas)
+		assert.Len(t, f.received[eastHost], 1)
+		assert.Equal(t, map[string]uint64{east.ID: 1}, f.replActor.dataCenterAccepted)
+	})
+
+	t.Run("a datacenter that appears is sent what is pending", func(t *testing.T) {
+		f := setup(t)
+		add(t, f, key, "a")
+
+		// no remote datacenter on record: the entry waits
+		flush(t, f)
+		require.Len(t, f.replActor.pendingDeltas, 1)
+		assert.Zero(t, f.replActor.crossDCSendCount.Load())
+
+		replaceDataCenterRecords(t, f.sys, east)
+
+		flush(t, f)
+		require.Len(t, f.received[eastHost], 1)
+		assert.Empty(t, f.replActor.pendingDeltas)
+		assert.ElementsMatch(t, []any{"a"}, applied(t, crdt.NewORSet(), <-f.received[eastHost]).Elements())
+	})
+
+	t.Run("a tombstone follows the same marks", func(t *testing.T) {
+		f := setup(t, east, west)
+		f.westDown.Store(true)
+		add(t, f, key, "a")
+
+		_, err := Ask(context.TODO(), f.repl, &crdt.Delete{Key: key}, time.Second)
+		require.NoError(t, err)
+
+		flush(t, f)
+		batch := <-f.received[eastHost]
+		assert.Empty(t, batch.GetDeltas())
+		require.Len(t, batch.GetTombstones(), 1)
+		assert.Len(t, f.replActor.pendingTombstones, 1)
+
+		f.westDown.Store(false)
+		flush(t, f)
+		assert.Empty(t, f.received[eastHost])
+		require.Len(t, f.received[westHost], 1)
+		assert.Empty(t, f.replActor.pendingTombstones)
+	})
+
+	t.Run("a node that becomes the leader sends everything pending, and one that stops forgets its marks", func(t *testing.T) {
+		f := setup(t, east, west)
+		f.westDown.Store(true)
+		f.leader.Store(false)
+		add(t, f, key, "a")
+
+		// not the leader: the entry is buffered and nothing is sent
+		flush(t, f)
+		assert.Len(t, f.replActor.pendingDeltas, 1)
+		assert.Empty(t, f.received[eastHost])
+		assert.Empty(t, f.replActor.dataCenterAccepted)
+
+		// the node becomes the leader: east takes what was buffered
+		f.leader.Store(true)
+		flush(t, f)
+		require.Len(t, f.received[eastHost], 1)
+		assert.Equal(t, map[string]uint64{east.ID: 1}, f.replActor.dataCenterAccepted)
+
+		// it stops being the leader: the marks go, the entry stays
+		f.leader.Store(false)
+		flush(t, f)
+		assert.Empty(t, f.replActor.dataCenterAccepted)
+		assert.Len(t, f.replActor.pendingDeltas, 1)
+		assert.Len(t, f.received[eastHost], 1)
+
+		// leader again, without marks: east is sent the entry once more
+		f.leader.Store(true)
+		flush(t, f)
+		assert.Len(t, f.received[eastHost], 2)
+		assert.EqualValues(t, 2, f.replActor.crossDCSendCount.Load())
+	})
+}
+
+// TestReplicatorCoalescedDeltaMatchesIndividualDeltas verifies that the one
+// pending delta of a key gives a receiver the value it would have reached by
+// merging the deltas one after the other.
+func TestReplicatorCoalescedDeltaMatchesIndividualDeltas(t *testing.T) {
+	t.Run("ORSet with additions and removals", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "node-1"
+
+		var deltas []crdt.ReplicatedData
+
+		set := crdt.NewORSet()
+		record := func(next *crdt.ORSet) {
+			delta := next.Delta()
+			next.ResetDelta()
+			deltas = append(deltas, delta)
+			r.bufferDelta("sessions", crdt.ORSetType, delta)
+			set = next
+		}
+
+		record(set.Add("node-1", "a"))
+		record(set.Add("node-1", "b"))
+		record(set.Remove("a"))
+		record(set.Add("node-1", "c"))
+		record(set.Add("node-1", "a"))
+		record(set.Remove("b"))
+
+		require.Len(t, r.pendingDeltas, 1)
+		pending := r.pendingDeltas["sessions"]
+		assert.Equal(t, "node-1", pending.Origin)
+		assert.Equal(t, crdt.ORSetType, pending.DataType)
+
+		// the receiver holds an element of its own
+		receiver := crdt.NewORSet().Add("node-2", "z")
+
+		individually := crdt.ReplicatedData(receiver)
+		for _, delta := range deltas {
+			individually = individually.Merge(delta)
+		}
+
+		coalesced := receiver.Merge(pending.Delta)
+
+		assert.ElementsMatch(t, []any{"a", "c", "z"}, individually.(*crdt.ORSet).Elements())
+		assert.ElementsMatch(t, individually.(*crdt.ORSet).Elements(), coalesced.(*crdt.ORSet).Elements())
+		assert.Equal(t, individually.(*crdt.ORSet).StateHash(), coalesced.(*crdt.ORSet).StateHash())
+	})
+
+	t.Run("PNCounter with increments and decrements", func(t *testing.T) {
+		r := newTestReplicator()
+		r.nodeID = "node-1"
+
+		var deltas []crdt.ReplicatedData
+
+		counter := crdt.NewPNCounter()
+		record := func(next *crdt.PNCounter) {
+			delta := next.Delta()
+			next.ResetDelta()
+			deltas = append(deltas, delta)
+			r.bufferDelta("stock", crdt.PNCounterType, delta)
+			counter = next
+		}
+
+		record(counter.Increment("node-1", 10))
+		record(counter.Decrement("node-1", 3))
+		record(counter.Increment("node-1", 4))
+
+		receiver := crdt.NewPNCounter().Increment("node-2", 100)
+
+		individually := crdt.ReplicatedData(receiver)
+		for _, delta := range deltas {
+			individually = individually.Merge(delta)
+		}
+
+		coalesced := receiver.Merge(r.pendingDeltas["stock"].Delta)
+
+		assert.EqualValues(t, 111, individually.(*crdt.PNCounter).Value())
+		assert.Equal(t, individually.(*crdt.PNCounter).StateHash(), coalesced.(*crdt.PNCounter).StateHash())
+	})
+}
+
+// TestReplicatorIncomingBatchRecreatedKey covers a batch that carries both a
+// tombstone and a delta of one key.
+func TestReplicatorIncomingBatchRecreatedKey(t *testing.T) {
+	origin := internalpb.DataCenter_builder{Name: "dc-east", Region: "us-east-1", Zone: "us-east-1a"}.Build()
+	key := crdt.PNCounterKey("orders")
+	serializer := ddata.NewCRDTValueSerializer()
+
+	// setup starts a replicator that holds the first incarnation of the key
+	setup := func(t *testing.T) (ActorSystem, *PID) {
+		t.Helper()
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, sys.Start(ctx))
+
+		repl := spawnTestReplicatorWithDC(t, sys, "dc-west", "us-west-2", "us-west-2a")
+		_, err := Ask(ctx, repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 5).Increment("node-2", 3)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+		return sys, repl
+	}
+
+	batchOf := func(t *testing.T, deletedAt time.Time, incarnation *crdt.PNCounter) *internalpb.CRDTDeltaBatch {
+		t.Helper()
+		data, err := ddata.EncodeCRDT(incarnation, serializer)
+		require.NoError(t, err)
+
+		return internalpb.CRDTDeltaBatch_builder{
+			Deltas: []*internalpb.CRDTDelta{
+				internalpb.CRDTDelta_builder{
+					Key:        codec.EncodeCRDTKey(key.ID(), key.Type()),
+					OriginNode: "remote-node",
+					Data:       data,
+				}.Build(),
+			},
+			Tombstones: []*internalpb.CRDTTombstone{
+				internalpb.CRDTTombstone_builder{
+					Key:            codec.EncodeCRDTKey(key.ID(), key.Type()),
+					DeletedAtNanos: deletedAt.UnixNano(),
+					DeletedByNode:  "remote-node",
+				}.Build(),
+			},
+			OriginDc:    origin,
+			SentAtNanos: time.Now().UnixNano(),
+		}.Build()
+	}
+
+	t.Run("a key recreated after its tombstone expired is held as the sender holds it", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, repl := setup(t)
+
+		// the sender deleted the key longer ago than the tombstone TTL and
+		// created it again; the deletion had not reached this datacenter
+		expired := time.Now().Add(-2 * crdt.NewConfig().TombstoneTTL())
+		require.NoError(t, Tell(ctx, repl, batchOf(t, expired, crdt.NewPNCounter().Increment("node-1", 2))))
+
+		// the old incarnation is gone and the new one is in its place
+		data := getPNCounter(t, repl, key)
+		require.NotNil(t, data)
+		assert.EqualValues(t, 2, data.Value())
+		assert.Equal(t, crdt.NewPNCounter().Increment("node-1", 2).StateHash(), data.StateHash())
+
+		require.NoError(t, sys.Stop(ctx))
+	})
+
+	t.Run("a live tombstone deletes the key and rejects the delta beside it", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, repl := setup(t)
+
+		require.NoError(t, Tell(ctx, repl, batchOf(t, time.Now(), crdt.NewPNCounter().Increment("node-1", 2))))
+		assert.Nil(t, getPNCounter(t, repl, key))
+
+		require.NoError(t, sys.Stop(ctx))
+	})
 }
 
 func BenchmarkReplicatorUpdatePNCounter(b *testing.B) {

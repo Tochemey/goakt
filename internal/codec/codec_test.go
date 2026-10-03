@@ -425,6 +425,69 @@ func TestDecodeSkipsInvalidRules(t *testing.T) {
 	require.Equal(t, supervisor.EscalateDirective, directive)
 }
 
+func TestEncodeDecodeSupervisorBackoff(t *testing.T) {
+	sup := supervisor.NewSupervisor(
+		supervisor.WithAnyErrorDirective(supervisor.RestartDirective),
+		supervisor.WithRetry(5, time.Minute),
+		supervisor.WithExponentialBackoff(200*time.Millisecond, 10*time.Second, 30*time.Second),
+	)
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.True(t, spec.HasInitialDelay())
+	require.Equal(t, 200*time.Millisecond, spec.GetInitialDelay().AsDuration())
+	require.Equal(t, 10*time.Second, spec.GetMaxDelay().AsDuration())
+	require.Equal(t, 30*time.Second, spec.GetBackoffResetAfter().AsDuration())
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+	require.EqualValues(t, 5, decoded.MaxRetries())
+	require.Equal(t, time.Minute, decoded.Timeout())
+	require.Equal(t, 200*time.Millisecond, decoded.InitialDelay())
+	require.Equal(t, 10*time.Second, decoded.MaxDelay())
+	require.Equal(t, 30*time.Second, decoded.BackoffResetAfter())
+}
+
+func TestEncodeSupervisorWithoutBackoffLeavesFieldsUnset(t *testing.T) {
+	sup := supervisor.NewSupervisor(supervisor.WithRetry(2, time.Second))
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.False(t, spec.HasInitialDelay())
+	require.False(t, spec.HasMaxDelay())
+	require.False(t, spec.HasBackoffResetAfter())
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+	require.Equal(t, time.Duration(0), decoded.InitialDelay())
+	require.Equal(t, time.Duration(0), decoded.MaxDelay())
+	require.Equal(t, time.Duration(0), decoded.BackoffResetAfter())
+}
+
+func TestEncodeDecodeSupervisorAnyErrorKeepsSpecificRules(t *testing.T) {
+	sup := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.ResumeDirective))
+	sup.SetDirectiveByType(errorType(&gerrors.InternalError{}), supervisor.RestartDirective)
+
+	spec := EncodeSupervisor(sup)
+	require.NotNil(t, spec)
+	require.True(t, spec.HasAnyErrorDirective())
+	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESUME, spec.GetAnyErrorDirective())
+	require.Len(t, spec.GetDirectives(), 1)
+	require.Equal(t, errorType(&gerrors.InternalError{}), spec.GetDirectives()[0].GetErrorType())
+	require.Equal(t, internalpb.SupervisorDirective_SUPERVISOR_DIRECTIVE_RESTART, spec.GetDirectives()[0].GetDirective())
+
+	decoded := DecodeSupervisor(spec)
+	require.NotNil(t, decoded)
+
+	directive, ok := decoded.Directive(&gerrors.InternalError{})
+	require.True(t, ok)
+	require.Equal(t, supervisor.RestartDirective, directive)
+
+	directive, ok = decoded.AnyErrorDirective()
+	require.True(t, ok)
+	require.Equal(t, supervisor.ResumeDirective, directive)
+}
+
 func TestDecodeWithMaxRetriesOnly(t *testing.T) {
 	spec := internalpb.SupervisorSpec_builder{
 		Strategy:   internalpb.SupervisorStrategy_SUPERVISOR_STRATEGY_ONE_FOR_ONE,

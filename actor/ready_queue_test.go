@@ -32,6 +32,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestReadyQueueTakeReachesGlobalUnderLocalLoad checks that a worker whose
+// local ring never empties still serves the global queue: every
+// globalQueueCheckInterval takes it reads the global queue first.
+func TestReadyQueueTakeReachesGlobalUnderLocalLoad(t *testing.T) {
+	rq := newReadyQueue(1)
+	hot := NewMockSchedulable(1)
+	waiting := NewMockSchedulable(2)
+
+	require.True(t, rq.locals[0].pushBack(hot))
+	rq.push(waiting)
+
+	for take := 1; take <= globalQueueCheckInterval; take++ {
+		s, ok := rq.take(0)
+		require.True(t, ok)
+		if s == schedulable(waiting) {
+			require.Equal(t, globalQueueCheckInterval, take)
+			return
+		}
+
+		// the hot schedulable goes straight back onto the local ring, as a
+		// busy actor that spent its budget does
+		require.Same(t, hot, s.(*MockSchedulable))
+		require.True(t, rq.locals[0].pushBack(hot))
+	}
+
+	t.Fatal("the global queue was never served")
+}
+
 func TestLocalQueuePushPop(t *testing.T) {
 	q := &localQueue{}
 	require.Equal(t, 0, q.length())

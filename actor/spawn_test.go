@@ -63,6 +63,21 @@ import (
 )
 
 // nolint
+// TestSpawnRouterIsLongLived checks that a router never passivates: its
+// routees are long-lived, and a router passivated by the system default would
+// take them with it.
+func TestSpawnRouterIsLongLived(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	router, err := actorSystem.SpawnRouter(ctx, "router", 2, NewMockActor())
+	require.NoError(t, err)
+	require.True(t, isLongLivedPassivationStrategy(router.PassivationStrategy()))
+}
+
 func TestSpawn(t *testing.T) {
 	t.Run("With Spawn an actor when not System started", func(t *testing.T) {
 		ctx := context.TODO()

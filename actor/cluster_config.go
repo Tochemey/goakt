@@ -362,8 +362,8 @@ func (x *ClusterConfig) WithClusterStateSyncInterval(interval time.Duration) *Cl
 //
 // Timeout semantics:
 //   - timeout == 0: wait indefinitely for quorum
-//   - timeout  > 0: wait up to the given duration, then proceed even if quorum
-//     has not been reached
+//   - timeout  > 0: wait up to the given duration; an activation still waiting
+//     when it expires fails with ErrGrainActivationBarrierTimeout
 //
 // Example:
 //

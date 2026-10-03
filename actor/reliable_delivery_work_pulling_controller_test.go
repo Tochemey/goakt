@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -422,7 +423,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		queue := &MockDurableWorkQueue{loadErr: errors.New("unreachable")}
 		controller := newWorkPullingProducerController(producer, testWorkPullingConfig(1, time.Millisecond, time.Millisecond), queue)
 		require.ErrorContains(t, controller.PreStart(newContext(ctx, "wp-load-fail", system)), "failed to load durable state")
-		assert.EqualValues(t, 1, controller.generation)
+		assert.EqualValues(t, 1, controller.generation.Load())
 	})
 
 	t.Run("With load failure after restart publishes failure", func(t *testing.T) {
@@ -441,6 +442,58 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 		failure := awaitFailure(t, subscriber)
 		assert.Equal(t, ReliableDeliveryStageLoad, failure.Stage())
 		assert.Equal(t, ReliableControllerRoleProducer, failure.ControllerRole())
+	})
+
+	t.Run("With load failing on every attempt of a restart publishes a single failure", func(t *testing.T) {
+		queue := &MockDurableWorkQueue{}
+		controller := newController(t, queue)
+
+		queue.mu.Lock()
+		queue.loadErr = errors.New("backing store is unreachable")
+		queue.mu.Unlock()
+
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+
+		// a restart retries PreStart on the same controller
+		for range 3 {
+			require.Error(t, controller.PreStart(newContext(ctx, "wp-load-restart-retried", system)))
+		}
+
+		assert.Equal(t, 1, countFailures(subscriber))
+	})
+
+	t.Run("With load failing on every attempt of the first start publishes no failure", func(t *testing.T) {
+		queue := &MockDurableWorkQueue{loadErr: errors.New("unreachable")}
+		controller := newWorkPullingProducerController(producer, testWorkPullingConfig(1, time.Millisecond, time.Millisecond), queue)
+
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+
+		// a spawn retries PreStart on the same controller
+		for range 3 {
+			require.Error(t, controller.PreStart(newContext(ctx, "wp-load-first-retried", system)))
+		}
+
+		assert.Zero(t, countFailures(subscriber))
+	})
+
+	t.Run("With a restart racing a forced stop", func(t *testing.T) {
+		controller := newController(t, nil)
+
+		// PostStop of the stopped incarnation and PreStart of the restarted
+		// one run on different goroutines: both touch the timer generation
+		var group sync.WaitGroup
+
+		group.Go(func() {
+			assert.NoError(t, controller.PreStart(newContext(ctx, "wp-race", system)))
+		})
+
+		group.Go(func() {
+			assert.NoError(t, controller.PostStop(newContext(ctx, "wp-race", system)))
+		})
+
+		group.Wait()
 	})
 
 	t.Run("With an unhandled message", func(t *testing.T) {
@@ -952,7 +1005,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 
 		// a stale generation is ignored
 		controller.handshake = producerHandshakeCredit
-		stale := &producerControllerTick{generation: controller.generation + 1}
+		stale := &producerControllerTick{generation: controller.generation.Load() + 1}
 		controller.handleTick(rctxFor(system.NoSender(), host, stale), stale)
 
 		// the StoredAck phase re-tells the retained Stored
@@ -966,7 +1019,7 @@ func TestWorkPullingControllerEdgeBranches(t *testing.T) {
 			return ok
 		})
 
-		tick := &producerControllerTick{generation: controller.generation}
+		tick := &producerControllerTick{generation: controller.generation.Load()}
 		controller.handleTick(rctxFor(system.NoSender(), host, tick), tick)
 
 		require.Eventually(t, func() bool {

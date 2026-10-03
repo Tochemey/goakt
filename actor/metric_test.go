@@ -165,6 +165,52 @@ func TestRegisterMetricsObservesRuntimeCounters(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 }
 
+// TestRegisterMetricsRefreshesDeadlettersCount checks that the system-level
+// dead-letter counter asks the deadletter actor on every scrape, instead of
+// reporting a total that only a call to ActorSystem.Metric refreshes.
+func TestRegisterMetricsRefreshesDeadlettersCount(t *testing.T) {
+	ctx := context.Background()
+
+	previous := otel.GetMeterProvider()
+	meterProvider := NewMockRecordingMeterProvider()
+	otel.SetMeterProvider(meterProvider)
+	t.Cleanup(func() { otel.SetMeterProvider(previous) })
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	pid, err := sys.Spawn(ctx, "blackhole", &MockUnhandledActor{}, WithLongLived())
+	require.NoError(t, err)
+
+	for range 3 {
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+	}
+
+	require.Eventually(t, func() bool {
+		return pid.unhandledCount.Load() == 3
+	}, 3*time.Second, 20*time.Millisecond)
+
+	// the deadletter actor records asynchronously; the scrape itself asks it
+	require.Eventually(t, func() bool {
+		observer := scrapeOnce(t, ctx, meterProvider)
+		return systemDeadlettersCount(observer.records) == 3
+	}, 3*time.Second, 50*time.Millisecond)
+}
+
+// systemDeadlettersCount returns the value observed for the system-level
+// dead-letter counter, or -1 when it was not observed.
+func systemDeadlettersCount(records []attrObserveRecord) int64 {
+	for _, record := range records {
+		if record.instrument == "actorsystem.deadletters.count" {
+			return record.value
+		}
+	}
+
+	return -1
+}
+
 // TestRegisterMetricsObservesSubsystemCounters drives one full collection over
 // a metrics-enabled non-cluster system and asserts the subsystem observations:
 // the live grain gauge, the scheduler totals, and the absence of the cluster

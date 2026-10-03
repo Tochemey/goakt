@@ -28,9 +28,10 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// rootGuardian defines the system root actor
-// its job is to monitor the userGuardian and the systemGuardian
-// when either of those actors get terminated, the actorSystem is shutdown.
+// rootGuardian defines the system root actor, the parent of the userGuardian
+// and the systemGuardian. When a system actor reports a failure to it with a
+// PanicSignal, it stops the actor system. The termination of either guardian
+// is only logged.
 type rootGuardian struct {
 	pid    *PID
 	logger log.Logger

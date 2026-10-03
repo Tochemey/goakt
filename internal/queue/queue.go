@@ -23,17 +23,20 @@
 package queue
 
 import (
-	"sync"
 	"sync/atomic"
 	"unsafe"
 )
 
 // Queue defines a lock-free Queue.
+//
+// It is a Michael-Scott queue. Dequeued nodes are left to the garbage
+// collector and never reused: a producer that loaded the tail may still hold a
+// pointer to a node after a consumer unlinked it, and linking onto a reused
+// node would lose the value or make the list cyclic.
 type Queue struct {
 	head unsafe.Pointer // pointer to the head of the queue
 	tail unsafe.Pointer // pointer to the tail of the queue
 	len  int64          // length of the queue
-	pool sync.Pool
 }
 
 // item is a single node in the queue.
@@ -50,19 +53,12 @@ func NewQueue() *Queue {
 		head: unsafe.Pointer(dummy), // both head and tail point to the dummy node
 		tail: unsafe.Pointer(dummy),
 		len:  0,
-		pool: sync.Pool{
-			New: func() any {
-				return &item{}
-			},
-		},
 	}
 }
 
 // Enqueue adds a value to the tail of the queue.
 func (q *Queue) Enqueue(v any) {
-	// Get a node from the pool
-	newNode := q.getItem()
-	newNode.v = v
+	newNode := &item{v: v}
 	newNodePtr := unsafe.Pointer(newNode)
 
 	for {
@@ -101,16 +97,12 @@ func (q *Queue) Dequeue() any {
 			return nil
 		}
 
-		nextNode := (*item)(next)
+		// Read the value before advancing the head: once the head moves the
+		// node belongs to the new head and another consumer may be past it.
+		value := (*item)(next).v
 
 		// Try to advance the head
 		if atomic.CompareAndSwapPointer(&q.head, unsafe.Pointer(head), next) {
-			// Get the value before potentially releasing the node
-			value := nextNode.v
-
-			// Release the old head node back to the pool
-			q.releaseItem(head)
-
 			// Decrement length atomically
 			atomic.AddInt64(&q.len, -1)
 
@@ -127,17 +119,4 @@ func (q *Queue) Length() uint64 {
 // IsEmpty returns true when the queue is empty
 func (q *Queue) IsEmpty() bool {
 	return atomic.LoadInt64(&q.len) == 0
-}
-
-// getItem retrieves a node from the pool or creates a new one
-func (q *Queue) getItem() *item {
-	return q.pool.Get().(*item)
-}
-
-// releaseItem returns a node to the pool for reuse
-func (q *Queue) releaseItem(i *item) {
-	// Reset i to prevent memory leaks
-	i.v = nil
-	i.next = nil
-	q.pool.Put(i)
 }

@@ -41,7 +41,9 @@ import (
 //   - Off preserves legacy behavior by disabling async requests.
 //   - AllowAll favors throughput; state can change while waiting.
 //   - StashNonReentrant favors determinism by stashing user messages
-//     until the response arrives, preserving mailbox order at the cost of latency.
+//     until the response arrives, at the cost of latency. When the last blocking
+//     request completes, the stashed messages are appended to the mailbox: the
+//     messages that arrived after the response, before it was handled, run first.
 //
 // Production note: prefer AllowAll to avoid deadlocks in call cycles
 // (A -> B -> A). Reserve StashNonReentrant for cases that require strict
@@ -87,9 +89,9 @@ func WithMaxInFlight(maxInFlight int) Option {
 // deadlocks in call cycles but allows actor state to change between request and
 // response handling.
 //
-// Use StashNonReentrant when strict message ordering is required; while any
-// stash-mode request is in flight, user messages are stashed until the last
-// blocking request completes. Always pair this with request timeouts and a
+// Use StashNonReentrant when the actor must not handle other messages while it
+// waits; while any stash-mode request is in flight, user messages are stashed
+// until the last blocking request completes, then appended to the mailbox. Always pair this with request timeouts and a
 // finite MaxInFlight limit to avoid unbounded stashing.
 //
 // Off disables async requests.
@@ -111,7 +113,8 @@ func WithMode(mode Mode) Option {
 //   - Then callbacks can run synchronously when registered after completion.
 //
 // In StashNonReentrant mode, user messages are stashed while any stash-mode request
-// is in flight, preserving mailbox order. This can increase latency and memory
+// is in flight, and appended to the mailbox when the last one completes, so the
+// messages that arrived just after the response run before them. This can increase latency and memory
 // usage under load; always pair it with per-request timeouts and a finite
 // MaxInFlight limit to avoid unbounded stashing.
 //

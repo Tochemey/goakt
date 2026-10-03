@@ -64,6 +64,39 @@ func TestPassivationManager_TimeBasedTrigger(t *testing.T) {
 	}
 }
 
+// TestPassivationManager_RestartAfterStop checks that a manager stopped by the
+// actor system's shutdown can be started again by the next Start, and that it
+// still passivates afterwards.
+func TestPassivationManager_RestartAfterStop(t *testing.T) {
+	ctx := context.Background()
+	manager := newPassivationManager(log.DiscardLogger)
+
+	triggered := make(chan struct{}, 1)
+	manager.passivateFn = func(entry *passivationEntry) bool {
+		select {
+		case triggered <- struct{}{}:
+		default:
+		}
+		return true
+	}
+
+	manager.Start(ctx)
+	manager.Stop(ctx)
+	manager.Start(ctx)
+	defer manager.Stop(ctx)
+
+	strategy := passivation.NewTimeBasedStrategy(25 * time.Millisecond)
+	pid := newPassivationPID(t, "restarted", strategy)
+	pid.latestReceiveTimeNano.Store(time.Now().Add(-time.Minute).UnixNano())
+	manager.Register(pid, strategy)
+
+	select {
+	case <-triggered:
+	case <-time.After(time.Second):
+		t.Fatal("expected the restarted manager to passivate")
+	}
+}
+
 // nolint
 func TestPassivationManager_MessageCountTrigger(t *testing.T) {
 	manager := newPassivationManager(log.DiscardLogger)
@@ -207,6 +240,124 @@ func TestPassivationManager_ProcessMessageEntry_PostPassivate(t *testing.T) {
 		default:
 			t.Fatal("expected entry to be scheduled again")
 		}
+	})
+}
+
+// TestPassivationManager_Defer checks how an attempt refused by a busy
+// participant is retried: not at once, which would spin while the participant
+// stays busy, but on the next message-count trigger.
+func TestPassivationManager_Defer(t *testing.T) {
+	newEntry := func(manager *passivationManager, id string, strategy passivation.Strategy) *passivationEntry {
+		entry := &passivationEntry{
+			target:   &MockPassivationParticipant{id: id, last: time.Now()},
+			id:       id,
+			strategy: strategy,
+			pending:  true,
+			enqueued: true,
+		}
+		manager.entries[id] = entry
+		return entry
+	}
+
+	t.Run("a deferred attempt is not re-enqueued", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		entry := newEntry(manager, "busy", passivation.NewMessageCountBasedStrategy(1))
+		manager.passivateFn = func(pe *passivationEntry) bool {
+			manager.Defer(pe.target)
+			return false
+		}
+
+		manager.processMessageEntry(entry)
+
+		manager.mu.Lock()
+		require.False(t, entry.enqueued)
+		require.False(t, entry.deferred)
+		require.True(t, entry.pending)
+		manager.mu.Unlock()
+		require.Equal(t, 0, len(manager.messageTriggers))
+	})
+
+	t.Run("a deferred attempt is re-enqueued when a trigger was raised meanwhile", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		manager.started.Store(true)
+
+		entry := newEntry(manager, "busy-then-idle", passivation.NewMessageCountBasedStrategy(1))
+		manager.passivateFn = func(pe *passivationEntry) bool {
+			manager.Defer(pe.target)
+
+			// the participant ends its turn while the attempt is still running
+			manager.mu.Lock()
+			pe.triggers++
+			manager.mu.Unlock()
+			return false
+		}
+
+		manager.processMessageEntry(entry)
+
+		manager.mu.Lock()
+		require.True(t, entry.enqueued)
+		manager.mu.Unlock()
+
+		select {
+		case got := <-manager.messageTriggers:
+			require.Equal(t, entry, got)
+		default:
+			t.Fatal("expected entry to be scheduled again")
+		}
+	})
+
+	t.Run("Defer ignores unknown and unnamed participants", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+
+		entry := newEntry(manager, "known", passivation.NewMessageCountBasedStrategy(1))
+		manager.Defer(&MockPassivationParticipant{id: "unknown"})
+		manager.Defer(&MockPassivationParticipant{})
+
+		manager.mu.Lock()
+		require.False(t, entry.deferred)
+		manager.mu.Unlock()
+	})
+
+	t.Run("a deferred time-based attempt is retried a whole timeout later", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+
+		// the participant has been busy for longer than its timeout, so a
+		// deadline computed from its latest activity is already past
+		const timeout = time.Minute
+		participant := &MockPassivationParticipant{id: "busy-timer", last: time.Now().Add(-2 * timeout)}
+		entry := &passivationEntry{
+			target:   participant,
+			id:       participant.id,
+			strategy: passivation.NewTimeBasedStrategy(timeout),
+			timeout:  timeout,
+			deadline: time.Now().Add(-timeout),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+
+		var attempts int
+		manager.passivateFn = func(pe *passivationEntry) bool {
+			attempts++
+			if attempts > 1 {
+				// a second attempt means trigger is spinning: stop it
+				return true
+			}
+
+			manager.Defer(pe.target)
+			return false
+		}
+
+		before := time.Now()
+		manager.trigger(entry)
+
+		require.Equal(t, 1, attempts)
+		manager.mu.Lock()
+		require.False(t, entry.deferred)
+		require.False(t, entry.deadline.Before(before.Add(timeout)))
+		require.Equal(t, entry, manager.queue[0])
+		manager.mu.Unlock()
 	})
 }
 
@@ -472,7 +623,7 @@ func TestPassivationManager_TriggerPaths(t *testing.T) {
 		manager := newPassivationManager(log.DiscardLogger)
 		stub := &MockPassivationParticipant{
 			id:   "requeue",
-			last: time.Now(),
+			last: time.Now().Add(-2 * time.Second),
 		}
 		entry := &passivationEntry{
 			target:   stub,
@@ -503,7 +654,7 @@ func TestPassivationManager_TriggerPaths(t *testing.T) {
 		manager := newPassivationManager(log.DiscardLogger)
 		stub := &MockPassivationParticipant{
 			id:   "paused-mid-trigger",
-			last: time.Now(),
+			last: time.Now().Add(-2 * time.Second),
 		}
 		entry := &passivationEntry{
 			target:   stub,
@@ -527,6 +678,182 @@ func TestPassivationManager_TriggerPaths(t *testing.T) {
 		manager.mu.Unlock()
 		require.True(t, tracked)
 	})
+
+	t.Run("re-arms for the remaining idle time instead of firing on a stale deadline", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		timeout := time.Second
+		// the participant was active just now, but its coalesced Touch has not
+		// moved the heap deadline, which has already expired
+		stub := &MockPassivationParticipant{
+			id:   "stale-deadline",
+			last: time.Now(),
+		}
+		entry := &passivationEntry{
+			target:   stub,
+			id:       stub.id,
+			strategy: passivation.NewTimeBasedStrategy(timeout),
+			timeout:  timeout,
+			deadline: time.Now().Add(-time.Second),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+
+		attempted := false
+		manager.passivateFn = func(*passivationEntry) bool {
+			attempted = true
+			return true
+		}
+
+		manager.trigger(entry)
+
+		require.False(t, attempted, "the participant was attempted before it had been idle for the timeout")
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Equal(t, entry, manager.queue[0])
+		require.Equal(t, 0, entry.index)
+		require.Equal(t, stub.last.Add(timeout), entry.deadline)
+	})
+
+	t.Run("retries a refused attempt a whole timeout later", func(t *testing.T) {
+		manager := newPassivationManager(log.DiscardLogger)
+		timeout := time.Second
+		stub := &MockPassivationParticipant{
+			id:   "refused",
+			last: time.Now().Add(-time.Minute),
+		}
+		entry := &passivationEntry{
+			target:   stub,
+			id:       stub.id,
+			strategy: passivation.NewTimeBasedStrategy(timeout),
+			timeout:  timeout,
+			deadline: time.Now().Add(-time.Second),
+		}
+		manager.entries[entry.id] = entry
+		cheaps.Push(&manager.queue, entry)
+
+		// refused without Defer and without any activity: the entry must not
+		// come back with a deadline that has already passed
+		attempts := 0
+		manager.passivateFn = func(*passivationEntry) bool {
+			attempts++
+			return false
+		}
+
+		before := time.Now()
+		manager.trigger(entry)
+
+		require.Equal(t, 1, attempts)
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		require.Equal(t, entry, manager.queue[0])
+		require.False(t, entry.deadline.Before(before.Add(timeout)), "the refused entry was re-armed less than a timeout from now")
+	})
+}
+
+// TestPassivationManager_StopReturnsWhileRefusedEntryIsExpired checks that Stop
+// returns while an expired entry keeps refusing its attempts, which is what
+// every registered actor does once the actor system is shutting down.
+func TestPassivationManager_StopReturnsWhileRefusedEntryIsExpired(t *testing.T) {
+	ctx := context.Background()
+	manager := newPassivationManager(log.DiscardLogger)
+
+	attempted := make(chan struct{}, 1)
+	manager.passivateFn = func(*passivationEntry) bool {
+		select {
+		case attempted <- struct{}{}:
+		default:
+		}
+
+		return false
+	}
+
+	manager.Start(ctx)
+
+	strategy := passivation.NewTimeBasedStrategy(20 * time.Millisecond)
+	stub := &MockPassivationParticipant{id: "refusing", last: time.Now().Add(-time.Minute)}
+	manager.Register(stub, strategy)
+
+	select {
+	case <-attempted:
+	case <-time.After(time.Second):
+		t.Fatal("expected the expired entry to be attempted")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		manager.Stop(ctx)
+		close(stopped)
+	}()
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return while an expired entry kept refusing its attempts")
+	}
+}
+
+// TestPassivationManager_RunObservesStopBeforeExpiredEntry checks that the run
+// loop reads the stop signal before attempting an expired entry, so a backlog
+// of expired entries does not delay Stop by one attempt each.
+func TestPassivationManager_RunObservesStopBeforeExpiredEntry(t *testing.T) {
+	ctx := context.Background()
+	manager := newPassivationManager(log.DiscardLogger)
+
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	attempts := make(chan string, 2)
+	manager.passivateFn = func(entry *passivationEntry) bool {
+		attempts <- entry.id
+		entered <- struct{}{}
+		<-release
+		return false
+	}
+
+	manager.Start(ctx)
+
+	strategy := passivation.NewTimeBasedStrategy(time.Minute)
+	first := &MockPassivationParticipant{id: "first", last: time.Now().Add(-time.Hour)}
+	manager.Register(first, strategy)
+
+	// the manager is now inside the attempt of "first"
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("expected the first entry to be attempted")
+	}
+
+	second := &MockPassivationParticipant{id: "second", last: time.Now().Add(-time.Hour)}
+	manager.Register(second, strategy)
+
+	stopped := make(chan struct{})
+	go func() {
+		manager.Stop(ctx)
+		close(stopped)
+	}()
+
+	// Stop is waiting on the attempt in progress: let it finish
+	require.Eventually(t, func() bool {
+		select {
+		case <-manager.stop:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond)
+	close(release)
+
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Stop did not return")
+	}
+
+	require.Equal(t, "first", <-attempts)
+	select {
+	case id := <-attempts:
+		t.Fatalf("entry %q was attempted after Stop was called", id)
+	default:
+	}
 }
 
 func TestPassivationManager_Notify(t *testing.T) {

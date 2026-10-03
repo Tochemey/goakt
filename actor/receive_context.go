@@ -72,7 +72,7 @@ import (
 //	func (a *MyActor) Receive(ctx *actor.ReceiveContext) {
 //	    switch msg := ctx.Message().(type) {
 //	    case *Ping:
-//	        ctx.Respond(&Pong{}) // Ask reply
+//	        ctx.Response(&Pong{}) // Ask reply
 //	    case *Work:
 //	        ctx.PipeToName("worker", func() (any, error) {
 //	            return doWork(msg), nil
@@ -134,11 +134,15 @@ func (rctx *ReceiveContext) Self() *PID {
 	return rctx.self
 }
 
-// Err records a non-fatal error observed during message handling.
+// Err records an error observed during message handling.
 //
-// Use Err to report issues to the runtime without panicking. Supervisors or
-// the actor system may log, escalate, or apply policies based on this error.
-// Calling Err does not stop message processing immediately.
+// Use Err to report issues to the runtime without panicking. Calling Err does
+// not stop the current handler; once it returns, the error is handed to the
+// actor's supervisor, except ErrDead, which is never supervised. An error the
+// supervisor has no directive for suspends the actor, and the default
+// supervisor only has directives for panics: an actor
+// that must keep running after ordinary errors needs a supervisor configured
+// with WithAnyErrorDirective or WithDirective.
 //
 // Typical usage:
 //
@@ -321,10 +325,11 @@ func (rctx *ReceiveContext) Stash() {
 	}
 }
 
-// Unstash dequeues the oldest stashed message and prepends it to the mailbox.
+// Unstash takes the oldest stashed message and sends it to the actor again.
 //
-// The unstashed message will be processed before any newly arriving messages,
-// preserving the original arrival order relative to other stashed messages.
+// The message is appended to the mailbox: it is handled after the messages
+// already queued, and before those that arrive later. Stashed messages keep
+// their arrival order relative to each other.
 func (rctx *ReceiveContext) Unstash() {
 	recipient := rctx.self
 	if err := recipient.unstash(); err != nil {
@@ -332,9 +337,11 @@ func (rctx *ReceiveContext) Unstash() {
 	}
 }
 
-// UnstashAll moves all stashed messages back to the mailbox in arrival order.
+// UnstashAll sends every stashed message to the actor again, oldest first.
 //
-// Older stashed messages are delivered before newer ones. Use this after a behavior
+// The messages are appended to the mailbox, behind the messages already queued:
+// a handler that stashed while waiting for an event sees the stashed messages
+// after everything that queued up meanwhile. Use this after a behavior
 // transition that enables processing of the previously deferred messages.
 func (rctx *ReceiveContext) UnstashAll() {
 	recipient := rctx.self
@@ -374,8 +381,11 @@ func (rctx *ReceiveContext) BatchTell(to *PID, messages ...any) {
 // delivery error, the error is recorded via Err and the returned response may be nil.
 // Choose timeouts carefully to avoid false positives.
 //
-// Prefer small timeouts and design protocols so that timeouts are treated as
-// expected failures.
+// Because the error goes through Err, a timeout is supervised like any handler
+// error: under the default supervisor it suspends this actor. To treat timeouts
+// as expected failures, configure the actor's supervisor (for instance with
+// WithAnyErrorDirective(ResumeDirective)), or call the PID's Ask, which returns
+// the error instead of recording it.
 func (rctx *ReceiveContext) Ask(to *PID, message any, timeout time.Duration) (response any) {
 	self := rctx.self
 	ctx := rctx.withoutCancel()
@@ -405,7 +415,10 @@ func (rctx *ReceiveContext) Ask(to *PID, message any, timeout time.Duration) (re
 //
 // Timeouts and options:
 //   - Per-call behavior (timeout, mode/policy) can be customized via RequestOption.
-//     Defaults may be configured at actor/system level.
+//     Without WithReentrancyMode the request uses the mode the actor was given
+//     through WithReentrancy. There is no default timeout, at actor or system
+//     level: without WithRequestTimeout the request stays in flight until it is
+//     answered or cancelled.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
 func (rctx *ReceiveContext) Request(to *PID, message any, opts ...RequestOption) RequestCall {
@@ -437,7 +450,10 @@ func (rctx *ReceiveContext) Request(to *PID, message any, opts ...RequestOption)
 //
 // Options:
 //   - Per-call behavior (timeout, mode/policy, etc.) can be customized via RequestOption.
-//     Defaults may be configured at actor/system level.
+//     Without WithReentrancyMode the request uses the mode the actor was given
+//     through WithReentrancy. There is no default timeout, at actor or system
+//     level: without WithRequestTimeout the request stays in flight until it is
+//     answered or cancelled.
 //
 // On failure to initiate the request, Err is set and the returned call is nil.
 func (rctx *ReceiveContext) RequestName(actorName string, message any, opts ...RequestOption) RequestCall {
@@ -612,8 +628,11 @@ func (rctx *ReceiveContext) Stop(child *PID) {
 
 // Forward forwards the current message to another local PID, preserving the original sender.
 //
-// The receiver of the forwarded message sees the original Sender.
-// This is only valid within a single-node system where the target PID is known and running.
+// The receiver of the forwarded message sees the original Sender. When the current
+// message is an Ask, the forwarded message keeps its reply route: the receiver's
+// Response answers the original asker, within the asker's remaining timeout.
+// This is only valid within a single-node system where the target PID is known and running:
+// forwarded to a remote PID, the message is sent with Tell and an Ask's reply is lost.
 // No action is taken if the target is not running.
 func (rctx *ReceiveContext) Forward(to *PID) {
 	message := rctx.Message()
@@ -638,6 +657,7 @@ func (rctx *ReceiveContext) Forward(to *PID) {
 
 	receiveContext := getContext(to.ctxShard)
 	receiveContext.build(ctx, sender, to, message, true)
+	receiveContext.inheritReplyRoute(rctx)
 	to.doReceive(receiveContext)
 }
 
@@ -684,8 +704,9 @@ func (rctx *ReceiveContext) RemoteReSpawn(host string, port int, name string) *P
 // PipeTo runs a task asynchronously and sends its successful result to the target PID.
 //
 // The calling actor remains responsive while the task executes. On success, the
-// returned proto.Message is delivered to the target's mailbox. On failure, behavior
-// is controlled by PipeOptions (e.g., error mapping, retries).
+// task's result is delivered to the target's mailbox. On failure, the error is
+// sent to the dead letters. The options are WithTimeout, which bounds the wait
+// for the result, and WithCircuitBreaker; only one may be given.
 //
 // The task runs outside the actor's mailbox thread. Avoid mutating the actor's
 // internal state inside the task. Communicate results via the returned message.
@@ -854,6 +875,23 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message an
 	rctx.ctx = ctx
 	rctx.response = getResponseChannel()
 	return rctx
+}
+
+// inheritReplyRoute gives a forwarded message the reply route of the message
+// it forwards, so that answering it answers the original Ask: the asker's
+// response channel, or the routed-reply metadata of an Ask that arrived over
+// remoting, and the moment the asker stops waiting. A message that is not an
+// Ask has no route to inherit and is left as built.
+func (rctx *ReceiveContext) inheritReplyRoute(from *ReceiveContext) {
+	if from.response != nil {
+		rctx.response = from.response
+		// a pooled context may still carry the guard of an earlier Ask
+		rctx.responseClosed.Store(false)
+	}
+
+	rctx.requestID = from.requestID
+	rctx.requestReplyTo = from.requestReplyTo
+	rctx.deadline = from.deadline
 }
 
 // releaseRemoteHold grants back this message's flow-control credit share, if

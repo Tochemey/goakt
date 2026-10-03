@@ -85,6 +85,7 @@ func (d *dispatcher) start() {
 	if !d.started.CompareAndSwap(false, true) {
 		return
 	}
+
 	for _, w := range d.workers {
 		go w.run()
 	}
@@ -99,9 +100,11 @@ func (d *dispatcher) signalStop() {
 	if d == nil {
 		return
 	}
+
 	if !d.stopping.CompareAndSwap(false, true) {
 		return
 	}
+
 	d.readyQueue.close()
 	d.supervisor.stop()
 }
@@ -114,7 +117,7 @@ func (d *dispatcher) schedule(s schedulable) {
 }
 
 // submitSupervision hands a failing actor and its signal to the shared
-// supervision consumer.
-func (d *dispatcher) submitSupervision(pid *PID, signal *supervisionSignal) {
-	d.supervisor.Submit(pid, signal)
+// supervision consumer, and reports whether the consumer took it.
+func (d *dispatcher) submitSupervision(pid *PID, signal *supervisionSignal) bool {
+	return d.supervisor.Submit(pid, signal)
 }

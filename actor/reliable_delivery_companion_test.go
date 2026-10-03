@@ -792,13 +792,29 @@ func TestReliableEndpointDataCenterRejected(t *testing.T) {
 }
 
 func TestReliableEndpointRemoteChildSpawnRejected(t *testing.T) {
-	// the remote child spawn request cannot carry reliable-delivery settings,
-	// so the options are rejected instead of silently dropped
+	// a child endpoint could never get its controller, so the options are
+	// rejected instead of silently dropped
 	remoteParent := newRemotePID(address.New("parent", "remote-system", "127.0.0.1", 8080), nil)
 
 	pid, err := remoteParent.SpawnChild(context.TODO(), "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
-	require.ErrorContains(t, err, "remote children")
+	require.ErrorIs(t, err, gerrors.ErrReliableChildSpawnUnsupported)
 	assert.Nil(t, pid)
+}
+
+func TestReliableEndpointLocalChildSpawnRejected(t *testing.T) {
+	// only a top-level spawn creates an endpoint's controller, so a local
+	// child endpoint is rejected instead of spawned without one
+	ctx, system := newCompanionTestSystem(t)
+
+	parent, err := system.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+
+	pid, err := parent.SpawnChild(ctx, "orders-producer", &MockReliableProducer{}, AsReliableProducer("orders-consumer"))
+	require.ErrorIs(t, err, gerrors.ErrReliableChildSpawnUnsupported)
+	assert.Nil(t, pid)
+
+	_, ok := system.actors.node(parent.childAddress("orders-producer").String())
+	assert.False(t, ok)
 }
 
 func TestReliableEndpointRemotingOnlyRemotePlacementRejected(t *testing.T) {

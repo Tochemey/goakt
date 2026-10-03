@@ -26,7 +26,8 @@ package actor
 //
 // Available strategies:
 //   - RoundRobinRouting:
-//     Distributes messages one at a time to each routee in sequence.
+//     Distributes messages one at a time to each routee in sequence, in a fixed
+//     order (spawn order), cycling back to the first after the last.
 //     Useful for balancing uniform, stateless workloads.
 //     Example:
 //     // creates a router that round-robins messages across 5 workers
@@ -48,7 +49,9 @@ package actor
 //     Example:
 //     r := newRouter(5, &MyWorker{}, logger, WithConsistentHashRouter(myExtractor))
 //
-// Note: If a routee stops, it is removed from the internal map and no longer receives messages.
+// Note: If a routee stops, it is removed from the pool before the next message is routed and
+// no longer receives messages. A message that finds no live routee goes to the deadletter and
+// the router shuts down.
 type RoutingStrategy int
 
 const (

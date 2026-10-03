@@ -77,7 +77,7 @@ func WithRoutingStrategy(strategy RoutingStrategy) RouterOption {
 // Parameters:
 //
 //	within   - Total time budget allowed for obtaining any successful response.
-//	           Must be > 0. Starts counting when the first routee receives the message.
+//	           Must be > 0. Starts counting when the router handles the Broadcast.
 //	interval - Delay between successive attempts. Must be > 0 and < within for multiple routees
 //	           to be attempted. If interval >= within only the first routee is tried.
 //
@@ -224,7 +224,7 @@ func WithConsistentHashHasher(h hash.Hasher) RouterOption {
 //
 // Notes:
 //   - Mutually exclusive with WithRestartRouteeOnFailure and WithStopRouteeOnFailure; the last applied wins.
-//   - If no directive option is provided, the default is Restart.
+//   - If no directive option is provided, the default is Stop.
 func WithResumeRouteeOnFailure() RouterOption {
 	return RouterOptionFunc(func(r *router) {
 		r.supervisorDirective = resumeRoutee
@@ -238,6 +238,12 @@ func WithResumeRouteeOnFailure() RouterOption {
 //   - The failing message is not retried by the router.
 //   - Subsequent messages may be processed after the restart.
 //   - Use when local state may be corrupted or requires re-initialization.
+//
+// Parameters:
+//
+//	maxRetries - Maximum number of restart attempts for one failure.
+//	timeout    - Delay between two successive restart attempts, not a bound on their total duration.
+//	             When maxRetries is 0 or timeout <= 0 a single attempt is made.
 //
 // Notes:
 //   - Mutually exclusive with WithResumeRouteeOnFailure and WithStopRouteeOnFailure; the last applied wins.

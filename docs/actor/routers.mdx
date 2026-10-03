@@ -28,15 +28,18 @@ The router unwraps the payload and dispatches it to its routees based on the rou
 
 These strategies never wait for replies. They are fire-and-forget; routees process messages asynchronously.
 
-- **RoundRobin**: Rotate through routees in order.
+- **RoundRobin**: Rotate through routees in a fixed order (spawn order), cycling back to the first after the last.
 - **Random**: Pick a random routee.
-- **FanOut**: Send to all routees concurrently (default).
+- **FanOut**: Send a copy to every routee (default). Each routee receives the copies in the order the router handled
+  the broadcasts.
 - **ConsistentHash**: Route messages with the same key to the same routee (sticky sessions).
 
 ### Reply-based strategies
 
 When you need the router to observe replies and relay the first successful response back to the sender, use one of
-these. Outcomes are delivered **asynchronously** to the sender as ordinary messages (not via `Ask`).
+these. Outcomes are delivered **asynchronously** to the sender as ordinary messages (not via `Ask`). The router does
+not wait for the routees itself: each request is gathered on its own goroutine, so a request that nobody answers does
+not delay the requests queued behind it.
 
 - **Scatter-Gather First**: Sends the request to all routees concurrently. The first successful reply within the time
   budget is forwarded to the original sender. Late replies are ignored. If no routee replies in time, the sender
@@ -72,7 +75,7 @@ Parameters:
 - **AsScatterGatherFirst**: Use scatter-gather-first. `within` is the total time budget for any reply.
 - **AsTailChopping**: Use tail-chopping. `within` is the global deadline; `interval` is the delay between successive
   attempts. Requires `interval` > 0 and `within` > 0; typically `interval` < `within`.
-- **WithRestartRouteeOnFailure**: On routee panic: restart the routee (up to `maxRetries` within `timeout`).
+- **WithRestartRouteeOnFailure**: On routee panic: restart the routee (up to `maxRetries` attempts, `timeout` apart).
 - **WithStopRouteeOnFailure**: On routee panic: stop and remove the routee from the pool. **Default.**.
 - **WithResumeRouteeOnFailure**: On routee panic: resume the routee (keep state, continue processing).
 
@@ -102,7 +105,7 @@ system.SpawnRouter(ctx, "lookup", 5, &LookupActor{}, actor.AsScatterGatherFirst(
 // Tail-chopping: try every 200ms for up to 2s
 system.SpawnRouter(ctx, "probe", 5, &ProbeActor{}, actor.AsTailChopping(2*time.Second, 200*time.Millisecond))
 
-// Restart failing routees up to 3 times within 1s
+// Restart failing routees, up to 3 attempts 1s apart
 system.SpawnRouter(ctx, "resilient", 5, &Worker{}, actor.WithRestartRouteeOnFailure(3, time.Second))
 ```
 
@@ -173,4 +176,12 @@ When a routee panics, the router receives a `PanicSignal` and applies the config
 - **Restart**: Restart the routee (with retry limits)
 - **Resume**: Keep the routee and continue processing
 
-If all routees are stopped and none remain, the router shuts down and unhandled messages go to the deadletter.
+A routee that stops on its own (for example by calling `ctx.Shutdown()`) is removed from the pool the next time the
+router routes a message; no message is sent to it. When a `Broadcast` finds no live routee, whether the routees were
+removed by the Stop directive, by scaling down or because they stopped on their own, that message goes to the
+deadletter and the router shuts down.
+
+<Note>
+Scaling the pool up after routees were removed always adds the requested number of routees; the new routees get fresh
+names, so they never collide with the routees still in the pool.
+</Note>

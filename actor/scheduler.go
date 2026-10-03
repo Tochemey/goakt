@@ -74,6 +74,11 @@ type scheduler struct {
 	mu sync.Mutex
 	// underlying Scheduler
 	quartzScheduler quartz.Scheduler
+	// cancel ends the run context handed to the quartz scheduler. The scheduler owns that
+	// context instead of using the one passed to Start: quartz stops itself when its context
+	// ends, so the scheduler's lifetime must be bound to Stop alone, not to a caller's
+	// start-up context that may be cancelled once the system is up.
+	cancel context.CancelFunc
 	// states whether the quartzScheduler has started or not
 	started *atomic.Bool
 	// define the logger
@@ -90,8 +95,9 @@ type scheduler struct {
 	actorSystem ActorSystem
 	// scheduledCount and cancelledCount total the schedules accepted and the
 	// cancellations honored since the scheduler was created. They feed the
-	// scheduler metrics scrape, are written only by the scheduling API calls,
-	// and survive Stop so the exported counters never decrease.
+	// scheduler metrics scrape and are written only by the scheduling API calls.
+	// Stop leaves them untouched, but the actor system builds a new scheduler on
+	// every Start, so a restart of the system zeroes them.
 	scheduledCount atomic.Int64
 	cancelledCount atomic.Int64
 }
@@ -119,6 +125,11 @@ type scheduleMeta struct {
 	path Path
 	// grain is the target Grain identity; nil for an actor schedule.
 	grain *GrainIdentity
+	// fireAt is the instant a one-shot schedule is due to fire; zero for a recurring
+	// schedule. ResumeSchedule needs it: a quartz run-once trigger expires the moment it is
+	// scheduled and a paused job loses its queued fire time, so resuming a one-shot means
+	// scheduling it again for whatever remains of this instant.
+	fireAt time.Time
 }
 
 // newScheduler creates an instance of scheduler
@@ -157,17 +168,24 @@ func newScheduler(logger log.Logger, shutdownTimeout time.Duration, system Actor
 	return scheduler
 }
 
-// Start starts the scheduler
-func (x *scheduler) Start(ctx context.Context) {
+// Start starts the scheduler. The scheduler runs until Stop is called: the context given
+// here is not used for its lifetime, since a caller's start-up context is routinely cancelled
+// once the actor system is up and the schedules must outlive it.
+func (x *scheduler) Start(_ context.Context) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.logger.Info("starting messages scheduler...")
+	ctx, cancel := context.WithCancel(context.Background())
+	x.cancel = cancel
 	x.quartzScheduler.Start(ctx)
 	x.started.Store(x.quartzScheduler.IsStarted())
 	x.logger.Info("messages scheduler started.:)")
 }
 
-// Stop stops the scheduler
+// Stop stops the scheduler. It releases the scheduler lock before waiting for in-flight
+// job executions: a fired one-shot takes that lock to release its reference (see
+// oneShotJobFn), and waiting for it while holding the lock would stall the shutdown
+// until shutdownTimeout.
 func (x *scheduler) Stop(ctx context.Context) {
 	if !x.started.Load() {
 		return
@@ -175,10 +193,11 @@ func (x *scheduler) Stop(ctx context.Context) {
 
 	x.logger.Info("stopping messages scheduler...")
 	x.mu.Lock()
-	defer x.mu.Unlock()
 	_ = x.quartzScheduler.Clear()
 	x.quartzScheduler.Stop()
+	x.cancel()
 	x.started.Store(x.quartzScheduler.IsStarted())
+	x.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(ctx, x.shutdownTimeout)
 	defer cancel()
@@ -191,11 +210,14 @@ func (x *scheduler) Stop(ctx context.Context) {
 
 // ScheduleOnce schedules a one-time delivery of a message to the specified actor (PID) after a given delay.
 //
-// The message will be sent exactly once to the target actor after the specified duration has elapsed.
-// This is a fire-and-forget scheduling mechanism — once delivered, the message will not be retried or repeated.
+// The message is delivered at most once: a single delivery is attempted once the specified duration has
+// elapsed, and it is not retried when the target actor is not running at that time.
+// This is a fire-and-forget scheduling mechanism — the delivery is never retried or repeated.
+// Once the schedule has fired its reference is released: management calls on it return
+// ErrScheduledReferenceNotFound and the reference can be used again.
 //
 // Parameters:
-//   - message: The proto.Message to be sent.
+//   - message: The message to be sent.
 //   - pid: The PID of the actor that will receive the message.
 //   - delay: The duration to wait before delivering the message.
 //   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
@@ -224,14 +246,14 @@ func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
+	fireAt := time.Now().Add(delay)
 
-	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
+	detail := quartz.NewJobDetail(job.NewFunctionJob(x.oneShotJobFn(reference, jobKey, jobFn)), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay)); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{path: to.Path(), fireAt: fireAt})
 	x.scheduledCount.Inc()
 	return nil
 }
@@ -239,10 +261,12 @@ func (x *scheduler) ScheduleOnce(message any, to *PID, delay time.Duration, opts
 // Schedule schedules a recurring message to be delivered to the specified actor (PID) at a fixed interval.
 //
 // This function sets up a message to be sent repeatedly to the target actor, with each delivery occurring
-// after the specified interval. The scheduling continues until explicitly canceled or if the actor is no longer available.
+// after the specified interval. The scheduling continues until it is explicitly canceled or the scheduler
+// stops; a target actor that is no longer running does not end the schedule, each tick to it simply fails
+// and is discarded.
 //
 // Parameters:
-//   - message: The proto.Message to be delivered at regular intervals.
+//   - message: The message to be delivered at regular intervals.
 //   - pid: The PID of the actor that will receive the message.
 //   - interval: The time duration between each delivery of the message.
 //   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
@@ -272,14 +296,13 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval)); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{path: to.Path()})
 	x.scheduledCount.Inc()
 	return nil
 }
@@ -290,7 +313,7 @@ func (x *scheduler) Schedule(message any, to *PID, interval time.Duration, opts 
 // The message will be sent to the target actor according to the schedule defined by the cron expression.
 //
 // Parameters:
-//   - message: The proto.Message to be delivered.
+//   - message: The message to be delivered.
 //   - pid: The PID of the actor that will receive the message.
 //   - cronExpression: A standard cron-formatted string (e.g., "0 */5 * * * *") representing the schedule.
 //   - opts: Optional ScheduleOption values such as WithReference to control scheduling behavior.
@@ -360,22 +383,22 @@ func (x *scheduler) ScheduleWithCron(message any, to *PID, cronExpression string
 
 	reference := senderConfig.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{path: to.Path()})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, trigger); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{path: to.Path()})
 	x.scheduledCount.Inc()
 	return nil
 }
 
 // ScheduleGrainOnce schedules a one-time delivery of a message to the Grain identified by the given identity after a given delay.
 //
-// The message is delivered exactly once to the target Grain after the specified duration has elapsed.
-// This is a fire-and-forget scheduling mechanism: once delivered, the message is not retried or repeated.
+// The message is delivered at most once: a single delivery is attempted once the specified duration has
+// elapsed. This is a fire-and-forget scheduling mechanism: the delivery is never retried or repeated, and
+// once the schedule has fired its reference is released, as for ScheduleOnce.
 // Delivery goes through TellGrain, so the Grain is located, or activated, wherever it lives when the
 // schedule fires; a Grain passivated in the meantime is activated again by the delivery.
 //
@@ -410,14 +433,14 @@ func (x *scheduler) ScheduleGrainOnce(message any, identity *GrainIdentity, dela
 
 	reference := config.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{grain: identity})
+	fireAt := time.Now().Add(delay)
 
-	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
+	detail := quartz.NewJobDetail(job.NewFunctionJob(x.oneShotJobFn(reference, jobKey, jobFn)), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay)); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{grain: identity, fireAt: fireAt})
 	x.scheduledCount.Inc()
 	return nil
 }
@@ -461,14 +484,13 @@ func (x *scheduler) ScheduleGrain(message any, identity *GrainIdentity, interval
 
 	reference := config.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{grain: identity})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, quartz.NewSimpleTrigger(interval)); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{grain: identity})
 	x.scheduledCount.Inc()
 	return nil
 }
@@ -544,14 +566,13 @@ func (x *scheduler) ScheduleGrainWithCron(message any, identity *GrainIdentity, 
 
 	reference := config.Reference()
 	jobKey := quartz.NewJobKey(reference)
-	x.scheduledKeys.Set(reference, jobKey)
-	x.recordSchedule(reference, &scheduleMeta{grain: identity})
 
 	detail := quartz.NewJobDetail(job.NewFunctionJob(jobFn), jobKey)
 	if err := x.quartzScheduler.ScheduleJob(detail, trigger); err != nil {
 		return err
 	}
 
+	x.recordSchedule(reference, jobKey, &scheduleMeta{grain: identity})
 	x.scheduledCount.Inc()
 	return nil
 }
@@ -594,6 +615,7 @@ func (x *scheduler) CancelSchedule(reference string) error {
 //
 // This function temporarily halts the delivery of the scheduled message. It can be resumed later using a corresponding resume mechanism,
 // depending on the scheduler's capabilities. If the message has already been delivered or cannot be found, an error is returned.
+// A paused one-shot schedule keeps its original fire time; see ResumeSchedule for what happens once it is resumed.
 //
 // Parameters:
 //   - reference: The message reference previously used when scheduling the message
@@ -621,6 +643,10 @@ func (x *scheduler) PauseSchedule(reference string) error {
 // This function reactivates a scheduled message that was previously paused, allowing it to continue toward delivery.
 // If the message has already been delivered, canceled, or cannot be found, an error is returned.
 //
+// A resumed one-shot schedule (ScheduleOnce, ScheduleGrainOnce) keeps the fire time it was given when
+// it was scheduled: resumed before that time it still fires at that time, resumed after that time it
+// fires immediately.
+//
 // Parameters:
 //   - reference: The message reference previously used when scheduling the message
 //
@@ -639,6 +665,10 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 		return errors.ErrScheduledReferenceNotFound
 	}
 
+	if meta, ok := x.scheduledMeta.Get(reference); ok && !meta.fireAt.IsZero() {
+		return x.resumeOneShot(jobKey, meta.fireAt)
+	}
+
 	return x.quartzScheduler.ResumeJob(jobKey)
 }
 
@@ -647,7 +677,7 @@ func (x *scheduler) ResumeSchedule(reference string) error {
 //
 // It is purely read-only and has no effect on the schedules themselves. A schedule stops appearing
 // once it has been canceled (CancelSchedule) or, for one-shot schedules created via ScheduleOnce or
-// ScheduleGrainOnce, once it has fired and been delivered.
+// ScheduleGrainOnce, once it has fired.
 //
 // Returns an empty slice when the scheduler has not started or when nothing is currently scheduled.
 func (x *scheduler) ListSchedules() []ScheduleInfo {
@@ -663,8 +693,8 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 		}
 
 		if _, err := x.quartzScheduler.GetScheduledJob(jobKey); err != nil {
-			// only job-not-found means the schedule legitimately ended (fired one-shot or a
-			// removal path that skipped scheduledMeta); anything else is unexpected and logged
+			// only job-not-found means the schedule legitimately ended (a one-shot that fired
+			// but has not released its reference yet); anything else is unexpected and logged
 			if !stderrors.Is(err, quartz.ErrJobNotFound) {
 				x.logger.Warnf("failed to look up scheduled job reference=%s: %v", reference, err)
 			}
@@ -681,10 +711,69 @@ func (x *scheduler) ListSchedules() []ScheduleInfo {
 	return infos
 }
 
-// recordSchedule stores the introspection metadata for a newly created schedule.
-// Called by the actor and Grain scheduling methods right after the job key is registered.
-func (x *scheduler) recordSchedule(reference string, meta *scheduleMeta) {
+// recordSchedule stores the job key and the introspection metadata of a newly created schedule.
+// The actor and Grain scheduling methods call it only once quartz has accepted the job, so a
+// rejected registration (a duplicate reference, for instance) never alters what is recorded
+// for the schedule that already owns the reference.
+func (x *scheduler) recordSchedule(reference string, jobKey *quartz.JobKey, meta *scheduleMeta) {
+	x.scheduledKeys.Set(reference, jobKey)
 	x.scheduledMeta.Set(reference, meta)
+}
+
+// releaseSchedule forgets the reference of a one-shot schedule that has fired, provided the
+// reference still names that schedule's job key: the reference may have been reused for a
+// new schedule between the job leaving the quartz queue and this call. It must be called
+// with x.mu held so the comparison and the removal are atomic with the scheduling methods.
+func (x *scheduler) releaseSchedule(reference string, jobKey *quartz.JobKey) {
+	current, ok := x.scheduledKeys.Get(reference)
+	if !ok || current != jobKey {
+		return
+	}
+
+	x.scheduledKeys.Delete(reference)
+	x.scheduledMeta.Delete(reference)
+}
+
+// oneShotJobFn wraps the job function of a one-shot schedule so that the schedule's reference is
+// released when the job fires. Quartz drops a run-once job from its queue before executing it,
+// so without this the reference would stay in the scheduler's maps until Stop, management calls
+// on it would report quartz's job-not-found error instead of ErrScheduledReferenceNotFound, and
+// the reference could never be reused. The reference is released before the delivery is attempted:
+// the schedule has already fired from the caller's point of view, and the outcome of the delivery
+// does not change that.
+func (x *scheduler) oneShotJobFn(reference string, jobKey *quartz.JobKey, jobFn func(context.Context) (bool, error)) func(context.Context) (bool, error) {
+	return func(ctx context.Context) (bool, error) {
+		x.mu.Lock()
+		x.releaseSchedule(reference, jobKey)
+		x.mu.Unlock()
+
+		return jobFn(ctx)
+	}
+}
+
+// resumeOneShot resumes a paused one-shot schedule due at fireAt. Quartz cannot resume it on its
+// own: its run-once trigger expired the moment the schedule was registered and the paused job has
+// lost its queued fire time, so quartz's ResumeJob would drop the job with ErrTriggerExpired.
+// The job is therefore taken out of the queue and scheduled again, under the same job key and
+// with the same job, for whatever remains until fireAt; a fire time that passed while the
+// schedule was paused makes it fire immediately. Must be called with x.mu held.
+func (x *scheduler) resumeOneShot(jobKey *quartz.JobKey, fireAt time.Time) error {
+	scheduled, err := x.quartzScheduler.GetScheduledJob(jobKey)
+	if err != nil {
+		return err
+	}
+
+	if !scheduled.JobDetail().Options().Suspended {
+		return fmt.Errorf("%w: %w", quartz.ErrIllegalState, quartz.ErrJobIsActive)
+	}
+
+	if err := x.quartzScheduler.DeleteJob(jobKey); err != nil {
+		return err
+	}
+
+	delay := max(time.Until(fireAt), 0)
+	detail := quartz.NewJobDetail(scheduled.JobDetail().Job(), jobKey)
+	return x.quartzScheduler.ScheduleJob(detail, quartz.NewRunOnceTrigger(delay))
 }
 
 // cronClaimTTL derives the cluster schedule-fire claim TTL from the gap between two

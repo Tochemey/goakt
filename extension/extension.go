@@ -42,10 +42,13 @@ type Extension interface {
 	// ID returns the unique identifier for the extension.
 	//
 	// The identifier must:
-	//   - Be no more than 255 characters long.
+	//   - Be between 2 and 255 characters long.
 	//   - Start with an alphanumeric character [a-zA-Z0-9].
 	//   - Contain only alphanumeric characters, hyphens (-), or underscores (_) thereafter.
 	//
-	// Identifiers that do not meet these constraints are considered invalid.
+	// Identifiers that do not meet these constraints are considered invalid. The
+	// identifier is validated without its surrounding spaces but stored as returned,
+	// so it should carry none. A later registration with the same identifier
+	// replaces the earlier one.
 	ID() string
 }

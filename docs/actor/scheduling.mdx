@@ -10,8 +10,9 @@ GoAkt includes a built-in scheduler for delayed and recurring message delivery. 
 [go-quartz](https://github.com/reugn/go-quartz), a minimalist scheduling library that supports the Quartz cron
 expression format.
 
-The scheduler starts automatically when the actor system starts and stops when the system shuts down. Use it for
-timeouts, periodic tasks, heartbeats, and cron-style jobs.
+The scheduler starts automatically when the actor system starts and stops when the system shuts down. Its lifetime is
+not tied to the context passed to `Start`: cancelling that context once the system is up, as a start-up timeout does,
+leaves the scheduler and its schedules running. Use it for timeouts, periodic tasks, heartbeats, and cron-style jobs.
 
 ## Location transparency
 
@@ -46,8 +47,8 @@ regardless of where it runs.
 - **WithReference**: Set a unique ID for cancel, pause, or resume. **Strongly recommended** if you plan to manage the
   schedule later. Without it, an auto-generated UUID is used and may not be retrievable. **Required** for
   `ScheduleWithCron` in cluster mode; see [Cluster-wide single fire](#cluster-wide-single-fire) below.
-- **WithSender**: Set the sender PID for the scheduled message. Defaults to `NoSender` (nil) so the target actor sees
-  `ctx.Sender` as nil.
+- **WithSender**: Set the sender PID for the scheduled message. Defaults to the system's `NoSender` actor, so the
+  target actor sees `ctx.Sender()` as that PID (compare it with `system.NoSender()`), not as nil.
 
 ## Examples
 
@@ -66,6 +67,13 @@ system.CancelSchedule("heartbeat-1")
 system.PauseSchedule("cleanup")
 system.ResumeSchedule("cleanup")
 ```
+
+### Pausing and resuming
+
+`PauseSchedule` holds a schedule back without removing it and `ResumeSchedule` lets it run again. A resumed interval
+or cron schedule picks up its next tick as usual. A one-shot schedule (`ScheduleOnce`, `ScheduleGrainOnce`) keeps
+the fire time it was scheduled with: resumed before that time, it still fires at that time; resumed after that time
+passed while it was paused, it fires immediately.
 
 ## Cron expression format
 
@@ -196,13 +204,15 @@ since an entry may be the winning claim other nodes are still arbitrating agains
 
 ## Sender and target actor
 
-For scheduled messages, the target actor receives the message via `Tell`. By default, `ctx.Sender()` is `nil`
-(NoSender). Use `WithSender(pid)` if you want the target to know which actor scheduled the message.
+For scheduled messages, the target actor receives the message via `Tell`. By default, `ctx.Sender()` is the system's
+`NoSender` actor (`system.NoSender()`), not `nil`. Use `WithSender(pid)` if you want the target to know which actor
+scheduled the message.
 
 ## Errors
 
 - **ErrSchedulerNotStarted**: Actor system not started; scheduler is started with the system.
-- **ErrScheduledReferenceNotFound**: Cancel, pause, or resume called with an unknown reference.
+- **ErrScheduledReferenceNotFound**: Cancel, pause, or resume called with an unknown reference, including the
+  reference of a one-shot schedule that has already fired or of a schedule that was already canceled.
 - **ErrRemotingDisabled**: Scheduling to a remote PID when remoting is not enabled.
 - **ErrScheduleReferenceRequired**: `ScheduleWithCron` in cluster mode called without `WithReference`.
 
@@ -211,7 +221,8 @@ For scheduled messages, the target actor receives the message via `Tell`. By def
 - **Fire-and-forget**: Scheduling does not provide built-in delivery guarantees (at-least-once or exactly-once). Ensure
   idempotency where needed.
 - **No retries**: If delivery fails (e.g., actor not found), the message is not retried.
-- **ScheduleOnce**: Delivered exactly once after the delay; no further deliveries.
+- **ScheduleOnce**: Delivered at most once after the delay; no further deliveries, and no delivery at all if the
+  target is not running when the schedule fires. Once it has fired, its reference is released and can be used again.
 
 ## Introspection
 
@@ -236,5 +247,6 @@ for _, info := range system.ListSchedules() {
 <Note>
   `ListSchedules` is purely read-only: it has no effect on the schedules themselves. A schedule stops appearing once it
   has been canceled via `CancelSchedule` or, for one-shot schedules created via `ScheduleOnce` or `ScheduleGrainOnce`,
-  once it has fired and been delivered: there is no need to clean anything up manually.
+  once it has fired: the scheduler releases a fired one-shot's reference on its own, so there is no need to clean
+  anything up manually.
 </Note>

@@ -214,6 +214,8 @@ func (x *topicActor) sendToLocalSubscribers(cctx context.Context, topic string, 
 				subscribers.Delete(subscriber.ID())
 			}
 		}
+
+		x.forgetTopicIfEmpty(topic, subscribers)
 	}
 }
 
@@ -298,13 +300,21 @@ func (x *topicActor) handleTopicStatsRequest(ctx *ReceiveContext) {
 // handleGetTopicStats answers a getTopicStats query with a TopicStats
 // snapshot: the local subscriber count, plus a fan-out TopicStatsRequest to
 // every peer's topic actor to count topic-actor instances with subscribers.
+//
+// The fan-out waits for every peer's topic actor to answer, so it runs on its
+// own goroutine and replies to the asker from there, and the topic actor's
+// turn ends at once. Run on the turn, two topic actors querying each other at
+// the same time would each wait for the other's turn, which is busy waiting,
+// until the ask timeout. A fan-out that fails sends no reply, so the asker
+// times out instead of getting an undercounted snapshot.
 func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 	query, ok := ctx.Message().(*getTopicStats)
 	if !ok {
 		return
 	}
 
-	local := x.localSubscriberCount(query.topic)
+	topic := query.topic
+	local := x.localSubscriberCount(topic)
 
 	var instances int32
 	if local > 0 {
@@ -312,25 +322,41 @@ func (x *topicActor) handleGetTopicStats(ctx *ReceiveContext) {
 		instances = 1
 	}
 
-	if x.actorSystem.InCluster() {
-		cctx := context.WithoutCancel(ctx.Context())
-		peers, err := x.cluster.Peers(cctx)
-		if err != nil {
-			ctx.Err(errors.NewInternalError(err))
-			return
-		}
-
-		from := pathToAddress(x.pid.Path())
-		remoteInstances, err := x.queryRemotePeerInstanceCount(cctx, from, x.actorSystem.getAskTimeout(), buildRemotePeers(peers), query.topic)
-		if err != nil {
-			ctx.Err(errors.NewInternalError(err))
-			return
-		}
-
-		instances += remoteInstances
+	if !x.actorSystem.InCluster() {
+		ctx.Response(NewTopicStats(topic, local, instances))
+		return
 	}
 
-	ctx.Response(NewTopicStats(query.topic, local, instances))
+	cctx := context.WithoutCancel(ctx.Context())
+	peers, err := x.cluster.Peers(cctx)
+	if err != nil {
+		ctx.Err(errors.NewInternalError(err))
+		return
+	}
+
+	// everything the fan-out reads off the actor is read here, on the turn
+	// (see queryRemotePeerInstanceCount). The reply channel is the asker's own
+	// and outlives this turn; the ReceiveContext does not, so nothing below
+	// touches ctx once the goroutine starts.
+	from := pathToAddress(x.pid.Path())
+	askTimeout := x.actorSystem.getAskTimeout()
+	remotePeers := buildRemotePeers(peers)
+	reply := ctx.response
+
+	go func() {
+		remoteInstances, err := x.queryRemotePeerInstanceCount(cctx, from, askTimeout, remotePeers, topic)
+		if err != nil {
+			x.logger.Warnf("failed to aggregate topic stats for topic=%s: %s", topic, err.Error())
+			return
+		}
+
+		select {
+		case reply <- NewTopicStats(topic, local, instances+remoteInstances):
+		default:
+			// a query sent with Tell has no reply channel, and an asker that
+			// already gave up never reads its channel
+		}
+	}()
 }
 
 // queryRemotePeerInstanceCount asks every remote peer's topic actor for its
@@ -384,27 +410,51 @@ func (x *topicActor) queryRemotePeerInstanceCount(cctx context.Context, from *ad
 
 // handleTerminated handles Terminated message
 // This is called when a subscriber actor is terminated.
-// We remove the subscriber from all topics it is subscribed to.
+// We remove the subscriber from all topics it is subscribed to, and the topics
+// it leaves empty from the registry.
 // This is important to avoid memory leaks and ensure that we do not send messages to terminated actors.
 func (x *topicActor) handleTerminated(msg *Terminated) {
 	actorID := msg.ActorPath().String()
-	x.topics.Range(func(topic string, subscribers *xsync.Map[string, *PID]) {
+	for _, topic := range x.topics.Keys() {
+		subscribers, ok := x.topics.Get(topic)
+		if !ok {
+			continue
+		}
+
 		if subscriber, ok := subscribers.Get(actorID); ok {
 			subscribers.Delete(subscriber.ID())
 			x.logger.Debugf("removed actor=%s from topic=%s", subscriber.Name(), topic)
 		}
-	})
+
+		x.forgetTopicIfEmpty(topic, subscribers)
+	}
 }
 
-// handleUnsubscribe handles Unsubscribe message
+// forgetTopicIfEmpty removes topic from the registry when subscribers, its
+// subscriber map, is empty, so a topic nobody listens to any more does not
+// stay registered for the life of the actor system. The registry is only
+// written on the topic actor's turn, so no subscriber can be added between
+// the check and the removal.
+func (x *topicActor) forgetTopicIfEmpty(topic string, subscribers *xsync.Map[string, *PID]) {
+	if subscribers.Len() == 0 {
+		x.topics.Delete(topic)
+	}
+}
+
+// handleUnsubscribe handles Unsubscribe message.
+// The sender is removed from the topic, the topic is forgotten when it leaves
+// it empty, and the sender is acknowledged whether or not it was subscribed:
+// either way it is not subscribed once the message is handled.
 func (x *topicActor) handleUnsubscribe(ctx *ReceiveContext) {
 	sender := ctx.Sender()
 	if message, ok := ctx.Message().(*Unsubscribe); ok {
 		topic := message.Topic()
 		if subscribers, ok := x.topics.Get(topic); ok {
 			subscribers.Delete(sender.ID())
-			ctx.Tell(sender, NewUnsubscribeAck(topic))
+			x.forgetTopicIfEmpty(topic, subscribers)
 		}
+
+		ctx.Tell(sender, NewUnsubscribeAck(topic))
 	}
 }
 
@@ -473,6 +523,10 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 			return
 		}
 
+		// mark the message as processed so a redelivery by the same peer
+		// within the retention window is dropped
+		x.processed.Set(id, types.Unit{})
+
 		cctx := context.WithoutCancel(ctx.Context())
 		// send the message to all local subscribers
 		if subscribers, ok := x.topics.Get(topic); ok && subscribers.Len() != 0 {
@@ -495,6 +549,7 @@ func (x *topicActor) handleTopicMessage(ctx *ReceiveContext) {
 			}
 			// wait for all messages to be sent to all subscribers
 			wg.Wait()
+			x.forgetTopicIfEmpty(topic, subscribers)
 		}
 	}
 }

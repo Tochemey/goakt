@@ -29,6 +29,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -39,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -649,12 +651,12 @@ func TestWithReentrancyDoesNotEnableStash(t *testing.T) {
 	pid := &PID{}
 	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll)))(pid)
 	require.NotNil(t, pid.reentrancy.Load())
-	require.Nil(t, pid.stashState)
+	require.Nil(t, pid.stashState.Load())
 
 	pid = &PID{}
 	withReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant)))(pid)
 	require.NotNil(t, pid.reentrancy.Load())
-	require.Nil(t, pid.stashState)
+	require.Nil(t, pid.stashState.Load())
 }
 
 func TestRequestConfigTimeoutClamp(t *testing.T) {
@@ -840,6 +842,8 @@ func TestProcessStashErrorPath(t *testing.T) {
 	}
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
 	pid.reentrancy.Load().blockingCount.Store(1)
+	// the turn hands user messages only to a running actor
+	pid.setState(runningState, true)
 
 	receiveCtx := getContext(0)
 	receiveCtx.build(context.Background(), pid, pid, new(testpb.TestSend), true)
@@ -1097,7 +1101,7 @@ func TestRegisterRequestStateTracksCounts(t *testing.T) {
 	state := newRequestState("id", reentrancy.AllowAll, pid)
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.Load().inFlightCount.Load())
-	require.Nil(t, pid.stashState)
+	require.Nil(t, pid.stashState.Load())
 	pid.deregisterRequestState(state)
 
 	pid = &PID{}
@@ -1106,19 +1110,18 @@ func TestRegisterRequestStateTracksCounts(t *testing.T) {
 	require.NoError(t, pid.registerRequestState(state))
 	require.EqualValues(t, 1, pid.reentrancy.Load().inFlightCount.Load())
 	require.EqualValues(t, 1, pid.reentrancy.Load().blockingCount.Load())
-	require.NotNil(t, pid.stashState)
-	require.NotNil(t, pid.stashState.box)
+	require.NotNil(t, pid.stashState.Load())
+	require.NotNil(t, pid.stashState.Load().box)
 }
 
 func TestRegisterRequestStatePreservesExistingStash(t *testing.T) {
-	pid := &PID{
-		stashState: &stashState{box: NewUnboundedMailbox()},
-	}
+	pid := &PID{}
+	pid.stashState.Store(&stashState{box: NewUnboundedMailbox()})
 	pid.reentrancy.Store(newReentrancyState(reentrancy.AllowAll, 0))
-	existing := pid.stashState
+	existing := pid.stashState.Load()
 	state := newRequestState("stash", reentrancy.StashNonReentrant, pid)
 	require.NoError(t, pid.registerRequestState(state))
-	require.Same(t, existing, pid.stashState)
+	require.Same(t, existing, pid.stashState.Load())
 	pid.deregisterRequestState(state)
 }
 
@@ -1157,6 +1160,47 @@ func TestDeregisterRequestStateUnstashOnLastBlocking(t *testing.T) {
 	require.Zero(t, pid.reentrancy.Load().inFlightCount.Load())
 	require.Zero(t, pid.reentrancy.Load().blockingCount.Load())
 	require.Zero(t, pid.reentrancy.Load().requestStates.Len())
+}
+
+// TestHandleAsyncResponseUnknownCorrelationLogLevel verifies that a response
+// with no in-flight request, the ordinary outcome of a reply that loses the
+// race against a timeout or a cancellation, is reported at debug level only.
+func TestHandleAsyncResponseUnknownCorrelationLogLevel(t *testing.T) {
+	late := []*commands.AsyncResponse{
+		{CorrelationID: "late-reply", Message: testpb.Reply_builder{Content: "late"}.Build()},
+		{CorrelationID: "late-error", Error: gerrors.ErrRequestTimeout.Error()},
+	}
+
+	deliver := func(t *testing.T, level log.Level) string {
+		t.Helper()
+		ctx := context.Background()
+		buf := &safeBuffer{}
+		logger := log.NewSlog(level, buf)
+
+		sys, err := NewActorSystem("reentrancy-"+uuid.NewString(), WithLogger(logger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		pid := spawnReentrancyActor(t, sys, ctx, "requester", func(*ReceiveContext) {}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+
+		for _, response := range late {
+			pid.handleAsyncResponse(nil, response)
+		}
+
+		_ = logger.Flush()
+		return buf.String()
+	}
+
+	t.Run("silent at warning level", func(t *testing.T) {
+		require.NotContains(t, deliver(t, log.WarningLevel), "unknown correlation id")
+	})
+
+	t.Run("reported at debug level", func(t *testing.T) {
+		output := deliver(t, log.DebugLevel)
+		require.Contains(t, output, "unknown correlation id=late-reply")
+		require.Contains(t, output, "unknown correlation id=late-error")
+	})
 }
 
 func TestCompleteRequest(t *testing.T) {

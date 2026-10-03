@@ -24,6 +24,8 @@ package actor
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -768,6 +770,131 @@ func TestTopicActor(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 1, stats.LocalSubscriberCount())
 		require.EqualValues(t, 1, stats.TopicInstanceCount())
+
+		require.NoError(t, cl1.Stop(ctx))
+		require.NoError(t, cl2.Stop(ctx))
+		require.NoError(t, cl3.Stop(ctx))
+
+		require.NoError(t, sd1.Close())
+		require.NoError(t, sd2.Close())
+		require.NoError(t, sd3.Close())
+		srv.Shutdown()
+	})
+	t.Run("With Unsubscribe forgetting an empty topic and acknowledging an unknown one", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		subscriber, err := actorSystem.Spawn(ctx, "subscriber", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		counter := subscriber.Actor().(*MockSubscriber).counter
+
+		topic := "test-topic"
+		registry := actorSystem.TopicActor().Actor().(*topicActor).topics
+
+		require.NoError(t, subscriber.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
+		require.Eventually(t, func() bool { return counter.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+		_, ok := registry.Get(topic)
+		require.True(t, ok)
+
+		// the last subscriber leaves: the ack arrives and the topic is gone
+		require.NoError(t, subscriber.Tell(ctx, actorSystem.TopicActor(), NewUnsubscribe(topic)))
+		require.Eventually(t, func() bool { return counter.Load() == 0 }, 5*time.Second, 10*time.Millisecond)
+
+		_, ok = registry.Get(topic)
+		require.False(t, ok, "an empty topic must be removed from the registry")
+
+		// unsubscribing from a topic nobody knows is acknowledged too
+		require.NoError(t, subscriber.Tell(ctx, actorSystem.TopicActor(), NewUnsubscribe("unknown-topic")))
+		require.Eventually(t, func() bool { return counter.Load() == -1 }, 5*time.Second, 10*time.Millisecond)
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With Terminated forgetting an empty topic", func(t *testing.T) {
+		ctx := context.Background()
+		actorSystem, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+
+		require.NoError(t, actorSystem.Start(ctx))
+
+		subscriber, err := actorSystem.Spawn(ctx, "subscriber", NewMockSubscriber(), WithLongLived())
+		require.NoError(t, err)
+		counter := subscriber.Actor().(*MockSubscriber).counter
+
+		topic := "test-topic"
+		registry := actorSystem.TopicActor().Actor().(*topicActor).topics
+
+		require.NoError(t, subscriber.Tell(ctx, actorSystem.TopicActor(), NewSubscribe(topic)))
+		require.Eventually(t, func() bool { return counter.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+
+		_, ok := registry.Get(topic)
+		require.True(t, ok)
+
+		// the only subscriber stops: Terminated removes it and the topic with it
+		require.NoError(t, subscriber.Shutdown(ctx))
+		require.Eventually(t, func() bool {
+			_, ok := registry.Get(topic)
+			return !ok
+		}, 5*time.Second, 10*time.Millisecond, "an empty topic must be removed from the registry")
+
+		require.NoError(t, actorSystem.Stop(ctx))
+	})
+	t.Run("With concurrent TopicStats across the cluster", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		cl1, sd1 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
+		require.NotNil(t, cl1)
+
+		cl2, sd2 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
+		require.NotNil(t, cl2)
+
+		cl3, sd3 := startNATsSystem(t, srv.Addr().String(), withTestPubSub())
+		require.NotNil(t, cl3)
+
+		nodes := []ActorSystem{cl1, cl2, cl3}
+		topic := "test-topic"
+
+		// every node gets a subscriber so every node's topic actor is involved
+		for i, node := range nodes {
+			subscriber, err := node.Spawn(ctx, fmt.Sprintf("actor%d", i), NewMockSubscriber())
+			require.NoError(t, err)
+			require.NoError(t, subscriber.Tell(ctx, node.TopicActor(), NewSubscribe(topic)))
+
+			counter := subscriber.Actor().(*MockSubscriber).counter
+			require.Eventually(t, func() bool { return counter.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+		}
+
+		// one node at a time: the control
+		for i, node := range nodes {
+			stats, err := node.TopicStats(ctx, topic, 5*time.Second)
+			require.NoError(t, err, "sequential TopicStats on node %d", i)
+			require.EqualValues(t, 3, stats.TopicInstanceCount())
+		}
+
+		// all nodes at once: each topic actor is asked by its own node while
+		// the other two query it, which must not make them wait on each other
+		results := make([]*TopicStats, len(nodes))
+		errs := make([]error, len(nodes))
+		start := make(chan struct{})
+
+		var wg sync.WaitGroup
+		for i, node := range nodes {
+			wg.Go(func() {
+				<-start
+				results[i], errs[i] = node.TopicStats(ctx, topic, 5*time.Second)
+			})
+		}
+
+		close(start)
+		wg.Wait()
+
+		for i := range nodes {
+			require.NoError(t, errs[i], "concurrent TopicStats on node %d", i)
+			require.EqualValues(t, 1, results[i].LocalSubscriberCount())
+			require.EqualValues(t, 3, results[i].TopicInstanceCount())
+		}
 
 		require.NoError(t, cl1.Stop(ctx))
 		require.NoError(t, cl2.Stop(ctx))

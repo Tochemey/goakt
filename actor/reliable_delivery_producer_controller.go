@@ -179,6 +179,12 @@ type producerController struct {
 
 	// failed marks that the terminal failure event was already published.
 	failed bool
+	// reportLoadFailure is set once a start loaded the durable state, so the
+	// next Load failure belongs to a restart and is published. Publishing
+	// clears it: the start is retried on the same controller, and the retried
+	// attempts of one failed restart must not publish again. It stays false on
+	// a first start, whose failure is returned to the spawner instead.
+	reportLoadFailure bool
 	// generation fences the recurring timer across restarts. Atomic because
 	// PostStop can run on a different goroutine than the PreStart that last
 	// incremented it (restart racing a forced stop).
@@ -249,7 +255,7 @@ func (x *producerController) PreStart(ctx *Context) error {
 	x.deferredOp = 0
 	x.dirtyConfirmSeq = 0
 	x.failed = false
-	generation := x.generation.Add(1)
+	x.generation.Add(1)
 
 	if x.queue == nil {
 		return nil
@@ -257,7 +263,8 @@ func (x *producerController) PreStart(ctx *Context) error {
 
 	state, epoch, err := x.queue.Load(ctx.Context())
 	if err != nil {
-		if generation > 1 {
+		if x.reportLoadFailure {
+			x.reportLoadFailure = false
 			x.publishFailure(ReliableDeliveryStageLoad, err)
 		}
 
@@ -269,6 +276,7 @@ func (x *producerController) PreStart(ctx *Context) error {
 	x.confirmedSeq = state.ConfirmedSeq()
 	x.persistedConfirmedSeq = state.ConfirmedSeq()
 	x.unconfirmed = hydrateLoadedUnconfirmed(state.Unconfirmed())
+	x.reportLoadFailure = true
 	return nil
 }
 

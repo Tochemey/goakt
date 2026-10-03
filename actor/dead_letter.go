@@ -32,6 +32,11 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
+// deadletterPruneThreshold is the number of per-receiver buckets below which
+// the deadletter actor never prunes. Above it, a prune runs each time the
+// bucket count doubles since the last one, which keeps its cost amortized.
+const deadletterPruneThreshold = 1024
+
 // deadletterKey identifies one deadletter bucket. Counting by receiver address
 // alone answers how many messages an actor dropped; adding the message type
 // answers which messages it dropped, which is what an operator needs to act on
@@ -52,6 +57,11 @@ type deadLetter struct {
 	counter      *atomic.Int64
 	letters      *xsync.Map[string, *Deadletter]
 	counters     *xsync.Map[deadletterKey, *atomic.Int64]
+	// pruneAt is the bucket count at which the next prune runs. The
+	// per-receiver buckets are only read for actors in the actor tree, so a
+	// prune drops the buckets of receivers that have left it; without it, the
+	// buckets would grow with every distinct receiver name ever seen.
+	pruneAt int
 }
 
 // enforce the implementation of the Actor interface
@@ -64,6 +74,7 @@ func newDeadLetter() *deadLetter {
 		letters:  xsync.NewMap[string, *Deadletter](),
 		counters: xsync.NewMap[deadletterKey, *atomic.Int64](),
 		counter:  counter,
+		pruneAt:  deadletterPruneThreshold,
 	}
 }
 
@@ -85,7 +96,7 @@ func (x *deadLetter) Receive(ctx *ReceiveContext) {
 		count := x.count(msg)
 		ctx.Response(&commands.DeadlettersCountResponse{TotalCount: count})
 	case *commands.DeadlettersSnapshotRequest:
-		ctx.Response(&commands.DeadlettersSnapshotResponse{Counts: x.snapshot()})
+		ctx.Response(&commands.DeadlettersSnapshotResponse{Counts: x.snapshot(), TotalCount: x.counter.Load()})
 	default:
 		// simply ignore anyhing else
 	}
@@ -107,6 +118,7 @@ func (x *deadLetter) handlePostStart(ctx *ReceiveContext) {
 	x.letters = xsync.NewMap[string, *Deadletter]()
 	x.counters = xsync.NewMap[deadletterKey, *atomic.Int64]()
 	x.counter.Store(0)
+	x.pruneAt = deadletterPruneThreshold
 	if x.logger.Enabled(log.InfoLevel) {
 		x.logger.Infof("actor=%s started successfully", x.pid.Name())
 	}
@@ -120,8 +132,15 @@ func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {
 
 	x.eventsStream.Publish(eventsTopic, deadLetter)
 
-	// letters the message for future query
+	// The per-receiver buckets are only read for actors in the actor tree: a
+	// receiver that is not there, a stopped actor, a grain or a remote actor,
+	// is counted in the total only.
 	id := msg.Receiver.String()
+	if !x.inTree(id) {
+		return
+	}
+
+	// letters the message for future query
 	x.letters.Set(id, deadLetter)
 
 	key := deadletterKey{address: id, messageType: types.NameOf(msg.Message)}
@@ -132,6 +151,40 @@ func (x *deadLetter) handleDeadletter(msg *commands.Deadletter) {
 
 	counter := atomic.NewInt64(1)
 	x.counters.Set(key, counter)
+
+	if x.counters.Len() >= x.pruneAt {
+		x.prune()
+		x.pruneAt = max(deadletterPruneThreshold, 2*x.counters.Len())
+	}
+}
+
+// inTree reports whether the actor at the given address string is in the
+// actor tree, which is where every reader of the per-receiver buckets looks
+// actors up. Without an actor system to ask, every receiver is kept.
+func (x *deadLetter) inTree(address string) bool {
+	if x.pid == nil || x.pid.ActorSystem() == nil {
+		return true
+	}
+
+	_, ok := x.pid.ActorSystem().tree().node(address)
+	return ok
+}
+
+// prune drops the buckets of receivers that have left the actor tree since
+// they were recorded: an actor that stopped or passivated. An actor spawned
+// again under the same name later starts its counts from zero.
+func (x *deadLetter) prune() {
+	for _, key := range x.counters.Keys() {
+		if !x.inTree(key.address) {
+			x.counters.Delete(key)
+		}
+	}
+
+	for _, address := range x.letters.Keys() {
+		if !x.inTree(address) {
+			x.letters.Delete(address)
+		}
+	}
 }
 
 // handlePublishDeadletters pushes the actor state back to the stream

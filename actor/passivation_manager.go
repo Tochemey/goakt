@@ -78,6 +78,12 @@ type passivationParticipant interface {
 //   - paused:      Tracks whether scheduling is paused for this participant.
 //   - pending:     Signals that a message-count trigger was raised but not yet processed.
 //   - enqueued:    Guards against double-enqueueing onto messageTriggers.
+//   - triggers:    Counts the message-count triggers raised for the entry. An attempt
+//     compares it before and after to learn whether the participant processed
+//     another message, or ended its turn, while the attempt ran.
+//   - deferred:    Set by Defer when the participant refuses the attempt in progress
+//     because it is processing messages. A message-count entry is retried on its next
+//     trigger, a time-based one a whole timeout later.
 type passivationEntry struct {
 	target      passivationParticipant
 	id          string
@@ -90,6 +96,8 @@ type passivationEntry struct {
 	paused      bool
 	pending     bool
 	enqueued    bool
+	triggers    uint64
+	deferred    bool
 }
 
 func newPassivationManager(logger log.Logger) *passivationManager {
@@ -104,10 +112,17 @@ func newPassivationManager(logger log.Logger) *passivationManager {
 	}
 }
 
+// Start launches the scheduling goroutine. The actor system reuses one manager
+// across its own restarts, and the previous run closed stop and done on its
+// way out, so every run gets fresh channels and a fresh stopOnce.
 func (m *passivationManager) Start(context.Context) {
 	if !m.started.CompareAndSwap(false, true) {
 		return
 	}
+
+	m.stop = make(chan types.Unit)
+	m.done = make(chan types.Unit)
+	m.stopOnce = sync.Once{}
 
 	go m.run()
 }
@@ -278,6 +293,26 @@ func (m *passivationManager) Touch(participant passivationParticipant) {
 	m.notifyLocked()
 }
 
+// Defer records that a participant refused the passivation attempt in
+// progress because it is processing messages. Such an attempt is not retried
+// at once, which would spin for as long as the participant stays busy: a
+// message-count entry is retried by its next trigger, raised when the
+// participant processes another message or ends its turn, and a time-based
+// entry a whole timeout later.
+func (m *passivationManager) Defer(participant passivationParticipant) {
+	key := participant.passivationID()
+	if key == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if entry, ok := m.entries[key]; ok {
+		entry.deferred = true
+	}
+}
+
 // run multiplexes between timeouts, message-count triggers, and shutdown signals.
 // Only one goroutine is needed for all actors, drastically reducing footprint.
 func (m *passivationManager) run() {
@@ -305,6 +340,17 @@ func (m *passivationManager) run() {
 		}
 
 		if wait <= 0 {
+			// An expired entry is attempted at once, but never without looking
+			// at the stop signal first: a run of expired entries must not keep
+			// Stop waiting for every one of their attempts.
+			select {
+			case <-m.stop:
+				stopTimer(timer)
+				close(m.done)
+				return
+			default:
+			}
+
 			m.trigger(entry)
 			continue
 		}
@@ -346,55 +392,83 @@ func (m *passivationManager) nextEntry() (*passivationEntry, time.Duration) {
 	return nil, 0
 }
 
+// trigger runs one passivation attempt for expected, the entry at the top of
+// the heap whose deadline has passed. It is a single pass: the entry either
+// leaves the manager, or goes back on the heap with a deadline in the future,
+// so the run loop always moves on and sees the stop signal between attempts.
 func (m *passivationManager) trigger(expected *passivationEntry) {
-	for {
-		m.mu.Lock()
-		if len(m.queue) == 0 {
-			m.mu.Unlock()
-			return
-		}
-
-		entry := m.queue[0]
-		if entry != expected {
-			m.mu.Unlock()
-			return
-		}
-
-		now := time.Now()
-		if entry.deadline.After(now) {
-			m.mu.Unlock()
-			return
-		}
-
-		cheaps.Pop(&m.queue)
-		entry.index = -1
+	m.mu.Lock()
+	if len(m.queue) == 0 {
 		m.mu.Unlock()
-
-		passivated := m.passivate(entry)
-
-		m.mu.Lock()
-		current, ok := m.entries[entry.id]
-		if !ok || current != entry {
-			m.mu.Unlock()
-			return
-		}
-
-		if passivated {
-			delete(m.entries, entry.id)
-			m.mu.Unlock()
-			return
-		}
-
-		if entry.paused {
-			m.mu.Unlock()
-			return
-		}
-
-		entry.refreshDeadline()
-		cheaps.Push(&m.queue, entry)
-		m.mu.Unlock()
-		m.notify()
+		return
 	}
+
+	entry := m.queue[0]
+	if entry != expected {
+		m.mu.Unlock()
+		return
+	}
+
+	now := time.Now()
+	if entry.deadline.After(now) {
+		m.mu.Unlock()
+		return
+	}
+
+	// The heap deadline can lag the participant's latest activity, because a
+	// participant refreshes it at most every passivationTouchInterval. Fire on
+	// the actual activity: a participant that has not been idle for the whole
+	// timeout is re-armed for the remaining time instead of being attempted.
+	if last := entry.target.passivationLatestActivity(); !last.IsZero() && last.Add(entry.timeout).After(now) {
+		entry.deadline = last.Add(entry.timeout)
+		cheaps.Fix(&m.queue, entry.index)
+		m.mu.Unlock()
+		return
+	}
+
+	cheaps.Pop(&m.queue)
+	entry.index = -1
+	entry.deferred = false
+	m.mu.Unlock()
+
+	passivated := m.passivate(entry)
+
+	m.mu.Lock()
+	deferred := entry.deferred
+	entry.deferred = false
+	current, ok := m.entries[entry.id]
+	if !ok || current != entry {
+		m.mu.Unlock()
+		return
+	}
+
+	if passivated {
+		delete(m.entries, entry.id)
+		m.mu.Unlock()
+		return
+	}
+
+	if entry.paused {
+		m.mu.Unlock()
+		return
+	}
+
+	now = time.Now()
+	entry.refreshDeadline()
+
+	// A refused attempt is retried a whole timeout from now unless the
+	// participant's activity has already moved its deadline into the future.
+	// A busy participant's latest activity is the start of the message it is
+	// still processing, and a participant that refuses for another reason, for
+	// example because the actor system is stopping, has not moved it at all:
+	// retrying at once would spin for as long as the refusal lasts.
+	if deferred || !entry.deadline.After(now) {
+		entry.deadline = later(entry.deadline, now.Add(entry.timeout))
+	}
+
+	cheaps.Push(&m.queue, entry)
+	m.mu.Unlock()
+	m.notify()
 }
 
 func (m *passivationManager) notify() {
@@ -422,7 +496,17 @@ func (entry *passivationEntry) refreshDeadline() {
 	entry.deadline = last.Add(entry.timeout)
 }
 
-// MessageProcessed checks message-count strategies after each processed message.
+// later returns the later of two instants.
+func later(a, b time.Time) time.Time {
+	if a.After(b) {
+		return a
+	}
+
+	return b
+}
+
+// MessageProcessed checks message-count strategies after each processed message
+// and whenever the actor ends a turn with nothing left to process.
 // Once the delta between the current counter and the baseline reaches the configured
 // maxMessages the entry is enqueued for passivation.
 func (m *passivationManager) MessageProcessed(pid *PID) {
@@ -456,6 +540,7 @@ func (m *passivationManager) MessageProcessed(pid *PID) {
 	}
 
 	entry.pending = true
+	entry.triggers++
 	if entry.paused || entry.enqueued {
 		m.mu.Unlock()
 		return
@@ -468,7 +553,9 @@ func (m *passivationManager) MessageProcessed(pid *PID) {
 
 // processMessageEntry services the messageTriggers channel.
 // It attempts passivation and, if the attempt was skipped (e.g., due to a pause/reinstate),
-// re-enqueues the entry until a definitive outcome is reached.
+// re-enqueues the entry until a definitive outcome is reached. An attempt the participant
+// deferred because it is processing messages (see Defer) is the exception: it is re-enqueued
+// only when a trigger was raised while the attempt ran, and otherwise left to the next trigger.
 func (m *passivationManager) processMessageEntry(entry *passivationEntry) {
 	if entry == nil {
 		return
@@ -485,12 +572,17 @@ func (m *passivationManager) processMessageEntry(entry *passivationEntry) {
 		m.mu.Unlock()
 		return
 	}
+
+	seen := entry.triggers
+	entry.deferred = false
 	m.mu.Unlock()
 
 	passivated := m.passivate(entry)
 
 	m.mu.Lock()
 	entry.enqueued = false
+	deferred := entry.deferred
+	entry.deferred = false
 	current, ok = m.entries[entry.id]
 	if !ok || current != entry {
 		m.mu.Unlock()
@@ -505,6 +597,13 @@ func (m *passivationManager) processMessageEntry(entry *passivationEntry) {
 	}
 
 	if entry.paused {
+		m.mu.Unlock()
+		return
+	}
+
+	// the participant is busy and raised no trigger during the attempt: its
+	// next processed message or turn end raises the one that retries
+	if deferred && entry.triggers == seen {
 		m.mu.Unlock()
 		return
 	}

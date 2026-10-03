@@ -24,7 +24,8 @@ Use `pid.IsRunning()`, `pid.IsSuspended()`, `pid.IsStopping()` to query state wh
 ## Spawn and stop
 
 - **Spawn**: Creates the actor, registers it, calls `PreStart`, and starts the mailbox dispatch loop.
-- **Stop**: Sends a stop signal. The actor finishes current work, runs `PostStop`, and is removed from the tree.
+- **Stop**: Stops the actor at once, runs `PostStop`, and removes it from the tree. See the warning under
+  [Lifecycle hooks](#lifecycle-hooks-actor-interface) for the message being processed and the messages still queued.
 
 When a parent stops, all children stop first (depth-first). The order among descendants is not guaranteed.
 
@@ -50,9 +51,10 @@ if err != nil {
 }
 ```
 
-Spawning a name that a running actor holds returns that actor. Spawning a name held by an actor that is not running,
-because it is suspended, stopping or restarting, fails with `ErrActorAlreadyExists` and starts nothing: reinstate,
-restart or stop that actor first.
+Without a cluster, spawning a name that a running actor holds returns that actor. Spawning a name held by an actor that
+is not running, because it is suspended, stopping or restarting, fails with `ErrActorAlreadyExists` and starts nothing:
+reinstate, restart or stop that actor first. In cluster mode a taken name always fails with `ErrActorAlreadyExists`,
+even when the actor holding it runs on the same node; use `ActorOf` to get that actor.
 
 <Note>
 In cluster mode the stopped actor's registry record is removed in the background. A spawn of the same name on the
@@ -70,18 +72,33 @@ full interface.
 - **Receive**: called for each message. Process messages. State is private; no locks needed.
 - **PostStop**: called before termination. Release resources, flush buffers, notify other systems.
 
+<Warning>
+`PID.Shutdown`, `ActorSystem.Stop`, system eviction and a parent stopping its children stop an actor at once: they do
+not wait for the message it is processing, so `PostStop` can run while `Receive` is still handling that message. State
+shared by the two must be safe for concurrent use. A `PoisonPill`, `ctx.Shutdown()` and per-actor passivation stop the
+actor from its own turn or while it is idle, so `PostStop` never runs concurrently with `Receive`. In every case, user messages still queued are
+discarded.
+</Warning>
+
 If `PreStart` returns an error, the actor is not started and the supervisor handles the failure.
 
 ### Init timeout
 
-`PreStart` runs under a deadline. When it does not complete within the init timeout, initialization fails and the actor
-is not started. The system-wide default is set with `WithActorInitTimeout` on the actor system; override it per actor
-with the `WithInitTimeout` spawn option:
+A failed `PreStart` is retried. The init timeout bounds those retries: a new attempt starts only while the timeout has
+not elapsed, up to the configured number of attempts (`WithActorInitMaxRetries`, 5 by default), and when the last one
+fails the actor is not started. The system-wide default is set with `WithActorInitTimeout` on the actor system; override
+it per actor with the `WithInitTimeout` spawn option:
 
 ```go Init timeout
 pid, err := system.Spawn(ctx, "loader", NewLoader(),
     actor.WithInitTimeout(5*time.Second))
 ```
+
+<Note>
+The init timeout does not interrupt a `PreStart` attempt in progress, and the context `PreStart` receives carries no
+deadline from it. A `PreStart` that runs past the timeout and then succeeds starts the actor. Bound slow initialization
+work, such as connecting to a database, with a deadline of your own inside `PreStart`.
+</Note>
 
 A non-positive duration is ignored, leaving the system-wide timeout in effect. Child actors and relocated actors honor
 an explicit `WithInitTimeout`; without one they use the hosting node's system-wide timeout. The override travels with

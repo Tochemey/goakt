@@ -96,6 +96,13 @@ func (as *activeSenders) dequeue() *senderBox {
 // work. Choose it whenever fairness is more important than the absolute
 // throughput of a single hot sender. For latency-critical applications that
 // prioritize raw throughput, prefer the lighter-weight UnboundedMailbox.
+//
+// The sub-queues are keyed by the sender's ID and are never removed: the
+// mailbox keeps one for every distinct sender it has ever seen, and an idle
+// sub-queue keeps its sender's last message until that sender sends again.
+// An actor that hears from many short-lived senders, per-request actors or
+// remote clients, therefore grows for as long as it lives. All package-level
+// sends (actor.Tell, actor.Ask) come from NoSender and share one sub-queue.
 type UnboundedFairMailbox struct {
 	// map of sender key -> per‑sender queue
 	senders sync.Map // map[string]*senderBox

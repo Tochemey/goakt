@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	instrumentationName = "github.com/Tochemey/goakt/v3/telemetry"
+	instrumentationName = "github.com/Tochemey/goakt/v4/telemetry"
 )
 
 type Provider struct {

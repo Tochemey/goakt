@@ -20,6 +20,17 @@ strategy triggers. Only actors with a passivation strategy (other than `LongLive
   at least `maxMessages` since the strategy was registered.
 - **LongLivedStrategy**: Constructor: `passivation.NewLongLivedStrategy`. Trigger: Never passivate (opt-out).
 
+Only an idle actor is passivated. When a strategy triggers while the actor is processing a message or has messages
+queued, the actor is left alone and the passivation is tried again later: at the next deadline for a time-based
+strategy, as soon as the actor goes idle for a message-count one. `PostStop` therefore never runs alongside `Receive`
+during passivation, and messages already queued are not dropped by it.
+
+<Note>
+This idle check covers the passivated actor itself, not its children. Passivation stops the children with `Shutdown`,
+which does not wait for a child's handler to finish, so a child's `PostStop` can run while its `Receive` is still
+handling a message.
+</Note>
+
 ### Usage
 
 ```go Usage
@@ -47,14 +58,17 @@ pid, err := system.Spawn(ctx, "service", actor, actor.WithLongLived())
 ## System eviction
 
 **System eviction** is a node-wide mechanism that limits the total number of active actors. When the count exceeds the
-configured limit, the framework passivates actors according to an eviction policy (LRU, LFU, or MRU). This is
+configured limit, the framework stops actors according to an eviction policy (LRU, LFU, or MRU). This is
 independent of per-actor passivation: system eviction can stop any user actor, including those with `LongLivedStrategy`.
+Eviction stops an actor at once, as `Shutdown` does: unlike per-actor passivation it does not wait for the actor to be
+idle, so `PostStop` can run while `Receive` is still handling a message. An evicted actor is reported as stopped, not
+passivated: the event stream publishes `ActorStopped` and the `stopped` metric is incremented, not `passivated`.
 
 ### Eviction policies
 
-- **LRU**: Least Recently Used: passivate actors with the oldest `LatestActivityTime`.
-- **LFU**: Least Frequently Used: passivate actors with the lowest `ProcessedCount`.
-- **MRU**: Most Recently Used: passivate actors with the newest `LatestActivityTime`.
+- **LRU**: Least Recently Used: stop actors with the oldest `LatestActivityTime`.
+- **LFU**: Least Frequently Used: stop actors with the lowest `ProcessedCount`.
+- **MRU**: Most Recently Used: stop actors with the newest `LatestActivityTime`.
 
 ### Configuration
 
@@ -67,13 +81,14 @@ system, _ := actor.NewActorSystem("app",
 
 - **limit**: Maximum number of active actors before eviction runs. Must be > 0.
 - **policy**: `actor.LRU`, `actor.LFU`, or `actor.MRU`.
-- **percentage**: Percentage of actors to passivate when over limit (0–100). Clamped automatically.
-- **interval**: How often the eviction engine runs (e.g. `5*time.Second`).
+- **percentage**: Percentage of actors to stop when over limit (0–100). Clamped automatically.
+- **interval**: How often the eviction engine runs (e.g. `5*time.Second`). A zero or negative interval falls back to
+  `actor.DefaultEvictionInterval` (5 seconds).
 
 ### Behavior
 
 - The eviction loop runs at the configured interval.
-- When `NumActors() > limit`, actors are selected by policy and passivated via `Shutdown`.
+- When `NumActors() > limit`, actors are selected by policy and stopped with `Shutdown`.
 - The number of actors to evict is the greater of: (total − limit) and (percentage × total / 100).
 - System actors (reserved names) are excluded. Only user actors are eligible for eviction.
 

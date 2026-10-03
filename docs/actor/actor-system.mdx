@@ -5,7 +5,8 @@ sidebarTitle: "Actor System"
 ---
 
 The **ActorSystem** is the top-level runtime that hosts actors and orchestrates messaging, clustering, remoting, and
-lifecycle. There is one ActorSystem per process. All actors, grains, and system services run within it.
+lifecycle. Run one ActorSystem per process; this is not enforced, and several systems can run in one process as long as
+their remoting and cluster ports differ. All actors, grains, and system services run within it.
 
 ## Role and responsibilities
 
@@ -104,7 +105,8 @@ See [Event Streams](/advanced/event-streams), [PubSub](/advanced/pubsub), [Obser
 ### Cluster and lifecycle control
 
 - **Kill**: Stop an actor by name (local or remote).
-- **ReSpawn**: Restart an actor; children are recreated with initial state.
+- **ReSpawn**: Restart an actor with its whole subtree. The same actor values are reused and only `PreStart` runs again,
+  so state that `PreStart` does not reset survives the restart.
 - **Name**: Actor system name.
 
 ### Dependency injection

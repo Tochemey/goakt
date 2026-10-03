@@ -447,13 +447,11 @@ func FormatHostPort(host string, port int) string {
 	return host + ":" + strconv.Itoa(port)
 }
 
-// Equals reports whether x and a represent the same address.
+// Equals reports whether x and y represent the same address.
 //
-// Equals performs a deep, field-by-field comparison of the underlying protobuf
-// messages using proto.Equal. It returns false if either receiver or argument
-// is nil.
-//
-// This comparison includes System, Host, Port, Name, ID, and Parent.
+// It compares Name, System, Host and Port only: the parent and the incarnation
+// ID are not compared (see SameIncarnation for the latter). It returns false if
+// either receiver or argument is nil.
 func (x *Address) Equals(y *Address) bool {
 	if x == nil || y == nil {
 		return false

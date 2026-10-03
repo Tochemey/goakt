@@ -113,6 +113,12 @@ var (
 	_ Actor                = (*MockRestartMarkerActor)(nil)
 	_ Actor                = (*MockMailboxBlockingActor)(nil)
 	_ Actor                = (*MockOverlapActor)(nil)
+	_ Actor                = (*MockStopOverlapActor)(nil)
+	_ Actor                = (*MockWithheldWorkActor)(nil)
+	_ Actor                = (*MockBehaviorStackActor)(nil)
+	_ Actor                = (*MockFailingLifecycleActor)(nil)
+	_ Actor                = (*MockRespawnOnTerminatedActor)(nil)
+	_ error                = (*MockDirectiveError)(nil)
 )
 
 // postStartCount counts the PostStart messages observed by MockPostStartCountingActor.
@@ -483,11 +489,11 @@ type MockForwardingActor struct {
 	remoteRef *PID
 }
 
-// Receive forwards TestBye to actorRef and TestRemoteForward to remoteRef.
+// Receive forwards TestBye and TestReply to actorRef and TestRemoteForward to remoteRef.
 func (x *MockForwardingActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *PostStart:
-	case *testpb.TestBye:
+	case *testpb.TestBye, *testpb.TestReply:
 		ctx.Forward(x.actorRef)
 	case *testpb.TestRemoteForward:
 		ctx.Forward(x.remoteRef)
@@ -1903,6 +1909,97 @@ func (x *MockDeactivationFailingGrain) OnDeactivate(ctx context.Context, props *
 // OnReceive succeeds without a reply.
 func (x *MockDeactivationFailingGrain) OnReceive(ctx *GrainContext) {
 	ctx.NoErr()
+}
+
+// MockTurnOverlapGrain records whether OnDeactivate runs while an OnReceive
+// turn is in progress, which the grain runtime must never allow. A turn waits
+// for a deactivation to start, within a bound, so an overlap that the runtime
+// lets happen is caught rather than missed by timing.
+type MockTurnOverlapGrain struct {
+	MockNoopGrain
+
+	// probe is the state the test reads. A grain instantiated from the kind
+	// registry is a zero value whose probe is nil: it only answers.
+	probe *MockTurnOverlapProbe
+}
+
+// MockTurnOverlapProbe is the state a MockTurnOverlapGrain shares with its test.
+type MockTurnOverlapProbe struct {
+	// activations counts the OnActivate calls.
+	activations atomic.Int32
+	// receives counts the messages handed to OnReceive.
+	receives atomic.Int32
+	// inTurn counts the OnReceive turns in progress.
+	inTurn atomic.Int32
+	// overlaps counts the OnDeactivate calls made while a turn was in progress.
+	overlaps atomic.Int32
+	// received receives a value each time a turn starts.
+	received chan types.Unit
+	// deactivating is closed when the first OnDeactivate starts.
+	deactivating chan types.Unit
+	// deactivatingOnce guards the close of deactivating.
+	deactivatingOnce sync.Once
+}
+
+// NewMockTurnOverlapGrain returns a MockTurnOverlapGrain and the probe it reports to.
+func NewMockTurnOverlapGrain() (*MockTurnOverlapGrain, *MockTurnOverlapProbe) {
+	probe := &MockTurnOverlapProbe{
+		received:     make(chan types.Unit, 1),
+		deactivating: make(chan types.Unit),
+	}
+
+	return &MockTurnOverlapGrain{probe: probe}, probe
+}
+
+// OnActivate counts the activation.
+func (x *MockTurnOverlapGrain) OnActivate(context.Context, *GrainProps) error {
+	if x.probe != nil {
+		x.probe.activations.Inc()
+	}
+
+	return nil
+}
+
+// OnReceive marks the turn in progress until a deactivation starts or a short
+// bound passes, then answers TestReply with a Reply and anything else with NoErr.
+func (x *MockTurnOverlapGrain) OnReceive(ctx *GrainContext) {
+	if probe := x.probe; probe != nil {
+		probe.inTurn.Inc()
+		probe.receives.Inc()
+
+		select {
+		case probe.received <- types.Unit{}:
+		default:
+		}
+
+		select {
+		case <-probe.deactivating:
+		case <-time.After(500 * time.Millisecond):
+		}
+
+		probe.inTurn.Dec()
+	}
+
+	if _, ok := ctx.Message().(*testpb.TestReply); ok {
+		ctx.Response(testpb.Reply_builder{Content: "received message"}.Build())
+		return
+	}
+
+	ctx.NoErr()
+}
+
+// OnDeactivate records an overlap when a turn is in progress and signals that
+// a deactivation started.
+func (x *MockTurnOverlapGrain) OnDeactivate(context.Context, *GrainProps) error {
+	if probe := x.probe; probe != nil {
+		if probe.inTurn.Load() > 0 {
+			probe.overlaps.Inc()
+		}
+
+		probe.deactivatingOnce.Do(func() { close(probe.deactivating) })
+	}
+
+	return nil
 }
 
 // MockCountingGrain counts the messages it receives by type, so a test can attribute
@@ -4338,4 +4435,266 @@ func (x *MockOverlapActor) PreStart(*Context) error {
 // Receive ignores every message; the actor only needs to exist.
 func (x *MockOverlapActor) Receive(ctx *ReceiveContext) {
 	ctx.Unhandled()
+}
+
+// MockStopOverlapActor parks its turn on the first TestSend until the test
+// releases it, and records in PostStop whether a Receive was still running.
+// It lets a test check that passivation never runs PostStop alongside a handler.
+type MockStopOverlapActor struct {
+	// entered is closed once the turn has parked on its first TestSend.
+	entered chan struct{}
+	// release is closed by the test to let the parked turn finish.
+	release chan struct{}
+	once    sync.Once
+	// inReceive is true while the parked handler runs.
+	inReceive atomic.Bool
+	// overlapped records whether PostStop ran while inReceive was true.
+	overlapped atomic.Bool
+	// stopped is closed when PostStop runs.
+	stopped chan struct{}
+}
+
+// NewMockStopOverlapActor returns a MockStopOverlapActor with its channels ready.
+func NewMockStopOverlapActor() *MockStopOverlapActor {
+	return &MockStopOverlapActor{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+}
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (x *MockStopOverlapActor) PreStart(*Context) error { return nil }
+
+// Receive parks the turn on the first TestSend and lets every later message through.
+func (x *MockStopOverlapActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
+		return
+	}
+
+	x.once.Do(func() {
+		x.inReceive.Store(true)
+		close(x.entered)
+		<-x.release
+		x.inReceive.Store(false)
+	})
+}
+
+// PostStop records whether the parked handler was still running.
+func (x *MockStopOverlapActor) PostStop(*Context) error {
+	x.overlapped.Store(x.inReceive.Load())
+	close(x.stopped)
+	return nil
+}
+
+// MockSignalLogger discards every log line and closes hit the first time a
+// debug line starts with mark. It lets a test wait for a code path that has no
+// other observable effect, such as an attempt about to block on a lock.
+type MockSignalLogger struct {
+	log.Logger
+	// mark is the prefix of the debug format that signals.
+	mark string
+	// hit is closed on the first matching debug line.
+	hit  chan struct{}
+	once sync.Once
+}
+
+// NewMockSignalLogger returns a MockSignalLogger that signals on mark.
+func NewMockSignalLogger(mark string) *MockSignalLogger {
+	return &MockSignalLogger{Logger: log.DiscardLogger, mark: mark, hit: make(chan struct{})}
+}
+
+// Debugf closes hit when format starts with the mark.
+func (x *MockSignalLogger) Debugf(format string, _ ...any) {
+	if strings.HasPrefix(format, x.mark) {
+		x.once.Do(func() { close(x.hit) })
+	}
+}
+
+// MockWithheldWorkActor handles every TestSend slowly and counts it, and
+// records an ordinary error on TestTimeout. Under the default supervisor that
+// error suspends the actor, which lets a test watch what happens to the
+// TestSend messages queued behind the failure. It also counts the times a
+// TestSend started while another was still running, which only two dispatcher
+// workers running the actor at once can cause.
+type MockWithheldWorkActor struct {
+	// handled counts the TestSend messages handled.
+	handled atomic.Int64
+	// inReceive counts the TestSend handlers running right now; one at most.
+	inReceive atomic.Int32
+	// overlaps counts the TestSend handlers that found another one running.
+	overlaps atomic.Int32
+	// delay is how long each TestSend takes.
+	delay time.Duration
+}
+
+// NewMockWithheldWorkActor returns a MockWithheldWorkActor whose TestSend takes delay.
+func NewMockWithheldWorkActor(delay time.Duration) *MockWithheldWorkActor {
+	return &MockWithheldWorkActor{delay: delay}
+}
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (x *MockWithheldWorkActor) PreStart(*Context) error { return nil }
+
+// Receive counts TestSend after its delay and fails on TestTimeout.
+func (x *MockWithheldWorkActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestSend:
+		if x.inReceive.Add(1) > 1 {
+			x.overlaps.Add(1)
+		}
+
+		pause.For(x.delay)
+		x.handled.Add(1)
+		x.inReceive.Add(-1)
+	case *testpb.TestTimeout:
+		ctx.Err(errors.New("mock failure"))
+	}
+}
+
+// PostStop is a no-op.
+func (x *MockWithheldWorkActor) PostStop(*Context) error { return nil }
+
+// MockBehaviorStackActor switches behaviors on command and answers TestReadiness
+// with the name of the behavior that handled it: CreateAccount stacks
+// "stacked", DebitAccount unstacks, and TestBye returns to the default.
+type MockBehaviorStackActor struct{}
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (x *MockBehaviorStackActor) PreStart(*Context) error { return nil }
+
+// Receive is the default behavior.
+func (x *MockBehaviorStackActor) Receive(ctx *ReceiveContext) {
+	x.handle("default", ctx)
+}
+
+// handle answers TestReadiness with name and applies the behavior commands.
+func (x *MockBehaviorStackActor) handle(name string, ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestReadiness:
+		ctx.Response(testpb.Reply_builder{Content: name}.Build())
+	case *testpb.CreateAccount:
+		ctx.BecomeStacked(func(c *ReceiveContext) { x.handle("stacked", c) })
+		ctx.Response(new(testpb.AccountCreated))
+	case *testpb.DebitAccount:
+		ctx.UnBecomeStacked()
+		ctx.Response(new(testpb.AccountDebited))
+	case *testpb.TestBye:
+		ctx.UnBecome()
+		ctx.Response(new(testpb.TestReady))
+	}
+}
+
+// PostStop is a no-op.
+func (x *MockBehaviorStackActor) PostStop(*Context) error { return nil }
+
+// MockDirectiveError is an error type a test maps to a supervisor directive.
+type MockDirectiveError struct{}
+
+// Error describes the error.
+func (*MockDirectiveError) Error() string { return "mock directive error" }
+
+// MockFailingLifecycleActor counts its PreStart and PostStop calls and fails on
+// demand: TestPanic panics with panicValue, TestTimeout records an ordinary
+// error. Its first preStartFailures PreStart calls fail, which lets a test make
+// a restart fail. It lets a test watch what a supervised restart does to the
+// actor's lifecycle hooks.
+type MockFailingLifecycleActor struct {
+	// starts counts the PreStart calls, stops the PostStop calls.
+	starts atomic.Int64
+	stops  atomic.Int64
+	// dependencies counts the dependencies the last PreStart saw.
+	dependencies atomic.Int64
+	// preStartFailures is how many PreStart calls are still to fail.
+	preStartFailures atomic.Int64
+	// panicValue is what TestPanic panics with; a nil value is panic(nil).
+	panicValue any
+}
+
+// NewMockFailingLifecycleActor returns a MockFailingLifecycleActor whose TestPanic panics with panicValue.
+func NewMockFailingLifecycleActor(panicValue any) *MockFailingLifecycleActor {
+	return &MockFailingLifecycleActor{panicValue: panicValue}
+}
+
+// PreStart counts the call and the dependencies it sees, and fails while failures remain.
+func (x *MockFailingLifecycleActor) PreStart(ctx *Context) error {
+	x.starts.Add(1)
+	x.dependencies.Store(int64(len(ctx.Dependencies())))
+	if x.preStartFailures.Load() > 0 {
+		x.preStartFailures.Dec()
+		return errors.New("mock prestart failure")
+	}
+
+	return nil
+}
+
+// Receive answers TestReply, panics on TestPanic and records an error on TestTimeout.
+func (x *MockFailingLifecycleActor) Receive(ctx *ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *testpb.TestReply:
+		ctx.Response(new(testpb.Reply))
+	case *testpb.TestPanic:
+		panic(x.panicValue)
+	case *testpb.TestTimeout:
+		ctx.Err(errors.New("mock failure"))
+	}
+}
+
+// PostStop counts the call.
+func (x *MockFailingLifecycleActor) PostStop(*Context) error {
+	x.stops.Add(1)
+	return nil
+}
+
+// MockRespawnOnTerminatedActor spawns the terminated actor's name again when it
+// receives Terminated, and reports the spawn's error, so a test can check that
+// the name is free by the time a watcher learns of the death.
+type MockRespawnOnTerminatedActor struct {
+	// results receives the error of each spawn attempt, nil included.
+	results chan error
+}
+
+// NewMockRespawnOnTerminatedActor returns a MockRespawnOnTerminatedActor with a buffered results channel.
+func NewMockRespawnOnTerminatedActor() *MockRespawnOnTerminatedActor {
+	return &MockRespawnOnTerminatedActor{results: make(chan error, 1024)}
+}
+
+// PreStart is a no-op: the actor carries no state to initialize.
+func (x *MockRespawnOnTerminatedActor) PreStart(*Context) error { return nil }
+
+// Receive spawns the terminated actor's name again and reports the outcome.
+func (x *MockRespawnOnTerminatedActor) Receive(ctx *ReceiveContext) {
+	terminated, ok := ctx.Message().(*Terminated)
+	if !ok {
+		return
+	}
+
+	_, err := ctx.ActorSystem().Spawn(ctx.Context(), terminated.ActorPath().Name(), NewMockActor())
+	x.results <- err
+}
+
+// PostStop is a no-op.
+func (x *MockRespawnOnTerminatedActor) PostStop(*Context) error { return nil }
+
+// MockMessageProbe is an actor that hands every message it receives to the
+// test, so a test can wait for a message instead of polling for its effect.
+type MockMessageProbe struct {
+	MockNoopActor
+
+	// received carries each message, PostStart excluded, out to the test.
+	received chan any
+}
+
+// NewMockMessageProbe returns a MockMessageProbe with a buffered message channel.
+func NewMockMessageProbe() *MockMessageProbe {
+	return &MockMessageProbe{received: make(chan any, 64)}
+}
+
+// Receive publishes every message but PostStart on received.
+func (x *MockMessageProbe) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*PostStart); ok {
+		return
+	}
+
+	x.received <- ctx.Message()
 }

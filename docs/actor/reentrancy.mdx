@@ -18,8 +18,8 @@ preserving single-threaded processing.
 - **Off**: Strict sequential; `Request`/`RequestName` disabled. Use `Ask`/`SendSync` for sync calls.
 - **AllowAll**: All incoming messages can be processed while awaiting a response. Maximizes throughput.
 - **StashNonReentrant**: User messages are stashed while any stash-mode request is in flight; only async responses and
-  system messages (e.g. `PoisonPill`, `HealthCheckRequest`) are processed. Preserves strict ordering at the cost of
-  latency.
+  system messages (e.g. `PoisonPill`, `HealthCheckRequest`) are processed. No user message is handled while the actor
+  waits, at the cost of latency.
 
 ## Enabling reentrancy
 
@@ -130,13 +130,14 @@ if call != nil {
 
 In `StashNonReentrant` mode, user messages are automatically stashed while any stash-mode request is in flight. A stash
 buffer is created on demand; you do **not** need `WithStashing()` for reentrancy-driven stashing. When the last blocking
-request completes, stashed messages are unstashed and processed in order.
+request completes, the stashed messages are appended to the mailbox, oldest first. Messages that arrived after the
+response but before the actor handled it are already in the mailbox, so they run before the stashed ones.
 
 ## When to use
 
 - **Actors that make async requests** and need to stay responsive (e.g. fan-out, long I/O via PipeTo).
 - **Avoiding deadlock** in call cycles (A -> B -> A). Use `AllowAll` so A can process B's reply while waiting.
-- **Strict ordering** when you must not interleave user messages with async responses: use `StashNonReentrant`.
+- **No interleaving** when user messages must not run while a request is in flight: use `StashNonReentrant`.
 
 ## Production notes
 

@@ -5,14 +5,15 @@ sidebarTitle: "Death Watch"
 ---
 
 Death watch lets an actor receive a `Terminated` message when another actor stops. Use it to clean up references, fail
-over, or react to actor lifecycle.
+over, or react to actor lifecycle. The watched actor may live on another node: `Watch` on a remote `PID` registers the
+watch there, and the `Terminated` message crosses the network.
 
 ## API
 
 - **pid.Watch**: Register to receive `Terminated` when `cid` stops.
 - **pid.UnWatch**: Cancel the watch for `cid`.
-- **ctx.Watch**: Same as `ctx.Self`.
-- **ctx.UnWatch**: Same as `ctx.Self`.
+- **ctx.Watch**: `ctx.Self().Watch(cid)`.
+- **ctx.UnWatch**: `ctx.Self().UnWatch(cid)`.
 
 `Watch` and `UnWatch` are on `*PID` and `ReceiveContext`. Use `ctx.Watch(pid)` from inside `Receive` to watch another
 actor.
@@ -22,19 +23,28 @@ actor.
 When a watched actor stops, the watcher receives:
 
 ```go Terminated message
-type Terminated struct {
-    // Address returns the address (ID) of the terminated actor.
-    Address() string
-}
+// ActorPath returns the path of the terminated actor; TerminatedAt the time it stopped.
+func (x *Terminated) ActorPath() Path
+func (x *Terminated) TerminatedAt() time.Time
 ```
 
 Handle it in `Receive`:
 
 ```go Terminated message
 case *actor.Terminated:
-    addr := msg.Address()
+    name := msg.ActorPath().Name()
     // remove from local state, restart a replacement, etc.
 ```
+
+A few rules govern when it arrives:
+
+- `Terminated` is sent after the stopped actor's `PostStop` has returned, and after its name is free, so a watcher may
+  spawn the same name again as soon as it receives the message.
+- It is a control message: in the watcher it is handled ahead of the user messages still queued, and a watcher that is
+  suspended at that moment still receives it.
+- A restart is not a death: restarting a watched actor sends no `Terminated`, and the watch stays in place.
+- Watching an actor that has already stopped registers nothing, and no `Terminated` ever comes.
+- A parent watches each of its children automatically.
 
 ## When to use
 
@@ -54,12 +64,12 @@ watching before the target terminates.
 func (a *ParentActor) Receive(ctx *ReceiveContext) {
     switch msg := ctx.Message().(type) {
     case *SpawnWorker:
-        pid, _ := ctx.Spawn("worker", NewWorkerActor())
+        pid := ctx.Spawn("worker", NewWorkerActor())
         ctx.Watch(pid)
         a.workers[pid.ID()] = pid
     case *actor.Terminated:
-        delete(a.workers, msg.Address())
-        // optionally respawn
+        delete(a.workers, msg.ActorPath().String())
+        // optionally respawn: the name is free by now
     default:
         ctx.Unhandled()
     }

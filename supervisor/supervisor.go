@@ -47,7 +47,8 @@ const (
 	// sibling child actors if any one of them fails or panics during message processing.
 	//
 	// When using OneForAllStrategy, a failure in any child actor triggers a collective response:
-	// the same directive (e.g., restart, resume, or stop) is applied to every child under the supervisor.
+	// a restart or stop directive is applied to every child under the supervisor. Resume and
+	// Escalate concern the failing actor alone.
 	// This strategy is particularly appropriate when the child actors are tightly coupled or
 	// interdependent—where the malfunction of one actor can adversely affect the overall functionality
 	// of the ensemble.
@@ -91,8 +92,8 @@ const (
 	// actor can continue processing messages without a state reset.
 	ResumeDirective
 	// RestartDirective indicates that when an actor fails, the supervisor should restart the actor.
-	// Restarting involves stopping the current instance and creating a new one, effectively resetting
-	// the actor's internal state.
+	// Restarting runs PostStop on the actor and then PreStart again, on the same actor value: state
+	// that PreStart does not set again is kept. The mailbox and the queued messages are kept too.
 	RestartDirective
 
 	// EscalateDirective indicates that when an actor fails, the supervisor should escalate the failure
@@ -220,7 +221,8 @@ func WithAnyErrorDirective(directive Directive) SupervisorOption {
 
 // DirectiveRule describes a directive rule keyed by error type.
 type DirectiveRule struct {
-	// ErrorType should be the fully-qualified Go error type name (reflect.Type.String()).
+	// ErrorType is the error's Go type name as reflect.Type.String() gives it: the
+	// package name and the type name, such as "pkg.MyError", not the import path.
 	ErrorType string
 	// Directive is the directive to apply for ErrorType.
 	Directive Directive
@@ -253,7 +255,7 @@ type Supervisor struct {
 	// Specifies the strategy
 	strategy Strategy
 	// Specifies the maximum number of retries
-	// When reaching this number the faulty actor is stopped
+	// When exceeding this number within the reset window the faulty actor is suspended
 	maxRetries uint32
 	// Specifies the time range to restart the faulty actor
 	timeout time.Duration
@@ -396,7 +398,8 @@ func (s *Supervisor) AnyErrorDirective() (Directive, bool) {
 // SetDirectiveByType associates a supervision directive with an error type name.
 //
 // The key must be the concrete (non-pointer) error type string as returned by
-// reflect.Type.String() (for example: "net.OpError" or "github.com/acme/pkg.MyError").
+// reflect.Type.String(): the package name and the type name (for example
+// "net.OpError" or "pkg.MyError"), never the import path.
 // Callers typically obtain this value via the internal helper errorType(err).
 //
 // This is a low-level helper intended for cases where the error type is only known

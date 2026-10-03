@@ -22,7 +22,7 @@ When `Stop(ctx)` is called, the system:
 From the first step on, the node activates no new grains. See [Grain lifecycle](/grains/overview#during-shutdown).
 
 Shutdown is best-effort: it continues even if individual steps fail, collecting errors. A configurable `shutdownTimeout`
-(default: 3 minutes) bounds the total time.
+(default: 5 minutes) bounds the total time.
 
 ## Shutdown hooks
 

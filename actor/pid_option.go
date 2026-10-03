@@ -100,7 +100,7 @@ func withSupervisor(supervisor *supervisor.Supervisor) pidOption {
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
-		pid.stashState = &stashState{box: NewUnboundedMailbox()}
+		pid.stashState.Store(&stashState{box: NewUnboundedMailbox()})
 	}
 }
 

@@ -21,7 +21,7 @@ type Extension interface {
 }
 ```
 
-`ID` must be unique, alphanumeric, up to 255 chars. Add domain-specific methods to your concrete type.
+`ID` must be 2 to 255 characters, start with a letter or digit, and contain only letters, digits, `-` and `_`. It must be unique: a later extension with the same `ID` replaces the earlier one. Add domain-specific methods to your concrete type.
 
 ### Wiring
 
@@ -51,11 +51,14 @@ type Dependency interface {
     // ID returns the unique identifier for the extension.
     //
     // The identifier must:
-    //   - Be no more than 255 characters long.
+    //   - Be between 2 and 255 characters long.
     //   - Start with an alphanumeric character [a-zA-Z0-9].
     //   - Contain only alphanumeric characters, hyphens (-), or underscores (_) thereafter.
     //
-    // Identifiers that do not meet these constraints are considered invalid.
+    // Identifiers that do not meet these constraints are considered invalid. The
+    // identifier is validated without its surrounding spaces but stored as returned,
+    // so it should carry none. A later registration with the same identifier
+    // replaces the earlier one.
     ID() string
 }
 
@@ -74,8 +77,9 @@ Dependencies can be injected in two ways:
 
 2. **Via the actor system**: Call `system.Inject(dep1, dep2, ...)` after the system has started. This registers the
    dependency types with the actor system's registry, enabling the framework to restore dependencies during cluster
-   topology changes or when creating actors on remote hosts. You typically combine this with `WithDependencies` when
-   spawning: inject first to register the types, then pass them at spawn so the actor receives them.
+   topology changes or when creating actors on remote hosts. A local spawn registers the types of its own
+   dependencies, so `Inject` matters on the **other** nodes: those that may receive the actor through relocation or a
+   remote spawn without ever spawning that dependency type themselves.
 
 ### Use cases
 
