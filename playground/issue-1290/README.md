@@ -113,7 +113,7 @@ func (g *OrderGrain) OnReceive(ctx *actor.GrainContext) {
 - Requests default to `DefaultGrainRequestTimeout` (5s); `WithRequestTimeout(0)` disables the timeout. Keep a finite timeout in stash mode, or a lost reply pauses the grain until shutdown.
 - Error identity survives the request path: `errors.Is(err, gerrors.ErrRequestTimeout)` works in continuations, locally and across nodes.
 - Reentrancy is activation-scoped configuration. A grain reactivated by a bare send comes back without it; re-activate with options or enable it from a handler.
-- Internals for maintainers: [architecture/REENTRANCY.md](../../architecture/REENTRANCY.md).
+- Internals for maintainers: [chapter 8 of the book](../../book/chapters/chap-08.md), sections 8.5 and 8.6.
 
 ## Run
 

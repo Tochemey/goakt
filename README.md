@@ -67,7 +67,7 @@ Ask questions and follow the work in [Discussions](https://github.com/Tochemey/g
 
   <a href="./CLA.md"><img src="https://img.shields.io/badge/CLA-signed%20on%20PR-blue" alt="CLA" /></a>
 
-We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [Architecture Document](./architecture/ARCHITECTURE.md) to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
+We welcome contributions: bug fixes, new features, and documentation improvements. Before diving in, read the [architecture overview](./book/architecture.md) of [GoAkt from the Inside](./book/README.md), the maintainers' book, to understand the codebase. We use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) and a Docker-backed `Makefile` so contributors only need Docker and Make installed; run `make help` to see the available targets.
 
 See [contributing.md](./CONTRIBUTING.md) for prerequisites, setup, and the full contribution workflow, the other [design documents](./architecture/) covering the dispatcher pool, CRDTs, streams, reentrancy, and reliable delivery, and the [benchmark suite](./benchmark/) for the performance harness.
 

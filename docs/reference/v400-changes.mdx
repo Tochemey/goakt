@@ -8,30 +8,66 @@ A quick summary of v4.0.0 changes.
 
 ## Executive summary
 
-v4.0.0 delivers **simplification** and **performance**:
+v4.0.0 makes the API smaller and more uniform:
 
-- **Unified APIs**: Single actor reference (`*PID`), single lookup (`ActorOf`), unified scheduler.
-- **Type flexibility**: `any` replaces `proto.Message`; CBOR for arbitrary Go types.
-- **Remoting**: Config-only public API; client is internal.
+- **Unified APIs**: Single actor reference (`*PID`), single lookup (`ActorOf`), one scheduler for local and remote actors.
+- **Type flexibility**: `any` replaces `proto.Message`. Protocol Buffers still work, and plain Go types can cross the network through the CBOR or JSON serializer.
+- **Remoting**: Enabled with a `remote.Config`. The client the actor system uses to reach other nodes is internal; programs without an actor system use the public `client` package.
 - **Identity**: `Path` interface replaces `*address.Address`.
-- **Performance**: Low-GC serialization, lock-free type registry, single-allocation frames.
 
 ## Quick migration reference
 
-- `proto.Message` in handlers → `any`
+- Module path `github.com/tochemey/goakt/v3` → `github.com/tochemey/goakt/v4`
+- `proto.Message` in handlers and call sites → `any`
 - `goaktpb.*` types → `actor.*` (e.g., `actor.PostStart`, `actor.PoisonPill`)
 - `ActorRef` → `*PID`
-- `ActorOf` → `(addr, pid, err)` → `ActorOf` → `(*PID, error)`
+- `ActorOf` returning `(addr, pid, err)` → `ActorOf` returning `(*PID, error)`
 - `LocalActor` → `ActorOf`
 - `RemoteActor` → `ActorOf`
-- `pid.Address` → `pid.Path`
-- `ctx.SenderAddress` → `ctx.Sender`
+- `Actors()` and `ActorRefs(ctx, timeout)` → `Actors(ctx, timeout)`
+- `RemoteScheduleOnce`, `RemoteSchedule`, `RemoteScheduleWithCron` → `ScheduleOnce`, `Schedule`, `ScheduleWithCron` with a PID from `ActorOf`
+- `GetPartition` → `Partition`
+- `pid.Address()` → `pid.Path()`
+- `ctx.SenderAddress()` → `ctx.Sender().Path()`
+- `ctx.ReceiverAddress()` → `ctx.Self().Path()`
+- `testkit.Probe.SenderAddress()` → `Probe.Sender()`, then `Path()` or `IsRemote()`
+- `address` package → no public package; use the `Path` interface
+- `remote.Remoting`, `remote.Client`, `remote.NewRemoting()`, `remote.NewClient()` → `actor.WithRemote(config)` and the PID methods; the `client` package outside an actor system
 - `WithRemoting` → `WithRemote`
-- `address` package → `internal/address`; use `Path` interface
+- `actor.WithTLS` (deprecated) → `remote.WithTLS` on the remote config
+
+## Behavior to know
+
+- **No sender**: when a message has no sender, `ctx.Sender()` returns the actor system's no-sender PID, not `nil`. Compare it with `ctx.ActorSystem().NoSender()`.
+- **Remote PIDs**: `Tell`, `Ask` and the scheduler route a remote PID through remoting. Operations that run on the PID's own actor, such as `PipeTo` or `SendAsync`, return `errors.ErrNotLocal` when called on a remote PID.
+- **Scheduling in a cluster**: `ScheduleWithCron` requires `actor.WithReference`; without it the call fails with `errors.ErrScheduleReferenceRequired`.
+- **Remote spawn**: `Spawn` with `actor.WithHostAndPort(host, port)` forwards `WithRelocationDisabled`, `WithDependencies`, `WithStashing`, `WithPassivationStrategy`, `WithReentrancy`, `WithSupervisor`, `WithRole` and `WithInitTimeout` to the target node, which must have registered the actor type with `system.Register`.
+- **Compression**: configure every node with the same `remote.WithCompression` algorithm. On the duplex protocol a mismatch keeps the connection up but sends uncompressed traffic; on the legacy protocol it makes frames unreadable.
+- **`client` package**: `client.Client.Tell` and `client.Client.TellGrain` still take a `proto.Message`; `client.Client.Ask` and `client.Client.AskGrain` take `any`.
+
+```go
+func (a *Auditor) Receive(ctx *actor.ReceiveContext) {
+	sender := ctx.Sender()
+	if sender.Equals(ctx.ActorSystem().NoSender()) {
+		ctx.Logger().Info("message without a sender")
+		return
+	}
+
+	ctx.Logger().Infof("%s sent a message to %s", sender.Path().String(), ctx.Self().Path().String())
+}
+```
 
 ## New additions
 
-- **Pluggable serializers**: ProtoSerializer (default), CBORSerializer for any Go type
-- **Path interface**: Location-transparent actor identity
-- **Extended Logger**: Context-aware logging, `Enabled`, `With`, `Flush`, etc.
-- **Slog and Zap implementations**: Low-GC logging options
+- **Pluggable serializers**: `ProtoSerializer` is registered for every `proto.Message` by default. `CBORSerializer` and `JSONSerializer` encode plain Go types: register them with `remote.WithSerializables(new(MyMessage))` for CBOR or `remote.WithJSONSerializables(new(MyMessage))` for JSON. A custom `remote.Serializer` is registered with `remote.WithSerializers`.
+- **Path interface**: Location-transparent actor identity.
+- **`PID.Kind()`**: the actor's type name. For a remote PID it asks the actor's node and returns an empty string when that fails.
+- **Error sentinels**: `errors.ErrRemotingDisabled` and `errors.ErrNotLocal`.
+- **Extended Logger**: Context-aware methods (`InfoContext`, `ErrorfContext`, and so on), `LogLevel`, `Enabled`, `With`, `Flush` and `StdLogger`. Custom implementations must add them. The interface has no `Fatal`, `Panic` or `LogOutput` methods; the concrete `log.Zap` and `log.Slog` types still have them. `log.DiscardLogger` is a `log.Logger` value, so it does not expose them.
+- **Logger implementations**: `log.NewSlog`, `log.NewSlogFrom`, `log.NewZap` and `log.DiscardLogger`.
+
+<Warning>
+Register the same serializable types on every node that sends or receives them: a node cannot decode a type it has not registered.
+</Warning>
+
+The full migration guide, with examples, is in the repository: [book/migration/v3-to-v4.md](https://github.com/tochemey/goakt/blob/main/book/migration/v3-to-v4.md).
