@@ -39,6 +39,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -354,6 +355,24 @@ func TestGrainLateMessageForwarding(t *testing.T) {
 		replyErr, ok := reply.(grainReplyError)
 		require.True(t, ok)
 		require.ErrorIs(t, replyErr.err, gerrors.ErrSystemShuttingDown)
+		require.True(t, refusal.Marked(replyErr.err), "the late message is refused by the node, not by a handler")
+	})
+
+	t.Run("shutdown refuses the late ask of a reentrant caller with the mark", func(t *testing.T) {
+		system, identity, pid := deactivatedGrainFixture(t)
+		system.shuttingDown.Store(true)
+		t.Cleanup(func() { system.shuttingDown.Store(false) })
+
+		// the ask travels as an envelope and its reply through the pending-asks
+		// table, as for a reentrancy-enabled grain
+		slot := system.pendingAsks.Register("late-envelope-ask")
+		grainContext := getGrainContext(pid.ctxShard).build(ctx, pid, system, identity, new(testpb.TestReply), grainEnvelope)
+		grainContext.requestID = "late-envelope-ask"
+		pid.handleGrainContext(grainContext, time.Now())
+
+		response := <-slot
+		require.Equal(t, gerrors.ErrSystemShuttingDown.Error(), response.Error)
+		require.True(t, response.Refused, "the refusal keeps its mark on the envelope path")
 	})
 
 	t.Run("late messages keep their arrival order", func(t *testing.T) {

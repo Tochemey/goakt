@@ -48,7 +48,21 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/refusal"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/remote"
+)
+
+const (
+	// grainRegistryWriteAttempts, grainRegistryWriteInitialDelay and
+	// grainRegistryWriteMaxDelay bound the retries of a write to the grain
+	// registry: the claim of a grain, the publication of its record and the
+	// release of the entry of an owner that is gone. While a node leaves the
+	// cluster, the registry can for a moment still route a write to that
+	// node, whose store is shutting down or gone, and the write fails.
+	grainRegistryWriteAttempts     = 3
+	grainRegistryWriteInitialDelay = 100 * time.Millisecond
+	grainRegistryWriteMaxDelay     = 500 * time.Millisecond
 )
 
 type grainOwnerMismatchError struct {
@@ -152,7 +166,8 @@ func (x *actorSystem) GrainIdentity(ctx context.Context, name string, factory Gr
 		return nil, err
 	}
 
-	return x.activateGrain(ctx, identity, staticGrainProvider(grain), config)
+	identity, err = x.activateGrain(ctx, identity, staticGrainProvider(grain), config)
+	return identity, refusal.Unmark(err)
 }
 
 // grainOf retrieves or activates the Grain identified by the prototype's kind and the given name.
@@ -188,7 +203,8 @@ func (x *actorSystem) grainOf(ctx context.Context, prototype Grain, name string,
 		return x.getReflection().instantiateGrain(identity.Kind())
 	}
 
-	return x.activateGrain(ctx, identity, provider, config)
+	identity, err = x.activateGrain(ctx, identity, provider, config)
+	return identity, refusal.Unmark(err)
 }
 
 // grainProvider lazily supplies the grain instance to activate. It is only
@@ -253,6 +269,14 @@ func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity
 // the handler reported, if any. With WithOneWay the call returns as soon as the message is enqueued in the
 // grain mailbox; a failure the handler reports is recorded as a deadletter instead of reaching the caller.
 //
+// In a cluster, the registry entry of an owner that is gone is released by the call itself. When the
+// message did not run, because the owner refused it while shutting down or had left the cluster before
+// the request could be sent, the message is sent once more in the same call, to the grain re-activated on
+// this node with its recorded configuration, within what is left of DefaultGrainRequestTimeout. When the
+// owner left the cluster with the message in flight, the entry is released and the transport error is
+// returned without sending the message again, since it may have run before the owner died; the next
+// call reaches the grain on a live node.
+//
 // Parameters:
 //   - ctx: Context for cancellation and timeout control.
 //   - identity: The unique identity of the Grain.
@@ -276,12 +300,15 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 		mode = grainOneWay
 	}
 
+	// The error goes to application code, so it is returned without the mark
+	// of a node refusal: a grain handler that passes it on must not make its
+	// own node look like it refused the message it is handling.
 	if x.InCluster() {
-		return x.remoteTellGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
+		return refusal.Unmark(x.remoteTellGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode))
 	}
 
 	_, err := x.localSendGrain(ctx, identity, message, DefaultGrainRequestTimeout, mode)
-	return err
+	return refusal.Unmark(err)
 }
 
 // AskGrain sends a synchronous request message to a Grain (virtual actor) identified by the given identity.
@@ -289,6 +316,14 @@ func (x *actorSystem) TellGrain(ctx context.Context, identity *GrainIdentity, me
 // This method locates or activates the target Grain (locally or in the cluster), sends the provided
 // protobuf message, and waits for a response or error. The request will block until a response is received,
 // the context is canceled, or the timeout elapses.
+//
+// In a cluster, the registry entry of an owner that is gone is released by the call itself. When the
+// message did not run, because the owner refused it while shutting down or had left the cluster before
+// the request could be sent, the message is sent once more in the same call, to the grain re-activated on
+// this node with its recorded configuration, within what is left of the timeout. When the
+// owner left the cluster with the message in flight, the entry is released and the transport error is
+// returned without sending the message again, since it may have run before the owner died; the next
+// call reaches the grain on a live node.
 //
 // Parameters:
 //   - ctx: Context for cancellation and timeout control.
@@ -309,11 +344,14 @@ func (x *actorSystem) AskGrain(ctx context.Context, identity *GrainIdentity, mes
 		return nil, gerrors.NewErrInvalidGrainIdentity(err)
 	}
 
+	// The error is returned without the mark of a node refusal; see TellGrain.
 	if x.InCluster() {
-		return x.remoteAskGrain(ctx, identity, message, timeout)
+		response, err = x.remoteAskGrain(ctx, identity, message, timeout)
+		return response, refusal.Unmark(err)
 	}
 
-	return x.localSendGrain(ctx, identity, message, timeout, grainAsk)
+	response, err = x.localSendGrain(ctx, identity, message, timeout, grainAsk)
+	return response, refusal.Unmark(err)
 }
 
 // Grains retrieves a list of all active Grains (virtual actors) in the system.
@@ -527,38 +565,112 @@ func (x *actorSystem) tryPeerActivation(ctx context.Context, identity *GrainIden
 //
 // The entry is released when the owner answered that it is shutting down or
 // that its remoting is off, or when the owner is unreachable and the
-// membership confirms it has left.
+// membership confirms it has left. An activation request runs no grain
+// handler, so ErrSystemShuttingDown is always the owner's own answer here.
 func (x *actorSystem) releaseUnreachableGrainOwner(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error) error {
+	refused := errors.Is(sendErr, gerrors.ErrSystemShuttingDown) || errors.Is(sendErr, gerrors.ErrRemotingDisabled)
+	released, err := x.releaseGrainOwnerRecord(ctx, identity, owner, sendErr, refused)
+	if err != nil {
+		return err
+	}
+
+	if !released {
+		return sendErr
+	}
+
+	return nil
+}
+
+// releaseStaleGrainOwner decides what a failed message to a remote owner means
+// for its registry entry. The entry is released when the owner refused the
+// message (grainMessageRefused), or when the owner is unreachable and the
+// membership confirms it has left.
+//
+// It reports whether the message may be sent again, which takes both a
+// released entry and the certainty that the message did not run: the owner
+// refused it, or the owner has left and the request never left this node
+// (isDialFailure). A message that was in flight when its owner went away may
+// have run, so it is not sent again. It returns the error the caller must
+// report: sendErr, or, when the release itself failed, sendErr joined with
+// that failure.
+func (x *actorSystem) releaseStaleGrainOwner(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error) (bool, error) {
+	refused := grainMessageRefused(sendErr)
+	released, err := x.releaseGrainOwnerRecord(ctx, identity, owner, sendErr, refused)
+	if err != nil {
+		// the entry still names the owner, so nothing is sent again; the
+		// caller still gets the failure of its message, which it may match on
+		return false, errors.Join(refusal.Unmark(sendErr), err)
+	}
+
+	return released && (refused || isDialFailure(sendErr)), sendErr
+}
+
+// isDialFailure reports whether err is the failure to connect to a node. The
+// remoting client writes a request only on an established connection and does
+// not send it a second time by itself, so a request that failed this way never
+// left this node and did not run.
+func isDialFailure(err error) bool {
+	opErr, ok := errors.AsType[*net.OpError](err)
+	return ok && opErr.Op == "dial"
+}
+
+// grainMessageRefused reports whether sendErr is the answer of an owner that
+// did not run a grain message: its remoting is off, which the remote server
+// answers before any handler runs, or the node refused the message while
+// shutting down (refusal.Mark). ErrSystemShuttingDown without the
+// refusal mark may have been reported by a grain handler, or by an owner too
+// old to mark it, so it does not count.
+func grainMessageRefused(sendErr error) bool {
+	if errors.Is(sendErr, gerrors.ErrRemotingDisabled) {
+		return true
+	}
+
+	return refusal.Marked(sendErr)
+}
+
+// releaseGrainOwnerRecord releases the registry entry naming owner after a
+// request to it failed with sendErr. A request the owner refused releases the
+// entry at once. Otherwise the entry is released only after a transport
+// failure, where the owner never answered, and once the cluster membership
+// confirms the owner has left. Cluster.ReleaseGrain deletes the entry only
+// while it still names the owner. A release the registry fails is tried again
+// (retryGrainRegistryWrite). It reports whether the entry was released, and returns
+// an error only when the release itself failed.
+func (x *actorSystem) releaseGrainOwnerRecord(ctx context.Context, identity *GrainIdentity, owner *internalpb.Grain, sendErr error, refused bool) (bool, error) {
 	node := address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))
 
 	switch {
-	case errors.Is(sendErr, gerrors.ErrSystemShuttingDown):
-		// the owner is shutting down and does not have the grain active
-		x.logger.Infof("owner=%s for grain=%s is shutting down, releasing its registry entry", node, identity.String())
-	case errors.Is(sendErr, gerrors.ErrRemotingDisabled):
+	case refused && errors.Is(sendErr, gerrors.ErrRemotingDisabled):
 		// a cluster node turns its remoting off only at the end of its shutdown
 		x.logger.Infof("owner=%s for grain=%s has shut down, releasing its registry entry", node, identity.String())
+	case refused:
+		// the owner is shutting down and does not serve the request
+		x.logger.Infof("owner=%s for grain=%s is shutting down, releasing its registry entry", node, identity.String())
 	case isTransportFailure(ctx, sendErr):
 		departed, err := x.grainOwnerDeparted(ctx, owner)
 		if err != nil {
 			x.logger.Warnf("failed to check membership of owner=%s for grain=%s: %v", node, identity.String(), err)
-			return sendErr
+			return false, nil
 		}
 
 		if !departed {
-			return sendErr
+			return false, nil
 		}
 
 		x.logger.Warnf("owner=%s for grain=%s left the cluster, releasing its registry entry: %v", node, identity.String(), sendErr)
 	default:
-		return sendErr
+		return false, nil
 	}
 
-	if _, err := x.getCluster().ReleaseGrain(ctx, identity.String(), node); err != nil {
-		return fmt.Errorf("failed to release registry entry of grain=%s owned by departed node=%s: %w", identity.String(), node, err)
+	err := x.retryGrainRegistryWrite(ctx, func(ctx context.Context) error {
+		_, err := x.getCluster().ReleaseGrain(ctx, identity.String(), node)
+		return err
+	})
+	if err != nil {
+		return false, fmt.Errorf("failed to release registry entry of grain=%s owned by departed node=%s: %w", identity.String(), node, err)
 	}
 
-	return nil
+	return true, nil
 }
 
 // isTransportFailure reports whether err means the remote node never answered
@@ -734,7 +846,9 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 			_, err := x.localSendGrain(ctx, id, message, timeout, mode)
 			return err
 		}
-		return x.sendRemoteTellGrainRequest(ctx, grain, message, mode)
+
+		_, err := x.sendToRecordedGrainOwner(ctx, id, grain, message, timeout, mode)
+		return err
 	}
 
 	if !errors.Is(err, cluster.ErrGrainNotFound) {
@@ -780,7 +894,8 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 		if x.isLocalGrainOwner(grain) {
 			return x.localSendGrain(ctx, id, message, timeout, grainAsk)
 		}
-		return x.sendRemoteAskGrainRequest(ctx, grain, message, timeout)
+
+		return x.sendToRecordedGrainOwner(ctx, id, grain, message, timeout, grainAsk)
 	}
 
 	if !errors.Is(err, cluster.ErrGrainNotFound) {
@@ -819,7 +934,8 @@ func (x *actorSystem) localSendGrain(ctx context.Context, id *GrainIdentity, mes
 	if err != nil {
 		var ownerErr *grainOwnerMismatchError
 		if errors.As(err, &ownerErr) {
-			return x.sendToGrainOwner(ctx, ownerErr.owner, message, timeout, mode)
+			reply, _, err := x.sendToGrainOwner(ctx, id, ownerErr.owner, message, timeout, mode)
+			return reply, err
 		}
 		return nil, err
 	}
@@ -967,8 +1083,15 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 		// Decode exactly like the on-turn response handler does: an empty
 		// response is a successful reply without a payload (NoErr).
 		if response.Error != "" {
-			return nil, asyncErrorFromString(response.Error)
+			err := asyncErrorFromString(response.Error)
+			if response.Refused {
+				// the node refused the ask before the grain ran it
+				err = refusal.Mark(err)
+			}
+
+			return nil, err
 		}
+
 		return response.Message, nil
 	case <-ctx.Done():
 		timers.Put(timer)
@@ -1001,8 +1124,12 @@ func (x *actorSystem) deliverAsyncEnvelope(ctx context.Context, id *GrainIdentit
 		var ownerErr *grainOwnerMismatchError
 		if errors.As(err, &ownerErr) {
 			// The owner is remote: the envelope rides the existing tell-grain
-			// remote call, made encodable by the envelope serializers.
-			return x.sendRemoteTellGrainRequest(ctx, ownerErr.owner, envelope, grainEnvelope)
+			// remote call, made encodable by the envelope serializers. An
+			// envelope is never sent again after a refusal: the continuation
+			// that waits for a response, or the reply target of a request,
+			// may have been lost with the owner.
+			_, _, err := x.sendToGrainOwner(ctx, id, ownerErr.owner, envelope, 0, grainEnvelope)
+			return err
 		}
 		return err
 	}
@@ -1481,7 +1608,9 @@ func (x *actorSystem) rollbackGrainClaim(ctx context.Context, identity string) {
 // the shutdown may already have released the grain's record, and a record
 // written after that would name a node that no longer has the grain. A grain
 // already active on entry stays active for the shutdown to deactivate, and an
-// activation that finishes once the node is stopping is rolled back.
+// activation that finishes once the node is stopping is rolled back. The error
+// is marked as a node refusal (refusal.Mark): a message waiting for the
+// activation has not run.
 func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grainPID, claimed, activatedHere bool) error {
 	key := process.getIdentity().String()
 	if !activatedHere {
@@ -1491,14 +1620,16 @@ func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grai
 	var err error
 	if x.InCluster() && x.isStopping() {
 		// publish nothing: the shutdown may already have released the record
-		err = gerrors.ErrSystemShuttingDown
+		err = refusal.Mark(gerrors.ErrSystemShuttingDown)
 	} else {
-		err = x.putGrainOnCluster(ctx, process)
+		err = x.retryGrainRegistryWrite(ctx, func(ctx context.Context) error {
+			return x.putGrainOnCluster(ctx, process)
+		})
 	}
 
 	if err == nil && activatedHere && x.InCluster() && x.isStopping() {
 		// the shutdown cleanup may have missed this record, so roll it back
-		err = gerrors.ErrSystemShuttingDown
+		err = refusal.Mark(gerrors.ErrSystemShuttingDown)
 	}
 
 	if err == nil {
@@ -1600,8 +1731,16 @@ func (x *actorSystem) getGrainOwner(ctx context.Context, id *GrainIdentity) (*in
 	return owner, nil
 }
 
+// tryClaimGrain claims the grain for the node its record names, with the
+// atomic put-if-absent. It reports whether the claim was made. When the grain
+// is already claimed it returns the record of its owner, or no record when
+// that owner released it meanwhile. A claim the registry fails is tried again
+// (retryGrainRegistryWrite).
 func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain) (bool, *internalpb.Grain, error) {
-	if err := cluster.PutGrainIfAbsent(ctx, x.getCluster(), grain); err != nil {
+	err := x.retryGrainRegistryWrite(ctx, func(ctx context.Context) error {
+		return cluster.PutGrainIfAbsent(ctx, x.getCluster(), grain)
+	})
+	if err != nil {
 		if errors.Is(err, cluster.ErrGrainAlreadyExists) {
 			owner, err := x.getCluster().GetGrain(ctx, grain.GetGrainId().GetValue())
 			if err != nil {
@@ -1617,18 +1756,112 @@ func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain
 	return true, grain, nil
 }
 
+// retryGrainRegistryWrite runs write, a write to the grain registry, and runs
+// it again a bounded number of times when it fails, with a growing delay and
+// within ctx. It returns the last error of write. While a node leaves the
+// cluster the registry can fail a write it still routes to that node, and
+// giving up at once would fail an activation, or keep the entry of an owner
+// that is gone, over a condition that clears by itself. A write is not tried
+// again when the grain is already claimed, which is an answer and not a
+// failure, nor once this node is stopping, whose own store is going away.
+func (x *actorSystem) retryGrainRegistryWrite(ctx context.Context, write func(ctx context.Context) error) error {
+	retrier := retry.NewRetrier(grainRegistryWriteAttempts, grainRegistryWriteInitialDelay, grainRegistryWriteMaxDelay)
+	return retrier.RunContext(ctx, func(ctx context.Context) error {
+		err := write(ctx)
+		if err != nil && (errors.Is(err, cluster.ErrGrainAlreadyExists) || x.isStoppingOrStopped()) {
+			return retry.Stop(err)
+		}
+
+		return err
+	})
+}
+
 // sendToGrainOwner forwards a message to the owning node with the semantics selected by mode:
-// a remote ask for grainAsk, a remote tell otherwise.
-func (x *actorSystem) sendToGrainOwner(ctx context.Context, owner *internalpb.Grain, message any, timeout time.Duration, mode grainContextMode) (any, error) {
+// a remote ask for grainAsk, a remote tell otherwise. A failure that shows the owner is gone
+// releases its registry entry (releaseStaleGrainOwner). It reports whether the message may be
+// sent again: its entry is released and it did not run. The message is never sent again from here: only the AskGrain
+// and TellGrain entry points do that (sendToRecordedGrainOwner), so a forwarded message, or a
+// message this node received from a peer, is sent at most once by this node.
+func (x *actorSystem) sendToGrainOwner(ctx context.Context, id *GrainIdentity, owner *internalpb.Grain, message any, timeout time.Duration, mode grainContextMode) (any, bool, error) {
 	if owner == nil {
-		return nil, errors.New("grain owner is unknown")
+		return nil, false, errors.New("grain owner is unknown")
 	}
+
+	var (
+		reply any
+		err   error
+	)
 
 	if mode == grainAsk {
-		return x.sendRemoteAskGrainRequest(ctx, owner, message, timeout)
+		reply, err = x.sendRemoteAskGrainRequest(ctx, owner, message, timeout)
+	} else {
+		err = x.sendRemoteTellGrainRequest(ctx, owner, message, mode)
 	}
 
-	return nil, x.sendRemoteTellGrainRequest(ctx, owner, message, mode)
+	if err == nil {
+		return reply, false, nil
+	}
+
+	resendable, err := x.releaseStaleGrainOwner(ctx, id, owner, err)
+	return nil, resendable, err
+}
+
+// sendToRecordedGrainOwner sends message to the remote owner named by the grain's registry entry,
+// on behalf of AskGrain and TellGrain. When the message did not run and sendToGrainOwner released
+// the owner's entry, because the owner refused it or had left before the request could be sent,
+// the message is sent once more in the same call: this node claims the grain with the released
+// entry's configuration (claimStaleGrain) and delivers the message through localSendGrain, within
+// what is left of the caller's timeout. When this node cannot host the grain, the failure is
+// returned and the next activation, from an eligible node, re-creates the grain. Any other
+// failure is returned as is.
+func (x *actorSystem) sendToRecordedGrainOwner(ctx context.Context, id *GrainIdentity, owner *internalpb.Grain, message any, timeout time.Duration, mode grainContextMode) (any, error) {
+	deadline := askDeadline(ctx, timeout)
+
+	reply, resendable, err := x.sendToGrainOwner(ctx, id, owner, message, timeout, mode)
+	if !resendable {
+		return reply, err
+	}
+
+	// When the activation that follows fails, the claim stays, like a claim
+	// made on a peer's behalf (tryPeerActivation): the entry names a live
+	// node, which activates the grain on the next message routed to it.
+	hosted, claimErr := x.claimStaleGrain(ctx, id, owner)
+	if claimErr != nil {
+		return nil, claimErr
+	}
+
+	if !hosted {
+		return nil, err
+	}
+
+	return x.localSendGrain(ctx, id, message, untilAskDeadline(deadline), mode)
+}
+
+// claimStaleGrain claims for this node a grain whose owner is gone and whose registry entry was
+// released. The claim carries the released entry's configuration (role, mailbox
+// capacity, reentrancy, dependencies, activation settings), and the activation that follows on
+// this node runs with it, because ensureNewGrainProcess honors an entry that names this node. It
+// reports false without claiming when this node cannot host the grain: the grain kind is not
+// registered here, or the entry requires a role this node does not have. Losing the claim to
+// another node is not an error: the delivery that follows forwards the message to that node.
+func (x *actorSystem) claimStaleGrain(ctx context.Context, id *GrainIdentity, owner *internalpb.Grain) (bool, error) {
+	if _, ok := x.registry.TypeOf(id.Kind()); !ok {
+		return false, nil
+	}
+
+	if !eligibleForRole(x.getNodeRoles(), owner.GetRole()) {
+		return false, nil
+	}
+
+	claim := proto.CloneOf(owner)
+	claim.SetHost(x.Host())
+	claim.SetPort(int32(x.Port()))
+
+	if _, _, err := x.tryClaimGrain(ctx, claim); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // sendRemoteAskGrainRequest sends a request to a known Grain endpoint and returns the decoded reply.
@@ -1707,11 +1940,11 @@ func (x *actorSystem) recreateGrainFromWire(ctx context.Context, grain *internal
 //
 // The removal is gated exactly like recreateGrainFromWire (see
 // Cluster.ReleaseGrain): the entry is only deleted when it still points at the
-// departed node. The message paths never release an entry, so this cleanup is
-// what lets Tell/Ask reach a departed owner's grains again without an
-// activation call. A grain that opted out of relocation is released like any
-// other: it is lost with its node, and re-creating it on the next message is
-// the documented way to recover it.
+// departed node. Without this cleanup, every grain of the departed owner would
+// fail the first Tell/Ask that meets it (releaseStaleGrainOwner releases the
+// entry but returns the transport error). A grain that opted out of relocation
+// is released like any other: it is lost with its node, and re-creating it on
+// the next message is the documented way to recover it.
 func (x *actorSystem) releaseGrainForLazyRelocation(ctx context.Context, grain *internalpb.Grain, departedNode string) error {
 	if isSystemName(grain.GetGrainId().GetName()) {
 		return nil
@@ -2032,9 +2265,11 @@ func (x *actorSystem) waitForGrainActivationBarrier(ctx context.Context) error {
 
 // admitGrainActivation refuses new activations with ErrSystemShuttingDown once
 // the node is shutting down, otherwise it waits for the activation barrier.
+// The refusal is marked as a node refusal (refusal.Mark): a message waiting
+// for the activation has not run, so its sender may send it again elsewhere.
 func (x *actorSystem) admitGrainActivation(ctx context.Context) error {
 	if x.isStopping() {
-		return gerrors.ErrSystemShuttingDown
+		return refusal.Mark(gerrors.ErrSystemShuttingDown)
 	}
 
 	return x.waitForGrainActivationBarrier(ctx)

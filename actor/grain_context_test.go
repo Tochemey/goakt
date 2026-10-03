@@ -35,6 +35,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -839,6 +840,34 @@ func TestGrainRequestGrain(t *testing.T) {
 			require.EqualValues(t, 42, count.GetValue())
 		case err := <-failures:
 			t.Fatalf("request failed: %v", err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("continuation never ran")
+		}
+	})
+
+	t.Run("a node refusal reaches the continuation without its internal mark", func(t *testing.T) {
+		system := newRequestTestSystem(t)
+		ctx := context.Background()
+
+		failures := make(chan error, 1)
+		target := newGrainIdentity(NewMockGrain(), "refusing-request-target")
+		system.registry.Register(NewMockGrain())
+
+		caller := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+			gctx.RequestGrain(target, new(testpb.TestPing)).Then(func(_ any, err error) {
+				failures <- err
+			})
+			gctx.NoErr()
+		}}
+		callerID := activateReentrantGrain(t, system, caller, "refused-request-caller")
+		putGrainOnRefusingOwner(t, system, target)
+
+		require.NoError(t, system.TellGrain(ctx, callerID, new(testpb.TestSend)))
+
+		select {
+		case err := <-failures:
+			require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+			require.False(t, refusal.Marked(err), "an error handed to a grain handler carries no node refusal mark")
 		case <-time.After(2 * time.Second):
 			t.Fatal("continuation never ran")
 		}

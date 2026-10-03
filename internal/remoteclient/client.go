@@ -45,6 +45,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/id"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/strconvx"
 	"github.com/tochemey/goakt/v4/internal/types"
@@ -2832,6 +2833,17 @@ func checkProtoError(resp proto.Message) error {
 		return nil
 	}
 
+	if errResp.GetRefused() {
+		// the node refused a grain message before any handler ran it
+		return refusal.Mark(protoErrorFromCode(errResp))
+	}
+
+	return protoErrorFromCode(errResp)
+}
+
+// protoErrorFromCode maps the code and message of an internalpb.Error to the
+// Go error the remoting client returns for it.
+func protoErrorFromCode(errResp *internalpb.Error) error {
 	msg := errResp.GetMessage()
 
 	// Fast path: common errors

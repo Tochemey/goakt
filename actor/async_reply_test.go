@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
@@ -139,6 +140,19 @@ func TestRouteAsyncReplyToPendingAsk(t *testing.T) {
 		response := <-slot
 		require.Equal(t, "boom", response.Error)
 		require.Nil(t, response.Message)
+		require.False(t, response.Refused)
+	})
+
+	t.Run("carries the mark of a node refusal", func(t *testing.T) {
+		sys, ctx := newReentrancySystem(t)
+		system := sys.(*actorSystem)
+
+		slot := system.pendingAsks.Register("corr")
+		require.NoError(t, system.routeAsyncReply(ctx, nil, nil, "corr", nil, refusal.Mark(gerrors.ErrSystemShuttingDown)))
+
+		response := <-slot
+		require.Equal(t, gerrors.ErrSystemShuttingDown.Error(), response.Error)
+		require.True(t, response.Refused)
 	})
 
 	// A reply that loses the race against the caller's timeout has nowhere to go.

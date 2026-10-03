@@ -29,6 +29,7 @@ import (
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 )
 
 // routeAsyncReply delivers a response to whoever is awaiting the given
@@ -53,6 +54,7 @@ func (x *actorSystem) routeAsyncReply(ctx context.Context, from *PID, replyTo *c
 	response := &commands.AsyncResponse{CorrelationID: correlationID}
 	if failure != nil {
 		response.Error = failure.Error()
+		response.Refused = refusal.Marked(failure)
 	} else {
 		response.Message = message
 	}

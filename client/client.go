@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/chain"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/locker"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/ticker"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
@@ -380,7 +381,8 @@ func (x *Client) AskGrain(ctx context.Context, grainRequest *remote.GrainRequest
 
 	response, err := remoting.RemoteAskGrain(ctx, remoteHost, remotePort, grainRequest, message, timeout)
 	if err != nil {
-		return nil, err
+		// the node refusal mark is internal and never reaches application code
+		return nil, refusal.Unmark(err)
 	}
 	return response, nil
 }
@@ -411,10 +413,11 @@ func (x *Client) TellGrain(ctx context.Context, grainRequest *remote.GrainReques
 	remoting := node.remoteClient()
 	x.locker.Unlock()
 
+	// the node refusal mark is internal and never reaches application code
 	if newTellGrainConfig(opts...).isOneWay {
-		return remoting.RemoteTellGrainOneWay(ctx, remoteHost, remotePort, grainRequest, message)
+		return refusal.Unmark(remoting.RemoteTellGrainOneWay(ctx, remoteHost, remotePort, grainRequest, message))
 	}
-	return remoting.RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message)
+	return refusal.Unmark(remoting.RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message))
 }
 
 // Stop gracefully stops or forcefully terminates the specified actor.

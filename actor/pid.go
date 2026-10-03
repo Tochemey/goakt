@@ -56,6 +56,7 @@ import (
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/internal/ticker"
@@ -2087,7 +2088,8 @@ func (pid *PID) requestGrain(ctx context.Context, to *GrainIdentity, message any
 
 	if err := pid.ActorSystem().deliverAsyncEnvelope(ctx, to, req); err != nil {
 		pid.deregisterRequestState(state)
-		return nil, err
+		// the error goes to the actor, so it carries no node refusal mark
+		return nil, refusal.Unmark(err)
 	}
 
 	return &requestHandle{state: state}, nil

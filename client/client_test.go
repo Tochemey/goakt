@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/tlstest"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -2043,6 +2044,43 @@ func TestClientTellGrainOptions(t *testing.T) {
 
 		require.NoError(t, client.TellGrain(ctx, grainRequest, message))
 		mockRemoting.AssertNotCalled(t, "RemoteTellGrainOneWay", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+
+		client.Close()
+	})
+
+	t.Run("a node refusal reaches the caller without its internal mark", func(t *testing.T) {
+		ctx := context.TODO()
+
+		mockRemoting := mockremote.NewClient(t)
+		node := &Node{
+			remoting: mockRemoting,
+			address:  "127.0.0.1:12345",
+		}
+
+		grainRequest := &remote.GrainRequest{Name: "grain", Kind: "MockGrain"}
+		message := new(testpb.TestSend)
+		nodeRefusal := refusal.Mark(gerrors.ErrSystemShuttingDown)
+
+		remoteHost, remotePort := node.hostAndPort()
+		mockRemoting.EXPECT().NetClient(remoteHost, remotePort).Return(inet.NewClient(net.JoinHostPort(remoteHost, strconv.Itoa(remotePort))))
+		mockRemoting.EXPECT().RemoteTellGrain(ctx, remoteHost, remotePort, grainRequest, message).Return(nodeRefusal)
+		mockRemoting.EXPECT().RemoteTellGrainOneWay(ctx, remoteHost, remotePort, grainRequest, message).Return(nodeRefusal)
+		mockRemoting.EXPECT().RemoteAskGrain(ctx, remoteHost, remotePort, grainRequest, message, time.Second).Return(nil, nodeRefusal)
+		mockRemoting.EXPECT().Close()
+
+		client, err := New(ctx, []*Node{node})
+		require.NoError(t, err)
+		require.NotNil(t, client)
+
+		_, askErr := client.AskGrain(ctx, grainRequest, message, time.Second)
+		for _, err := range []error{
+			client.TellGrain(ctx, grainRequest, message),
+			client.TellGrain(ctx, grainRequest, message, WithOneWay()),
+			askErr,
+		} {
+			require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+			require.False(t, refusal.Marked(err))
+		}
 
 		client.Close()
 	})

@@ -49,6 +49,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	internalnet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -440,7 +441,9 @@ func TestAdmitGrainActivation(t *testing.T) {
 	t.Run("refuses when the node is shutting down", func(t *testing.T) {
 		sys := newClusterReadySystem(rem, cl, node)
 		sys.shuttingDown.Store(true)
-		require.ErrorIs(t, sys.admitGrainActivation(t.Context()), gerrors.ErrSystemShuttingDown)
+		err := sys.admitGrainActivation(t.Context())
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.True(t, refusal.Marked(err), "a refused activation is marked as the node's refusal")
 	})
 }
 
@@ -685,7 +688,8 @@ func TestTryRemoteGrainActivation(t *testing.T) {
 
 		rem.EXPECT().RemoteActivateGrain(ctx, owner.GetHost(), int(owner.GetPort()), mock.Anything).Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
 		cl.EXPECT().Members(ctx).Return([]*cluster.Peer{localPeer}, nil).Once()
-		cl.EXPECT().ReleaseGrain(ctx, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, releaseErr).Once()
+		// a failing release is tried grainRegistryWriteAttempts times
+		cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, releaseErr).Times(grainRegistryWriteAttempts)
 
 		handled, err := sys.tryRemoteGrainActivation(ctx, identity, newGrainConfig(), owner)
 		require.ErrorIs(t, err, releaseErr)
@@ -774,7 +778,8 @@ func TestTryPeerActivation(t *testing.T) {
 		peer := &cluster.Peer{Host: "192.0.2.60", PeersPort: 15060, RemotingPort: 16060}
 		expectedErr := errors.New("claim error")
 
-		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Once()
+		// a failing claim is tried grainRegistryWriteAttempts times
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Times(grainRegistryWriteAttempts)
 
 		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
@@ -804,10 +809,11 @@ func TestTryPeerActivation(t *testing.T) {
 		peer := &cluster.Peer{Host: "192.0.2.62", PeersPort: 15062, RemotingPort: 16062}
 		expectedErr := errors.New("put failed")
 
-		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+		// a failing claim is tried grainRegistryWriteAttempts times
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Times(grainRegistryWriteAttempts)
 		cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
-		})).Return(expectedErr).Once()
+		})).Return(expectedErr).Times(grainRegistryWriteAttempts)
 
 		handled, err := sys.tryPeerActivation(ctx, identity, newGrainConfig(), peer)
 		require.ErrorIs(t, err, expectedErr)
@@ -985,7 +991,8 @@ func TestActivateGrainLocally(t *testing.T) {
 		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-claim-error", false)
 		expectedErr := errors.New("claim error")
 
-		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Once()
+		// a failing claim is tried grainRegistryWriteAttempts times
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, expectedErr).Times(grainRegistryWriteAttempts)
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.ErrorIs(t, err, expectedErr)
@@ -1009,10 +1016,11 @@ func TestActivateGrainLocally(t *testing.T) {
 		sys, cl, _, identity := newActivationTestSystem(t, grain, "local-put-error", false)
 		expectedErr := errors.New("put grain failed")
 
-		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+		// a failing claim is tried grainRegistryWriteAttempts times
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Times(grainRegistryWriteAttempts)
 		cl.EXPECT().PutGrain(mock.Anything, mock.MatchedBy(func(actual *internalpb.Grain) bool {
 			return actual != nil && actual.GetGrainId().GetValue() == identity.String()
-		})).Return(expectedErr).Once()
+		})).Return(expectedErr).Times(grainRegistryWriteAttempts)
 
 		err := sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), newGrainConfig(), nil)
 		require.ErrorIs(t, err, expectedErr)
@@ -1680,7 +1688,7 @@ func TestSendToGrainOwner_ErrorsWhenOwnerMissing(t *testing.T) {
 	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 9012, RemotingPort: 9112}
 	sys := newClusterReadySystem(rem, cl, node)
 
-	resp, err := sys.sendToGrainOwner(ctx, nil, &testpb.TestReply{}, time.Second, grainAsk)
+	resp, _, err := sys.sendToGrainOwner(ctx, newGrainIdentity(NewMockGrain(), "missing-owner"), nil, &testpb.TestReply{}, time.Second, grainAsk)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "grain owner is unknown")
 	require.Nil(t, resp)
@@ -1743,6 +1751,8 @@ func TestTellGrain(t *testing.T) {
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
 		rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 			Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
+		// the owner is still a member, so its entry is kept
+		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: owner.GetHost(), RemotingPort: int(owner.GetPort())}}, nil).Once()
 
 		err := sys.TellGrain(ctx, identity, &testpb.TestSend{})
 		require.Error(t, err)
@@ -2110,9 +2120,12 @@ func TestSendToGrainOwner_TellMode(t *testing.T) {
 
 	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 		Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
+	// the owner is still a member, so its entry is kept
+	cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: owner.GetHost(), RemotingPort: int(owner.GetPort())}}, nil).Once()
 
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, grainTell)
+	resp, refused, err := sys.sendToGrainOwner(ctx, newGrainIdentity(NewMockGrain(), "test"), owner, &testpb.TestSend{}, time.Second, grainTell)
 	require.Error(t, err)
+	require.False(t, refused)
 	require.Nil(t, resp)
 }
 
@@ -2135,7 +2148,7 @@ func TestSendToGrainOwner_OneWayMode(t *testing.T) {
 			return request.Name == "test" && request.Kind == "TestGrain"
 		}), mock.Anything).Return(nil).Once()
 
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestSend{}, time.Second, grainOneWay)
+	resp, _, err := sys.sendToGrainOwner(ctx, newGrainIdentity(NewMockGrain(), "test"), owner, &testpb.TestSend{}, time.Second, grainOneWay)
 	require.NoError(t, err)
 	require.Nil(t, resp)
 }
@@ -2280,9 +2293,857 @@ func TestSendToGrainOwner_AskMode(t *testing.T) {
 	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
 		Return(nil, errors.New("connection refused")).Once()
 
-	resp, err := sys.sendToGrainOwner(ctx, owner, &testpb.TestReply{}, time.Second, grainAsk)
+	resp, _, err := sys.sendToGrainOwner(ctx, newGrainIdentity(NewMockGrain(), "test"), owner, &testpb.TestReply{}, time.Second, grainAsk)
 	require.Error(t, err)
 	require.Nil(t, resp)
+}
+
+// TestAskAndTellGrain_RefusedOwnerReleasedAndMessageResent covers an owner that
+// refused a message it did not run: AskGrain and TellGrain release its entry,
+// claim the grain for this node with the entry's configuration, and deliver
+// the message here in the same call, without consulting the membership.
+func TestAskAndTellGrain_RefusedOwnerReleasedAndMessageResent(t *testing.T) {
+	answers := []struct {
+		name string
+		err  error
+	}{
+		{"owner refused while shutting down", refusal.Mark(gerrors.ErrSystemShuttingDown)},
+		{"owner has shut down", gerrors.ErrRemotingDisabled},
+	}
+
+	modes := []struct {
+		name string
+		mode grainContextMode
+	}{
+		{"ask", grainAsk},
+		{"tell", grainTell},
+		{"one-way tell", grainOneWay},
+	}
+
+	for _, answer := range answers {
+		for _, tc := range modes {
+			t.Run(answer.name+"/"+tc.name, func(t *testing.T) {
+				ctx := t.Context()
+				sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "refused-owner-grain", true)
+
+				staleOwner := internalpb.Grain_builder{
+					GrainId:         internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+					Host:            "192.0.2.30",
+					Port:            18030,
+					MailboxCapacity: proto.Int64(16),
+				}.Build()
+
+				claim := proto.CloneOf(staleOwner)
+				claim.SetHost(sys.Host())
+				claim.SetPort(int32(sys.Port()))
+
+				namesThisNodeWithTheEntryConfig := mock.MatchedBy(func(actual *internalpb.Grain) bool {
+					return actual.GetGrainId().GetValue() == identity.String() &&
+						sys.isLocalGrainOwner(actual) && actual.GetMailboxCapacity() == 16
+				})
+
+				cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(staleOwner, nil).Once()
+				switch tc.mode {
+				case grainAsk:
+					rem.EXPECT().RemoteAskGrain(mock.Anything, staleOwner.GetHost(), int(staleOwner.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, answer.err).Once()
+				case grainTell:
+					rem.EXPECT().RemoteTellGrain(mock.Anything, staleOwner.GetHost(), int(staleOwner.GetPort()), mock.Anything, mock.Anything).Return(answer.err).Once()
+				default:
+					rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, staleOwner.GetHost(), int(staleOwner.GetPort()), mock.Anything, mock.Anything).Return(answer.err).Once()
+				}
+
+				cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(staleOwner.GetHost(), int(staleOwner.GetPort()))).Return(nil, nil).Once()
+				// the claim for this node, then the owner resolution of the activation
+				cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+				cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+				cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+				// one put for the claim, one for the publication of the activated grain
+				cl.EXPECT().PutGrain(mock.Anything, namesThisNodeWithTheEntryConfig).Return(nil).Twice()
+
+				switch tc.mode {
+				case grainAsk:
+					reply, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+					require.NoError(t, err)
+					require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+				case grainTell:
+					require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend)))
+				default:
+					require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay()))
+				}
+
+				process, ok := sys.grains.Get(identity.String())
+				require.True(t, ok)
+				require.True(t, process.isActive())
+				require.EqualValues(t, 16, process.config.capacity)
+				// the owner answered for itself, so membership is not consulted
+				cl.AssertNotCalled(t, "Members", mock.Anything)
+			})
+		}
+	}
+}
+
+// TestAskGrain_OwnerFailureKeepsTheEntry covers failures that do not show the
+// owner is gone: the error is returned and the entry is neither released nor
+// claimed, since the mocks fail on any unexpected registry call.
+func TestAskGrain_OwnerFailureKeepsTheEntry(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ownerHost, ownerPort := "192.0.2.31", 18031
+	member := []*cluster.Peer{{Host: ownerHost, RemotingPort: ownerPort}}
+
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		err     error
+		members []*cluster.Peer
+		listErr error
+	}{
+		{name: "shutting down reported by a grain handler", ctx: context.Background(), err: gerrors.ErrSystemShuttingDown},
+		{name: "grain gone", ctx: context.Background(), err: gerrors.ErrDead},
+		{name: "mailbox full", ctx: context.Background(), err: gerrors.ErrMailboxFull},
+		{name: "request timeout", ctx: context.Background(), err: gerrors.ErrRequestTimeout},
+		{name: "caller canceled", ctx: canceled, err: context.Canceled},
+		{name: "handler error", ctx: context.Background(), err: errors.New("handler failed")},
+		{name: "transport failure while the owner is a member", ctx: context.Background(), err: gerrors.NewErrRemoteSendFailure(errors.New("connection refused")), members: member},
+		{name: "transport failure while the membership is unknown", ctx: context.Background(), err: gerrors.NewErrRemoteSendFailure(errors.New("connection refused")), listErr: errors.New("membership unavailable")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "kept-owner-grain", true)
+			owner := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+				Host:    ownerHost,
+				Port:    int32(ownerPort),
+			}.Build()
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+			rem.EXPECT().RemoteAskGrain(mock.Anything, ownerHost, ownerPort, mock.Anything, mock.Anything, time.Second).Return(nil, tc.err).Once()
+			if tc.members != nil || tc.listErr != nil {
+				cl.EXPECT().Members(mock.Anything).Return(tc.members, tc.listErr).Once()
+			}
+
+			reply, err := sys.AskGrain(tc.ctx, identity, new(testpb.TestReply), time.Second)
+			require.ErrorIs(t, err, tc.err)
+			require.Nil(t, reply)
+
+			_, ok := sys.grains.Get(identity.String())
+			require.False(t, ok)
+		})
+	}
+}
+
+// TestAskAndTellGrain_DepartedOwnerReleasedWithoutResend covers a transport
+// failure towards an owner the membership confirms has left: the entry is
+// released and the error returned, because the message may have run before
+// the owner died. The next call reaches the grain on this node without
+// GrainOf.
+func TestAskAndTellGrain_DepartedOwnerReleasedWithoutResend(t *testing.T) {
+	for _, mode := range []grainContextMode{grainAsk, grainTell} {
+		t.Run(map[grainContextMode]string{grainAsk: "ask", grainTell: "tell"}[mode], func(t *testing.T) {
+			ctx := t.Context()
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "departed-owner-grain", true)
+			departed := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+				Host:    "192.0.2.32",
+				Port:    18032,
+			}.Build()
+			// the connection broke with the request in flight
+			transportErr := &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(departed, nil).Once()
+			if mode == grainAsk {
+				rem.EXPECT().RemoteAskGrain(mock.Anything, departed.GetHost(), int(departed.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, transportErr).Once()
+			} else {
+				rem.EXPECT().RemoteTellGrain(mock.Anything, departed.GetHost(), int(departed.GetPort()), mock.Anything, mock.Anything).Return(transportErr).Once()
+			}
+
+			cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: sys.Host(), RemotingPort: sys.Port()}}, nil).Once()
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(departed.GetHost(), int(departed.GetPort()))).Return(nil, nil).Once()
+
+			send := func() error {
+				if mode == grainAsk {
+					_, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+					return err
+				}
+				return sys.TellGrain(ctx, identity, new(testpb.TestSend))
+			}
+
+			require.ErrorIs(t, send(), transportErr)
+			_, ok := sys.grains.Get(identity.String())
+			require.False(t, ok, "the message must not be sent again")
+
+			// the entry is gone, so the next call activates the grain here
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, cluster.ErrGrainNotFound).Once()
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+			cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Twice()
+
+			require.NoError(t, send())
+			process, ok := sys.grains.Get(identity.String())
+			require.True(t, ok)
+			require.True(t, process.isActive())
+		})
+	}
+}
+
+// TestAskAndTellGrain_DepartedOwnerNeverReachedIsResent covers an owner the
+// membership confirms has left and that this node could not even connect to:
+// the request never left this node, so the entry is released and the message
+// is delivered on this node in the same call.
+func TestAskAndTellGrain_DepartedOwnerNeverReachedIsResent(t *testing.T) {
+	for _, mode := range []grainContextMode{grainAsk, grainTell} {
+		t.Run(map[grainContextMode]string{grainAsk: "ask", grainTell: "tell"}[mode], func(t *testing.T) {
+			ctx := t.Context()
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "never-reached-owner-grain", true)
+			departed := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+				Host:    "192.0.2.46",
+				Port:    18046,
+			}.Build()
+			dialErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+
+			claim := proto.CloneOf(departed)
+			claim.SetHost(sys.Host())
+			claim.SetPort(int32(sys.Port()))
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(departed, nil).Once()
+			if mode == grainAsk {
+				rem.EXPECT().RemoteAskGrain(mock.Anything, departed.GetHost(), int(departed.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, dialErr).Once()
+			} else {
+				rem.EXPECT().RemoteTellGrain(mock.Anything, departed.GetHost(), int(departed.GetPort()), mock.Anything, mock.Anything).Return(dialErr).Once()
+			}
+
+			cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: sys.Host(), RemotingPort: sys.Port()}}, nil).Once()
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(departed.GetHost(), int(departed.GetPort()))).Return(nil, nil).Once()
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+			cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Twice()
+
+			if mode == grainAsk {
+				reply, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+				require.NoError(t, err)
+				require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+			} else {
+				require.NoError(t, sys.TellGrain(ctx, identity, new(testpb.TestSend)))
+			}
+
+			process, ok := sys.grains.Get(identity.String())
+			require.True(t, ok)
+			require.True(t, process.isActive())
+		})
+	}
+}
+
+// TestAskGrain_UnreachableMemberNeverReachedIsNotResent covers an owner this
+// node could not connect to while the membership still lists it: the owner may
+// only be unreachable from here, so its entry is kept and the failure returned.
+func TestAskGrain_UnreachableMemberNeverReachedIsNotResent(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "unreachable-member-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.47",
+		Port:    18047,
+	}.Build()
+	dialErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, dialErr).Once()
+	cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: owner.GetHost(), RemotingPort: int(owner.GetPort())}}, nil).Once()
+
+	reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), time.Second)
+	require.Nil(t, reply)
+	require.ErrorIs(t, err, dialErr)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
+}
+
+// TestIsDialFailure covers what counts as a request that never left this
+// node: only a failure to connect, wrapped or not, and never a failure on an
+// established connection.
+func TestIsDialFailure(t *testing.T) {
+	dial := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"dial failure", dial, true},
+		{"wrapped dial failure", gerrors.NewErrRemoteSendFailure(dial), true},
+		{"read failure", &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")}, false},
+		{"write failure", &net.OpError{Op: "write", Net: "tcp", Err: errors.New("broken pipe")}, false},
+		{"send failure without a network error", gerrors.ErrRemoteSendFailure, false},
+		{"end of stream", io.EOF, false},
+		{"no error", nil, false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isDialFailure(tc.err))
+		})
+	}
+}
+
+// TestAskGrain_RefusedOwnerNotResent covers a refusal after which this node
+// does not send the message again: the release failed, or this node cannot
+// host the grain.
+func TestAskGrain_RefusedOwnerNotResent(t *testing.T) {
+	ownerRefusal := refusal.Mark(gerrors.ErrSystemShuttingDown)
+
+	cases := []struct {
+		name       string
+		register   bool
+		role       *string
+		releaseErr error
+		wantErr    error
+	}{
+		{name: "the release fails", register: true, releaseErr: errors.New("quorum lost")},
+		{name: "the grain kind is not registered here", register: false, wantErr: gerrors.ErrSystemShuttingDown},
+		{name: "this node lacks the grain's role", register: true, role: proto.String("payments"), wantErr: gerrors.ErrSystemShuttingDown},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "not-resent-grain", tc.register)
+			owner := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+				Host:    "192.0.2.33",
+				Port:    18033,
+				Role:    tc.role,
+			}.Build()
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+			rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, ownerRefusal).Once()
+			// a failing release is tried grainRegistryWriteAttempts times
+			release := cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, tc.releaseErr)
+			if tc.releaseErr != nil {
+				release.Times(grainRegistryWriteAttempts)
+			} else {
+				release.Once()
+			}
+
+			reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), time.Second)
+			require.Nil(t, reply)
+			if tc.releaseErr != nil {
+				require.ErrorIs(t, err, tc.releaseErr)
+				require.ErrorContains(t, err, "failed to release registry entry")
+				// the failure of the message itself is still reported
+				require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+			} else {
+				require.ErrorIs(t, err, tc.wantErr)
+			}
+
+			require.False(t, refusal.Marked(err), "an error returned to application code carries no node refusal mark")
+
+			_, ok := sys.grains.Get(identity.String())
+			require.False(t, ok)
+		})
+	}
+}
+
+// TestGrainHandlerCannotPassOnANodeRefusal covers a grain whose handler asks
+// another grain, is refused by that grain's owner, and reports the error as
+// its own. The handler ran, so the remote caller of the first grain must not
+// be told that the node refused its message: it would release the record of a
+// live owner and run the message a second time.
+func TestGrainHandlerCannotPassOnANodeRefusal(t *testing.T) {
+	ctx := t.Context()
+	sys, cl, rem, _ := newActivationTestSystem(t, NewMockGrain(), "unused", false)
+
+	// the target's kind is not registered here, so this node cannot host it
+	// and the refusal of its owner comes back from the nested ask
+	target := newGrainIdentity(NewMockGrain(), "refusing-target")
+	targetOwner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: target.String(), Kind: target.Kind(), Name: target.Name()}.Build(),
+		Host:    "192.0.2.39",
+		Port:    18039,
+	}.Build()
+
+	relay := &MockRelayGrain{target: target}
+	relayID := newGrainIdentity(relay, "relay")
+	process := newGrainPID(relayID, relay, sys, newGrainConfig())
+	require.NoError(t, process.activate(ctx))
+	sys.grains.Set(relayID.String(), process)
+
+	cl.EXPECT().GetGrain(mock.Anything, target.String()).Return(targetOwner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, targetOwner.GetHost(), int(targetOwner.GetPort()), mock.Anything, mock.Anything, time.Second).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, target.String(), address.FormatHostPort(targetOwner.GetHost(), int(targetOwner.GetPort()))).Return(nil, nil).Once()
+
+	// what the remote ask handler does for a message from another node
+	_, err := sys.localSendGrain(ctx, relayID, new(testpb.TestReply), 5*time.Second, grainAsk)
+	require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+	require.False(t, refusal.Marked(err), "an error reported by a handler is not a node refusal")
+	require.False(t, sys.grainSendError(relayID, sys.Host(), int32(sys.Port()), err).GetRefused())
+}
+
+// TestEnvelopeAsk_KeepsTheNodeRefusalMark covers an ask against a
+// reentrancy-enabled grain whose reply comes back through the pending-asks
+// table: a failure the node flagged as its own refusal is marked again for
+// the waiting caller, and any other failure is not.
+func TestEnvelopeAsk_KeepsTheNodeRefusalMark(t *testing.T) {
+	for name, refused := range map[string]bool{"a node refusal": true, "another failure": false} {
+		t.Run(name, func(t *testing.T) {
+			sys, ctx := newReentrancySystem(t)
+			system := sys.(*actorSystem)
+
+			// the grain keeps the reply for itself, so the test answers the ask
+			correlationIDs := make(chan string, 1)
+			grain := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+				gctx.DeferResponse()
+				correlationIDs <- gctx.CorrelationID()
+			}}
+
+			identity, err := system.GrainIdentity(ctx, "envelope-ask-refusal", func(context.Context) (Grain, error) {
+				return grain, nil
+			}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+			require.NoError(t, err)
+
+			pid, ok := system.grains.Get(identity.String())
+			require.True(t, ok)
+
+			go func() {
+				system.pendingAsks.Complete(&commands.AsyncResponse{
+					CorrelationID: <-correlationIDs,
+					Error:         gerrors.ErrSystemShuttingDown.Error(),
+					Refused:       refused,
+				})
+			}()
+
+			_, err = system.envelopeAsk(ctx, pid, new(testpb.TestReply), 5*time.Second)
+			require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+			require.Equal(t, refused, refusal.Marked(err))
+		})
+	}
+}
+
+// TestTellGrain_RefusalReturnedWithoutTheMark covers a refusal TellGrain
+// returns because this node cannot host the grain: the error reaches
+// application code without the internal mark, acknowledged or one-way.
+func TestTellGrain_RefusalReturnedWithoutTheMark(t *testing.T) {
+	for name, oneWay := range map[string]bool{"tell": false, "one-way tell": true} {
+		t.Run(name, func(t *testing.T) {
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "tell-not-hosted", false)
+			owner := internalpb.Grain_builder{
+				GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+				Host:    "192.0.2.41",
+				Port:    18041,
+			}.Build()
+			ownerRefusal := refusal.Mark(gerrors.ErrSystemShuttingDown)
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+
+			var opts []TellGrainOption
+			if oneWay {
+				opts = append(opts, WithOneWay())
+				rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).Return(ownerRefusal).Once()
+			} else {
+				rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).Return(ownerRefusal).Once()
+			}
+
+			err := sys.TellGrain(t.Context(), identity, new(testpb.TestSend), opts...)
+			require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+			require.False(t, refusal.Marked(err))
+		})
+	}
+}
+
+// TestGrainIdentity_RefusalReturnedWithoutTheMark covers an activation this
+// node refuses because its shutdown began while the call was running:
+// GrainIdentity returns the refusal without the internal mark.
+func TestGrainIdentity_RefusalReturnedWithoutTheMark(t *testing.T) {
+	grain := NewMockGrain()
+	sys, cl, _, identity := newActivationTestSystem(t, grain, "identity-refused", true)
+
+	// no record and no other member: this node claims the grain for itself
+	cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: sys.Host(), PeersPort: 14000, RemotingPort: sys.Port()}}, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
+
+	// the shutdown begins once the call is past its own started check
+	got, err := sys.GrainIdentity(t.Context(), identity.Name(), func(context.Context) (Grain, error) {
+		sys.shuttingDown.Store(true)
+		return grain, nil
+	}, WithActivationStrategy(LocalActivation))
+	require.Nil(t, got)
+	require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+	require.False(t, refusal.Marked(err))
+}
+
+// TestAskGrain_RefusedOwnerClaimFails covers a refusal after which the claim
+// for this node cannot be written: the failure of the claim is returned and
+// the message is not sent again.
+func TestAskGrain_RefusedOwnerClaimFails(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "claim-fails-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.42",
+		Port:    18042,
+	}.Build()
+	claimErr := errors.New("registry unavailable")
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+	// a failing claim is tried grainRegistryWriteAttempts times
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, claimErr).Times(grainRegistryWriteAttempts)
+
+	reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), time.Second)
+	require.Nil(t, reply)
+	require.ErrorIs(t, err, claimErr)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
+}
+
+// TestAskGrain_RefusedOwnerActivationFailsAfterTheClaim covers a refusal after
+// which this node claims the grain and then fails to activate it: the
+// activation error is returned and the claim is kept, since it names a live
+// node that activates the grain on the next message. The mocks fail on a
+// release of this node's entry.
+func TestAskGrain_RefusedOwnerActivationFailsAfterTheClaim(t *testing.T) {
+	grain := NewMockActivationFailingGrain()
+	sys, cl, rem, identity := newActivationTestSystem(t, grain, "activation-fails-after-claim", true)
+	owner := internalpb.Grain_builder{
+		GrainId:           internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:              "192.0.2.43",
+		Port:              18043,
+		ActivationTimeout: durationpb.New(time.Second),
+	}.Build()
+
+	claim := proto.CloneOf(owner)
+	claim.SetHost(sys.Host())
+	claim.SetPort(int32(sys.Port()))
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, time.Second).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+
+	reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), time.Second)
+	require.Nil(t, reply)
+	require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
+}
+
+// TestAskGrain_ReleaseRetriedWhileTheOwnerLeaves covers the registry failing
+// the release of a refused owner's entry while that owner leaves the cluster:
+// the release is tried again, and once it succeeds the message is delivered on
+// this node in the same call.
+func TestAskGrain_ReleaseRetriedWhileTheOwnerLeaves(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "release-retried-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.44",
+		Port:    18044,
+	}.Build()
+	ownerNode := address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))
+
+	claim := proto.CloneOf(owner)
+	claim.SetHost(sys.Host())
+	claim.SetPort(int32(sys.Port()))
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, 5*time.Second).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	// the leaving node fails the first release, the second one goes through
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), ownerNode).Return(nil, errors.New("context canceled")).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), ownerNode).Return(nil, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), 5*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+}
+
+// TestTryClaimGrain_OwnerLookupFails covers a claim that finds the grain
+// already claimed and then cannot read who owns it: the failure of that read
+// is returned.
+func TestTryClaimGrain_OwnerLookupFails(t *testing.T) {
+	sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "claim-owner-lookup-fails", true)
+	record, err := wireGrain(identity, newGrainConfig(), sys.Host(), sys.Port())
+	require.NoError(t, err)
+	lookupErr := errors.New("registry unavailable")
+
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, lookupErr).Once()
+
+	claimed, owner, err := sys.tryClaimGrain(t.Context(), record)
+	require.ErrorIs(t, err, lookupErr)
+	require.False(t, claimed)
+	require.Nil(t, owner)
+}
+
+// TestRetryGrainRegistryWrite covers the bounded retry of a write to the grain
+// registry: a write the registry fails is tried again, except when the grain
+// is already claimed, when this node is stopping or when the caller gave up.
+func TestRetryGrainRegistryWrite(t *testing.T) {
+	transient := errors.New("context canceled")
+	node := &discovery.Node{Host: "127.0.0.1", PeersPort: 14002, RemotingPort: 15002}
+
+	// failingWrite returns a write that fails with err on its first failures
+	// calls, and the number of calls it received.
+	failingWrite := func(failures int, err error) (func(context.Context) error, *int) {
+		calls := 0
+		return func(context.Context) error {
+			calls++
+			if calls <= failures {
+				return err
+			}
+
+			return nil
+		}, &calls
+	}
+
+	t.Run("a write that succeeds runs once", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		write, calls := failingWrite(0, transient)
+
+		require.NoError(t, sys.retryGrainRegistryWrite(t.Context(), write))
+		require.Equal(t, 1, *calls)
+	})
+
+	t.Run("a write the registry fails is tried again until it succeeds", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		write, calls := failingWrite(grainRegistryWriteAttempts-1, transient)
+
+		require.NoError(t, sys.retryGrainRegistryWrite(t.Context(), write))
+		require.Equal(t, grainRegistryWriteAttempts, *calls)
+	})
+
+	t.Run("a write that keeps failing returns its error after the last attempt", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		write, calls := failingWrite(grainRegistryWriteAttempts, transient)
+
+		require.ErrorIs(t, sys.retryGrainRegistryWrite(t.Context(), write), transient)
+		require.Equal(t, grainRegistryWriteAttempts, *calls)
+	})
+
+	t.Run("a grain that is already claimed is not tried again", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		write, calls := failingWrite(grainRegistryWriteAttempts, cluster.ErrGrainAlreadyExists)
+
+		require.ErrorIs(t, sys.retryGrainRegistryWrite(t.Context(), write), cluster.ErrGrainAlreadyExists)
+		require.Equal(t, 1, *calls)
+	})
+
+	t.Run("a stopping node does not try again", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		sys.shuttingDown.Store(true)
+		write, calls := failingWrite(grainRegistryWriteAttempts, transient)
+
+		require.ErrorIs(t, sys.retryGrainRegistryWrite(t.Context(), write), transient)
+		require.Equal(t, 1, *calls)
+	})
+
+	t.Run("a caller that gave up gets the error of the write", func(t *testing.T) {
+		sys := newClusterReadySystem(mockremote.NewClient(t), mockcluster.NewCluster(t), node)
+		ctx, cancel := context.WithCancel(t.Context())
+		calls := 0
+
+		err := sys.retryGrainRegistryWrite(ctx, func(context.Context) error {
+			calls++
+			cancel()
+			return transient
+		})
+		require.ErrorIs(t, err, transient)
+		require.Equal(t, 1, calls)
+	})
+}
+
+// TestAskGrain_ClaimAndPublicationRetriedWhileTheOwnerLeaves covers the
+// registry failing the claim and the publication of a grain this node takes
+// over from a refused owner, while that owner leaves the cluster: both writes
+// are tried again and the message is delivered in the same call.
+func TestAskGrain_ClaimAndPublicationRetriedWhileTheOwnerLeaves(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "writes-retried-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.45",
+		Port:    18045,
+	}.Build()
+	transient := errors.New("context canceled")
+
+	claim := proto.CloneOf(owner)
+	claim.SetHost(sys.Host())
+	claim.SetPort(int32(sys.Port()))
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything, 5*time.Second).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+	// the claim: the leaving node fails the first write, the second goes through
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Twice()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(transient).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+	// the activation finds the claim, then its publication fails once too
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(transient).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+
+	reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), 5*time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+
+	process, ok := sys.grains.Get(identity.String())
+	require.True(t, ok)
+	require.True(t, process.isActive())
+}
+
+// TestAskGrain_RefusedOwnerClaimLost covers a refusal after which another node
+// wins the claim: the message is forwarded to the winner. When the winner
+// refuses too, its entry is released and the refusal returned, with no second
+// resend.
+func TestAskGrain_RefusedOwnerClaimLost(t *testing.T) {
+	ownerRefusal := refusal.Mark(gerrors.ErrSystemShuttingDown)
+
+	cases := []struct {
+		name        string
+		winnerReply any
+		winnerErr   error
+	}{
+		{name: "the winner answers", winnerReply: testpb.Reply_builder{Content: "from the winner"}.Build()},
+		{name: "the winner refuses too", winnerErr: ownerRefusal},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "claim-lost-grain", true)
+			grainID := internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build()
+			staleOwner := internalpb.Grain_builder{GrainId: grainID, Host: "192.0.2.34", Port: 18034}.Build()
+			winner := internalpb.Grain_builder{GrainId: grainID, Host: "192.0.2.35", Port: 18035}.Build()
+
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(staleOwner, nil).Once()
+			rem.EXPECT().RemoteAskGrain(mock.Anything, staleOwner.GetHost(), int(staleOwner.GetPort()), mock.Anything, mock.Anything, time.Second).Return(nil, ownerRefusal).Once()
+			cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(staleOwner.GetHost(), int(staleOwner.GetPort()))).Return(nil, nil).Once()
+			// the claim finds the winner's entry, and so does the activation
+			cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Twice()
+			cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(winner, nil).Twice()
+			rem.EXPECT().RemoteAskGrain(mock.Anything, winner.GetHost(), int(winner.GetPort()), mock.Anything, mock.Anything, mock.Anything).Return(tc.winnerReply, tc.winnerErr).Once()
+			if tc.winnerErr != nil {
+				cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(winner.GetHost(), int(winner.GetPort()))).Return(nil, nil).Once()
+			}
+
+			reply, err := sys.AskGrain(t.Context(), identity, new(testpb.TestReply), time.Second)
+			if tc.winnerErr != nil {
+				require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+				require.Nil(t, reply)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, "from the winner", reply.(*testpb.Reply).GetContent())
+			}
+
+			_, ok := sys.grains.Get(identity.String())
+			require.False(t, ok)
+		})
+	}
+}
+
+// TestAskGrain_ResendUsesTheRemainingTimeout checks that the resend after a
+// refusal waits only for what is left of the caller's timeout, not for a
+// fresh one.
+func TestAskGrain_ResendUsesTheRemainingTimeout(t *testing.T) {
+	const (
+		timeout     = 600 * time.Millisecond
+		ownerAnswer = 300 * time.Millisecond
+	)
+
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "remaining-timeout-grain", true)
+	staleOwner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.36",
+		Port:    18036,
+	}.Build()
+
+	claim := proto.CloneOf(staleOwner)
+	claim.SetHost(sys.Host())
+	claim.SetPort(int32(sys.Port()))
+
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(staleOwner, nil).Once()
+	rem.EXPECT().RemoteAskGrain(mock.Anything, staleOwner.GetHost(), int(staleOwner.GetPort()), mock.Anything, mock.Anything, timeout).
+		Run(func(context.Context, string, int, *remote.GrainRequest, any, time.Duration) { pause.For(ownerAnswer) }).
+		Return(nil, refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), mock.Anything).Return(nil, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Once()
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(claim, nil).Once()
+	cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Twice()
+
+	// the handler of TestTimeout outlasts any timeout, so the resend times out
+	start := time.Now()
+	_, err := sys.AskGrain(t.Context(), identity, new(testpb.TestTimeout), timeout)
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	require.Less(t, elapsed, timeout+ownerAnswer, "the resend must not wait for a fresh timeout")
+}
+
+// TestLocalSendGrain_ForwardReleasesWithoutResend covers the forward to a
+// remote owner found while activating: a refusal releases the owner's entry
+// and is returned, and the message is not sent again from here.
+func TestLocalSendGrain_ForwardReleasesWithoutResend(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "forward-refused-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.37",
+		Port:    18037,
+	}.Build()
+
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+		Return(refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+
+	_, err := sys.localSendGrain(t.Context(), identity, new(testpb.TestSend), time.Second, grainTell)
+	require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+	// the message did not run, so a node that forwarded it for a peer tells
+	// that peer so
+	require.True(t, refusal.Marked(err))
+	require.True(t, sys.grainSendError(identity, sys.Host(), int32(sys.Port()), err).GetRefused())
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
+}
+
+// TestDeliverAsyncEnvelope_RefusedOwnerReleasedWithoutResend covers an
+// envelope forwarded to a remote owner that refuses it: the owner's entry is
+// released and the refusal returned, and the envelope is not sent again.
+func TestDeliverAsyncEnvelope_RefusedOwnerReleasedWithoutResend(t *testing.T) {
+	sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "envelope-refused-grain", true)
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+		Host:    "192.0.2.38",
+		Port:    18038,
+	}.Build()
+
+	cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+		Return(refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+
+	err := sys.deliverAsyncEnvelope(t.Context(), identity, &commands.AsyncRequest{CorrelationID: "envelope-refused"})
+	require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+	_, ok := sys.grains.Get(identity.String())
+	require.False(t, ok)
 }
 
 func TestSetupGrainActivationBarrier(t *testing.T) {
@@ -3144,7 +4005,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
 
-		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Times(grainRegistryWriteAttempts)
 		// deactivation fails before its own cleanup runs, so the fallback
 		// removes the local entry and releases the claim explicitly
 		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
@@ -3160,6 +4021,31 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		// a running node reports the failed rollback as an error
 		_ = logger.Flush()
 		require.Equal(t, "error", logLevelOf(t, buf.String(), "after failed cluster publication"))
+	})
+
+	t.Run("an activation published while the shutdown began is rolled back and refused", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-shutdown-during-publication")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		// the shutdown begins while the record is being written
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Run(func(context.Context, *internalpb.Grain) {
+			system.shuttingDown.Store(true)
+		}).Return(nil).Once()
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, true)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.True(t, refusal.Marked(err), "a message waiting for this activation has not run")
+
+		_, ok := system.grains.Get(identity.String())
+		require.False(t, ok, "a rolled back activation must leave no grain behind")
+		require.False(t, process.isActive())
+		clusterMock.AssertExpectations(t)
 	})
 
 	t.Run("a failed rollback on a stopping node is a warning and still leaves nothing behind", func(t *testing.T) {
@@ -3180,6 +4066,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 
 		err := system.finalizeGrainActivation(ctx, process, true, true)
 		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.True(t, refusal.Marked(err), "an activation rolled back by the shutdown is marked as the node's refusal")
 
 		_, ok := system.grains.Get(identity.String())
 		require.False(t, ok, "a rolled back activation must leave no grain behind")
@@ -3199,7 +4086,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
 
-		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Times(grainRegistryWriteAttempts)
 		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
 
 		err := system.finalizeGrainActivation(ctx, process, true, false)
@@ -3332,7 +4219,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
 
-		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Once()
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Times(grainRegistryWriteAttempts)
 
 		err := system.finalizeGrainActivation(ctx, process, false, false)
 		require.Error(t, err)
@@ -3366,6 +4253,8 @@ func TestFinalizeGrainActivationRacingLocalSend(t *testing.T) {
 			close(publishing)
 			<-proceed
 		}).Return(assert.AnError).Once()
+		// the publication is tried again and keeps failing
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Times(grainRegistryWriteAttempts - 1)
 
 		// the rollback releases the record; a send that comes after the
 		// failed activation activates the grain again and is served
@@ -3422,6 +4311,8 @@ func TestFinalizeGrainActivationRacingLocalSend(t *testing.T) {
 			close(publishing)
 			<-proceed
 		}).Return(assert.AnError).Once()
+		// the publication is tried again and keeps failing
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(assert.AnError).Times(grainRegistryWriteAttempts - 1)
 
 		// the rollback releases the record; a send that comes after the
 		// failed activation activates the grain again and is served
@@ -4090,6 +4981,8 @@ func TestTellGrainOneWay(t *testing.T) {
 		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
 		rem.EXPECT().RemoteTellGrainOneWay(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
 			Return(gerrors.NewErrRemoteSendFailure(errors.New("connection refused"))).Once()
+		// the owner is still a member, so its entry is kept
+		cl.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{{Host: owner.GetHost(), RemotingPort: int(owner.GetPort())}}, nil).Once()
 
 		err := sys.TellGrain(ctx, identity, new(testpb.TestSend), WithOneWay())
 		require.ErrorIs(t, err, gerrors.ErrRemoteSendFailure)
@@ -4568,4 +5461,96 @@ func TestGrainOf_ReleasesTheRecordOfAStoppedOwnerStillConnected(t *testing.T) {
 	reply, err := nodeB.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
 	require.NoError(t, err)
 	require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+}
+
+// TestAskAndTellGrain_ReachTheGrainPastAStaleOwner runs a three-node cluster
+// where the registry record of a grain names node A while A no longer runs the
+// grain. AskGrain and TellGrain on node B reach the grain without GrainOf:
+//
+//   - while A is shutting down, A refuses the message, so B releases the
+//     record and the same call delivers the message on B;
+//   - once A has stopped and left, B cannot connect to it, so the request
+//     never leaves B and the same call delivers the message on B.
+func TestAskAndTellGrain_ReachTheGrainPastAStaleOwner(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 3)
+	nodeA, nodeB, nodeC := systems[0], systems[1], systems[2]
+	sysA, sysB := nodeA.(*actorSystem), nodeB.(*actorSystem)
+	t.Cleanup(func() {
+		_ = nodeC.Stop(ctx)
+		_ = nodeB.Stop(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		peers, err := nodeA.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 2
+	}, 10*time.Second, 100*time.Millisecond)
+
+	ownerHost, ownerPort := sysA.Host(), sysA.Port()
+	sysB.registry.Register(new(MockGrain))
+
+	// staleRecordOnA writes the record of a grain named name that names node A,
+	// which does not run the grain.
+	staleRecordOnA := func(name string) *GrainIdentity {
+		identity := newGrainIdentity(new(MockGrain), name)
+		record, err := wireGrain(identity, newGrainConfig(), ownerHost, ownerPort)
+		require.NoError(t, err)
+		require.NoError(t, sysB.getCluster().PutGrain(ctx, record))
+		return identity
+	}
+
+	requireOwnedByB := func(identity *GrainIdentity) {
+		owner, err := sysB.getCluster().GetGrain(ctx, identity.String())
+		require.NoError(t, err)
+		require.True(t, sysB.isLocalGrainOwner(owner), "the grain must be owned by node B")
+	}
+
+	t.Run("an owner that refuses the message", func(t *testing.T) {
+		sysA.shuttingDown.Store(true)
+		t.Cleanup(func() { sysA.shuttingDown.Store(false) })
+
+		asked := staleRecordOnA("stale-owner-ask")
+		reply, err := nodeB.AskGrain(ctx, asked, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		requireOwnedByB(asked)
+
+		told := staleRecordOnA("stale-owner-tell")
+		require.NoError(t, nodeB.TellGrain(ctx, told, new(testpb.TestSend)))
+		requireOwnedByB(told)
+	})
+
+	t.Run("an owner that has stopped", func(t *testing.T) {
+		sysA.shuttingDown.Store(false)
+		require.NoError(t, nodeA.Stop(ctx))
+
+		require.Eventually(t, func() bool {
+			alive, err := sysB.isEndpointAlive(ctx, ownerHost, ownerPort)
+			return err == nil && !alive
+		}, 30*time.Second, 100*time.Millisecond)
+
+		// A node that has just stopped can still answer on a connection it
+		// serves that its remoting is disabled, an answer that is a refusal.
+		// Wait until node A no longer answers that way, so the call meets the
+		// stopped node the way a later request does.
+		require.Eventually(t, func() bool {
+			_, err := sysB.remoting.RemoteLookup(ctx, ownerHost, ownerPort, "probe")
+			return !errors.Is(err, gerrors.ErrRemotingDisabled)
+		}, time.Minute, 100*time.Millisecond)
+
+		// node A cannot be connected to anymore, so the request never leaves
+		// node B and the same call delivers the message on node B
+		told := staleRecordOnA("stopped-owner-tell")
+		require.NoError(t, nodeB.TellGrain(ctx, told, new(testpb.TestSend)))
+		requireOwnedByB(told)
+
+		asked := staleRecordOnA("stopped-owner-ask")
+		reply, err := nodeB.AskGrain(ctx, asked, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		requireOwnedByB(asked)
+	})
 }

@@ -96,4 +96,9 @@ type AsyncResponse struct {
 	// Error carries the failure reason as a string to keep the envelope stable
 	// across versions and nodes.
 	Error string
+	// Refused tells that Error is the refusal of the request by the node that
+	// received it, which did not run it (see the refusal package). It is read
+	// only by a caller waiting on that same node: the serializer does not send
+	// it, so a response from another node never carries it.
+	Refused bool
 }

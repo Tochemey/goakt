@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/future"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/reentrancy"
 )
@@ -550,7 +551,8 @@ func (gctx *GrainContext) RequestGrain(to *GrainIdentity, message any, opts ...R
 
 	if err := gctx.actorSystem.deliverAsyncEnvelope(context.WithoutCancel(gctx.ctx), to, envelope); err != nil {
 		pid.deregisterRequestState(state)
-		return completedRequestCall(err)
+		// the error goes to the handler, so it carries no node refusal mark
+		return completedRequestCall(refusal.Unmark(err))
 	}
 
 	if timeout := config.grainTimeout(); timeout > 0 {
