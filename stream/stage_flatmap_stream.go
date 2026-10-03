@@ -31,7 +31,7 @@ import (
 // flatMapStreamActor backs FlatMapConcat (breadth=1) and FlatMapMerge
 // (breadth>1). For each upstream element it calls the user-supplied
 // fn(In) Source[Out], materialises the returned source as a sub-pipeline
-// terminated by subMergeSinkActor, and forwards the sub-pipeline's elements
+// terminated by a mergeSinkActor, and forwards the sub-pipeline's elements
 // to its own downstream.
 //
 // Demand is bounded by the breadth: total in-flight upstream credit plus
@@ -40,8 +40,11 @@ import (
 // is active at a time, giving FlatMapConcat its strict ordering guarantee.
 //
 // Sub-pipeline output is buffered in outBuf and forwarded as downstream
-// demand allows. Active sub-pipeline handles are tracked so the actor can
-// abort them on cancellation or failure rather than leaking goroutines.
+// demand allows. Each sub-pipeline's sink sends at most one demand window
+// ahead of what has left outBuf (the fan-in acknowledgement scheme of
+// inputPipelines), so outBuf holds at most breadth windows. Active
+// sub-pipeline handles are tracked so the actor can abort them on
+// cancellation or failure rather than leaking goroutines.
 type flatMapStreamActor[In, Out any] struct {
 	fn      func(In) Source[Out]
 	breadth int
@@ -59,8 +62,13 @@ type flatMapStreamActor[In, Out any] struct {
 	activeSubs     int
 	upstreamDone   bool
 
-	children   map[int]StreamHandle
-	subCounter int
+	subs inputPipelines // the nested stream pipelines; aborted on cancellation, failure and PostStop
+	// freeSlots holds the input slots of finished sub-pipelines, for reuse.
+	// A slot identifies a sub-pipeline's sink in inputPipelines; reusing
+	// them keeps the slot range within breadth.
+	freeSlots []int
+	// nextSlot is the next never-used input slot.
+	nextSlot int
 
 	failed    bool
 	completed bool
@@ -80,17 +88,18 @@ func newFlatMapStreamActor[In, Out any](breadth int, fn func(In) Source[Out], co
 	}
 
 	return &flatMapStreamActor[In, Out]{
-		fn:       fn,
-		breadth:  breadth,
-		system:   config.System,
-		children: make(map[int]StreamHandle),
-		config:   config,
-		metrics:  metrics,
+		fn:      fn,
+		breadth: breadth,
+		system:  config.System,
+		config:  config,
+		metrics: metrics,
 	}
 }
 
 func (a *flatMapStreamActor[In, Out]) PreStart(_ *actor.Context) error { return nil }
 
+// Receive handles stageWire, streamRequest, streamElement, mergeSubValue,
+// mergeSubDone, mergeSubErr, streamComplete, streamError, and streamCancel.
 func (a *flatMapStreamActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -116,20 +125,18 @@ func (a *flatMapStreamActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 
 		a.spawnInner(rctx, input)
 
-	case *subOut:
-		a.outBuf.push(msg.value)
+	case *mergeSubValue:
+		a.subs.arrived(msg)
+		a.outBuf.push(msg)
 		a.tryFlush(rctx)
 
-	case *subDone:
-		if key, ok := msg.key.(int); ok {
-			delete(a.children, key)
-		}
-
+	case *mergeSubDone:
+		a.freeSlots = append(a.freeSlots, msg.slot)
 		a.activeSubs--
 		a.maybeRequestMore(rctx)
 		a.tryFlush(rctx)
 
-	case *subErr:
+	case *mergeSubErr:
 		a.fail(rctx, msg.err)
 
 	case *streamComplete:
@@ -152,30 +159,36 @@ func (a *flatMapStreamActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
+// PostStop aborts the nested stream pipelines so they do not outlive the stage.
 func (a *flatMapStreamActor[In, Out]) PostStop(_ *actor.Context) error {
 	a.cancelChildren()
 	return nil
 }
 
 // spawnInner materialises fn(input) as a sub-pipeline ending in a
-// subMergeSinkActor that forwards every produced element back to this actor
-// as *subOut and reports completion / failure as *subDone / *subErr.
+// mergeSinkActor that forwards every produced element back to this actor as
+// *mergeSubValue and reports completion / failure as *mergeSubDone /
+// *mergeSubErr. The sub-pipeline takes a free input slot; a slot is freed
+// only by its pipeline's mergeSubDone, which follows all of its elements.
 func (a *flatMapStreamActor[In, Out]) spawnInner(rctx *actor.ReceiveContext, input In) {
 	innerSource := a.fn(input)
-	a.subCounter++
-	subKey := a.subCounter
+	slot := a.nextSlot
+	if n := len(a.freeSlots); n > 0 {
+		slot = a.freeSlots[n-1]
+		a.freeSlots = a.freeSlots[:n-1]
+	} else {
+		a.nextSlot++
+	}
 
 	stages := make([]*stage, 0, len(innerSource.stages)+1)
 	stages = append(stages, innerSource.stages...)
-	stages = append(stages, makeSubMergeSinkDesc(rctx.Self(), subKey))
+	stages = append(stages, makeMergeSinkDesc(rctx.Self(), slot))
 
-	handle, err := materialize(rctx.Context(), a.system, stages)
-	if err != nil {
+	if err := a.subs.spawn(rctx.Context(), a.system, stages); err != nil {
 		a.fail(rctx, err)
 		return
 	}
 
-	a.children[subKey] = handle
 	a.activeSubs++
 }
 
@@ -183,14 +196,16 @@ func (a *flatMapStreamActor[In, Out]) spawnInner(rctx *actor.ReceiveContext, inp
 // remains, then checks whether the stream can complete.
 func (a *flatMapStreamActor[In, Out]) tryFlush(rctx *actor.ReceiveContext) {
 	for a.downstreamDemand > 0 && !a.outBuf.empty() {
+		elem := a.outBuf.pop().(*mergeSubValue)
 		a.seqNo++
 		a.metrics.elementsOut.Add(1)
 		rctx.Tell(a.downstream, &streamElement{
 			subID: a.subID,
-			value: a.outBuf.pop(),
+			value: elem.value,
 			seqNo: a.seqNo,
 		})
 		a.downstreamDemand--
+		a.subs.releaseValue(rctx, elem)
 	}
 
 	a.maybeComplete(rctx)
@@ -230,6 +245,8 @@ func (a *flatMapStreamActor[In, Out]) maybeComplete(rctx *actor.ReceiveContext) 
 	rctx.Shutdown()
 }
 
+// fail ends the stage with err: it aborts the nested streams, cancels its
+// upstream, sends err downstream and stops. Later calls do nothing.
 func (a *flatMapStreamActor[In, Out]) fail(rctx *actor.ReceiveContext, err error) {
 	if a.failed {
 		return
@@ -251,9 +268,5 @@ func (a *flatMapStreamActor[In, Out]) fail(rctx *actor.ReceiveContext, err error
 // actors, independent of the parent stream's coordinator) do not outlive
 // the FlatMap stage.
 func (a *flatMapStreamActor[In, Out]) cancelChildren() {
-	for _, handle := range a.children {
-		handle.Abort()
-	}
-
-	a.children = nil
+	a.subs.abort()
 }

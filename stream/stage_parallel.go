@@ -63,8 +63,10 @@ func (h *seqHeap) Pop() any {
 // parallelMapActor fans out element processing across a pool of worker func actors.
 // Each incoming streamElement is dispatched round-robin to a pre-spawned func actor.
 // Workers run the user's fn with panic recovery and reply with parallelResult messages.
-// Concurrency is bounded by demand control: the actor requests exactly `workers` elements
-// initially and one more per completed result, so at most `workers` tasks are in flight.
+// Concurrency is bounded by demand control: the actor never has more than `workers` elements
+// requested or in flight, and requests only what downstream demand does not already have an
+// element on its way for. Each input yields exactly one output, so every result can be emitted
+// as soon as it is ready (and, when ordered, in turn) without exceeding downstream demand.
 type parallelMapActor[In, Out any] struct {
 	workersCount int
 	fn           func(In) Out
@@ -74,6 +76,8 @@ type parallelMapActor[In, Out any] struct {
 	subID        string
 	self         *actor.PID
 	inFlight     int64
+	credit       int64  // elements requested from upstream and not yet received
+	demand       int64  // elements downstream has requested and not yet received
 	inputSeqNo   uint64 // seq assigned to each incoming element
 	outSeqNo     uint64 // seq assigned to each outgoing element (unordered)
 	nextEmit     uint64 // next inputSeqNo to emit (ordered)
@@ -99,6 +103,8 @@ func newParallelMapActor[In, Out any](n int, fn func(In) Out, ordered bool, cfg 
 
 func (a *parallelMapActor[In, Out]) PreStart(_ *actor.Context) error { return nil }
 
+// Receive handles stageWire, streamRequest, streamElement, parallelResult,
+// streamComplete, streamError, and streamCancel.
 func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -145,9 +151,13 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 			}
 			a.workers = append(a.workers, pid)
 		}
-		rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: int64(a.workersCount)})
+
+	case *streamRequest:
+		a.demand += msg.n
+		a.maybeRequestUpstream(rctx)
 
 	case *streamElement:
+		a.credit--
 		value, ok := msg.value.(In)
 		if !ok {
 			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
@@ -180,11 +190,12 @@ func (a *parallelMapActor[In, Out]) Receive(rctx *actor.ReceiveContext) {
 			a.flushOrdered(rctx)
 		} else {
 			a.outSeqNo++
+			a.demand--
 			rctx.Tell(a.downstream, &streamElement{subID: a.subID, value: msg.value, seqNo: a.outSeqNo})
 		}
-		if !a.upstreamDone {
-			rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: 1})
-		}
+
+		a.maybeRequestUpstream(rctx)
+
 		if a.upstreamDone && a.inFlight == 0 {
 			if a.ordered {
 				a.flushOrdered(rctx)
@@ -226,8 +237,30 @@ func (a *parallelMapActor[In, Out]) flushOrdered(rctx *actor.ReceiveContext) {
 		heap.Pop(&a.pending)
 		a.nextEmit++
 		a.outSeqNo++
+		a.demand--
 		rctx.Tell(a.downstream, &streamElement{subID: a.subID, value: top.value, seqNo: a.outSeqNo})
 	}
+}
+
+// maybeRequestUpstream pulls more elements from upstream when a worker is
+// free and downstream demand is not yet covered. An element counts as covering
+// demand from the moment it is requested until its result is emitted: while
+// requested (credit), while a worker runs it (inFlight) and, when ordered,
+// while its result waits for its turn (pending). No-op once upstream is done.
+func (a *parallelMapActor[In, Out]) maybeRequestUpstream(rctx *actor.ReceiveContext) {
+	if a.upstreamDone {
+		return
+	}
+
+	freeWorkers := int64(a.workersCount) - a.credit - a.inFlight
+	uncovered := a.demand - a.credit - a.inFlight - int64(len(a.pending))
+	n := min(freeWorkers, uncovered)
+	if n <= 0 {
+		return
+	}
+
+	a.credit += n
+	rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: n})
 }
 
 // PostStop shuts down all worker func actors when the stage terminates.

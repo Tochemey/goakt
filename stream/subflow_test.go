@@ -405,3 +405,93 @@ func TestSubFlow_TooManySubstreamsFailsStream(t *testing.T) {
 	require.Error(t, handle.Err())
 	require.True(t, errors.Is(handle.Err(), stream.ErrTooManySubstreams))
 }
+
+// TestSubFlow_Abort_StopsUpstreamAndSubstreams verifies that aborting a
+// stream built on MergeSubstreams stops the upstream pipeline and every
+// substream pipeline the splitter materialized, right after Run as well as
+// once the substreams exist.
+func TestSubFlow_Abort_StopsUpstreamAndSubstreams(t *testing.T) {
+	build := func(ch <-chan int) stream.RunnableGraph {
+		sf := stream.GroupBy(stream.FromChannel(ch), 0, func(n int) int { return n % 4 })
+		return stream.From(stream.MergeSubstreams(sf)).To(stream.Ignore[int]())
+	}
+
+	t.Run("right after Run", func(t *testing.T) {
+		sys := newTestSystem(t)
+
+		for range 30 {
+			handle, err := build(make(chan int)).Run(context.Background(), sys)
+			require.NoError(t, err)
+			handle.Abort()
+		}
+
+		requireNoStreamActorsLeft(t, sys)
+	})
+
+	t.Run("with open substreams", func(t *testing.T) {
+		sys := newTestSystem(t)
+
+		ch := make(chan int)
+		var seen atomic.Int64
+		sf := stream.GroupBy(stream.FromChannel(ch), 0, func(n int) int { return n % 4 })
+		handle, err := stream.From(stream.MergeSubstreams(sf)).
+			To(stream.ForEach(func(int) { seen.Add(1) })).
+			Run(context.Background(), sys)
+		require.NoError(t, err)
+
+		// Four keys: four substreams are open once all four elements came through.
+		for i := range 4 {
+			ch <- i
+		}
+
+		require.Eventually(t, func() bool { return seen.Load() == 4 }, 5*time.Second, 5*time.Millisecond)
+		handle.Abort()
+		requireNoStreamActorsLeft(t, sys)
+	})
+}
+
+// TestSubFlow_UpstreamFailure_FailsTheStream verifies that a failure of the
+// pipeline feeding the splitter surfaces as the stream's terminal error.
+func TestSubFlow_UpstreamFailure_FailsTheStream(t *testing.T) {
+	sys := newTestSystem(t)
+
+	sentinel := errors.New("upstream failed")
+	upstream := stream.Via(stream.Of(1, 2, 3, 4), stream.TryMap(func(n int) (int, error) {
+		if n == 3 {
+			return 0, sentinel
+		}
+		return n, nil
+	}))
+	sf := stream.GroupBy(upstream, 0, func(n int) int { return n % 2 })
+	handle, err := stream.From(stream.MergeSubstreams(sf)).To(stream.Ignore[int]()).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not terminate")
+	}
+
+	require.ErrorIs(t, handle.Err(), sentinel)
+	requireNoStreamActorsLeft(t, sys)
+}
+
+// TestSubFlow_UpstreamMaterializationFailure_FailsTheStream verifies that an
+// upstream the splitter cannot materialize fails the stream instead of
+// leaving it waiting.
+func TestSubFlow_UpstreamMaterializationFailure_FailsTheStream(t *testing.T) {
+	sys := newTestSystem(t)
+
+	// A source without a source stage is rejected by the materializer.
+	sf := stream.GroupBy(stream.Source[int]{}, 0, func(n int) int { return n })
+	handle, err := stream.From(stream.MergeSubstreams(sf)).To(stream.Ignore[int]()).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not terminate")
+	}
+
+	require.ErrorIs(t, handle.Err(), stream.ErrInvalidGraph)
+}

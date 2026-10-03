@@ -38,6 +38,7 @@ import (
 type concatSourceActor[T any] struct {
 	subStages  [][]*stage
 	system     actor.ActorSystem
+	inputs     inputPipelines // materialized input pipelines; aborted in PostStop
 	downstream *actor.PID
 	subID      string
 	seqNo      uint64
@@ -67,7 +68,7 @@ func newConcatSourceActor[T any](subStages [][]*stage, config StageConfig) *conc
 
 func (a *concatSourceActor[T]) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, and streamCancel.
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, mergeSubErr, and streamCancel.
 func (a *concatSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -89,7 +90,8 @@ func (a *concatSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// mergeSubDone is delivered after all of its values (FIFO per sender),
 		// and the next sub-source is only spawned after that done arrives.
 		a.metrics.elementsIn.Add(1)
-		a.buf.push(msg.value)
+		a.inputs.arrived(msg)
+		a.buf.push(msg)
 		a.tryFlush(rctx)
 
 	case *mergeSubDone:
@@ -99,6 +101,10 @@ func (a *concatSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 		}
 		a.done = true
 		a.tryFlush(rctx)
+
+	case *mergeSubErr:
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
+		rctx.Shutdown()
 
 	case *streamCancel:
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
@@ -118,20 +124,26 @@ func (a *concatSourceActor[T]) spawnNext(rctx *actor.ReceiveContext) {
 	all := make([]*stage, len(sub)+1)
 	copy(all, sub)
 	all[len(sub)] = sink
-	spawnSubPipeline(rctx.Context(), a.system, all)
+	if err := a.inputs.spawn(rctx.Context(), a.system, all); err != nil {
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+		rctx.Shutdown()
+		return
+	}
 }
 
 // tryFlush forwards buffered elements while demand remains, then completes
 // once every sub-source has produced its mergeSubDone and the buffer is empty.
 func (a *concatSourceActor[T]) tryFlush(rctx *actor.ReceiveContext) {
 	for a.demand > 0 && !a.buf.empty() {
+		elem := a.buf.pop().(*mergeSubValue)
 		a.seqNo++
 		rctx.Tell(a.downstream, &streamElement{
 			subID: a.subID,
-			value: a.buf.pop(),
+			value: elem.value,
 			seqNo: a.seqNo,
 		})
 		a.demand--
+		a.inputs.release(rctx, elem.slot, 1)
 	}
 
 	if a.done && a.buf.empty() {
@@ -140,4 +152,8 @@ func (a *concatSourceActor[T]) tryFlush(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *concatSourceActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the input pipelines so they do not outlive this stage.
+func (a *concatSourceActor[T]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}

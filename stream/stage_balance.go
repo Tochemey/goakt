@@ -24,74 +24,67 @@ package stream
 
 import (
 	"context"
-	"sync"
+	"sync/atomic"
 
 	"github.com/tochemey/goakt/v4/actor"
 )
 
 // sharedBalance is the coordination point shared by all N balanceSlotActors
-// that result from a single Balance call. It collects slot actor PIDs as each
-// branch is materialized, then spawns the upstream sub-pipeline (with the
-// balanceHubActor as its terminal sink) once every slot has registered.
+// that result from a single Balance call. It collects slot actors as each
+// branch is materialized and, every time one materialization of every branch
+// is available, spawns a fresh upstream sub-pipeline with a new
+// balanceHubActor as its terminal sink for that generation.
 type sharedBalance[T any] struct {
-	mu         sync.Mutex
-	n          int
-	srcStages  []*stage
-	slots      []*actor.PID
-	slotSubIDs []string
-	registered int
-	started    bool
-	hub        *balanceHubActor[T]
+	n           int
+	srcStages   []*stage
+	generations *fanOutGenerations
 }
 
-// newSharedBalance creates the coordination struct and pre-allocates the hub.
+// newSharedBalance creates the coordination struct for n branches of srcStages.
 func newSharedBalance[T any](n int, srcStages []*stage) *sharedBalance[T] {
-	hub := &balanceHubActor[T]{
-		n:          n,
-		slots:      make([]*actor.PID, n),
-		slotSubIDs: make([]string, n),
-		demand:     make([]int64, n),
-	}
 	return &sharedBalance[T]{
-		n:          n,
-		srcStages:  srcStages,
-		slots:      make([]*actor.PID, n),
-		slotSubIDs: make([]string, n),
-		hub:        hub,
+		n:           n,
+		srcStages:   srcStages,
+		generations: newFanOutGenerations(n),
 	}
 }
 
-// registerSlot records a slot actor's PID and subID. When the last slot
-// registers, it snapshots slot info into the hub struct and spawns the
-// upstream sub-pipeline in a goroutine.
+// registerSlot records one materialization of a slot actor. When it completes
+// a generation (one materialization of every branch), it builds that
+// generation's hub over the paired slot actors and spawns the upstream
+// sub-pipeline in a goroutine.
 func (s *sharedBalance[T]) registerSlot(ctx context.Context, slot int, pid *actor.PID, subID string, sys actor.ActorSystem) {
-	s.mu.Lock()
-	s.slots[slot] = pid
-	s.slotSubIDs[slot] = subID
-	s.registered++
-	allReady := s.registered == s.n && !s.started
-	if allReady {
-		s.started = true
-		copy(s.hub.slots, s.slots)
-		copy(s.hub.slotSubIDs, s.slotSubIDs)
+	generation := s.generations.register(slot, pid, subID)
+	if generation == nil {
+		return
 	}
-	s.mu.Unlock()
 
-	if allReady {
-		hubSinkDesc := &stage{
-			id:   newStageID(),
-			kind: sinkKind,
-			actorFn: func(cfg StageConfig) actor.Actor {
-				s.hub.config = cfg
-				return s.hub
-			},
-			config: defaultStageConfig(),
-		}
-		all := make([]*stage, len(s.srcStages)+1)
-		copy(all, s.srcStages)
-		all[len(s.srcStages)] = hubSinkDesc
-		go spawnSubPipeline(ctx, sys, all)
+	hub := &balanceHubActor[T]{
+		n:          s.n,
+		slots:      make([]*actor.PID, s.n),
+		slotSubIDs: make([]string, s.n),
+		demand:     make([]int64, s.n),
 	}
+
+	for i, branch := range generation {
+		hub.slots[i] = branch.pid
+		hub.slotSubIDs[i] = branch.subID
+	}
+
+	hubSinkDesc := &stage{
+		id:   newStageID(),
+		kind: sinkKind,
+		actorFn: func(cfg StageConfig) actor.Actor {
+			hub.config = cfg
+			return hub
+		},
+		config:        defaultStageConfig(),
+		manyProducers: true,
+	}
+	all := make([]*stage, len(s.srcStages)+1)
+	copy(all, s.srcStages)
+	all[len(s.srcStages)] = hubSinkDesc
+	go spawnFanOutUpstream(ctx, sys, all, generation)
 }
 
 // balanceSlotActor is the source actor for one branch of a Balance fan-out.
@@ -106,6 +99,9 @@ type balanceSlotActor[T any] struct {
 	hub           *actor.PID
 	pendingDemand int64
 	config        StageConfig
+	// self is the slot's own PID, stored when it is wired so that PostStop,
+	// which may run on another goroutine, can withdraw it from the fan-out.
+	self atomic.Pointer[actor.PID]
 }
 
 func (a *balanceSlotActor[T]) PreStart(_ *actor.Context) error { return nil }
@@ -117,6 +113,7 @@ func (a *balanceSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 	case *stageWire:
 		a.downstream = msg.downstream
 		a.subID = msg.subID
+		a.self.Store(rctx.Self())
 		a.shared.registerSlot(rctx.Context(), a.slot, rctx.Self(), msg.subID, rctx.ActorSystem())
 
 	case *streamRequest:
@@ -159,7 +156,12 @@ func (a *balanceSlotActor[T]) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *balanceSlotActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop withdraws the slot from the fan-out if it stops while still
+// waiting for its sibling branches to be materialized.
+func (a *balanceSlotActor[T]) PostStop(_ *actor.Context) error {
+	a.shared.generations.withdraw(a.slot, a.self.Load())
+	return nil
+}
 
 // balanceHubActor is the terminal sink of the upstream sub-pipeline spawned by
 // a Balance call. Unlike broadcastHubActor (which fans out to ALL slots),
@@ -184,7 +186,7 @@ type balanceHubActor[T any] struct {
 func (a *balanceHubActor[T]) PreStart(_ *actor.Context) error { return nil }
 
 // Receive handles stageWire, slotDemand, streamElement, streamComplete,
-// streamError, and slotCancel.
+// streamError, slotCancel, and actor.Terminated for the slot actors.
 func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -192,7 +194,13 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.subID = msg.subID
 		hub := rctx.Self()
 		for _, slotPID := range a.slots {
+			rctx.Watch(slotPID)
 			rctx.Tell(slotPID, &hubReady{hub: hub})
+		}
+
+		// A slot that stopped before it could be watched is released now.
+		for _, slot := range stoppedSlots(a.slots) {
+			a.releaseSlot(rctx, slot)
 		}
 
 	case *slotDemand:
@@ -241,16 +249,14 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *slotCancel:
-		a.slots[msg.slot] = nil
-		a.cancelled++
-		if a.cancelled >= a.n {
-			if a.upstream != nil {
-				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
-			}
-			rctx.Shutdown()
-			return
+		a.releaseSlot(rctx, msg.slot)
+
+	case *actor.Terminated:
+		// A slot actor that stops without cancelling (its branch was aborted)
+		// is released like a cancelled one, so it cannot stall its siblings.
+		if slot := terminatedSlot(a.slots, msg); slot >= 0 {
+			a.releaseSlot(rctx, slot)
 		}
-		a.maybePull(rctx)
 
 	default:
 		rctx.Unhandled()
@@ -258,6 +264,29 @@ func (a *balanceHubActor[T]) Receive(rctx *actor.ReceiveContext) {
 }
 
 func (a *balanceHubActor[T]) PostStop(_ *actor.Context) error { return nil }
+
+// releaseSlot removes slot from the active slots, because its branch cancelled
+// or its actor stopped. When no slot is left it cancels the upstream and shuts
+// the hub down; otherwise the remaining slots may now unblock the pull. It
+// does nothing for a slot that was already released.
+func (a *balanceHubActor[T]) releaseSlot(rctx *actor.ReceiveContext, slot int) {
+	if a.slots[slot] == nil {
+		return
+	}
+
+	a.slots[slot] = nil
+	a.cancelled++
+	if a.cancelled >= a.n {
+		if a.upstream != nil {
+			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
+		}
+
+		rctx.Shutdown()
+		return
+	}
+
+	a.maybePull(rctx)
+}
 
 // maybePull requests elements from upstream when at least one active slot has
 // outstanding demand and no elements are currently in flight.

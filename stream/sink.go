@@ -76,10 +76,6 @@ func (c *Collector[T]) Items() []T {
 func (s Sink[T]) WithErrorStrategy(strategy ErrorStrategy) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.ErrorStrategy = strategy
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor {
-		return prevMake(newDesc.config)
-	}
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -92,10 +88,6 @@ func (s Sink[T]) WithRetryConfig(rc RetryConfig) Sink[T] {
 	}
 	newDesc := *s.desc
 	newDesc.config.RetryConfig = rc
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor {
-		return prevMake(newDesc.config)
-	}
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -103,8 +95,6 @@ func (s Sink[T]) WithRetryConfig(rc RetryConfig) Sink[T] {
 func (s Sink[T]) WithMailbox(mailbox actor.Mailbox) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Mailbox = mailbox
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
@@ -112,26 +102,22 @@ func (s Sink[T]) WithMailbox(mailbox actor.Mailbox) Sink[T] {
 func (s Sink[T]) WithName(name string) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Name = name
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
-// WithTags returns a new Sink with tags propagated to metrics and traces.
+// WithTags returns a new Sink carrying the given tags. The tags are stored on
+// the stage; no stage reads them yet.
 func (s Sink[T]) WithTags(tags map[string]string) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Tags = tags
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 
-// WithTracer returns a new Sink with the given Tracer attached.
+// WithTracer returns a new Sink with the given Tracer attached. The tracer is
+// stored on the sink stage; sink stages do not call it yet.
 func (s Sink[T]) WithTracer(t Tracer) Sink[T] {
 	newDesc := *s.desc
 	newDesc.config.Tracer = t
-	prevMake := s.desc.actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	return Sink[T]{desc: &newDesc}
 }
 

@@ -57,6 +57,13 @@ type stage struct {
 	// Returns (result, pass, err). When pass is false, the element is filtered out.
 	// When err is non-nil, the element failed processing.
 	fuseFn func(any) (any, bool, error)
+	// manyProducers marks a stage that receives elements from many independent
+	// producers: a fan-in source, a FlatMap, a splitter, a fan-out hub. Such a
+	// stage gets an unbounded mailbox. Its occupancy is bounded by the demand
+	// window of each producer, while a bounded mailbox would make the
+	// producers block dispatcher workers once it is full, and with as many
+	// producers as workers nothing would be left to drain it.
+	manyProducers bool
 }
 
 // newStageID returns a short 8-character identifier derived from a UUID v4.
@@ -75,7 +82,8 @@ const (
 	FuseStateless FusionMode = iota
 	// FuseNone disables stage fusion (useful for debugging or profiling individual stages).
 	FuseNone
-	// FuseAggressive fuses all fusable adjacent stages including those with buffering.
+	// FuseAggressive is reserved for fusing stages with buffering; it currently
+	// behaves exactly like FuseStateless.
 	FuseAggressive
 )
 

@@ -215,7 +215,8 @@ func MergeSubstreams[K comparable, T any](sf SubFlow[K, T]) Source[T] {
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newSubFlowSourceActor(upstream, sub, mode, keyFn, splitPred, maxSubs, perKeyBuffer, overflow, errorStrategy, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[T]{stages: []*stage{desc}}
 }

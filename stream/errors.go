@@ -43,7 +43,9 @@ const (
 var (
 	// ErrStreamCanceled is returned when the stream was stopped before completion.
 	ErrStreamCanceled = errors.New("stream: canceled")
-	// ErrPullTimeout is returned when an actor source does not respond within the pull timeout.
+	// ErrPullTimeout is reserved and currently not returned: when an actor source
+	// does not answer within the pull timeout, the stream fails with the error
+	// returned by actor.Ask.
 	ErrPullTimeout = errors.New("stream: pull from actor source timed out")
 	// ErrInvalidGraph is returned when a RunnableGraph has fewer than 2 stages (source + sink).
 	ErrInvalidGraph = errors.New("stream: graph must have at least a source and a sink")

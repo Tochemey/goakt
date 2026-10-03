@@ -40,6 +40,7 @@ type weightedMergeSourceActor[T any] struct {
 	subStages  [][]*stage
 	selectSlot slotSelector
 	system     actor.ActorSystem
+	inputs     inputPipelines // materialized input pipelines; aborted in PostStop
 	downstream *actor.PID
 	subID      string
 	seqNo      uint64
@@ -68,7 +69,7 @@ func newWeightedMergeSourceActor[T any](subStages [][]*stage, selectSlot slotSel
 
 func (a *weightedMergeSourceActor[T]) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, and streamCancel.
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, mergeSubErr, and streamCancel.
 func (a *weightedMergeSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -88,7 +89,11 @@ func (a *weightedMergeSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
-			spawnSubPipeline(ctx, a.system, all)
+			if err := a.inputs.spawn(ctx, a.system, all); err != nil {
+				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+				rctx.Shutdown()
+				return
+			}
 		}
 
 	case *streamRequest:
@@ -97,12 +102,17 @@ func (a *weightedMergeSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 
 	case *mergeSubValue:
 		a.metrics.elementsIn.Add(1)
+		a.inputs.arrived(msg)
 		a.bufs[msg.slot].push(msg.value)
 		a.tryFlush(rctx)
 
 	case *mergeSubDone:
 		a.done[msg.slot] = true
 		a.tryFlush(rctx)
+
+	case *mergeSubErr:
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
+		rctx.Shutdown()
 
 	case *streamCancel:
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
@@ -129,6 +139,7 @@ func (a *weightedMergeSourceActor[T]) tryFlush(rctx *actor.ReceiveContext) {
 			seqNo: a.seqNo,
 		})
 		a.demand--
+		a.inputs.release(rctx, slot, 1)
 	}
 
 	if a.allDoneAndEmpty() {
@@ -148,4 +159,8 @@ func (a *weightedMergeSourceActor[T]) allDoneAndEmpty() bool {
 	return true
 }
 
-func (a *weightedMergeSourceActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the input pipelines so they do not outlive this stage.
+func (a *weightedMergeSourceActor[T]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}

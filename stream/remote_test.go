@@ -25,12 +25,15 @@ package stream_test
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/stream"
@@ -225,6 +228,38 @@ func TestSinkRef_UpstreamErrorPropagates(t *testing.T) {
 	}
 	require.Error(t, h.Err())
 	assert.Contains(t, h.Err().Error(), "upstream boom")
+}
+
+// TestSourceRef_ProducerErrorPropagates verifies that a failure of the source
+// behind a SourceRef reaches the consumer as the stream's terminal error
+// instead of being reported as a normal completion.
+func TestSourceRef_ProducerErrorPropagates(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	boom := errors.New("producer boom")
+	ref, err := stream.Via(
+		stream.Of(1, 2, 3, 4, 5),
+		stream.TryMap(func(v int) (int, error) {
+			if v == 3 {
+				return 0, boom
+			}
+			return v, nil
+		}),
+	).SourceRef(ctx, sys)
+	require.NoError(t, err)
+
+	h, err := ref.Source(sys).To(stream.Ignore[int]()).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("source ref did not terminate after producer error")
+	}
+
+	require.Error(t, h.Err())
+	assert.Contains(t, h.Err().Error(), "producer boom")
 }
 
 // TestSourceRef_NonexistentEndpointFails verifies that resolving a SourceRef
@@ -544,5 +579,113 @@ func TestRefs_CrossNode(t *testing.T) {
 			pause.For(20 * time.Millisecond)
 		}
 		assert.Equal(t, []int{10, 20, 30, 40, 50}, col.Items())
+	})
+}
+
+// streamActorCount returns the number of stream actors (coordinators and
+// stages) running in sys.
+func streamActorCount(t *testing.T, sys actor.ActorSystem) int {
+	t.Helper()
+	pids, err := sys.Actors(context.Background(), time.Second)
+	require.NoError(t, err)
+
+	count := 0
+	for _, pid := range pids {
+		if strings.HasPrefix(pid.Name(), "stream-") {
+			count++
+		}
+	}
+
+	return count
+}
+
+// TestSourceRef_TerminatedEndpoint_StopsItsSource verifies that once a source
+// ref endpoint has ended its stream with an error, here a backpressure
+// overflow, it stops the source pipeline at once instead of letting it run
+// until the endpoint itself is reaped.
+func TestSourceRef_TerminatedEndpoint_StopsItsSource(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	var produced atomic.Int64
+	endless := stream.Unfold(0, func(s int) (int, int, bool) {
+		produced.Add(1)
+		return s + 1, s, true
+	})
+	ref, err := endless.SourceRef(ctx, sys)
+	require.NoError(t, err)
+
+	// The consumer blocks on its first element, so the endpoint's backlog grows
+	// until it overflows.
+	gate := make(chan struct{})
+	h, err := ref.Source(sys).To(stream.ForEach(func(int) { <-gate })).Run(ctx, sys)
+	require.NoError(t, err)
+
+	// One demand window shipped plus more than the endpoint may hold: the
+	// overflow has happened.
+	require.Eventually(t, func() bool { return produced.Load() > 224+1024 }, 5*time.Second, 5*time.Millisecond)
+	close(gate)
+
+	select {
+	case <-h.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("consumer did not terminate after the endpoint overflowed")
+	}
+
+	require.Error(t, h.Err())
+	assert.Contains(t, h.Err().Error(), "overflow")
+	requireNoStreamActorsLeft(t, sys)
+}
+
+// TestSourceRef_ConsumerGone_StopsTheSource verifies that the source pipeline
+// behind a source ref stops when its consumer stops or is aborted.
+func TestSourceRef_ConsumerGone_StopsTheSource(t *testing.T) {
+	testCases := map[string]func(t *testing.T, h stream.StreamHandle){
+		"Stop":  func(t *testing.T, h stream.StreamHandle) { require.NoError(t, h.Stop(context.Background())) },
+		"Abort": func(_ *testing.T, h stream.StreamHandle) { h.Abort() },
+	}
+
+	for name, end := range testCases {
+		t.Run(name, func(t *testing.T) {
+			sys := newTestSystem(t)
+			ctx := context.Background()
+
+			ref, err := stream.FromChannel(make(chan int)).SourceRef(ctx, sys)
+			require.NoError(t, err)
+
+			h, err := ref.Source(sys).To(stream.Ignore[int]()).Run(ctx, sys)
+			require.NoError(t, err)
+
+			// Consumer pipeline and source pipeline: a coordinator and two stages each.
+			require.Eventually(t, func() bool { return streamActorCount(t, sys) == 6 }, 5*time.Second, 5*time.Millisecond)
+
+			end(t, h)
+			requireNoStreamActorsLeft(t, sys)
+		})
+	}
+
+	t.Run("Abort right after Run", func(t *testing.T) {
+		sys := newTestSystem(t)
+		ctx := context.Background()
+
+		for i := range 100 {
+			ref, err := stream.FromChannel(make(chan int)).SourceRef(ctx, sys)
+			require.NoError(t, err)
+
+			h, err := ref.Source(sys).To(stream.Ignore[int]()).Run(ctx, sys)
+			require.NoError(t, err)
+
+			// Alternate an immediate abort with one a few microseconds later,
+			// so the abort lands on either side of the subscription.
+			if i%2 == 1 {
+				deadline := time.Now().Add(5 * time.Microsecond)
+				for time.Now().Before(deadline) {
+				}
+			}
+
+			h.Abort()
+		}
+
+		requireNoStreamActorsLeft(t, sys)
 	})
 }

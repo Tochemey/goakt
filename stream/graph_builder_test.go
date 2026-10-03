@@ -51,10 +51,9 @@ func TestFlow_WithRetryConfig_AppliesConfig(t *testing.T) {
 	sys := newTestSystem(t)
 	ctx := context.Background()
 
-	// WithRetryConfig covers the code path and verifies the pipeline runs. Each
-	// builder call captures its own copy of the config, so the effective retry
-	// count is 1 (initial) + 1 (one retry from MaxAttempts=1 captured by the
-	// WithErrorStrategy closure) = 2.
+	// Builder options compose: the retry budget set after the error strategy
+	// must reach the stage actor. Retries come after the failed first call, so
+	// MaxAttempts=3 yields 1 initial call + 3 retries = 4 calls in total.
 	attempts := 0
 	sentinel := errors.New("transient")
 	handle, err := stream.Via(
@@ -71,9 +70,108 @@ func TestFlow_WithRetryConfig_AppliesConfig(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("stream did not complete")
 	}
-	// The builder captures configs per-step; effective max is the WithErrorStrategy
-	// step's default (1), yielding 1 initial + 1 retry = 2 total calls.
-	assert.Equal(t, 2, attempts)
+
+	require.ErrorIs(t, handle.Err(), sentinel)
+	assert.Equal(t, 4, attempts)
+}
+
+// TestBuilders_ComposeAndKeepMaterializerConfig verifies that a stage built
+// with one or more With… options still receives what the materializer injects
+// at Run time (actor system, shared metrics, default name) and that every
+// option in a chain takes effect.
+func TestBuilders_ComposeAndKeepMaterializerConfig(t *testing.T) {
+	t.Run("retry config set before the error strategy", func(t *testing.T) {
+		sys := newTestSystem(t)
+		ctx := context.Background()
+
+		attempts := 0
+		col, sink := stream.Collect[int]()
+		handle, err := stream.Via(
+			stream.Of(1),
+			stream.TryMap(func(n int) (int, error) {
+				attempts++
+				if attempts < 4 {
+					return 0, errors.New("transient")
+				}
+				return n, nil
+			}).WithRetryConfig(stream.RetryConfig{MaxAttempts: 3}).WithErrorStrategy(stream.Retry).WithName("retrying-map"),
+		).To(sink).Run(ctx, sys)
+		require.NoError(t, err)
+
+		select {
+		case <-handle.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("stream did not complete")
+		}
+
+		require.NoError(t, handle.Err())
+		assert.Equal(t, []int{1}, col.Items())
+		assert.Equal(t, 4, attempts)
+	})
+
+	t.Run("handle metrics with configured source and sink", func(t *testing.T) {
+		sys := newTestSystem(t)
+		ctx := context.Background()
+
+		_, sink := stream.Collect[int]()
+		handle, err := stream.Of(1, 2, 3).
+			WithOverflowStrategy(stream.DropHead).
+			To(sink.WithName("configured-sink").WithTags(map[string]string{"env": "test"})).
+			Run(ctx, sys)
+		require.NoError(t, err)
+
+		select {
+		case <-handle.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("stream did not complete")
+		}
+
+		metrics := handle.Metrics()
+		assert.Equal(t, uint64(6), metrics.ElementsIn, "3 produced by the source + 3 received by the sink")
+		assert.Equal(t, uint64(3), metrics.ElementsOut)
+	})
+
+	t.Run("composite source with a tracer", func(t *testing.T) {
+		sys := newTestSystem(t)
+		ctx := context.Background()
+
+		col, sink := stream.Collect[int]()
+		handle, err := stream.Merge(stream.Of(1, 2), stream.Of(3, 4)).
+			WithTracer(&testTracer{}).
+			To(sink).
+			Run(ctx, sys)
+		require.NoError(t, err)
+
+		select {
+		case <-handle.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("merge built with WithTracer did not complete")
+		}
+
+		require.NoError(t, handle.Err())
+		assert.ElementsMatch(t, []int{1, 2, 3, 4}, col.Items())
+	})
+
+	t.Run("sub-pipeline flow with a name", func(t *testing.T) {
+		sys := newTestSystem(t)
+		ctx := context.Background()
+
+		col, sink := stream.Collect[int]()
+		handle, err := stream.Via(
+			stream.Of(1, 2),
+			stream.FlatMapConcat(func(n int) stream.Source[int] { return stream.Of(n, n*10) }).WithName("expand"),
+		).To(sink).Run(ctx, sys)
+		require.NoError(t, err)
+
+		select {
+		case <-handle.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("FlatMapConcat built with WithName did not complete")
+		}
+
+		require.NoError(t, handle.Err())
+		assert.Equal(t, []int{1, 10, 2, 20}, col.Items())
+	})
 }
 
 func TestFlow_WithRetryConfig_ZeroCoercedToOne(t *testing.T) {

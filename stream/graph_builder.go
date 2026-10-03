@@ -347,7 +347,8 @@ func (g *Graph) buildMergeDesc(node *node, fanOuts map[string]*fanOutReg) (*stag
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSourceActor[any](captured, cfg)
 		},
-		config: defaultStageConfig(),
+		config:        defaultStageConfig(),
+		manyProducers: true,
 	}, nil
 }
 
@@ -369,7 +370,8 @@ func (g *Graph) buildConcatDesc(node *node, fanOuts map[string]*fanOutReg) (*sta
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newConcatSourceActor[any](captured, cfg)
 		},
-		config: defaultStageConfig(),
+		config:        defaultStageConfig(),
+		manyProducers: true,
 	}, nil
 }
 

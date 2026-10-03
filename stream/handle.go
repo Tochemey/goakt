@@ -44,7 +44,9 @@ type StreamHandle interface {
 	Err() error
 	// Stop signals an orderly shutdown. In-flight elements are drained before
 	// stages are stopped. Blocks until the stream has terminated or the context
-	// deadline is exceeded.
+	// deadline is exceeded. Stop cancels the source and lets in-flight work
+	// finish, so a stream whose in-flight work never finishes, such as a
+	// FlatMapMerge with endless inner sources, does not end on Stop; use Abort.
 	Stop(ctx context.Context) error
 	// Abort immediately terminates all stage actors, discarding buffered elements.
 	Abort()

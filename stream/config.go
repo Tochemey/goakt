@@ -35,8 +35,9 @@ const (
 	// defaultInitialDemand is the first batch of demand sent by a sink to its upstream.
 	// It equals 87.5 % of defaultBufferSize, leaving room for in-flight elements.
 	defaultInitialDemand = 224
-	// defaultRefillThreshold is the consumed-count at which a sink requests a refill.
-	// When consumed >= defaultRefillThreshold, the sink sends Request(consumed) upstream.
+	// defaultRefillThreshold is the low watermark of outstanding upstream credit.
+	// When a stage's remaining credit falls to defaultRefillThreshold or below,
+	// it requests enough to bring the credit back up to InitialDemand.
 	defaultRefillThreshold = 64
 	// defaultPullTimeout is the maximum time to wait for a pull response from an actor source.
 	defaultPullTimeout = 5 * time.Second
@@ -44,8 +45,9 @@ const (
 
 // RetryConfig controls retry behaviour when ErrorStrategy is Retry.
 type RetryConfig struct {
-	// MaxAttempts is the maximum number of times an element is processed before
-	// the error is escalated. Must be ≥ 1. Zero is treated as 1.
+	// MaxAttempts is the maximum number of times an element is processed again
+	// after its first failed attempt, before the error is escalated.
+	// Must be ≥ 1. Zero is treated as 1.
 	MaxAttempts int
 }
 
@@ -60,7 +62,9 @@ type StageConfig struct {
 	// InitialDemand is the first batch of demand the sink sends upstream.
 	// Default: defaultInitialDemand (224).
 	InitialDemand int64
-	// RefillThreshold is the number of elements consumed before requesting a refill.
+	// RefillThreshold is the low watermark of outstanding upstream credit: a
+	// stage requests a refill, back up to InitialDemand, once its remaining
+	// credit falls to this value or below.
 	// Default: defaultRefillThreshold (64).
 	RefillThreshold int64
 	// ErrorStrategy controls element-level error handling.
@@ -69,7 +73,9 @@ type StageConfig struct {
 	// RetryConfig is used when ErrorStrategy is Retry. Controls max attempts.
 	// Default: RetryConfig{MaxAttempts: 1}.
 	RetryConfig RetryConfig
-	// OverflowStrategy controls what happens when the source buffer is full.
+	// OverflowStrategy is recorded on the stage but not applied by linear stages,
+	// which are bounded by demand and never overflow; only substream buffers
+	// (SubFlow.WithSubstreamBuffer) act on an overflow strategy.
 	// Default: DropTail.
 	OverflowStrategy OverflowStrategy
 	// PullTimeout is the timeout for pulls from actor sources.
@@ -91,9 +97,10 @@ type StageConfig struct {
 	// Name overrides the auto-generated actor name for this stage.
 	// When empty, the materializer generates a name.
 	Name string
-	// Tags are propagated to metrics and traces.
+	// Tags are stored on the stage; no stage reads them yet.
 	Tags map[string]string
-	// Tracer is an optional hook for distributed tracing.
+	// Tracer is an optional hook for distributed tracing. Only the element-wise
+	// flow stages call it; source and sink stages store it without calling it.
 	Tracer Tracer
 	// OnDrop is called when an element is dropped (overflow, exhausted retries).
 	// Use this to route dropped elements to a dead-letter store.

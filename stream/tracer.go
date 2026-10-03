@@ -23,7 +23,8 @@
 package stream
 
 // Tracer is an optional hook for distributed tracing integration.
-// Attach a tracer to a flow or sink via WithTracer(t).
+// Attach a tracer to a flow via WithTracer(t). Sources and sinks accept a
+// tracer through their own WithTracer but do not call it yet.
 type Tracer interface {
 	// OnElement is called for every element passing through a stage.
 	// stageName identifies the stage; seqNo is the element sequence number;
@@ -39,6 +40,7 @@ type Tracer interface {
 
 // MetricsReporter is an optional hook for external metrics systems.
 // Implementations can forward StreamMetrics to Prometheus, OpenTelemetry, etc.
+// It is reserved: nothing in the package accepts or calls a MetricsReporter yet.
 type MetricsReporter interface {
 	// Report is called periodically with the current metrics snapshot.
 	// id is the stream's unique identifier.

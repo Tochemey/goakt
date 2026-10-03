@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -598,4 +599,49 @@ func TestFlatMapMerge_BreadthZeroCoercesToOne(t *testing.T) {
 	require.NoError(t, handle.Err())
 
 	require.Equal(t, []int64{0, 0, 1, 0, 1, 2}, collector.Items())
+}
+
+// TestFlatMapMerge_AbortRightAfterRun_StopsSubPipelines verifies that a
+// FlatMap stream aborted while it is materializing its nested streams leaves
+// none of them behind.
+func TestFlatMapMerge_AbortRightAfterRun_StopsSubPipelines(t *testing.T) {
+	sys := newTestSystem(t)
+
+	for range 30 {
+		handle, err := stream.Via(
+			stream.Of(1, 2, 3, 4, 5, 6, 7, 8),
+			stream.FlatMapMerge(8, func(int) stream.Source[int] { return stream.FromChannel(make(chan int)) }),
+		).To(stream.Ignore[int]()).Run(context.Background(), sys)
+		require.NoError(t, err)
+		handle.Abort()
+	}
+
+	requireNoStreamActorsLeft(t, sys)
+}
+
+// TestFlatMapMerge_ManyEndlessInnerSources_KeepsFlowing verifies that a
+// FlatMapMerge running more endless inner sources than the dispatcher has
+// workers keeps delivering, and that Abort ends it.
+func TestFlatMapMerge_ManyEndlessInnerSources_KeepsFlowing(t *testing.T) {
+	sys := newTestSystem(t)
+
+	const breadth = 16
+	inputs := make([]int, breadth)
+	endless := func(int) stream.Source[int] {
+		return stream.Unfold(0, func(s int) (int, int, bool) { return s + 1, s, true })
+	}
+
+	var received atomic.Int64
+	handle, err := stream.Via(stream.Of(inputs...), stream.FlatMapMerge(breadth, endless)).
+		To(stream.ForEach(func(int) { received.Add(1) })).
+		Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	first := int64(breadth * 224 * 2)
+	require.Eventually(t, func() bool { return received.Load() > first }, 10*time.Second, time.Millisecond)
+	second := received.Load() + first
+	require.Eventually(t, func() bool { return received.Load() > second }, 10*time.Second, time.Millisecond)
+
+	handle.Abort()
+	requireNoStreamActorsLeft(t, sys)
 }

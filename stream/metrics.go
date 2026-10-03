@@ -39,6 +39,7 @@ type StreamMetrics struct {
 	// Errors is the count of element-level processing errors encountered.
 	Errors uint64
 	// BackpressureMs is the cumulative milliseconds the source spent waiting for demand.
+	// It is reserved: no stage records the wait yet, so the value is always zero.
 	BackpressureMs float64
 }
 

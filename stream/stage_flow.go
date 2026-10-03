@@ -154,7 +154,8 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 		a.maybeRequestUpstream(rctx)
 
 	case *streamComplete:
-		// Mark as completing and flush what we can. If the buffer still has
+		// Mark as completing and flush what we can. tryFlushOutput propagates
+		// completion when the buffer is empty. If the buffer still has
 		// elements we keep the actor alive to serve incoming streamRequests
 		// so downstream can drain everything before we propagate completion.
 		a.completing = true
@@ -162,10 +163,6 @@ func (a *flowActor) Receive(rctx *actor.ReceiveContext) {
 			a.tracer.OnComplete(a.stageName)
 		}
 		a.tryFlushOutput(rctx)
-		if a.outputBuf.empty() {
-			rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
-			rctx.Shutdown()
-		}
 
 	case *streamError:
 		rctx.Tell(a.downstream, msg)
@@ -233,35 +230,46 @@ func (a *flowActor) PostStop(_ *actor.Context) error { return nil }
 // fusedFlowActor is a flow actor that applies a pre-composed chain of stateless
 // transforms (the result of stage fusion). It has no error strategy or retry
 // logic beyond FailFast — fused stages must all be stateless.
+//
+// The composed function yields at most one output per input, so the actor
+// needs no output buffer: it requests from upstream only what downstream has
+// demanded and forwards each result as it is produced.
 type fusedFlowActor struct {
-	fn         func(any) (any, bool, error)
-	downstream *actor.PID
-	upstream   *actor.PID
-	subID      string
-	seqNo      uint64
-	credit     int64 // outstanding upstream credit; refilled in batches like flowActor
-	config     StageConfig
+	fn               func(any) (any, bool, error)
+	downstream       *actor.PID
+	upstream         *actor.PID
+	subID            string
+	seqNo            uint64
+	credit           int64 // elements requested from upstream and not yet received
+	downstreamDemand int64 // elements downstream has requested and not yet received
+	config           StageConfig
 }
 
+// newFusedFlowActor creates a fusedFlowActor that applies fn to each element.
 func newFusedFlowActor(fn func(any) (any, bool, error), config StageConfig) *fusedFlowActor {
 	return &fusedFlowActor{fn: fn, config: config}
 }
 
 func (a *fusedFlowActor) PreStart(_ *actor.Context) error { return nil }
 
+// Receive handles stageWire, streamRequest, streamElement, streamComplete,
+// streamError, and streamCancel.
 func (a *fusedFlowActor) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
 		a.upstream = msg.upstream
 		a.downstream = msg.downstream
 		a.subID = msg.subID
-		// Send initial demand upstream and track the outstanding credit.
-		a.credit = a.config.InitialDemand
-		rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: a.credit})
+
+	case *streamRequest:
+		a.downstreamDemand += msg.n
+		a.maybeRequestUpstream(rctx)
 
 	case *streamElement:
+		a.credit--
 		result, pass, err := a.fn(msg.value)
 		if err != nil {
+			rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 			rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
 			rctx.Shutdown()
 			return
@@ -270,17 +278,10 @@ func (a *fusedFlowActor) Receive(rctx *actor.ReceiveContext) {
 		if pass {
 			a.seqNo++
 			rctx.Tell(a.downstream, &streamElement{subID: a.subID, value: result, seqNo: a.seqNo})
+			a.downstreamDemand--
 		}
 
-		// Refill upstream credit in batches (matching flowActor's watermark strategy)
-		// instead of sending a streamRequest for every single element. This reduces
-		// demand-message allocations by ~RefillThreshold-fold on the fused fast path.
-		a.credit--
-		if a.credit <= a.config.RefillThreshold {
-			refill := a.config.InitialDemand - a.credit
-			a.credit += refill
-			rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: refill})
-		}
+		a.maybeRequestUpstream(rctx)
 
 	case *streamComplete:
 		rctx.Tell(a.downstream, msg)
@@ -300,11 +301,38 @@ func (a *fusedFlowActor) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
+// maybeRequestUpstream requests from upstream the part of the downstream
+// demand that outstanding upstream credit does not already cover. Each
+// upstream element yields at most one output, so the stage never receives
+// more than downstream asked for. A filtered-out element leaves demand
+// unmet and is replaced here. Requests are sent in batches, once the
+// outstanding credit has fallen to RefillThreshold (matching flowActor's
+// watermark strategy), instead of one streamRequest per filtered element.
+func (a *fusedFlowActor) maybeRequestUpstream(rctx *actor.ReceiveContext) {
+	if a.credit > a.config.RefillThreshold {
+		return
+	}
+
+	missing := a.downstreamDemand - a.credit
+	if missing <= 0 {
+		return
+	}
+
+	a.credit += missing
+	rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: missing})
+}
+
 func (a *fusedFlowActor) PostStop(_ *actor.Context) error { return nil }
 
 // batchFlowActor groups incoming elements into slices of at most maxSize,
 // flushing early when the GoAkt actor-system scheduler fires a batchFlush after
 // maxWait has elapsed with at least one element buffered.
+//
+// A window that is full, timed out or cut short by upstream completion is
+// sealed into a batch and queued in ready. Batches leave ready only against
+// downstream demand, so a window never grows past maxSize while downstream is
+// not asking, and nothing is lost when upstream completes before downstream
+// has asked.
 type batchFlowActor[T any] struct {
 	maxSize          int
 	maxWait          time.Duration
@@ -313,9 +341,12 @@ type batchFlowActor[T any] struct {
 	subID            string
 	seqNo            uint64
 	window           []T
+	ready            queue // sealed batches ([]T) waiting for downstream demand
+	readyElems       int64 // elements held in ready; they count against the upstream credit window
 	upstreamCredit   int64
 	downstreamDemand int64
 	timerActive      bool
+	completing       bool // true once upstream sent streamComplete; the stage stops when ready drains
 	schedRef         string
 	config           StageConfig
 	metrics          *stageMetrics
@@ -349,6 +380,7 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 
 	case *streamRequest:
 		a.downstreamDemand += msg.n
+		a.tryFlush(rctx)
 		a.maybeRequestUpstream(rctx)
 
 	case *streamElement:
@@ -374,24 +406,29 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 		}
 
 		if len(a.window) >= a.maxSize {
-			a.flush(rctx)
+			a.seal()
+			a.tryFlush(rctx)
 		}
+
 		a.maybeRequestUpstream(rctx)
 
 	case *batchFlush:
 		a.timerActive = false
 		if len(a.window) > 0 {
-			a.flush(rctx)
+			a.seal()
+			a.tryFlush(rctx)
+			a.maybeRequestUpstream(rctx)
 		}
 
 	case *streamComplete:
-		// Flush any remaining elements before propagating completion.
+		// Seal any remaining elements, then propagate completion once every
+		// sealed batch has been delivered against downstream demand.
 		if len(a.window) > 0 {
-			a.flush(rctx)
+			a.seal()
 		}
 
-		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
-		rctx.Shutdown()
+		a.completing = true
+		a.tryFlush(rctx)
 
 	case *streamError:
 		rctx.Tell(a.downstream, msg)
@@ -407,28 +444,51 @@ func (a *batchFlowActor[T]) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
-// flush emits the current window as a single batch element to downstream,
-// provided demand is available.
-func (a *batchFlowActor[T]) flush(rctx *actor.ReceiveContext) {
-	if a.downstreamDemand <= 0 {
-		return
-	}
+// seal closes the current window: its elements become one batch queued in
+// ready, and a new empty window starts.
+func (a *batchFlowActor[T]) seal() {
 	batch := make([]T, len(a.window))
 	copy(batch, a.window)
 	a.window = a.window[:0]
-	a.seqNo++
-	a.metrics.elementsOut.Add(1)
-	rctx.Tell(a.downstream, &streamElement{
-		subID: a.subID,
-		value: batch,
-		seqNo: a.seqNo,
-	})
-	a.downstreamDemand--
+	a.ready.push(batch)
+	a.readyElems += int64(len(batch))
+}
+
+// tryFlush emits sealed batches downstream, one per unit of downstream
+// demand. When upstream has completed and every batch has been delivered it
+// propagates streamComplete downstream and shuts down.
+func (a *batchFlowActor[T]) tryFlush(rctx *actor.ReceiveContext) {
+	for a.downstreamDemand > 0 && !a.ready.empty() {
+		batch := a.ready.pop().([]T)
+		a.readyElems -= int64(len(batch))
+		a.seqNo++
+		a.metrics.elementsOut.Add(1)
+		rctx.Tell(a.downstream, &streamElement{
+			subID: a.subID,
+			value: batch,
+			seqNo: a.seqNo,
+		})
+		a.downstreamDemand--
+	}
+
+	if a.completing && a.ready.empty() {
+		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
+		rctx.Shutdown()
+	}
 }
 
 // maybeRequestUpstream refills upstream credit when it falls below the threshold.
+// The credit window is the larger of InitialDemand and maxSize, so a window of
+// maxSize elements can always fill by size. Elements held in the open window
+// and in undelivered batches count against it, which stops the stage pulling
+// while downstream is not consuming. No-op when upstream has already completed.
 func (a *batchFlowActor[T]) maybeRequestUpstream(rctx *actor.ReceiveContext) {
-	available := a.config.InitialDemand - a.upstreamCredit - int64(len(a.window))
+	if a.completing {
+		return
+	}
+
+	capacity := max(a.config.InitialDemand, int64(a.maxSize))
+	available := capacity - a.upstreamCredit - int64(len(a.window)) - a.readyElems
 	if available <= 0 {
 		return
 	}

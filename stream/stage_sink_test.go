@@ -195,3 +195,22 @@ func TestSink_WithErrorStrategy(t *testing.T) {
 	require.NoError(t, err)
 	<-handle.Done()
 }
+
+// TestFirstSinkActor_UpstreamError_ReportsErr verifies that a First sink whose
+// upstream fails before producing an element surfaces the error on the handle.
+func TestFirstSinkActor_UpstreamError_ReportsErr(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	sentinel := errors.New("upstream error")
+	res, sink := First[int]()
+	handle, err := Via(
+		Of(1, 2, 3),
+		TryMap(func(int) (int, error) { return 0, sentinel }),
+	).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	<-handle.Done()
+	require.ErrorIs(t, handle.Err(), sentinel)
+	assert.Zero(t, res.Value())
+}

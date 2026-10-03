@@ -41,13 +41,13 @@ type sinkActor struct {
 	credit  int64
 	config  StageConfig
 	metrics *stageMetrics
-	termErr error // set when the stream terminates with an error; read by completionWrapper
+	termErr terminalError // set when the stream terminates with an error; read by completionWrapper
 }
 
 // TermErr returns the terminal error recorded when a *streamError was received,
 // or nil on normal completion. Implemented for the terminalErrorActor interface
 // so completionWrapper can propagate the error to StreamHandle.
-func (a *sinkActor) TermErr() error { return a.termErr }
+func (a *sinkActor) TermErr() error { return a.termErr.get() }
 
 func newSinkActor(consumeFn func(any) error, onComplete func(), config StageConfig) *sinkActor {
 	m := config.Metrics
@@ -101,7 +101,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 					if a.config.OnDrop != nil {
 						a.config.OnDrop(msg.value, "retry-exhausted: element processing error")
 					}
-					a.termErr = retryErr
+					a.termErr.set(retryErr)
 					rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 					a.callOnComplete()
 					rctx.Shutdown()
@@ -111,13 +111,13 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 				// Delegate to actor supervision: escalate so the stream supervisor
 				// can apply its directive. Behaves like FailFast until a dedicated
 				// stream supervisor hierarchy is established.
-				a.termErr = err
+				a.termErr.set(err)
 				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				a.callOnComplete()
 				rctx.Shutdown()
 				return
 			default: // FailFast
-				a.termErr = err
+				a.termErr.set(err)
 				rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 				a.callOnComplete()
 				rctx.Shutdown()
@@ -137,7 +137,7 @@ func (a *sinkActor) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamError:
-		a.termErr = msg.err // preserved for completionWrapper → StreamHandle.Err()
+		a.termErr.set(msg.err) // preserved for completionWrapper → StreamHandle.Err()
 		rctx.Tell(a.upstream, &streamCancel{subID: a.subID})
 		a.callOnComplete()
 		rctx.Shutdown()
@@ -171,7 +171,14 @@ type firstSinkActor[T any] struct {
 	got      bool
 	config   StageConfig
 	metrics  *stageMetrics
+	termErr  terminalError // set when upstream fails; read by completionWrapper
 }
+
+// TermErr returns the upstream error that terminated the stream, or nil when
+// the sink captured its element or upstream completed. Implemented for the
+// terminalErrorActor interface so completionWrapper can propagate the error
+// to StreamHandle.
+func (a *firstSinkActor[T]) TermErr() error { return a.termErr.get() }
 
 func newFirstSinkActor[T any](result *FoldResult[T], config StageConfig) *firstSinkActor[T] {
 	m := config.Metrics
@@ -212,6 +219,7 @@ func (a *firstSinkActor[T]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamError:
+		a.termErr.set(msg.err)
 		a.markDone()
 		rctx.Shutdown()
 

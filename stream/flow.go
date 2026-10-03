@@ -44,11 +44,6 @@ type Flow[In, Out any] struct {
 func (f Flow[In, Out]) WithErrorStrategy(s ErrorStrategy) Flow[In, Out] {
 	newStage := *f.stage
 	newStage.config.ErrorStrategy = s
-	// Rebuild makeActor so it captures the updated config value.
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor {
-		return prevMake(newStage.config)
-	}
 	return Flow[In, Out]{stage: &newStage}
 }
 
@@ -62,10 +57,6 @@ func (f Flow[In, Out]) WithRetryConfig(rc RetryConfig) Flow[In, Out] {
 
 	newStage := *f.stage
 	newStage.config.RetryConfig = rc
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor {
-		return prevMake(newStage.config)
-	}
 	return Flow[In, Out]{stage: &newStage}
 }
 
@@ -73,8 +64,6 @@ func (f Flow[In, Out]) WithRetryConfig(rc RetryConfig) Flow[In, Out] {
 func (f Flow[In, Out]) WithMailbox(mailbox actor.Mailbox) Flow[In, Out] {
 	newStage := *f.stage
 	newStage.config.Mailbox = mailbox
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
 	return Flow[In, Out]{stage: &newStage}
 }
 
@@ -82,17 +71,14 @@ func (f Flow[In, Out]) WithMailbox(mailbox actor.Mailbox) Flow[In, Out] {
 func (f Flow[In, Out]) WithName(name string) Flow[In, Out] {
 	newStage := *f.stage
 	newStage.config.Name = name
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
 	return Flow[In, Out]{stage: &newStage}
 }
 
-// WithTags returns a new Flow with tags propagated to metrics and traces.
+// WithTags returns a new Flow carrying the given tags. The tags are stored on
+// the stage; no stage reads them yet.
 func (f Flow[In, Out]) WithTags(tags map[string]string) Flow[In, Out] {
 	newStage := *f.stage
 	newStage.config.Tags = tags
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
 	return Flow[In, Out]{stage: &newStage}
 }
 
@@ -100,8 +86,6 @@ func (f Flow[In, Out]) WithTags(tags map[string]string) Flow[In, Out] {
 func (f Flow[In, Out]) WithTracer(tracer Tracer) Flow[In, Out] {
 	newStage := *f.stage
 	newStage.config.Tracer = tracer
-	prevMake := f.stage.actorFn
-	newStage.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newStage.config) }
 	return Flow[In, Out]{stage: &newStage}
 }
 
@@ -225,7 +209,8 @@ func Batch[T any](n int, maxWait time.Duration) Flow[T, []T] {
 
 // Buffer inserts an asynchronous buffer stage of the given capacity.
 // It decouples the processing rates of upstream and downstream.
-// When the buffer is full the OverflowStrategy is applied.
+// When the buffer is full the stage stops requesting from upstream; the
+// OverflowStrategy is recorded on the stage but not applied.
 func Buffer[T any](size int, strategy OverflowStrategy) Flow[T, T] {
 	if size < 1 {
 		size = 1
@@ -324,10 +309,10 @@ func Scan[In, State any](zero State, fn func(State, In) State) Flow[In, State] {
 }
 
 // WithContext creates a type-preserving Flow that passes each element through
-// unchanged. The key/value pair labels this stage as a named tracing boundary.
-// In future releases this metadata will be attached to distributed tracing spans
-// when an OpenTelemetry integration is active; for now it is recorded in the
-// stage descriptor and visible via actor-system tooling.
+// unchanged. The key/value pair is meant to label this stage as a named
+// tracing boundary. It is reserved for a future OpenTelemetry integration:
+// for now the pair is not recorded anywhere and the stage is a plain
+// pass-through.
 func WithContext[T any](key, value string) Flow[T, T] {
 	_ = key
 	_ = value
@@ -418,7 +403,8 @@ func makeFlatMapStreamFlow[In, Out any](breadth int, fn func(In) Source[Out]) Fl
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newFlatMapStreamActor(breadth, fn, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Flow[In, Out]{stage: stage}
 }

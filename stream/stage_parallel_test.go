@@ -596,3 +596,40 @@ func TestSeqHeapPopClearsBackingArraySlot(t *testing.T) {
 	require.Empty(t, queue)
 	require.Equal(t, parallelResult{}, backing[0])
 }
+
+// TestParallelMapActor_RespectsDownstreamDemand verifies that the parallel
+// stage pulls from upstream only against downstream demand, never more than
+// its worker count at a time, and handles the demand signal itself.
+func TestParallelMapActor_RespectsDownstreamDemand(t *testing.T) {
+	testCases := []struct {
+		name    string
+		ordered bool
+	}{
+		{name: "unordered", ordered: false},
+		{name: "ordered", ordered: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys := newInternalTestSystem(t)
+			ctx := context.Background()
+
+			pa := newParallelMapActor(4, func(n int) int { return n * 2 }, tc.ordered, defaultStageConfig())
+			paPID, up, down := spawnStageUnderTest(t, sys, "pm-demand-"+tc.name, pa)
+
+			// The first request upstream sees is sized by the downstream demand:
+			// a request sent at wire time would be recorded first.
+			require.NoError(t, actor.Tell(ctx, paPID, &streamRequest{subID: "unit", n: 1}))
+			assert.EqualValues(t, 1, expectProbeMessage[*streamRequest](t, up).n)
+
+			require.NoError(t, actor.Tell(ctx, paPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
+			assert.Equal(t, 2, expectProbeMessage[*streamElement](t, down).value)
+
+			// The single unit of demand is spent, so the result triggers no pull:
+			// the next request upstream sees answers the next downstream demand.
+			// Demand above the worker count is served at most workers at a time.
+			require.NoError(t, actor.Tell(ctx, paPID, &streamRequest{subID: "unit", n: 10}))
+			assert.EqualValues(t, 4, expectProbeMessage[*streamRequest](t, up).n)
+		})
+	}
+}
