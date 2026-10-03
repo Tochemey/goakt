@@ -35,12 +35,12 @@ A chapter is marked **verified** when every statement in it has been checked aga
 | [chap-10](chapters/chap-10.md) | Passivation and Eviction | verified |
 | [chap-11](chapters/chap-11.md) | Scheduling, Routers, Event Stream, Pub/Sub | verified |
 | [chap-12](chapters/chap-12.md) | Extensions, Dependencies, Observability, Logging | verified |
-| chap-13 – chap-14 | Grains | planned |
+| chap-13 to chap-14 | Grains | planned |
 | [chap-15](chapters/chap-15.md) | Remoting: the Transport | verified |
-| chap-16 – chap-18 | Remote Client, Remote Server, TLS and the Standalone Client | planned |
-| chap-19 – chap-22 | Clustering | planned |
+| chap-16 to chap-18 | Remote Client, Remote Server, TLS and the Standalone Client | planned |
+| chap-19 to chap-22 | Clustering | planned |
 | [chap-23](chapters/chap-23.md) | Reliable Delivery | verified |
 | [chap-24](chapters/chap-24.md) | Distributed Data (CRDTs) | verified |
 | [chap-25](chapters/chap-25.md) | Streams | verified |
 | chap-26 | Circuit Breaker, Memory, Testkit | planned |
-| chap-27 – chap-29 | Failure Modes, Testing GoAkt, Exercises | planned |
+| chap-27 to chap-29 | Failure Modes, Testing GoAkt, Exercises | planned |

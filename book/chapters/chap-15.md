@@ -162,7 +162,7 @@ Each lane is one TCP connection with its own reader, writer, queue, tables and c
 
 A control request stays on the control lane. Three bulk requests (`RelocateBatchRequest`, `PersistPeerStateRequest`, `RemoteStateRequest`) move to the large lane when their encoded size exceeds `ChunkSize` (`isControlBulk` and `client.sendControlDuplex` in `internal/remoteclient/send.go`).
 
-**Ordering.** The guarantee is FIFO **per sender–receiver pair**. With one ordinary lane, all ordinary traffic to a peer is effectively FIFO. Control traffic may overtake user messages by design, and large destinations have their own ordering domain. Raising `OrdinaryLanes` trades a narrower ordering domain for parallelism.
+**Ordering.** The guarantee is FIFO **per sender-receiver pair**. With one ordinary lane, all ordinary traffic to a peer is effectively FIFO. Control traffic may overtake user messages by design, and large destinations have their own ordering domain. Raising `OrdinaryLanes` trades a narrower ordering domain for parallelism.
 
 ### Connection lifecycle and liveness
 
@@ -186,8 +186,8 @@ Every frame starts with a fixed 16-byte, big-endian header (`Frame` in `internal
 |---|---|---|---|
 | 0 | `ver` | 1 byte | `ProtocolVersion`, `0x02`. It is also the byte the listener uses to tell duplex from legacy |
 | 1 | `type` | 1 byte | `HELLO` 0x01, `HELLO_ACK` 0x02, `DATA` 0x03, `REPLY` 0x04, `ERROR` 0x05, `CHUNK` 0x06, `CREDIT` 0x07, `TABLE` 0x08, `PING` 0x09, `PONG` 0x0A |
-| 2 | `flags` | 1 byte | bit 0 `hasMetadata`, bit 1 `expectsReply`, bit 2 `firstChunk`, bit 3 `lastChunk`; bits 4–7 must be zero |
-| 3 | `lane` | 1 byte | control `0x00`, ordinary `index+1` (`0x01`–`0xFE`), large `0xFF` |
+| 2 | `flags` | 1 byte | bit 0 `hasMetadata`, bit 1 `expectsReply`, bit 2 `firstChunk`, bit 3 `lastChunk`; bits 4 to 7 must be zero |
+| 3 | `lane` | 1 byte | control `0x00`, ordinary `index+1` (`0x01` to `0xFE`), large `0xFF` |
 | 4..7 | `length` | 4 bytes, big-endian | body length, bounded by the negotiated frame limit |
 | 8..15 | `correlation` | 8 bytes, big-endian | must be nonzero for `REPLY`, `CHUNK` and `DATA` with `expectsReply`; zero for a plain tell and for a connection-scoped `ERROR` |
 
@@ -241,7 +241,7 @@ A reference is a uvarint. Nonzero is a table ID. Zero is followed by a uvarint l
 | 3 | CBOR |
 | 255 | Custom serializer bytes, self-describing; `typeRef` must be empty |
 
-IDs 0–3 require a type name; any other ID is rejected (`validateSerializerID`).
+IDs 0 to 3 require a type name; any other ID is rejected (`validateSerializerID`).
 
 | Frame | Body |
 |---|---|
@@ -437,10 +437,10 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 
 | Setting | Default | Role | Negotiated |
 |---|---|---|---|
-| `OrdinaryLanes` | 1 (1–254) | Number of ordinary lanes dialled per peer | No |
+| `OrdinaryLanes` | 1 (1 to 254) | Number of ordinary lanes dialled per peer | No |
 | `LargeMessageDestinations` | empty | Path patterns routed to the large lane | No |
-| `ChunkSize` | 256 KiB (16 KiB–4 MiB) | Size above which a frame is chunked, and the chunk body limit | No; clamped to the negotiated frame limit |
-| `MaxFrameSize` | 16 MiB (16 KiB–16 MiB) | Bound on one frame | Minimum |
+| `ChunkSize` | 256 KiB (16 KiB to 4 MiB) | Size above which a frame is chunked, and the chunk body limit | No; clamped to the negotiated frame limit |
+| `MaxFrameSize` | 16 MiB (16 KiB to 16 MiB) | Bound on one frame | Minimum |
 | `MaxMessageSize` | 16 MiB | Bound on one reassembled message | Minimum |
 | `MaxConcurrentLargeTransfers` | 4 | Open chunk groups per connection, both ends | Minimum |
 | `CreditWindow` | 16 MiB | Send window and admission cap | Minimum |
@@ -461,7 +461,7 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 - At revision 4, every accepted `DATA` or `CHUNK` byte is granted exactly once on a healthy connection.
 - Credits, errors and liveness frames pass a writer parked on the window.
 - A pooled payload is released exactly once, and custom serializer bytes are copied before user code can keep them.
-- FIFO holds per sender–receiver pair on the selected lane. Nothing is promised across lanes.
+- FIFO holds per sender-receiver pair on the selected lane. Nothing is promised across lanes.
 - A switch from legacy to duplex drains legacy sends first.
 
 ### Where things live

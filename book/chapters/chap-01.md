@@ -112,7 +112,7 @@ Line counts in the working tree (commit `cf7a7c6d` plus the uncommitted changes)
 | `remote` | Public remoting configuration and serializers | 2,800 | 2,178 |
 | `crdt` | CRDT data types | 2,219 | 3,182 |
 | `datacenter/...` | Multi-datacenter configuration and control planes (etcd, NATS) | 1,589 | 3,052 |
-| `log`, `testkit`, `client`, `internal/commands`, `breaker`, … | Smaller packages | — | — |
+| `log`, `testkit`, `client`, `internal/commands`, `breaker`, … | Smaller packages | none | none |
 | `internal/internalpb` | Generated protobuf code | 15,407 | 0 |
 
 In total there are about 103,900 hand-written source lines (excluding `playground/`, `mocks/`, `benchmark/` and generated code) and about 167,500 test lines (including `benchmark/`). `actor` alone holds almost half of the source and well over half of the tests. Becoming fluent in GoAkt mostly means becoming fluent in `actor`.

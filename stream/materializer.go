@@ -193,8 +193,8 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 
 	// Watch only the sink so the coordinator can detect an unexpected crash
 	// (a sink crash that bypasses completionWrapper.PostStop). Source and flow
-	// stages shut down as part of the normal completion flow — before the sink's
-	// onDone fires — so watching them would produce spurious errors. The sink is
+	// stages shut down as part of the normal completion flow, before the sink's
+	// onDone fires, so watching them would produce spurious errors. The sink is
 	// registered before the stages are wired: no stage acts before its
 	// stageWire, so the coordinator cannot miss a sink that terminates early.
 	coord.sinkPID.Store(pids[sinkIdx])

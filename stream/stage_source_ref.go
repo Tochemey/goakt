@@ -208,7 +208,7 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.scheduleTermination(rctx)
 
 	case *streamCancelWire:
-		// Subscriber cancelled — shut down immediately. PostStop aborts the
+		// Subscriber cancelled: shut down immediately. PostStop aborts the
 		// source pipeline.
 		rctx.Shutdown()
 

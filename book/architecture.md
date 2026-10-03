@@ -72,8 +72,8 @@ Chapter 1, "The model", says the same in more detail.
 
 | Shape | What runs | Chapters |
 |---|---|---|
-| **Standalone** | One process, no network. Actors and grains talk in-process. | 1–12 |
-| **Clustered** | Nodes find each other through a discovery provider (Consul, DNS-SD, etcd, Kubernetes, mDNS, NATS, self-managed, static) and share a registry of actors and grains, so a name resolves to whichever node holds it. Clustering needs remoting (`actorSystem.setupCluster` in `actor/actor_system.go`). | 15; 16–22 planned |
+| **Standalone** | One process, no network. Actors and grains talk in-process. | 1 to 12 |
+| **Clustered** | Nodes find each other through a discovery provider (Consul, DNS-SD, etcd, Kubernetes, mDNS, NATS, self-managed, static) and share a registry of actors and grains, so a name resolves to whichever node holds it. Clustering needs remoting (`actorSystem.setupCluster` in `actor/actor_system.go`). | 15; 16 to 22 planned |
 | **Multi-datacenter** | Several clusters, each with its own discovery, linked through a control plane (NATS JetStream or etcd) that holds one leased record per datacenter. Spawning (`SpawnOn` with `WithDataCenter`), name lookup (`SendAsync`, `SendSync`), grain messaging and CRDT replication can cross datacenters. | 24, §24.9; 22 planned |
 
 Remoting can also be enabled without a cluster: PIDs can then point at actors on other nodes, but there is no shared registry.
@@ -91,7 +91,7 @@ Remoting can also be enabled without a cluster: PIDs can then point at actors on
 | **Supervisor** | The failure policy an actor is spawned with. The failing actor's own supervisor picks the directive; its parent carries it out. | 9 |
 | **Passivation** | Stopping an idle actor according to its strategy. The default is two minutes of idleness. | 10 |
 | **Grain** | A virtual actor addressed by identity, activated on first message and deactivated when idle. | 13 planned |
-| **Registry** | The cluster-wide map from actor qualified names and grain identities to the node that holds them, stored in Olric. | 19–20 planned |
+| **Registry** | The cluster-wide map from actor qualified names and grain identities to the node that holds them, stored in Olric. | 19 to 20 planned |
 | **CRDT, Replicator** | Conflict-free replicated data types (`crdt`), held and merged by one Replicator actor per node. Eventually consistent, and separate from the registry. | 24 |
 | **Stream** | A `Source`, optional `Flow` stages and a `Sink`, materialised by `RunnableGraph.Run` on an actor system. Every stage is an actor; demand flows upstream. | 25 |
 
@@ -147,7 +147,7 @@ The repository is organised by package. `actor` holds almost half of the hand-wr
 
 | Package | Role | Chapter |
 |---|---|---|
-| `actor` | The hub: actor system, PID, mailboxes, dispatcher, supervision, passivation, scheduler, routers, grains, remoting handlers, cluster glue, relocation, reliable delivery, the CRDT Replicator. | 3–12, 15, 23, 24 |
+| `actor` | The hub: actor system, PID, mailboxes, dispatcher, supervision, passivation, scheduler, routers, grains, remoting handlers, cluster glue, relocation, reliable delivery, the CRDT Replicator. | 3 to 12, 15, 23, 24 |
 | `remote` | Public remoting configuration (`Config`, options, compression, protocol pin), the `Serializer` interface and the protobuf, CBOR and JSON serializers, the context propagator. | 15; 16 planned |
 | `client` | A client for programs outside any actor system. `Client` offers `Tell`, `Ask`, `Spawn`, `SpawnBalanced`, `ReSpawn`, `Stop`, `Exists`, `Reinstate`, `Kinds`, `TellGrain` and `AskGrain`, and picks a node with a `Balancer`: round robin, random or least load. | 18 planned |
 | `discovery`, `discovery/*` | The `Provider` interface and eight providers. | 19 planned |
@@ -158,7 +158,7 @@ The repository is organised by package. `actor` holds almost half of the hand-wr
 | `eventstream` | In-process publish/subscribe, used for system events. | 11, §11.3 |
 | `extension` | The `Extension` and `Dependency` interfaces. | 12 |
 | `log` | The logging interface, with zap (the default), slog and discard implementations. | 12, §12.5 |
-| `errors` | Sentinel errors and error types used across the module. | — |
+| `errors` | Sentinel errors and error types used across the module. | none |
 | `hash` | The `Hasher` that maps registry keys to cluster partitions; xxh3 by default (`ClusterConfig.WithPartitionHasher` in `actor/cluster_config.go`). | 19 planned |
 | `tls` | `Info`, the TLS configuration for remoting and the cluster. | 18 planned |
 | `breaker` | A circuit breaker, used by `PipeTo` (`WithCircuitBreaker` in `actor/pipe_option.go`). | 26 planned |
@@ -204,11 +204,11 @@ flowchart TD
     Turn --> Receive["Receive"]
 ```
 
-`Tell` and `Ask` take a pooled `ReceiveContext` and hand it to `PID.doReceive`, which refuses ordinary messages while the system stops and otherwise routes control messages to the system queue and the rest to the mailbox (Chapter 1, "How a message reaches `Receive`"). The producer that moves the actor from idle to scheduled pushes it onto the ready queue (Chapter 7, §7.2, §7.5). A worker runs one turn and then yields (Chapter 7, §7.3). An `Ask` carries its deadline, a turn skips an `Ask` whose sender has stopped waiting, and the reply goes back through `ctx.Response` (Chapter 5, §5.2–§5.3). A failure in `Receive` leaves the turn and goes to supervision (Chapter 7, §7.6; Chapter 9).
+`Tell` and `Ask` take a pooled `ReceiveContext` and hand it to `PID.doReceive`, which refuses ordinary messages while the system stops and otherwise routes control messages to the system queue and the rest to the mailbox (Chapter 1, "How a message reaches `Receive`"). The producer that moves the actor from idle to scheduled pushes it onto the ready queue (Chapter 7, §7.2, §7.5). A worker runs one turn and then yields (Chapter 7, §7.3). An `Ask` carries its deadline, a turn skips an `Ask` whose sender has stopped waiting, and the reply goes back through `ctx.Response` (Chapter 5, §5.2-§5.3). A failure in `Receive` leaves the turn and goes to supervision (Chapter 7, §7.6; Chapter 9).
 
 ### Remote tell and ask
 
-*The remote client and server chapters (16–17) are planned. Chapter 15 covers the transport underneath.*
+*The remote client and server chapters (16 to 17) are planned. Chapter 15 covers the transport underneath.*
 
 `Tell` and `Ask` on a remote PID call `RemoteTell` and `RemoteAsk` on the remoting client (`actor/api.go`).
 
@@ -254,13 +254,13 @@ On the receiver, `actorSystem.remoteTellHandler` (`actor/remote_server.go`) deli
 
 ### Spawning
 
-`ActorSystem.Spawn` (`actor/spawn.go`) checks that the system runs and the options are valid, then serialises concurrent spawns of one name in a `singleflight.Group`. In cluster mode it asks the registry whether the name is taken. It then checks the local tree, builds the PID with `newPID`, which runs `PreStart` with retries, attaches the PID under the user guardian with the death watch watching it, and in cluster mode writes the registry record synchronously before returning. `PostStart` is the actor's first message (Chapter 4, §4.2–§4.4).
+`ActorSystem.Spawn` (`actor/spawn.go`) checks that the system runs and the options are valid, then serialises concurrent spawns of one name in a `singleflight.Group`. In cluster mode it asks the registry whether the name is taken. It then checks the local tree, builds the PID with `newPID`, which runs `PreStart` with retries, attaches the PID under the user guardian with the death watch watching it, and in cluster mode writes the registry record synchronously before returning. `PostStart` is the actor's first message (Chapter 4, §4.2-§4.4).
 
 `SpawnOn` places an actor on another node: it picks a node with a placement strategy (`SpawnPlacement` in `actor/spawn_option.go`) and sends a `RemoteSpawn` control request. The target instantiates the actor from its registered kind (`reflection.instantiateActor`, called by `actorSystem.remoteSpawnHandler` in `actor/remote_server.go`) and runs its own spawn. `SpawnSingleton` places a cluster singleton on the coordinator, or with a role on the oldest member advertising it (`actorSystem.SpawnSingleton` in `actor/spawn.go`).
 
 ### Grain activation
 
-*The grain chapters (13–14) are planned.*
+*The grain chapters (13 to 14) are planned.*
 
 A grain implements `OnActivate`, `OnReceive` and `OnDeactivate` (`Grain` in `actor/grain.go`) and is addressed by a `GrainIdentity` (kind and name). Grains run on the same dispatcher as actors (Chapter 7, §7.1). An idle grain is deactivated after `DefaultPassivationTimeout` (two minutes) unless `WithGrainDeactivateAfter` or `WithLongLivedGrain` says otherwise (`newGrainConfig` in `actor/grain_option.go`).
 
@@ -295,7 +295,7 @@ Outside a cluster, the grain is delivered to locally and activated if needed (`l
 
 ### Cluster membership and node departure
 
-*The clustering chapters (19–22) are planned.*
+*The clustering chapters (19 to 22) are planned.*
 
 **Membership.** Olric emits membership changes on its cluster events channel, which the cluster engine subscribes to through Olric's in-process pub/sub (`cluster.createSubscription` in `internal/cluster/cluster.go`). The engine holds a confirmed join or leave until the cluster state has converged on it, at most `WithConvergenceTimeout` (default ten seconds, `actor/cluster_config.go`), and then delivers `NodeJoined` or `NodeLeft`. It detects a change of coordinator itself and delivers `LeaderChanged` (`cluster.detectLeaderChangeLocked` in `internal/cluster/cluster.go`; the event type is in `internal/cluster/event.go`). `actorSystem.handleClusterEvent` (`actor/actor_system.go`) publishes each one on the event stream and acts on joins and departures.
 
@@ -425,7 +425,7 @@ Messages from one sender to one actor with a FIFO mailbox are handled in the ord
 - Priority mailboxes order by priority, and the fair mailbox keeps order per sender only (Chapter 6, §6.3).
 - Control messages such as `PoisonPill` and `Terminated` overtake queued user messages (Chapter 7, §7.4).
 - Stashed messages are handled when they are unstashed (Chapter 8, §8.4).
-- Across nodes, order holds per sender–receiver pair on the lane that pair uses; control traffic may overtake user messages (Chapter 15, §15.3).
+- Across nodes, order holds per sender-receiver pair on the lane that pair uses; control traffic may overtake user messages (Chapter 15, §15.3).
 
 ### Goroutines
 
@@ -459,7 +459,7 @@ The order encodes dependencies: every PID needs the remoting client, every syste
 
 ## Cluster consistency model
 
-*The clustering chapters (19–22) are planned.*
+*The clustering chapters (19 to 22) are planned.*
 
 ### The registry
 
@@ -504,9 +504,9 @@ Each datacenter is an independent cluster. The datacenter controller runs only o
 | A discovery provider | `discovery.Provider`: `ID`, `Initialize`, `Register`, `Deregister`, `DiscoverPeers`, `Close` (`discovery/provider.go`) | `ClusterConfig.WithDiscovery` | The cluster wraps it for Olric (`discoveryProvider` in `internal/cluster/discovery.go`); `internal/cluster` needs no change. The interface comment states the boot contract: once `Register` returns, `DiscoverPeers` on the other nodes must list this node; a provider whose view may be incomplete must return an error, which the cluster retries once a second for ten seconds, rather than a list without any other node. |
 | A control plane | `datacenter.ControlPlane`: `Register`, `Heartbeat`, `SetState`, `ListActive`, `Watch`, `Deregister` (`datacenter/control_plane.go`) | the datacenter configuration given to `ClusterConfig.WithDataCenter` | Records are leased and versioned; every method honours its context and must be safe for concurrent use. |
 | A serializer | `remote.Serializer`: `Serialize(message any) ([]byte, error)`, `Deserialize(data []byte) (any, error)` | `remote.WithSerializers(type, serializer)` | The bytes must describe their own type, and the serializer must be safe for concurrent use (`remote/serializer.go`). |
-| An extension or a dependency | `extension.Extension`, or `extension.Dependency` (also `MarshalBinary` and `UnmarshalBinary`) | `WithExtensions` on the system; `WithDependencies` on a spawn | Chapter 12, §12.1–§12.2. |
+| An extension or a dependency | `extension.Extension`, or `extension.Dependency` (also `MarshalBinary` and `UnmarshalBinary`) | `WithExtensions` on the system; `WithDependencies` on a spawn | Chapter 12, §12.1-§12.2. |
 | A mailbox | `Mailbox`: `Enqueue`, `Dequeue`, `IsEmpty`, `Len`, `Dispose` (`actor/mailbox.go`) | `WithMailbox` | Chapter 6, §6.9 lists the six rules a mailbox must keep. |
-| A passivation strategy | not by implementing `passivation.Strategy` alone | — | Spawn validation accepts only the three built-in strategies; a new one also needs changes to validation, `withPassivationStrategy` and the passivation manager (Chapter 10, §10.1). |
+| A passivation strategy | not by implementing `passivation.Strategy` alone | none | Spawn validation accepts only the three built-in strategies; a new one also needs changes to validation, `withPassivationStrategy` and the passivation manager (Chapter 10, §10.1). |
 
 ## Testing strategy
 

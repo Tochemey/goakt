@@ -53,7 +53,7 @@ The struct (`actorSystem` in `actor/actor_system.go`) is easier to read as group
 | Cluster | `clusterEnabled`, `cluster`, `eventsQueue`, `clusterNode`, `clusterConfig`, `clusterStore`, `relocationJobs`, `peerRemotingPorts`, `relocatingEndpoints`, `recentDepartures` | Belong to the clustering chapters (Part V), which are not written yet |
 | Grains | `grains`, `lateGrainMessages`, `grainBarrier`, `grainActivation`, `pendingAsks`, `grainDefaultOptions` | Belong to the grain chapters (Part III), which are not written yet |
 | Metrics | `metricProvider`, `actorKinds`, `actorKindsLocker`, `relocationMetric`, … | Explained in Chapter 12 |
-| Data centers | `dataCenterController`, `dataCenterLeaderTicker`, … | Belong to the clustering chapters (19–22), which are not written yet |
+| Data centers | `dataCenterController`, `dataCenterLeaderTicker`, … | Belong to the clustering chapters (19 to 22), which are not written yet |
 
 Three kinds of synchronisation coexist in the struct, and knowing which applies to a field saves a lot of reading:
 
@@ -135,7 +135,7 @@ Fifteen steps run through `internal/chain` in fail-fast mode: the first error st
 The order encodes real dependencies:
 
 - The remoting client (step 1) is built before any actor because every PID is constructed with it (`withRemoting(x.remoting)`, `actorSystem.configPID` in `actor/actor_system.go`).
-- Every system actor exists (steps 3–11) before the remote server starts accepting requests (step 12), and the remote server runs before the node joins the cluster (step 13). Nothing can reach this node before it can answer.
+- Every system actor exists (steps 3 to 11) before the remote server starts accepting requests (step 12), and the remote server runs before the node joins the cluster (step 13). Nothing can reach this node before it can answer.
 - `startCluster` seeds the peer-port cache before starting the events loop, so a member that later crashes can still be resolved (`actor/actor_system.go`).
 
 ### Phase 3: after the chain

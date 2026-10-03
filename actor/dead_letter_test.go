@@ -635,8 +635,8 @@ func TestRemoteTellCoalescedTransportFailureExactCount(t *testing.T) {
 	}
 
 	// Poll via the dead-letter actor's total counter rather than the subscriber,
-	// because Iterator() drains on every call (see eventstream/subscriber.go)
-	// — repeated polling there loses messages between snapshots. The remote
+	// because Iterator() drains on every call (see eventstream/subscriber.go),
+	// so repeated polling there loses messages between snapshots. The remote
 	// receiver is not in the local actor tree, so it has no count of its own.
 	require.Eventually(t, func() bool {
 		reply, askErr := Ask(ctx, sys.(*actorSystem).getDeadletter(),

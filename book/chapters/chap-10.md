@@ -99,7 +99,7 @@ A suspension pauses passivation and a reinstate resumes it (Chapter 9, §9.7). A
 
 ## 10.7 System eviction
 
-Eviction is a system-wide bound on the number of user actors, independent of per-actor strategies. `NewEvictionStrategy(limit, policy, percentage)` rejects a limit of zero and an unknown policy, and clamps the percentage to 0–100 (`actor/system_eviction.go`). `WithEvictionStrategy(strategy, interval)` installs it; a non-positive interval falls back to `DefaultEvictionInterval`, five seconds (`actor/option.go`).
+Eviction is a system-wide bound on the number of user actors, independent of per-actor strategies. `NewEvictionStrategy(limit, policy, percentage)` rejects a limit of zero and an unknown policy, and clamps the percentage to 0 to 100 (`actor/system_eviction.go`). `WithEvictionStrategy(strategy, interval)` installs it; a non-positive interval falls back to `DefaultEvictionInterval`, five seconds (`actor/option.go`).
 
 `Start` runs `evictionLoop`, which calls `runEviction` on every tick until `Stop` closes its signal (`actorSystem.startEviction` in `actor/actor_system.go`). Each run:
 

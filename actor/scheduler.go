@@ -212,7 +212,7 @@ func (x *scheduler) Stop(ctx context.Context) {
 //
 // The message is delivered at most once: a single delivery is attempted once the specified duration has
 // elapsed, and it is not retried when the target actor is not running at that time.
-// This is a fire-and-forget scheduling mechanism — the delivery is never retried or repeated.
+// This is a fire-and-forget scheduling mechanism: the delivery is never retried or repeated.
 // Once the schedule has fired its reference is released: management calls on it return
 // ErrScheduledReferenceNotFound and the reference can be used again.
 //

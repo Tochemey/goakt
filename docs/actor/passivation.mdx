@@ -81,7 +81,7 @@ system, _ := actor.NewActorSystem("app",
 
 - **limit**: Maximum number of active actors before eviction runs. Must be > 0.
 - **policy**: `actor.LRU`, `actor.LFU`, or `actor.MRU`.
-- **percentage**: Percentage of actors to stop when over limit (0–100). Clamped automatically.
+- **percentage**: Percentage of actors to stop when over limit (0 to 100). Clamped automatically.
 - **interval**: How often the eviction engine runs (e.g. `5*time.Second`). A zero or negative interval falls back to
   `actor.DefaultEvictionInterval` (5 seconds).
 
