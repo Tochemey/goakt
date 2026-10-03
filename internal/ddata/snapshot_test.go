@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,7 +52,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"counter-1": entry}
 
-		err = store.Save(entries)
+		err = store.Save(entries, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -78,7 +79,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"pn-1": entry}
 
-		err = store.Save(entries)
+		err = store.Save(entries, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -102,7 +103,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"flag-1": entry}
 
-		err = store.Save(entries)
+		err = store.Save(entries, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -141,7 +142,7 @@ func TestStore(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		err = store.Save(entries1)
+		err = store.Save(entries1, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		// second save with different keys
@@ -152,7 +153,7 @@ func TestStore(t *testing.T) {
 				Version: 2,
 			}.Build(),
 		}
-		err = store.Save(entries2)
+		err = store.Save(entries2, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		// load should only have "c"
@@ -184,7 +185,7 @@ func TestStore(t *testing.T) {
 		err = store.Close()
 		require.NoError(t, err)
 
-		err = store.Save(nil)
+		err = store.Save(nil, time.Time{}, time.Time{})
 		assert.ErrorIs(t, err, ErrStoreClosed)
 	})
 
@@ -227,7 +228,7 @@ func TestStore(t *testing.T) {
 			}.Build(),
 		}
 
-		err = store.Save(entries)
+		err = store.Save(entries, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -311,6 +312,103 @@ func TestStore(t *testing.T) {
 		_, err = store.Load()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "unmarshal snapshot entry")
+	})
+
+	t.Run("contact times round trip", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		lastContact := time.Unix(0, time.Now().UnixNano())
+		since := lastContact.Add(-time.Hour)
+		require.NoError(t, store.Save(nil, lastContact, since))
+
+		loadedContact, loadedSince, err := store.Contact()
+		require.NoError(t, err)
+		assert.True(t, lastContact.Equal(loadedContact))
+		assert.True(t, since.Equal(loadedSince))
+	})
+
+	t.Run("contact times survive reopening the store", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+
+		lastContact := time.Unix(0, time.Now().UnixNano())
+		require.NoError(t, store.Save(nil, lastContact, lastContact))
+		require.NoError(t, store.Close())
+
+		reopened, err := NewStore(dir)
+		require.NoError(t, err)
+		defer reopened.Close()
+
+		loadedContact, loadedSince, err := reopened.Contact()
+		require.NoError(t, err)
+		assert.True(t, lastContact.Equal(loadedContact))
+		assert.True(t, lastContact.Equal(loadedSince))
+	})
+
+	t.Run("zero or missing contact times read back as the zero time", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		// never saved, as in a snapshot of a version that predates them
+		lastContact, since, err := store.Contact()
+		require.NoError(t, err)
+		assert.True(t, lastContact.IsZero())
+		assert.True(t, since.IsZero())
+
+		// saved by a node that has never heard from a peer and has stale keys
+		require.NoError(t, store.Save(nil, time.Time{}, time.Time{}))
+		lastContact, since, err = store.Contact()
+		require.NoError(t, err)
+		assert.True(t, lastContact.IsZero())
+		assert.True(t, since.IsZero())
+	})
+
+	t.Run("a snapshot file without the metadata bucket reads no contact and cannot be saved", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		require.NoError(t, store.db.Update(func(tx *bbolt.Tx) error {
+			return tx.DeleteBucket([]byte(metaBucketName))
+		}))
+
+		lastContact, since, err := store.Contact()
+		require.NoError(t, err)
+		assert.True(t, lastContact.IsZero())
+		assert.True(t, since.IsZero())
+
+		err = store.Save(nil, time.Now(), time.Time{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), metaBucketName)
+	})
+
+	t.Run("a malformed contact time returns error", func(t *testing.T) {
+		for _, key := range []string{lastContactKey, sinceKey} {
+			store, err := NewStore(t.TempDir())
+			require.NoError(t, err)
+
+			require.NoError(t, store.db.Update(func(tx *bbolt.Tx) error {
+				return tx.Bucket([]byte(metaBucketName)).Put([]byte(key), []byte{0x01})
+			}))
+
+			_, _, err = store.Contact()
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "malformed time")
+			require.NoError(t, store.Close())
+		}
+	})
+
+	t.Run("contact times after close return error", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.Close())
+
+		_, _, err = store.Contact()
+		require.ErrorIs(t, err, ErrStoreClosed)
 	})
 
 	t.Run("remove already removed file is no-op", func(t *testing.T) {

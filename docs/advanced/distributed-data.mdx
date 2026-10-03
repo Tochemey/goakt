@@ -91,7 +91,8 @@ no publisher/subscriber distinction. When Node B updates the same key, the flow 
 with a **content hash** of its value. The peer answers with its full state of every key whose hash differs from its own
 and of every key the sender does not have, and the sender merges the answer. The digest also carries the tombstones the
 sender retains, and the answer the peer's tombstones for keys the digest listed, so a deletion either side knows of
-reaches the other. Every node pulls this way on its own
+reaches the other. Both also carry the time from which their sender knows every deletion, which resolves the stale keys of a
+node back from a long absence (see [Tombstone window](#tombstone-window)). Every node pulls this way on its own
 schedule, so any two nodes end up holding the merge of their states. This ensures convergence even if some deltas were
 lost during a network partition.
 
@@ -602,10 +603,44 @@ anti-entropy carries the deletion to every peer it exchanges with, in both direc
 tombstone itself drops the key on its next round with a node that has it. This also holds across datacenters when
 cross-DC anti-entropy is on.
 
-Two cases remain outside the TTL. A node partitioned for longer than the TTL that still holds the key resurrects it when
-it rejoins, because no node retains the tombstone any more. And a key deleted and then created again after the TTL is
-merged with the old copy such a node brings back. Set `WithTombstoneTTL` to outlast the longest partition you want to
-tolerate.
+A node that comes back after a longer absence, restored from its snapshot or kept running through a partition, can still
+hold a key deleted while it was away, whose tombstone no node retains any more. Each Replicator records the last time it
+heard from a peer, and saves it with its snapshot. When it hears from a peer again after a gap longer than the TTL, or is
+restored from a snapshot taken longer than the TTL before, the keys it held before the gap and has not updated since are
+**stale**. It does not send a stale key to its peers, neither in anti-entropy nor in coordinated reads, and holds its
+cross-datacenter replication, until the stale keys are resolved. Its own reads still return them.
+
+- Each digest carries the time from which its sender knows every deletion, and nodes pass the earliest such time on to
+  each other. A peer that was in the cluster for the whole gap, or that took its time from one that was, resolves the
+  stale keys: a stale key that peer holds is kept, and one it does not hold was deleted during the gap and is removed.
+- When every current peer that runs a Replicator has sent a digest and none could resolve the stale keys, as when the
+  whole cluster was down for longer than the TTL, the stale keys are kept.
+- A key the returning node updates, or receives from a peer in a delta or an anti-entropy answer, is no longer stale.
+
+Stale keys need anti-entropy: with `WithAntiEntropyInterval(0)`, no key is marked stale.
+
+Some cases remain outside the TTL:
+
+- A cluster that splits into two groups of two or more nodes, both running apart for longer than the TTL. Every node
+  keeps hearing from a peer, so none has stale keys, and each group brings back the keys the other deleted when they
+  merge.
+- A key deleted and then created again after the TTL is merged with the old copy a returning node holds, because the
+  peer that resolves its stale keys holds the key.
+- A key created on a node just before it lost contact, and that never reached a peer, is removed when that node returns
+  after the TTL.
+- A key the returning node updates is no longer stale, so if it was deleted while the node was away it comes back with
+  the node's old value merged into the update.
+- A digest or a batch from another datacenter also counts as contact. A node cut off from its own datacenter but still
+  reached from another one does not mark its keys stale, and a node of another datacenter can resolve them.
+
+Set `WithTombstoneTTL` to outlast the longest partition you want to tolerate, and keep node clocks in sync: staleness
+compares times taken on different nodes.
+
+<Note>
+During a rolling upgrade, a node that predates stale keys sends digests without the time, so it never resolves the
+stale keys of another node; they are kept once every peer has been heard from. A snapshot written by such a node has no
+last contact, so a node restored from it is treated as never having been away.
+</Note>
 
 ### Value serialization
 

@@ -159,6 +159,14 @@ message CRDTDigest {
   // deletes the keys it has not seen deleted. A node that predates the
   // field sends none.
   repeated CRDTTombstone tombstones = 2;
+  // Specifies, in Unix nanoseconds, the time from which the sender knows
+  // every deletion made in the cluster: a key it does not hold and was
+  // created before that time has been deleted. A node that returns after a
+  // gap longer than the tombstone TTL keeps the keys it held before the gap
+  // only when a digest whose time is at or before the gap lists them. A node
+  // that is itself back from such a gap, and a node that predates the field,
+  // leave it unset.
+  optional int64 since_nanos = 3;
 }
 
 // CRDTFullStateEntry is a single key's full state in an anti-entropy response.
@@ -177,6 +185,11 @@ message CRDTFullState {
   // listed, so the digest sender deletes them. A node that predates the
   // field sends none.
   repeated CRDTTombstone tombstones = 2;
+  // Specifies the responder's time from which it knows every deletion, as
+  // in CRDTDigest. The digest sender has merged the responder's state and
+  // takes this time when it is earlier than its own. Unset under the same
+  // conditions as in CRDTDigest.
+  optional int64 since_nanos = 3;
 }
 
 // CRDTTombstone marks a deleted CRDT key.
@@ -217,6 +230,11 @@ message CRDTSnapshotEntry {
   CRDTData data = 2;
   // Specifies the local version counter.
   uint64 version = 3;
+  // Specifies, in Unix nanoseconds, the last time this node updated the key
+  // itself. Zero when it has only merged the key from peers. A key updated
+  // after the node's last contact with a peer is not doubted when the node
+  // returns after a gap longer than the tombstone TTL.
+  int64 changed_at_nanos = 4;
 }
 
 // CRDTDeltaBatch is a batched collection of deltas and tombstones forwarded

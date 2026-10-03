@@ -148,7 +148,37 @@ type replicatorActor struct {
 	// store goes through setValue, which drops it, and contentHash computes
 	// it again on demand. A key that has not changed since the last
 	// anti-entropy round therefore costs a map lookup in the next one.
-	hashes                map[string]uint64
+	hashes map[string]uint64
+	// lastContact is the last time a peer Replicator reached this node with
+	// a delta, a tombstone, a digest, an anti-entropy answer or a coordinated
+	// read. It is saved with the snapshot. A gap since then longer than the
+	// tombstone TTL means the tombstones of the deletions made meanwhile may
+	// have expired on every node, so the keys this node held before the gap
+	// are stale until a peer resolves them: see markStaleKeys.
+	lastContact time.Time
+	// since is the time from which this node knows every deletion made in
+	// the cluster: its start, or the earlier time of a peer whose state it
+	// merged. It travels in digests and anti-entropy answers, so a node back
+	// from a gap can tell whether the sender saw the whole gap. It is zero
+	// while this node is itself back from a gap, and then nothing is sent.
+	since time.Time
+	// changedAt holds the time of the last local update of each key. A key
+	// updated after the last contact is this node's own write, not a copy a
+	// deletion may have missed, so it is never stale.
+	changedAt map[string]time.Time
+	// staleKeys holds, while this node is back from a gap longer than the
+	// tombstone TTL, the keys it held before the gap and has not updated or
+	// received from a peer since. They are kept from peers until they are
+	// resolved. It is nil when this node has no stale keys.
+	staleKeys map[string]types.Unit
+	// gapStart is the last contact before the gap, while staleKeys is set.
+	// A peer whose since is at or before it saw every deletion of the gap.
+	gapStart time.Time
+	// heardWhileStale holds the peers, by host:port, whose digest arrived
+	// while staleKeys is set. Once it covers every current peer and none of
+	// them saw the whole gap, no node knows more than this one and its stale
+	// keys are kept.
+	heardWhileStale       map[string]types.Unit
 	msgSeq                atomic.Uint64
 	actorSystem           ActorSystem
 	clusterRef            cluster.Cluster
@@ -238,6 +268,12 @@ func (r *replicatorActor) PreStart(ctx *Context) error {
 	r.tombstones = make(map[string]*tombstone)
 	r.versions = make(map[string]uint64)
 	r.hashes = make(map[string]uint64)
+	r.changedAt = make(map[string]time.Time)
+	r.lastContact = time.Time{}
+	r.since = time.Now()
+	r.staleKeys = nil
+	r.gapStart = time.Time{}
+	r.heardWhileStale = nil
 
 	// what is still owed to the remote datacenters survives a restart
 	if r.pendingDeltas == nil {
@@ -283,7 +319,8 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 			return fmt.Errorf("failed to encode final CRDT snapshot: %w", err)
 		}
 
-		if err := r.snapshotStore.Save(entries); err != nil {
+		lastContact, since := r.snapshotContact()
+		if err := r.snapshotStore.Save(entries, lastContact, since); err != nil {
 			return fmt.Errorf("failed to save final CRDT snapshot: %w", err)
 		}
 
@@ -465,6 +502,8 @@ func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
 	updated.ResetDelta()
 	r.setValue(keyID, updated)
 	r.versions[keyID]++
+	r.changedAt[keyID] = time.Now()
+	delete(r.staleKeys, keyID)
 
 	coordination := msg.WriteCoordination()
 	if delta != nil {
@@ -592,12 +631,14 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 
 // handleProtoTombstone processes a tombstone received from a peer via TopicActor
 // or in a batch from another datacenter. One this node issued is ignored: the
-// TopicActor delivers a publication to its publisher too.
+// TopicActor delivers a publication to its publisher too. Any other is a
+// contact with a peer: see observeContact.
 func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 	if msg.GetDeletedByNode() == r.nodeID {
 		return
 	}
 
+	r.observeContact()
 	r.applyTombstone(msg)
 }
 
@@ -676,18 +717,24 @@ func (r *replicatorActor) handleProtoDelta(ctx *ReceiveContext, msg *internalpb.
 // handleDelta merges a delta received from a peer replicator via TopicActor.
 // A delta that leaves the stored value unchanged, such as a duplicate
 // delivery, neither advances the key's version nor notifies its watchers.
+// A delta from a peer is a contact with it (see observeContact), and the key
+// it carries is no longer stale.
 func (r *replicatorActor) handleDelta(ctx *ReceiveContext, msg *crdtDelta) {
 	if msg.Origin == r.nodeID {
 		return
 	}
 
 	r.deltaReceiveCount.Add(1)
+	r.observeContact()
 	keyID := msg.KeyID
 
 	// reject deltas for tombstoned keys
 	if _, ok := r.tombstones[keyID]; ok {
 		return
 	}
+
+	// a peer has the key, so it was not deleted
+	delete(r.staleKeys, keyID)
 
 	current, exists := r.store[keyID]
 	if !exists {
@@ -721,6 +768,12 @@ func (r *replicatorActor) handleAntiEntropy(ctx *ReceiveContext) {
 		return
 	}
 
+	// no current peer saw the whole gap: this node knows as much as any
+	if r.hasStaleKeys() && r.heardFromEveryPeer(peers) {
+		r.logger.Infof("crdt: no peer saw the whole gap; keeping %d stale keys", len(r.staleKeys))
+		r.keepStaleKeys(time.Now())
+	}
+
 	if len(peers) == 0 {
 		return
 	}
@@ -746,6 +799,14 @@ func (r *replicatorActor) handleAntiEntropy(ctx *ReceiveContext) {
 
 // handleDigest processes an anti-entropy digest from a peer and answers with
 // the full state of every key the peer needs from this node.
+//
+// The digest is a contact with a peer: see observeContact. While this node
+// has stale keys, the digest may resolve them (see resolveStaleKeys), and a
+// key that is still stale is not sent. The answer carries this node's since;
+// a digest whose since is later than it is answered even when nothing else
+// is to be sent, so two nodes that hold the same state still pass the
+// earlier since on, and a node restarted while another was away can resolve
+// that node's stale keys.
 //
 // A key is sent when the peer does not have it. For a key both nodes have,
 // the content hashes decide: the key is sent when the hashes differ and left
@@ -783,6 +844,8 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 		tombstones []*internalpb.CRDTTombstone
 	)
 
+	r.observeContact()
+
 	for _, ts := range msg.GetTombstones() {
 		r.applyTombstone(ts)
 	}
@@ -804,8 +867,16 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 		}
 	}
 
+	if r.hasStaleKeys() {
+		r.resolveStaleKeys(ctx, msg, peerEntries)
+	}
+
 	for keyID, data := range r.store {
 		if peerEntry, peerHas := peerEntries[keyID]; peerHas && !r.differsFromPeer(keyID, peerEntry) {
+			continue
+		}
+
+		if _, stale := r.staleKeys[keyID]; stale {
 			continue
 		}
 
@@ -821,10 +892,19 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 		entries = append(entries, crdtfse)
 	}
 
-	if (len(entries) > 0 || len(tombstones) > 0) && ctx.Sender() != nil {
+	// a peer that knows every deletion only from a later time than this node
+	// takes this node's since from the answer, even when nothing else differs
+	sinceIsNews := !r.since.IsZero() && msg.HasSinceNanos() && time.Unix(0, msg.GetSinceNanos()).After(r.since)
+
+	if (len(entries) > 0 || len(tombstones) > 0 || sinceIsNews) && ctx.Sender() != nil {
 		fullState := &internalpb.CRDTFullState{}
 		fullState.SetEntries(entries)
 		fullState.SetTombstones(tombstones)
+
+		if !r.since.IsZero() {
+			fullState.SetSinceNanos(r.since.UnixNano())
+		}
+
 		ctx.Tell(ctx.Sender(), fullState)
 	}
 }
@@ -844,6 +924,128 @@ func (r *replicatorActor) differsFromPeer(keyID string, peerEntry *internalpb.CR
 	return r.versions[keyID] > peerEntry.GetVersion()
 }
 
+// observeContact records that a peer Replicator reached this node. When the
+// previous contact is older than the tombstone TTL (see gapBeyondTTL), this
+// node first marks its stale keys, with the gap starting at that previous
+// contact.
+func (r *replicatorActor) observeContact() {
+	if !r.hasStaleKeys() && r.gapBeyondTTL() {
+		r.markStaleKeys()
+	}
+
+	r.lastContact = time.Now()
+}
+
+// gapBeyondTTL reports whether the last contact is older than the tombstone
+// TTL. A node that has never had a contact has no gap. Without anti-entropy
+// there is no gap either: no digest would ever resolve the stale keys, and no
+// anti-entropy round would spread them.
+func (r *replicatorActor) gapBeyondTTL() bool {
+	if r.config.AntiEntropyInterval() <= 0 || r.lastContact.IsZero() {
+		return false
+	}
+
+	return time.Since(r.lastContact) > r.config.TombstoneTTL()
+}
+
+// hasStaleKeys reports whether this node is back from a gap longer than the
+// tombstone TTL and its stale keys are not resolved yet.
+func (r *replicatorActor) hasStaleKeys() bool {
+	return r.staleKeys != nil
+}
+
+// markStaleKeys marks the keys this node held before its gap, and has not
+// updated since, as stale. Any of them may have been deleted during the gap
+// with a tombstone that has expired since, which no peer can send any more.
+// A stale key is not sent to peers, not in an anti-entropy answer and not in
+// a coordinated read, and the deltas waiting for the remote datacenters wait
+// too, until the stale keys are resolved (see resolveStaleKeys and
+// handleAntiEntropy). A key a peer turns out to hold, through a delta or an
+// anti-entropy answer, is no longer stale. This node's own reads still see
+// the stale keys.
+//
+// This node also stops advertising its since: it missed the deletions of the
+// gap, so it cannot resolve another node's stale keys.
+func (r *replicatorActor) markStaleKeys() {
+	r.gapStart = r.lastContact
+	r.staleKeys = make(map[string]types.Unit)
+	r.heardWhileStale = make(map[string]types.Unit)
+	r.since = time.Time{}
+
+	for keyID := range r.store {
+		if changedAt, ok := r.changedAt[keyID]; ok && changedAt.After(r.gapStart) {
+			continue
+		}
+
+		r.staleKeys[keyID] = types.Unit{}
+	}
+
+	r.logger.Infof("crdt: back after %s without a peer, longer than the tombstone TTL; %d keys are stale", time.Since(r.gapStart).Round(time.Second), len(r.staleKeys))
+}
+
+// resolveStaleKeys applies the digest of a peer to the stale keys. The peer
+// is recorded as heard. A peer whose since is at or before the start of the
+// gap saw every deletion of the gap, and its digest lists every key it holds:
+// a stale key it lists is kept, one it does not list was deleted during the
+// gap and is removed, as a tombstone would remove it. This node then takes
+// the peer's since. A digest without a since, from a node that has stale keys
+// itself or that predates the field, or with a later since, resolves nothing.
+func (r *replicatorActor) resolveStaleKeys(ctx *ReceiveContext, msg *internalpb.CRDTDigest, peerEntries map[string]*internalpb.CRDTDigestEntry) {
+	if ctx.Sender() != nil {
+		r.heardWhileStale[ctx.Sender().Path().HostPort()] = types.Unit{}
+	}
+
+	if !msg.HasSinceNanos() {
+		return
+	}
+
+	peerSince := time.Unix(0, msg.GetSinceNanos())
+	if peerSince.After(r.gapStart) {
+		return
+	}
+
+	removed := 0
+	for keyID := range r.staleKeys {
+		if _, listed := peerEntries[keyID]; listed {
+			continue
+		}
+
+		r.removeValue(keyID)
+		delete(r.pendingDeltas, keyID)
+		removed++
+	}
+
+	r.logger.Infof("crdt: a peer that saw the whole gap resolved the stale keys; removed %d keys deleted during the gap", removed)
+	r.keepStaleKeys(peerSince)
+}
+
+// heardFromEveryPeer reports whether the digest of every given peer that runs
+// a Replicator arrived while this node has stale keys. When distributed data
+// is restricted to a role, a peer without the role runs none and is skipped.
+func (r *replicatorActor) heardFromEveryPeer(peers []*cluster.Peer) bool {
+	role := r.config.Role()
+	for _, peer := range peers {
+		if role != "" && !peer.HasRole(role) {
+			continue
+		}
+
+		if _, heard := r.heardWhileStale[peer.Host+":"+strconv.Itoa(peer.RemotingPort)]; !heard {
+			return false
+		}
+	}
+
+	return true
+}
+
+// keepStaleKeys keeps the keys that are still stale as ordinary keys, and
+// records that this node knows every deletion from the given time on.
+func (r *replicatorActor) keepStaleKeys(since time.Time) {
+	r.staleKeys = nil
+	r.heardWhileStale = nil
+	r.gapStart = time.Time{}
+	r.since = since
+}
+
 // handleFullState processes a full state response from a peer during anti-entropy.
 // A state that leaves the stored value unchanged, which is what a node that is
 // ahead of its peer receives, neither advances the key's version nor notifies
@@ -852,9 +1054,23 @@ func (r *replicatorActor) differsFromPeer(keyID string, peerEntry *internalpb.CR
 // The answer may also carry the peer's tombstones for keys this node listed
 // in its digest. They are applied first, by the rule of applyTombstone, so a
 // key the peer has deleted is removed here.
+//
+// The answer is a contact with a peer: see observeContact. A key it carries
+// is held by the peer, so it is no longer stale. Once merged, this node
+// knows every deletion the peer knows, so it takes the peer's since when that
+// is earlier than its own; a node with stale keys takes it from
+// resolveStaleKeys instead.
 func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.CRDTFullState) {
+	r.observeContact()
+
 	for _, ts := range msg.GetTombstones() {
 		r.applyTombstone(ts)
+	}
+
+	if !r.hasStaleKeys() && msg.HasSinceNanos() {
+		if peerSince := time.Unix(0, msg.GetSinceNanos()); peerSince.Before(r.since) {
+			r.since = peerSince
+		}
 	}
 
 	for _, entry := range msg.GetEntries() {
@@ -868,6 +1084,9 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 		if _, ok := r.tombstones[keyID]; ok {
 			continue
 		}
+
+		// the peer has the key, so it was not deleted
+		delete(r.staleKeys, keyID)
 
 		data, err := ddata.DecodeCRDT(entry.GetData(), r.serializer)
 		if err != nil {
@@ -919,7 +1138,8 @@ func (r *replicatorActor) handlePrune() {
 // carries the key's local version and the content hash of its value; the hash
 // is what a peer compares, the version is kept for peers that predate it.
 // The digest also carries every tombstone this node retains that is within
-// its TTL, so a peer that still holds a deleted key deletes it.
+// its TTL, so a peer that still holds a deleted key deletes it, and this
+// node's since unless it has stale keys.
 // Pre-allocates contiguous slices to minimize heap allocations.
 func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 	n := len(r.store)
@@ -953,6 +1173,11 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 	crdtd := &internalpb.CRDTDigest{}
 	crdtd.SetEntries(entries)
 	crdtd.SetTombstones(tombstones)
+
+	if !r.since.IsZero() {
+		crdtd.SetSinceNanos(r.since.UnixNano())
+	}
+
 	return crdtd
 }
 
@@ -976,6 +1201,8 @@ func (r *replicatorActor) removeValue(keyID string) {
 	delete(r.store, keyID)
 	delete(r.versions, keyID)
 	delete(r.hashes, keyID)
+	delete(r.changedAt, keyID)
+	delete(r.staleKeys, keyID)
 }
 
 // contentHash returns the canonical content hash of the value stored under a
@@ -1118,7 +1345,8 @@ func (r *replicatorActor) removeWatcher(keyID string, pid *PID) {
 	}
 }
 
-// handleSnapshot saves the current CRDT store to BoltDB.
+// handleSnapshot saves the current CRDT store to BoltDB, with the contact
+// times returned by snapshotContact.
 func (r *replicatorActor) handleSnapshot() {
 	if r.snapshotStore == nil {
 		return
@@ -1128,9 +1356,22 @@ func (r *replicatorActor) handleSnapshot() {
 		r.logger.Errorf("failed to encode CRDT snapshot: %v", err)
 		return
 	}
-	if err := r.snapshotStore.Save(entries); err != nil {
+	lastContact, since := r.snapshotContact()
+	if err := r.snapshotStore.Save(entries, lastContact, since); err != nil {
 		r.logger.Errorf("failed to save CRDT snapshot: %v", err)
 	}
+}
+
+// snapshotContact returns the last contact and the since to save with a
+// snapshot. While this node has stale keys it saves the start of the gap as
+// its last contact, and no since, so a restart before the stale keys are
+// resolved finds the gap again.
+func (r *replicatorActor) snapshotContact() (time.Time, time.Time) {
+	if r.hasStaleKeys() {
+		return r.gapStart, time.Time{}
+	}
+
+	return r.lastContact, r.since
 }
 
 // buildSnapshotEntries encodes the in-memory CRDT store into protobuf snapshot entries.
@@ -1150,6 +1391,11 @@ func (r *replicatorActor) buildSnapshotEntries() (map[string]*internalpb.CRDTSna
 		crdtse.SetKey(codec.EncodeCRDTKey(keyID, dataType))
 		crdtse.SetData(pbData)
 		crdtse.SetVersion(version)
+
+		if changedAt, ok := r.changedAt[keyID]; ok {
+			crdtse.SetChangedAtNanos(changedAt.UnixNano())
+		}
+
 		entries[keyID] = crdtse
 	}
 	return entries, nil
@@ -1163,7 +1409,14 @@ func (r *replicatorActor) handleReadRequest(ctx *ReceiveContext, msg *internalpb
 		r.logger.Warnf("coordinated read: failed to decode key: %v", err)
 		return
 	}
+
+	r.observeContact()
+
+	// a stale key is answered as absent
 	data := r.store[keyID]
+	if _, stale := r.staleKeys[keyID]; stale {
+		data = nil
+	}
 
 	var pbData *internalpb.CRDTData
 	if data != nil {
@@ -1554,7 +1807,8 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 	return x.keepMetricRegistration(registration, err)
 }
 
-// restoreFromSnapshot opens the snapshot store and restores persisted CRDT state.
+// restoreFromSnapshot opens the snapshot store and restores persisted CRDT state,
+// then the contact times saved with it (see restoreContact).
 // This is a no-op when snapshot persistence is not configured.
 // Note: the serializer is not yet available during PreStart (it is set in
 // handlePostStart), so restoreFromSnapshot decodes with its own
@@ -1572,13 +1826,14 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 	}
 	r.snapshotStore = store
 
+	lastContact, since, err := store.Contact()
+	if err != nil {
+		r.logger.Warnf("failed to load CRDT snapshot contact times: %v", err)
+	}
+
 	entries, err := store.Load()
 	if err != nil {
 		r.logger.Warnf("failed to load CRDT snapshot: %v", err)
-		return nil
-	}
-
-	if len(entries) == 0 {
 		return nil
 	}
 
@@ -1602,10 +1857,34 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 		r.keyTypes[entryKeyID] = dataType
 		r.versions[entryKeyID] = entry.GetVersion()
 		r.subscriptions[entryKeyID] = types.Unit{}
+
+		if changedAt := entry.GetChangedAtNanos(); changedAt != 0 {
+			r.changedAt[entryKeyID] = time.Unix(0, changedAt)
+		}
 	}
 
+	r.restoreContact(lastContact, since)
 	r.logger.Debugf("restored %d CRDT keys from snapshot", len(entries))
 	return nil
+}
+
+// restoreContact applies the contact times saved with the snapshot, once its
+// keys are restored. A node restored after a gap longer than the tombstone
+// TTL marks its stale keys at once, before any peer reaches it, so it neither
+// advertises the since it had before the gap nor serves its old keys. A node
+// restored within the TTL keeps the since it had, when that is earlier than
+// its start: it saw every deletion until it stopped, and the tombstones of
+// those made since are still live.
+func (r *replicatorActor) restoreContact(lastContact, since time.Time) {
+	r.lastContact = lastContact
+	if r.gapBeyondTTL() {
+		r.markStaleKeys()
+		return
+	}
+
+	if !since.IsZero() && since.Before(r.since) {
+		r.since = since
+	}
 }
 
 // handleDataCenterFlush sends the buffered deltas and tombstones to the
@@ -1635,6 +1914,11 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 // datacenters and what they hold may change while another node leads.
 func (r *replicatorActor) handleDataCenterFlush(ctx *ReceiveContext) {
 	if len(r.pendingDeltas) == 0 && len(r.pendingTombstones) == 0 {
+		return
+	}
+
+	// a pending delta may be of a stale key; it waits until they are resolved
+	if r.hasStaleKeys() {
 		return
 	}
 
