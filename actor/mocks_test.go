@@ -4698,3 +4698,24 @@ func (x *MockMessageProbe) Receive(ctx *ReceiveContext) {
 
 	x.received <- ctx.Message()
 }
+
+// logLevelOf returns the level of the first JSON log line in output whose
+// message contains fragment, failing the test when no line carries it. It lets
+// a test check the level a failure is reported at, not only that it is logged.
+func logLevelOf(t *testing.T, output, fragment string) string {
+	t.Helper()
+
+	for line := range strings.SplitSeq(output, "\n") {
+		var entry struct {
+			Level string `json:"level"`
+			Msg   string `json:"msg"`
+		}
+
+		if json.Unmarshal([]byte(line), &entry) == nil && strings.Contains(entry.Msg, fragment) {
+			return entry.Level
+		}
+	}
+
+	t.Fatalf("no log line contains %q in:\n%s", fragment, output)
+	return ""
+}

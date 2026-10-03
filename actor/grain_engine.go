@@ -214,13 +214,13 @@ func (x *actorSystem) activateGrain(ctx context.Context, identity *GrainIdentity
 	x.logger.Debugf("activating grain=%s", identity.String())
 	owner, err := x.resolveGrainOwner(ctx, identity)
 	if err != nil {
-		x.logger.Errorf("failed to resolve owner for grain (%s): %v (hint: check cluster connectivity, grain registration)", identity.String(), err)
+		x.logGrainActivationFailure(ctx, err, "failed to resolve owner for grain (%s): %v (hint: check cluster connectivity, grain registration)", identity.String(), err)
 		return nil, err
 	}
 
 	handled, err := x.tryRemoteGrainActivation(ctx, identity, config, owner)
 	if err != nil {
-		x.logger.Errorf("failed to attempt remote activation for grain (%s): %v (hint: check target node reachable, grain OnActivate)", identity.String(), err)
+		x.logGrainActivationFailure(ctx, err, "failed to attempt remote activation for grain (%s): %v (hint: check target node reachable, grain OnActivate)", identity.String(), err)
 		return nil, err
 	}
 
@@ -421,6 +421,23 @@ func (x *actorSystem) resolveGrainOwner(ctx context.Context, identity *GrainIden
 		return nil, nil
 	}
 	return x.getGrainOwner(ctx, identity)
+}
+
+// logGrainActivationFailure logs a failed grain activation at the level its
+// cause deserves. A caller that canceled or timed out gave up on its own and
+// is told through the returned error, so the failure is a debug line. An
+// outbound queue that is full, typically towards a departing node, is an
+// expected and transient condition the caller also sees, so it is a warning.
+// Any other failure is an error.
+func (x *actorSystem) logGrainActivationFailure(ctx context.Context, err error, format string, args ...any) {
+	switch {
+	case ctx.Err() != nil:
+		x.logger.Debugf(format, args...)
+	case errors.Is(err, gerrors.ErrRemoteSendBackpressure):
+		x.logger.Warnf(format, args...)
+	default:
+		x.logger.Errorf(format, args...)
+	}
 }
 
 // tryRemoteGrainActivation attempts to activate the grain on a remote owner or activation peer.
@@ -1501,7 +1518,14 @@ func (x *actorSystem) finalizeGrainActivation(ctx context.Context, process *grai
 		// the grain inactive, deletes the local entry and removes the cluster
 		// record, releasing any claim this call made.
 		if derr := process.deactivate(ctx); derr != nil {
-			x.logger.Errorf("failed to deactivate grain=%s after failed cluster publication: %v", key, derr)
+			if x.isStopping() {
+				// a stopping node tears the registry down underneath the
+				// rollback, and the record heals like the other best-effort
+				// releases of the shutdown
+				x.logger.Warnf("failed to deactivate grain=%s after failed cluster publication while stopping: %v", key, derr)
+			} else {
+				x.logger.Errorf("failed to deactivate grain=%s after failed cluster publication: %v", key, derr)
+			}
 			// make sure nothing is left behind even when deactivation fails midway
 			x.grains.Delete(key)
 

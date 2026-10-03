@@ -3076,12 +3076,68 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	require.Equal(t, identity.String(), got.String())
 }
 
+func TestLogGrainActivationFailure(t *testing.T) {
+	const message = "failed to attempt remote activation for grain"
+
+	t.Run("a caller that gave up is a debug line", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		system.logGrainActivationFailure(ctx, context.Canceled, message+": %v", context.Canceled)
+		_ = logger.Flush()
+		require.Equal(t, "debug", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("a caller whose deadline passed during backpressure is a debug line", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		defer cancel()
+		<-ctx.Done()
+
+		err := errors.Join(gerrors.ErrRemoteSendBackpressure, ctx.Err())
+		system.logGrainActivationFailure(ctx, err, message+": %v", err)
+		_ = logger.Flush()
+		require.Equal(t, "debug", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("a full outbound queue is a warning", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		err := errors.Join(gerrors.ErrRemoteSendBackpressure, errors.New("tcp: duplex outbound queue full"))
+		system.logGrainActivationFailure(context.Background(), err, message+": %v", err)
+		_ = logger.Flush()
+		require.Equal(t, "warn", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("any other failure is an error", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		system.logGrainActivationFailure(context.Background(), assert.AnError, message+": %v", assert.AnError)
+		_ = logger.Flush()
+		require.Equal(t, "error", logLevelOf(t, buf.String(), message))
+	})
+}
+
 func TestFinalizeGrainActivation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("publish failure with failed deactivation still leaves nothing behind", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 		system := newReplicationSystem(clusterMock)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
 
 		grain := NewMockDeactivationFailingGrain()
 		identity := newGrainIdentity(grain, "finalize-deactivate-failure")
@@ -3100,6 +3156,38 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		_, ok := system.grains.Get(identity.String())
 		require.False(t, ok, "a failed activation must leave no grain behind")
 		clusterMock.AssertExpectations(t)
+
+		// a running node reports the failed rollback as an error
+		_ = logger.Flush()
+		require.Equal(t, "error", logLevelOf(t, buf.String(), "after failed cluster publication"))
+	})
+
+	t.Run("a failed rollback on a stopping node is a warning and still leaves nothing behind", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+		system.shuttingDown.Store(true)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
+
+		grain := NewMockDeactivationFailingGrain()
+		identity := newGrainIdentity(grain, "finalize-stopping-deactivate-failure")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		// nothing is published, and the fallback releases the claim
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, true)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+		_, ok := system.grains.Get(identity.String())
+		require.False(t, ok, "a rolled back activation must leave no grain behind")
+		clusterMock.AssertExpectations(t)
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+
+		_ = logger.Flush()
+		require.Equal(t, "warn", logLevelOf(t, buf.String(), "after failed cluster publication while stopping"))
 	})
 
 	t.Run("publish failure releases the claim without disturbing an already-active grain", func(t *testing.T) {
