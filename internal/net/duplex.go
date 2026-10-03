@@ -378,7 +378,9 @@ func (x *duplexConn) Tell(ctx context.Context, frame Frame) error {
 // expectsReply, and blocks until a REPLY/ERROR arrives, ctx is done, or the
 // duplex closes. Timeout abandons the waiter so a late reply is dropped.
 // Oversized frames are chunked when the negotiated revision supports it; a
-// soft-reject ERROR during chunk admission completes the waiter.
+// soft-reject ERROR during chunk admission completes the waiter. A close
+// reports the connection loss (see [duplexConn.closedError]) whether Ask sees
+// the close signal or the waiter completion that close delivers first.
 func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 	corr := x.nextCorrelation()
 	frame.Correlation = corr
@@ -397,10 +399,7 @@ func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 		select {
 		case resp := <-wait:
 			putPendingWaiter(wait)
-			if resp.Type == FrameTypeError {
-				return resp, decodeErrorPayload(resp.Payload)
-			}
-			return resp, nil
+			return x.askResult(resp)
 		default:
 			_ = x.pending.abandon(corr)
 			return Frame{}, err
@@ -410,10 +409,7 @@ func (x *duplexConn) Ask(ctx context.Context, frame Frame) (Frame, error) {
 	select {
 	case resp := <-wait:
 		putPendingWaiter(wait)
-		if resp.Type == FrameTypeError {
-			return resp, decodeErrorPayload(resp.Payload)
-		}
-		return resp, nil
+		return x.askResult(resp)
 	case <-ctx.Done():
 		_ = x.pending.abandon(corr)
 		return Frame{}, ctx.Err()
@@ -578,6 +574,24 @@ func (x *duplexConn) Close() error {
 		return *errPtr
 	}
 	return nil
+}
+
+// askResult turns the frame that completed an Ask waiter into the Ask result.
+// A REPLY is returned as is and a peer ERROR, which always echoes the request
+// correlation, is decoded into an error. The ERROR frame without a correlation
+// is the one [duplexConn.signalClose] hands every pending waiter when the
+// connection closes: it carries no peer error, so the connection loss is
+// reported instead.
+func (x *duplexConn) askResult(resp Frame) (Frame, error) {
+	if resp.Type != FrameTypeError {
+		return resp, nil
+	}
+
+	if resp.Correlation == 0 {
+		return resp, x.closedError()
+	}
+
+	return resp, decodeErrorPayload(resp.Payload)
 }
 
 // signalClose marks the duplex closed and wakes waiters without tearing down

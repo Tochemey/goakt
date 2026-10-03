@@ -36,11 +36,14 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -1330,40 +1333,223 @@ func TestRemotingServerHandleDuplexConnRejectsMismatchedLanePing(t *testing.T) {
 }
 
 func TestRemotingServerHandleDuplexConnNegotiatesCompression(t *testing.T) {
-	ps, err := NewRemotingServer("127.0.0.1:0",
-		WithRemotingServerLoops(1),
-		WithRemotingServerMaxFrameSize(1<<20),
+	const (
+		none   = internalpb.CompressionCodec_COMPRESSION_CODEC_NONE
+		gzip   = internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP
+		zstd   = internalpb.CompressionCodec_COMPRESSION_CODEC_ZSTD
+		brotli = internalpb.CompressionCodec_COMPRESSION_CODEC_BROTLI
 	)
-	require.NoError(t, err)
-	require.NoError(t, ps.Listen())
-	t.Cleanup(func() { _ = ps.Shutdown(time.Second) })
 
-	go func() { _ = ps.Serve() }()
-	pause.For(50 * time.Millisecond)
+	testCases := []struct {
+		name       string
+		configured bool
+		server     internalpb.CompressionCodec
+		proposal   internalpb.CompressionCodec
+		expected   internalpb.CompressionCodec
+	}{
+		{name: "gzip on both sides", configured: true, server: gzip, proposal: gzip, expected: gzip},
+		{name: "zstd on both sides", configured: true, server: zstd, proposal: zstd, expected: zstd},
+		{name: "brotli on both sides", configured: true, server: brotli, proposal: brotli, expected: brotli},
+		{name: "mismatched codecs", configured: true, server: zstd, proposal: gzip, expected: none},
+		{name: "dialer proposes none", configured: true, server: zstd, proposal: none, expected: none},
+		{name: "unconfigured server", proposal: gzip, expected: none},
+	}
 
-	transport := NewTCPTransport()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := []RemotingServerOption{
+				WithRemotingServerLoops(1),
+				WithRemotingServerMaxFrameSize(1 << 20),
+			}
 
-	conn, err := transport.Dial(ctx, ps.ListenAddr().String(), LaneSpec{})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = conn.Close() })
+			if tc.configured {
+				opts = append(opts, WithRemotingServerCompression(tc.server))
+			}
 
-	hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP, 1<<20)
-	result, err := performHello(conn, hello)
-	require.NoError(t, err)
-	assert.Equal(t, internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, result.Effective.GetCompression())
+			ps, err := NewRemotingServer("127.0.0.1:0", opts...)
+			require.NoError(t, err)
+			require.NoError(t, ps.Listen())
 
-	require.NoError(t, conn.WriteFrames(Frame{
-		Version:     ProtocolVersion,
-		Type:        FrameTypePing,
-		Lane:        LaneControl,
-		Correlation: 7,
-	}))
+			serveDone := make(chan error, 1)
+			go func() { serveDone <- ps.Serve() }()
 
-	pong, err := conn.ReadFrame()
-	require.NoError(t, err)
-	assert.Equal(t, FrameTypePong, pong.Type)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			conn, err := NewTCPTransport().Dial(ctx, ps.ListenAddr().String(), LaneSpec{})
+			require.NoError(t, err)
+
+			result, err := performHello(conn, testHello(tc.proposal, 1<<20))
+			require.NoError(t, err)
+			assert.Equal(t, tc.expected, result.Effective.GetCompression())
+
+			require.NoError(t, conn.Close())
+			require.NoError(t, ps.Shutdown(time.Second))
+			<-serveDone
+		})
+	}
+}
+
+// wireCountingConn counts the bytes written to the raw socket, below any
+// compression wrapper.
+type wireCountingConn struct {
+	net.Conn
+	// written is the number of bytes handed to the socket.
+	written atomic.Int64
+}
+
+// Write forwards p to the socket and adds what was written to the count.
+func (x *wireCountingConn) Write(p []byte) (int, error) {
+	n, err := x.Conn.Write(p)
+	x.written.Add(int64(n))
+	return n, err
+}
+
+// wireCountingTransport dials framed connections over a [wireCountingConn] so
+// a test can compare the bytes on the wire with the bytes it submitted.
+type wireCountingTransport struct {
+	*TCPTransport
+	// maxFrameSize is the frame limit of the dialed connection.
+	maxFrameSize uint32
+	// conn is the last dialed raw connection.
+	conn *wireCountingConn
+}
+
+// Dial connects to peer and returns a framed connection over a counting
+// socket.
+func (x *wireCountingTransport) Dial(ctx context.Context, peer string, _ LaneSpec) (FramedConn, error) {
+	var dialer net.Dialer
+	raw, err := dialer.DialContext(ctx, "tcp", peer)
+	if err != nil {
+		return nil, err
+	}
+
+	x.conn = &wireCountingConn{Conn: raw}
+	return newTCPFramedConn(x.conn, x.maxFrameSize), nil
+}
+
+// TestRemotingServerDuplexCompressedRoundTrip drives DATA, a chunked DATA
+// larger than one frame and PING/PONG through a real server on a negotiated
+// codec, and checks that the bytes on the wire are fewer than the logical
+// bytes for a compressible payload (and not fewer without a codec).
+func TestRemotingServerDuplexCompressedRoundTrip(t *testing.T) {
+	const (
+		maxFrame  = 64 << 10
+		chunkSize = 32 << 10
+		smallSize = 8 << 10
+		largeSize = 300 << 10
+	)
+
+	testCases := []struct {
+		name       string
+		codec      internalpb.CompressionCodec
+		compressed bool
+	}{
+		{name: "none", codec: internalpb.CompressionCodec_COMPRESSION_CODEC_NONE},
+		{name: "gzip", codec: internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP, compressed: true},
+		{name: "zstd", codec: internalpb.CompressionCodec_COMPRESSION_CODEC_ZSTD, compressed: true},
+		{name: "brotli", codec: internalpb.CompressionCodec_COMPRESSION_CODEC_BROTLI, compressed: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+
+			received := make(chan int, 2)
+			ps, err := NewRemotingServer("127.0.0.1:0",
+				WithRemotingServerLoops(1),
+				WithRemotingServerMaxFrameSize(maxFrame),
+				WithRemotingServerMaxMessageSize(1<<20),
+				WithRemotingServerChunkSize(chunkSize),
+				WithRemotingServerCompression(tc.codec),
+				WithRemotingServerDuplexTellHandler(func(_ context.Context, env DataEnvelope) {
+					received <- len(env.Payload)
+				}),
+			)
+			require.NoError(t, err)
+			require.NoError(t, ps.Listen())
+
+			serveDone := make(chan error, 1)
+			go func() { serveDone <- ps.Serve() }()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			hello := testHello(tc.codec, maxFrame)
+			hello.SetRevision(CapabilityRevisionCredits)
+			hello.SetMaxMessageSize(1 << 20)
+			hello.SetInitialCredits(4 << 20)
+
+			transport := &wireCountingTransport{TCPTransport: NewTCPTransport(), maxFrameSize: maxFrame}
+			session, result, err := OpenDuplex(
+				ctx,
+				transport,
+				ps.ListenAddr().String(),
+				hello,
+				LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
+				time.Second,
+				0,
+				chunkSize,
+			)
+			require.NoError(t, err)
+			require.Equal(t, tc.codec, result.Effective.GetCompression())
+
+			logical := 0
+			for _, payloadSize := range []int{smallSize, largeSize} {
+				encoded, err := EncodeDataEnvelope(DataEnvelope{
+					Receiver:     "goakt://test@127.0.0.1:1/user/receiver",
+					TypeName:     "testpb.TestSend",
+					SerializerID: SerializerIDPublicProto,
+					Payload:      make([]byte, payloadSize),
+				})
+				require.NoError(t, err)
+				require.NoError(t, session.Tell(ctx, Frame{
+					Version: ProtocolVersion,
+					Type:    FrameTypeData,
+					Lane:    LaneControl,
+					Payload: encoded,
+				}))
+
+				select {
+				case got := <-received:
+					require.Equal(t, payloadSize, got)
+				case <-ctx.Done():
+					t.Fatal("timed out waiting for DATA")
+				}
+
+				logical += payloadSize
+			}
+
+			dc, ok := session.(*duplexConn)
+			require.True(t, ok)
+
+			wait := dc.pending.register(99)
+			require.NoError(t, dc.Submit(ctx, Frame{
+				Type:        FrameTypePing,
+				Lane:        LaneControl,
+				Correlation: 99,
+			}))
+
+			select {
+			case pong := <-wait:
+				putPendingWaiter(wait)
+				require.Equal(t, FrameTypePong, pong.Type)
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for PONG")
+			}
+
+			wire := int(transport.conn.written.Load())
+			if tc.compressed {
+				assert.Less(t, wire, logical/10, "compressible payloads must shrink on the wire")
+			} else {
+				assert.Greater(t, wire, logical, "uncompressed frames carry the payload plus headers")
+			}
+
+			require.NoError(t, session.Close())
+			require.NoError(t, ps.Shutdown(time.Second))
+			<-serveDone
+		})
+	}
 }
 
 // TestInvokeDuplexTellReportsPanic verifies the dispatch surface learns about
@@ -1425,4 +1611,233 @@ func TestAcceptHelloHandshakeTimeout(t *testing.T) {
 
 	require.Error(t, readErr, "acceptor must drop a peer that never sends HELLO")
 	require.Less(t, elapsed, time.Second, "the drop must come from the handshake deadline, not the client backstop")
+}
+
+// TestRemotingServerShutdownClosesDuplexConnections checks that Shutdown
+// closes a duplex connection a peer keeps open: a stopped server must stop
+// serving it, so an ask sent on it fails with the connection loss instead of
+// an answer from the stopped server.
+func TestRemotingServerShutdownClosesDuplexConnections(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	var calls atomic.Int32
+	ps, serveDone := startShutdownTestServer(t, func() { calls.Add(1) })
+
+	session, sessionClosed := openShutdownTestSession(t, ps)
+	_, err := askShutdownTestSession(session)
+	require.NoError(t, err)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	awaitShutdownTestSessionClosed(t, sessionClosed)
+
+	_, err = askShutdownTestSession(session)
+	require.Error(t, err)
+	require.Truef(t, isShutdownTestTransportError(err), "unexpected ask error: %v", err)
+	require.EqualValues(t, 1, calls.Load(), "an ask sent after shutdown must not reach the handler")
+
+	require.NoError(t, <-serveDone)
+	_ = session.Close()
+}
+
+// TestRemotingServerShutdownLetsAdmittedAskReply checks that Shutdown with a
+// positive timeout lets an ask admitted before it finish and deliver its reply
+// on the connection, refuses an ask that arrives afterwards without running
+// the handler, and then closes the connection.
+func TestRemotingServerShutdownLetsAdmittedAskReply(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	entered := make(chan types.Unit)
+	release := make(chan types.Unit)
+
+	var calls atomic.Int32
+	ps, serveDone := startShutdownTestServer(t, func() {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	})
+
+	session, sessionClosed := openShutdownTestSession(t, ps)
+
+	firstAsk := make(chan error, 1)
+	go func() {
+		reply, err := askShutdownTestSession(session)
+		if err == nil && reply.Type != FrameTypeReply {
+			err = errors.New("unexpected reply frame type")
+		}
+
+		firstAsk <- err
+	}()
+
+	<-entered
+	require.NoError(t, ps.Shutdown(5*time.Second))
+
+	refusal, err := askShutdownTestSession(session)
+	require.Error(t, err, "an ask sent after shutdown began must be refused")
+	require.Equal(t, FrameTypeError, refusal.Type)
+
+	refused := new(internalpb.Error)
+	require.NoError(t, proto.Unmarshal(refusal.Payload, refused))
+	require.Equal(t, internalpb.Code_CODE_FAILED_PRECONDITION, refused.GetCode())
+	require.Equal(t, gerrors.ErrRemotingDisabled.Error(), refused.GetMessage())
+	require.EqualValues(t, 1, calls.Load(), "an ask sent after shutdown began must not reach the handler")
+	require.False(t, session.IsClosed(), "the connection must stay open while an admitted ask is running")
+
+	close(release)
+	require.NoError(t, <-firstAsk, "the admitted ask must get its reply")
+
+	awaitShutdownTestSessionClosed(t, sessionClosed)
+	require.NoError(t, <-serveDone)
+	_ = session.Close()
+}
+
+// TestRemotingServerShutdownWithoutWaitClosesDuplexConnections checks that
+// Shutdown with a negative timeout returns at once and closes the duplex
+// connections without waiting for the asks still running.
+func TestRemotingServerShutdownWithoutWaitClosesDuplexConnections(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	entered := make(chan types.Unit)
+	release := make(chan types.Unit)
+
+	var calls atomic.Int32
+	ps, serveDone := startShutdownTestServer(t, func() {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+	})
+
+	session, sessionClosed := openShutdownTestSession(t, ps)
+
+	firstAsk := make(chan error, 1)
+	go func() {
+		_, err := askShutdownTestSession(session)
+		firstAsk <- err
+	}()
+
+	<-entered
+
+	start := time.Now()
+	require.NoError(t, ps.Shutdown(-1))
+	require.Less(t, time.Since(start), 100*time.Millisecond, "Shutdown with a negative timeout must not wait")
+
+	awaitShutdownTestSessionClosed(t, sessionClosed)
+
+	err := <-firstAsk
+	require.Error(t, err)
+	require.Truef(t, isShutdownTestTransportError(err), "unexpected ask error: %v", err)
+
+	close(release)
+	require.NoError(t, <-serveDone)
+	_ = session.Close()
+}
+
+// TestRemotingServerDuplexAskOnStoppedPoolClosesConnection checks that an ask
+// the stopped ask pool cannot take closes its connection, so the peer sees
+// the connection loss rather than an ERROR frame from a server that no longer
+// serves.
+func TestRemotingServerDuplexAskOnStoppedPoolClosesConnection(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	var calls atomic.Int32
+	ps, serveDone := startShutdownTestServer(t, func() { calls.Add(1) })
+
+	session, sessionClosed := openShutdownTestSession(t, ps)
+	ps.askPool.Stop()
+
+	reply, err := askShutdownTestSession(session)
+	require.Error(t, err)
+	require.NotEqual(t, FrameTypeError, reply.Type, "the stopped server must not answer with an ERROR frame")
+	require.Truef(t, isShutdownTestTransportError(err), "unexpected ask error: %v", err)
+	require.Zero(t, calls.Load())
+
+	awaitShutdownTestSessionClosed(t, sessionClosed)
+	require.NoError(t, ps.Shutdown(time.Second))
+	require.NoError(t, <-serveDone)
+	_ = session.Close()
+}
+
+// startShutdownTestServer starts a remoting server whose duplex ask handler
+// runs onAsk and echoes the request payload, and returns it with the channel
+// that receives the result of Serve.
+func startShutdownTestServer(t *testing.T, onAsk func()) (*RemotingServer, <-chan error) {
+	t.Helper()
+
+	ps, err := NewRemotingServer("127.0.0.1:0",
+		WithRemotingServerLoops(1),
+		WithRemotingServerDuplexAskHandler(func(_ context.Context, env DataEnvelope) (ReplyEnvelope, error) {
+			onAsk()
+			return ReplyEnvelope{TypeName: env.TypeName, SerializerID: SerializerIDPublicProto, Payload: env.Payload}, nil
+		}),
+	)
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- ps.Serve() }()
+	return ps, serveDone
+}
+
+// openShutdownTestSession dials ps on the control lane and returns the
+// session with a channel closed once the session sees its connection close.
+func openShutdownTestSession(t *testing.T, ps *RemotingServer) (DuplexSession, <-chan types.Unit) {
+	t.Helper()
+
+	closed := make(chan types.Unit)
+	var closeOnce sync.Once
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	session, _, err := OpenDuplex(
+		ctx,
+		NewTCPTransport(),
+		ps.ListenAddr().String(),
+		testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20),
+		LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL},
+		time.Second,
+		0,
+		0,
+		WithSessionClosedHandler(func(DuplexSession) { closeOnce.Do(func() { close(closed) }) }),
+	)
+	require.NoError(t, err)
+	return session, closed
+}
+
+// askShutdownTestSession sends one user ask on session and returns the frame
+// and error the ask completes with.
+func askShutdownTestSession(session DuplexSession) (Frame, error) {
+	encoded, err := EncodeDataEnvelope(DataEnvelope{
+		Receiver:     "goakt://test@127.0.0.1:1/user/receiver",
+		TypeName:     "testpb.Reply",
+		SerializerID: SerializerIDPublicProto,
+		Payload:      []byte("ping"),
+	})
+	if err != nil {
+		return Frame{}, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return session.Ask(ctx, Frame{Version: ProtocolVersion, Type: FrameTypeData, Lane: LaneControl, Payload: encoded})
+}
+
+// awaitShutdownTestSessionClosed fails the test when the session does not see
+// its connection close within a few seconds.
+func awaitShutdownTestSessionClosed(t *testing.T, closed <-chan types.Unit) {
+	t.Helper()
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the server did not close the duplex connection")
+	}
+}
+
+// isShutdownTestTransportError reports whether err is the loss of the
+// connection rather than an answer from the server.
+func isShutdownTestTransportError(err error) bool {
+	return errors.Is(err, ErrDuplexClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }

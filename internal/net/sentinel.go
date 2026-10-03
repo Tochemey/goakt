@@ -49,6 +49,11 @@ var (
 	// advertises a capability revision below [CapabilityRevisionBaseline];
 	// revisions start at 1, so 0 marks a broken or mismatched peer.
 	ErrInvalidCapabilityRevision = errors.New("tcp: capability revision below baseline")
+	// ErrUnexpectedCompressionCodec is returned by the dialer when a
+	// HELLO_ACK names a codec that is neither none nor the codec the dialer
+	// proposed. The dialer answers with a connection-scoped ERROR frame and
+	// closes instead of compressing with a codec it did not ask for.
+	ErrUnexpectedCompressionCodec = errors.New("tcp: unexpected compression codec in HELLO_ACK")
 	// ErrTableRefUnsupported is returned when a DATA or REPLY envelope carries
 	// a nonzero compression-table ID before tables are negotiated (revision
 	// below 3). The protocol layer answers with a connection-scoped ERROR

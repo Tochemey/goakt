@@ -99,6 +99,17 @@ func WithReadIdleTimeout(timeout time.Duration) Option {
 	})
 }
 
+// WithDialTimeout sets how long the remoting client waits to establish a
+// connection to a peer node before the dial fails. The default is 5 seconds.
+// A dial to an address that silently drops packets, such as the IP of a
+// departed pod, waits out this timeout, so keep it below the timeout of the
+// calls that may have to dial. It must be greater than zero.
+func WithDialTimeout(timeout time.Duration) Option {
+	return OptionFunc(func(config *Config) {
+		config.dialTimeout = timeout
+	})
+}
+
 // WithOrdinaryLanes sets the number of ordinary duplex lanes dialed per peer
 // for user tell/ask traffic.
 //
@@ -271,8 +282,19 @@ func WithMaxFrameSize(size uint32) Option {
 	})
 }
 
-// WithCompression sets the compression algorithm to use
-// when sending or receiving data.
+// WithCompression sets the compression algorithm applied to remoting
+// connections. The default is [NoCompression].
+//
+// How the algorithm takes effect depends on the wire protocol (see
+// [WithProtocolPin]):
+//   - duplex: each side names its algorithm in the HELLO handshake. The
+//     connection is compressed only when the dialing node and the accepting
+//     node are configured with the same algorithm; on any mismatch the
+//     connection stays up and carries uncompressed traffic.
+//   - legacy: there is no negotiation. Both nodes must be configured with the
+//     same algorithm, otherwise frames are unreadable.
+//
+// Configure every node of a cluster with the same algorithm.
 func WithCompression(c Compression) Option {
 	return OptionFunc(func(config *Config) {
 		config.compression = c

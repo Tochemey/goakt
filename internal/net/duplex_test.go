@@ -258,6 +258,34 @@ func TestDuplexAskOutOfOrder(t *testing.T) {
 	require.NoError(t, server.Close())
 }
 
+// TestDuplexAskFailsWithTransportErrorWhenPeerCloses checks that an Ask in
+// flight when the peer closes the connection reports the connection loss,
+// never the empty ERROR frame that close hands to pending waiters. Callers
+// classify a dead peer by that error, so it must be the same whichever of
+// the close signal and the waiter completion the Ask observes first; the
+// loop gives both orders a chance to happen.
+func TestDuplexAskFailsWithTransportErrorWhenPeerCloses(t *testing.T) {
+	defer goleak.VerifyNone(t)
+
+	for range 1000 {
+		c1, c2 := net.Pipe()
+		client := newDuplexConn(newTCPFramedConn(c1, defaultMaxFrameSize), 1<<20)
+
+		result := make(chan error, 1)
+		go func() {
+			_, err := client.Ask(context.Background(), Frame{Type: FrameTypeData, Lane: LaneOrdinary, Payload: []byte("x")})
+			result <- err
+		}()
+
+		_ = c2.Close()
+		err := <-result
+		_ = client.Close()
+
+		require.Error(t, err)
+		require.Truef(t, errors.Is(err, ErrDuplexClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe), "unexpected Ask error: %v", err)
+	}
+}
+
 func TestDuplexAskTimeoutClearsPending(t *testing.T) {
 	defer goleak.VerifyNone(t)
 

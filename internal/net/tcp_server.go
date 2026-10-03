@@ -241,7 +241,9 @@ func WithAllowThreadLocking(allow bool) ServerOption {
 // WithConnWrapper appends a [ConnWrapper] (e.g. compression) to the
 // server's wrapping pipeline, applied after TLS on the legacy path only.
 // Multiple wrappers are applied in the order they were added. Duplex
-// connections negotiate compression after HELLO instead.
+// connections never pass through these wrappers: they negotiate a codec in
+// HELLO and are wrapped after the handshake (see
+// [WithRemotingServerCompression]).
 func WithConnWrapper(w ConnWrapper) ServerOption {
 	return func(s *TCPServer) { s.connWrappers = append(s.connWrappers, w) }
 }

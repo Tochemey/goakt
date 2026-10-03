@@ -25,6 +25,9 @@ package remoteclient
 import (
 	"context"
 	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -35,6 +38,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
@@ -135,8 +139,91 @@ func TestDecodeControlReply(t *testing.T) {
 		Type:    inet.FrameTypeError,
 		Payload: errPayload,
 	}, inet.DecodeReplyEnvelope)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "NOT_FOUND")
+	require.ErrorIs(t, err, gerrors.ErrAddressNotFound)
+}
+
+// TestDuplexErrorFrameDecodesLikeLegacy checks that an internalpb.Error a
+// server sends as a duplex ERROR frame becomes the same Go error the legacy
+// path builds from the same internalpb.Error, so callers that classify errors
+// with errors.Is behave the same on both protocols.
+func TestDuplexErrorFrameDecodesLikeLegacy(t *testing.T) {
+	sentinels := []error{
+		gerrors.ErrRemoteSendFailure,
+		gerrors.ErrRemotingDisabled,
+		gerrors.ErrSystemShuttingDown,
+		gerrors.ErrMailboxFull,
+		gerrors.ErrAddressNotFound,
+		gerrors.ErrRequestTimeout,
+		gerrors.ErrActorAlreadyExists,
+		gerrors.ErrTypeNotRegistered,
+		gerrors.ErrClusterDisabled,
+		gerrors.ErrDead,
+	}
+
+	testCases := []struct {
+		name    string
+		code    internalpb.Code
+		message string
+	}{
+		{name: "unavailable", code: internalpb.Code_CODE_UNAVAILABLE, message: "tcp: worker pool is stopped"},
+		{name: "failed precondition remoting disabled", code: internalpb.Code_CODE_FAILED_PRECONDITION, message: gerrors.ErrRemotingDisabled.Error()},
+		{name: "failed precondition shutting down", code: internalpb.Code_CODE_FAILED_PRECONDITION, message: gerrors.ErrSystemShuttingDown.Error()},
+		{name: "resource exhausted mailbox full", code: internalpb.Code_CODE_RESOURCE_EXHAUSTED, message: gerrors.ErrMailboxFull.Error()},
+		{name: "not found", code: internalpb.Code_CODE_NOT_FOUND, message: "missing"},
+		{name: "deadline exceeded", code: internalpb.Code_CODE_DEADLINE_EXCEEDED, message: "too late"},
+		{name: "already exists", code: internalpb.Code_CODE_ALREADY_EXISTS, message: "actor=(a) " + gerrors.ErrActorAlreadyExists.Error()},
+		{name: "invalid argument", code: internalpb.Code_CODE_INVALID_ARGUMENT, message: "bad field"},
+		{name: "internal error", code: internalpb.Code_CODE_INTERNAL_ERROR, message: "boom"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			errMsg := internalpb.Error_builder{Code: tc.code, Message: tc.message}.Build()
+			payload, err := proto.Marshal(errMsg)
+			require.NoError(t, err)
+
+			legacy := checkProtoError(errMsg)
+			require.Error(t, legacy)
+
+			frame := inet.Frame{Type: inet.FrameTypeError, Correlation: 7, Payload: payload}
+			_, controlErr := decodeControlReply(frame, inet.DecodeReplyEnvelope)
+			require.Error(t, controlErr)
+
+			// duplexConn.Ask returns the ERROR frame together with a plain
+			// "<code>: <message>" error; the Ask call sites decode the frame.
+			askErr := duplexAskError(fmt.Errorf("%s: %s", tc.code, tc.message), frame)
+			require.Error(t, askErr)
+
+			for _, sentinel := range sentinels {
+				assert.Equal(t, errors.Is(legacy, sentinel), errors.Is(controlErr, sentinel), "decodeControlReply: errors.Is(%v)", sentinel)
+				assert.Equal(t, errors.Is(legacy, sentinel), errors.Is(askErr, sentinel), "duplexAskError: errors.Is(%v)", sentinel)
+			}
+
+			assert.EqualError(t, controlErr, legacy.Error())
+			assert.EqualError(t, askErr, legacy.Error())
+		})
+	}
+}
+
+// TestDuplexAskError checks that only an ERROR frame answering the request is
+// decoded as the peer's error; every other Ask failure keeps its transport
+// error mapping.
+func TestDuplexAskError(t *testing.T) {
+	t.Run("transport failure without a reply frame", func(t *testing.T) {
+		err := duplexAskError(io.EOF, inet.Frame{})
+		require.ErrorIs(t, err, io.EOF)
+	})
+
+	t.Run("backpressure keeps its sentinel", func(t *testing.T) {
+		err := duplexAskError(inet.ErrDuplexBackpressure, inet.Frame{})
+		require.ErrorIs(t, err, gerrors.ErrRemoteSendBackpressure)
+		require.ErrorIs(t, err, inet.ErrDuplexBackpressure)
+	})
+
+	t.Run("an ERROR frame without a correlation is not a reply", func(t *testing.T) {
+		err := duplexAskError(inet.ErrDuplexClosed, inet.Frame{Type: inet.FrameTypeError})
+		require.ErrorIs(t, err, inet.ErrDuplexClosed)
+	})
 }
 
 func TestDeserializeReplyEnvelope(t *testing.T) {

@@ -24,8 +24,10 @@ package remote
 
 // Compression represents the compression algorithm applied to data sent and
 // received over TCP connections between remote actor systems. Both the client
-// (Remoting) and the server (remote.Config) must agree on the algorithm;
-// a mismatch will produce unreadable frames.
+// (Remoting) and the server (remote.Config) must agree on the algorithm. On
+// the duplex protocol the two sides compare algorithms in the HELLO handshake
+// and a mismatch falls back to an uncompressed connection; on the legacy
+// protocol there is no negotiation and a mismatch produces unreadable frames.
 //
 // The default for both NewRemoting and NewConfig / DefaultConfig is
 // NoCompression. This matches the convention adopted by gRPC, Akka, Erlang

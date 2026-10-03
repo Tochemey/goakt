@@ -266,14 +266,15 @@ func (x *ProtoSerializer) UnmarshalBinary(data []byte) (proto.Message, protorefl
 
 // MarshalBinaryWithMetadata encodes a message with optional metadata into a
 // single frame. The extended frame format includes a 4-byte metadata length
-// field after the type name, followed by the serialized metadata bytes.
+// field after the name length, and the serialized metadata bytes between the
+// type name and the proto bytes.
 //
 // Extended frame layout (all integers are big-endian):
 //
-//	┌──────────┬──────────┬────────────┬──────────┬────────────┬──────────────┐
-//	│ totalLen │ nameLen  │ type name  │ metaLen  │ metadata   │ proto bytes  │
-//	│ 4 bytes  │ 4 bytes  │ N bytes    │ 4 bytes  │ K bytes    │ M bytes      │
-//	└──────────┴──────────┴────────────┴──────────┴────────────┴──────────────┘
+//	┌──────────┬──────────┬──────────┬────────────┬────────────┬──────────────┐
+//	│ totalLen │ nameLen  │ metaLen  │ type name  │ metadata   │ proto bytes  │
+//	│ 4 bytes  │ 4 bytes  │ 4 bytes  │ N bytes    │ K bytes    │ M bytes      │
+//	└──────────┴──────────┴──────────┴────────────┴────────────┴──────────────┘
 //
 //	totalLen = 4 + 4 + N + 4 + K + M   (covers the entire frame including itself)
 //
