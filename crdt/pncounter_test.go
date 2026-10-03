@@ -170,3 +170,35 @@ func TestPNCounter(t *testing.T) {
 		assert.Equal(t, int64(13), cloned.Value())
 	})
 }
+
+func TestPNCounterStateHash(t *testing.T) {
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewPNCounter().Increment("node-1", 5).Decrement("node-2", 2).Increment("node-1", 1)
+		b := NewPNCounter().Decrement("node-2", 2).Increment("node-1", 6)
+		assert.Equal(t, a.StateHash(), b.StateHash())
+	})
+
+	t.Run("merge in either direction hashes alike", func(t *testing.T) {
+		a := NewPNCounter().Increment("node-1", 5)
+		b := NewPNCounter().Decrement("node-2", 3)
+		ab := a.Merge(b).(*PNCounter)
+		ba := b.Merge(a).(*PNCounter)
+		assert.Equal(t, ab.StateHash(), ba.StateHash())
+		assert.NotEqual(t, a.StateHash(), ab.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		// the same value reached through different slots is a different state
+		assert.NotEqual(t, NewPNCounter().Increment("node-1", 5).StateHash(), NewPNCounter().Decrement("node-1", 5).StateHash())
+		assert.NotEqual(t, NewPNCounter().Increment("node-1", 5).StateHash(), NewPNCounter().Increment("node-1", 6).Decrement("node-1", 1).StateHash())
+		assert.NotEqual(t, NewPNCounter().StateHash(), NewGCounter().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		c := NewPNCounter().Increment("node-1", 5).Decrement("node-1", 2)
+		before := c.StateHash()
+		assert.Equal(t, before, c.Clone().(*PNCounter).StateHash())
+		c.ResetDelta()
+		assert.Equal(t, before, c.StateHash())
+	})
+}

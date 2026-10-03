@@ -144,6 +144,28 @@ func (m *ORMap) Merge(other ReplicatedData) ReplicatedData {
 	return merged
 }
 
+// StateHash returns the canonical content hash of the map: its key set and,
+// for each key in it, the content hash of the value. A value whose type does
+// not implement StateHasher contributes its key only. See StateHasher.
+func (m *ORMap) StateHash() uint64 {
+	var entries uint64
+
+	for key, dots := range m.keys.entries {
+		if len(dots) == 0 {
+			continue
+		}
+
+		var value uint64
+		if hasher, ok := m.values[key].(StateHasher); ok {
+			value = hasher.StateHash()
+		}
+
+		entries += hashParts(hashTagORMapEntry, hashValue(key), value)
+	}
+
+	return hashParts(hashTagORMap, m.keys.StateHash(), entries)
+}
+
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if there are no changes.
 func (m *ORMap) Delta() ReplicatedData {

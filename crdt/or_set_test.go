@@ -219,6 +219,160 @@ func TestORSet(t *testing.T) {
 		assert.True(t, replica.Contains("b"), "unrelated element must survive")
 	})
 
+	t.Run("delta add does not drop earlier elements of the same node", func(t *testing.T) {
+		// node-1 adds "a" (c=1) and ships its delta, then adds "b" (c=2) and
+		// ships only the second delta. The replica must end up with both.
+		s := NewORSet().Add("node-1", "a")
+		replica := NewORSet().Merge(s.Delta()).(*ORSet)
+		s.ResetDelta()
+		require.True(t, replica.Contains("a"))
+
+		s = s.Add("node-1", "b")
+		d := s.Delta()
+		require.NotNil(t, d)
+		s.ResetDelta()
+
+		replica = replica.Merge(d).(*ORSet)
+		assert.True(t, replica.Contains("a"), "earlier element must survive a later delta")
+		assert.True(t, replica.Contains("b"))
+
+		// A full-state exchange in either direction must not lose anything.
+		assert.ElementsMatch(t, []any{"a", "b"}, s.Merge(replica).(*ORSet).Elements())
+		assert.ElementsMatch(t, []any{"a", "b"}, replica.Merge(s).(*ORSet).Elements())
+	})
+
+	t.Run("delta remove does not drop unrelated lower-counter entries", func(t *testing.T) {
+		// node-1 adds "a" (c=1), adds "b" (c=2), syncs to replica, then
+		// removes only "b". The delta must remove "b" without disturbing "a".
+		s := NewORSet().Add("node-1", "a").Add("node-1", "b")
+		replica := NewORSet().Merge(s).(*ORSet)
+		s.ResetDelta()
+
+		s = s.Remove("b")
+		d := s.Delta()
+		require.NotNil(t, d)
+
+		replica = replica.Merge(d).(*ORSet)
+		assert.True(t, replica.Contains("a"), "unrelated element must survive")
+		assert.False(t, replica.Contains("b"), "removed element must disappear")
+	})
+
+	t.Run("delta remove of another node's element keeps that node's newer elements", func(t *testing.T) {
+		// node-2 knows node-1's "a" (c=1) and "b" (c=2) and removes "b".
+		// The replica also holds node-1's "c" (c=3), which node-2 has not seen.
+		origin := NewORSet().Add("node-1", "a").Add("node-1", "b")
+		remover := NewORSet().Merge(origin).(*ORSet)
+		replica := NewORSet().Merge(origin.Add("node-1", "c")).(*ORSet)
+
+		remover = remover.Remove("b")
+		d := remover.Delta()
+		require.NotNil(t, d)
+
+		replica = replica.Merge(d).(*ORSet)
+		assert.ElementsMatch(t, []any{"a", "c"}, replica.Elements())
+	})
+
+	t.Run("delta omits an element added and removed before the delta is taken", func(t *testing.T) {
+		s := NewORSet().Add("node-1", "a")
+		replica := NewORSet().Merge(s.Delta()).(*ORSet)
+		s.ResetDelta()
+
+		// "x" never exists on the origin once the update completes.
+		s = s.Add("node-1", "x").Remove("x")
+		require.False(t, s.Contains("x"))
+
+		d := s.Delta()
+		require.NotNil(t, d)
+		assert.False(t, d.(*ORSet).Contains("x"), "delta must not carry a removed dot")
+
+		replica = replica.Merge(d).(*ORSet)
+		assert.False(t, replica.Contains("x"), "replica must not gain an element the origin lacks")
+		assert.ElementsMatch(t, s.Elements(), replica.Elements())
+	})
+
+	t.Run("delta carries only the live dot of a re-added element", func(t *testing.T) {
+		s := NewORSet().Add("node-1", "x").Remove("x").Add("node-1", "x")
+		replica := NewORSet().Merge(s.Delta()).(*ORSet)
+		s.ResetDelta()
+		require.True(t, replica.Contains("x"))
+
+		entries, _ := replica.RawState()
+		require.Len(t, entries, 1)
+		assert.Equal(t, []Dot{{NodeID: "node-1", Counter: 2}}, entries[0].Dots)
+
+		s = s.Remove("x")
+		replica = replica.Merge(s.Delta()).(*ORSet)
+		assert.False(t, replica.Contains("x"))
+	})
+
+	t.Run("deltas converge in any delivery order with duplicates", func(t *testing.T) {
+		// Each step is one local update followed by Delta and ResetDelta,
+		// which is how the Replicator produces deltas.
+		steps := []func(*ORSet) *ORSet{
+			func(s *ORSet) *ORSet { return s.Add("node-1", "a") },
+			func(s *ORSet) *ORSet { return s.Add("node-1", "b") },
+			func(s *ORSet) *ORSet { return s.Remove("a") },
+			func(s *ORSet) *ORSet { return s.Add("node-1", "c").Add("node-1", "d").Remove("c") },
+			func(s *ORSet) *ORSet { return s.Add("node-1", "a") },
+		}
+
+		s := NewORSet()
+		deltas := make([]ReplicatedData, 0, len(steps))
+
+		for _, step := range steps {
+			s = step(s)
+			d := s.Delta()
+			require.NotNil(t, d)
+			deltas = append(deltas, d)
+			s.ResetDelta()
+		}
+
+		expected := []any{"a", "b", "d"}
+		require.ElementsMatch(t, expected, s.Elements())
+
+		var permute func(order []int, k int)
+		permute = func(order []int, k int) {
+			if k == len(order) {
+				replica := ReplicatedData(NewORSet().Add("node-2", "z"))
+
+				for _, i := range order {
+					replica = replica.Merge(deltas[i])
+					// duplicated delivery of the same delta
+					replica = replica.Merge(deltas[i])
+				}
+
+				// re-delivery of the oldest delta after everything else
+				replica = replica.Merge(deltas[0])
+				assert.ElementsMatch(t, append([]any{"z"}, expected...), replica.(*ORSet).Elements(), "order %v", order)
+				return
+			}
+
+			for i := k; i < len(order); i++ {
+				order[k], order[i] = order[i], order[k]
+				permute(order, k+1)
+				order[k], order[i] = order[i], order[k]
+			}
+		}
+
+		permute([]int{0, 1, 2, 3, 4}, 0)
+	})
+
+	t.Run("delta merge is commutative, associative and idempotent", func(t *testing.T) {
+		s := NewORSet().Add("node-1", "a")
+		d1 := s.Delta()
+		s.ResetDelta()
+		s = s.Add("node-1", "b").Remove("a")
+		d2 := s.Delta()
+		s.ResetDelta()
+		peer := NewORSet().Add("node-2", "c")
+
+		expected := []any{"b", "c"}
+		assert.ElementsMatch(t, expected, peer.Merge(d1).Merge(d2).(*ORSet).Elements())
+		assert.ElementsMatch(t, expected, d2.Merge(d1).Merge(peer).(*ORSet).Elements())
+		assert.ElementsMatch(t, expected, peer.Merge(d1.Merge(d2)).(*ORSet).Elements())
+		assert.ElementsMatch(t, expected, d1.Merge(peer).Merge(d2).Merge(d2).Merge(d1).(*ORSet).Elements())
+	})
+
 	t.Run("clone produces independent copy", func(t *testing.T) {
 		s := NewORSet().Add("node-1", "a")
 		cloned := s.Clone().(*ORSet)
@@ -362,5 +516,59 @@ func TestCloneDots(t *testing.T) {
 		assert.Equal(t, dots, cloned)
 		cloned[0].counter = 99
 		assert.Equal(t, uint64(1), dots[0].counter)
+	})
+}
+
+func TestORSetStateHash(t *testing.T) {
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewORSet().Add("node-1", "x").Add("node-2", "y").Add("node-3", "z")
+		b := NewORSet().Add("node-3", "z").Add("node-2", "y").Add("node-1", "x")
+		assert.Equal(t, a.StateHash(), b.StateHash())
+	})
+
+	t.Run("merge in any order hashes alike", func(t *testing.T) {
+		a := NewORSet().Add("node-1", "x").Add("node-1", "shared")
+		b := NewORSet().Add("node-2", "y").Add("node-2", "shared")
+		c := NewORSet().Add("node-3", "z").Add("node-3", "gone").Remove("gone")
+
+		replicas := []*ORSet{a, b, c}
+		orders := [][]int{{0, 1, 2}, {0, 2, 1}, {1, 0, 2}, {1, 2, 0}, {2, 0, 1}, {2, 1, 0}}
+		expected := a.Merge(b).Merge(c).(*ORSet).StateHash()
+
+		for _, order := range orders {
+			merged := replicas[order[0]].Merge(replicas[order[1]]).Merge(replicas[order[2]]).(*ORSet)
+			assert.Equal(t, expected, merged.StateHash(), "order %v", order)
+
+			nested := replicas[order[0]].Merge(replicas[order[1]].Merge(replicas[order[2]])).(*ORSet)
+			assert.Equal(t, expected, nested.StateHash(), "nested order %v", order)
+		}
+
+		assert.NotEqual(t, a.StateHash(), expected)
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		base := NewORSet().Add("node-1", "x")
+		assert.NotEqual(t, base.StateHash(), NewORSet().Add("node-1", "y").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewORSet().Add("node-2", "x").StateHash())
+		assert.NotEqual(t, base.StateHash(), base.Add("node-1", "y").StateHash())
+		// a removal leaves the clock behind: the set is empty but not new
+		assert.NotEqual(t, NewORSet().StateHash(), base.Remove("x").StateHash())
+		assert.NotEqual(t, base.StateHash(), base.Remove("x").StateHash())
+		// an element of another type is another element
+		assert.NotEqual(t, NewORSet().Add("node-1", 1).StateHash(), NewORSet().Add("node-1", "1").StateHash())
+	})
+
+	t.Run("compaction does not change the hash", func(t *testing.T) {
+		s := NewORSet().Add("node-1", "x").Add("node-1", "x").Add("node-2", "x").Add("node-1", "y")
+		assert.Equal(t, s.StateHash(), s.Compact().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		s := NewORSet().Add("node-1", "x").Add("node-2", "y").Remove("y")
+		before := s.StateHash()
+		assert.Equal(t, before, s.Clone().(*ORSet).StateHash())
+		s.ResetDelta()
+		assert.Equal(t, before, s.StateHash())
+		assert.Equal(t, before, ORSetFromRawState(s.RawState()).StateHash())
 	})
 }

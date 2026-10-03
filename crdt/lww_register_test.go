@@ -141,3 +141,40 @@ func TestLWWRegister(t *testing.T) {
 		assert.Equal(t, true, r.Value())
 	})
 }
+
+func TestLWWRegisterStateHash(t *testing.T) {
+	early := time.Unix(100, 0)
+	late := time.Unix(200, 0)
+
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewLWWRegister().Set("old", early, "node-1").Set("new", late, "node-2")
+		b := NewLWWRegister().Set("new", late, "node-2")
+		assert.Equal(t, a.StateHash(), b.StateHash())
+	})
+
+	t.Run("merge in either direction hashes alike", func(t *testing.T) {
+		a := NewLWWRegister().Set("old", early, "node-1")
+		b := NewLWWRegister().Set("new", late, "node-2")
+		ab := a.Merge(b).(*LWWRegister)
+		ba := b.Merge(a).(*LWWRegister)
+		assert.Equal(t, ab.StateHash(), ba.StateHash())
+		assert.Equal(t, b.StateHash(), ab.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		base := NewLWWRegister().Set("value", early, "node-1")
+		assert.NotEqual(t, base.StateHash(), NewLWWRegister().Set("other", early, "node-1").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewLWWRegister().Set("value", late, "node-1").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewLWWRegister().Set("value", early, "node-2").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewLWWRegister().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		r := NewLWWRegister().Set("value", early, "node-1")
+		before := r.StateHash()
+		assert.Equal(t, before, r.Clone().(*LWWRegister).StateHash())
+		r.ResetDelta()
+		assert.Equal(t, before, r.StateHash())
+		assert.Equal(t, before, LWWRegisterFromState(r.Value(), r.Timestamp(), r.NodeID()).StateHash())
+	})
+}

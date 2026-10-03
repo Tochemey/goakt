@@ -160,3 +160,25 @@ func TestFlag(t *testing.T) {
 		assert.NotSame(t, f, cloned)
 	})
 }
+
+func TestFlagStateHash(t *testing.T) {
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewFlag().Enable().Enable()
+		b := NewFlag().Merge(NewFlag().Enable()).(*Flag)
+		c := NewFlag().Enable().Merge(NewFlag()).(*Flag)
+		assert.Equal(t, a.StateHash(), b.StateHash())
+		assert.Equal(t, a.StateHash(), c.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		assert.NotEqual(t, NewFlag().StateHash(), NewFlag().Enable().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		f := NewFlag().Enable()
+		before := f.StateHash()
+		assert.Equal(t, before, f.Clone().(*Flag).StateHash())
+		f.ResetDelta()
+		assert.Equal(t, before, f.StateHash())
+	})
+}
