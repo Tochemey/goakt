@@ -1326,11 +1326,14 @@ func (b0 CRDTDigestEntry_builder) Build() *CRDTDigestEntry {
 
 // CRDTDigest is exchanged between Replicators during anti-entropy.
 type CRDTDigest struct {
-	state                 protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Entries    *[]*CRDTDigestEntry    `protobuf:"bytes,1,rep,name=entries,proto3"`
-	xxx_hidden_Tombstones *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries     *[]*CRDTDigestEntry    `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Tombstones  *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
+	xxx_hidden_SinceNanos  int64                  `protobuf:"varint,3,opt,name=since_nanos,json=sinceNanos,proto3,oneof"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *CRDTDigest) Reset() {
@@ -1376,12 +1379,36 @@ func (x *CRDTDigest) GetTombstones() []*CRDTTombstone {
 	return nil
 }
 
+func (x *CRDTDigest) GetSinceNanos() int64 {
+	if x != nil {
+		return x.xxx_hidden_SinceNanos
+	}
+	return 0
+}
+
 func (x *CRDTDigest) SetEntries(v []*CRDTDigestEntry) {
 	x.xxx_hidden_Entries = &v
 }
 
 func (x *CRDTDigest) SetTombstones(v []*CRDTTombstone) {
 	x.xxx_hidden_Tombstones = &v
+}
+
+func (x *CRDTDigest) SetSinceNanos(v int64) {
+	x.xxx_hidden_SinceNanos = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+}
+
+func (x *CRDTDigest) HasSinceNanos() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *CRDTDigest) ClearSinceNanos() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_SinceNanos = 0
 }
 
 type CRDTDigest_builder struct {
@@ -1393,6 +1420,14 @@ type CRDTDigest_builder struct {
 	// deletes the keys it has not seen deleted. A node that predates the
 	// field sends none.
 	Tombstones []*CRDTTombstone
+	// Specifies, in Unix nanoseconds, the time from which the sender knows
+	// every deletion made in the cluster: a key it does not hold and was
+	// created before that time has been deleted. A node that returns after a
+	// gap longer than the tombstone TTL keeps the keys it held before the gap
+	// only when a digest whose time is at or before the gap lists them. A node
+	// that is itself back from such a gap, and a node that predates the field,
+	// leave it unset.
+	SinceNanos *int64
 }
 
 func (b0 CRDTDigest_builder) Build() *CRDTDigest {
@@ -1401,6 +1436,10 @@ func (b0 CRDTDigest_builder) Build() *CRDTDigest {
 	_, _ = b, x
 	x.xxx_hidden_Entries = &b.Entries
 	x.xxx_hidden_Tombstones = &b.Tombstones
+	if b.SinceNanos != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_SinceNanos = *b.SinceNanos
+	}
 	return m0
 }
 
@@ -1502,11 +1541,14 @@ func (b0 CRDTFullStateEntry_builder) Build() *CRDTFullStateEntry {
 
 // CRDTFullState is the anti-entropy response containing full state for divergent keys.
 type CRDTFullState struct {
-	state                 protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Entries    *[]*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
-	xxx_hidden_Tombstones *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Entries     *[]*CRDTFullStateEntry `protobuf:"bytes,1,rep,name=entries,proto3"`
+	xxx_hidden_Tombstones  *[]*CRDTTombstone      `protobuf:"bytes,2,rep,name=tombstones,proto3"`
+	xxx_hidden_SinceNanos  int64                  `protobuf:"varint,3,opt,name=since_nanos,json=sinceNanos,proto3,oneof"`
+	XXX_raceDetectHookData protoimpl.RaceDetectHookData
+	XXX_presence           [1]uint32
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *CRDTFullState) Reset() {
@@ -1552,12 +1594,36 @@ func (x *CRDTFullState) GetTombstones() []*CRDTTombstone {
 	return nil
 }
 
+func (x *CRDTFullState) GetSinceNanos() int64 {
+	if x != nil {
+		return x.xxx_hidden_SinceNanos
+	}
+	return 0
+}
+
 func (x *CRDTFullState) SetEntries(v []*CRDTFullStateEntry) {
 	x.xxx_hidden_Entries = &v
 }
 
 func (x *CRDTFullState) SetTombstones(v []*CRDTTombstone) {
 	x.xxx_hidden_Tombstones = &v
+}
+
+func (x *CRDTFullState) SetSinceNanos(v int64) {
+	x.xxx_hidden_SinceNanos = v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 2, 3)
+}
+
+func (x *CRDTFullState) HasSinceNanos() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 2)
+}
+
+func (x *CRDTFullState) ClearSinceNanos() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 2)
+	x.xxx_hidden_SinceNanos = 0
 }
 
 type CRDTFullState_builder struct {
@@ -1569,6 +1635,11 @@ type CRDTFullState_builder struct {
 	// listed, so the digest sender deletes them. A node that predates the
 	// field sends none.
 	Tombstones []*CRDTTombstone
+	// Specifies the responder's time from which it knows every deletion, as
+	// in CRDTDigest. The digest sender has merged the responder's state and
+	// takes this time when it is earlier than its own. Unset under the same
+	// conditions as in CRDTDigest.
+	SinceNanos *int64
 }
 
 func (b0 CRDTFullState_builder) Build() *CRDTFullState {
@@ -1577,6 +1648,10 @@ func (b0 CRDTFullState_builder) Build() *CRDTFullState {
 	_, _ = b, x
 	x.xxx_hidden_Entries = &b.Entries
 	x.xxx_hidden_Tombstones = &b.Tombstones
+	if b.SinceNanos != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 2, 3)
+		x.xxx_hidden_SinceNanos = *b.SinceNanos
+	}
 	return m0
 }
 
@@ -1880,12 +1955,13 @@ func (b0 CRDTReadResponse_builder) Build() *CRDTReadResponse {
 
 // CRDTSnapshotEntry is a single key's state in a durable BoltDB snapshot.
 type CRDTSnapshotEntry struct {
-	state              protoimpl.MessageState `protogen:"opaque.v1"`
-	xxx_hidden_Key     *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
-	xxx_hidden_Data    *CRDTData              `protobuf:"bytes,2,opt,name=data,proto3"`
-	xxx_hidden_Version uint64                 `protobuf:"varint,3,opt,name=version,proto3"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state                     protoimpl.MessageState `protogen:"opaque.v1"`
+	xxx_hidden_Key            *CRDTKey               `protobuf:"bytes,1,opt,name=key,proto3"`
+	xxx_hidden_Data           *CRDTData              `protobuf:"bytes,2,opt,name=data,proto3"`
+	xxx_hidden_Version        uint64                 `protobuf:"varint,3,opt,name=version,proto3"`
+	xxx_hidden_ChangedAtNanos int64                  `protobuf:"varint,4,opt,name=changed_at_nanos,json=changedAtNanos,proto3"`
+	unknownFields             protoimpl.UnknownFields
+	sizeCache                 protoimpl.SizeCache
 }
 
 func (x *CRDTSnapshotEntry) Reset() {
@@ -1934,6 +2010,13 @@ func (x *CRDTSnapshotEntry) GetVersion() uint64 {
 	return 0
 }
 
+func (x *CRDTSnapshotEntry) GetChangedAtNanos() int64 {
+	if x != nil {
+		return x.xxx_hidden_ChangedAtNanos
+	}
+	return 0
+}
+
 func (x *CRDTSnapshotEntry) SetKey(v *CRDTKey) {
 	x.xxx_hidden_Key = v
 }
@@ -1944,6 +2027,10 @@ func (x *CRDTSnapshotEntry) SetData(v *CRDTData) {
 
 func (x *CRDTSnapshotEntry) SetVersion(v uint64) {
 	x.xxx_hidden_Version = v
+}
+
+func (x *CRDTSnapshotEntry) SetChangedAtNanos(v int64) {
+	x.xxx_hidden_ChangedAtNanos = v
 }
 
 func (x *CRDTSnapshotEntry) HasKey() bool {
@@ -1977,6 +2064,11 @@ type CRDTSnapshotEntry_builder struct {
 	Data *CRDTData
 	// Specifies the local version counter.
 	Version uint64
+	// Specifies, in Unix nanoseconds, the last time this node updated the key
+	// itself. Zero when it has only merged the key from peers. A key updated
+	// after the node's last contact with a peer is not doubted when the node
+	// returns after a gap longer than the tombstone TTL.
+	ChangedAtNanos int64
 }
 
 func (b0 CRDTSnapshotEntry_builder) Build() *CRDTSnapshotEntry {
@@ -1986,6 +2078,7 @@ func (b0 CRDTSnapshotEntry_builder) Build() *CRDTSnapshotEntry {
 	x.xxx_hidden_Key = b.Key
 	x.xxx_hidden_Data = b.Data
 	x.xxx_hidden_Version = b.Version
+	x.xxx_hidden_ChangedAtNanos = b.ChangedAtNanos
 	return m0
 }
 
@@ -2523,21 +2616,27 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\aversion\x18\x02 \x01(\x04R\aversion\x12\"\n" +
 	"\n" +
 	"state_hash\x18\x03 \x01(\x06H\x00R\tstateHash\x88\x01\x01B\r\n" +
-	"\v_state_hash\"~\n" +
+	"\v_state_hash\"\xb4\x01\n" +
 	"\n" +
 	"CRDTDigest\x125\n" +
 	"\aentries\x18\x01 \x03(\v2\x1b.internalpb.CRDTDigestEntryR\aentries\x129\n" +
 	"\n" +
 	"tombstones\x18\x02 \x03(\v2\x19.internalpb.CRDTTombstoneR\n" +
-	"tombstones\"e\n" +
+	"tombstones\x12$\n" +
+	"\vsince_nanos\x18\x03 \x01(\x03H\x00R\n" +
+	"sinceNanos\x88\x01\x01B\x0e\n" +
+	"\f_since_nanos\"e\n" +
 	"\x12CRDTFullStateEntry\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
-	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"\x84\x01\n" +
+	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\"\xba\x01\n" +
 	"\rCRDTFullState\x128\n" +
 	"\aentries\x18\x01 \x03(\v2\x1e.internalpb.CRDTFullStateEntryR\aentries\x129\n" +
 	"\n" +
 	"tombstones\x18\x02 \x03(\v2\x19.internalpb.CRDTTombstoneR\n" +
-	"tombstones\"\x88\x01\n" +
+	"tombstones\x12$\n" +
+	"\vsince_nanos\x18\x03 \x01(\x03H\x00R\n" +
+	"sinceNanos\x88\x01\x01B\x0e\n" +
+	"\f_since_nanos\"\x88\x01\n" +
 	"\rCRDTTombstone\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x10deleted_at_nanos\x18\x02 \x01(\x03R\x0edeletedAtNanos\x12&\n" +
@@ -2548,11 +2647,12 @@ const file_internal_crdt_proto_rawDesc = "" +
 	"\x10CRDTReadResponse\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\x12\x1b\n" +
-	"\tfrom_node\x18\x03 \x01(\tR\bfromNode\"~\n" +
+	"\tfrom_node\x18\x03 \x01(\tR\bfromNode\"\xa8\x01\n" +
 	"\x11CRDTSnapshotEntry\x12%\n" +
 	"\x03key\x18\x01 \x01(\v2\x13.internalpb.CRDTKeyR\x03key\x12(\n" +
 	"\x04data\x18\x02 \x01(\v2\x14.internalpb.CRDTDataR\x04data\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\x04R\aversion\"\xd3\x01\n" +
+	"\aversion\x18\x03 \x01(\x04R\aversion\x12(\n" +
+	"\x10changed_at_nanos\x18\x04 \x01(\x03R\x0echangedAtNanos\"\xd3\x01\n" +
 	"\x0eCRDTDeltaBatch\x12-\n" +
 	"\x06deltas\x18\x01 \x03(\v2\x15.internalpb.CRDTDeltaR\x06deltas\x129\n" +
 	"\n" +
@@ -2667,6 +2767,8 @@ func file_internal_crdt_proto_init() {
 		(*cRDTData_MvRegister)(nil),
 	}
 	file_internal_crdt_proto_msgTypes[10].OneofWrappers = []any{}
+	file_internal_crdt_proto_msgTypes[11].OneofWrappers = []any{}
+	file_internal_crdt_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

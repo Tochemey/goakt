@@ -24,6 +24,7 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
   - [The content hash](#the-content-hash)
 - [24.6 Consistency model](#246-consistency-model)
 - [24.7 Deletion, tombstones and pruning](#247-deletion-tombstones-and-pruning)
+  - [Stale keys](#stale-keys)
 - [24.8 Snapshots](#248-snapshots)
 - [24.9 Cluster integration and multi-datacenter](#249-cluster-integration-and-multi-datacenter)
   - [Join and departure](#join-and-departure)
@@ -197,6 +198,10 @@ If `spawnReplicator` fails, `Start` shuts the Replicator down if it exists, stop
 | `versions` | key ID to a local `uint64` counter (§24.5) |
 | `hashes` | key ID to the cached content hash of the stored value (§24.5) |
 | `tombstones` | key ID to the time and node of a deletion |
+| `lastContact` | the last time a peer Replicator reached this node; saved with the snapshot (§24.7) |
+| `since` | the time from which this node knows every deletion; sent in digests and answers, saved with the snapshot, zero while it has stale keys (§24.7) |
+| `changedAt` | key ID to the time of the last local update |
+| `staleKeys`, `gapStart`, `heardWhileStale` | while back from a gap longer than the tombstone TTL: the keys held before the gap, the start of the gap, and the peers whose digest arrived since (§24.7) |
 | `watchers` | key ID to the PIDs subscribed to changes |
 | `subscriptions` | key IDs seen; written by `trackKey`, never read |
 | `pendingDeltas`, `pendingTombstones` | key ID to the one delta or the one tombstone waiting for the cross-datacenter flush, each with the sequence number of its last write (§24.9) |
@@ -336,9 +341,9 @@ Publication through the topic actor can lose messages: a partition, a node resta
 
 On each `antiEntropyTick` (default every 30 seconds), `handleAntiEntropy`:
 
-1. Returns when there is no cluster, no remoting client, or no peer.
+1. Returns when there is no cluster or no remoting client. When this node has stale keys and every current peer that runs a Replicator has sent it a digest since, keeps them (§24.7). Returns when there is no peer.
 2. Picks one peer at random and looks up its Replicator by reserved name.
-3. Sends it a `CRDTDigest` built by `buildDigest`: one entry per stored key with the key, its type, its local version and the content hash of its value, and every tombstone this node retains that is within the tombstone TTL.
+3. Sends it a `CRDTDigest` built by `buildDigest`: one entry per stored key with the key, its type, its local version and the content hash of its value, every tombstone this node retains that is within the tombstone TTL, and this node's `since` unless it has stale keys.
 4. Counts the round, whether or not the send succeeded. A failed lookup is not counted.
 
 The peer's `handleDigest` first applies every tombstone in the digest by the rule of `applyTombstone` (§24.7), so a key the sender deleted is removed before anything is compared. It then answers with a `CRDTFullState` holding its full value of every key the sender needs, and its own tombstone for every key the digest lists that it has deleted, when that tombstone is within its TTL. A key the digest lacks is always sent; for a key both nodes hold, `differsFromPeer` decides:
@@ -349,7 +354,7 @@ The peer's `handleDigest` first applies every tombstone in the digest by the rul
 | carries a content hash | the hash differs from the local one, whatever the versions |
 | carries no content hash | the local version is higher than the entry's |
 
-It sends nothing when no key and no tombstone qualifies. A tombstoned key is not in the store, so it is never sent. `handleFullState` on the first node applies the tombstones of the answer by the same rule, then skips tombstoned keys. It stores an unknown key, increments its version and notifies its watchers. It merges a known key with `mergeValue`, and increments the version and notifies the watchers only when the value changed.
+It sends nothing when no key and no tombstone qualifies and the digest's `since` is absent or not later than its own. A tombstoned key is not in the store, so it is never sent, and neither is a stale key (§24.7). The answer carries the responder's `since` unless it has stale keys; the first node takes it when it is earlier than its own. A digest whose `since` is later is answered even with nothing else to send, so two nodes that hold the same state still pass the earlier `since` on. `handleFullState` on the first node applies the tombstones of the answer by the same rule, then skips tombstoned keys. It stores an unknown key, increments its version and notifies its watchers. It merges a known key with `mergeValue`, and increments the version and notifies the watchers only when the value changed.
 
 **The exchange is a pull, and it converges.** A round is one-directional: A sends its digest, receives B's state and merges it, and B learns nothing. Every node sends its own digest to a random peer on every tick, so for any two nodes each one sooner or later pulls from the other. Once A has pulled from B and B from A, both hold the merge of the two states, their hashes are equal, and the rounds between them send nothing. Neither direction depends on the other node's choice of peer, so neither can starve. When only one node is behind, the node that is ahead still receives the older state; the merge changes nothing and is neither counted in the version nor announced.
 
@@ -435,21 +440,37 @@ On each `pruneTick` (default every 5 minutes), `handlePrune`:
 1. Removes every tombstone older than the tombstone TTL (default 24 hours).
 2. Replaces every stored value that implements `Compactable` with its `CompactData()`. The content hash of the value is the same after compaction (§24.5).
 
-After a tombstone expires the key can be created again, by a new update or by a peer that never received the tombstone. The TTL must outlast the time a deletion needs to reach every replica, across datacenters too.
+After a tombstone expires the key can be created again by a new update. The TTL must outlast the time a deletion needs to reach every replica, across datacenters too.
+
+### Stale keys
+
+A node that was out of contact for longer than the TTL may still hold a key deleted meanwhile, whose tombstone has expired on every node. Restored from its snapshot or kept running through a partition, it would offer the key to peers that hold neither the key nor a tombstone, and they would take it as new. The Replicator prevents this with two times:
+
+- `lastContact`, updated by `observeContact` on every delta, tombstone, digest, anti-entropy answer and coordinated read from a peer, and saved with the snapshot.
+- `since`, the time from which the node knows every deletion: its start, the earlier `since` saved with a snapshot restored within the TTL, or the earlier `since` of a peer whose anti-entropy answer it merged.
+
+When `observeContact` finds the previous contact older than the TTL (`gapBeyondTTL`), `markStaleKeys` records the gap's start and marks as stale every stored key not updated locally since (`changedAt`). `restoreContact` does the same at once for a node restored from a snapshot saved longer than the TTL before, so it never advertises the `since` it had before the gap. A node that never had a contact has no gap, and neither has one without anti-entropy: no digest would resolve its stale keys. While a node has stale keys:
+
+1. It does not send them: `handleDigest` leaves them out of its answer, `handleReadRequest` answers them as absent, and `handleDataCenterFlush` holds the pending cross-datacenter deltas. Its own reads still return them.
+2. It sends no `since`, so it cannot resolve another node's stale keys. A snapshot saves the start of the gap as its last contact and no `since` (`snapshotContact`), so a restart before the stale keys are resolved finds the gap again.
+3. A key it updates, or receives from a peer in a delta or an anti-entropy answer, is no longer stale.
+
+`resolveStaleKeys`, called by `handleDigest`, records the digest's sender. A digest whose `since` is at or before the start of the gap comes from a node that saw every deletion of the gap, and it lists every key that node holds: a stale key it lists is kept, one it does not list is removed with its pending cross-datacenter delta, as a tombstone would remove it, and the node takes the peer's `since`. A digest without a `since` or with a later one resolves nothing. When every current peer that runs a Replicator has sent a digest and none resolved the stale keys, `handleAntiEntropy` keeps them (`keepStaleKeys`): no node knows more, as after a restart of the whole cluster.
 
 ## 24.8 Snapshots
 
 Snapshots are enabled when both `WithSnapshotInterval` (default zero, disabled) and `WithSnapshotDir` are set.
 
-`ddata.Store` (`internal/ddata/snapshot.go`) is a BoltDB file `crdt-snapshot.db` in that directory, mode `0600`, with one bucket `crdt_snapshots`. It stores bytes: the Replicator does the encoding. `Save` clears the bucket and writes every entry in one transaction, keyed by key ID. `Load` returns every entry. `Close` is idempotent; `Save` and `Load` on a closed store return `ErrStoreClosed`; `Remove` deletes the file and requires a closed store.
+`ddata.Store` (`internal/ddata/snapshot.go`) is a BoltDB file `crdt-snapshot.db` in that directory, mode `0600`, with a bucket `crdt_snapshots` for the entries and a bucket `crdt_snapshot_meta` for the last contact and the `since`. It stores bytes: the Replicator does the encoding. `Save` clears the entries bucket and writes every entry, keyed by key ID, the last contact and the `since` in one transaction. `Load` returns every entry. `Contact` returns the last contact and the `since`; zero, or none saved as in a file of an older version, reads back as the zero time. `Close` is idempotent; `Save`, `Load` and `Contact` on a closed store return `ErrStoreClosed`; `Remove` deletes the file and requires a closed store.
 
 `restoreFromSnapshot`, in `PreStart`:
 
 1. Does nothing when snapshots are not configured.
 2. Opens the store. A failure to open or to load is logged as a warning and the Replicator starts without that data; it does not fail the start.
-3. For each entry, decodes the key and the data with a `CRDTValueSerializer`; an entry that fails is skipped with a warning. The value, its type and its **version** are restored.
+3. For each entry, decodes the key and the data with a `CRDTValueSerializer`; an entry that fails is skipped with a warning. The value, its type, its **version** and the time of its last local update are restored.
+4. Applies the last contact and the `since` (`restoreContact`, §24.7). Times that cannot be read are logged as a warning and count as none.
 
-`handleSnapshot`, on each `snapshotTick`, builds one `CRDTSnapshotEntry` per stored key (`buildSnapshotEntries`) and saves them. An error is logged. `PostStop` does the same and returns the error. `buildSnapshotEntries` fails for the whole snapshot when one stored key has no recorded type or cannot be encoded.
+`handleSnapshot`, on each `snapshotTick`, builds one `CRDTSnapshotEntry` per stored key (`buildSnapshotEntries`) and saves them with the times `snapshotContact` returns. An error is logged. `PostStop` does the same and returns the error. `buildSnapshotEntries` fails for the whole snapshot when one stored key has no recorded type or cannot be encoded.
 
 Tombstones, watchers and the cross-datacenter buffers are not part of the snapshot.
 
@@ -551,10 +572,10 @@ The flush runs inside one turn of the actor, sends included, so no entry is writ
 | `CRDTData` | a `oneof` over `GCounterData`, `PNCounterData`, `LWWRegisterData`, `ORSetData`, `ORMapData`, `FlagData`, `MVRegisterData` |
 | `CRDTDelta` | key, origin node, data |
 | `CRDTTombstone` | key, deletion time in nanoseconds, deleting node |
-| `CRDTDigest`, `CRDTDigestEntry` | key, version and the optional content hash `state_hash` per entry; the sender's live tombstones in `tombstones` |
-| `CRDTFullState`, `CRDTFullStateEntry` | key and data per entry; the responder's live tombstones for the keys the digest listed in `tombstones` |
+| `CRDTDigest`, `CRDTDigestEntry` | key, version and the optional content hash `state_hash` per entry; the sender's live tombstones in `tombstones`; the sender's optional `since_nanos` |
+| `CRDTFullState`, `CRDTFullStateEntry` | key and data per entry; the responder's live tombstones for the keys the digest listed in `tombstones`; the responder's optional `since_nanos` |
 | `CRDTReadRequest`, `CRDTReadResponse` | key and requesting node; key, data (absent when the key is unknown) and answering node |
-| `CRDTSnapshotEntry` | key, data, version |
+| `CRDTSnapshotEntry` | key, data, version, time of the last local update in `changed_at_nanos` |
 | `CRDTDeltaBatch` | deltas, tombstones, origin `DataCenter`, send time in nanoseconds |
 
 Per type: `GCounterData` is a map of node to count; `PNCounterData` is two of them; `LWWRegisterData` is value bytes, timestamp and node; `ORSetData` is a list of entries (element bytes and dots) and a clock; `ORMapData` is a list of entries (key bytes and a nested `CRDTData`) and the key set as `ORSetData`; `FlagData` is a boolean; `MVRegisterData` is a list of entries (value bytes, node, counter) and a clock.
@@ -644,7 +665,9 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | A full-state entry for a tombstoned key is skipped | `TestReplicatorHandleDigestAndFullState` in `actor/replicator_test.go` |
 | A read request is answered with the local value, or with no data for an unknown key | `TestReplicatorHandleReadRequest` in `actor/replicator_test.go` |
 | A snapshot restores value, type and version; stopping the system writes a final snapshot; a stored key without a type fails the snapshot build | `TestReplicatorRestoreFromSnapshot`, `TestReplicatorPostStopWithSnapshot` and `TestReplicatorBuildSnapshotEntriesErrors` in `actor/replicator_test.go` |
-| The snapshot store round-trips entries, overwrites on save, and refuses use after `Close` | `TestStore` in `internal/ddata/snapshot_test.go` |
+| The snapshot store round-trips entries and both contact times, overwrites on save, reads a missing or zero time as the zero time, fails on a malformed one, and refuses use after `Close` | `TestStore` in `internal/ddata/snapshot_test.go` |
+| A contact within the TTL marks no key stale. After a longer gap, a peer that saw the whole gap removes the stale keys it does not list; a peer that came after the gap, or that sends no `since`, resolves nothing and is sent no stale key. A key written after the gap, or received from a peer in a delta or an answer, is not stale. A coordinated read gets no stale key, and a node with stale keys sends no `since`. An answer passes on an earlier `since` only, and a digest with a later `since` is answered with it even when nothing else differs. Without anti-entropy no key is marked stale. A node restored after the TTL marks its keys stale before any contact; one restored within the TTL keeps its earlier `since`; a snapshot taken while keys are stale keeps the gap. The stale keys are kept once every peer that runs a Replicator is heard from, and the cross-datacenter flush waits until then. The last contact and the local update times come back from the snapshot, and a last contact that cannot be read counts as no contact | `TestReplicatorStaleKeys` in `actor/replicator_test.go` |
+| In a three-node cluster, a node restored from its snapshot after the tombstone TTL does not bring back a key deleted while it was away, nor one whose tombstone is still live, whether its peers kept running or restarted from their snapshots during the gap | `TestReplicatorCluster` in `actor/replicator_test.go` |
 | A batch from another datacenter merges its deltas and applies its tombstones; a batch from the local datacenter is dropped; a batch without origin is processed | `TestReplicatorIncomingBatch` and `TestReplicatorIncomingBatchEdgeCases` in `actor/replicator_test.go` |
 | A non-leader sends no batch; a leader does and empties its buffers; a stale cache with fail-on-stale skips the flush and counts it | `TestReplicatorDataCenterFlushNonLeaderSkips`, `TestReplicatorDataCenterFlushLeaderSendsToRemoteDC`, `TestReplicatorDataCenterFlushDrainsPendingBuffers` and `TestReplicatorDataCenterFlushStaleCacheSkips` in `actor/replicator_test.go` |
 | A batch the leader could not send, or had no datacenter to send to, stays in the buffer and goes out on a later tick with the changes made in between; a non-leader holds one pending delta per key; a local tombstone replaces the pending delta of its key and a peer's tombstone drops it | `TestReplicatorDataCenterPendingBuffers` in `actor/replicator_test.go` |
@@ -660,7 +683,7 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 - The message IDs `<nodeID>:<sequence>` and `<nodeID>:del:<sequence>`.
 - `WithMaxDeltaSize` and its 64 KB default: the option is stored and nothing reads it.
 - The `subscriptions` map, which is written and never read.
-- The snapshot file name, bucket name, file mode, and BoltDB's five-second open timeout.
+- The snapshot file name, bucket names, file mode, and BoltDB's five-second open timeout.
 - The wire enum being the Go `DataType` plus one.
 - The per-key version being a plain counter.
 - The content hash: xxh3, its 64-bit width, the tags, and the encodings used for user values.
@@ -697,8 +720,15 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | With cross-datacenter replication enabled and no remote datacenter on record, the pending entries are never cleared | `replicatorActor.dropAcceptedPending` in `actor/replicator.go` |
 | A tombstone that arrives later than the tombstone TTL after the deletion deletes the key and is not kept | `replicatorActor.handleProtoTombstone` in `actor/replicator.go` |
 | A receiver whose clock or tombstone TTL makes an old tombstone look live keeps it and rejects the delta of the recreated key in the same batch | `replicatorActor.handleProtoTombstone` and `replicatorActor.handleDelta` in `actor/replicator.go` |
-| Anti-entropy carries a deletion only while some node retains the tombstone; a node away for longer than the tombstone TTL that still holds the key spreads it again on its return | `replicatorActor.buildDigest` and `replicatorActor.handlePrune` in `actor/replicator.go` |
-| A node away for longer than the TTL that missed a deletion and the later re-creation of a key holds the old incarnation; anti-entropy merges it into the new one on every node | `replicatorActor.handleFullState` in `actor/replicator.go` |
+| A node back after a gap longer than the tombstone TTL holds its stale keys back from peers until they are resolved, and its own reads still return them | `replicatorActor.markStaleKeys` and `replicatorActor.handleDigest` in `actor/replicator.go` |
+| Two groups of two or more nodes that run apart for longer than the TTL never mark keys stale, and bring back each other's deleted keys when they merge | `replicatorActor.observeContact` in `actor/replicator.go` |
+| When no current peer saw the whole gap or took its `since` from one that did, for example when every such node left the cluster or all restarted at once without a snapshot, the stale keys are kept, including the keys those nodes deleted | `replicatorActor.handleAntiEntropy` in `actor/replicator.go` |
+| A key the returning node updates is no longer stale, so a key deleted while it was away comes back with its old value merged into the update | `replicatorActor.handleUpdate` in `actor/replicator.go` |
+| A digest, delta or tombstone from another datacenter counts as contact: a node cut off from its own datacenter but reached from another does not mark its keys stale, and a remote node can resolve them | `replicatorActor.observeContact` in `actor/replicator.go` |
+| Without anti-entropy no key is marked stale | `replicatorActor.gapBeyondTTL` in `actor/replicator.go` |
+| A key created on a node just before its gap that never reached a peer is removed when a peer that saw the whole gap does not list it | `replicatorActor.resolveStaleKeys` in `actor/replicator.go` |
+| A key deleted and created again after the TTL is merged with the old copy a returning node holds, since the peer that resolves its stale keys lists the key | `replicatorActor.resolveStaleKeys` and `replicatorActor.handleFullState` in `actor/replicator.go` |
+| Staleness compares times taken on different nodes, so clocks that differ by more than the margin between the gap and the TTL can decide it either way | `replicatorActor.observeContact` and `replicatorActor.resolveStaleKeys` in `actor/replicator.go` |
 | Two nodes that deleted the same key independently keep the later deletion; a deletion wins over any value of the key, whenever the value was written | `replicatorActor.applyTombstone` in `actor/replicator.go` |
 | Against a node whose digests carry no tombstones, deletions travel neither way | `replicatorActor.handleDigest` in `actor/replicator.go` |
 | A batch from another datacenter is merged on the receiving node only | `replicatorActor.handleIncomingBatch` in `actor/replicator.go` |
@@ -709,7 +739,7 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 
 1. Node A increments a `GCounter` slot from 4 to 5 and the delta is delivered twice to node B. Using §24.2, explain why B's value is correct, and using §24.4 and §24.5 say how B knows that the second delivery changed nothing and what it therefore leaves alone.
 2. A three-node cluster handles an `Update` with `WriteTo: Majority`. How many peers receive the delta directly, by which path do they receive it again, and what does the caller learn if both peers are unreachable?
-3. Node A deletes a key while node C is partitioned. The partition heals after the tombstone TTL has passed on A and B. Trace, through §24.5 and §24.7, how the key returns.
+3. Node A deletes a key while node C is partitioned. The partition heals after the tombstone TTL has passed on A and B. Trace, through §24.5 and §24.7, why C does not send the key to A or B and how C loses it. What happens instead if A and B were both restarted without snapshots during the partition?
 4. A Replicator restarts with snapshots enabled. List what it has again after `PreStart` and what it has lost, and say how each lost item is or is not recovered.
 5. In a two-datacenter deployment a non-leader node of DC-West updates a key. Describe the two steps by which the value reaches a non-leader node of DC-East, and name the interval that bounds each.
 6. Nodes A and B each apply one local update to the same `GCounter` key, on different slots, and every delta between them is lost. Why can a version counter alone not tell them apart, how does the content hash, and how many rounds in which direction does it take until both hold the merged value? What changes in your answer if B runs code that sends no `state_hash`?

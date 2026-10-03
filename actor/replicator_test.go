@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -33,15 +34,19 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/bbolt"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
+	"github.com/tochemey/goakt/v4/discovery"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/cluster"
 	"github.com/tochemey/goakt/v4/internal/codec"
 	"github.com/tochemey/goakt/v4/internal/ddata"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -1423,6 +1428,122 @@ func TestReplicatorCluster(t *testing.T) {
 			assert.Nil(t, data, "node %d should not have the deleted counter", i+1)
 		}
 	})
+
+	t.Run("a node back after the tombstone TTL does not bring a deleted key back", func(t *testing.T) {
+		for _, restartPeers := range []bool{false, true} {
+			name := "with its peers running"
+			if restartPeers {
+				name = "with its peers restarted from their snapshots during the gap"
+			}
+
+			t.Run(name, func(t *testing.T) {
+				ctx := context.TODO()
+				srv := startNatsServer(t)
+				// longer than a restarted node takes to be seen by its peer, so the
+				// peers themselves never go a whole TTL without contact
+				ttl := 5 * time.Second
+				tick := 250 * time.Millisecond
+
+				// every node keeps its store on disk and comes back with it
+				dirs := [3]string{t.TempDir(), t.TempDir(), t.TempDir()}
+				optionsOf := func(i int) testClusterOption {
+					return withTestCRDT(crdt.WithAntiEntropyInterval(tick), crdt.WithPruneInterval(tick), crdt.WithTombstoneTTL(ttl), crdt.WithSnapshotInterval(tick), crdt.WithSnapshotDir(dirs[i]))
+				}
+
+				var nodes [3]ActorSystem
+				var sds [3]discovery.Provider
+				for i := range 3 {
+					nodes[i], sds[i] = startNATsSystem(t, srv.Addr().String(), optionsOf(i))
+				}
+
+				peersOf := func(node ActorSystem) int {
+					peers, err := node.Peers(ctx, time.Second)
+					if err != nil {
+						return -1
+					}
+
+					return len(peers)
+				}
+
+				// holds runs inside require.Eventually, off the test goroutine, so it
+				// reports a failed read as not holding instead of failing the test
+				holds := func(node ActorSystem, key crdt.Key) bool {
+					resp, err := Ask(ctx, node.Replicator(), &crdt.Get{Key: key}, time.Second)
+					return err == nil && resp.(*crdt.GetResponse).Data != nil
+				}
+
+				restart := func(i int) {
+					require.NoError(t, nodes[i].Stop(ctx))
+					require.NoError(t, sds[i].Close())
+					nodes[i], sds[i] = startNATsSystem(t, srv.Addr().String(), optionsOf(i))
+				}
+
+				require.Eventually(t, func() bool { return peersOf(nodes[0]) == 2 }, 30*time.Second, 50*time.Millisecond)
+
+				// beyond is deleted longer than the TTL before node 3 returns, within
+				// is deleted just before; both are on every node when node 3 leaves
+				beyond, within := crdt.GCounterKey("beyond"), crdt.GCounterKey("within")
+				for _, key := range []crdt.Key{beyond, within} {
+					_, err := Ask(ctx, nodes[0].Replicator(), &crdt.Update{
+						Key:     key,
+						Initial: crdt.NewGCounter(),
+						Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+							return current.(*crdt.GCounter).Increment("node-1", 1)
+						},
+					}, time.Second)
+					require.NoError(t, err)
+
+					for _, node := range nodes {
+						require.Eventually(t, func() bool { return holds(node, key) }, 10*time.Second, 50*time.Millisecond)
+					}
+				}
+
+				require.NoError(t, nodes[2].Stop(ctx))
+				require.NoError(t, sds[2].Close())
+				require.Eventually(t, func() bool { return peersOf(nodes[0]) == 1 }, 30*time.Second, 50*time.Millisecond)
+
+				_, err := Ask(ctx, nodes[0].Replicator(), &crdt.Delete{Key: beyond}, time.Second)
+				require.NoError(t, err)
+				require.Eventually(t, func() bool { return !holds(nodes[1], beyond) }, 10*time.Second, 50*time.Millisecond)
+
+				// node 1 and node 2 restart one after the other, each with a store
+				// equal to its peer's, so the time from which they know every
+				// deletion travels only as itself
+				if restartPeers {
+					for _, i := range []int{0, 1} {
+						restart(i)
+						require.Eventually(t, func() bool { return peersOf(nodes[i]) == 1 }, 30*time.Second, 50*time.Millisecond)
+						pause.For(4 * tick)
+					}
+				}
+
+				// the tombstone of beyond expires and is pruned on both nodes
+				pause.For(ttl + 4*tick)
+
+				_, err = Ask(ctx, nodes[0].Replicator(), &crdt.Delete{Key: within}, time.Second)
+				require.NoError(t, err)
+				require.Eventually(t, func() bool { return !holds(nodes[1], within) }, 10*time.Second, 50*time.Millisecond)
+
+				nodes[2], sds[2] = startNATsSystem(t, srv.Addr().String(), optionsOf(2))
+				require.Eventually(t, func() bool { return peersOf(nodes[0]) == 2 }, 30*time.Second, 50*time.Millisecond)
+
+				// many anti-entropy rounds between every pair of nodes
+				pause.For(20 * tick)
+
+				for i, node := range nodes {
+					assert.False(t, holds(node, beyond), "node %d holds beyond", i+1)
+					assert.False(t, holds(node, within), "node %d holds within", i+1)
+				}
+
+				for i := 2; i >= 0; i-- {
+					require.NoError(t, nodes[i].Stop(ctx))
+					require.NoError(t, sds[i].Close())
+				}
+
+				srv.Shutdown()
+			})
+		}
+	})
 }
 
 func TestCRDTConfigExtension(t *testing.T) {
@@ -1560,7 +1681,7 @@ func TestReplicatorRestoreFromSnapshot(t *testing.T) {
 				Version: 5,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries))
+		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -3184,7 +3305,7 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries))
+		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -3216,7 +3337,7 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries))
+		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -6495,4 +6616,483 @@ func BenchmarkReplicatorFullStateRoundTrip(b *testing.B) {
 			}
 		})
 	}
+}
+
+// TestReplicatorStaleKeys covers a node back from a gap without contact longer
+// than the tombstone TTL: the keys it held before the gap are stale, because
+// they may have been deleted with a tombstone that has expired since. They are
+// kept from peers until a peer that saw the whole gap lists them, or until
+// every peer has been heard from and none saw the whole gap.
+func TestReplicatorStaleKeys(t *testing.T) {
+	const ttl = time.Minute
+	kept := crdt.GCounterKey("kept")
+	deleted := crdt.GCounterKey("deleted")
+
+	// start spawns a replicator and a probe that stands for a peer replicator.
+	// Anti-entropy is on, without which no gap is recognized, but its rounds
+	// are an hour apart and find no cluster.
+	start := func(t *testing.T, opts ...crdt.Option) (*PID, *replicatorActor, *PID, *MockMessageProbe) {
+		t.Helper()
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		opts = append([]crdt.Option{crdt.WithAntiEntropyInterval(time.Hour), crdt.WithPruneInterval(0), crdt.WithTombstoneTTL(ttl)}, opts...)
+		sys.(*actorSystem).extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: crdt.NewConfig(opts...)})
+
+		actor := newReplicatorActor()
+		repl, err := sys.Spawn(ctx, "replicator", actor, WithLongLived())
+		require.NoError(t, err)
+
+		probe := NewMockMessageProbe()
+		peer, err := sys.Spawn(ctx, "peer", probe, WithLongLived())
+		require.NoError(t, err)
+		return repl, actor, peer, probe
+	}
+
+	increment := func(t *testing.T, repl *PID, key crdt.Key) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-a", 1)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	// holds reports whether the replicator holds the key; its answer also
+	// proves that every message sent to the replicator before has been handled
+	holds := func(t *testing.T, repl *PID, key crdt.Key) bool {
+		t.Helper()
+		resp, err := Ask(context.TODO(), repl, &crdt.Get{Key: key}, time.Second)
+		require.NoError(t, err)
+		return resp.(*crdt.GetResponse).Data != nil
+	}
+
+	// awayFor puts the replicator's last contact gap ago and its local writes
+	// before that, as for a node that held its keys when it lost contact. It
+	// returns the start of the gap.
+	awayFor := func(t *testing.T, repl *PID, actor *replicatorActor, gap time.Duration) time.Time {
+		t.Helper()
+		holds(t, repl, kept)
+		actor.lastContact = time.Now().Add(-gap)
+
+		for keyID := range actor.changedAt {
+			actor.changedAt[keyID] = actor.lastContact.Add(-time.Second)
+		}
+
+		return actor.lastContact
+	}
+
+	// digestOf is the digest of a peer that holds the given keys and knows
+	// every deletion since the given time, or that sends no time when zero
+	digestOf := func(since time.Time, keys ...crdt.Key) *internalpb.CRDTDigest {
+		entries := make([]*internalpb.CRDTDigestEntry, 0, len(keys))
+		for _, key := range keys {
+			entries = append(entries, internalpb.CRDTDigestEntry_builder{Key: codec.EncodeCRDTKey(key.ID(), key.Type()), Version: 1}.Build())
+		}
+
+		digest := internalpb.CRDTDigest_builder{Entries: entries}.Build()
+		if !since.IsZero() {
+			digest.SetSinceNanos(since.UnixNano())
+		}
+
+		return digest
+	}
+
+	isStale := func(t *testing.T, repl *PID, actor *replicatorActor) bool {
+		t.Helper()
+		holds(t, repl, kept)
+		return actor.hasStaleKeys()
+	}
+
+	t.Run("a contact within the TTL marks no key stale and the answer carries the since", func(t *testing.T) {
+		repl, actor, peer, probe := start(t)
+		increment(t, repl, kept)
+		awayFor(t, repl, actor, ttl/2)
+
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(time.Now())))
+
+		select {
+		case message := <-probe.received:
+			fullState, ok := message.(*internalpb.CRDTFullState)
+			require.True(t, ok, "expected a full state, got %T", message)
+			require.Len(t, fullState.GetEntries(), 1)
+			assert.Equal(t, kept.ID(), fullState.GetEntries()[0].GetKey().GetId())
+			assert.True(t, fullState.HasSinceNanos())
+		case <-time.After(3 * time.Second):
+			t.Fatal("the peer was not sent the key it lacks")
+		}
+
+		assert.False(t, isStale(t, repl, actor))
+	})
+
+	t.Run("a peer that saw the whole gap removes the stale keys it does not list", func(t *testing.T) {
+		repl, actor, peer, _ := start(t)
+		increment(t, repl, kept)
+		increment(t, repl, deleted)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+
+		peerSince := gapStart.Add(-time.Hour)
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(peerSince, kept)))
+
+		assert.True(t, holds(t, repl, kept))
+		assert.False(t, holds(t, repl, deleted))
+		assert.False(t, actor.hasStaleKeys())
+		assert.True(t, peerSince.Equal(actor.since))
+	})
+
+	t.Run("a peer that came after the gap resolves nothing and is sent no stale key", func(t *testing.T) {
+		repl, actor, peer, probe := start(t)
+		increment(t, repl, kept)
+		awayFor(t, repl, actor, 2*ttl)
+
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(time.Now())))
+
+		probeIsQuiet(t, peer, probe)
+		assert.True(t, holds(t, repl, kept))
+		assert.True(t, isStale(t, repl, actor))
+	})
+
+	t.Run("a digest without a since resolves nothing", func(t *testing.T) {
+		repl, actor, peer, probe := start(t)
+		increment(t, repl, kept)
+		awayFor(t, repl, actor, 2*ttl)
+
+		// a peer that has stale keys itself, or that predates the field
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(time.Time{})))
+
+		probeIsQuiet(t, peer, probe)
+		assert.True(t, holds(t, repl, kept))
+		assert.True(t, isStale(t, repl, actor))
+	})
+
+	t.Run("a key written after the gap is not stale", func(t *testing.T) {
+		repl, actor, peer, _ := start(t)
+		increment(t, repl, deleted)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+		increment(t, repl, kept)
+
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(gapStart.Add(-time.Hour))))
+
+		assert.True(t, holds(t, repl, kept))
+		assert.False(t, holds(t, repl, deleted))
+	})
+
+	t.Run("a key a peer sends in a delta is no longer stale", func(t *testing.T) {
+		ctx := context.TODO()
+		repl, actor, peer, _ := start(t)
+		increment(t, repl, kept)
+		increment(t, repl, deleted)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+
+		require.NoError(t, Tell(ctx, repl, &crdtDelta{KeyID: kept.ID(), DataType: kept.Type(), Delta: crdt.NewGCounter().Increment("node-c", 1), Origin: "node-c"}))
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(gapStart.Add(-time.Hour))))
+
+		assert.True(t, holds(t, repl, kept))
+		assert.False(t, holds(t, repl, deleted))
+	})
+
+	t.Run("a key a peer sends in an anti-entropy answer is no longer stale", func(t *testing.T) {
+		ctx := context.TODO()
+		repl, actor, peer, _ := start(t)
+		increment(t, repl, kept)
+		increment(t, repl, deleted)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+
+		data, err := ddata.EncodeCRDT(crdt.NewGCounter().Increment("node-c", 1), ddata.NewCRDTValueSerializer())
+		require.NoError(t, err)
+		answer := internalpb.CRDTFullState_builder{
+			Entries: []*internalpb.CRDTFullStateEntry{
+				internalpb.CRDTFullStateEntry_builder{Key: codec.EncodeCRDTKey(kept.ID(), kept.Type()), Data: data}.Build(),
+			},
+		}.Build()
+
+		require.NoError(t, peer.Tell(ctx, repl, answer))
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(gapStart.Add(-time.Hour))))
+
+		assert.True(t, holds(t, repl, kept))
+		assert.False(t, holds(t, repl, deleted))
+	})
+
+	t.Run("a coordinated read gets no stale key", func(t *testing.T) {
+		repl, actor, _, _ := start(t)
+		increment(t, repl, kept)
+		awayFor(t, repl, actor, 2*ttl)
+
+		request := internalpb.CRDTReadRequest_builder{Key: codec.EncodeCRDTKey(kept.ID(), kept.Type()), FromNode: "node-b"}.Build()
+		resp, err := Ask(context.TODO(), repl, request, time.Second)
+		require.NoError(t, err)
+
+		readResp, ok := resp.(*internalpb.CRDTReadResponse)
+		require.True(t, ok)
+		assert.Nil(t, readResp.GetData())
+
+		// this node's own reads still see the key
+		assert.True(t, holds(t, repl, kept))
+		assert.True(t, actor.hasStaleKeys())
+	})
+
+	t.Run("a node with stale keys sends no since until they are resolved", func(t *testing.T) {
+		ctx := context.TODO()
+		repl, actor, peer, _ := start(t)
+		increment(t, repl, kept)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(time.Now())))
+		resp, err := Ask(ctx, repl, &dataCenterDigestRequest{}, time.Second)
+		require.NoError(t, err)
+		assert.False(t, resp.(*internalpb.CRDTDigest).HasSinceNanos())
+
+		peerSince := gapStart.Add(-time.Hour)
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(peerSince, kept)))
+		resp, err = Ask(ctx, repl, &dataCenterDigestRequest{}, time.Second)
+		require.NoError(t, err)
+		assert.Equal(t, peerSince.UnixNano(), resp.(*internalpb.CRDTDigest).GetSinceNanos())
+	})
+
+	t.Run("an anti-entropy answer passes on an earlier since only", func(t *testing.T) {
+		ctx := context.TODO()
+		repl, actor, peer, _ := start(t)
+		holds(t, repl, kept)
+		own := actor.since
+
+		earlier := own.Add(-time.Hour)
+		require.NoError(t, peer.Tell(ctx, repl, internalpb.CRDTFullState_builder{SinceNanos: proto.Int64(earlier.UnixNano())}.Build()))
+		holds(t, repl, kept)
+		assert.True(t, earlier.Equal(actor.since))
+
+		later := own.Add(time.Hour)
+		require.NoError(t, peer.Tell(ctx, repl, internalpb.CRDTFullState_builder{SinceNanos: proto.Int64(later.UnixNano())}.Build()))
+		holds(t, repl, kept)
+		assert.True(t, earlier.Equal(actor.since))
+	})
+
+	t.Run("a peer whose since is later is answered with this node's since", func(t *testing.T) {
+		ctx := context.TODO()
+		repl, actor, peer, probe := start(t)
+		holds(t, repl, kept)
+		own := actor.since
+
+		// the peer holds what this node holds, so only the since is news to it
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(own.Add(time.Hour))))
+
+		select {
+		case message := <-probe.received:
+			fullState, ok := message.(*internalpb.CRDTFullState)
+			require.True(t, ok, "expected a full state, got %T", message)
+			assert.Empty(t, fullState.GetEntries())
+			assert.Equal(t, own.UnixNano(), fullState.GetSinceNanos())
+		case <-time.After(3 * time.Second):
+			t.Fatal("the peer was not told this node's since")
+		}
+
+		// a peer that knows deletions from as early or earlier needs nothing
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(own)))
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(own.Add(-time.Hour))))
+		probeIsQuiet(t, peer, probe)
+	})
+
+	t.Run("a snapshot taken while keys are stale keeps the gap", func(t *testing.T) {
+		ctx := context.TODO()
+		dir := t.TempDir()
+		repl, actor, peer, _ := start(t, crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		increment(t, repl, kept)
+		gapStart := awayFor(t, repl, actor, 2*ttl)
+
+		// the first contact marks the key stale; the replicator stops before it is resolved
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(time.Now())))
+		require.True(t, isStale(t, repl, actor))
+		require.NoError(t, repl.Shutdown(ctx))
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(ttl), crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		r.since = time.Now()
+		require.NoError(t, r.restoreFromSnapshot())
+		t.Cleanup(func() { _ = r.snapshotStore.Close() })
+
+		assert.Equal(t, gapStart.UnixNano(), r.lastContact.UnixNano())
+		assert.True(t, r.hasStaleKeys())
+		assert.Contains(t, r.staleKeys, kept.ID())
+	})
+
+	t.Run("without anti-entropy a gap marks no key stale", func(t *testing.T) {
+		repl, actor, peer, _ := start(t, crdt.WithAntiEntropyInterval(0))
+		increment(t, repl, kept)
+		awayFor(t, repl, actor, 2*ttl)
+
+		require.NoError(t, peer.Tell(context.TODO(), repl, digestOf(time.Now())))
+		assert.False(t, isStale(t, repl, actor))
+	})
+
+	// restored returns a replicator restored from a snapshot that holds the
+	// kept key and was saved with the given contact times
+	restored := func(t *testing.T, lastContact, since time.Time, opts ...crdt.Option) *replicatorActor {
+		t.Helper()
+		dir := t.TempDir()
+
+		source := newTestReplicator()
+		source.serializer = ddata.NewCRDTValueSerializer()
+		source.store[kept.ID()] = crdt.NewGCounter().Increment("node-a", 1)
+		source.keyTypes[kept.ID()] = kept.Type()
+		entries, err := source.buildSnapshotEntries()
+		require.NoError(t, err)
+
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.Save(entries, lastContact, since))
+		require.NoError(t, store.Close())
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(append([]crdt.Option{crdt.WithTombstoneTTL(ttl), crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir)}, opts...)...)
+		r.since = time.Now()
+		require.NoError(t, r.restoreFromSnapshot())
+		t.Cleanup(func() { _ = r.snapshotStore.Close() })
+		return r
+	}
+
+	t.Run("a node restored after the TTL marks its keys stale before any contact", func(t *testing.T) {
+		r := restored(t, time.Now().Add(-2*ttl), time.Now().Add(-3*ttl))
+		assert.True(t, r.hasStaleKeys())
+		assert.Contains(t, r.staleKeys, kept.ID())
+		assert.True(t, r.since.IsZero())
+		assert.False(t, r.buildDigest().HasSinceNanos())
+
+		// without anti-entropy there is no gap
+		r = restored(t, time.Now().Add(-2*ttl), time.Now().Add(-3*ttl), crdt.WithAntiEntropyInterval(0))
+		assert.False(t, r.hasStaleKeys())
+	})
+
+	t.Run("a node restored within the TTL keeps its earlier since", func(t *testing.T) {
+		since := time.Unix(0, time.Now().Add(-time.Hour).UnixNano())
+		r := restored(t, time.Now().Add(-ttl/2), since)
+		assert.False(t, r.hasStaleKeys())
+		assert.True(t, since.Equal(r.since))
+
+		// a saved since later than its start changes nothing
+		r = restored(t, time.Now().Add(-ttl/2), time.Now().Add(time.Hour))
+		assert.False(t, r.since.After(time.Now()))
+	})
+
+	t.Run("only peers that run a replicator have to be heard from", func(t *testing.T) {
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(crdt.WithRole("data"))
+		r.markStaleKeys()
+		r.heardWhileStale["10.0.0.1:9000"] = types.Unit{}
+
+		peers := []*cluster.Peer{
+			{Host: "10.0.0.1", RemotingPort: 9000, Roles: []string{"data"}},
+			{Host: "10.0.0.2", RemotingPort: 9000},
+		}
+		assert.True(t, r.heardFromEveryPeer(peers))
+
+		peers = append(peers, &cluster.Peer{Host: "10.0.0.3", RemotingPort: 9000, Roles: []string{"data"}})
+		assert.False(t, r.heardFromEveryPeer(peers))
+
+		// without a role every peer runs one
+		r.config = crdt.NewConfig()
+		assert.False(t, r.heardFromEveryPeer(peers[:2]))
+	})
+
+	t.Run("stale keys are kept once every peer is heard from and none saw the whole gap", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, repl, actor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(nil), nil)
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		probe := NewMockMessageProbe()
+		peer, err := sys.Spawn(ctx, "peer", probe, WithLongLived())
+		require.NoError(t, err)
+
+		increment(t, repl, kept)
+		require.Contains(t, actor.pendingDeltas, kept.ID())
+		awayFor(t, repl, actor, 48*time.Hour)
+
+		// the only peer came after the gap
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(time.Now())))
+		require.True(t, isStale(t, repl, actor))
+
+		// the delta for the remote datacenters waits: the flush stops before
+		// it asks for the leadership, which the cluster mock does not expect
+		require.NoError(t, Tell(ctx, repl, &dataCenterFlushTick{}))
+		require.True(t, isStale(t, repl, actor))
+		assert.Contains(t, actor.pendingDeltas, kept.ID())
+
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{{Host: peer.Path().Host(), RemotingPort: peer.Path().Port()}}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("unreachable"))
+
+		before := time.Now()
+		require.NoError(t, Tell(ctx, repl, &antiEntropyTick{}))
+		assert.False(t, isStale(t, repl, actor))
+		assert.True(t, holds(t, repl, kept))
+		assert.False(t, actor.since.Before(before))
+	})
+
+	t.Run("the last contact and the local write times come back from the snapshot", func(t *testing.T) {
+		ctx := context.TODO()
+		dir := t.TempDir()
+		repl, actor, peer, _ := start(t, crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		increment(t, repl, kept)
+		require.NoError(t, peer.Tell(ctx, repl, digestOf(time.Now())))
+		holds(t, repl, kept)
+		lastContact, changedAt := actor.lastContact, actor.changedAt[kept.ID()]
+		require.False(t, lastContact.IsZero())
+
+		// the final snapshot is written when the replicator stops
+		require.NoError(t, repl.Shutdown(ctx))
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		require.NoError(t, r.restoreFromSnapshot())
+		t.Cleanup(func() { _ = r.snapshotStore.Close() })
+
+		assert.Equal(t, lastContact.UnixNano(), r.lastContact.UnixNano())
+		assert.Equal(t, changedAt.UnixNano(), r.changedAt[kept.ID()].UnixNano())
+	})
+
+	t.Run("a last contact that cannot be read is a warning and no contact", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+		require.NoError(t, store.Save(nil, time.Now(), time.Time{}))
+		require.NoError(t, store.Close())
+
+		// a last contact of the wrong size
+		db, err := bbolt.Open(filepath.Join(dir, "crdt-snapshot.db"), 0o600, nil)
+		require.NoError(t, err)
+		require.NoError(t, db.Update(func(tx *bbolt.Tx) error {
+			return tx.Bucket([]byte("crdt_snapshot_meta")).Put([]byte("last_contact"), []byte{0x01})
+		}))
+		require.NoError(t, db.Close())
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		require.NoError(t, r.restoreFromSnapshot())
+		t.Cleanup(func() { _ = r.snapshotStore.Close() })
+
+		assert.True(t, r.lastContact.IsZero())
+	})
+
+	t.Run("the periodic snapshot saves the last contact", func(t *testing.T) {
+		dir := t.TempDir()
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(crdt.WithSnapshotInterval(time.Minute), crdt.WithSnapshotDir(dir))
+		require.NoError(t, r.restoreFromSnapshot())
+		t.Cleanup(func() { _ = r.snapshotStore.Close() })
+
+		r.lastContact = time.Unix(0, time.Now().UnixNano())
+		r.handleSnapshot()
+
+		saved, _, err := r.snapshotStore.Contact()
+		require.NoError(t, err)
+		assert.True(t, r.lastContact.Equal(saved))
+	})
 }

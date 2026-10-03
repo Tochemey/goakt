@@ -2946,6 +2946,7 @@ func newTestReplicator() *replicatorActor {
 	r.tombstones = make(map[string]*tombstone)
 	r.versions = make(map[string]uint64)
 	r.hashes = make(map[string]uint64)
+	r.changedAt = make(map[string]time.Time)
 	r.pendingDeltas = make(map[string]*pendingDelta)
 	r.pendingTombstones = make(map[string]*pendingTombstone)
 	r.dataCenterAccepted = make(map[string]uint64)

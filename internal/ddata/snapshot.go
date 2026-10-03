@@ -23,6 +23,7 @@
 package ddata
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -38,9 +39,12 @@ import (
 )
 
 const (
-	bucketName             = "crdt_snapshots"
-	fileMode   os.FileMode = 0o600
-	fileName               = "crdt-snapshot.db"
+	bucketName                 = "crdt_snapshots"
+	metaBucketName             = "crdt_snapshot_meta"
+	lastContactKey             = "last_contact"
+	sinceKey                   = "since"
+	fileMode       os.FileMode = 0o600
+	fileName                   = "crdt-snapshot.db"
 )
 
 var (
@@ -78,7 +82,11 @@ func NewStore(dir string) (*Store, error) {
 
 	bucket := []byte(bucketName)
 	if err := db.Update(func(tx *bbolt.Tx) error {
-		_, e := tx.CreateBucketIfNotExists(bucket)
+		if _, e := tx.CreateBucketIfNotExists(bucket); e != nil {
+			return e
+		}
+
+		_, e := tx.CreateBucketIfNotExists([]byte(metaBucketName))
 		return e
 	}); err != nil {
 		_ = db.Close()
@@ -88,9 +96,13 @@ func NewStore(dir string) (*Store, error) {
 	return &Store{db: db, bucket: bucket, path: path}, nil
 }
 
-// Save persists the pre-encoded CRDT snapshot entries to BoltDB.
-// Each entry is keyed by its CRDT key ID.
-func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry) error {
+// Save persists the pre-encoded CRDT snapshot entries to BoltDB in one
+// transaction with two times of the node: the last time it heard from a peer
+// Replicator, and the time from which it knows every deletion. Each entry is
+// keyed by its CRDT key ID. A node restored from the snapshot compares the
+// last contact with the tombstone TTL to know whether the deletions made
+// while it was away may have expired. A zero time is saved as none.
+func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry, lastContact, since time.Time) error {
 	if s.closed.Load() {
 		return ErrStoreClosed
 	}
@@ -99,6 +111,19 @@ func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry) error {
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("crdt: snapshot bucket %q missing", bucketName)
+		}
+
+		meta := tx.Bucket([]byte(metaBucketName))
+		if meta == nil {
+			return fmt.Errorf("crdt: snapshot bucket %q missing", metaBucketName)
+		}
+
+		if err := meta.Put([]byte(lastContactKey), encodeTime(lastContact)); err != nil {
+			return err
+		}
+
+		if err := meta.Put([]byte(sinceKey), encodeTime(since)); err != nil {
+			return err
 		}
 
 		// clear existing entries
@@ -157,6 +182,34 @@ func (s *Store) Load() (map[string]*internalpb.CRDTSnapshotEntry, error) {
 	return entries, nil
 }
 
+// Contact returns the last contact and the since saved by Save. A time that
+// was zero, or that was not saved, as in a snapshot written by a version that
+// predates it, is returned as the zero time.
+func (s *Store) Contact() (lastContact, since time.Time, err error) {
+	if s.closed.Load() {
+		return time.Time{}, time.Time{}, ErrStoreClosed
+	}
+
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(metaBucketName))
+		if bucket == nil {
+			return nil
+		}
+
+		if lastContact, err = decodeTime(bucket.Get([]byte(lastContactKey))); err != nil {
+			return fmt.Errorf("crdt: last contact: %w", err)
+		}
+
+		if since, err = decodeTime(bucket.Get([]byte(sinceKey))); err != nil {
+			return fmt.Errorf("crdt: since: %w", err)
+		}
+
+		return nil
+	})
+
+	return lastContact, since, err
+}
+
 // Close releases the underlying BoltDB handle without removing the snapshot file.
 // Use Remove to delete the snapshot file when it is no longer needed.
 func (s *Store) Close() error {
@@ -184,4 +237,36 @@ func (s *Store) EnsureOpen() error {
 		return ErrStoreClosed
 	}
 	return nil
+}
+
+// encodeTime encodes a time as its Unix nanoseconds in eight big-endian
+// bytes. The zero time, which has no Unix nanoseconds, is encoded as zero.
+func encodeTime(t time.Time) []byte {
+	var nanos int64
+	if !t.IsZero() {
+		nanos = t.UnixNano()
+	}
+
+	raw := make([]byte, 8)
+	binary.BigEndian.PutUint64(raw, uint64(nanos))
+	return raw
+}
+
+// decodeTime decodes a time encoded by encodeTime. Nil and zero decode as the
+// zero time; any length other than eight bytes is malformed.
+func decodeTime(raw []byte) (time.Time, error) {
+	if raw == nil {
+		return time.Time{}, nil
+	}
+
+	if len(raw) != 8 {
+		return time.Time{}, fmt.Errorf("malformed time of %d bytes", len(raw))
+	}
+
+	nanos := int64(binary.BigEndian.Uint64(raw))
+	if nanos == 0 {
+		return time.Time{}, nil
+	}
+
+	return time.Unix(0, nanos), nil
 }
