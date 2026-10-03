@@ -1424,7 +1424,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		expectedErr := errors.New("claim failed")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
-		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Times(grainRegistryWriteAttempts)
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, expectedErr)
@@ -1542,7 +1542,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		expectedErr := errors.New("claim failed")
 
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Once()
-		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Once()
+		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, expectedErr).Times(grainRegistryWriteAttempts)
 
 		got, err := sys.ensureGrainProcess(ctx, id)
 		require.ErrorIs(t, err, expectedErr)
@@ -1681,7 +1681,7 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		cl.EXPECT().GrainExists(ctx, id.String()).Return(false, nil).Twice()
 		// the claim succeeds, the publication fails
 		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(nil).Once()
-		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(expectedErr).Once()
+		cl.EXPECT().PutGrain(ctx, mock.Anything).Return(expectedErr).Times(grainRegistryWriteAttempts)
 		// the failed publication deactivates the grain, which releases its record
 		cl.EXPECT().ReleaseGrain(mock.Anything, id.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Once()
 

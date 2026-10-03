@@ -387,7 +387,8 @@ func (w *relocationWorker) finish(ctx context.Context, address string) {
 //     grain (the default) only has its stale directory entry released so the
 //     next TellGrain/AskGrain re-activates it on a survivor. A lazy grain is a
 //     failure only when its release fails, because the entry then still points
-//     at the dead node and the fast path does not self-heal a stale owner.
+//     at the dead node until a message or an activation for the grain meets the
+//     dead owner and releases it.
 //
 // A failing item records a failure instead of cancelling its siblings, so every
 // goroutine returns nil. record must be safe for concurrent use.
@@ -671,17 +672,16 @@ func leastLoadedEligibleSurvivor(survivors []*cluster.Peer, shares [][]*internal
 
 // releaseUndeliverableLazyGrains removes, leader-side, the directory entries of
 // lazy grains that could not be handed off to any peer. Without this their
-// entries keep pointing at the departed (dead) node, and the TellGrain/AskGrain
-// fast path does not self-heal a stale owner (only the GrainIdentity activation
-// path does), so the grain would be permanently unreachable. recordUnsent
-// deliberately does not report lazy grains as failures, so this best-effort
-// cleanup is what makes them provably self-healing; eager grains are already
-// recorded as failures by recordUnsent.
+// entries keep pointing at the departed (dead) node, and the first message or
+// activation for each grain would fail on the dead owner before releasing the
+// entry. recordUnsent deliberately does not report lazy grains as failures, so
+// this best-effort cleanup is what makes them reachable again; eager grains are
+// already recorded as failures by recordUnsent.
 //
-// When the cleanup itself fails the entry stays pinned to the dead node with no
-// self-heal path, so the grain is recorded as a relocation failure to preserve
-// the guarantee that every relocated grain is either reachable again or listed
-// in RelocationFailed.
+// When the cleanup itself fails the entry stays pinned to the dead node until a
+// message or an activation for the grain releases it, so the grain is recorded
+// as a relocation failure to preserve the guarantee that every relocated grain
+// is either reachable again or listed in RelocationFailed.
 func (w *relocationWorker) releaseUndeliverableLazyGrains(ctx context.Context, requests []*internalpb.RelocateBatchRequest, failures *relocationFailures) {
 	if w.pid == nil {
 		return

@@ -46,6 +46,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
@@ -1960,20 +1961,24 @@ func TestGrainSendError(t *testing.T) {
 	sys := newRemoteServerTestSystem("127.0.0.1", 9007)
 	identity := &GrainIdentity{kind: "Kind", name: "Name"}
 	for _, tc := range []struct {
-		err  error
-		code internalpb.Code
+		name    string
+		err     error
+		code    internalpb.Code
+		refused bool
 	}{
-		{err: gerrors.ErrMailboxFull, code: internalpb.Code_CODE_RESOURCE_EXHAUSTED},
-		{err: gerrors.ErrRequestTimeout, code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
-		{err: errors.Join(context.DeadlineExceeded, gerrors.ErrRequestTimeout), code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
-		{err: gerrors.ErrDead, code: internalpb.Code_CODE_FAILED_PRECONDITION},
-		{err: gerrors.ErrSystemShuttingDown, code: internalpb.Code_CODE_FAILED_PRECONDITION},
-		{err: errors.New("the grain's own error"), code: internalpb.Code_CODE_INTERNAL_ERROR},
+		{name: "mailbox full", err: gerrors.ErrMailboxFull, code: internalpb.Code_CODE_RESOURCE_EXHAUSTED},
+		{name: "request timeout", err: gerrors.ErrRequestTimeout, code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
+		{name: "deadline exceeded", err: errors.Join(context.DeadlineExceeded, gerrors.ErrRequestTimeout), code: internalpb.Code_CODE_DEADLINE_EXCEEDED},
+		{name: "grain gone", err: gerrors.ErrDead, code: internalpb.Code_CODE_FAILED_PRECONDITION},
+		{name: "shutting down reported by a grain handler", err: gerrors.ErrSystemShuttingDown, code: internalpb.Code_CODE_FAILED_PRECONDITION},
+		{name: "shutting down refused by the node", err: refusal.Mark(gerrors.ErrSystemShuttingDown), code: internalpb.Code_CODE_FAILED_PRECONDITION, refused: true},
+		{name: "grain error", err: errors.New("the grain's own error"), code: internalpb.Code_CODE_INTERNAL_ERROR},
 	} {
-		t.Run(tc.err.Error(), func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			resp := sys.grainSendError(identity, "127.0.0.1", 9007, tc.err)
 			requireProtoError(t, resp, tc.code)
 			require.Contains(t, resp.GetMessage(), tc.err.Error())
+			require.Equal(t, tc.refused, resp.GetRefused())
 		})
 	}
 }
@@ -2250,6 +2255,7 @@ func TestRemoteGrainHandlersOnAShuttingDownNode(t *testing.T) {
 		resp, err := sys.remoteTellGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireRefused(t, resp)
+		require.True(t, resp.(*internalpb.Error).GetRefused(), "the node refused the message before any handler ran it")
 
 		_, ok := sys.grains.Get(identity.String())
 		require.False(t, ok)
@@ -2268,6 +2274,7 @@ func TestRemoteGrainHandlersOnAShuttingDownNode(t *testing.T) {
 		resp, err := sys.remoteAskGrainHandler(ctx, nullConn, req)
 		require.NoError(t, err)
 		requireRefused(t, resp)
+		require.True(t, resp.(*internalpb.Error).GetRefused(), "the node refused the message before any handler ran it")
 
 		_, ok := sys.grains.Get(identity.String())
 		require.False(t, ok)

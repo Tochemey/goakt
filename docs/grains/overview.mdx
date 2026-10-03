@@ -272,12 +272,14 @@ expires is abandoned without running `OnDeactivate`. The node activates no new g
 - Messages queued behind a grain's deactivation are refused with `ErrSystemShuttingDown` instead of being sent to a
   fresh activation.
 
-In a cluster, `GrainOf` and `GrainIdentity` treat that refusal as a sign the node is leaving and activate the grain on
-a live node.
+In a cluster, `GrainOf`, `GrainIdentity`, `TellGrain` and `AskGrain` treat that refusal as a sign the node is leaving.
+`GrainOf` and `GrainIdentity` activate the grain on the calling node. `TellGrain` and `AskGrain` send the message once
+more in the same call, to the grain activated on the calling node, so a rolling restart needs no retry in the caller.
+See [Activation guarantee](#activation-guarantee).
 
 <Tip>
-  A message refused with `ErrSystemShuttingDown` was not processed, so it is safe to send it again. During a rolling
-  restart, retry such calls: in a cluster the retry reaches the grain on a live node.
+  A message refused with `ErrSystemShuttingDown` by the node was not processed, so it is safe to send it again. Outside
+  a cluster, or when the caller cannot host the grain, retry such calls during a rolling restart.
 </Tip>
 
 ## Activation guarantee
@@ -286,13 +288,43 @@ In cluster mode, the system claims grain ownership in the cluster registry using
 before activating locally. If another node already owns the grain, requests are forwarded to that owner. If local
 activation fails after a successful claim, the claim is removed.
 
-A failed request to a remote owner rarely displaces that owner. An activation error reported by the owner, or a
-request abandoned by the caller's own context, is returned to the caller and the registry entry is kept. The entry is
-released, letting the grain re-activate elsewhere, in two cases only:
+A failed request to a remote owner rarely displaces that owner. An activation error or a handler error reported by
+the owner, or a request abandoned by the caller's own context, is returned to the caller and the registry entry is
+kept. `GrainOf`, `GrainIdentity`, `TellGrain` and `AskGrain` release the entry, letting the grain re-activate
+elsewhere, in two cases only:
 
-- the owner answers that it is shutting down or has shut down;
+- the owner answers that it is shutting down or has shut down. For a message, the owner's node must have refused it
+  before any handler ran: an `ErrSystemShuttingDown` that a grain handler returned does not release the entry;
 - a transport failure occurs, where the owner never answered, and the cluster membership confirms the owner's node has
   left.
+
+What `TellGrain` and `AskGrain` do with the message after the release depends on the case:
+
+- **The owner refused the message.** The message did not run, so it is sent once more in the same call. The calling
+  node claims the grain with the configuration recorded in the released entry (role, mailbox capacity, reentrancy,
+  dependencies, activation settings) and delivers the message to it. The second send uses what is left of the call's
+  timeout. When another node wins the claim, the message goes to that node. When the calling node cannot host the
+  grain, because the grain kind is not registered on it or it lacks the grain's role, the refusal is returned.
+- **The owner left the cluster before the request could be sent.** The calling node could not connect to the owner,
+  so the message did not run. It is sent once more in the same call, the same way.
+- **The owner left the cluster with the message in flight.** The message may have run before the owner died, so it is
+  not sent again: the transport error is returned. The next call reaches the grain on a live node.
+
+A call sends the message again at most once. If the second send fails as well, its error is returned.
+
+A node that crashed cannot say it is gone. Until the cluster membership drops it, which takes a few seconds, calls to
+its grains fail with the transport error and its registry entries are kept: the node may only be unreachable. Right
+after the membership dropped it, a registry read can still time out with `ErrClusterRegistryTimeout` while the registry
+converges; that call can be sent again.
+
+While a node leaves, the registry can fail a write it still routes to that node. The writes an activation and a release
+need (the claim of the grain, the publication of its record and the release of an owner's entry) are tried again a few
+times before the call fails.
+
+<Note>
+  The owner marks its refusals on the wire. During a rolling upgrade, an `ErrSystemShuttingDown` from an owner on an
+  older version carries no mark: the error is returned and the entry is kept, as before.
+</Note>
 
 A node that is shutting down takes no new grains (see [During shutdown](#during-shutdown)). A grain activation that
 finishes after the shutdown began is rolled back, so its registry entry does not outlive the node, and a node that is
@@ -308,10 +340,10 @@ rolled back so the next activation can pick another node. When the outcome is un
 expired caller context, the claim is kept: the peer may already have activated the grain, and if it has not, it does so
 with the recorded configuration on the first message routed to it.
 
-Every release of a registry entry, by the departure cleanup, by an activation that confirmed the owner left, by the
-rollback of a claim, or by the owner's own deactivation and shutdown, deletes the entry only while it still names the
-expected node. The check and the deletion run
-under a cluster-wide lock on the grain, so a release that lost a race against a newer claim leaves that claim in place.
+Every release of a registry entry, by the departure cleanup, by an activation or a message that confirmed the owner
+left or was refused by it, by the rollback of a claim, or by the owner's own deactivation and shutdown, deletes the
+entry only while it still names the expected node. The check and the deletion run under a cluster-wide lock on the
+grain, so a release that lost a race against a newer claim leaves that claim in place.
 
 When configured, the grain activation barrier delays grain activations until the cluster reaches the minimum peers
 quorum (or until the barrier timeout elapses).

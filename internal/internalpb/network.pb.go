@@ -95,6 +95,7 @@ type Error struct {
 	xxx_hidden_Message    string                 `protobuf:"bytes,2,opt,name=message,proto3"`
 	xxx_hidden_StackTrace string                 `protobuf:"bytes,3,opt,name=stack_trace,json=stackTrace,proto3"`
 	xxx_hidden_Details    *anypb.Any             `protobuf:"bytes,4,opt,name=details,proto3"`
+	xxx_hidden_Refused    bool                   `protobuf:"varint,5,opt,name=refused,proto3"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -152,6 +153,13 @@ func (x *Error) GetDetails() *anypb.Any {
 	return nil
 }
 
+func (x *Error) GetRefused() bool {
+	if x != nil {
+		return x.xxx_hidden_Refused
+	}
+	return false
+}
+
 func (x *Error) SetCode(v Code) {
 	x.xxx_hidden_Code = v
 }
@@ -166,6 +174,10 @@ func (x *Error) SetStackTrace(v string) {
 
 func (x *Error) SetDetails(v *anypb.Any) {
 	x.xxx_hidden_Details = v
+}
+
+func (x *Error) SetRefused(v bool) {
+	x.xxx_hidden_Refused = v
 }
 
 func (x *Error) HasDetails() bool {
@@ -186,6 +198,11 @@ type Error_builder struct {
 	Message    string
 	StackTrace string
 	Details    *anypb.Any
+	// refused is set by a node that refused a grain message before any handler
+	// ran it, because the node is shutting down. The sender can then release the
+	// node's registry record and send the message again elsewhere without the
+	// message running twice. It is never set for an error a handler reported.
+	Refused bool
 }
 
 func (b0 Error_builder) Build() *Error {
@@ -196,6 +213,7 @@ func (b0 Error_builder) Build() *Error {
 	x.xxx_hidden_Message = b.Message
 	x.xxx_hidden_StackTrace = b.StackTrace
 	x.xxx_hidden_Details = b.Details
+	x.xxx_hidden_Refused = b.Refused
 	return m0
 }
 
@@ -204,13 +222,14 @@ var File_internal_network_proto protoreflect.FileDescriptor
 const file_internal_network_proto_rawDesc = "" +
 	"\n" +
 	"\x16internal/network.proto\x12\n" +
-	"internalpb\x1a\x19google/protobuf/any.proto\"\x98\x01\n" +
+	"internalpb\x1a\x19google/protobuf/any.proto\"\xb2\x01\n" +
 	"\x05Error\x12$\n" +
 	"\x04code\x18\x01 \x01(\x0e2\x10.internalpb.CodeR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12\x1f\n" +
 	"\vstack_trace\x18\x03 \x01(\tR\n" +
 	"stackTrace\x12.\n" +
-	"\adetails\x18\x04 \x01(\v2\x14.google.protobuf.AnyR\adetails*\x8c\x02\n" +
+	"\adetails\x18\x04 \x01(\v2\x14.google.protobuf.AnyR\adetails\x12\x18\n" +
+	"\arefused\x18\x05 \x01(\bR\arefused*\x8c\x02\n" +
 	"\x04Code\x12\x11\n" +
 	"\rCODE_INTERNAL\x10\x00\x12\x12\n" +
 	"\x0eCODE_NOT_FOUND\x10\x01\x12\x17\n" +

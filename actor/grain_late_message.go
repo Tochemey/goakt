@@ -28,6 +28,7 @@ import (
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 )
 
 // lateGrainMessages holds, per deactivated grain instance, the messages that
@@ -74,12 +75,13 @@ func (x *lateGrainMessages) pop(pid *grainPID) *GrainContext {
 }
 
 // redirectLateMessage handles a message that reached this instance after it
-// deactivated. A node that is shutting down refuses it; otherwise it is sent
-// to a fresh activation and the reply goes back to the original caller.
+// deactivated. A node that is shutting down refuses it, marked as a node
+// refusal (refusal.Mark) because the message has not run; otherwise it is sent to a
+// fresh activation and the reply goes back to the original caller.
 func (pid *grainPID) redirectLateMessage(grainContext *GrainContext) {
 	system := pid.actorSystem
 	if system.isStopping() {
-		grainContext.Err(gerrors.ErrSystemShuttingDown)
+		grainContext.Err(refusal.Mark(gerrors.ErrSystemShuttingDown))
 		return
 	}
 

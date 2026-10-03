@@ -1871,6 +1871,26 @@ func (x *MockGrain) OnReceive(ctx *GrainContext) {
 	}
 }
 
+// MockRelayGrain is a grain that asks another grain on every message and
+// reports the error of that nested ask as its own.
+type MockRelayGrain struct {
+	MockNoopGrain
+
+	// target is the grain every message is relayed to.
+	target *GrainIdentity
+}
+
+// OnReceive asks the target and replies with what it answered.
+func (x *MockRelayGrain) OnReceive(ctx *GrainContext) {
+	reply, err := ctx.AskGrain(x.target, ctx.Message(), time.Second)
+	if err != nil {
+		ctx.Err(err)
+		return
+	}
+
+	ctx.Response(reply)
+}
+
 // MockActivationFailingGrain is a grain that never activates.
 type MockActivationFailingGrain struct {
 	MockNoopGrain

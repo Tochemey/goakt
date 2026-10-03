@@ -40,6 +40,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	"github.com/tochemey/goakt/v4/reentrancy"
@@ -1466,6 +1467,41 @@ func TestActorRequestGrainDeliveryFailure(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("delivery failure never reported")
 	}
+	require.Zero(t, requester.reentrancy.Load().inFlightCount.Load())
+}
+
+// TestActorRequestGrainNodeRefusalIsUnmarked covers an actor whose request to
+// a grain is refused by the grain's owner: the actor gets the refusal without
+// the internal mark, which never reaches application code.
+func TestActorRequestGrainNodeRefusalIsUnmarked(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	system := sys.(*actorSystem)
+
+	target := newGrainIdentity(NewMockGrain(), "refusing-request-target")
+	system.registry.Register(NewMockGrain())
+	failures := make(chan error, 1)
+
+	requester := spawnReentrancyActor(t, sys, ctx, "refused-requester", func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestSend); !ok {
+			return
+		}
+
+		if call := rctx.RequestGrain(target, new(testpb.TestPing)); call == nil {
+			failures <- rctx.getError()
+		}
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+
+	putGrainOnRefusingOwner(t, system, target)
+	require.NoError(t, Tell(ctx, requester, new(testpb.TestSend)))
+
+	select {
+	case err := <-failures:
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.False(t, refusal.Marked(err), "an error handed to an actor carries no node refusal mark")
+	case <-time.After(2 * time.Second):
+		t.Fatal("delivery failure never reported")
+	}
+
 	require.Zero(t, requester.reentrancy.Load().inFlightCount.Load())
 }
 

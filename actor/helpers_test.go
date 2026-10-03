@@ -59,6 +59,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery/etcd"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	"github.com/tochemey/goakt/v4/discovery/selfmanaged"
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/extension"
 	"github.com/tochemey/goakt/v4/internal/address"
@@ -68,6 +69,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
@@ -1587,6 +1589,45 @@ func newRequestTestSystem(t *testing.T) *actorSystem {
 	})
 
 	return system.(*actorSystem)
+}
+
+// putGrainOnRefusingOwner makes target a grain owned by another node that
+// refuses every message sent to it: system is switched to cluster mode over a
+// mock registry whose record of target names that node, and a mock remoting
+// client that answers with the node's refusal. The record is expected to be
+// released once. The system is switched back before it stops.
+func putGrainOnRefusingOwner(t *testing.T, system *actorSystem, target *GrainIdentity) {
+	t.Helper()
+
+	owner := internalpb.Grain_builder{
+		GrainId: internalpb.GrainId_builder{Value: target.String(), Kind: target.Kind(), Name: target.Name()}.Build(),
+		Host:    "192.0.2.40",
+		Port:    18040,
+	}.Build()
+
+	cl := mockcluster.NewCluster(t)
+	cl.EXPECT().GrainExists(mock.Anything, target.String()).Return(true, nil).Once()
+	cl.EXPECT().GetGrain(mock.Anything, target.String()).Return(owner, nil).Once()
+	cl.EXPECT().ReleaseGrain(mock.Anything, target.String(), address.FormatHostPort(owner.GetHost(), int(owner.GetPort()))).Return(nil, nil).Once()
+
+	rem := mocksremote.NewClient(t)
+	rem.EXPECT().RemoteTellGrain(mock.Anything, owner.GetHost(), int(owner.GetPort()), mock.Anything, mock.Anything).
+		Return(refusal.Mark(gerrors.ErrSystemShuttingDown)).Once()
+
+	previousRemoting := system.remoting
+	system.locker.Lock()
+	system.cluster = cl
+	system.locker.Unlock()
+	system.remoting = rem
+	system.clusterEnabled.Store(true)
+
+	t.Cleanup(func() {
+		system.clusterEnabled.Store(false)
+		system.remoting = previousRemoting
+		system.locker.Lock()
+		system.cluster = nil
+		system.locker.Unlock()
+	})
 }
 
 // activateReentrantGrain activates grain under name and equips its pid with

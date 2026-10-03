@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pointer"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -76,7 +77,9 @@ type coalescedFailure struct {
 // backpressure, a timeout and a grain that is gone, get their own codes so
 // the remoting client hands back the same sentinels a local caller sees, and
 // are reported at debug level: they are not failures of this node. Anything
-// else stays an internal error, logged as such.
+// else stays an internal error, logged as such. A refusal by this node
+// (refusal.Mark) is flagged as refused, so the caller knows the message has
+// not run and can tell it from the same sentinel reported by a grain handler.
 func (x *actorSystem) grainSendError(identity *GrainIdentity, host string, port int32, err error) *internalpb.Error {
 	var code internalpb.Code
 	switch {
@@ -92,7 +95,12 @@ func (x *actorSystem) grainSendError(identity *GrainIdentity, host string, port 
 	}
 
 	x.logger.Debugf("send to grain=%s on host=%s port=%d rejected: %v", identity.String(), host, port, err)
-	return toProtoError(code, err)
+	protoErr := toProtoError(code, err)
+	if refusal.Marked(err) {
+		protoErr.SetRefused(true)
+	}
+
+	return protoErr
 }
 
 // toProtoError creates an internalpb.Error message with the specified code and error message.

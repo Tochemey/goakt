@@ -44,6 +44,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/refusal"
 	"github.com/tochemey/goakt/v4/internal/size"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/passivation"
@@ -1229,6 +1230,20 @@ func TestCheckProtoError(t *testing.T) {
 		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrRemotingDisabled.Error()}.Build()
 		err := checkProtoError(resp)
 		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
+	})
+
+	t.Run("refused marks the error as a node refusal", func(t *testing.T) {
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrSystemShuttingDown.Error(), Refused: true}.Build()
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.True(t, refusal.Marked(err))
+	})
+
+	t.Run("without refused the error is not a node refusal", func(t *testing.T) {
+		resp := internalpb.Error_builder{Code: internalpb.Code_CODE_FAILED_PRECONDITION, Message: gerrors.ErrSystemShuttingDown.Error()}.Build()
+		err := checkProtoError(resp)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+		require.False(t, refusal.Marked(err))
 	})
 
 	t.Run("CODE_ALREADY_EXISTS delegates to parseAlreadyExists", func(t *testing.T) {

@@ -603,6 +603,14 @@ type ActorSystem interface {
 	// protobuf message, and waits for a response or error. The request will block until a response is received,
 	// the context is canceled, or the timeout elapses.
 	//
+	// In a cluster, the registry entry of an owner that is gone is released by the call itself. When the
+	// message did not run, because the owner refused it while shutting down or had left the cluster before
+	// the request could be sent, the message is sent once more in the same call, to the grain re-activated on
+	// this node with its recorded configuration, within what is left of the timeout. When the
+	// owner left the cluster with the message in flight, the entry is released and the transport error is
+	// returned without sending the message again, since it may have run before the owner died; the next
+	// call reaches the grain on a live node.
+	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout control.
 	//   - identity: The unique identity of the Grain.
@@ -620,6 +628,14 @@ type ActorSystem interface {
 	// the message through NoErr, Err or Unhandled, bounded by DefaultGrainRequestTimeout, and returns the error
 	// the handler reported, if any. With WithOneWay the call returns as soon as the message is enqueued in the
 	// grain mailbox; a failure the handler reports is recorded as a deadletter instead of reaching the caller.
+	//
+	// In a cluster, the registry entry of an owner that is gone is released by the call itself. When the
+	// message did not run, because the owner refused it while shutting down or had left the cluster before
+	// the request could be sent, the message is sent once more in the same call, to the grain re-activated on
+	// this node with its recorded configuration, within what is left of DefaultGrainRequestTimeout. When the
+	// owner left the cluster with the message in flight, the entry is released and the transport error is
+	// returned without sending the message again, since it may have run before the owner died; the next
+	// call reaches the grain on a live node.
 	//
 	// Parameters:
 	//   - ctx: Context for cancellation and timeout control.
@@ -6037,7 +6053,8 @@ func (x *actorSystem) recordRelocationMetrics(ctx context.Context, departed stri
 //   - lazy grains have their stale directory entry released locally so the next
 //     TellGrain/AskGrain re-activates them on a survivor; only a lazy grain
 //     whose release fails is a failure, because its entry still points at the
-//     dead node and the fast path does not self-heal a stale owner.
+//     dead node until a message or an activation for the grain meets the dead
+//     owner and releases it.
 //
 // It publishes the RelocationFailed event and records the relocation metrics.
 // Deleting the peer-state snapshot and releasing the relocation job stay with
