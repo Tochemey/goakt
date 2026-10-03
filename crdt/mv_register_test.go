@@ -185,3 +185,47 @@ func TestMVRegister(t *testing.T) {
 		assert.Equal(t, 42, values[0])
 	})
 }
+
+func TestMVRegisterStateHash(t *testing.T) {
+	t.Run("merge in either direction hashes alike", func(t *testing.T) {
+		a := NewMVRegister().Set("node-1", "left")
+		b := NewMVRegister().Set("node-2", "right")
+		ab := a.Merge(b).(*MVRegister)
+		ba := b.Merge(a).(*MVRegister)
+
+		// the two merges hold the concurrent values in opposite order
+		require.Equal(t, []any{"left", "right"}, ab.Values())
+		require.Equal(t, []any{"right", "left"}, ba.Values())
+		assert.Equal(t, ab.StateHash(), ba.StateHash())
+		assert.NotEqual(t, a.StateHash(), ab.StateHash())
+	})
+
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewMVRegister().Set("node-1", "left")
+		b := NewMVRegister().Set("node-2", "right")
+		c := NewMVRegister().Set("node-3", "middle")
+		first := a.Merge(b).Merge(c).(*MVRegister)
+		second := c.Merge(a).Merge(b).(*MVRegister)
+		third := b.Merge(c.Merge(a)).(*MVRegister)
+		assert.Equal(t, first.StateHash(), second.StateHash())
+		assert.Equal(t, first.StateHash(), third.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		base := NewMVRegister().Set("node-1", "value")
+		assert.NotEqual(t, base.StateHash(), NewMVRegister().Set("node-1", "other").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewMVRegister().Set("node-2", "value").StateHash())
+		// the same value written twice has a later dot and a later clock
+		assert.NotEqual(t, base.StateHash(), base.Set("node-1", "value").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewMVRegister().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		r := NewMVRegister().Set("node-1", "value")
+		before := r.StateHash()
+		assert.Equal(t, before, r.Clone().(*MVRegister).StateHash())
+		r.ResetDelta()
+		assert.Equal(t, before, r.StateHash())
+		assert.Equal(t, before, MVRegisterFromRawState(r.RawState()).StateHash())
+	})
+}

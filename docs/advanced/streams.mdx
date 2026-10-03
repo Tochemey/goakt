@@ -245,7 +245,7 @@ stream.Batch[Event](100, 500*time.Millisecond)
 // Throttle: limits throughput to n elements per duration
 stream.Throttle[Request](100, time.Second)
 
-// Buffer: asynchronous decoupling buffer with overflow strategy
+// Buffer: asynchronous decoupling buffer; when full it backpressures upstream
 stream.Buffer[int](256, stream.DropTail)
 ```
 
@@ -282,11 +282,12 @@ stream.OrderedParallelMap(8, func(req Request) Response { return callAPI(req) })
 - **FlatMapMerge[In, Out]**: Per-element streaming flat-map; up to `breadth` sub-sources concurrent.
 - **Flatten[T]**: Unwraps `[]T` elements into individual elements.
 - **Batch[T]**: Groups into `[]T` slices of at most `n`; flushes early after `maxWait`.
-- **Buffer[T]**: Asynchronous buffer with configurable overflow strategy.
+- **Buffer[T]**: Asynchronous buffer of the given capacity; a full buffer applies backpressure.
 - **Throttle[T]**: Limits throughput to at most `n` elements per `per` duration.
 - **Deduplicate[T]**: Suppresses consecutive duplicate elements (`T` must be comparable).
 - **Scan[In, State]**: Running accumulation; emits each intermediate state.
-- **WithContext[T]**: Marks a named tracing boundary; passes elements through unchanged.
+- **WithContext[T]**: Passes elements through unchanged. The key/value pair is reserved for future tracing and is
+  not recorded yet.
 - **ParallelMap[In, Out]**: Applies `fn` concurrently with up to `n` goroutines; unordered output.
 - **OrderedParallelMap[In, Out]**: Like `ParallelMap` but preserves input order via min-heap resequencing.
 
@@ -371,6 +372,15 @@ handle2, _ := stream.From(branches[1]).
 
 Both pipelines must be materialized. The upstream sub-pipeline starts once the **last** branch materializes.
 
+The branch graphs can be run again. Each run of all the branches is a generation with its own hub and its own
+materialization of the upstream: the k-th run of each branch is paired with the k-th run of the others. A branch that is
+run without its siblings waits for them; `Stop` or `Abort` on its handle ends the wait. A branch aborted before it
+registered leaves its siblings in the same position: they wait for a new partner, and `Stop` or `Abort` on their handles
+ends that wait. A branch that is stopped or aborted after it registered is released by the hub and does not hold its
+siblings back; when every branch is gone the hub cancels the
+upstream. If the upstream cannot be materialized, every branch of that generation fails with the materialization error.
+The same applies to `Balance`, `Partition` and fan-out nodes of the `Graph` DSL.
+
 ### Balance
 
 `Balance` distributes elements across N branches using round-robin routing with backpressure. Each element goes to
@@ -424,7 +434,13 @@ keys, values := stream.Unzip(
 ### Merge
 
 `Merge` fans N independent sources into a single downstream. Elements arrive in non-deterministic order; completion
-happens when all inputs have completed:
+happens when all inputs have completed. If an input fails, the merged stream fails with that input's error and the
+remaining inputs are stopped; every fan-in source (`Merge`, `MergePreferred`, `MergePrioritized`, `MergeLatest`,
+`MergeSequence`, `Concat`, `Zip`, `ZipWith`, `Combine`) behaves this way. Stopping or aborting the stream also stops its
+inputs. Fan-in sources respect backpressure: each input is pulled for at most one demand window (224 elements) ahead of
+what the downstream has consumed. Two exceptions follow from their semantics: `MergeLatest` keeps only the latest value
+of each input, so it never holds an input back, and `MergeSequence` reads on without bound while the next sequence
+number is missing:
 
 ```go Merge
 merged := stream.Merge(
@@ -557,7 +573,9 @@ predicate-true element (the triggering element becomes the LAST of the closing s
 accumulators, `Deduplicate`'s last-seen value, anything stateful in the per-substream chain) is genuinely independent
 because each substream is a real GoAkt actor pipeline materialised lazily on its first element. `MergeSubstreams`
 collapses the partitioned stream back into a flat `Source[T]` whose elements interleave non-deterministically across
-substreams while preserving order within a single substream.
+substreams while preserving order within a single substream. A failure of the pipeline that feeds the splitter fails the
+merged stream with that error, and when the merged stream ends, by completion, failure, `Stop` or `Abort`, the feeding
+pipeline and every open substream are stopped with it.
 
 ```go Substreams (SubFlow)
 // Partition events by tenantID, count events per tenant via a per-substream
@@ -792,7 +810,8 @@ h, err := feed.Ref.Source(sysB).
 ```
 
 The underlying source pipeline is materialised lazily: only when a subscriber connects via `ref.Source(...).Run(...)`.
-Constructing the ref is cheap.
+Constructing the ref is cheap. The source pipeline stops when the consumer stops or is aborted, and as soon as the
+stream ends; a failure of the source reaches the consumer as the stream's error.
 
 ### `SinkRef`: publish a consumer
 
@@ -878,13 +897,17 @@ stream.From(stream.FromChannel(ch)).
 
 ### Overflow strategies
 
-Overflow strategies apply when a stage's internal buffer is full:
+`OverflowStrategy` has four values:
 
-- **DropTail** (default): Discard the newest incoming element.
 - **DropHead**: Discard the oldest buffered element.
-- **DropBuffer**: Discard the entire buffer.
-- **Backpressure**: Block the upstream (apply natural backpressure).
-- **Fail**: Treat overflow as a fatal error.
+- **DropTail** (default): Discard the newest incoming element.
+- **BackpressureSource**: Block the producer until space is available.
+- **FailSource**: Terminate the stream with an error.
+
+<Note>
+  Only substream buffers act on the strategy today (see `SubFlow.WithSubstreamBuffer`). Linear stages never overflow:
+  they are bounded by demand, so `Buffer` and `Source.WithOverflowStrategy` record the strategy but do not apply it.
+</Note>
 
 ## Stage fusion
 
@@ -902,10 +925,11 @@ handle, err := graph.
 
 - **FuseStateless** (default): Fuses adjacent `Map` and `Filter` stages into one actor.
 - **FuseNone**: No fusion; each stage is a separate actor (useful for debugging).
-- **FuseAggressive**: Fuses all fusable adjacent stages.
+- **FuseAggressive**: Currently behaves like `FuseStateless`.
 
-Fusion is transparent: the external API and semantics are identical. Disable it with `FuseNone` when profiling
-individual stage throughput.
+Fusion is transparent: the external API and semantics are identical. A fused actor always fails fast and calls no
+tracer, so a stage configured with an `ErrorStrategy` other than `FailFast` or with a `Tracer` is never fused and keeps
+its own actor. Disable fusion with `FuseNone` when profiling individual stage throughput.
 
 ## StreamHandle lifecycle
 
@@ -936,6 +960,11 @@ handle.Abort()
 - **Done**: Channel closed when the stream terminates (naturally or by error).
 - **Err**: Terminal error; valid only after `Done` is closed.
 - **Stop**: Orderly shutdown; drains in-flight elements, then stops all stages.
+
+<Note>
+  `Stop` cancels the source and lets in-flight work drain. A stream whose in-flight work never finishes, such as a
+  `FlatMapMerge` whose inner sources are endless, does not end on `Stop`: use `Abort`.
+</Note>
 - **Abort**: Immediate termination; discards buffered elements.
 - **Metrics**: Returns a `StreamMetrics` snapshot.
 
@@ -943,16 +972,17 @@ handle.Abort()
 
 ### Metrics
 
-`StreamHandle.Metrics()` returns a live snapshot of element counts:
+`StreamHandle.Metrics()` returns a live `StreamMetrics` snapshot. The counters are plain struct fields, summed over the
+source and sink stages:
 
 ```go Metrics
 m := handle.Metrics()
-log.Printf("in=%d out=%d errors=%d", m.ElementsIn(), m.ElementsOut(), m.Errors())
+log.Printf("in=%d out=%d dropped=%d errors=%d", m.ElementsIn, m.ElementsOut, m.DroppedElements, m.Errors)
 ```
 
 ### Tracer
 
-Attach a `Tracer` to any `Flow` or `Sink` for per-element distributed tracing:
+Attach a `Tracer` to a `Flow` for per-element distributed tracing:
 
 ```go Tracer
 type myTracer struct{}
@@ -973,9 +1003,16 @@ stream.From(src).
     Run(ctx, sys)
 ```
 
+<Note>
+  The tracer is called by the element-wise flows (`Map`, `TryMap`, `Filter`, `FlatMap`, `Flatten`, `Buffer`,
+  `Deduplicate`, `Scan`, `WithContext`). `Source.WithTracer` and `Sink.WithTracer` store the tracer, but source and
+  sink stages do not call it yet.
+</Note>
+
 ## Configuration reference
 
-`StageConfig` carries per-stage configuration. Apply it via the builder methods on `Flow`, `Sink`, or `Source`:
+`StageConfig` carries per-stage configuration. Apply it via the builder methods on `Flow`, `Sink`, or `Source`. Builder
+calls compose: each returns a new stage that keeps the options set before it.
 
 ```go Configuration reference
 stream.Map(fn).
@@ -986,19 +1023,24 @@ stream.Map(fn).
     WithMailbox(actor.NewBoundedMailbox(512))
 ```
 
+`Flow` and `Sink` offer `WithErrorStrategy`, `WithRetryConfig`, `WithMailbox`, `WithName`, `WithTags` and `WithTracer`;
+`Source` offers `WithOverflowStrategy` and `WithTracer`. The remaining fields keep their defaults unless an operator
+sets them (for example `Buffer` sets `InitialDemand`, `RefillThreshold` and `BufferSize` from its size).
+
 - **InitialDemand**: First demand batch from sink to upstream. Type: `int64`. Default: `224`.
 - **RefillThreshold**: Credit level that triggers a refill request. Type: `int64`. Default: `64`.
 - **ErrorStrategy**: Element-level failure handling. Type: `ErrorStrategy`. Default: `FailFast`.
-- **RetryConfig.MaxAttempts**: Retry attempts when `ErrorStrategy` is `Retry`. Type: `int`. Default: `1`.
-- **OverflowStrategy**: Behaviour when internal buffer is full. Type: `OverflowStrategy`. Default: `DropTail`.
+- **RetryConfig.MaxAttempts**: Retry attempts after the first failed call when `ErrorStrategy` is `Retry`. Type: `int`.
+  Default: `1`.
+- **OverflowStrategy**: Recorded on the stage; not applied by linear stages (see
+  [Overflow strategies](#overflow-strategies)). Type: `OverflowStrategy`. Default: `DropTail`.
 - **PullTimeout**: Timeout for `FromActor` pull requests. Type: `time.Duration`. Default: `5s`.
 - **BufferSize**: Bounded mailbox capacity (`BufferSize × 2` slots). Type: `int`. Default: `256`.
 - **Mailbox**: Override the default mailbox implementation. Type: `actor.Mailbox`. Default: `nil`.
 - **Name**: Custom actor name for this stage. Type: `string`. Default: auto.
-- **Tags**: Key/value labels propagated to metrics and traces. Type: `map[string]string`. Default: `nil`.
+- **Tags**: Key/value labels stored on the stage; not yet read by any stage. Type: `map[string]string`. Default: `nil`.
 - **Tracer**: Optional distributed tracing hook. Type: `Tracer`. Default: `nil`.
 - **Fusion**: Whether this stage may participate in stage fusion. Type: `bool`. Default: `true`.
-- **MicroBatch**: Accumulate this many elements before forwarding (flow stages only). Type: `int`. Default: `1`.
 - **OnDrop**: Called when an element is dropped due to overflow or exhausted retries. Type: `func`. Default: `nil`.
 
 ## Comparison with other approaches

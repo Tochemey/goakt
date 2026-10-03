@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/eventstream"
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
@@ -203,7 +204,11 @@ func TestDeadletter(t *testing.T) {
 		require.NoError(t, sys.Start(ctx))
 		pause.For(time.Second)
 
-		receiver := address.New("gone", sys.Name(), "127.0.0.1", 0)
+		// the registry keeps per-receiver counts for actors in the tree only
+		live, err := sys.Spawn(ctx, "live", NewMockActor())
+		require.NoError(t, err)
+
+		receiver := live.getAddress()
 		deadletter := sys.getDeadletter()
 		require.NotNil(t, deadletter)
 
@@ -317,6 +322,64 @@ func TestDeadletter(t *testing.T) {
 //   - both live actors received their messages
 //   - exactly one dead-letter was published, for the missing receiver
 //   - sender/receiver/reason on the dead-letter match the failed message
+//
+// TestDeadletterBucketsFollowActorTree checks that the per-receiver buckets
+// stay bounded: a receiver outside the actor tree is counted in the total
+// only, and a prune drops the buckets of receivers that have left the tree.
+func TestDeadletterBucketsFollowActorTree(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	stopped, err := sys.Spawn(ctx, "stopped", NewMockActor())
+	require.NoError(t, err)
+	kept, err := sys.Spawn(ctx, "kept", NewMockActor())
+	require.NoError(t, err)
+
+	letters := newDeadLetter()
+	letters.pid = kept
+	letters.eventsStream = eventstream.New()
+	letters.pruneAt = 3
+
+	record := func(receiver *address.Address, message any) {
+		letters.handleDeadletter(&commands.Deadletter{
+			Sender:   sys.NoSender().getAddress(),
+			Receiver: receiver,
+			Message:  message,
+			SendTime: time.Now(),
+			Reason:   "test",
+		})
+	}
+
+	// a receiver that is not in the tree is counted in the total only
+	record(address.New("unknown", sys.Name(), "127.0.0.1", 0), new(testpb.TestSend))
+	require.EqualValues(t, 1, letters.counter.Load())
+	require.Zero(t, letters.counters.Len())
+	require.Zero(t, letters.letters.Len())
+
+	record(stopped.getAddress(), new(testpb.TestSend))
+	record(kept.getAddress(), new(testpb.TestSend))
+	require.Equal(t, 2, letters.counters.Len())
+
+	require.NoError(t, stopped.Shutdown(ctx))
+
+	// the third bucket reaches pruneAt: the stopped receiver's buckets go
+	record(kept.getAddress(), new(testpb.TestReply))
+	require.Equal(t, 2, letters.counters.Len())
+	require.Equal(t, 1, letters.letters.Len())
+	require.EqualValues(t, 4, letters.counter.Load())
+	require.Equal(t, deadletterPruneThreshold, letters.pruneAt)
+
+	for _, key := range letters.counters.Keys() {
+		require.Equal(t, kept.getAddress().String(), key.address)
+	}
+
+	// without an actor system to ask, every receiver is kept
+	require.True(t, newDeadLetter().inTree("anything"))
+}
+
 func TestRemoteTellHandlerPerMessageDeadlettering(t *testing.T) {
 	ctx := context.Background()
 	host := "127.0.0.1"
@@ -571,12 +634,13 @@ func TestRemoteTellCoalescedTransportFailureExactCount(t *testing.T) {
 		require.NoError(t, remoting.RemoteTell(ctx, sender, receiver, new(testpb.TestSend)))
 	}
 
-	// Poll via the dead-letter actor's counter rather than the subscriber,
-	// because Iterator() drains on every call (see eventstream/subscriber.go)
-	// — repeated polling there loses messages between snapshots.
+	// Poll via the dead-letter actor's total counter rather than the subscriber,
+	// because Iterator() drains on every call (see eventstream/subscriber.go),
+	// so repeated polling there loses messages between snapshots. The remote
+	// receiver is not in the local actor tree, so it has no count of its own.
 	require.Eventually(t, func() bool {
 		reply, askErr := Ask(ctx, sys.(*actorSystem).getDeadletter(),
-			&commands.DeadlettersCountRequest{Address: receiver}, 500*time.Millisecond)
+			&commands.DeadlettersCountRequest{}, 500*time.Millisecond)
 		if askErr != nil {
 			return false
 		}

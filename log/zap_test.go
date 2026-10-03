@@ -30,6 +30,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"testing"
@@ -722,6 +723,51 @@ func TestStdLogger(t *testing.T) {
 	lvl, err := extractLevel(line)
 	require.NoError(t, err)
 	assert.Equal(t, InfoLevel.String(), lvl)
+}
+
+func TestFlushKeepsFlushingFileOutput(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+	file, err := os.Create(path)
+	require.NoError(t, err)
+	defer file.Close()
+
+	logger := NewZap(InfoLevel, file)
+
+	// the first Flush writes the buffered line through to the file
+	logger.Info("first")
+	require.NoError(t, logger.Flush())
+
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "first")
+
+	// a line logged after that Flush must reach the file on the next Flush:
+	// the buffered syncer stays alive across flushes
+	logger.Info("second")
+	require.NoError(t, logger.Flush())
+
+	content, err = os.ReadFile(path)
+	require.NoError(t, err)
+	require.Contains(t, string(content), "second")
+}
+
+func TestErrorLinesCarryStacktrace(t *testing.T) {
+	buffer := new(bytes.Buffer)
+	logger := NewZap(InfoLevel, buffer)
+
+	// an error line carries the stack trace that NewZap installs at ErrorLevel
+	logger.Error("failure")
+	fields := decodeLine(t, extractLogLine(buffer.Bytes()))
+	require.Equal(t, "error", fields["level"])
+	require.Contains(t, fields, "stacktrace")
+	require.Contains(t, fields["stacktrace"], "zap_test.go")
+
+	// a warning stays below the stack trace level
+	buffer.Reset()
+	logger.Warn("careful")
+	fields = decodeLine(t, extractLogLine(buffer.Bytes()))
+	require.Equal(t, "warn", fields["level"])
+	require.NotContains(t, fields, "stacktrace")
 }
 
 func flushLogger(t *testing.T, logger *Zap) {

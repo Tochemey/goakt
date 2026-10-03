@@ -22,7 +22,11 @@
 
 package crdt
 
-import "time"
+import (
+	"time"
+
+	"github.com/zeebo/xxh3"
+)
 
 // ensure LWWRegister implements ReplicatedData at compile time.
 var _ ReplicatedData = (*LWWRegister)(nil)
@@ -90,6 +94,12 @@ func (r *LWWRegister) Merge(other ReplicatedData) ReplicatedData {
 		timestamp: winner.timestamp,
 		nodeID:    winner.nodeID,
 	}
+}
+
+// StateHash returns the canonical content hash of the register: its value,
+// its timestamp and the node that wrote it. See StateHasher.
+func (r *LWWRegister) StateHash() uint64 {
+	return hashParts(hashTagLWWRegister, uint64(r.timestamp), xxh3.HashString(r.nodeID), hashValue(r.value))
 }
 
 // Delta returns the register state if it has changed since the last ResetDelta.

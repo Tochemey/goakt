@@ -360,6 +360,66 @@ func TestRemoteWatchRegistry_DropHost(t *testing.T) {
 	})
 }
 
+func TestRemoteWatchRegistry_DropNode(t *testing.T) {
+	t.Run("empty host returns empty entries and is a no-op", func(t *testing.T) {
+		r := newRemoteWatchRegistry()
+		entries := r.dropNode("", 1)
+		require.Empty(t, entries.Watchers)
+		require.Empty(t, entries.Watchees)
+	})
+
+	t.Run("unknown node returns empty entries", func(t *testing.T) {
+		r := newRemoteWatchRegistry()
+		r.addWatcher(testRegistryPidA, newTestAddress(t, "w", "h1", 1))
+		entries := r.dropNode("h1", 2)
+		require.Empty(t, entries.Watchers)
+		require.Empty(t, entries.Watchees)
+		require.Len(t, r.watchersFor(testRegistryPidA), 1)
+	})
+
+	t.Run("drops only the entries of the node and keeps the other node on the same host", func(t *testing.T) {
+		r := newRemoteWatchRegistry()
+		w1 := newTestAddress(t, "w", "h1", 1)
+		x1 := newTestAddress(t, "x", "h1", 1)
+		w2 := newTestAddress(t, "w", "h1", 2)
+		x2 := newTestAddress(t, "x", "h1", 2)
+
+		r.addWatcher(testRegistryPidA, w1)
+		r.addWatchee(testRegistryPidA, x1)
+		r.addWatcher(testRegistryPidA, w2)
+		r.addWatchee(testRegistryPidB, x2)
+
+		entries := r.dropNode("h1", 1)
+
+		require.Len(t, entries.Watchers, 1)
+		require.Equal(t, testRegistryPidA, entries.Watchers[0].LocalID)
+		require.Equal(t, w1, entries.Watchers[0].RemoteAddress)
+
+		require.Len(t, entries.Watchees, 1)
+		require.Equal(t, testRegistryPidA, entries.Watchees[0].LocalID)
+		require.Equal(t, x1, entries.Watchees[0].RemoteAddress)
+
+		// the other node on the same host is untouched, in both views
+		require.Equal(t, []*address.Address{w2}, r.watchersFor(testRegistryPidA))
+		require.Empty(t, r.watcheesFor(testRegistryPidA))
+		require.Equal(t, []*address.Address{x2}, r.watcheesFor(testRegistryPidB))
+		require.Contains(t, r.watchersByHost, "h1")
+		require.Contains(t, r.watcheesByHost, "h1")
+		require.NotContains(t, r.watcheesByHost["h1"], testRegistryPidA)
+
+		// dropping the last node of the host empties the host indexes
+		entries = r.dropNode("h1", 2)
+		require.Len(t, entries.Watchers, 1)
+		require.Equal(t, w2, entries.Watchers[0].RemoteAddress)
+		require.Len(t, entries.Watchees, 1)
+		require.Equal(t, x2, entries.Watchees[0].RemoteAddress)
+		require.NotContains(t, r.watchersByHost, "h1")
+		require.NotContains(t, r.watcheesByHost, "h1")
+		require.Empty(t, r.watchers)
+		require.Empty(t, r.watchees)
+	})
+}
+
 func TestRemoteWatchRegistry_ConcurrentAccess(t *testing.T) {
 	// Exercises the RWMutex under interleaved readers/writers; relies on -race
 	// at the package level to surface any data race.

@@ -41,7 +41,8 @@ import (
 
 // Slog implements Logger using the standard library slog package.
 // It is optimized for low GC: Enabled() checks avoid formatting when disabled,
-// and With() uses typed slog.Attr for common types to avoid reflection.
+// and With() builds typed slog.Attr values for common types before handing them
+// to the underlying slog.Logger.
 var _ Logger = (*Slog)(nil)
 
 const maxSlogAttrs = 8
@@ -647,8 +648,9 @@ func (h *slogOrderedHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	}
 }
 
-// WithGroup returns a new handler that nests subsequent attrs under the given
-// group name. The new handler shares the same mutex and writer as the parent.
+// WithGroup returns a new handler that records the group name. The handler
+// writes attributes flat: the recorded groups are not applied to the output.
+// The new handler shares the same mutex and writer as the parent.
 func (h *slogOrderedHandler) WithGroup(name string) slog.Handler {
 	newGroups := make([]string, 0, len(h.groups)+1)
 	newGroups = append(newGroups, h.groups...)

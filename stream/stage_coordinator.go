@@ -44,6 +44,9 @@ import (
 //  2. Detect when the SINK terminates before the stream has signaled completion
 //     (i.e. a crash in the sink that bypasses the completionWrapper) and signal
 //     the StreamHandle so callers are not left hanging.
+//  3. Stop itself once the stream has ended, so a finished stream leaves no
+//     actor behind. The StreamHandle does not depend on the coordinator:
+//     Done, Err and Metrics read state held by the handle.
 //
 // Source and flow stages terminate as part of normal completion flow (before the
 // sink's PostStop fires the onDone callback), so they are NOT watched. Only the
@@ -51,34 +54,49 @@ import (
 type streamCoordinator struct {
 	handle *streamHandleImpl
 	// sinkPID is the sink stage, watched for unexpected early termination.
-	// Atomic because the materializer stores it after the stages are spawned
-	// and wired, while a Terminated from a fast-failing pipeline can already
-	// be running through Receive on a dispatcher worker.
+	// Atomic because the materializer stores it after the stages are spawned,
+	// from a goroutine other than the one running Receive.
 	sinkPID atomic.Pointer[actor.PID]
+	// sinkStopped is set once the sink's Terminated has been handled. From
+	// then on the coordinator stops as soon as its last stage has stopped.
+	// Only Receive reads and writes it.
+	sinkStopped bool
 }
 
 func (c *streamCoordinator) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles Terminated messages from watched actors.
+// Receive handles Terminated messages from the stage actors.
 // GoAkt automatically delivers Terminated to the parent coordinator for every
 // child spawned via SpawnChild when that child stops — regardless of Watch calls.
-// Source and flow stages stop as part of normal completion flow, so we only
-// act on Terminated when the message is for the sink PID and the stream has
-// not yet signaled completion (i.e. an unexpected sink crash).
+//
+// The sink's Terminated marks the end of the stream. If the handle has not
+// been signaled by then, the sink crashed: the coordinator signals the error
+// and shuts down at once, which stops the stages that would otherwise wait
+// for a sink that is gone. After a regular end the remaining stages are
+// stopping on their own as completion or cancellation reaches them; the
+// coordinator waits for the last of them before it shuts down, because
+// stopping a stage discards its mailbox and a stage must be left to handle
+// a pending streamCancel (a fan-out slot, for instance, tells its hub).
 func (c *streamCoordinator) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *actor.Terminated:
-		// Only care about the sink; ignore normal source/flow shutdowns.
 		sinkPID := c.sinkPID.Load()
-		if sinkPID == nil || !msg.ActorPath().Equals(sinkPID.Path()) {
-			return
+		if sinkPID != nil && msg.ActorPath().Equals(sinkPID.Path()) {
+			c.sinkStopped = true
+			select {
+			case <-c.handle.done:
+				// Stream already completed normally.
+			default:
+				c.handle.signalDone(fmt.Errorf("stream: sink %s terminated unexpectedly", msg.ActorPath()))
+				rctx.Shutdown()
+				return
+			}
 		}
-		select {
-		case <-c.handle.done:
-			// Stream already completed normally — ignore.
-		default:
-			c.handle.signalDone(fmt.Errorf("stream: sink %s terminated unexpectedly", msg.ActorPath()))
+
+		if c.sinkStopped && rctx.Self().ChildrenCount() == 0 {
+			rctx.Shutdown()
 		}
+
 	default:
 		rctx.Unhandled()
 	}

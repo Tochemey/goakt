@@ -21,8 +21,9 @@ Without `WithStashing()`, calls to `Stash`, `Unstash`, or `UnstashAll` record `E
 
 - **ctx.Stash**: Buffer the current message. It will not be processed until unstashed. The message is moved to a side
   buffer; the actor continues with the next message.
-- **ctx.Unstash**: Dequeue the oldest stashed message and prepend it to the mailbox. Processes one message.
-- **ctx.UnstashAll**: Move all stashed messages back to the mailbox in arrival order.
+- **ctx.Unstash**: Take the oldest stashed message and send it to the actor again. It is appended to the mailbox, so it is
+  handled after the messages already queued.
+- **ctx.UnstashAll**: Send every stashed message to the actor again, oldest first, behind the messages already queued.
 
 Stashed messages are processed in FIFO order when unstashed.
 

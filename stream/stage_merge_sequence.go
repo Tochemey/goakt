@@ -33,6 +33,7 @@ import (
 type mergeSeqEntry struct {
 	seq   int64
 	value any
+	slot  int // input the element came from
 }
 
 // mergeSeqHeap is a min-heap of mergeSeqEntry ordered by seq.
@@ -64,14 +65,22 @@ func (h *mergeSeqHeap) Pop() any {
 // starting from 0. If every input completes while the heap still holds
 // elements whose smallest seq is not the expected one, the actor emits a
 // streamError describing the missing sequence number.
+//
+// Elements waiting in the heap for downstream demand count against their
+// input's demand window, like in the other fan-in sources. When the heap is
+// waiting for a sequence number that has not arrived, the actor releases
+// everything it holds instead: it must read on to find the missing element,
+// so in that state the reordering buffer is not bounded.
 type mergeSequenceSourceActor[T any] struct {
 	subStages  [][]*stage
 	extractFn  func(any) int64
 	system     actor.ActorSystem
+	inputs     inputPipelines // materialized input pipelines; aborted in PostStop
 	downstream *actor.PID
 	subID      string
 	seqNo      uint64
 	pending    mergeSeqHeap
+	held       []int64 // per input: elements in the heap not yet released to that input's sink
 	expected   int64
 	done       []bool
 	doneCount  int
@@ -98,7 +107,7 @@ func newMergeSequenceSourceActor[T any](subStages [][]*stage, extractFn func(any
 
 func (a *mergeSequenceSourceActor[T]) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, and streamCancel.
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, mergeSubErr, and streamCancel.
 func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -110,6 +119,7 @@ func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			return
 		}
 		a.done = make([]bool, len(a.subStages))
+		a.held = make([]int64, len(a.subStages))
 		self := rctx.Self()
 		ctx := rctx.Context()
 		for i, sub := range a.subStages {
@@ -117,7 +127,11 @@ func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
-			spawnSubPipeline(ctx, a.system, all)
+			if err := a.inputs.spawn(ctx, a.system, all); err != nil {
+				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+				rctx.Shutdown()
+				return
+			}
 		}
 
 	case *streamRequest:
@@ -126,9 +140,12 @@ func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 
 	case *mergeSubValue:
 		a.metrics.elementsIn.Add(1)
+		a.inputs.arrived(msg)
+		a.held[msg.slot]++
 		heap.Push(&a.pending, mergeSeqEntry{
 			seq:   a.extractFn(msg.value),
 			value: msg.value,
+			slot:  msg.slot,
 		})
 		a.tryEmit(rctx)
 
@@ -138,6 +155,10 @@ func (a *mergeSequenceSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			a.doneCount++
 		}
 		a.tryEmit(rctx)
+
+	case *mergeSubErr:
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
+		rctx.Shutdown()
 
 	case *streamCancel:
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
@@ -163,6 +184,18 @@ func (a *mergeSequenceSourceActor[T]) tryEmit(rctx *actor.ReceiveContext) {
 		a.expected++
 		a.demand--
 		a.metrics.elementsOut.Add(1)
+		if a.held[e.slot] > 0 {
+			a.held[e.slot]--
+			a.inputs.release(rctx, e.slot, 1)
+		}
+	}
+
+	// The next expected element has not arrived: read on to find it.
+	if a.pending.Len() > 0 && a.pending[0].seq != a.expected {
+		for slot, n := range a.held {
+			a.inputs.release(rctx, slot, n)
+			a.held[slot] = 0
+		}
 	}
 
 	if a.doneCount == len(a.subStages) {
@@ -183,4 +216,8 @@ func (a *mergeSequenceSourceActor[T]) tryEmit(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *mergeSequenceSourceActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the input pipelines so they do not outlive this stage.
+func (a *mergeSequenceSourceActor[T]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}

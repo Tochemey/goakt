@@ -526,6 +526,34 @@ func TestAddNodeParentValidation(t *testing.T) {
 	})
 }
 
+// TestTreeAddOrAttachNodeRefusesStoppingParent checks that a child cannot be
+// attached under a parent that is stopping or passivating: the parent frees
+// its children once its stop has begun, and a child attached after that would
+// outlive it unsupervised.
+func TestTreeAddOrAttachNodeRefusesStoppingParent(t *testing.T) {
+	ports := dynaport.Get(1)
+	actorSystem, _ := NewActorSystem("TestSys")
+
+	root := newPIDAt(actorSystem, "root", ports[0])
+	parent := newPIDAt(actorSystem, "parent", ports[0])
+	child := newPIDAt(actorSystem, "child", ports[0])
+
+	tree := newTree()
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, parent))
+
+	parent.setState(stoppingState, true)
+	require.Error(t, tree.addOrAttachNode(parent, child))
+	parent.setState(stoppingState, false)
+
+	parent.setState(passivatingState, true)
+	require.Error(t, tree.addOrAttachNode(parent, child))
+	parent.setState(passivatingState, false)
+
+	require.NoError(t, tree.addOrAttachNode(parent, child))
+	require.Len(t, tree.children(parent), 1)
+}
+
 func TestTreeNoSenderGuards(t *testing.T) {
 	system, _ := NewActorSystem("TestSys")
 	impl, ok := system.(*actorSystem)

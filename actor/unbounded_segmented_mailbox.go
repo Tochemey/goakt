@@ -23,7 +23,6 @@
 package actor
 
 import (
-	"sync"
 	"sync/atomic"
 )
 
@@ -44,17 +43,14 @@ type segment struct {
 	data [segmentSize]atomic.Pointer[ReceiveContext]
 }
 
-var segmentPool = sync.Pool{New: func() any { return new(segment) }}
-
+// newSegment allocates an empty segment. Segments are never reused: a producer
+// may still hold a pointer to a segment the consumer has drained (it loaded
+// the tail just before the segment filled up), and a reused segment would let
+// that producer reserve a slot in another queue, or in a later part of this
+// one. A drained segment is left to the garbage collector once nothing points
+// to it, and a stale producer then finds it full and moves on to the tail.
 func newSegment() *segment {
-	seg := segmentPool.Get().(*segment)
-	seg.writeIdx.Store(0)
-	seg.deqIdx.Store(0)
-	seg.next.Store(nil)
-	for i := range seg.data {
-		seg.data[i].Store(nil)
-	}
-	return seg
+	return new(segment)
 }
 
 // UnboundedSegmentedMailbox is an unbounded, lock‑free MPSC mailbox that
@@ -73,8 +69,8 @@ func newSegment() *segment {
 //   - Hot‑path efficiency: producers reserve a slot by atomically incrementing a
 //     segment write index and store directly into a cache‑friendly array slot;
 //     the consumer reads sequentially via a dequeue index.
-//   - Low GC pressure: segments are pooled; steady‑state traffic typically
-//     performs zero allocations per message.
+//   - Low GC pressure: one allocation per 256 messages, for the next segment;
+//     segments are not reused (see newSegment).
 //   - Observability: IsEmpty is O(1); Len is an approximate atomic counter
 //     (best‑effort under concurrency) and intended for metrics, not strict
 //     synchronization.
@@ -84,8 +80,8 @@ func newSegment() *segment {
 //     stream sinks that receive from many producers concurrently. The
 //     segment‑locality reduces cache misses compared to list nodes.
 //   - Ingestion/telemetry/logging actors: bursts of events followed by quick
-//     processing. Segment pooling amortizes allocation spikes and keeps the hot
-//     path mostly allocation‑free.
+//     processing. One allocation per 256 messages keeps the hot path mostly
+//     allocation‑free.
 //   - Scheduling/dispatch actors: timers, batchers, or background workers that
 //     consume quickly and benefit from contiguous array scans when draining.
 //   - Broker/bridge actors: gateways that translate external messages (NATS,
@@ -114,7 +110,7 @@ var _ Mailbox = (*UnboundedSegmentedMailbox)(nil)
 // NewUnboundedSegmentedMailbox creates and initializes a
 // UnboundedSegmentedMailbox.
 //
-// The mailbox starts with a single, pooled segment and grows by linking new
+// The mailbox starts with a single segment and grows by linking new
 // segments as necessary. Choose this mailbox when you need an unbounded, fast
 // MPSC queue with good cache locality and low allocation rates.
 func NewUnboundedSegmentedMailbox() *UnboundedSegmentedMailbox {
@@ -167,7 +163,7 @@ func (m *UnboundedSegmentedMailbox) Enqueue(value *ReceiveContext) error {
 // Semantics
 //   - Returns nil if the mailbox is empty.
 //   - Amortized O(1) for the single consumer: read from the current segment;
-//     when a segment is drained, advance to the next pooled segment.
+//     when a segment is drained, advance to the next segment.
 //
 // Single‑consumer requirement
 //   - Must be called from exactly one goroutine. Multiple consumers are not
@@ -193,10 +189,17 @@ func (m *UnboundedSegmentedMailbox) Dequeue() *ReceiveContext {
 		if next == nil {
 			return nil
 		}
-		// recycle old head
+
+		// A producer links a successor only after reserving past the end of
+		// this segment, so every slot here is reserved. The write index read
+		// above may predate those reservations: leave the segment only once
+		// all its slots have been dequeued, otherwise the slots reserved
+		// meanwhile would be abandoned with their messages.
+		if deq < segmentSize {
+			continue
+		}
+
 		m.head.Store(next)
-		seg.next.Store(nil)
-		segmentPool.Put(seg)
 		seg = next
 	}
 }

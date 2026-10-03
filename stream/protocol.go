@@ -104,10 +104,30 @@ type mergeSubDone struct {
 	slot int
 }
 
+// mergeSubErr is sent to a fan-in source actor when one of its input pipelines
+// terminates with an error instead of completing. The slot field identifies
+// the failed input; err is the error that terminated it.
+type mergeSubErr struct {
+	slot int
+	err  error
+}
+
 // mergeSubValue carries an element from a sub-source pipeline to the merge/combine actor.
 type mergeSubValue struct {
-	slot  int // 0=left, 1=right — used by combineSourceActor; ignored by mergeSourceActor
+	slot  int // index of the input the element came from
 	value any
+	// sink is the internal sink of that input pipeline. The fan-in actor sends
+	// it a mergeSubAck when the element leaves the fan-in buffer.
+	sink *actor.PID
+}
+
+// mergeSubAck is sent by a fan-in source actor to the internal sink of one of
+// its input pipelines when n elements of that input have left the fan-in
+// buffer. The sink answers by requesting n more elements from its upstream,
+// which keeps the elements of one input held by the fan-in actor within one
+// demand window.
+type mergeSubAck struct {
+	n int64
 }
 
 // slotDemand is sent by a broadcastSlotActor to the broadcastHubActor when its
@@ -142,6 +162,12 @@ type subUpstreamElem struct {
 // subUpstreamDone is sent by the upstream feeder sink when the original source
 // pipeline has completed.
 type subUpstreamDone struct{}
+
+// subUpstreamErr is sent by the upstream feeder sink when the original source
+// pipeline terminated with an error instead of completing.
+type subUpstreamErr struct {
+	err error
+}
 
 // subPush is sent by the splitter to a per-substream feedSourceActor to inject
 // one element into that substream's pipeline.

@@ -135,7 +135,7 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 
 Pure CRDT data types and replication configuration: **no** import of `actor`. User and Replicator code interact via
 `crdt` messages and `ReplicatedData` values. See [Distributed data](/advanced/distributed-data) and the repository
-[`architecture/CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md).
+[book chapter on distributed data](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-24.md).
 
 - **crdt.go**, **key.go**: `ReplicatedData`, keys, `DataType`.
 - **config.go**, **consistency.go**: `Config`, options, optional read/write coordination.
@@ -147,7 +147,7 @@ Pure CRDT data types and replication configuration: **no** import of `actor`. Us
 
 Reactive pipelines (`Source`, `Flow`, `Sink` → `RunnableGraph`) materialized onto an `ActorSystem` with backpressure.
 See [Streams](/advanced/streams) and the repository
-[`architecture/REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md).
+[book chapter on streams](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-25.md).
 
 - **stream.go**, **graph.go**, `graph_builder.go`, **pipeline.go**, **materializer.go**: Graph construction and `Run`.
 - **source.go**, **flow.go**, **sink.go**: Stream building blocks.
@@ -268,8 +268,7 @@ protos/
 - [Design Decisions](/architecture/design-decisions): rationale for architectural choices
 - [Streams](/advanced/streams): reactive pipelines on actors
 - [Distributed data](/advanced/distributed-data): CRDTs and the Replicator
-- Repository design docs:
-  [`architecture/ARCHITECTURE.md`](https://github.com/tochemey/goakt/blob/main/architecture/ARCHITECTURE.md),
-  [`CRDTs.md`](https://github.com/tochemey/goakt/blob/main/architecture/CRDTs.md),
-  [`DISPATCHER_POOL_DESIGN.md`](https://github.com/tochemey/goakt/blob/main/architecture/DISPATCHER_POOL_DESIGN.md),
-  [`REACTIVE_STREAMS.md`](https://github.com/tochemey/goakt/blob/main/architecture/REACTIVE_STREAMS.md)
+- The maintainers' book in the repository, [GoAkt from the Inside](https://github.com/tochemey/goakt/blob/main/book/README.md): implementation detail for
+  [dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md), [remoting](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-15.md),
+  [reliable delivery](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-23.md), [distributed data](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-24.md) and
+  [streams](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-25.md)

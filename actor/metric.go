@@ -82,13 +82,13 @@ func (m Metric) Uptime() int64 {
 // aggregation is performed. Metrics are captured at the moment Metric is called and will
 // not update afterwards. If the actor is not running when requested, PID.Metric returns nil.
 type ActorMetric struct { //nolint:revive
-	// deadlettersCount is the total number of messages this actor sent to deadletters.
+	// deadlettersCount is the total number of messages addressed to this actor that went to deadletters.
 	deadlettersCount uint64
 	// childrenCount is the total number of direct child actors for this actor.
 	childrenCount uint64
 	// uptime is the number of seconds this actor has been alive (resets after restarts).
 	uptime int64
-	// latestProcessedDuration is the duration of the most recent message processing.
+	// latestProcessedDuration is the time elapsed since the most recent message started processing.
 	latestProcessedDuration time.Duration
 	// restartCount is the total number of restarts the actor has undergone.
 	restartCount uint64
@@ -105,20 +105,20 @@ type ActorMetric struct { //nolint:revive
 	unhandledCount uint64
 }
 
-// LatestProcessedDuration returns the duration of the latest message processing.
-// Unit: time.Duration (nanoseconds). Useful for latency observations on the last handled message.
+// LatestProcessedDuration returns the time elapsed since the latest message started processing,
+// that is, how long the actor has been idle. Unit: time.Duration (nanoseconds).
 func (x ActorMetric) LatestProcessedDuration() time.Duration {
 	return x.latestProcessedDuration
 }
 
-// RestartCount returns the cumulative number of restarts for this actor (PID).
-// Increments when supervision restarts the actor. Does not include normal stops.
+// RestartCount returns the cumulative number of restarts for this actor (PID), whether
+// decided by supervision or requested with Restart or ReSpawn. A terminal stop ends it.
 func (x ActorMetric) RestartCount() uint64 {
 	return x.restartCount
 }
 
-// DeadlettersCount returns the total number of messages sent to deadletters by this actor.
-// Indicates local delivery failures or unhandled messages.
+// DeadlettersCount returns the total number of messages addressed to this actor that went to
+// deadletters: messages it rejected with Unhandled, or that could not be delivered to it.
 func (x ActorMetric) DeadlettersCount() uint64 {
 	return x.deadlettersCount
 }
@@ -135,8 +135,9 @@ func (x ActorMetric) Uptime() int64 {
 	return x.uptime
 }
 
-// ProcessedCount returns the cumulative number of messages this actor has processed.
-// Increments after successful handling; excludes stashed or dropped messages.
+// ProcessedCount returns the cumulative number of messages handed to this actor's handler,
+// PostStart excluded. A message is counted when its handling starts, so a message whose
+// handling fails counts too. It resets on restart.
 func (x ActorMetric) ProcessedCount() uint64 {
 	return x.processedCount
 }
@@ -147,8 +148,8 @@ func (x ActorMetric) StashSize() uint64 {
 	return x.stashSize
 }
 
-// FailureCount returns the cumulative number of failures observed by this actor.
-// Typically increments on panics or errors that trigger supervision actions.
+// FailureCount returns the cumulative number of failures the supervisor acted on for this
+// actor: suspensions, and failures resumed with a resume directive. It survives restarts.
 func (x ActorMetric) FailureCount() uint64 {
 	return x.failureCount
 }

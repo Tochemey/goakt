@@ -51,6 +51,7 @@ than the wildcard. To listen on one interface only, and to choose the advertised
 - **WithCreditWindow**: Unreclaimed in-flight byte budget per duplex connection (≥ chunk size). Default: `16 MiB`.
 - **WithWriteTimeout**: Duplex outbound admission bound when the caller has no deadline. Default: `10s`.
 - **WithReadIdleTimeout**: Duplex PING interval; two missed PONGs close the connection (`0` = off). Default: `10s`.
+- **WithDialTimeout**: How long a dial to a peer may take before it fails (must be > 0). Default: `5s`.
 - **WithCompression**: None, Gzip, Zstd, or Brotli. Default: None.
 - **WithSerializers**: Bind a `Serializer` to a message type or interface. Default: protobuf.
 - **WithSerializables**: Bulk-register types with the built-in CBOR serializer. Default: none.
@@ -144,6 +145,11 @@ Asks are multiplexed by correlation ID on the same connection: the socket read l
 bounded worker pool, so one slow actor does not block the connection. A saturated ask pool answers with an in-band
 unavailable error for that request.
 
+When a node stops, its remoting server also ends the duplex connections its peers opened. From the start of the stop it
+admits no new ask: a late ask is refused with `ErrRemotingDisabled` and does not run. Asks already running finish and
+reply within the shutdown timeout, then the connections are closed, so a peer sees the node gone (a closed connection,
+then a refused dial) instead of answers from a stopped node.
+
 <Warning>
 The credit window is shared by every receiver on a duplex connection. Because a
 tell's credit is not returned until the message leaves the mailbox, a single
@@ -173,6 +179,10 @@ legacy peers (see [Protocol pin](#protocol-pin)).
 - `WithReadIdleTimeout` (default 10s) arms duplex PING/PONG liveness probes. After two missed PONGs the connection is
   closed. Set to `0` to disable probes. PINGs also refresh the server’s connection idle deadline, so a healthy idle lane
   is not reclaimed while liveness is succeeding.
+- `WithDialTimeout` (default 5s) bounds the connection of the remoting client to a peer, on the duplex and the legacy
+  path alike. A dial to an address that silently drops packets, such as the IP of a departed pod, waits out the whole
+  timeout. Keep it below the timeout of the calls that may have to dial, so the dial fails on its own timeout instead
+  of the call failing on its deadline.
 - The config idle timeout (default 20 minutes; no public option) is the legacy unary read/write deadline and the duplex
   connection reclaim window. When both idle timeout and `WithReadIdleTimeout` are set, read-idle must be strictly less
   than idle timeout.

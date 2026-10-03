@@ -6,8 +6,14 @@ sidebarTitle: "Supervision"
 
 ## What is supervision?
 
-Every actor has a parent. When a child fails (panics, returns an error from a handler), the parent's **supervisor**
-decides what to do. This keeps failures localized and recoverable.
+Every actor has a parent. When a child fails (its handler panics, or records an error with `ctx.Err`), the child's
+own **supervisor**, the one passed to its spawn with `WithSupervisor`, decides what to do, and the parent carries the
+decision out. This keeps failures localized and recoverable.
+
+A panic is matched to the rules by the type of the error it carries, exactly as an error recorded with `ctx.Err` is:
+`panic(&MyError{})` and `ctx.Err(&MyError{})` follow the same rule. A panic whose value matches no rule falls under the
+rule for `PanicError`, which every supervisor starts with (`Stop`), and `panic(nil)` follows the rule for
+`runtime.PanicNilError` (`Restart` by default).
 
 ## Strategies
 
@@ -18,13 +24,29 @@ Choose **OneForOne** when failures are independent; **OneForAll** when siblings 
 
 ## Directives
 
-- **Resume**: Ignore the failure; continue processing.
-- **Restart**: Re-initialize the child (PreStart runs again).
+- **Resume**: Ignore the failure; continue processing. The child decides this on its own, without involving the parent.
+- **Restart**: Stop the child (`PostStop` runs) and start it again (`PreStart` runs again) on the same actor value.
+  The mailbox and the queued messages are kept, and so are the child's watchers and the actors it watches: a restart is
+  not a death, so nobody receives `Terminated`. The restart count accumulates and the uptime starts again.
 - **Stop**: Terminate the child.
-- **Escalate**: Pass the failure to the parent.
+- **Escalate**: Deliver a `PanicSignal` to the parent's `Receive`, with the child as sender, and leave the child
+  suspended until the parent's code acts on it (stop, reinstate or restart `ctx.Sender()`). A top-level actor escalates
+  to the user guardian, which ignores the signal, so it stays suspended.
 
 Configure a restart budget (max consecutive restarts within a time window) to avoid infinite restart loops. Once the
 budget is exhausted, the faulty child is suspended instead of restarted.
+
+<Warning>
+An error with no matching directive suspends the actor. The default supervisor only has directives for panics, so under
+it any ordinary error suspends the actor: an error passed to `ctx.Err`, and a failed send from inside `Receive`, such as
+a `ctx.Ask` that times out. `ErrDead`, returned for a send to an actor that is not running, is the exception: it is
+never supervised. An actor that must keep running after such errors needs `WithAnyErrorDirective` or
+`WithDirective`. A system-wide fallback can be set with `WithDefaultSupervisor`.
+</Warning>
+
+From the failure until the supervisor's decision, the actor handles no user message: the messages queued behind the
+failure wait, and control messages still run. A resume lets them run on the same actor, a restart hands them to the new
+incarnation, and a suspension holds them until the actor is reinstated.
 
 ## Supervisor configuration
 
@@ -47,10 +69,13 @@ connections). Two options work together to prevent it; both track consecutive fa
 once the child stays fault-free for the configured window.
 
 `WithRetry(maxRetries, timeout)` is the restart budget: more than `maxRetries` consecutive faults within the window
-suspends the child instead of restarting it. A suspended actor no longer processes messages but can be revived with
+suspends the child instead of restarting it. A suspended actor no longer processes messages, including those already in
+its mailbox, but can be revived with
 `Reinstate`. `timeout` is the reset window, measured from the previous fault: a new fault arriving later than `timeout`
-after the last one starts the count over. It is also the delay between attempts when a restart itself keeps failing (for
-example, when `PreStart` keeps returning an error). A non-positive `timeout` disables the budget.
+after the last one starts the count over. It also bounds the pause between attempts when a restart itself keeps failing
+(for example, when `PreStart` keeps returning an error): the attempts are spaced by about `timeout`, with jitter. A
+non-positive `timeout` disables the budget. When every attempt fails, the child is stopped and its parent receives
+`Terminated` for it.
 
 `WithExponentialBackoff(initialDelay, maxDelay, resetAfter)` delays each consecutive restart: the nth restart waits
 `min(initialDelay << (n-1), maxDelay)` before the child comes back up, giving the failing dependency time to recover.
@@ -72,8 +97,8 @@ consecutive fault within the window suspends it. If no new fault occurs for 30 s
 starts over at 200ms.
 
 <Note>
-  While a restart delay is pending, the child does not process messages. As with any restart, mailboxes are not
-  preserved: messages sent during the delay may be dropped when the restart completes. With `OneForAllStrategy`, the
+  While a restart delay is pending, the child does not process messages. As with any restart, the mailbox is kept:
+  messages queued before the failure are handled by the new incarnation, after `PostStart`. With `OneForAllStrategy`, the
   delay and the budget apply to the whole group: siblings restart with the same delay, and budget exhaustion suspends
   them together with the faulty child.
 </Note>

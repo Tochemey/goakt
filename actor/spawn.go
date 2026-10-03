@@ -56,11 +56,14 @@ import (
 // Spawn creates and starts a new actor in the local actor system.
 //
 // The actor will be registered under the given `name`, allowing other actors
-// or components to send messages to it using the returned *PID. If a running
-// actor already holds the name in the local system, that actor is returned and
-// no new actor is created. If the actor holding the name is not running,
-// because it is suspended, stopping or restarting, ErrActorAlreadyExists is
-// returned.
+// or components to send messages to it using the returned *PID. Without a
+// cluster, if a running actor already holds the name in the local system, that
+// actor is returned and no new actor is created. If the actor holding the name
+// is not running, because it is suspended, stopping or restarting,
+// ErrActorAlreadyExists is returned. In cluster mode a name identifies one actor
+// across the cluster and the registry is checked first, so spawning a name that
+// is taken returns ErrActorAlreadyExists, even when the actor holding it runs on
+// this node: use ActorOf to get it.
 //
 // This method is location-transparent: with options such as WithHostAndPort, the actor
 // may be spawned on a remote node when remoting is enabled; otherwise it is created locally.
@@ -73,7 +76,9 @@ import (
 //
 // Parameters:
 //   - ctx: A context used to control cancellation and timeouts during the spawn process.
-//   - name: A unique identifier for the actor within the local actor system.
+//   - name: A unique identifier for the actor within the local actor system. It starts with a letter or a
+//     digit, followed by letters, digits, '-', '_' or '.'. Leading and trailing spaces are accepted and kept as
+//     part of the name, so "orders " and "orders" are two names: trim names that come from input.
 //   - actor: An instance implementing the Actor interface, representing the behavior and lifecycle of the actor.
 //   - opts: Optional SpawnOptions to customize the actor's behavior (e.g., dependency, mailbox, supervisor strategy).
 //
@@ -173,9 +178,10 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 //   - [WithPostStop] runs a hook after the actor has stopped.
 //   - [WithFuncMailbox] overrides the default mailbox.
 //
-// The name must be unique within the actor system. If an actor with the same name already exists and is
-// running, that actor is returned and no new actor is created. If it is not running, because it is
-// suspended, stopping or restarting, ErrActorAlreadyExists is returned.
+// The name must be unique within the actor system. Without a cluster, if an actor with the same name
+// already exists and is running, that actor is returned and no new actor is created. If it is not running,
+// because it is suspended, stopping or restarting, ErrActorAlreadyExists is returned. In cluster mode a
+// taken name always returns ErrActorAlreadyExists, even when the actor holding it runs on this node.
 //
 // The created actor is not relocatable: when running in a cluster it will not be redeployed to another node
 // if its host node leaves the cluster.
@@ -274,7 +280,9 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 //	    log.Fatalf("Failed to spawn actor in dc-west: %v", err)
 //	}
 //
-// ⚠️ Note: The created actor uses the default mailbox from the actor system unless overridden in opts.
+// ⚠️ Note: WithMailbox applies only when the actor is placed on this node. A mailbox is a Go value
+// and does not travel: an actor placed on another node, or re-created there by relocation, runs on
+// the default mailbox.
 func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	if !x.Running() {
 		return nil, gerrors.ErrActorSystemNotStarted
@@ -399,6 +407,7 @@ func (x *actorSystem) SpawnRouter(ctx context.Context, name string, poolSize int
 	router := newRouter(poolSize, routeesKind, x.logger, opts...)
 	return x.Spawn(ctx, name, router,
 		WithRelocationDisabled(),
+		WithLongLived(),
 		asSystem(),
 		WithSupervisor(
 			supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.ResumeDirective)),

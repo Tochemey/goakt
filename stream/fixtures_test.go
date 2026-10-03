@@ -25,6 +25,7 @@ package stream_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,4 +177,24 @@ func newClusterPair(t *testing.T, extraOpts ...remote.Option) (actor.ActorSystem
 		pause.For(100 * time.Millisecond)
 	}
 	return sysA, sysB
+}
+
+// requireNoStreamActorsLeft waits until no stream actor (coordinator or
+// stage) is left running in sys.
+func requireNoStreamActorsLeft(t *testing.T, sys actor.ActorSystem) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		pids, err := sys.Actors(context.Background(), time.Second)
+		if err != nil {
+			return false
+		}
+
+		for _, pid := range pids {
+			if strings.HasPrefix(pid.Name(), "stream-") {
+				return false
+			}
+		}
+
+		return true
+	}, 5*time.Second, 10*time.Millisecond, "stream actors still running")
 }

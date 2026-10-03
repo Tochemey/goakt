@@ -177,46 +177,63 @@ func (s *ORSet) Merge(other ReplicatedData) ReplicatedData {
 	return merged
 }
 
+// StateHash returns the canonical content hash of the set: its elements, each
+// with the dots that keep it in the set, and its clock. Dots that Compact
+// would remove do not take part, so a set hashes the same before and after
+// compaction. See StateHasher.
+func (s *ORSet) StateHash() uint64 {
+	var entries uint64
+
+	for elem, dots := range s.entries {
+		if len(dots) > 0 {
+			entries += hashParts(hashTagORSetEntry, hashValue(elem), hashLiveDots(dots))
+		}
+	}
+
+	return hashParts(hashTagORSet, entries, hashNodeCounters(s.clock))
+}
+
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if there are no changes. The returned delta can be used
 // as a ReplicatedData and merged into a peer's ORSet.
 //
-// The delta carries only the newly-added entries and a clock scoped to
-// the nodes that produced those dots. This prevents a peer from treating
-// the full clock as evidence that unseen dots have been removed.
+// The delta is the current state restricted to the nodes whose dots were
+// added or removed since the last reset: it carries this set's clock entry
+// for each of those nodes together with every live dot they produced.
+// Merge reads a clock entry as "every dot of that node up to this counter
+// has been seen, and the ones not listed are removed", so a delta that
+// names a node must list all of that node's live dots; otherwise a peer
+// would drop elements this set still has. Dots that were added and removed
+// again before the delta is taken are not live and are therefore not sent.
 func (s *ORSet) Delta() ReplicatedData {
 	if len(s.delta.added) == 0 && len(s.delta.removed) == 0 {
 		return nil
 	}
-	// Build a minimal ORSet representing just the delta.
+
 	d := &ORSet{
-		entries: make(map[any][]dot, len(s.delta.added)),
+		entries: make(map[any][]dot),
 		clock:   make(map[string]uint64),
 		delta:   newORSetDelta(),
 	}
-	for elem, dots := range s.delta.added {
-		cloned := cloneDots(dots)
-		d.entries[elem] = cloned
-		// Include only clock entries for nodes that produced new dots.
-		for _, dt := range cloned {
-			if c, ok := s.clock[dt.nodeID]; ok {
-				if c > d.clock[dt.nodeID] {
-					d.clock[dt.nodeID] = c
-				}
+
+	// Collect the nodes whose dots changed, with this set's clock for each.
+	for _, changed := range []map[any][]dot{s.delta.added, s.delta.removed} {
+		for _, dots := range changed {
+			for _, dt := range dots {
+				d.clock[dt.nodeID] = s.clock[dt.nodeID]
 			}
 		}
 	}
-	// Include clock entries for removed dots so that peers will see
-	// these dots as dominated and drop them during merge. We use each
-	// dot's own counter (not s.clock) to avoid over-claiming causality
-	// which could accidentally dominate unrelated higher-counter entries.
-	for _, dots := range s.delta.removed {
+
+	// Carry every live dot produced by those nodes.
+	for elem, dots := range s.entries {
 		for _, dt := range dots {
-			if dt.counter > d.clock[dt.nodeID] {
-				d.clock[dt.nodeID] = dt.counter
+			if _, ok := d.clock[dt.nodeID]; ok {
+				d.entries[elem] = append(d.entries[elem], dt)
 			}
 		}
 	}
+
 	return d
 }
 

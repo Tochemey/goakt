@@ -27,9 +27,10 @@ import (
 	"unsafe"
 )
 
-// systemQueue is the actor's queue of system messages: PostStart, PoisonPill,
-// Terminated, the supervision signals and the other control messages that
-// runTurn drains ahead of the user mailbox. Producers push with one
+// systemQueue is the actor's queue of control messages: PoisonPill,
+// Terminated, the supervision signals and the others isControlMessage lists,
+// which runTurn drains ahead of the user mailbox. PostStart is not among them:
+// it has its own slot on the PID (see armPostStart). Producers push with one
 // compare-and-swap; the single consumer, the dispatcher worker that owns the
 // actor's turn, takes everything pushed so far in one swap and hands it out in
 // send order. It needs no sentinel node, so an idle actor holds nothing: the

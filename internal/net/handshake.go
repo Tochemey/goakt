@@ -40,7 +40,9 @@ type HandshakeResult struct {
 }
 
 // performHello runs the dialer side of the duplex handshake: send HELLO,
-// read HELLO_ACK, compute effective limits.
+// read HELLO_ACK, compute effective limits. The acceptor chooses the codec,
+// but only between the dialer's proposal and none: an ACK naming any other
+// codec fails with [ErrUnexpectedCompressionCodec].
 func performHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, error) {
 	if local == nil {
 		return nil, fmt.Errorf("tcp: hello local parameters are required")
@@ -91,6 +93,11 @@ func performHello(conn FramedConn, local *internalpb.Hello) (*HandshakeResult, e
 	if remote.GetRevision() < CapabilityRevisionBaseline {
 		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "capability revision below baseline")
 		return nil, fmt.Errorf("%w: %d", ErrInvalidCapabilityRevision, remote.GetRevision())
+	}
+
+	if codec := remote.GetCompression(); codec != internalpb.CompressionCodec_COMPRESSION_CODEC_NONE && codec != local.GetCompression() {
+		_ = writeErrorFrame(conn, 0, internalpb.Code_CODE_INVALID_ARGUMENT, "unexpected compression codec in HELLO_ACK")
+		return nil, fmt.Errorf("%w: proposed %s, peer answered %s", ErrUnexpectedCompressionCodec, local.GetCompression(), codec)
 	}
 
 	effective := negotiateHello(local, remote)
@@ -183,9 +190,11 @@ func negotiateHello(local, remote *internalpb.Hello) *internalpb.Hello {
 	return hello
 }
 
-// selectCompression picks the codec both sides will use. The acceptor answers
-// with the dialer's proposal when it matches the acceptor's configured codec;
-// otherwise it falls back to NONE.
+// selectCompression picks the codec both sides will use. local is the
+// acceptor's configured codec and remote the dialer's proposal: the acceptor
+// answers with the proposal when the two are the same codec, and with NONE
+// otherwise, so a mismatch leaves the connection uncompressed instead of
+// failing it.
 func selectCompression(local, remote internalpb.CompressionCodec) internalpb.CompressionCodec {
 	if local == remote {
 		return remote

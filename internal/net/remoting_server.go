@@ -29,12 +29,15 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/types"
 )
 
 // acceptHandshakeTimeout bounds the acceptor-side handshake: the protocol
@@ -154,6 +157,28 @@ type RemotingServer struct {
 	duplexAsk                   DuplexAskHandler
 	senderResolver              func(path string) any
 	askPool                     *WorkerPool[duplexAskTask]
+
+	// compression is the codec this acceptor advertises in its duplex HELLO.
+	// A duplex connection is compressed only when the dialer proposes this
+	// same codec; the legacy path ignores it and uses the [ConnWrapper]s.
+	compression internalpb.CompressionCodec
+
+	// shutdownMu orders duplex ask admission and duplex connection tracking
+	// against the start of shutdown. Ask admission holds it shared; starting
+	// shutdown and adding or removing a tracked connection hold it exclusively.
+	shutdownMu sync.RWMutex
+	// shuttingDown is set under shutdownMu when Shutdown starts. From then on
+	// no duplex ask is admitted and a duplex connection that completes its
+	// handshake is closed at once.
+	shuttingDown bool
+	// duplexConns holds the accepted duplex connections still being served.
+	// They are served by their own goroutines, which outlive the listener, so
+	// Shutdown closes them through this set.
+	duplexConns map[*duplexConn]types.Unit
+	// asksInFlight counts the duplex asks admitted to askPool whose handler
+	// has not returned. Shutdown waits for it, within its timeout, so an
+	// admitted ask writes its reply before the connections close.
+	asksInFlight sync.WaitGroup
 }
 
 // RemotingServerOption configures a [RemotingServer] before it is started.
@@ -177,13 +202,14 @@ func NewRemotingServer(listenAddr string, opts ...RemotingServerOption) (*Remoti
 		chunkSize:                   DefaultChunkSize,
 		initialCredits:              defaultInitialCredits,
 		maxConcurrentLargeTransfers: defaultMaxConcurrentLargeTransfers,
+		duplexConns:                 make(map[*duplexConn]types.Unit),
 	}
 
 	for _, opt := range opts {
 		opt(x)
 	}
 
-	x.askPool = NewWorkerPool(handleDuplexAskTask)
+	x.askPool = NewWorkerPool(x.serveAdmittedAsk)
 
 	// Wire the legacy proto read-loop and the duplex acceptor used by the
 	// dual-protocol sniff. Accept-protocol and idle-timeout options must land
@@ -450,10 +476,24 @@ func WithRemotingServerPanicHandler(f PanicHandlerFunc) RemotingServerOption {
 }
 
 // WithRemotingServerConnWrapper appends a [ConnWrapper] (e.g. compression) to the
-// underlying [TCPServer]'s wrapping pipeline.
+// underlying [TCPServer]'s wrapping pipeline. Wrappers apply to legacy
+// connections only; duplex connections are compressed with the codec set by
+// [WithRemotingServerCompression].
 func WithRemotingServerConnWrapper(w ConnWrapper) RemotingServerOption {
 	return func(x *RemotingServer) {
 		x.serverOpts = append(x.serverOpts, WithConnWrapper(w))
+	}
+}
+
+// WithRemotingServerCompression sets the codec the server advertises in its
+// duplex HELLO. A duplex connection is compressed with that codec when the
+// dialer proposes exactly the same one; any other proposal, including none,
+// leaves the connection uncompressed. The default is no compression. Legacy
+// connections are not affected: they are compressed by the wrapper installed
+// with [WithRemotingServerConnWrapper].
+func WithRemotingServerCompression(codec internalpb.CompressionCodec) RemotingServerOption {
+	return func(x *RemotingServer) {
+		x.compression = codec
 	}
 }
 
@@ -521,14 +561,29 @@ func (x *RemotingServer) Serve() error {
 //   - d > 0: wait up to d for in-flight connections to finish.
 //   - d == 0: wait indefinitely.
 //   - d < 0: return immediately without waiting.
+//
+// Duplex connections outlive the listener, so Shutdown also ends them. From
+// the moment it is called no duplex ask is admitted: a late ask is answered
+// with a request-scoped CODE_FAILED_PRECONDITION ERROR carrying
+// [gerrors.ErrRemotingDisabled], the answer of a node whose remoting is off,
+// and its handler never runs. The asks already admitted get the wait d allows
+// connections to finish their handler and write their reply, then the duplex
+// connections are closed; with d < 0 they are closed without waiting. Like
+// the listener shutdown, this runs in the background: Shutdown itself returns
+// at once and [RemotingServer.Serve] returns once the connections are gone or
+// d expired.
 func (x *RemotingServer) Shutdown(d time.Duration) error {
+	if x.beginShutdown() {
+		go x.closeDuplexConns(d)
+	}
+
 	return x.server.Shutdown(d)
 }
 
 // Halt immediately stops the server without waiting for in-flight
 // connections. Equivalent to Shutdown(-1).
 func (x *RemotingServer) Halt() error {
-	return x.server.Halt()
+	return x.Shutdown(-1 * time.Second)
 }
 
 // ListenAddr returns the actual [*net.TCPAddr] the server is listening on.
@@ -549,8 +604,10 @@ func (x *RemotingServer) AcceptedConnections() int32 {
 	return x.server.AcceptedConnections()
 }
 
-// handleDuplexConn accepts a sniffed duplex connection: it completes HELLO,
-// applies negotiated compression, wires DATA/PING service into the duplex
+// handleDuplexConn accepts a sniffed duplex connection: it completes HELLO
+// advertising the server's configured codec (see
+// [WithRemotingServerCompression]), wraps the connection in that codec when
+// the dialer proposed the same one, wires DATA/PING service into the duplex
 // read loop, and returns; the accept worker goes back to its pool while the
 // connection's own transport goroutines serve it (detached mode, see
 // [DuplexHandlerFunc]).
@@ -569,7 +626,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	hello.SetRevision(CapabilityRevisionCredits)
 	hello.SetSystemName(x.systemName)
 	hello.SetLaneRole(internalpb.LaneRole_LANE_ROLE_CONTROL)
-	hello.SetCompression(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE)
+	hello.SetCompression(x.compression)
 	hello.SetMaxFrameSize(x.maxFrameSize)
 	hello.SetMaxMessageSize(x.maxMessageSize)
 	hello.SetInitialCredits(x.initialCredits)
@@ -642,17 +699,26 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 		// goroutine), so a decode plus mailbox enqueue never stalls reads
 		// under sustained load.
 		withDuplexPipelinedInbound(),
-		withDuplexClosedHandler(func(DuplexSession) {
+		withDuplexClosedHandler(func(session DuplexSession) {
 			stop := <-watchReady
 			stop()
+			x.untrackDuplexConn(session.(*duplexConn))
 			release()
 		}),
 	)
+
+	tracked := x.trackDuplexConn(conn)
 
 	// The pre-fold serve loop exited when the server base context was
 	// cancelled; a detached read loop blocks on the socket instead, so watch
 	// the context and complete the close on the watcher's own goroutine.
 	watchReady <- context.AfterFunc(baseCtx, func() { _ = conn.Close() })
+
+	if !tracked {
+		// Shutdown started during the handshake and will not see this
+		// connection, so it is closed here instead of being served.
+		_ = conn.Close()
+	}
 }
 
 // serveDuplexFrame dispatches one inbound frame on the connection's read
@@ -816,6 +882,21 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 		return nil
 	}
 
+	if !x.admitAsk() {
+		// Shutdown has started: the handler must not run. The refusal is the
+		// answer the actor layer gives once its remoting is off, so a peer
+		// reads it as a node that is leaving. The connection stays open for
+		// the replies of the asks admitted before.
+		if cancel != nil {
+			cancel()
+		}
+
+		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrRemotingDisabled.Error())
+		conn.ReleasePayload(frame)
+		conn.noteOwnedFrame(frame)
+		return nil
+	}
+
 	task := duplexAskTask{
 		server: x,
 		conn:   conn,
@@ -825,8 +906,17 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 		cancel: cancel,
 	}
 	if err := x.askPool.AddTask(task); err != nil {
+		x.asksInFlight.Done()
+
 		if cancel != nil {
 			cancel()
+		}
+
+		if errors.Is(err, ErrPoolStopped) {
+			// The server has stopped serving: close the connection so the
+			// peer sees the connection loss instead of an answer from it.
+			conn.ReleasePayload(frame)
+			return err
 		}
 
 		_ = submitErrorFrame(ctx, conn, frame.Correlation, internalpb.Code_CODE_UNAVAILABLE, err.Error())
@@ -1026,4 +1116,110 @@ func (x *RemotingServer) recover(ctx context.Context, handler ProtoHandler, conn
 
 	resp, err = handler(ctx, conn, msg)
 	return resp, false, err
+}
+
+// serveAdmittedAsk is the ask pool handler: it runs one admitted duplex ask
+// and then marks it finished, so Shutdown knows when its reply is written.
+func (x *RemotingServer) serveAdmittedAsk(task duplexAskTask) {
+	defer x.asksInFlight.Done()
+	handleDuplexAskTask(task)
+}
+
+// admitAsk counts a duplex ask in asksInFlight and reports true, or reports
+// false once Shutdown has started. The caller that got true must call
+// asksInFlight.Done when the ask is finished or was never handed to the pool.
+func (x *RemotingServer) admitAsk() bool {
+	x.shutdownMu.RLock()
+	defer x.shutdownMu.RUnlock()
+
+	if x.shuttingDown {
+		return false
+	}
+
+	x.asksInFlight.Add(1)
+	return true
+}
+
+// beginShutdown marks the server as shutting down and reports whether this
+// call did it, so the duplex connections are closed by the first Shutdown
+// only.
+func (x *RemotingServer) beginShutdown() bool {
+	x.shutdownMu.Lock()
+	defer x.shutdownMu.Unlock()
+
+	if x.shuttingDown {
+		return false
+	}
+
+	x.shuttingDown = true
+	return true
+}
+
+// trackDuplexConn records conn as served so Shutdown can close it. It reports
+// false, and records nothing, when Shutdown has already started.
+func (x *RemotingServer) trackDuplexConn(conn *duplexConn) bool {
+	x.shutdownMu.Lock()
+	defer x.shutdownMu.Unlock()
+
+	if x.shuttingDown {
+		return false
+	}
+
+	x.duplexConns[conn] = types.Unit{}
+	return true
+}
+
+// untrackDuplexConn forgets conn once its service has ended.
+func (x *RemotingServer) untrackDuplexConn(conn *duplexConn) {
+	x.shutdownMu.Lock()
+	delete(x.duplexConns, conn)
+	x.shutdownMu.Unlock()
+}
+
+// closeDuplexConns ends the duplex connections on Shutdown(d). Unless d is
+// negative it first waits for the admitted asks to finish, indefinitely when d
+// is zero and for at most d otherwise; it then closes every tracked connection.
+// A connection's Close flushes the replies already queued on it.
+func (x *RemotingServer) closeDuplexConns(d time.Duration) {
+	if d >= 0 {
+		x.awaitAdmittedAsks(d)
+	}
+
+	x.shutdownMu.Lock()
+	conns := make([]*duplexConn, 0, len(x.duplexConns))
+	for conn := range x.duplexConns {
+		conns = append(conns, conn)
+	}
+
+	x.shutdownMu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, conn := range conns {
+		wg.Go(func() { _ = conn.Close() })
+	}
+
+	wg.Wait()
+}
+
+// awaitAdmittedAsks blocks until every admitted duplex ask has finished, or
+// for at most d when d is positive.
+func (x *RemotingServer) awaitAdmittedAsks(d time.Duration) {
+	done := make(chan types.Unit)
+	go func() {
+		x.asksInFlight.Wait()
+		close(done)
+	}()
+
+	if d == 0 {
+		<-done
+		return
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-done:
+	case <-timer.C:
+	}
 }

@@ -85,6 +85,26 @@ type tombstone struct {
 	deletedBy string
 }
 
+// pendingDelta is the one change of a key waiting for the remote datacenters.
+type pendingDelta struct {
+	*crdtDelta
+	// seq is the pending sequence number of the last write to this entry.
+	// A datacenter whose accepted mark is below it has not received the
+	// entry in its current form.
+	seq uint64
+}
+
+// pendingTombstone is the one deletion of a key waiting for the remote
+// datacenters.
+type pendingTombstone struct {
+	// tombstone is the deletion as it is sent.
+	tombstone *internalpb.CRDTTombstone
+	// seq is the pending sequence number given to the deletion when it was
+	// buffered. A datacenter whose accepted mark is below it has not
+	// received the deletion.
+	seq uint64
+}
+
 // crdtConfigExtension holds the CRDT configuration as an actor system extension.
 // This ensures the config survives supervisor restarts — the Replicator reads
 // it from the extension registry in PreStart rather than from a constructor argument.
@@ -112,17 +132,23 @@ func (e *crdtConfigExtension) Config() *crdt.Config {
 // the key inside the payload) to this shared topic. Because every replicator
 // is subscribed to the same topic, they all receive the delta automatically.
 type replicatorActor struct {
-	pid                   *PID
-	topicActor            *PID
-	logger                log.Logger
-	config                *crdt.Config
-	nodeID                string
-	store                 map[string]crdt.ReplicatedData
-	keyTypes              map[string]crdt.DataType
-	subscriptions         map[string]types.Unit
-	watchers              map[string][]*PID
-	tombstones            map[string]*tombstone
-	versions              map[string]uint64
+	pid           *PID
+	topicActor    *PID
+	logger        log.Logger
+	config        *crdt.Config
+	nodeID        string
+	store         map[string]crdt.ReplicatedData
+	keyTypes      map[string]crdt.DataType
+	subscriptions map[string]types.Unit
+	watchers      map[string][]*PID
+	tombstones    map[string]*tombstone
+	versions      map[string]uint64
+	// hashes caches the canonical content hash of stored values, by key ID.
+	// An entry is valid for the value currently in store: every write to
+	// store goes through setValue, which drops it, and contentHash computes
+	// it again on demand. A key that has not changed since the last
+	// anti-entropy round therefore costs a map lookup in the next one.
+	hashes                map[string]uint64
 	msgSeq                atomic.Uint64
 	actorSystem           ActorSystem
 	clusterRef            cluster.Cluster
@@ -139,10 +165,36 @@ type replicatorActor struct {
 	antiEntropyCount      atomic.Uint64
 
 	// cross-datacenter replication state
-	dc                    datacenter.DataCenter
-	originDCProto         *internalpb.DataCenter
-	pendingDeltas         []*internalpb.CRDTDelta
-	pendingTombstones     []*internalpb.CRDTTombstone
+	dc            datacenter.DataCenter
+	originDCProto *internalpb.DataCenter
+	// pendingDeltas holds the local changes not yet accepted by every
+	// remote datacenter, one entry per key: a new delta of a key is merged
+	// into the pending one, so an entry is cumulative since it entered the
+	// buffer. Its size is bounded by the number of distinct keys changed
+	// since every remote datacenter on record last caught up, so by the
+	// number of keys in the store. Every node buffers, leader or not, so
+	// that a node that becomes the leader has its own latest changes to
+	// send.
+	pendingDeltas map[string]*pendingDelta
+	// pendingTombstones holds the local deletions not yet accepted by
+	// every remote datacenter, one per key, with the same bound as
+	// pendingDeltas. A tombstone removes the pending delta of its key. A
+	// key can only be updated again once its local tombstone has expired;
+	// if its tombstone is still pending then, both are sent and the
+	// receiver applies the tombstone before the delta, which leaves it
+	// with the new incarnation of the key.
+	pendingTombstones map[string]*pendingTombstone
+	// pendingSeq numbers the writes to the two pending buffers. Every
+	// write stamps its entry with the next value, so the entries a
+	// datacenter still needs are those stamped above its accepted mark.
+	pendingSeq uint64
+	// dataCenterAccepted holds, for each remote datacenter, the highest
+	// pending sequence number of a batch it accepted from this node. It
+	// is keyed by DataCenter.ID of the control-plane record, the identity
+	// the record itself is registered under. Only the leader fills it; a
+	// node that is not the leader keeps it empty. A datacenter without a
+	// mark has accepted nothing.
+	dataCenterAccepted    map[string]uint64
 	crossDCSendCount      atomic.Uint64
 	crossDCReceiveCount   atomic.Uint64
 	crossDCStaleSkipCount atomic.Uint64
@@ -185,6 +237,15 @@ func (r *replicatorActor) PreStart(ctx *Context) error {
 	r.watchers = make(map[string][]*PID)
 	r.tombstones = make(map[string]*tombstone)
 	r.versions = make(map[string]uint64)
+	r.hashes = make(map[string]uint64)
+
+	// what is still owed to the remote datacenters survives a restart
+	if r.pendingDeltas == nil {
+		r.pendingDeltas = make(map[string]*pendingDelta)
+		r.pendingTombstones = make(map[string]*pendingTombstone)
+		r.dataCenterAccepted = make(map[string]uint64)
+	}
+
 	r.logger = ctx.ActorSystem().Logger()
 	r.actorSystem = ctx.ActorSystem()
 
@@ -373,6 +434,9 @@ func (r *replicatorActor) handleMessage(ctx *ReceiveContext) {
 		r.handlePrune()
 	case *snapshotTick:
 		r.handleSnapshot()
+	case *SubscribeAck:
+		// the TopicActor confirms the subscription made in handlePostStart;
+		// nothing depends on the confirmation
 	default:
 		ctx.Unhandled()
 	}
@@ -399,7 +463,7 @@ func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
 	updated := msg.Apply(current)
 	delta := updated.Delta()
 	updated.ResetDelta()
-	r.store[keyID] = updated
+	r.setValue(keyID, updated)
 	r.versions[keyID]++
 
 	coordination := msg.WriteCoordination()
@@ -419,6 +483,9 @@ func (r *replicatorActor) handleUpdate(ctx *ReceiveContext, msg updateCommand) {
 }
 
 // handleGet reads the current value of a CRDT key.
+// A coordinated read keeps the merged value in the local store. When the key
+// was unknown locally, its data type is recorded from the merged value so the
+// key is snapshotted and advertised with its real type like any other key.
 func (r *replicatorActor) handleGet(ctx *ReceiveContext, msg getCommand) {
 	keyID := msg.KeyID()
 	data := r.store[keyID]
@@ -427,7 +494,11 @@ func (r *replicatorActor) handleGet(ctx *ReceiveContext, msg getCommand) {
 	if coordination != 0 {
 		merged := r.coordinatedRead(ctx, keyID, data, coordination)
 		if merged != nil {
-			r.store[keyID] = merged
+			if _, tracked := r.keyTypes[keyID]; !tracked {
+				r.trackKey(keyID, crdtDataTypeOf(merged))
+			}
+
+			r.setValue(keyID, merged)
 			data = merged
 		}
 	}
@@ -481,8 +552,7 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 	keyID := msg.KeyID()
 
 	dataType, hasType := r.keyTypes[keyID]
-	delete(r.store, keyID)
-	delete(r.versions, keyID)
+	r.removeValue(keyID)
 
 	now := time.Now()
 	r.tombstones[keyID] = &tombstone{
@@ -511,7 +581,7 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 
 		// buffer for cross-DC forwarding if enabled
 		if r.config.DataCenterEnabled() {
-			r.pendingTombstones = append(r.pendingTombstones, pb)
+			r.bufferTombstone(keyID, pb)
 		}
 	}
 
@@ -520,26 +590,76 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 	}
 }
 
-// handleProtoTombstone processes a tombstone received from a peer via TopicActor.
+// handleProtoTombstone processes a tombstone received from a peer via TopicActor
+// or in a batch from another datacenter. One this node issued is ignored: the
+// TopicActor delivers a publication to its publisher too.
 func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 	if msg.GetDeletedByNode() == r.nodeID {
 		return
 	}
 
+	r.applyTombstone(msg)
+}
+
+// applyTombstone applies a deletion made on another node, or one this node
+// made and has since lost. It is the one rule for a tombstone, whichever way
+// it arrives: the topic, a batch from another datacenter, or an anti-entropy
+// exchange.
+//
+// The deletion wins over whatever value is stored, whenever that value was
+// written: the key is removed, and so is a change of it still waiting for
+// the remote datacenters. Watchers are not notified.
+//
+// The tombstone is then kept to reject the deltas of the deleted key that
+// arrive late, for the tombstone TTL counted from the deletion. One that
+// arrives after that time still deletes the key but is not kept: it would be
+// pruned on the next tick, and until then it would reject the deltas of a key
+// its sender has created again since, which a tombstone of that age allows.
+//
+// A tombstone this node already holds with the same or a later deletion time
+// is left alone, so a tombstone that comes back on every anti-entropy round is
+// applied once, and two nodes that deleted the same key on their own settle
+// on the later deletion.
+func (r *replicatorActor) applyTombstone(msg *internalpb.CRDTTombstone) {
 	keyID, dataType, err := codec.DecodeCRDTKey(msg.GetKey())
 	if err != nil {
 		r.logger.Warnf("tombstone: failed to decode key: %v", err)
 		return
 	}
-	delete(r.store, keyID)
-	delete(r.versions, keyID)
+
+	deletedAt := time.Unix(0, msg.GetDeletedAtNanos())
+	if held, ok := r.tombstones[keyID]; ok && !held.deletedAt.Before(deletedAt) {
+		return
+	}
+
+	r.removeValue(keyID)
+	delete(r.pendingDeltas, keyID)
+
+	if time.Since(deletedAt) > r.config.TombstoneTTL() {
+		return
+	}
 
 	r.tombstones[keyID] = &tombstone{
 		keyID:     keyID,
 		dataType:  dataType,
-		deletedAt: time.Unix(0, msg.GetDeletedAtNanos()),
+		deletedAt: deletedAt,
 		deletedBy: msg.GetDeletedByNode(),
 	}
+}
+
+// encodeLiveTombstone returns the wire form of a tombstone this node retains,
+// for an anti-entropy exchange. It reports false for one older than the
+// tombstone TTL: it is about to be pruned and no longer deletes anything.
+func (r *replicatorActor) encodeLiveTombstone(ts *tombstone) (*internalpb.CRDTTombstone, bool) {
+	if time.Since(ts.deletedAt) > r.config.TombstoneTTL() {
+		return nil, false
+	}
+
+	pb := &internalpb.CRDTTombstone{}
+	pb.SetKey(codec.EncodeCRDTKey(ts.keyID, ts.dataType))
+	pb.SetDeletedAtNanos(ts.deletedAt.UnixNano())
+	pb.SetDeletedByNode(ts.deletedBy)
+	return pb, true
 }
 
 // handleProtoDelta decodes a protobuf delta received from a peer replicator
@@ -554,6 +674,8 @@ func (r *replicatorActor) handleProtoDelta(ctx *ReceiveContext, msg *internalpb.
 }
 
 // handleDelta merges a delta received from a peer replicator via TopicActor.
+// A delta that leaves the stored value unchanged, such as a duplicate
+// delivery, neither advances the key's version nor notifies its watchers.
 func (r *replicatorActor) handleDelta(ctx *ReceiveContext, msg *crdtDelta) {
 	if msg.Origin == r.nodeID {
 		return
@@ -569,18 +691,20 @@ func (r *replicatorActor) handleDelta(ctx *ReceiveContext, msg *crdtDelta) {
 
 	current, exists := r.store[keyID]
 	if !exists {
-		r.store[keyID] = msg.Delta
+		r.setValue(keyID, msg.Delta)
 		r.trackKey(keyID, msg.DataType)
 		r.versions[keyID]++
 		r.notifyChanged(ctx, keyID, msg.Delta)
 		return
 	}
 
-	merged := current.Merge(msg.Delta)
-	r.store[keyID] = merged
-	r.versions[keyID]++
+	merged, changed := r.mergeValue(keyID, current, msg.Delta)
 	r.mergeCount.Add(1)
-	r.notifyChanged(ctx, keyID, merged)
+
+	if changed {
+		r.versions[keyID]++
+		r.notifyChanged(ctx, keyID, merged)
+	}
 }
 
 // handleAntiEntropy runs one round of anti-entropy by exchanging digests
@@ -620,50 +744,119 @@ func (r *replicatorActor) handleAntiEntropy(ctx *ReceiveContext) {
 	r.antiEntropyCount.Add(1)
 }
 
-// handleDigest processes an anti-entropy digest from a peer.
-// For keys where the peer is behind, we send our full state.
-// For keys where we are behind, we request the peer's state.
+// handleDigest processes an anti-entropy digest from a peer and answers with
+// the full state of every key the peer needs from this node.
+//
+// A key is sent when the peer does not have it. For a key both nodes have,
+// the content hashes decide: the key is sent when the hashes differ and left
+// alone when they are equal, whatever the versions say. Versions count local
+// events and are not comparable across nodes, so two nodes can hold different
+// values at the same version; the hash sees that, the version does not. An
+// entry without a hash comes from a node that predates the field, and for it
+// the version rule applies: the key is sent when the local version is higher.
+// A tombstoned key is not in the store, so it is never sent.
+//
+// Deletions travel in both directions of the exchange, for as long as a node
+// retains the tombstone. The digest carries the tombstones its sender
+// retains; each one is applied here first, by the rule of applyTombstone, so
+// a key the sender deleted is removed before the store is compared and is
+// not sent back. For a key the digest lists and this node has deleted, the
+// answer carries this node's tombstone, and the sender applies it by the same
+// rule. A tombstone for a key the digest does not list needs no answer. A
+// digest without tombstones comes from a node that predates the field and is
+// handled as it always was; such a node also ignores the tombstones of an
+// answer.
+//
+// The exchange is a pull by the node that sent the digest: it receives this
+// node's state and merges it, and this node learns nothing from the round.
+// That is enough to converge. Every node sends its own digest to a random
+// peer on every anti-entropy tick, so for any two nodes each one eventually
+// pulls from the other; after A pulled from B and B pulled from A both hold
+// the merge of the two states, their hashes are equal and the rounds between
+// them go quiet. Neither direction can starve, because neither depends on the
+// other node's choice of peer. When only one side is behind, the node that is
+// ahead still receives the older state; merging it changes nothing, and a
+// merge that changes nothing is not counted or announced.
 func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDTDigest) {
-	// Build response: full state for keys where we are ahead or peer is missing.
-	var entries []*internalpb.CRDTFullStateEntry
+	var (
+		entries    []*internalpb.CRDTFullStateEntry
+		tombstones []*internalpb.CRDTTombstone
+	)
 
-	peerVersions := make(map[string]uint64, len(msg.GetEntries()))
+	for _, ts := range msg.GetTombstones() {
+		r.applyTombstone(ts)
+	}
+
+	peerEntries := make(map[string]*internalpb.CRDTDigestEntry, len(msg.GetEntries()))
 	for _, e := range msg.GetEntries() {
 		keyID, _, err := codec.DecodeCRDTKey(e.GetKey())
 		if err != nil {
 			r.logger.Warnf("anti-entropy digest: failed to decode key: %v", err)
 			continue
 		}
-		peerVersions[keyID] = e.GetVersion()
-	}
+		peerEntries[keyID] = e
 
-	// Send state for keys where local version > peer version, or peer doesn't have the key.
-	for keyID, data := range r.store {
-		localVersion := r.versions[keyID]
-		peerVersion, peerHas := peerVersions[keyID]
-		if !peerHas || localVersion > peerVersion {
-			dataType := r.keyTypes[keyID]
-			pbData, err := ddata.EncodeCRDT(data, r.serializer)
-			if err != nil {
-				r.logger.Warnf("anti-entropy: failed to encode state for key=%s: %v", keyID, err)
-				continue
+		// the peer holds a key this node has deleted
+		if ts, deleted := r.tombstones[keyID]; deleted {
+			if pb, live := r.encodeLiveTombstone(ts); live {
+				tombstones = append(tombstones, pb)
 			}
-			crdtfse := &internalpb.CRDTFullStateEntry{}
-			crdtfse.SetKey(codec.EncodeCRDTKey(keyID, dataType))
-			crdtfse.SetData(pbData)
-			entries = append(entries, crdtfse)
 		}
 	}
 
-	if len(entries) > 0 && ctx.Sender() != nil {
+	for keyID, data := range r.store {
+		if peerEntry, peerHas := peerEntries[keyID]; peerHas && !r.differsFromPeer(keyID, peerEntry) {
+			continue
+		}
+
+		dataType := r.keyTypes[keyID]
+		pbData, err := ddata.EncodeCRDT(data, r.serializer)
+		if err != nil {
+			r.logger.Warnf("anti-entropy: failed to encode state for key=%s: %v", keyID, err)
+			continue
+		}
+		crdtfse := &internalpb.CRDTFullStateEntry{}
+		crdtfse.SetKey(codec.EncodeCRDTKey(keyID, dataType))
+		crdtfse.SetData(pbData)
+		entries = append(entries, crdtfse)
+	}
+
+	if (len(entries) > 0 || len(tombstones) > 0) && ctx.Sender() != nil {
 		fullState := &internalpb.CRDTFullState{}
 		fullState.SetEntries(entries)
+		fullState.SetTombstones(tombstones)
 		ctx.Tell(ctx.Sender(), fullState)
 	}
 }
 
+// differsFromPeer reports whether the peer needs this node's state of a key
+// both nodes hold, given the peer's digest entry for it. With a content hash
+// on both sides the hashes are compared; without one, the peer being a node
+// that predates the hash, the peer needs the state when the local version is
+// the higher one.
+func (r *replicatorActor) differsFromPeer(keyID string, peerEntry *internalpb.CRDTDigestEntry) bool {
+	if peerEntry.HasStateHash() {
+		if localHash, ok := r.contentHash(keyID); ok {
+			return localHash != peerEntry.GetStateHash()
+		}
+	}
+
+	return r.versions[keyID] > peerEntry.GetVersion()
+}
+
 // handleFullState processes a full state response from a peer during anti-entropy.
+// A state that leaves the stored value unchanged, which is what a node that is
+// ahead of its peer receives, neither advances the key's version nor notifies
+// its watchers.
+//
+// The answer may also carry the peer's tombstones for keys this node listed
+// in its digest. They are applied first, by the rule of applyTombstone, so a
+// key the peer has deleted is removed here.
 func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.CRDTFullState) {
+	for _, ts := range msg.GetTombstones() {
+		r.applyTombstone(ts)
+	}
+
 	for _, entry := range msg.GetEntries() {
 		keyID, dataType, err := codec.DecodeCRDTKey(entry.GetKey())
 		if err != nil {
@@ -684,18 +877,20 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 
 		current, exists := r.store[keyID]
 		if !exists {
-			r.store[keyID] = data
+			r.setValue(keyID, data)
 			r.trackKey(keyID, dataType)
 			r.versions[keyID]++
 			r.notifyChanged(ctx, keyID, data)
 			continue
 		}
 
-		merged := current.Merge(data)
-		r.store[keyID] = merged
-		r.versions[keyID]++
+		merged, changed := r.mergeValue(keyID, current, data)
 		r.mergeCount.Add(1)
-		r.notifyChanged(ctx, keyID, merged)
+
+		if changed {
+			r.versions[keyID]++
+			r.notifyChanged(ctx, keyID, merged)
+		}
 	}
 }
 
@@ -715,12 +910,16 @@ func (r *replicatorActor) handlePrune() {
 	// compact CRDTs that support it
 	for keyID, data := range r.store {
 		if c, ok := data.(crdt.Compactable); ok {
-			r.store[keyID] = c.CompactData()
+			r.setValue(keyID, c.CompactData())
 		}
 	}
 }
 
-// buildDigest creates an anti-entropy digest from the local store.
+// buildDigest creates an anti-entropy digest from the local store. Each entry
+// carries the key's local version and the content hash of its value; the hash
+// is what a peer compares, the version is kept for peers that predate it.
+// The digest also carries every tombstone this node retains that is within
+// its TTL, so a peer that still holds a deleted key deletes it.
 // Pre-allocates contiguous slices to minimize heap allocations.
 func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 	n := len(r.store)
@@ -735,11 +934,25 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 		keyBuf[i].SetDataType(internalpb.CRDTDataType(dataType + 1))
 		entryBuf[i].SetKey(&keyBuf[i])
 		entryBuf[i].SetVersion(r.versions[keyID])
+
+		if hash, ok := r.contentHash(keyID); ok {
+			entryBuf[i].SetStateHash(hash)
+		}
+
 		entries = append(entries, &entryBuf[i])
 		i++
 	}
+	var tombstones []*internalpb.CRDTTombstone
+
+	for _, ts := range r.tombstones {
+		if pb, live := r.encodeLiveTombstone(ts); live {
+			tombstones = append(tombstones, pb)
+		}
+	}
+
 	crdtd := &internalpb.CRDTDigest{}
 	crdtd.SetEntries(entries)
+	crdtd.SetTombstones(tombstones)
 	return crdtd
 }
 
@@ -747,6 +960,89 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 func (r *replicatorActor) trackKey(keyID string, dataType crdt.DataType) {
 	r.subscriptions[keyID] = types.Unit{}
 	r.keyTypes[keyID] = dataType
+}
+
+// setValue stores the value of a key. Every write to the store goes through
+// it, because it also drops the key's cached content hash, which described
+// the previous value.
+func (r *replicatorActor) setValue(keyID string, data crdt.ReplicatedData) {
+	r.store[keyID] = data
+	delete(r.hashes, keyID)
+}
+
+// removeValue forgets the value of a deleted key together with its version
+// and its cached content hash.
+func (r *replicatorActor) removeValue(keyID string) {
+	delete(r.store, keyID)
+	delete(r.versions, keyID)
+	delete(r.hashes, keyID)
+}
+
+// contentHash returns the canonical content hash of the value stored under a
+// key, computing it only when the value changed since it was last asked for.
+// It reports false for a key that is not stored and for a value whose type
+// has no content hash.
+func (r *replicatorActor) contentHash(keyID string) (uint64, bool) {
+	if hash, ok := r.hashes[keyID]; ok {
+		return hash, true
+	}
+
+	hasher, ok := r.store[keyID].(crdt.StateHasher)
+	if !ok {
+		return 0, false
+	}
+
+	hash := hasher.StateHash()
+	r.hashes[keyID] = hash
+	return hash, true
+}
+
+// mergeValue merges incoming into the stored value of a key, stores the
+// result and reports whether the replicated state changed, judged by the
+// content hash before and after. A value whose type has no content hash is
+// always reported as changed.
+func (r *replicatorActor) mergeValue(keyID string, current, incoming crdt.ReplicatedData) (crdt.ReplicatedData, bool) {
+	before, hashed := r.contentHash(keyID)
+	merged := current.Merge(incoming)
+	r.setValue(keyID, merged)
+	after, _ := r.contentHash(keyID)
+	return merged, !hashed || before != after
+}
+
+// bufferDelta records a local change for the remote datacenters. The buffer
+// holds one delta per key: a further delta of the same key is merged into
+// the pending one, which gives the receiver the same value as the two deltas
+// applied one after the other. Either way the entry takes the next pending
+// sequence number, so a datacenter that accepted an earlier form of it is
+// sent the merged form.
+func (r *replicatorActor) bufferDelta(keyID string, dataType crdt.DataType, delta crdt.ReplicatedData) {
+	r.pendingSeq++
+
+	if pending, ok := r.pendingDeltas[keyID]; ok {
+		pending.Delta = pending.Delta.Merge(delta)
+		pending.seq = r.pendingSeq
+		return
+	}
+
+	r.pendingDeltas[keyID] = &pendingDelta{
+		crdtDelta: &crdtDelta{
+			KeyID:    keyID,
+			DataType: dataType,
+			Delta:    delta,
+			Origin:   r.nodeID,
+		},
+		seq: r.pendingSeq,
+	}
+}
+
+// bufferTombstone records a local deletion for the remote datacenters under
+// the next pending sequence number. It replaces the pending delta of the
+// key: the receiver deletes the key, so the change that preceded the
+// deletion is no longer worth sending.
+func (r *replicatorActor) bufferTombstone(keyID string, pb *internalpb.CRDTTombstone) {
+	r.pendingSeq++
+	delete(r.pendingDeltas, keyID)
+	r.pendingTombstones[keyID] = &pendingTombstone{tombstone: pb, seq: r.pendingSeq}
 }
 
 // publishDelta publishes a CRDT delta to the well-known CRDT topic via the TopicActor.
@@ -774,22 +1070,25 @@ func (r *replicatorActor) publishDelta(ctx *ReceiveContext, keyID string, dataTy
 
 	// buffer for cross-DC forwarding if enabled
 	if r.config.DataCenterEnabled() {
-		r.pendingDeltas = append(r.pendingDeltas, pb)
+		r.bufferDelta(keyID, dataType, delta)
 	}
 }
 
 // notifyChanged sends a Changed message to all local watchers of a key.
-// Dead watchers are pruned from the list to prevent unbounded growth.
+// The message names the key, so an actor watching several keys can tell
+// which one changed. Dead watchers are pruned from the list to prevent
+// unbounded growth.
 func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data crdt.ReplicatedData) {
 	watchers, ok := r.watchers[keyID]
 	if !ok {
 		return
 	}
 
+	key := crdtKeyOf(keyID, r.keyTypes[keyID])
 	alive := watchers[:0]
 	for _, watcher := range watchers {
 		if watcher.IsRunning() {
-			ctx.Tell(watcher, &crdt.Changed{Data: data})
+			ctx.Tell(watcher, &crdt.Changed{Key: key, Data: data})
 			alive = append(alive, watcher)
 		}
 	}
@@ -1044,8 +1343,8 @@ type crdtDelta struct {
 	Origin   string
 }
 
-// updateCommand is implemented by crdt.Update[T] for any T.
-// It bridges the generic typed message to the replicator's untyped handling.
+// updateCommand is implemented by crdt.Update.
+// It keeps the replicator's handling independent of the concrete message type.
 type updateCommand interface {
 	KeyID() string
 	CRDTDataType() crdt.DataType
@@ -1054,26 +1353,26 @@ type updateCommand interface {
 	WriteCoordination() crdt.Coordination
 }
 
-// getCommand is implemented by crdt.Get[T] for any T.
+// getCommand is implemented by crdt.Get.
 type getCommand interface {
 	KeyID() string
 	Response(data crdt.ReplicatedData) any
 	ReadCoordination() crdt.Coordination
 }
 
-// subscribeCommand is implemented by crdt.Subscribe[T] for any T.
+// subscribeCommand is implemented by crdt.Subscribe.
 type subscribeCommand interface {
 	KeyID() string
 	IsSubscribe()
 }
 
-// unsubscribeCommand is implemented by crdt.Unsubscribe[T] for any T.
+// unsubscribeCommand is implemented by crdt.Unsubscribe.
 type unsubscribeCommand interface {
 	KeyID() string
 	IsUnsubscribe()
 }
 
-// deleteCommand is implemented by crdt.Delete[T] for any T.
+// deleteCommand is implemented by crdt.Delete.
 type deleteCommand interface {
 	KeyID() string
 	IsDelete()
@@ -1109,6 +1408,49 @@ func (r *replicatorActor) decodeDelta(pb *internalpb.CRDTDelta) (*crdtDelta, err
 		Delta:    data,
 		Origin:   pb.GetOriginNode(),
 	}, nil
+}
+
+// crdtKeyOf rebuilds the public key of a stored CRDT from its identifier and
+// data type, which is how the replicator tracks keys internally.
+func crdtKeyOf(keyID string, dataType crdt.DataType) crdt.Key {
+	switch dataType {
+	case crdt.PNCounterType:
+		return crdt.PNCounterKey(keyID)
+	case crdt.LWWRegisterType:
+		return crdt.LWWRegisterKey(keyID)
+	case crdt.ORSetType:
+		return crdt.ORSetKey(keyID)
+	case crdt.ORMapType:
+		return crdt.ORMapKey(keyID)
+	case crdt.FlagType:
+		return crdt.FlagKey(keyID)
+	case crdt.MVRegisterType:
+		return crdt.MVRegisterKey(keyID)
+	default:
+		return crdt.GCounterKey(keyID)
+	}
+}
+
+// crdtDataTypeOf returns the data type of a CRDT value. The replicator uses it
+// when a value reaches the store without its key, which is the case of a
+// coordinated read of a key that only peers hold.
+func crdtDataTypeOf(data crdt.ReplicatedData) crdt.DataType {
+	switch data.(type) {
+	case *crdt.PNCounter:
+		return crdt.PNCounterType
+	case *crdt.LWWRegister:
+		return crdt.LWWRegisterType
+	case *crdt.ORSet:
+		return crdt.ORSetType
+	case *crdt.ORMap:
+		return crdt.ORMapType
+	case *crdt.Flag:
+		return crdt.FlagType
+	case *crdt.MVRegister:
+		return crdt.MVRegisterType
+	default:
+		return crdt.GCounterType
+	}
 }
 
 // spawnReplicator creates the CRDT Replicator system actor.
@@ -1180,7 +1522,7 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
 	}
 
-	_, err = meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+	registration, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.StoreSize(), replActor.storeSize.Load(), observeOptions...)
 		observer.ObserveInt64(metrics.MergeCount(), int64(replActor.mergeCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.DeltaPublishCount(), int64(replActor.deltaPublishCount.Load()), observeOptions...)
@@ -1209,15 +1551,15 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 		metrics.CrossDCStaleSkipCount(),
 	)
 
-	return err
+	return x.keepMetricRegistration(registration, err)
 }
 
 // restoreFromSnapshot opens the snapshot store and restores persisted CRDT state.
 // This is a no-op when snapshot persistence is not configured.
 // Note: the serializer is not yet available during PreStart (it is set in
-// handlePostStart), so restoreFromSnapshot decodes using the default
-// ProtoSerializer. Snapshot data only contains protobuf-serialized values,
-// so this is safe.
+// handlePostStart), so restoreFromSnapshot decodes with its own
+// CRDTValueSerializer, the same serializer type handlePostStart installs and
+// the snapshot was encoded with.
 func (r *replicatorActor) restoreFromSnapshot() error {
 	if r.config.SnapshotInterval() <= 0 || r.config.SnapshotDir() == "" {
 		return nil
@@ -1266,9 +1608,31 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 	return nil
 }
 
-// handleDataCenterFlush sends all buffered deltas and tombstones to remote
-// datacenter replicators as a single CRDTDeltaBatch. Only the cluster leader
-// performs the flush; non-leaders skip silently.
+// handleDataCenterFlush sends the buffered deltas and tombstones to the
+// remote datacenters. Only the cluster leader performs the flush; a node that
+// is not the leader skips it and keeps buffering.
+//
+// There is one buffer for all datacenters and one accepted mark per
+// datacenter. Each remote datacenter is sent a CRDTDeltaBatch of the entries
+// stamped above its mark, and nothing when there is none. A datacenter that
+// takes its batch has its mark raised to the highest sequence number in that
+// batch; one that does not keeps its mark and is sent the entries again on
+// the next tick, while the datacenters that took theirs are not. An entry is
+// dropped once the mark of every remote datacenter on record has reached it.
+//
+// The flush runs inside one turn of the actor, sends included, so no entry
+// is written while it runs; the mark is still taken from the batch that was
+// sent and not from the current sequence number, which keeps the rule true
+// whatever the send path does.
+//
+// A datacenter that leaves the records no longer holds entries back and its
+// mark is forgotten. One that appears has no mark, so it is sent everything
+// still pending. With no remote datacenter on record nothing is dropped. A
+// node that becomes the leader has entries and no marks: it sends everything
+// pending to every datacenter, which is a set of idempotent merges and
+// deletions for those that had received it from the previous leader. A node
+// that stops being the leader forgets its marks on its next tick, because the
+// datacenters and what they hold may change while another node leads.
 func (r *replicatorActor) handleDataCenterFlush(ctx *ReceiveContext) {
 	if len(r.pendingDeltas) == 0 && len(r.pendingTombstones) == 0 {
 		return
@@ -1281,23 +1645,153 @@ func (r *replicatorActor) handleDataCenterFlush(ctx *ReceiveContext) {
 	// only the leader flushes cross-DC
 	cctx := context.WithoutCancel(ctx.Context())
 	if !r.clusterRef.IsLeader(cctx) {
+		clear(r.dataCenterAccepted)
 		return
 	}
 
+	controller := r.actorSystem.getDataCenterController()
+	if controller == nil {
+		return
+	}
+
+	records, stale := controller.ActiveRecords()
+	if stale && controller.FailOnStaleCache() {
+		r.crossDCStaleSkipCount.Add(1)
+		r.logger.Warnf("cross-DC flush: skipping due to stale DC cache")
+		return
+	}
+
+	r.sendPendingToRemoteDataCenters(ctx, records)
+	r.dropAcceptedPending(records)
+}
+
+// sendPendingToRemoteDataCenters sends each remote datacenter the pending
+// entries it has not accepted yet and raises the accepted mark of those that
+// took their batch. Every pending delta is encoded once, whatever the number
+// of datacenters; one that cannot be encoded can never be sent and is removed
+// from the buffer.
+func (r *replicatorActor) sendPendingToRemoteDataCenters(ctx *ReceiveContext, records []datacenter.DataCenterRecord) {
+	encoded := make(map[string]*internalpb.CRDTDelta, len(r.pendingDeltas))
+
+	for keyID, pending := range r.pendingDeltas {
+		pb, err := r.encodeDelta(pending.crdtDelta)
+		if err != nil {
+			r.logger.Errorf("cross-DC flush: failed to encode delta for key=%s: %v", keyID, err)
+			delete(r.pendingDeltas, keyID)
+			continue
+		}
+
+		encoded[keyID] = pb
+	}
+
+	from := pathToAddress(r.pid.Path())
+	actorName := reservedName(replicatorType)
+	me := r.dc.ID()
+
+	for _, record := range records {
+		id := record.DataCenter.ID()
+		if id == me || len(record.Endpoints) == 0 {
+			continue
+		}
+
+		batch, highest := r.buildPendingBatch(encoded, r.dataCenterAccepted[id])
+		if highest == 0 {
+			continue
+		}
+
+		if r.sendToDataCenter(ctx, record, from, actorName, batch) {
+			r.dataCenterAccepted[id] = highest
+		}
+	}
+}
+
+// buildPendingBatch builds the batch of the pending entries stamped above
+// after, the accepted mark of the datacenter it is meant for, from the
+// already encoded deltas. It returns the batch and the highest sequence
+// number in it, which is zero when the datacenter needs nothing.
+func (r *replicatorActor) buildPendingBatch(encoded map[string]*internalpb.CRDTDelta, after uint64) (*internalpb.CRDTDeltaBatch, uint64) {
+	var (
+		deltas     []*internalpb.CRDTDelta
+		tombstones []*internalpb.CRDTTombstone
+		highest    uint64
+	)
+
+	for keyID, pending := range r.pendingDeltas {
+		if pending.seq > after {
+			deltas = append(deltas, encoded[keyID])
+			highest = max(highest, pending.seq)
+		}
+	}
+
+	for _, pending := range r.pendingTombstones {
+		if pending.seq > after {
+			tombstones = append(tombstones, pending.tombstone)
+			highest = max(highest, pending.seq)
+		}
+	}
+
 	batch := &internalpb.CRDTDeltaBatch{}
-	batch.SetDeltas(r.pendingDeltas)
-	batch.SetTombstones(r.pendingTombstones)
+	batch.SetDeltas(deltas)
+	batch.SetTombstones(tombstones)
 	batch.SetOriginDc(r.originDCProto)
 	batch.SetSentAtNanos(time.Now().UnixNano())
+	return batch, highest
+}
 
-	r.pendingDeltas = r.pendingDeltas[:0]
-	r.pendingTombstones = r.pendingTombstones[:0]
+// dropAcceptedPending removes the pending entries every remote datacenter on
+// record has accepted, and forgets the accepted mark of a datacenter that is
+// not on record. A datacenter on record without a mark, or without an
+// endpoint to send to, has accepted nothing and holds every entry back. With
+// no remote datacenter on record nothing is removed.
+func (r *replicatorActor) dropAcceptedPending(records []datacenter.DataCenterRecord) {
+	me := r.dc.ID()
+	onRecord := make(map[string]types.Unit, len(records))
 
-	r.sendBatchToRemoteDataCenters(ctx, batch)
+	for _, record := range records {
+		if id := record.DataCenter.ID(); id != me {
+			onRecord[id] = types.Unit{}
+		}
+	}
+
+	for id := range r.dataCenterAccepted {
+		if _, ok := onRecord[id]; !ok {
+			delete(r.dataCenterAccepted, id)
+		}
+	}
+
+	if len(onRecord) == 0 {
+		return
+	}
+
+	lowest := r.pendingSeq
+	for id := range onRecord {
+		lowest = min(lowest, r.dataCenterAccepted[id])
+	}
+
+	for keyID, pending := range r.pendingDeltas {
+		if pending.seq <= lowest {
+			delete(r.pendingDeltas, keyID)
+		}
+	}
+
+	for keyID, pending := range r.pendingTombstones {
+		if pending.seq <= lowest {
+			delete(r.pendingTombstones, keyID)
+		}
+	}
 }
 
 // handleIncomingBatch processes a CRDTDeltaBatch received from a remote
 // datacenter's replicator and merges each delta and tombstone locally.
+//
+// Tombstones are applied before deltas. A batch holds a tombstone and a delta
+// of the same key only when the sender deleted the key and created it again
+// after its tombstone expired, so the deletion comes first: it removes the
+// incarnation held here, and the delta then creates the new one, which leaves
+// this node with the value the sender holds. The tombstone of such a key is
+// older than the tombstone TTL and is therefore not kept, so it does not
+// reject the delta that follows it. A tombstone still within its TTL is kept
+// and rejects a delta of its key in the same batch, as it rejects any other.
 func (r *replicatorActor) handleIncomingBatch(ctx *ReceiveContext, batch *internalpb.CRDTDeltaBatch) {
 	originDC := batch.GetOriginDc()
 	if originDC != nil && originDC.GetName() == r.dc.Name &&
@@ -1309,12 +1803,12 @@ func (r *replicatorActor) handleIncomingBatch(ctx *ReceiveContext, batch *intern
 	r.lastReplicationLag.Store(time.Now().UnixNano() - batch.GetSentAtNanos())
 	r.crossDCReceiveCount.Add(1)
 
-	for _, delta := range batch.GetDeltas() {
-		r.handleProtoDelta(ctx, delta)
-	}
-
 	for _, ts := range batch.GetTombstones() {
 		r.handleProtoTombstone(ts)
+	}
+
+	for _, delta := range batch.GetDeltas() {
+		r.handleProtoDelta(ctx, delta)
 	}
 }
 
@@ -1406,47 +1900,11 @@ func (r *replicatorActor) handleDataCenterAntiEntropy(ctx *ReceiveContext) {
 	}
 }
 
-// sendBatchToRemoteDataCenters sends a CRDTDeltaBatch to one random endpoint in each
-// remote datacenter discovered via the datacenter controller.
-// On failure it tries remaining endpoints in the same DC before moving on.
-func (r *replicatorActor) sendBatchToRemoteDataCenters(ctx *ReceiveContext, batch *internalpb.CRDTDeltaBatch) {
-	controller := r.actorSystem.getDataCenterController()
-	if controller == nil {
-		return
-	}
-
-	records, stale := controller.ActiveRecords()
-	if stale && controller.FailOnStaleCache() {
-		r.crossDCStaleSkipCount.Add(1)
-		r.logger.Warnf("cross-DC flush: skipping due to stale DC cache")
-		return
-	}
-
-	if len(records) == 0 {
-		return
-	}
-
-	from := pathToAddress(r.pid.Path())
-	actorName := reservedName(replicatorType)
-	me := r.dc.ID()
-
-	for _, record := range records {
-		if record.DataCenter.ID() == me {
-			continue
-		}
-
-		if len(record.Endpoints) == 0 {
-			continue
-		}
-
-		r.sendToDataCenter(ctx, record, from, actorName, batch)
-	}
-}
-
 // sendToDataCenter attempts to deliver a batch to a single remote DC.
 // It shuffles the endpoint list and tries each one until a send succeeds
-// or all endpoints are exhausted.
-func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacenter.DataCenterRecord, from *address.Address, actorName string, batch *internalpb.CRDTDeltaBatch) {
+// or all endpoints are exhausted. It reports whether an endpoint took the
+// batch.
+func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacenter.DataCenterRecord, from *address.Address, actorName string, batch *internalpb.CRDTDeltaBatch) bool {
 	endpoints := make([]string, len(record.Endpoints))
 	copy(endpoints, record.Endpoints)
 	rand.Shuffle(len(endpoints), func(i, j int) { //nolint:gosec
@@ -1486,8 +1944,9 @@ func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacente
 
 		cancel()
 		r.crossDCSendCount.Add(1)
-		return
+		return true
 	}
 
 	r.logger.Warnf("cross-DC flush: all endpoints exhausted for DC %s", dcID)
+	return false
 }

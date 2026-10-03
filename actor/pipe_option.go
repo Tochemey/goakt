@@ -71,7 +71,8 @@ type PipeOption func(config *pipeConfig)
 
 // WithTimeout configures PipeTo with a maximum duration for waiting on the
 // task outcome. If the result is not available within this duration, the
-// message will not be delivered.
+// message will not be delivered. The task itself is not stopped: it takes no
+// context, so it runs to completion and its result is discarded.
 func WithTimeout(timeout time.Duration) PipeOption {
 	return func(config *pipeConfig) {
 		config.timeout = &timeout

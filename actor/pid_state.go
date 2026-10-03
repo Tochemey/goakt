@@ -25,9 +25,9 @@ package actor
 // pidState models the bitmask used to track the PID's internal state. Instead of
 // sprinkling multiple atomic.Bool fields across the struct (which wastes cache
 // lines and padding), we flip individual bits inside a single atomic.Uint32.
-// Each flag represents a mutually independent property—e.g. "running" and
-// "suspended" should never be true at the same time—but the combined value lets
-// us toggle them efficiently.
+// Each flag represents one property; several are set at once, e.g. a suspended
+// actor keeps its "running" bit, and IsRunning reads both. The combined value
+// lets us toggle them efficiently.
 type pidState uint32
 
 // PID flag definitions. Each flag occupies a dedicated bit inside PID.stateFlags.
@@ -36,7 +36,7 @@ type pidState uint32
 //   - stoppingState:    PID is in the middle of Shutdown/Stop/Passivation.
 //   - suspendedState:   PID has been suspended by the supervisor.
 //   - passivatingState: PID is currently executing the passivation path.
-//   - passivationPausedState: Passivation is temporarily paused (e.g. during Watch/Reinstate).
+//   - passivationPausedState: Passivation is paused while the actor is suspended, until it is reinstated.
 //   - passivationSkipNextState: One-shot guard to skip the next passivation decision.
 //   - singletonState: PID represents a cluster singleton.
 //   - relocationState: PID may be relocated to another node (cluster mode).
@@ -50,6 +50,10 @@ type pidState uint32
 //     stop path that the teardown it is running belongs to a restart. Restart
 //     churn is owned by actor.restart.count, and actor.stopped.count must not
 //     count it a second time.
+//   - supervisionPendingState: a failure has been handed to supervision and no
+//     decision has been made yet. The actor handles no user message until the
+//     supervision goroutine clears it, so the messages queued behind a failure
+//     wait for the decision instead of running on a failed actor.
 const (
 	runningState pidState = 1 << iota
 	stoppingState
@@ -63,6 +67,7 @@ const (
 	remoteState
 	remoteHoldsClosedState
 	restartingState
+	supervisionPendingState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {

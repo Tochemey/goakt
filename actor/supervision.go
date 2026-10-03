@@ -75,17 +75,20 @@ func (s *supervision) stop() {
 	}
 }
 
-// Submit hands a failure signal to the shared consumer. It is called from the
-// dispatcher worker inside recovery(). The send is back-pressured rather than
-// dropped, with a stop escape so a producer never wedges during shutdown.
-func (s *supervision) Submit(pid *PID, signal *supervisionSignal) {
+// Submit hands a failure signal to the shared consumer and reports whether it
+// was queued. It is called from the dispatcher worker inside recovery(). The
+// send is back-pressured rather than dropped, with a stop escape so a producer
+// never wedges during shutdown.
+func (s *supervision) Submit(pid *PID, signal *supervisionSignal) bool {
 	if pid == nil || signal == nil || !s.started.Load() {
-		return
+		return false
 	}
 
 	select {
 	case s.queue <- supervisionWork{pid: pid, signal: signal}:
+		return true
 	case <-s.stopCh:
+		return false
 	}
 }
 
@@ -103,6 +106,10 @@ func (s *supervision) run() {
 			if work.pid.IsRunning() {
 				work.pid.notifyParent(work.signal)
 			}
+
+			// the decision is made: the actor's user messages may run again,
+			// unless the decision suspended it
+			work.pid.resumeAfterSupervision()
 		case <-s.stopCh:
 			return
 		}

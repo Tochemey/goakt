@@ -170,7 +170,7 @@ type remoteSinkBridgeActor[T any] struct {
 	upstream     *actor.PID
 	subID        string
 	streamID     string
-	termErr      error
+	termErr      terminalError
 	config       StageConfig
 }
 
@@ -188,7 +188,7 @@ func (a *remoteSinkBridgeActor[T]) PreStart(_ *actor.Context) error { return nil
 
 // TermErr exposes any terminal wire error so completionWrapper can surface it
 // on StreamHandle.Err().
-func (a *remoteSinkBridgeActor[T]) TermErr() error { return a.termErr }
+func (a *remoteSinkBridgeActor[T]) TermErr() error { return a.termErr.get() }
 
 // Receive handles stageWire, endpointResolved, streamRequestWire,
 // streamElement, streamComplete, streamError, and streamErrorWire.
@@ -200,7 +200,7 @@ func (a *remoteSinkBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 
 		endpoint, err := resolveEndpoint(rctx.Context(), a.system, rctx.Self(), a.endpointHost, a.endpointPort, a.endpointName)
 		if err != nil {
-			a.termErr = fmt.Errorf("stream: resolve sink ref %q: %w", a.endpointName, err)
+			a.termErr.set(fmt.Errorf("stream: resolve sink ref %q: %w", a.endpointName, err))
 			rctx.Shutdown()
 			return
 		}
@@ -211,7 +211,7 @@ func (a *remoteSinkBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 		// silently records errors via rctx.Err which the bridge would never
 		// observe — masking a transient remoting failure as a hung subscribe.
 		if err := rctx.Self().Tell(rctx.Context(), a.endpoint, &streamSubscribeWire{StreamID: a.streamID}); err != nil {
-			a.termErr = fmt.Errorf("stream: sink ref subscribe %q: %w", a.endpointName, err)
+			a.termErr.set(fmt.Errorf("stream: sink ref subscribe %q: %w", a.endpointName, err))
 			rctx.Shutdown()
 			return
 		}
@@ -241,7 +241,7 @@ func (a *remoteSinkBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 		rctx.Shutdown()
 
 	case *streamError:
-		a.termErr = msg.err
+		a.termErr.set(msg.err)
 		if a.endpoint != nil {
 			rctx.Tell(a.endpoint, &streamErrorWire{
 				StreamID: a.streamID,
@@ -255,7 +255,7 @@ func (a *remoteSinkBridgeActor[T]) Receive(rctx *actor.ReceiveContext) {
 		if msg.StreamID != a.streamID {
 			return
 		}
-		a.termErr = errors.New(msg.Err)
+		a.termErr.set(errors.New(msg.Err))
 		rctx.Shutdown()
 
 	default:

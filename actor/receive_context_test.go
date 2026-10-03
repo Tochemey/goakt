@@ -2597,6 +2597,40 @@ func TestReceiveContext(t *testing.T) {
 		require.NoError(t, pidA.Shutdown(ctx))
 		require.NoError(t, pidB.Shutdown(ctx))
 	})
+	t.Run("With Forward of an Ask the final actor answers the asker", func(t *testing.T) {
+		ctx := context.TODO()
+		ports := dynaport.Get(2)
+		host := "127.0.0.1"
+
+		actorSystem, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, ports[0])), WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		final, err := actorSystem.Spawn(ctx, "final", NewMockActor())
+		require.NoError(t, err)
+
+		front, err := actorSystem.Spawn(ctx, "front", &MockForwardingActor{actorRef: final})
+		require.NoError(t, err)
+
+		// a local Ask
+		reply, err := Ask(ctx, front, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+
+		// an Ask from another node
+		other, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, ports[1])), WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, other.Start(ctx))
+		t.Cleanup(func() { _ = other.Stop(ctx) })
+
+		remoteFront, err := other.NoSender().RemoteLookup(ctx, host, ports[0], "front")
+		require.NoError(t, err)
+
+		reply, err = other.NoSender().Ask(ctx, remoteFront, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+	})
 	t.Run("With failed Forward to stopped actor", func(t *testing.T) {
 		ctx := context.TODO()
 		ports := dynaport.Get(2)

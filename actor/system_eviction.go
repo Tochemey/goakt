@@ -24,8 +24,17 @@ package actor
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/tochemey/goakt/v4/errors"
+)
+
+const (
+	// DefaultEvictionInterval is the interval at which the eviction engine runs
+	// when WithEvictionStrategy is given a zero or negative interval. The
+	// eviction ticker cannot run at such an interval, so the option falls back
+	// to this value instead of letting Start crash the process.
+	DefaultEvictionInterval = 5 * time.Second
 )
 
 // EvictionPolicy defines a strategy for passivating (deactivating) actors

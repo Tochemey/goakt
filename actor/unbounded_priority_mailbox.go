@@ -70,8 +70,11 @@ func (h *heap) Swap(i, j int) {
 	h.items[i], h.items[j] = h.items[j], h.items[i]
 }
 
-// UnboundedPriorityMailBox is a Priority Queue (FIFO)
-// It implements a binary heap (using the standard library container/heap)
+// UnboundedPriorityMailBox is an unbounded priority queue, a binary heap from
+// the standard library's container/heap. A heap is not stable: messages the
+// priority function ranks equally come out in no particular order. Use
+// UnboundedStablePriorityMailbox when equal priorities must keep their
+// arrival order.
 type UnboundedPriorityMailBox struct {
 	heap   *heap
 	lock   *sync.RWMutex
@@ -96,8 +99,7 @@ func NewUnboundedPriorityMailBox(priorityFunc PriorityFunc) *UnboundedPriorityMa
 	}
 }
 
-// Enqueue places the given value in the mailbox
-// The given message must be a priority message otherwise an error will be returned
+// Enqueue places the given value in the mailbox. It always returns nil.
 func (q *UnboundedPriorityMailBox) Enqueue(msg *ReceiveContext) error {
 	q.lock.Lock()
 	hp.Push(q.heap, msg)

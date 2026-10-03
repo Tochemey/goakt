@@ -75,8 +75,9 @@ import (
 const passivationTouchInterval = int64(100 * time.Millisecond)
 
 // defaultSupervisor is the shared supervisor assigned to PIDs constructed
-// without a supervisor option. Supervisors are read-only after construction,
-// so a single instance serves every such PID.
+// without a supervisor option. A supervisor holds no per-actor state, so a
+// single instance serves every such PID; Reset and SetDirectiveByType would
+// change it for all of them.
 var defaultSupervisor = supervisor.NewSupervisor()
 
 // defaultPassivationStrategy is the shared passivation strategy assigned to
@@ -110,12 +111,18 @@ type restartNode struct {
 //   - Messaging: Tell, Ask, BatchTell, BatchAsk
 //   - Remote helpers: RemoteLookup, RemoteStop, RemoteReSpawn
 //
+// # Operations forwarded to the remote node
+//
+// Lifecycle: Stop, Restart, Shutdown, SpawnChild, Reinstate
+// Tree navigation: Child, Children, ChildrenCount, Parent
+//
 // # Local-only operations (return ErrNotLocal for remote PIDs)
 //
-// Lifecycle: Stop, Restart, Shutdown, SpawnChild, Reinstate, ReinstateNamed
-// Tree navigation: Child, Children, ChildrenCount, Parent
-// Watch: Watch, UnWatch
-// Name-based messaging: SendAsync, SendSync, PipeTo, PipeToName, DiscoverActor
+// These are ReinstateNamed, SendAsync, SendSync, PipeTo, PipeToName and
+// DiscoverActor.
+//
+// Watch and UnWatch called on a remote PID do nothing; call them on a local
+// PID with the remote PID as argument to watch a remote actor.
 //
 // # Query methods (safe for remote, return zero values)
 //
@@ -186,8 +193,10 @@ type PID struct {
 	// specifies the actor behavior stack
 	behaviorStack *behaviorStack
 
-	// stash settings
-	stashState *stashState
+	// stashState is the stash buffer, nil until WithStash or a stash-mode
+	// request creates it. An atomic pointer because that request creates it on
+	// the processing turn while StashSize reads it from other goroutines.
+	stashState atomic.Pointer[stashState]
 	// reentrancy holds the async request state. An atomic pointer because
 	// EnableReentrancy installs it at runtime from the processing turn while
 	// off-turn readers (shutdown cancellation, wire snapshots) observe it. It
@@ -524,9 +533,16 @@ func (pid *PID) Metric(ctx context.Context) *ActorMetric {
 			childrenCount           = pid.ChildrenCount()
 			deadlettersCount        = pid.getDeadlettersCount(ctx)
 			restartCount            = pid.RestartCount()
-			processedCount          = pid.ProcessedCount() - 1 // 1 because of the PostStart message
+			processedCount          = pid.ProcessedCount()
 			stashSize               = pid.StashSize()
 		)
+
+		// PostStart is not a processed message; until the first turn has
+		// handled it there is nothing to subtract
+		if processedCount > 0 {
+			processedCount--
+		}
+
 		return &ActorMetric{
 			deadlettersCount:        uint64(deadlettersCount),
 			childrenCount:           uint64(childrenCount),
@@ -579,7 +595,8 @@ func (pid *PID) Name() string {
 	return ""
 }
 
-// Equals reports whether pid and to refer to the same actor.
+// Equals reports whether pid and to refer to the same actor. Actor names are
+// case-sensitive, so the comparison is exact, as it is for Path.Equals.
 func (pid *PID) Equals(to *PID) bool {
 	if pid == nil && to == nil {
 		return true
@@ -589,7 +606,7 @@ func (pid *PID) Equals(to *PID) bool {
 		return false
 	}
 
-	return strings.EqualFold(pid.ID(), to.ID())
+	return pid.ID() == to.ID()
 }
 
 // Actor returns the underlying Actor implementation.
@@ -617,9 +634,10 @@ func (pid *PID) Kind() string {
 	return types.Name(pid.actor)
 }
 
-// Child returns the running child PID with the given name.
-// Returns ErrNotLocal for remote PIDs (or when remoting is nil), ErrDead if this actor is not running,
-// or ErrActorNotFound when no such child exists or the child is stopped.
+// Child returns the running child PID with the given name. For a remote PID it
+// asks the actor's node for its children and returns a remote PID. It returns
+// ErrDead if a local actor is not running, or ErrActorNotFound when no such
+// child exists or the child is stopped.
 func (pid *PID) Child(name string) (*PID, error) {
 	if pid.IsRemote() {
 		addresses, err := pid.remoting.RemoteChildren(context.Background(), pid.address.Host(), pid.address.Port(), pid.Name())
@@ -697,10 +715,11 @@ func (pid *PID) Children() []*PID {
 	return cids
 }
 
-// Stop signals the given child PID to shut down after it finishes processing its current message.
+// Stop stops the given actor at once, as Shutdown does: it does not wait for the message the actor is processing.
 // When cid is remote, Stop delegates to RemoteStop via the remoting layer.
 // Returns ErrRemotingDisabled when cid is remote but remoting is not configured,
-// ErrDead if this actor is not running, and ErrActorNotFound when cid is not a child of this actor.
+// ErrDead if this actor is not running, and ErrActorNotFound when cid is not known to the actor
+// system. Any local actor may be stopped this way, not only a child.
 // It is a no-op when cid is already stopped.
 func (pid *PID) Stop(ctx context.Context, cid *PID) error {
 	if cid.IsRemote() {
@@ -884,7 +903,10 @@ func (pid *PID) Path() Path {
 // The subtree is snapshotted, the same parent/child topology is rebuilt, and each
 // actor is re-initialized via its PreStart hook. Suspended actors are reinitialized
 // without a prior shutdown step; non-running descendants are skipped entirely.
-// Mailboxes are not preserved — queued or in-flight messages may be dropped.
+// Each actor keeps its mailbox: a message being handled when the restart begins
+// finishes on the old incarnation, and the messages queued behind it are handled
+// by the new one, after its PostStart. Messages sent while the restart is under
+// way are refused.
 //
 // If the target or any descendant fails to restart, Restart returns that error
 // and the whole subtree is stopped: no actor of it is left running, their names
@@ -917,10 +939,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 	// snapshot all alive descendants before shutdown so we can rebuild the full subtree
 	// after the teardown has detached the children from their parents.
 	subtree := buildRestartSubtree(pid, tree)
-	// get the parent node of the actor
-	parent := pid.ActorSystem().NoSender()
-	if ppid, ok := tree.parent(pid); ok {
-		parent = ppid
+
+	parent, err := pid.restartParent(tree)
+	if err != nil {
+		return err
 	}
 
 	// The teardown of the target stops its descendants too. Marking the whole
@@ -935,6 +957,30 @@ func (pid *PID) Restart(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// restartParent returns the parent the restarted actor is attached under. An
+// actor that is running or suspended is in the tree, which knows its parent. A
+// stopped actor has left the tree, so its parent is found from its address: its
+// parent actor, which must still be in the tree, or the user guardian for a
+// top-level actor. The restart then puts the actor back into the tree, under
+// supervision and death watch, instead of reviving it outside the tree.
+func (pid *PID) restartParent(tree *tree) (*PID, error) {
+	if parent, ok := tree.parent(pid); ok {
+		return parent, nil
+	}
+
+	parentAddress := pid.getAddress().Parent()
+	if parentAddress == nil || parentAddress.Equals(address.NoSender()) {
+		return pid.ActorSystem().getUserGuardian(), nil
+	}
+
+	node, ok := tree.node(parentAddress.String())
+	if !ok || node.value() == nil {
+		return nil, gerrors.ErrDead
+	}
+
+	return node.value(), nil
 }
 
 // RestartCount returns the total number of times this actor has been restarted.
@@ -1001,20 +1047,25 @@ func (pid *PID) LatestProcessedDuration() time.Duration {
 // If a running child with the same name already exists, its PID is returned without creating a new one.
 // If that child is not running, because it is suspended, stopping or restarting, ErrActorAlreadyExists is returned.
 // Returns ErrNotLocal for remote PIDs and ErrDead if this actor is not running.
+//
+// A child without WithSupervisor gets the actor system's default supervisor (see
+// WithDefaultSupervisor). A child is placed on its parent's node, so WithRole, which
+// only constrains placement, has no effect, and a child cannot be a reliable-delivery
+// endpoint: AsReliableProducer and AsReliableConsumer are rejected with an error.
 func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
 	config := newSpawnConfig(opts...)
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
 
-	if pid.IsRemote() {
-		// the remote child spawn request cannot carry reliable-delivery
-		// settings: reject instead of silently spawning an endpoint without
-		// its controller
-		if config.reliableDelivery != nil {
-			return nil, errors.New("reliable delivery endpoints cannot be spawned as remote children")
-		}
+	// A reliable endpoint needs a controller that only a top-level spawn
+	// creates, and the remote child spawn request cannot carry its settings:
+	// reject instead of silently spawning an endpoint without its controller.
+	if config.reliableDelivery != nil {
+		return nil, gerrors.ErrReliableChildSpawnUnsupported
+	}
 
+	if pid.IsRemote() {
 		return pid.spawnChildRemote(ctx, name, actor, config)
 	}
 
@@ -1024,8 +1075,10 @@ func (pid *PID) SpawnChild(ctx context.Context, name string, actor Actor, opts .
 // Reinstate resumes a suspended actor, allowing it to process messages again.
 // The actor's internal state is preserved across the suspension. It is a no-op when cid
 // is already running or not suspended.
-// Returns ErrNotLocal for remote PIDs, ErrDead if this actor is not running,
-// and ErrActorNotFound when cid is not known to the actor system.
+// When pid is remote, the call is forwarded over remoting to cid's node; it then returns
+// ErrRemotingDisabled when remoting is not configured and ErrUndefinedActor for a nil cid.
+// Returns ErrDead if this actor is not running, and ErrActorNotFound when cid is not known
+// to the actor system.
 //
 // See also: ReinstateNamed for name-based reinstatement.
 func (pid *PID) Reinstate(cid *PID) error {
@@ -1041,7 +1094,7 @@ func (pid *PID) Reinstate(cid *PID) error {
 			return gerrors.ErrUndefinedActor
 		}
 
-		return pid.remoting.RemoteReinstate(ctx, cid.Path().Host(), cid.Path().Port(), cid.Name())
+		return pid.remoting.RemoteReinstate(ctx, cid.Path().Host(), cid.Path().Port(), cid.Path().QualifiedName())
 	}
 
 	if !pid.IsRunning() {
@@ -1059,6 +1112,16 @@ func (pid *PID) Reinstate(cid *PID) error {
 	actual, err := pid.ActorSystem().ActorOf(ctx, cid.getAddress().QualifiedName())
 	if err != nil {
 		return err
+	}
+
+	// the actor lives on another node: reinstate it there
+	if actual.IsRemote() {
+		if !pid.remotingEnabled() {
+			return gerrors.ErrRemotingDisabled
+		}
+
+		addr := actual.getAddress()
+		return pid.remoting.RemoteReinstate(ctx, addr.Host(), addr.Port(), addr.QualifiedName())
 	}
 
 	// this is a rare case when the local actor is not the same as the one
@@ -1115,10 +1178,11 @@ func (pid *PID) ReinstateNamed(ctx context.Context, actorName string) error {
 
 // StashSize returns the number of messages currently held in the stash buffer.
 func (pid *PID) StashSize() uint64 {
-	if pid.stashState == nil || pid.stashState.box == nil {
+	state := pid.stashState.Load()
+	if state == nil || state.box == nil {
 		return 0
 	}
-	return uint64(pid.stashState.box.Len())
+	return uint64(state.box.Len())
 }
 
 // PipeTo runs task asynchronously and, on success, delivers the result to to's mailbox.
@@ -1628,9 +1692,14 @@ func (pid *PID) RemoteReSpawn(ctx context.Context, host string, port int, name s
 	return newRemotePID(address, pid.remoting), nil
 }
 
-// Shutdown gracefully stops this actor and all its children.
+// Shutdown stops this actor and all its children, and returns once PostStop has run.
 // When pid is remote, Shutdown delegates to RemoteStop via the remoting layer.
-// Pending mailbox messages are processed before the actor terminates.
+// The stop is immediate: Shutdown does not wait for the message the actor is
+// processing, so PostStop may run while Receive is still handling it, and the
+// messages still queued in the mailbox are dropped. To stop the actor between
+// two messages instead, send it a PoisonPill; to stop it after everything
+// already queued, send it a message of your own and call ReceiveContext.Shutdown
+// when it arrives.
 // Returns ErrRemotingDisabled when pid is remote but remoting is not configured,
 // and ErrShutdownForbidden when called on a system actor while the actor system is still running.
 func (pid *PID) Shutdown(ctx context.Context) error {
@@ -1653,6 +1722,14 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 		}
 	}
 
+	return pid.stop(ctx)
+}
+
+// stop stops a local actor: it is the shutdown without the checks Shutdown
+// makes on who may stop what, for the paths that may stop any actor, such as
+// the teardown of a restart. It returns once PostStop has run, and does
+// nothing for an actor that is not running or suspended.
+func (pid *PID) stop(ctx context.Context) error {
 	pid.stopLocker.Lock()
 	pid.getLogger().Debugf("shutdown started for actor=%s", pid.Name())
 
@@ -1715,7 +1792,7 @@ func (pid *PID) Watch(cid *PID) {
 		ctx, cancel := context.WithTimeout(context.Background(), pid.ActorSystem().getRemoteWatchTimeout())
 		defer cancel()
 
-		if err := r.RemoteWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
+		if err := r.RemoteWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.QualifiedName(), pid.getAddress()); err != nil {
 			pid.getLogger().Debugf("watch: RemoteWatch to %s failed: %v", cidAddr, err)
 			return
 		}
@@ -1723,7 +1800,7 @@ func (pid *PID) Watch(cid *PID) {
 		// Local registration happens only after the remote acknowledged, so
 		// freeWatchees never tries to unwatch something the remote does not
 		// actually know about.
-		pid.ActorSystem().getRemoteWatches().addWatchee(pid.ID(), cidAddr)
+		pid.ActorSystem().getRemoteWatchRegistry().addWatchee(pid.ID(), cidAddr)
 		return
 	}
 
@@ -1744,7 +1821,7 @@ func (pid *PID) UnWatch(cid *PID) {
 		cidAddr := cid.getAddress()
 
 		// Drop local state first so a failing RPC cannot leave a stale entry.
-		pid.ActorSystem().getRemoteWatches().removeWatchee(pid.ID(), cidAddr)
+		pid.ActorSystem().getRemoteWatchRegistry().removeWatchee(pid.ID(), cidAddr)
 
 		// Same remoting selection as PID.Watch / PID.Stop: prefer cid's own
 		// client, fall back to the watcher's.
@@ -1760,7 +1837,7 @@ func (pid *PID) UnWatch(cid *PID) {
 		ctx, cancel := context.WithTimeout(context.Background(), pid.ActorSystem().getRemoteWatchTimeout())
 		defer cancel()
 
-		if err := r.RemoteUnWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.Name(), pid.getAddress()); err != nil {
+		if err := r.RemoteUnWatch(ctx, cidAddr.Host(), cidAddr.Port(), cidAddr.QualifiedName(), pid.getAddress()); err != nil {
 			pid.getLogger().Debugf("unwatch: RemoteUnWatch to %s failed: %v", cidAddr, err)
 		}
 		return
@@ -2136,6 +2213,19 @@ func (pid *PID) runTurn(w *worker) {
 			pid.dispatchOne(sysMsg, now)
 			continue
 		}
+
+		// User messages wait while the actor cannot handle them: it is
+		// suspended, stopping or restarting, or a failure awaits a supervision
+		// decision. They stay queued for the incarnation that resumes, as in
+		// any actor model, instead of running on a failed or torn-down actor.
+		if !pid.handlesUserMessages() {
+			if pid.releaseWithheldTurn() {
+				return
+			}
+
+			continue
+		}
+
 		received := pid.mailbox.Dequeue()
 		if received == nil {
 			if pid.finishOrReclaim() {
@@ -2167,6 +2257,12 @@ func (pid *PID) runTurn(w *worker) {
 func (pid *PID) finishOrReclaim() bool {
 	pid.schedState.reset()
 	if pid.mailbox.IsEmpty() && pid.systemQueue.isEmpty() && pid.postStart.Load() == nil {
+		// The actor is idle: raise the message-count trigger again, so a
+		// passivation that was refused while this turn ran is retried.
+		if pid.passivationManager != nil && pid.msgCountPassivation.Load() {
+			pid.passivationManager.MessageProcessed(pid)
+		}
+
 		return true
 	}
 
@@ -2174,6 +2270,69 @@ func (pid *PID) finishOrReclaim() bool {
 		return true
 	}
 	return !pid.schedState.TakeForProcessing()
+}
+
+// handlesUserMessages reports whether the turn may hand the actor a user
+// message: it is running, not stopping or restarting, not suspended, and no
+// failure is waiting for a supervision decision. Control messages are handled
+// regardless.
+func (pid *PID) handlesUserMessages() bool {
+	state := pid.state.Load()
+	return state&uint32(runningState) != 0 &&
+		state&uint32(stoppingState|suspendedState|supervisionPendingState) == 0
+}
+
+// releaseWithheldTurn gives up the actor while its user messages wait (see
+// handlesUserMessages). It returns false when the turn took the actor back
+// because there is work it may do: a control message or a PostStart that
+// arrived meanwhile, or user messages the actor can handle again.
+//
+// The state is reset before that check, and a resumer (a supervision decision
+// or a reinstate) clears its flag before it tries to schedule the actor, so a
+// resume that races with this release is seen by one of the two: either the
+// check below finds the actor able to handle its messages, or the resumer's
+// TrySchedule finds the actor idle.
+func (pid *PID) releaseWithheldTurn() bool {
+	pid.schedState.reset()
+	if !pid.hasRunnableWork() {
+		return true
+	}
+
+	if !pid.schedState.TrySchedule() {
+		return true
+	}
+	return !pid.schedState.TakeForProcessing()
+}
+
+// hasRunnableWork reports whether a turn would find something to do: a
+// control message, a pending PostStart, or user messages the actor may handle.
+func (pid *PID) hasRunnableWork() bool {
+	if !pid.systemQueue.isEmpty() || pid.postStart.Load() != nil {
+		return true
+	}
+
+	return pid.handlesUserMessages() && !pid.mailbox.IsEmpty()
+}
+
+// scheduleWithheldWork schedules a turn for the messages that waited while the
+// actor could not handle them. Called when it can again: after a supervision
+// decision and after a reinstate.
+func (pid *PID) scheduleWithheldWork() {
+	if pid.dispatcher == nil || pid.mailbox == nil {
+		return
+	}
+
+	if pid.hasRunnableWork() && pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+}
+
+// resumeAfterSupervision lifts the pause a failure put on the user messages
+// once supervision has decided, and schedules a turn for those that waited. A
+// decision that suspended the actor keeps them waiting through the suspension.
+func (pid *PID) resumeAfterSupervision() {
+	pid.setState(supervisionPendingState, false)
+	pid.scheduleWithheldWork()
 }
 
 // dispatchOne routes a single message to its handler. Release is owned by
@@ -2288,6 +2447,9 @@ func (pid *PID) handleAsyncRequest(received *ReceiveContext, req *commands.Async
 }
 
 // handleAsyncResponse resolves an AsyncResponse and completes the tracked call.
+// An unknown correlation ID is a normal race with timeout or cancellation: the
+// reply arrived after its request was already completed. It is dropped and
+// reported at debug level only, as on the grain side.
 //
 // Design decision: errors are encoded as strings on the wire to keep the response
 // envelope stable and avoid cross-version type coupling.
@@ -2304,16 +2466,16 @@ func (pid *PID) handleAsyncResponse(received *ReceiveContext, resp *commands.Asy
 	}
 
 	if resp.Error != "" {
-		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) {
-			pid.getLogger().Warnf("async response dropped: unknown correlation id=%s", correlationID)
+		if !pid.completeRequest(correlationID, nil, asyncErrorFromString(resp.Error)) && pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("async response dropped: unknown correlation id=%s", correlationID)
 		}
 		return
 	}
 
 	// A response without a payload and without an error is a successful reply
 	// with nothing to return: a grain answered the request with NoErr.
-	if !pid.completeRequest(correlationID, resp.Message, nil) {
-		pid.getLogger().Warnf("Async response dropped: unknown correlation id=%s", correlationID)
+	if !pid.completeRequest(correlationID, resp.Message, nil) && pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("async response dropped: unknown correlation id=%s", correlationID)
 	}
 }
 
@@ -2362,8 +2524,8 @@ func (pid *PID) registerRequestState(state *requestState) error {
 	}
 
 	if state.mode == reentrancy.StashNonReentrant {
-		if pid.stashState == nil {
-			pid.stashState = &stashState{box: NewUnboundedMailbox()}
+		if pid.stashState.Load() == nil {
+			pid.stashState.Store(&stashState{box: NewUnboundedMailbox()})
 		}
 		reentrant.blockingCount.Inc()
 	}
@@ -2374,8 +2536,9 @@ func (pid *PID) registerRequestState(state *requestState) error {
 
 // deregisterRequestState removes an in-flight async request and releases stashed messages.
 //
-// Design decision: when the last blocking request completes, unstash all messages
-// to preserve original mailbox order.
+// Design decision: when the last blocking request completes, unstash all messages.
+// They are appended to the mailbox (see unstashAll), behind the messages that
+// arrived after the response.
 func (pid *PID) deregisterRequestState(state *requestState) {
 	reentrant := pid.reentrancy.Load()
 	if reentrant == nil || state == nil {
@@ -2546,12 +2709,13 @@ func (pid *PID) recovery(received *ReceiveContext) {
 			}
 
 			// this is a normal error just wrap it with some stack trace
-			// for rich logging purpose
+			// for rich logging purpose; the error itself stays the cause, so
+			// the supervisor's rule for its type applies (see directiveFor)
 			pc, fn, line, _ := runtime.Caller(2)
-			pid.submitSupervision(newSupervisionSignal(
+			pid.submitSupervision(newPanicSupervisionSignal(
 				gerrors.NewPanicError(
 					fmt.Errorf("%w at %s[%s:%d]", err, runtime.FuncForPC(pc).Name(), fn, line),
-				), received.Message()))
+				), err, received.Message()))
 
 		default:
 			// we have no idea what panic it is. Enrich it with some stack trace for rich
@@ -2572,12 +2736,28 @@ func (pid *PID) recovery(received *ReceiveContext) {
 // submitSupervision routes a failure signal to the shared supervision consumer
 // owned by the dispatcher. It falls back to handling the signal inline for PIDs
 // constructed without a dispatcher (edge construction paths and tests).
+//
+// From the failure until the decision the actor handles no user message (see
+// handlesUserMessages): the messages queued behind a failure must not run on
+// the failed actor. ErrDead is never supervised (see notifyParent), so it
+// pauses nothing.
 func (pid *PID) submitSupervision(signal *supervisionSignal) {
-	if pid.dispatcher != nil {
-		pid.dispatcher.submitSupervision(pid, signal)
+	if signal == nil || errors.Is(signal.Err(), gerrors.ErrDead) {
 		return
 	}
-	pid.notifyParent(signal)
+
+	pid.setState(supervisionPendingState, true)
+	if pid.dispatcher != nil && pid.dispatcher.submitSupervision(pid, signal) {
+		return
+	}
+
+	// no consumer took the signal: decide inline when there is no dispatcher,
+	// and lift the pause in every case so the actor is not held forever
+	if pid.dispatcher == nil {
+		pid.notifyParent(signal)
+	}
+
+	pid.resumeAfterSupervision()
 }
 
 // getAddress returns the internal address for use with APIs that require *address.Address
@@ -2654,31 +2834,42 @@ func (pid *PID) reset() {
 	// spawn allocates a new PID and receives its defaults from newPID.
 	pid.behaviorStack.Reset()
 	pid.processedCount.Store(0)
-	pid.failureCount.Store(0)
 	pid.reinstateCount.Store(0)
 	pid.unhandledCount.Store(0)
-	// the teardown embedded in a restart abandons whatever the mailbox still
-	// held, so both counts restart from zero instead of carrying a phantom
-	// backlog into the new incarnation.
-	pid.mailboxEnqueued.Store(0)
-	pid.mailboxDequeued.Store(0)
-	pid.restartCount.Store(0)
+	// A restart keeps the mailbox and the messages still in it, so the two
+	// counts behind actor.mailbox.size keep describing them. A terminal stop
+	// abandons the mailbox, and the counts restart from zero.
+	restarting := pid.isStateSet(restartingState)
+	if !restarting {
+		pid.mailboxEnqueued.Store(0)
+		pid.mailboxDequeued.Store(0)
+	}
+
+	// the restart and failure counts are cumulative across restarts, which a
+	// failure causes; a terminal stop ends them
+	if !restarting {
+		pid.restartCount.Store(0)
+		pid.failureCount.Store(0)
+	}
+
 	pid.startedAt.Store(0)
 	pid.setState(runningState, false)
 	pid.setState(stoppingState, false)
 	pid.setState(suspendedState, false)
+	pid.setState(supervisionPendingState, false)
 	// the supervisor is deliberately left untouched: it is the object the user
 	// passed to WithSupervisor and may be shared across actors. Wiping it here
 	// erased the directive rules of every actor spawned with the same instance
 	// and of the actor itself after a restart while running (#1269).
-	// Queued remote messages survive a restart (the default mailbox's Dispose
-	// is a no-op and nothing replaces it), but a terminal stop abandons them
-	// to the garbage collector, which would strand their credit shares and
-	// permanently shrink the peer connection's flow-control window. The hold
-	// registry tracks every share independently of the mailbox, so this
-	// grants them all back regardless of the mailbox implementation:
-	// messages that survive a restart later release as no-ops (idempotent),
-	// and a terminal stop repays the peers immediately.
+	// Queued messages survive a restart: the turn stops handing out user
+	// messages once the actor is stopping (see handlesUserMessages), and the
+	// restart reuses the mailbox. A terminal stop abandons them to the garbage
+	// collector, which would strand their credit shares and permanently shrink
+	// the peer connection's flow-control window. The hold registry tracks
+	// every share independently of the mailbox, so this grants them all back
+	// regardless of the mailbox implementation: messages that survive a
+	// restart later release as no-ops (idempotent), and a terminal stop repays
+	// the peers immediately.
 	//
 	// The closed bit must be set before the drain: a remote delivery that
 	// passed its liveness check before this teardown can still track its
@@ -2693,7 +2884,11 @@ func (pid *PID) reset() {
 		registry.releaseAll()
 	}
 
-	pid.mailbox.Dispose()
+	// A restart reuses the mailbox, so it must not be disposed of: a
+	// BoundedMailbox's Dispose is final, and every later Enqueue would fail.
+	if !restarting {
+		pid.mailbox.Dispose()
+	}
 
 	// Note: singletonState and relocationState are deliberately left untouched as
 	// well: both are spawn-time configuration applied once by newPID through
@@ -2704,7 +2899,9 @@ func (pid *PID) reset() {
 	// cleanup reported the wrong configuration to IsRelocatable, IsSingleton,
 	// toSerialize and the remote state endpoint (#1349).
 
-	if pid.dependencies != nil {
+	// The dependencies are spawn-time configuration, like the settings above:
+	// the restart re-runs PreStart on the same PID with the same dependencies.
+	if pid.dependencies != nil && !restarting {
 		pid.dependencies.Reset()
 	}
 
@@ -2714,44 +2911,50 @@ func (pid *PID) reset() {
 	pid.reentrancy.Load().reset()
 }
 
-// freeWatchers releases all the actors watching this actor.
-// Local watchers receive a Terminated message via the regular mailbox path.
+// freeWatchers tells the given watchers of this actor that it terminated and
+// releases them. The watchers are those recorded in the tree before the name was
+// released (see doStop).
+// Local watchers receive a Terminated message via the regular mailbox path; a
+// watcher that is suspended receives it too, since control messages are handled
+// while an actor is suspended, so it is not lost to the suspension.
 // Remote watchers receive a Terminated message via fire-and-forget RemoteTell;
 // its wire encoding is provided by terminatedSerializer and decoded back to
 // *Terminated on the receiving node, so user actors observe a single message
 // type regardless of locality. No synchronous liveness probe is issued, so
 // the shutdown path is not gated on the reachability of any remote peer.
-func (pid *PID) freeWatchers(ctx context.Context) {
+// An actor torn down by a restart is not dead: nobody is told and every watch
+// is kept, the death watch's included, since the restart updates the actor's
+// registry record in place.
+func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 	logger := pid.getLogger()
-	logger.Debugf("freeing all actor %s's watchers", pid.Name())
-
-	// The death watch removes the registry record of a dead actor. An actor
-	// torn down by a restart is not dead: it keeps its record, which the
-	// restart updates in place, so the death watch is neither told nor released.
-	var deathWatch *PID
 	if pid.isStateSet(restartingState) {
-		deathWatch = pid.ActorSystem().getDeathWatch()
+		logger.Debugf("actor=%s is restarting: its watchers are kept", pid.Name())
+		return
 	}
 
-	tree := pid.ActorSystem().tree()
-	watchers := tree.watchers(pid)
-	for _, watcher := range watchers {
-		if watcher == deathWatch {
-			continue
-		}
+	logger.Debugf("freeing all actor %s's watchers", pid.Name())
 
+	for _, watcher := range watchers {
 		terminated := NewTerminated(pid.Path())
 
-		if watcher.IsRunning() {
+		switch {
+		case watcher.IsRunning():
 			logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
 			// ignore error here because the watcher is running
 			_ = pid.Tell(ctx, watcher, terminated)
-			watcher.UnWatch(pid)
-			logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
+		case watcher.IsSuspended():
+			logger.Debugf("suspended watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			pid.tellSuspended(ctx, watcher, terminated)
+		default:
+			continue
 		}
+
+		watcher.UnWatch(pid)
+		logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
 	}
 
-	remoteWatchers := pid.ActorSystem().getRemoteWatches().watchersFor(pid.ID())
+	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
+	remoteWatchers := remoteWatchRegistry.watchersFor(pid.ID())
 	if len(remoteWatchers) > 0 && pid.remoting != nil {
 		terminated := NewTerminated(pid.Path())
 		from := pid.getAddress()
@@ -2763,6 +2966,11 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 		}
 	}
 
+	// Clear both watcher and watchee entries for this pid, now that the remote
+	// watchers have been told, so a shutdown followed by re-use of the same id
+	// does not see stale state.
+	remoteWatchRegistry.dropPID(pid.ID())
+
 	if len(watchers) == 0 && len(remoteWatchers) == 0 {
 		logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
 		return
@@ -2771,12 +2979,22 @@ func (pid *PID) freeWatchers(ctx context.Context) {
 	logger.Debugf("all actor %s's watchers freed", pid.Name())
 }
 
+// tellSuspended delivers a control message to a suspended actor. Tell refuses a
+// suspended target, but control messages are handled while an actor is
+// suspended, so a Terminated must not be lost to the suspension.
+func (pid *PID) tellSuspended(ctx context.Context, to *PID, message any) {
+	receiveContext := getContext(to.ctxShard)
+	receiveContext.build(ctx, pid, to, message, true)
+	to.doReceive(receiveContext)
+}
+
 // freeWatchees releases all actors that have been watched by this actor.
 // Local watchees are released via pid.UnWatch on the existing tree path.
 // Remote watchees are released by sending a best-effort RemoteUnWatch to each
-// peer; failures are logged at debug and do not block shutdown. The remote
-// watch registry is then cleared in one shot for this pid, so neither direction
-// keeps stale entries after the actor has terminated.
+// peer; failures are logged at debug and do not block shutdown. Each remote
+// watchee entry is dropped from the registry once its peer has been told; the
+// entries for this actor's own remote watchers are kept for freeWatchers, so
+// neither direction keeps stale entries after the actor has terminated.
 func (pid *PID) freeWatchees(ctx context.Context) error {
 	logger := pid.getLogger()
 	logger.Debugf("freeing all actor %s's watched actors", pid.Name())
@@ -2789,25 +3007,25 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 		logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
 	}
 
-	remoteWatches := pid.ActorSystem().getRemoteWatches()
-	remoteWatchees := remoteWatches.watcheesFor(pid.ID())
+	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
+	remoteWatchees := remoteWatchRegistry.watcheesFor(pid.ID())
 	if len(remoteWatchees) > 0 && pid.remoting != nil {
 		from := pid.getAddress()
 		timeout := pid.ActorSystem().getRemoteWatchTimeout()
 
 		for _, watcheeAddr := range remoteWatchees {
 			rpcCtx, cancel := context.WithTimeout(ctx, timeout)
-			err := pid.remoting.RemoteUnWatch(rpcCtx, watcheeAddr.Host(), watcheeAddr.Port(), watcheeAddr.Name(), from)
+			err := pid.remoting.RemoteUnWatch(rpcCtx, watcheeAddr.Host(), watcheeAddr.Port(), watcheeAddr.QualifiedName(), from)
 			cancel()
 			if err != nil {
 				logger.Debugf("freeWatchees: RemoteUnWatch to %s failed: %v", watcheeAddr, err)
 			}
+
+			// the watch is gone whatever the peer answered; the remote watchers
+			// of this actor are kept for freeWatchers to tell
+			remoteWatchRegistry.removeWatchee(pid.ID(), watcheeAddr)
 		}
 	}
-
-	// Clear both watcher and watchee entries for this pid so a shutdown
-	// followed by re-use of the same id does not see stale state.
-	remoteWatches.dropPID(pid.ID())
 
 	if len(watchees) == 0 && len(remoteWatchees) == 0 {
 		logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
@@ -2869,6 +3087,11 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 // tryPassivation evaluates the current passivation strategy and, when conditions are met,
 // stops the actor to free up resources.
 //
+// Only an idle actor is passivated. An actor with a message in flight or
+// waiting is left alone, so PostStop never runs alongside Receive here, and
+// the attempt is retried later: at the next deadline for a time-based
+// strategy, when the actor goes idle for a message-count one.
+//
 // Returns true when the actor was successfully passivated.
 func (pid *PID) tryPassivation(reason string) bool {
 	if pid.passivationStrategy == nil || isLongLivedPassivationStrategy(pid.passivationStrategy) {
@@ -2894,16 +3117,53 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	pid.getLogger().Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
-	pid.setState(passivatingState, true)
-	defer pid.setState(passivatingState, false)
-
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
+
+	// a Shutdown that took the lock first has stopped the actor already
+	if !pid.isStateSet(runningState) || pid.isStateSet(stoppingState) {
+		pid.getLogger().Debugf("passivation of actor=%s abandoned: the actor is stopped or stopping", pid.Name())
+		return false
+	}
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
 		pid.getLogger().Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
 		return false
 	}
+
+	// Owning the dispatch state keeps every worker off the actor until the
+	// stop is over. It can only be taken from an idle actor.
+	if !pid.schedState.TakeIdleForStop() {
+		pid.getLogger().Debugf("passivation of actor=%s deferred: the actor is processing messages", pid.Name())
+		if pid.passivationManager != nil {
+			pid.passivationManager.Defer(pid)
+		}
+
+		return false
+	}
+
+	// A message accepted just before the state was taken is waiting: its
+	// sender found the actor idle and lost the race to schedule it. Hand the
+	// actor back with that work scheduled, and retry later.
+	if pid.hasRunnableWork() {
+		pid.getLogger().Debugf("passivation of actor=%s deferred: a message arrived meanwhile", pid.Name())
+		pid.schedState.reset()
+		pid.scheduleWithheldWork()
+		if pid.passivationManager != nil {
+			pid.passivationManager.Defer(pid)
+		}
+
+		return false
+	}
+
+	defer pid.schedState.reset()
+
+	// The passivating bit makes the actor refuse messages and report itself
+	// not running. It is raised only once the stop is certain: an attempt
+	// refused above leaves a busy actor untouched, so its senders, its parent
+	// and the actors it watches never see a live actor as stopping.
+	pid.setState(passivatingState, true)
+	defer pid.setState(passivatingState, false)
 
 	pid.unregisterPassivation()
 
@@ -2933,9 +3193,12 @@ func (pid *PID) setBehavior(behavior Behavior) {
 	pid.fieldsLocker.Unlock()
 }
 
-// resetBehavior is a utility function resets the actor behavior
+// resetBehavior returns the actor to its default behavior, Receive, and
+// clears every stacked or swapped behavior, so a later UnBecomeStacked has
+// nothing to return to.
 func (pid *PID) resetBehavior() {
 	pid.fieldsLocker.Lock()
+	pid.behaviorStack.Reset()
 	pid.behaviorStack.Push(pid.actor.Receive)
 	pid.fieldsLocker.Unlock()
 }
@@ -2947,11 +3210,15 @@ func (pid *PID) setBehaviorStacked(behavior Behavior) {
 	pid.fieldsLocker.Unlock()
 }
 
-// unsetBehaviorStacked sets the actor's behavior to the next behavior
-// prior to setBehaviorStacked is called
+// unsetBehaviorStacked returns the actor to the behavior that was active
+// before the last setBehaviorStacked. The bottom behavior is never popped: with
+// nothing stacked the call has no effect, so the actor always has a behavior
+// to handle its messages with.
 func (pid *PID) unsetBehaviorStacked() {
 	pid.fieldsLocker.Lock()
-	pid.behaviorStack.Pop()
+	if pid.behaviorStack.Len() > 1 {
+		pid.behaviorStack.Pop()
+	}
 	pid.fieldsLocker.Unlock()
 }
 
@@ -2964,14 +3231,21 @@ func (pid *PID) doStop(ctx context.Context) error {
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 
 	defer func() {
-		pid.releaseName()
 		pid.setState(runningState, false)
 		pid.reset()
 	}()
 
 	err := chain.
 		New(chain.WithFailFast()).
-		AddRunner(func() error { return pid.freeWatchees(ctx) }).
+		AddRunner(func() error {
+			// An actor torn down by a restart is not dead: it keeps watching
+			// what it watched, as it keeps its watchers (see freeWatchers).
+			if pid.isStateSet(restartingState) {
+				return nil
+			}
+
+			return pid.freeWatchees(ctx)
+		}).
 		AddRunner(func() error { return pid.freeChildren(ctx) }).
 		AddRunner(func() error {
 			stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
@@ -2979,8 +3253,13 @@ func (pid *PID) doStop(ctx context.Context) error {
 		}).
 		Run()
 
-	// let watchers know you are terminated
-	pid.freeWatchers(ctx)
+	// The name is released before the watchers are told, so a watcher that
+	// spawns the same name again on Terminated finds it free. Releasing the
+	// name removes the tree node and its watch edges, so the watchers are read
+	// first.
+	watchers := pid.ActorSystem().tree().watchers(pid)
+	pid.releaseName()
+	pid.freeWatchers(ctx, watchers)
 
 	if err != nil {
 		return err
@@ -3017,17 +3296,11 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		return
 	}
 
-	// find a directive for the given error or check whether there
-	// is a directive for any error type
-	directive, ok := pid.supervisor.Directive(signal.Err())
+	directive, ok := pid.directiveFor(signal)
 	if !ok {
-		// let us check whether we have all errors directive
-		directive, ok = pid.supervisor.Directive(new(gerrors.AnyError))
-		if !ok {
-			pid.getLogger().Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
-			pid.suspend(signal.Err().Error())
-			return
-		}
+		pid.getLogger().Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+		pid.suspend(signal.Err().Error())
+		return
 	}
 
 	pid.getLogger().Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
@@ -3054,6 +3327,8 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
 		if directive == supervisor.ResumeDirective {
+			// a resumed failure is a failure the supervisor acted on, so it counts
+			pid.failureCount.Inc()
 			// Always skip the next passivation decision once to avoid immediate stop after resume.
 			pid.setState(passivationSkipNextState, true)
 			// If the actor was already suspended due to a prior signal, reinstate immediately.
@@ -3074,6 +3349,26 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 	// no parent found, just suspend the actor
 	pid.getLogger().Warnf("actor=%s has no parent to notify about failure: err=%s", pid.Name(), msg.Err.Error())
 	pid.suspend(msg.Err.Error())
+}
+
+// directiveFor finds the supervisor rule for a failure. A panic with an error
+// value is supervised like ctx.Err with that error: a rule for the panicked
+// error's type comes first, then the rule for the reported error (PanicError
+// for a panic), then the rule for any error. So the default PanicNilError rule
+// applies to panic(nil), and a rule for a user error type applies whether the
+// handler records or panics with it.
+func (pid *PID) directiveFor(signal *supervisionSignal) (supervisor.Directive, bool) {
+	if cause := signal.Cause(); cause != nil {
+		if directive, ok := pid.supervisor.Directive(cause); ok {
+			return directive, true
+		}
+	}
+
+	if directive, ok := pid.supervisor.Directive(signal.Err()); ok {
+		return directive, true
+	}
+
+	return pid.supervisor.Directive(new(gerrors.AnyError))
 }
 
 // handleReceivedError sends message to deadletter synthetic actor
@@ -3334,16 +3629,16 @@ func (pid *PID) restartChild(spid *PID, sup *supervisor.Supervisor, delay time.D
 
 	if delay > 0 {
 		pause.For(delay)
-
-		// a long delay can outlive the supervising parent or the whole actor
-		// system; restarting then would resurrect the child into a torn-down
-		// hierarchy, so skip instead
-		if !pid.IsRunning() || pid.ActorSystem().isStopping() {
-			return
-		}
 	}
 
-	pid.UnWatch(spid)
+	// the parent may have stopped meanwhile, or the whole actor system may be
+	// stopping; restarting then would resurrect the child into a torn-down
+	// hierarchy, so skip instead. The parent keeps watching the child: a
+	// restart tells no watcher (see freeWatchers), and when the restart fails
+	// for good the parent is told that the child died.
+	if !pid.IsRunning() || pid.ActorSystem().isStopping() {
+		return
+	}
 
 	maxRetries := sup.MaxRetries()
 	timeout := sup.Timeout()
@@ -3434,7 +3729,9 @@ func (pid *PID) suspend(reason string) {
 	// pause passivation loop
 	pid.pausePassivation()
 	// publish an event to the events stream
-	pid.getEventsStream().Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
+	if stream := pid.getEventsStream(); stream != nil {
+		stream.Publish(eventsTopic, NewActorSuspended(pid.Path(), reason))
+	}
 }
 
 // getDeadlettersCount gets deadletter
@@ -3522,7 +3819,12 @@ func (pid *PID) doReinstate() {
 	pid.resumePassivation()
 
 	// publish an event to the events stream
-	pid.getEventsStream().Publish(eventsTopic, NewActorReinstated(pid.Path()))
+	if stream := pid.getEventsStream(); stream != nil {
+		stream.Publish(eventsTopic, NewActorReinstated(pid.Path()))
+	}
+
+	// the messages queued while the actor was suspended are handled now
+	pid.scheduleWithheldWork()
 }
 
 func (pid *PID) shouldAutoPassivate() bool {
@@ -3636,7 +3938,8 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	actor.SetRelocatable(pid.IsRelocatable())
 	actor.SetPassivationStrategy(codec.EncodePassivationStrategy(pid.PassivationStrategy()))
 	actor.SetDependencies(dependencies)
-	actor.SetEnableStash(pid.stashState != nil && pid.stashState.box != nil)
+	stash := pid.stashState.Load()
+	actor.SetEnableStash(stash != nil && stash.box != nil)
 	if x := pid.Role(); x != nil {
 		actor.SetRole(*x)
 	}
@@ -3833,12 +4136,23 @@ func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
 		pidOptions = append(pidOptions, withMailbox(config.mailbox))
 	}
 
-	if config.supervisor != nil {
-		pidOptions = append(pidOptions, withSupervisor(config.supervisor))
+	// a child without a supervisor of its own gets the system's default, as a
+	// top-level actor does
+	supervisor := config.supervisor
+	if supervisor == nil {
+		supervisor = pid.actorSystem.getDefaultSupervisor()
+	}
+
+	if supervisor != nil {
+		pidOptions = append(pidOptions, withSupervisor(supervisor))
 	}
 
 	if config.enableStash {
 		pidOptions = append(pidOptions, withStash())
+	}
+
+	if config.reentrancy != nil {
+		pidOptions = append(pidOptions, withReentrancy(config.reentrancy))
 	}
 
 	if config.dependencies != nil {
@@ -3906,8 +4220,9 @@ func (x *restartNode) terminate(ctx context.Context) {
 		return
 	}
 
-	pid.freeWatchers(ctx)
+	watchers := pid.ActorSystem().tree().watchers(pid)
 	pid.releaseName()
+	pid.freeWatchers(ctx, watchers)
 }
 
 func buildRestartSubtree(root *PID, tree *tree) *restartNode {
@@ -3962,8 +4277,13 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 
 	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 	_, wasInTree := tree.node(pid.ID())
-	if pid.IsRunning() {
-		if err := pid.Shutdown(ctx); err != nil {
+
+	// A running or suspended actor is stopped before it is started again, so
+	// PostStop releases what PreStart acquired, as for any restart. The stop
+	// skips the system-actor check of Shutdown: a supervisor may restart a
+	// system actor.
+	if pid.IsRunning() || pid.IsSuspended() {
+		if err := pid.stop(ctx); err != nil {
 			return err
 		}
 
@@ -3991,10 +4311,18 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		runtime.Gosched()
 	}
 
+	// The dispatch state is forced to Idle here, while no worker holds the
+	// actor and no sender can reach it: init marks it running, and a message
+	// that starts a turn from then on owns the state. Forcing Idle any later
+	// would hand the actor to a second worker while that turn still runs.
+	pid.schedState.reset()
 	pid.resetBehavior()
 	if err := pid.init(ctx); err != nil {
 		return err
 	}
+
+	// the uptime starts again with the new incarnation
+	pid.startedAt.Store(time.Now().Unix())
 
 	// re-add the actor back to the actor tree and cluster
 	if err := chain.New(chain.WithFailFast()).
@@ -4024,7 +4352,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		return fmt.Errorf("actor=(%s) failed to restart: %w", pid.Name(), err)
 	}
 
-	pid.schedState.reset()
 	pid.setState(suspendedState, false)
 	pid.startPassivation()
 

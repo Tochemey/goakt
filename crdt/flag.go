@@ -70,6 +70,17 @@ func (x *Flag) Merge(other ReplicatedData) ReplicatedData {
 	}
 }
 
+// StateHash returns the canonical content hash of the flag, which depends on
+// its value only. See StateHasher.
+func (x *Flag) StateHash() uint64 {
+	var enabled uint64
+	if x.enabled {
+		enabled = 1
+	}
+
+	return hashParts(hashTagFlag, enabled)
+}
+
 // Delta returns the flag state if it has changed since the last ResetDelta.
 // Returns nil if there are no changes.
 func (x *Flag) Delta() ReplicatedData {

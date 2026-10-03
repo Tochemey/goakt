@@ -608,6 +608,85 @@ func TestPerformHelloRejectsZeroRevisionAck(t *testing.T) {
 	<-serverDone
 }
 
+func TestPerformHelloRejectsUnexpectedAckCodec(t *testing.T) {
+	const (
+		none = internalpb.CompressionCodec_COMPRESSION_CODEC_NONE
+		gzip = internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP
+		zstd = internalpb.CompressionCodec_COMPRESSION_CODEC_ZSTD
+	)
+
+	testCases := []struct {
+		name     string
+		proposal internalpb.CompressionCodec
+		answer   internalpb.CompressionCodec
+		rejected bool
+	}{
+		{name: "codec the dialer did not propose", proposal: gzip, answer: zstd, rejected: true},
+		{name: "codec when the dialer proposed none", proposal: none, answer: zstd, rejected: true},
+		{name: "the proposal", proposal: gzip, answer: gzip},
+		{name: "none", proposal: gzip, answer: none},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t)
+
+			c1, c2 := net.Pipe()
+			t.Cleanup(func() {
+				_ = c1.Close()
+				_ = c2.Close()
+			})
+
+			rejection := make(chan Frame, 1)
+			serverDone := make(chan struct{})
+			go func() {
+				defer close(serverDone)
+
+				framed := newTCPFramedConn(c2, defaultMaxFrameSize)
+
+				frame, err := framed.ReadFrame()
+				if err != nil || frame.Type != FrameTypeHello {
+					return
+				}
+
+				payload, err := proto.Marshal(testHello(tc.answer, 1<<20))
+				if err != nil {
+					return
+				}
+
+				_ = framed.WriteFrames(encodeHelloFrame(FrameTypeHelloAck, LaneControl, payload))
+
+				// Read the dialer's connection-scoped ERROR so its write
+				// cannot block on the synchronous pipe; an accepted ACK
+				// ends with the dialer closing instead.
+				if frame, err := framed.ReadFrame(); err == nil {
+					rejection <- frame
+				}
+
+				_ = framed.Close()
+			}()
+
+			client := newTCPFramedConn(c1, defaultMaxFrameSize)
+			result, err := performHello(client, testHello(tc.proposal, 1<<20))
+
+			if tc.rejected {
+				require.ErrorIs(t, err, ErrUnexpectedCompressionCodec)
+				require.Nil(t, result)
+
+				frame := <-rejection
+				assert.Equal(t, FrameTypeError, frame.Type)
+				assert.Zero(t, frame.Correlation)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tc.answer, result.Effective.GetCompression())
+			}
+
+			_ = client.Close()
+			<-serverDone
+		})
+	}
+}
+
 func TestMinUintHelpers(t *testing.T) {
 	assert.Equal(t, uint32(1), minUint32(1, 2))
 	assert.Equal(t, uint32(1), minUint32(2, 1))

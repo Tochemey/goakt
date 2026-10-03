@@ -242,6 +242,34 @@ func TestORMap(t *testing.T) {
 		assert.Nil(t, m.Delta())
 	})
 
+	t.Run("delta set does not drop earlier keys of the same node", func(t *testing.T) {
+		m := NewORMap().Set("node-1", "a", NewGCounter().Increment("node-1", 1))
+		replica := NewORMap().Merge(m.Delta()).(*ORMap)
+		m.ResetDelta()
+
+		m = m.Set("node-1", "b", NewGCounter().Increment("node-1", 2))
+		replica = replica.Merge(m.Delta()).(*ORMap)
+		m.ResetDelta()
+
+		assert.ElementsMatch(t, []any{"a", "b"}, replica.Keys())
+		assert.ElementsMatch(t, []any{"a", "b"}, m.Merge(replica).(*ORMap).Keys())
+	})
+
+	t.Run("delta omits a key set and removed before the delta is taken", func(t *testing.T) {
+		m := NewORMap().Set("node-1", "a", NewGCounter().Increment("node-1", 1))
+		replica := NewORMap().Merge(m.Delta()).(*ORMap)
+		m.ResetDelta()
+
+		m = m.Set("node-1", "x", NewGCounter().Increment("node-1", 2)).Remove("x")
+		d := m.Delta()
+		require.NotNil(t, d)
+
+		replica = replica.Merge(d).(*ORMap)
+		_, ok := replica.Get("x")
+		assert.False(t, ok)
+		assert.ElementsMatch(t, []any{"a"}, replica.Keys())
+	})
+
 	t.Run("clone produces independent copy", func(t *testing.T) {
 		m := NewORMap()
 		m = m.Set("node-1", "x", NewGCounter().Increment("node-1", 5))
@@ -351,5 +379,53 @@ func TestORMapCompact(t *testing.T) {
 		require.NotNil(t, result)
 		compacted := result.(*ORMap)
 		assert.Equal(t, 1, compacted.Len())
+	})
+}
+
+func TestORMapStateHash(t *testing.T) {
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewORMap().
+			Set("node-1", "apples", NewGCounter().Increment("node-1", 2)).
+			Set("node-2", "pears", NewGCounter().Increment("node-2", 3))
+		b := NewORMap().
+			Set("node-2", "pears", NewGCounter().Increment("node-2", 3)).
+			Set("node-1", "apples", NewGCounter().Increment("node-1", 2))
+		assert.Equal(t, a.StateHash(), b.StateHash())
+	})
+
+	t.Run("merge in either direction hashes alike", func(t *testing.T) {
+		a := NewORMap().Set("node-1", "apples", NewGCounter().Increment("node-1", 2))
+		b := NewORMap().
+			Set("node-2", "apples", NewGCounter().Increment("node-2", 5)).
+			Set("node-2", "pears", NewGCounter().Increment("node-2", 3))
+		ab := a.Merge(b).(*ORMap)
+		ba := b.Merge(a).(*ORMap)
+		assert.Equal(t, ab.StateHash(), ba.StateHash())
+		assert.NotEqual(t, a.StateHash(), ab.StateHash())
+		assert.NotEqual(t, b.StateHash(), ab.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		base := NewORMap().Set("node-1", "apples", NewGCounter().Increment("node-1", 2))
+		assert.NotEqual(t, base.StateHash(), NewORMap().Set("node-1", "apples", NewGCounter().Increment("node-1", 3)).StateHash())
+		assert.NotEqual(t, base.StateHash(), NewORMap().Set("node-1", "pears", NewGCounter().Increment("node-1", 2)).StateHash())
+		assert.NotEqual(t, base.StateHash(), base.Remove("apples").StateHash())
+		assert.NotEqual(t, base.StateHash(), NewORMap().StateHash())
+	})
+
+	t.Run("compaction does not change the hash", func(t *testing.T) {
+		m := NewORMap().
+			Set("node-1", "apples", NewGCounter().Increment("node-1", 2)).
+			Set("node-1", "apples", NewGCounter().Increment("node-1", 3))
+		assert.Equal(t, m.StateHash(), m.Compact().StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		m := NewORMap().Set("node-1", "apples", NewGCounter().Increment("node-1", 2))
+		before := m.StateHash()
+		assert.Equal(t, before, m.Clone().(*ORMap).StateHash())
+		m.ResetDelta()
+		assert.Equal(t, before, m.StateHash())
+		assert.Equal(t, before, ORMapFromRawState(m.RawState()).StateHash())
 	})
 }

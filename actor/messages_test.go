@@ -276,7 +276,8 @@ func TestActorRestarted(t *testing.T) {
 	err = pid.Restart(ctx)
 	assert.NoError(t, err)
 	assert.True(t, pid.IsRunning())
-	assert.NotZero(t, pid.Uptime())
+	// the uptime starts again with the new incarnation
+	assert.Less(t, pid.Uptime(), int64(2))
 
 	var restarted []*ActorRestarted
 	for event := range consumer.Iterator() {

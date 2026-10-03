@@ -1530,6 +1530,53 @@ func TestProducerControllerDurableQueueFailures(t *testing.T) {
 		assert.Equal(t, ReliableDeliveryStageLoad, failure.Stage())
 	})
 
+	t.Run("With load failing on every attempt of a restart publishes a single failure", func(t *testing.T) {
+		queue := &MockDurableQueue{}
+		harness := newProducerControllerHarness(t, queue)
+
+		subscriber, err := harness.system.Subscribe()
+		require.NoError(t, err)
+
+		queue.mu.Lock()
+		queue.loadErr = errors.New("backing store is unreachable")
+		loadsBefore := queue.loads
+		queue.mu.Unlock()
+
+		require.Error(t, harness.producerController.Restart(harness.ctx))
+
+		// the restart retried PreStart, and every attempt failed to load
+		queue.mu.Lock()
+		attempts := queue.loads - loadsBefore
+		queue.mu.Unlock()
+
+		require.Greater(t, attempts, 1)
+		assert.Equal(t, 1, countFailures(subscriber))
+	})
+
+	t.Run("With load failing on every attempt of the first start publishes no failure", func(t *testing.T) {
+		ctx, system := newCompanionTestSystem(t)
+
+		producer, err := system.Spawn(ctx, "producer", &MockDeliveryRecorder{})
+		require.NoError(t, err)
+
+		subscriber, err := system.Subscribe()
+		require.NoError(t, err)
+
+		queue := &MockDurableQueue{loadErr: errors.New("backing store is unreachable")}
+		config := testProducerConfig("consumer", 2, 20*time.Millisecond, 150*time.Millisecond)
+
+		_, err = system.Spawn(ctx, "producer-controller", newProducerController(producer, config, queue))
+		require.Error(t, err)
+
+		// the spawn retried PreStart, and every attempt failed to load
+		queue.mu.Lock()
+		attempts := queue.loads
+		queue.mu.Unlock()
+
+		require.Greater(t, attempts, 1)
+		assert.Zero(t, countFailures(subscriber))
+	})
+
 	t.Run("With deferred store behind slow confirm", func(t *testing.T) {
 		queue := &MockDurableQueue{confirmDelay: 300 * time.Millisecond}
 		harness := newProducerControllerHarness(t, queue)

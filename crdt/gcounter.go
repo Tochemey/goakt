@@ -100,6 +100,12 @@ func (c *GCounter) Merge(other ReplicatedData) ReplicatedData {
 	return merged
 }
 
+// StateHash returns the canonical content hash of the counter: the sum of the
+// hashes of its non-zero slots. See StateHasher.
+func (c *GCounter) StateHash() uint64 {
+	return hashParts(hashTagGCounter, hashNodeCounters(c.state))
+}
+
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if there are no changes. The returned delta contains the
 // full accumulated state for each node that changed, not just the increment.

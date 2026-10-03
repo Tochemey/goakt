@@ -104,6 +104,19 @@ func TestConfig(t *testing.T) {
 		require.Error(t, err)
 		assert.EqualError(t, err, "readIdleTimeout must be less than idleTimeout when both are set")
 	})
+	t.Run("With dial timeout", func(t *testing.T) {
+		config := NewConfig("127.0.0.1", 8080, WithDialTimeout(time.Second))
+		require.NoError(t, config.Validate())
+		assert.Exactly(t, time.Second, config.DialTimeout())
+	})
+	t.Run("With invalid dial timeout", func(t *testing.T) {
+		for _, timeout := range []time.Duration{0, -time.Second} {
+			config := NewConfig("127.0.0.1", 8080, WithDialTimeout(timeout))
+			err := config.Validate()
+			require.Error(t, err)
+			assert.EqualError(t, err, "dialTimeout must be greater than 0")
+		}
+	})
 	t.Run("With invalid large destination pattern", func(t *testing.T) {
 		config := NewConfig("127.0.0.1", 8080, WithLargeMessageDestinations("["))
 		err := config.Validate()

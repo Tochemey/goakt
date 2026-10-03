@@ -175,6 +175,12 @@ var (
 	// participate in the delivery protocol.
 	ErrReliableSpawnUnsupported = errors.New("reliable delivery endpoints cannot be spawned from this caller")
 
+	// ErrReliableChildSpawnUnsupported is returned when SpawnChild is given
+	// AsReliableProducer or AsReliableConsumer: only a top-level spawn creates the
+	// controller a reliable delivery endpoint needs, and a remote child spawn
+	// request cannot carry its settings.
+	ErrReliableChildSpawnUnsupported = errors.New("reliable delivery endpoints cannot be spawned as children")
+
 	// ErrReliableClusterRequired is returned when a reliable delivery endpoint would be
 	// placed over remoting without clustering. Remote placement resolves peer controllers
 	// through the cluster registry, so a remoting-only host would spawn an endpoint that

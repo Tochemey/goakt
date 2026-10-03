@@ -1718,7 +1718,7 @@ func (x *cluster) emitOverdueNodeLeft(node string) {
 		return
 	}
 
-	x.logger.Warnf("emitting overdue NodeLeft for node=%s: the routing table did not converge on its departure (hint: olric partition repair may be wedged after an abrupt departure)", node)
+	x.logger.Warnf("emitting overdue NodeLeft for node=%s: the routing table did not converge on its departure (hint: a member may have missed the leave message of a graceful stop, or olric partition repair may be wedged after an abrupt departure)", node)
 	x.releaseNodeLocked(node)
 }
 

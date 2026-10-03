@@ -295,7 +295,13 @@ released, letting the grain re-activate elsewhere, in two cases only:
   left.
 
 A node that is shutting down takes no new grains (see [During shutdown](#during-shutdown)). A grain activation that
-finishes after the shutdown began is rolled back, so its registry entry does not outlive the node.
+finishes after the shutdown began is rolled back, so its registry entry does not outlive the node, and a node that is
+shutting down does not write the registry entry of a grain it already runs again.
+
+A grain becomes reachable on its node only once its registry entry is written. A message sent on that node meanwhile
+waits for the activation, then reaches the grain, or gets the activation's error if the entry could not be written. The
+rollback of an activation whose entry could not be written therefore never runs `OnDeactivate` while a message sent to
+the grain is in `OnReceive`.
 
 A claim made on behalf of a remote peer follows the same rule. When the peer rejects the activation, the claim is
 rolled back so the next activation can pick another node. When the outcome is unknown, after a transport failure or an

@@ -22,7 +22,12 @@
 
 package queue
 
-import "testing"
+import (
+	"runtime"
+	"sync"
+	"testing"
+	"time"
+)
 
 func TestQueueDequeueEmpty(t *testing.T) {
 	q := NewQueue()
@@ -45,5 +50,92 @@ func TestQueueLength(t *testing.T) {
 	q.Dequeue()
 	if q.Length() != 0 {
 		t.Fatalf("count of dequeue wrong, want %d, got %d", 0, q.Length())
+	}
+}
+
+// TestQueueConcurrentProducersDeliverEveryValueOnce runs many producers against
+// one consumer that drains while they publish, and checks that every value is
+// dequeued exactly once and that the round finishes. A node that is handed out
+// again while a producer still holds it as the tail either loses the value
+// linked onto it or makes the list cyclic, in which case Enqueue spins forever;
+// the watchdog turns that spin into a failure instead of a hang.
+func TestQueueConcurrentProducersDeliverEveryValueOnce(t *testing.T) {
+	const (
+		rounds      = 200
+		producers   = 8
+		perProducer = 2000
+		total       = producers * perProducer
+		watchdog    = 10 * time.Second
+	)
+
+	for round := range rounds {
+		q := NewQueue()
+		start := make(chan struct{})
+		published := make(chan struct{})
+
+		var wg sync.WaitGroup
+		for p := range producers {
+			wg.Go(func() {
+				<-start
+
+				for i := range perProducer {
+					q.Enqueue(p*perProducer + i)
+				}
+			})
+		}
+
+		go func() {
+			wg.Wait()
+			close(published)
+		}()
+
+		seen := make([]bool, total)
+		got := 0
+		deadline := time.Now().Add(watchdog)
+		close(start)
+
+		for got < total {
+			if time.Now().After(deadline) {
+				t.Fatalf("round %d: only %d of %d values dequeued before the watchdog fired", round, got, total)
+			}
+
+			v := q.Dequeue()
+			if v == nil {
+				select {
+				case <-published:
+					// the producers are done and the queue reads empty: whatever
+					// is missing was lost
+					if q.Dequeue() == nil {
+						t.Fatalf("round %d: %d of %d values were lost", round, total-got, total)
+					}
+				default:
+					runtime.Gosched()
+				}
+
+				continue
+			}
+
+			i := v.(int)
+			if seen[i] {
+				t.Fatalf("round %d: value %d dequeued twice", round, i)
+			}
+
+			seen[i] = true
+			got++
+		}
+
+		select {
+		case <-published:
+		case <-time.After(time.Until(deadline)):
+			t.Fatalf("round %d: every value was dequeued but a producer never returned from Enqueue", round)
+		}
+
+		if q.Dequeue() != nil {
+			t.Fatalf("round %d: the queue still holds a value after %d dequeues", round, total)
+		}
+
+		if q.Length() != 0 {
+			t.Fatalf("round %d: length is %d after draining", round, q.Length())
+		}
 	}
 }

@@ -26,6 +26,7 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -144,6 +145,68 @@ func (a *dummyStageActor) PreStart(_ *actor.Context) error    { return nil }
 func (a *dummyStageActor) PostStop(_ *actor.Context) error    { return nil }
 func (a *dummyStageActor) Receive(rctx *actor.ReceiveContext) { rctx.Unhandled() }
 
+// probeStageActor stands in for the upstream or downstream neighbor of a
+// stage under test and records every stream protocol message it receives, so
+// a test can assert exactly what the stage sent and in which order.
+type probeStageActor struct {
+	received chan any
+}
+
+// newProbeStageActor creates a probeStageActor with room for 1024 messages.
+func newProbeStageActor() *probeStageActor {
+	return &probeStageActor{received: make(chan any, 1024)}
+}
+
+// PreStart does nothing: the probe has no state to prepare.
+func (a *probeStageActor) PreStart(_ *actor.Context) error { return nil }
+
+// PostStop does nothing: the probe holds no resource.
+func (a *probeStageActor) PostStop(_ *actor.Context) error { return nil }
+
+// Receive records every stream protocol message on the received channel and
+// reports anything else as unhandled.
+func (a *probeStageActor) Receive(rctx *actor.ReceiveContext) {
+	switch msg := rctx.Message().(type) {
+	case *streamElement, *streamComplete, *streamError, *streamRequest, *streamCancel:
+		a.received <- msg
+	default:
+		rctx.Unhandled()
+	}
+}
+
+// expectProbeMessage returns the next message recorded by probe, failing the
+// test when it is not of type M or does not arrive in time.
+func expectProbeMessage[M any](t *testing.T, probe *probeStageActor) M {
+	t.Helper()
+	select {
+	case msg := <-probe.received:
+		typed, ok := msg.(M)
+		require.Truef(t, ok, "expected %T, got %T", *new(M), msg)
+		return typed
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for %T", *new(M))
+		return *new(M)
+	}
+}
+
+// spawnStageUnderTest spawns stage wired between two probes and returns its
+// PID together with the upstream and downstream probes.
+func spawnStageUnderTest(t *testing.T, sys actor.ActorSystem, name string, stage actor.Actor) (*actor.PID, *probeStageActor, *probeStageActor) {
+	t.Helper()
+	ctx := context.Background()
+
+	up, down := newProbeStageActor(), newProbeStageActor()
+	upPID, err := sys.Spawn(ctx, name+"-up", up)
+	require.NoError(t, err)
+	downPID, err := sys.Spawn(ctx, name+"-down", down)
+	require.NoError(t, err)
+
+	stagePID, err := sys.Spawn(ctx, name, stage)
+	require.NoError(t, err)
+	require.NoError(t, actor.Tell(ctx, stagePID, &stageWire{subID: "unit", upstream: upPID, downstream: downPID}))
+	return stagePID, up, down
+}
+
 // TestFlowActor_StreamCancel_Unit verifies that a flowActor's *streamCancel handler
 // (lines that propagate cancel to upstream) is executed. A direct actor-level test
 // is used because the integration pipeline signals handle.Done the moment the sink
@@ -240,41 +303,6 @@ func TestBatchFlowActor_StreamCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("batch stream with cancel did not terminate")
 	}
-}
-
-// TestBatchFlowActor_Flush_NoDownstreamDemand verifies that flush() returns
-// immediately when downstreamDemand is zero, exercising the early-return branch.
-func TestBatchFlowActor_Flush_NoDownstreamDemand(t *testing.T) {
-	sys := newInternalTestSystem(t)
-	ctx := context.Background()
-
-	upPID, err := sys.Spawn(ctx, "batch-nd-up", &dummyStageActor{})
-	require.NoError(t, err)
-	downPID, err := sys.Spawn(ctx, "batch-nd-down", &dummyStageActor{})
-	require.NoError(t, err)
-
-	// batch size = 2, long timeout so only size-flush triggers.
-	ba := newBatchFlowActor[int](2, 10*time.Second, defaultStageConfig())
-	batchPID, err := sys.Spawn(ctx, "batch-nd-actor", ba)
-	require.NoError(t, err)
-
-	// Wire without any streamRequest → downstreamDemand stays at 0.
-	require.NoError(t, actor.Tell(ctx, batchPID, &stageWire{
-		subID: "unit", upstream: upPID, downstream: downPID,
-	}))
-	time.Sleep(10 * time.Millisecond)
-
-	// Inject 2 elements to fill the batch window without any downstream demand.
-	// flush() is called but returns early because downstreamDemand == 0.
-	require.NoError(t, actor.Tell(ctx, batchPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
-	require.NoError(t, actor.Tell(ctx, batchPID, &streamElement{subID: "unit", value: 2, seqNo: 2}))
-	time.Sleep(20 * time.Millisecond)
-
-	// Actor is still alive — flush returned early rather than panicking.
-	_, err = sys.ActorOf(ctx, batchPID.Name())
-	require.NoError(t, err)
-
-	_ = batchPID.Shutdown(ctx)
 }
 
 // TestThrottleActor_StreamComplete_EmptyBuffer tests that throttleActor completes
@@ -409,4 +437,186 @@ func TestThrottleActor_StreamCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("throttle with downstream cancel did not terminate")
 	}
+}
+
+// TestBatchFlowActor_NoDemand_KeepsBatchSize verifies that windows filled
+// while downstream has no demand are held as batches of at most maxSize and
+// are emitted as soon as demand arrives, without waiting for another element.
+func TestBatchFlowActor_NoDemand_KeepsBatchSize(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	batchPID, _, down := spawnStageUnderTest(t, sys, "batch-size-nd", newBatchFlowActor[int](2, 10*time.Second, defaultStageConfig()))
+
+	for i := 1; i <= 5; i++ {
+		require.NoError(t, actor.Tell(ctx, batchPID, &streamElement{subID: "unit", value: i, seqNo: uint64(i)}))
+	}
+
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamRequest{subID: "unit", n: 10}))
+	assert.Equal(t, []int{1, 2}, expectProbeMessage[*streamElement](t, down).value)
+	assert.Equal(t, []int{3, 4}, expectProbeMessage[*streamElement](t, down).value)
+
+	// The partial window is flushed on completion, before the completion signal.
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamComplete{subID: "unit"}))
+	assert.Equal(t, []int{5}, expectProbeMessage[*streamElement](t, down).value)
+	expectProbeMessage[*streamComplete](t, down)
+}
+
+// TestBatchFlowActor_Complete_WithoutDemand_KeepsPartialWindow verifies that
+// a partial window is not discarded when upstream completes while downstream
+// has no demand: the stage delivers it once demand arrives, then completes.
+func TestBatchFlowActor_Complete_WithoutDemand_KeepsPartialWindow(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	batchPID, _, down := spawnStageUnderTest(t, sys, "batch-complete-nd", newBatchFlowActor[int](2, 10*time.Second, defaultStageConfig()))
+
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamComplete{subID: "unit"}))
+
+	// The first message downstream sees is the batch, delivered against its
+	// demand: a completion sent ahead of it would be recorded first.
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamRequest{subID: "unit", n: 1}))
+	assert.Equal(t, []int{1}, expectProbeMessage[*streamElement](t, down).value)
+	expectProbeMessage[*streamComplete](t, down)
+}
+
+// TestBatchFlowActor_TimerFlush_WithoutDemand verifies that a window whose
+// maxWait elapsed while downstream had no demand is delivered when demand
+// arrives.
+func TestBatchFlowActor_TimerFlush_WithoutDemand(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	batchPID, _, down := spawnStageUnderTest(t, sys, "batch-timer-nd", newBatchFlowActor[int](10, 10*time.Second, defaultStageConfig()))
+
+	// batchFlush is injected directly so the test does not depend on timing:
+	// the real timer is 10s away.
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
+	require.NoError(t, actor.Tell(ctx, batchPID, &batchFlush{}))
+	require.NoError(t, actor.Tell(ctx, batchPID, &streamRequest{subID: "unit", n: 1}))
+	assert.Equal(t, []int{1}, expectProbeMessage[*streamElement](t, down).value)
+}
+
+// TestBatch_SizeAboveInitialDemand verifies that a batch size larger than the
+// stage's demand window is still filled by size rather than waiting for the
+// maxWait timer with a short window.
+func TestBatch_SizeAboveInitialDemand(t *testing.T) {
+	sys := newInternalTestSystem(t)
+
+	input := make([]int, 500)
+	for i := range input {
+		input[i] = i
+	}
+
+	col, sink := Collect[[]int]()
+	handle, err := Via(Of(input...), Batch[int](300, 30*time.Second)).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	waitDone(t, handle, 5*time.Second)
+	batches := col.Items()
+	require.Len(t, batches, 2)
+	assert.Len(t, batches[0], 300)
+	assert.Len(t, batches[1], 200)
+}
+
+// TestFlowActor_StreamComplete_EmptyBuffer_CompletesOnce verifies that a
+// flowActor with nothing buffered signals completion downstream exactly once.
+func TestFlowActor_StreamComplete_EmptyBuffer_CompletesOnce(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	fa := newFlowActor(func(v any) ([]any, error) { return []any{v}, nil }, defaultStageConfig())
+	flowPID, _, down := spawnStageUnderTest(t, sys, "flow-complete-once", fa)
+
+	require.NoError(t, actor.Tell(ctx, flowPID, &streamComplete{subID: "unit"}))
+	expectProbeMessage[*streamComplete](t, down)
+
+	// Once the flow has stopped it sends nothing more, so a barrier sent to
+	// the probe now is queued behind everything the flow sent: it must be the
+	// next message the probe records.
+	require.Eventually(t, func() bool {
+		_, err := sys.ActorOf(ctx, flowPID.Name())
+		return err != nil
+	}, 5*time.Second, 5*time.Millisecond)
+
+	downPID, err := sys.ActorOf(ctx, "flow-complete-once-down")
+	require.NoError(t, err)
+	require.NoError(t, actor.Tell(ctx, downPID, &streamRequest{subID: "barrier"}))
+	assert.Equal(t, "barrier", expectProbeMessage[*streamRequest](t, down).subID)
+}
+
+// TestFusedFlowActor_RespectsDownstreamDemand verifies that a fused stage
+// requests from upstream only what downstream has asked for, and asks for a
+// replacement when it filters an element out.
+func TestFusedFlowActor_RespectsDownstreamDemand(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	keepEven := func(v any) (any, bool, error) { return v, v.(int)%2 == 0, nil }
+	fusedPID, up, down := spawnStageUnderTest(t, sys, "fused-demand", newFusedFlowActor(keepEven, defaultStageConfig()))
+
+	// The first request upstream sees is the downstream demand passed through:
+	// a request sent at wire time, before any demand, would be recorded first.
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamRequest{subID: "unit", n: 2}))
+	assert.EqualValues(t, 2, expectProbeMessage[*streamRequest](t, up).n)
+
+	// A filtered-out element does not consume downstream demand: one more is requested.
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
+	assert.EqualValues(t, 1, expectProbeMessage[*streamRequest](t, up).n)
+
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamElement{subID: "unit", value: 2, seqNo: 2}))
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamElement{subID: "unit", value: 4, seqNo: 3}))
+	assert.Equal(t, 2, expectProbeMessage[*streamElement](t, down).value)
+	assert.Equal(t, 4, expectProbeMessage[*streamElement](t, down).value)
+
+	// Demand is exhausted: the next request upstream sees is the next downstream
+	// demand, exactly. A request sent in between would be recorded first.
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamRequest{subID: "unit", n: 5}))
+	assert.EqualValues(t, 5, expectProbeMessage[*streamRequest](t, up).n)
+}
+
+// TestFusedFlowActor_FnError_CancelsUpstream verifies that a fused stage whose
+// function fails cancels its upstream and reports the error downstream.
+func TestFusedFlowActor_FnError_CancelsUpstream(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	sentinel := errors.New("fused failure")
+	failing := func(any) (any, bool, error) { return nil, false, sentinel }
+	fusedPID, up, down := spawnStageUnderTest(t, sys, "fused-error", newFusedFlowActor(failing, defaultStageConfig()))
+
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamRequest{subID: "unit", n: 1}))
+	expectProbeMessage[*streamRequest](t, up)
+
+	require.NoError(t, actor.Tell(ctx, fusedPID, &streamElement{subID: "unit", value: 1, seqNo: 1}))
+	expectProbeMessage[*streamCancel](t, up)
+	require.ErrorIs(t, expectProbeMessage[*streamError](t, down).err, sentinel)
+}
+
+// TestFusedFlow_FnError_StopsSource verifies end to end that a failure inside
+// a fused chain stops the source stage instead of leaving it running.
+func TestFusedFlow_FnError_StopsSource(t *testing.T) {
+	sys := newInternalTestSystem(t)
+	ctx := context.Background()
+
+	sentinel := errors.New("fused failure")
+	src := Unfold(0, func(s int) (int, int, bool) { return s + 1, s, true })
+	fused := Via(Via(src, Map(func(n int) int { return n })), TryMap(func(n int) (int, error) {
+		if n == 300 {
+			return 0, sentinel
+		}
+		return n, nil
+	}))
+	handle, err := fused.To(Ignore[int]()).Run(ctx, sys)
+	require.NoError(t, err)
+
+	waitDone(t, handle, 5*time.Second)
+	require.ErrorIs(t, handle.Err(), sentinel)
+
+	sourceName := fmt.Sprintf("stream-%s-0", handle.ID())
+	require.Eventually(t, func() bool {
+		_, err := sys.ActorOf(ctx, sourceName)
+		return err != nil
+	}, 5*time.Second, 10*time.Millisecond, "source stage outlived the failed stream")
 }

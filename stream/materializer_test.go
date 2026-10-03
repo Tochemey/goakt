@@ -24,6 +24,7 @@ package stream_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -132,4 +133,34 @@ func TestMaterialize_MultipleFlowStages(t *testing.T) {
 	<-handle.Done()
 	// Evens: 2,4,6 → squares: 4,16,36 → > 4: 16, 36
 	assert.Equal(t, []int{16, 36}, col.Items())
+}
+
+// TestFusion_KeepsStageErrorStrategy verifies that fusion is transparent: a
+// stateless stage configured with a non-default ErrorStrategy or a Tracer
+// keeps that behaviour when it sits next to another fusable stage.
+func TestFusion_KeepsStageErrorStrategy(t *testing.T) {
+	sys := newTestSystem(t)
+	ctx := context.Background()
+
+	tracer := &testTracer{}
+	col, sink := stream.Collect[int]()
+	src := stream.Via(stream.Of(1, 2, 3), stream.Map(func(n int) int { return n }))
+	handle, err := stream.Via(src, stream.TryMap(func(n int) (int, error) {
+		if n == 2 {
+			return 0, errors.New("skip me")
+		}
+		return n, nil
+	}).WithErrorStrategy(stream.Resume).WithTracer(tracer)).To(sink).Run(ctx, sys)
+	require.NoError(t, err)
+
+	select {
+	case <-handle.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not complete")
+	}
+
+	require.NoError(t, handle.Err())
+	assert.Equal(t, []int{1, 3}, col.Items())
+	assert.EqualValues(t, 1, tracer.errors.Load())
+	assert.EqualValues(t, 2, tracer.elements.Load())
 }

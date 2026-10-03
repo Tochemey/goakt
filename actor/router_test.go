@@ -1101,6 +1101,250 @@ func TestRouter(t *testing.T) {
 	})
 }
 
+// TestRouterRoundRobinRotatesInOrder checks that round-robin visits the routees
+// in a fixed rotation: 50 broadcasts over 5 routees give each routee exactly 10.
+func TestRouterRoundRobinRotatesInOrder(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	const poolSize = 5
+	const total = 50
+	routerName := "roundRobinPool"
+	router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockRoutee), WithRoutingStrategy(RoundRobinRouting))
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, poolSize)
+
+	for range total {
+		require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build())))
+	}
+
+	routees := make([]*PID, 0, poolSize)
+	for i := range poolSize {
+		routee, ok := system.findRoutee(routeeName(i, routerName))
+		require.True(t, ok)
+		routees = append(routees, routee)
+	}
+
+	// every routee has processed PostStart; the broadcasts add up to total
+	require.Eventually(t, func() bool {
+		processed := 0
+		for _, routee := range routees {
+			processed += routee.ProcessedCount()
+		}
+		return processed == poolSize+total
+	}, 5*time.Second, 10*time.Millisecond)
+
+	for _, routee := range routees {
+		reply, err := Ask(ctx, routee, new(testpb.TestGetCount), time.Second)
+		require.NoError(t, err)
+		// 10 TestLog plus the TestGetCount itself
+		assert.EqualValues(t, total/poolSize+1, reply.(*testpb.TestCount).GetValue(), "routee %s", routee.Name())
+	}
+}
+
+// TestRouterFanOutPreservesPerRouteeOrder checks that every routee receives the
+// fan-out copies in the order the router handled the broadcasts.
+func TestRouterFanOutPreservesPerRouteeOrder(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	const poolSize = 2
+	const total = 500
+	routerName := "fanOutPool"
+	router, err := system.SpawnRouter(ctx, routerName, poolSize, new(MockOrderRecordingActor))
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, poolSize)
+
+	for i := 1; i <= total; i++ {
+		require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestCount_builder{Value: int32(i)}.Build())))
+	}
+
+	// the routees leave the trailing broadcast unhandled; a routee that has
+	// started its turn has finished handling every TestCount before it
+	require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "done"}.Build())))
+
+	for i := range poolSize {
+		routee, ok := system.findRoutee(routeeName(i, routerName))
+		require.True(t, ok)
+
+		// PostStart, the TestCount broadcasts and the trailing one
+		require.Eventually(t, func() bool {
+			return routee.ProcessedCount() >= total+2
+		}, 5*time.Second, 10*time.Millisecond)
+
+		seen := routee.Actor().(*MockOrderRecordingActor).Seen()
+		require.Len(t, seen, total)
+
+		for j, value := range seen {
+			require.EqualValues(t, j+1, value, "routee %s received the broadcasts out of order", routee.Name())
+		}
+	}
+}
+
+// TestRouterDropsStoppedRouteeBeforeRouting checks that a routee that stopped on
+// its own gets no message: with no live routee left, the broadcast becomes a
+// dead letter and the router shuts down.
+func TestRouterDropsStoppedRouteeBeforeRouting(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	consumer, err := system.Subscribe()
+	require.NoError(t, err)
+
+	routerName := "lonePool"
+	router, err := system.SpawnRouter(ctx, routerName, 1, new(MockRoutee), WithRoutingStrategy(RoundRobinRouting))
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, 1)
+
+	routee, ok := system.findRoutee(routeeName(0, routerName))
+	require.True(t, ok)
+	require.NoError(t, routee.Shutdown(ctx))
+	require.False(t, routee.IsRunning())
+
+	require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build())))
+
+	require.Eventually(t, func() bool {
+		return !router.IsRunning()
+	}, 5*time.Second, 10*time.Millisecond, "router kept running after its only routee stopped")
+
+	require.Eventually(t, func() bool {
+		for message := range consumer.Iterator() {
+			if _, ok := message.Payload().(*Deadletter); ok {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, 10*time.Millisecond, "the broadcast left no dead letter")
+}
+
+// TestRouterResumeReinsertsRoutee checks that the Resume directive puts a routee
+// back into the pool after a broadcast handled during its suspension removed it.
+func TestRouterResumeReinsertsRoutee(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	routerName := "resumePool"
+	router, err := system.SpawnRouter(ctx, routerName, 2, new(MockRoutee), WithResumeRouteeOnFailure())
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, 2)
+
+	routee, ok := system.findRoutee(routeeName(0, routerName))
+	require.True(t, ok)
+	routee.suspend("test suspension")
+
+	// a broadcast routed while the routee is suspended drops it from the pool
+	require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "msg"}.Build())))
+	waitForRouteeCount(t, ctx, router, 1)
+
+	// the routee's failure then reaches the router, which resumes it
+	require.NoError(t, routee.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
+	waitForRouteeCount(t, ctx, router, 2)
+	require.True(t, routee.IsRunning())
+}
+
+// TestRouterScaleUpAfterRemovalGrowsPool checks that growing the pool after a
+// routee was removed adds the requested number of routees under fresh names.
+func TestRouterScaleUpAfterRemovalGrowsPool(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	routerName := "scalePool"
+	router, err := system.SpawnRouter(ctx, routerName, 2, new(MockRoutee), WithStopRouteeOnFailure())
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, 2)
+
+	routee, ok := system.findRoutee(routeeName(0, routerName))
+	require.True(t, ok)
+	require.NoError(t, routee.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
+	waitForRouteeCount(t, ctx, router, 1)
+
+	require.NoError(t, system.NoSender().Tell(ctx, router, NewAdjustRouterPoolSize(1)))
+	waitForRouteeCount(t, ctx, router, 2)
+
+	// the new routee takes the next free index, not the removed routee's
+	_, ok = system.findRoutee(routeeName(2, routerName))
+	require.True(t, ok)
+}
+
+// TestRouterScatterGatherDoesNotBlockRouter checks that a scatter-gather request
+// nobody answers in time does not hold the router: a control message queued
+// behind it is answered at once, and the sender still gets the StatusFailure.
+func TestRouterScatterGatherDoesNotBlockRouter(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	probe := NewMockTailChopRoutee()
+	sender, err := system.Spawn(ctx, "scatterProbe", probe)
+	require.NoError(t, err)
+
+	const within = 2 * time.Second
+	router, err := system.SpawnRouter(ctx, "scatterPool", 2, new(MockRoutee), AsScatterGatherFirst(within))
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, 2)
+
+	// the routees answer only after the time budget
+	slow := testpb.TestSum_builder{A: 10, B: 20, Delay: durationpb.New(within + time.Second)}.Build()
+	require.NoError(t, sender.Tell(ctx, router, NewBroadcast(slow)))
+
+	// queued behind the broadcast in the router's mailbox
+	reply, err := Ask(ctx, router, new(GetRoutees), within/2)
+	require.NoError(t, err, "the router did not answer while gathering replies")
+	require.Len(t, reply.(*Routees).Names(), 2)
+
+	require.True(t, probe.WaitForFailure(2*within), "expected status failure")
+	assert.EqualValues(t, 1, probe.FailureCount())
+}
+
+// TestRouterTailChoppingDoesNotBlockRouter checks that a tail-chopping request
+// nobody answers in time does not hold the router: a control message queued
+// behind it is answered at once, and the sender still gets the StatusFailure.
+func TestRouterTailChoppingDoesNotBlockRouter(t *testing.T) {
+	ctx := t.Context()
+	system, err := NewActorSystem("testSystem", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, system.Start(ctx))
+	t.Cleanup(func() { assert.NoError(t, system.Stop(context.Background())) })
+
+	probe := NewMockTailChopRoutee()
+	sender, err := system.Spawn(ctx, "tailChopProbe", probe)
+	require.NoError(t, err)
+
+	const within = 2 * time.Second
+	router, err := system.SpawnRouter(ctx, "tailChopPool", 2, new(MockRoutee), AsTailChopping(within, 20*time.Millisecond))
+	require.NoError(t, err)
+	waitForRouteeCount(t, ctx, router, 2)
+
+	// the routees answer only after the time budget
+	slow := testpb.TestSum_builder{A: 10, B: 20, Delay: durationpb.New(within + time.Second)}.Build()
+	require.NoError(t, sender.Tell(ctx, router, NewBroadcast(slow)))
+
+	// queued behind the broadcast in the router's mailbox
+	reply, err := Ask(ctx, router, new(GetRoutees), within/2)
+	require.NoError(t, err, "the router did not answer while probing routees")
+	require.Len(t, reply.(*Routees).Names(), 2)
+
+	require.True(t, probe.WaitForFailure(2*within), "expected status failure")
+	assert.EqualValues(t, 1, probe.FailureCount())
+}
+
 func TestFindRouteeMissReleasesLock(t *testing.T) {
 	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)

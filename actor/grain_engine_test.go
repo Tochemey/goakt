@@ -50,6 +50,7 @@ import (
 	internalnet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
 	mockdiscovery "github.com/tochemey/goakt/v4/mocks/discovery"
@@ -3075,12 +3076,68 @@ func TestPeerActivationPropagatesGrainConfig(t *testing.T) {
 	require.Equal(t, identity.String(), got.String())
 }
 
+func TestLogGrainActivationFailure(t *testing.T) {
+	const message = "failed to attempt remote activation for grain"
+
+	t.Run("a caller that gave up is a debug line", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		system.logGrainActivationFailure(ctx, context.Canceled, message+": %v", context.Canceled)
+		_ = logger.Flush()
+		require.Equal(t, "debug", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("a caller whose deadline passed during backpressure is a debug line", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+		defer cancel()
+		<-ctx.Done()
+
+		err := errors.Join(gerrors.ErrRemoteSendBackpressure, ctx.Err())
+		system.logGrainActivationFailure(ctx, err, message+": %v", err)
+		_ = logger.Flush()
+		require.Equal(t, "debug", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("a full outbound queue is a warning", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		err := errors.Join(gerrors.ErrRemoteSendBackpressure, errors.New("tcp: duplex outbound queue full"))
+		system.logGrainActivationFailure(context.Background(), err, message+": %v", err)
+		_ = logger.Flush()
+		require.Equal(t, "warn", logLevelOf(t, buf.String(), message))
+	})
+
+	t.Run("any other failure is an error", func(t *testing.T) {
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system := &actorSystem{logger: logger}
+
+		system.logGrainActivationFailure(context.Background(), assert.AnError, message+": %v", assert.AnError)
+		_ = logger.Flush()
+		require.Equal(t, "error", logLevelOf(t, buf.String(), message))
+	})
+}
+
 func TestFinalizeGrainActivation(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("publish failure with failed deactivation still leaves nothing behind", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 		system := newReplicationSystem(clusterMock)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
 
 		grain := NewMockDeactivationFailingGrain()
 		identity := newGrainIdentity(grain, "finalize-deactivate-failure")
@@ -3099,6 +3156,38 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		_, ok := system.grains.Get(identity.String())
 		require.False(t, ok, "a failed activation must leave no grain behind")
 		clusterMock.AssertExpectations(t)
+
+		// a running node reports the failed rollback as an error
+		_ = logger.Flush()
+		require.Equal(t, "error", logLevelOf(t, buf.String(), "after failed cluster publication"))
+	})
+
+	t.Run("a failed rollback on a stopping node is a warning and still leaves nothing behind", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+		system.shuttingDown.Store(true)
+		buf := &safeBuffer{}
+		logger := log.NewSlog(log.DebugLevel, buf)
+		system.logger = logger
+
+		grain := NewMockDeactivationFailingGrain()
+		identity := newGrainIdentity(grain, "finalize-stopping-deactivate-failure")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		// nothing is published, and the fallback releases the claim
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, true)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+		_, ok := system.grains.Get(identity.String())
+		require.False(t, ok, "a rolled back activation must leave no grain behind")
+		clusterMock.AssertExpectations(t)
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+
+		_ = logger.Flush()
+		require.Equal(t, "warn", logLevelOf(t, buf.String(), "after failed cluster publication while stopping"))
 	})
 
 	t.Run("publish failure releases the claim without disturbing an already-active grain", func(t *testing.T) {
@@ -3133,7 +3222,7 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
 
-		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
+		// nothing is published: the deactivation releases the claim
 		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
 
 		err := system.finalizeGrainActivation(ctx, process, true, true)
@@ -3142,9 +3231,10 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		_, ok := system.grains.Get(identity.String())
 		require.False(t, ok, "the late activation must leave no grain behind")
 		clusterMock.AssertExpectations(t)
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
 	})
 
-	t.Run("keeps an already-active grain while the node is shutting down", func(t *testing.T) {
+	t.Run("a stopping node publishes nothing for an already-active grain", func(t *testing.T) {
 		clusterMock := new(mockcluster.Cluster)
 		system := newReplicationSystem(clusterMock)
 		system.shuttingDown.Store(true)
@@ -3153,6 +3243,50 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		identity := newGrainIdentity(grain, "finalize-shutting-down-active")
 		process := newGrainPID(identity, grain, system, newGrainConfig())
 		process.activated.Store(true)
+		system.grains.Set(identity.String(), process)
+
+		err := system.finalizeGrainActivation(ctx, process, false, false)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok, "the grain must stay registered locally")
+		require.True(t, got.isActive(), "the grain must stay active until the shutdown deactivates it")
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+		clusterMock.AssertNotCalled(t, "ReleaseGrain", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("a stopping node releases its claim without publishing for an already-active grain", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+		system.shuttingDown.Store(true)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-shutting-down-claimed")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+		system.grains.Set(identity.String(), process)
+
+		clusterMock.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(system.Host(), system.Port())).Return(nil, nil).Once()
+
+		err := system.finalizeGrainActivation(ctx, process, true, false)
+		require.ErrorIs(t, err, gerrors.ErrSystemShuttingDown)
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok)
+		require.True(t, got.isActive())
+		clusterMock.AssertExpectations(t)
+		clusterMock.AssertNotCalled(t, "PutGrain", mock.Anything, mock.Anything)
+	})
+
+	t.Run("a running node publishes an already-active grain", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-running-active")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+		system.grains.Set(identity.String(), process)
 
 		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -3160,8 +3294,33 @@ func TestFinalizeGrainActivation(t *testing.T) {
 
 		got, ok := system.grains.Get(identity.String())
 		require.True(t, ok)
+		require.Same(t, process, got)
 		require.True(t, got.isActive())
+		clusterMock.AssertExpectations(t)
 		clusterMock.AssertNotCalled(t, "ReleaseGrain", mock.Anything, mock.Anything, mock.Anything)
+	})
+
+	t.Run("an activated grain becomes reachable once its record is published", func(t *testing.T) {
+		clusterMock := new(mockcluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+
+		grain := NewMockGrain()
+		identity := newGrainIdentity(grain, "finalize-reachable-after-publish")
+		process := newGrainPID(identity, grain, system, newGrainConfig())
+		process.activated.Store(true)
+
+		var visibleWhilePublishing bool
+		clusterMock.EXPECT().PutGrain(mock.Anything, mock.Anything).Run(func(context.Context, *internalpb.Grain) {
+			_, visibleWhilePublishing = system.grains.Get(identity.String())
+		}).Return(nil).Once()
+
+		require.NoError(t, system.finalizeGrainActivation(ctx, process, true, true))
+		require.False(t, visibleWhilePublishing, "the grain must not be reachable before its record is published")
+
+		got, ok := system.grains.Get(identity.String())
+		require.True(t, ok, "the grain must be reachable once finalizeGrainActivation returns")
+		require.Same(t, process, got)
+		clusterMock.AssertExpectations(t)
 	})
 
 	t.Run("publish failure without claim or activation only returns the error", func(t *testing.T) {
@@ -3183,6 +3342,211 @@ func TestFinalizeGrainActivation(t *testing.T) {
 		require.True(t, ok, "an already-active grain must stay registered")
 		require.True(t, got.isActive(), "an already-active grain must not be deactivated")
 		clusterMock.AssertNotCalled(t, "ReleaseGrain", mock.Anything, mock.Anything, mock.Anything)
+	})
+}
+
+// TestFinalizeGrainActivationRacingLocalSend sends to a grain from this node
+// while its activation publishes the registry record. The grain is not
+// reachable until the record is published, so the send waits for the
+// activation: a failed publication rolls the grain back without OnDeactivate
+// overlapping an OnReceive turn, and a successful one serves the send once.
+func TestFinalizeGrainActivationRacingLocalSend(t *testing.T) {
+	t.Run("a failed publication never deactivates the grain during a turn", func(t *testing.T) {
+		ctx := t.Context()
+		grain, probe := NewMockTurnOverlapGrain()
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "racing-failed-publication", true)
+		config := newGrainConfig()
+		owner, err := wireGrain(identity, config, sys.Host(), sys.Port())
+		require.NoError(t, err)
+
+		publishing := make(chan types.Unit)
+		proceed := make(chan types.Unit)
+
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Run(func(context.Context, *internalpb.Grain) {
+			close(publishing)
+			<-proceed
+		}).Return(assert.AnError).Once()
+
+		// the rollback releases the record; a send that comes after the
+		// failed activation activates the grain again and is served
+		cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Maybe()
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, nil).Maybe()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		activation := make(chan error, 1)
+		go func() {
+			activation <- sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, owner)
+		}()
+
+		<-publishing
+
+		sent := make(chan error, 1)
+		go func() {
+			_, err := sys.localSendGrain(ctx, identity, new(testpb.TestSend), time.Second, grainTell)
+			sent <- err
+		}()
+
+		// a send that reaches the grain during the publication starts its
+		// turn here; one that waits for the activation does not
+		select {
+		case <-probe.received:
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		close(proceed)
+
+		require.ErrorIs(t, <-activation, assert.AnError)
+		sendErr := <-sent
+		require.Zero(t, probe.overlaps.Load(), "OnDeactivate ran while an OnReceive turn was in progress")
+		if sendErr != nil {
+			require.ErrorIs(t, sendErr, assert.AnError, "a send that waited for the failed activation must report its failure")
+		}
+	})
+
+	t.Run("a failed publication of a reactivated grain never deactivates it during a turn", func(t *testing.T) {
+		ctx := t.Context()
+		grain, probe := NewMockTurnOverlapGrain()
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "racing-failed-reactivation", true)
+
+		// an entry left inactive in the grains map, as a failed OnDeactivate leaves it
+		seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
+		owner, err := wireGrain(identity, newGrainConfig(), sys.Host(), sys.Port())
+		require.NoError(t, err)
+
+		publishing := make(chan types.Unit)
+		proceed := make(chan types.Unit)
+
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Maybe()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Maybe()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Run(func(context.Context, *internalpb.Grain) {
+			close(publishing)
+			<-proceed
+		}).Return(assert.AnError).Once()
+
+		// the rollback releases the record; a send that comes after the
+		// failed activation activates the grain again and is served
+		cl.EXPECT().ReleaseGrain(mock.Anything, identity.String(), address.FormatHostPort(sys.Host(), sys.Port())).Return(nil, nil).Maybe()
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		reactivation := make(chan error, 1)
+		go func() {
+			_, err := sys.localSendGrain(ctx, identity, new(testpb.TestSend), time.Second, grainTell)
+			reactivation <- err
+		}()
+
+		<-publishing
+
+		sent := make(chan error, 1)
+		go func() {
+			_, err := sys.localSendGrain(ctx, identity, new(testpb.TestSend), time.Second, grainTell)
+			sent <- err
+		}()
+
+		select {
+		case <-probe.received:
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		close(proceed)
+
+		require.ErrorIs(t, <-reactivation, assert.AnError)
+		sendErr := <-sent
+		require.Zero(t, probe.overlaps.Load(), "OnDeactivate ran while an OnReceive turn was in progress")
+		if sendErr != nil {
+			require.ErrorIs(t, sendErr, assert.AnError, "a send that waited for the failed activation must report its failure")
+		}
+	})
+
+	t.Run("a successful publication serves a waiting send once", func(t *testing.T) {
+		ctx := t.Context()
+		grain, probe := NewMockTurnOverlapGrain()
+		sys, cl, _, identity := newActivationTestSystem(t, grain, "racing-successful-publication", true)
+		config := newGrainConfig()
+		owner, err := wireGrain(identity, config, sys.Host(), sys.Port())
+		require.NoError(t, err)
+
+		publishing := make(chan types.Unit)
+		proceed := make(chan types.Unit)
+
+		cl.EXPECT().PutGrain(mock.Anything, mock.Anything).Run(func(context.Context, *internalpb.Grain) {
+			close(publishing)
+			<-proceed
+		}).Return(nil).Once()
+
+		activation := make(chan error, 1)
+		go func() {
+			activation <- sys.activateGrainLocally(ctx, identity, staticGrainProvider(grain), config, owner)
+		}()
+
+		<-publishing
+
+		type askResult struct {
+			reply any
+			err   error
+		}
+
+		asked := make(chan askResult, 1)
+		go func() {
+			reply, err := sys.localSendGrain(ctx, identity, new(testpb.TestReply), time.Second, grainAsk)
+			asked <- askResult{reply: reply, err: err}
+		}()
+
+		select {
+		case <-probe.received:
+			t.Fatal("the grain was reached before its record was published")
+		case <-time.After(200 * time.Millisecond):
+		}
+
+		close(proceed)
+		require.NoError(t, <-activation)
+
+		result := <-asked
+		require.NoError(t, result.err)
+		require.Equal(t, "received message", result.reply.(*testpb.Reply).GetContent())
+		require.EqualValues(t, 1, probe.activations.Load(), "the send must use the activation it waited for")
+		require.EqualValues(t, 1, probe.receives.Load(), "the send must be served exactly once")
+	})
+}
+
+func TestActivateUnreachable(t *testing.T) {
+	failingConfig := newGrainConfig(WithGrainInitMaxRetries(1), WithGrainInitTimeout(10*time.Millisecond))
+
+	t.Run("a failed activation puts an inactive entry back", func(t *testing.T) {
+		grain := NewMockActivationFailingGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "unreachable-restore", true)
+		process := seedInactiveGrainPID(sys, identity, grain, failingConfig)
+
+		err := sys.activateUnreachable(t.Context(), process)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+
+		got, ok := sys.grains.Get(identity.String())
+		require.True(t, ok, "the inactive entry must be put back")
+		require.Same(t, process, got)
+		require.False(t, got.isActive())
+	})
+
+	t.Run("a failed activation of an unregistered process registers nothing", func(t *testing.T) {
+		grain := NewMockActivationFailingGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "unreachable-new", true)
+		process := newGrainPID(identity, grain, sys, failingConfig)
+
+		err := sys.activateUnreachable(t.Context(), process)
+		require.ErrorIs(t, err, gerrors.ErrGrainActivationFailure)
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok)
+	})
+
+	t.Run("a successful activation leaves registration to the publication", func(t *testing.T) {
+		grain := NewMockGrain()
+		sys, _, _, identity := newActivationTestSystem(t, grain, "unreachable-success", true)
+		process := seedInactiveGrainPID(sys, identity, grain, newGrainConfig())
+
+		require.NoError(t, sys.activateUnreachable(t.Context(), process))
+		require.True(t, process.isActive())
+
+		_, ok := sys.grains.Get(identity.String())
+		require.False(t, ok, "the grain must stay unreachable until finalizeGrainActivation publishes it")
 	})
 }
 
@@ -4138,4 +4502,70 @@ func TestAskGrain_HandlerContextEndsWithTheAsk(t *testing.T) {
 			require.False(t, ok)
 		})
 	}
+}
+
+// TestGrainOf_ReleasesTheRecordOfAStoppedOwnerStillConnected reproduces a
+// rolling deploy in a three-node cluster: a grain is active on node A, node B
+// reaches it over a duplex connection that stays open, A stops, and a registry
+// record naming A is left behind. GrainOf on B must release that record and
+// activate the grain on B in the same call, instead of reading the answer of
+// the stopped node as a live owner refusing the request.
+func TestGrainOf_ReleasesTheRecordOfAStoppedOwnerStillConnected(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+	t.Cleanup(srv.Shutdown)
+
+	systems, _ := startNATsSystems(t, srv.Addr().String(), 3)
+	nodeA, nodeB, nodeC := systems[0], systems[1], systems[2]
+	t.Cleanup(func() {
+		_ = nodeC.Stop(ctx)
+		_ = nodeB.Stop(ctx)
+	})
+
+	require.Eventually(t, func() bool {
+		peers, err := nodeA.Peers(ctx, time.Second)
+		return err == nil && len(peers) == 2
+	}, 10*time.Second, 100*time.Millisecond)
+
+	identity, err := GrainOf[*MockGrain](ctx, nodeA, "stale-owner-grain", WithActivationStrategy(LocalActivation))
+	require.NoError(t, err)
+
+	// node B reaches the grain on node A, which opens B's duplex connection to A
+	_, err = nodeB.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+
+	ownerA := nodeA.(*actorSystem)
+	ownerHost, ownerPort := ownerA.Host(), ownerA.Port()
+	require.NoError(t, nodeA.Stop(ctx))
+
+	sysB := nodeB.(*actorSystem)
+	require.Eventually(t, func() bool {
+		alive, err := sysB.isEndpointAlive(ctx, ownerHost, ownerPort)
+		return err == nil && !alive
+	}, 30*time.Second, 100*time.Millisecond)
+
+	// the record a lost release leaves behind
+	staleRecord, err := wireGrain(identity, newGrainConfig(), ownerHost, ownerPort)
+	require.NoError(t, err)
+	require.NoError(t, sysB.getCluster().PutGrain(ctx, staleRecord))
+
+	// A node that has just stopped can still answer on a connection it serves
+	// that its remoting is disabled, an answer that releases the record by
+	// itself. Wait until node A no longer answers that way, so GrainOf meets
+	// the stopped node the way a later request does.
+	require.Eventually(t, func() bool {
+		_, err := sysB.remoting.RemoteLookup(ctx, ownerHost, ownerPort, "probe")
+		return !errors.Is(err, gerrors.ErrRemotingDisabled)
+	}, time.Minute, 100*time.Millisecond)
+
+	_, err = GrainOf[*MockGrain](ctx, nodeB, identity.Name())
+	require.NoError(t, err)
+
+	owner, err := sysB.getCluster().GetGrain(ctx, identity.String())
+	require.NoError(t, err)
+	require.True(t, sysB.isLocalGrainOwner(owner), "the grain must be owned by node B")
+
+	reply, err := nodeB.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
 }

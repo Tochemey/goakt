@@ -84,7 +84,7 @@ const (
 	// ShouldFail indicates that if a ShutdownHook fails, the shutdown process should immediately stop executing any remaining hooks.
 	//
 	// The error from the failed hook is reported, and no further shutdown hooks are run.
-	// Use this policy when subsequent hooks depend on the success of previous ones, or when a failure should halt the shutdown sequence.
+	// Use this policy when subsequent hooks depend on the success of previous ones, or when a failure should halt the hook sequence. The actor system still stops.
 	ShouldFail RecoveryStrategy = iota
 
 	// ShouldRetryAndFail indicates that if a ShutdownHook fails, the system should retry executing the hook.
@@ -124,9 +124,8 @@ const (
 // Example usage:
 //
 //	recovery := NewShutdownHookRecovery(
-//	    WithShutdownHookRetries(3),
-//	    WithShutdownHookRetryDelay(2 * time.Second),
-//	    WithShutdownHookRecoveryPolicy(ShouldRetryAndSkip),
+//	    WithShutdownHookRetry(3, 2*time.Second),
+//	    WithShutdownHookRecoveryStrategy(ShouldRetryAndSkip),
 //	)
 type RecoveryOption func(*ShutdownHookRecovery)
 

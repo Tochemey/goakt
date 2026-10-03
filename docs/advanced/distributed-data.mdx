@@ -87,8 +87,22 @@ sequenceDiagram
 Both Replicators are **equal participants**: they both subscribe to the same topic and both can publish to it. There is
 no publisher/subscriber distinction. When Node B updates the same key, the flow is identical with roles reversed.
 
-**Anti-entropy** runs periodically as a safety net. Each Replicator exchanges version digests with a random peer, and
-any divergent keys are repaired. This ensures convergence even if some deltas were lost during a network partition.
+**Anti-entropy** runs periodically as a safety net. Each Replicator sends a digest to a random peer: one entry per key
+with a **content hash** of its value. The peer answers with its full state of every key whose hash differs from its own
+and of every key the sender does not have, and the sender merges the answer. The digest also carries the tombstones the
+sender retains, and the answer the peer's tombstones for keys the digest listed, so a deletion either side knows of
+reaches the other. Every node pulls this way on its own
+schedule, so any two nodes end up holding the merge of their states. This ensures convergence even if some deltas were
+lost during a network partition.
+
+The content hash is canonical: two replicas that hold the same state compute the same hash, whatever the order of the
+updates and merges that produced it. A merge that leaves the hash unchanged, such as a delta delivered twice or the
+state of a peer that is behind, changes nothing: it does not notify watchers.
+
+<Note>
+During a rolling upgrade, a node that predates the content hash sends digests without it. For those entries a
+Replicator falls back to comparing its per-key version counter with the peer's, as before.
+</Note>
 
 ## CRDT types
 
@@ -180,8 +194,19 @@ To **also** replicate across DCs, enable multi-DC on the cluster and cross-DC CR
 - Every node runs a Replicator; only the **cluster leader** periodically sends a protobuf `CRDTDeltaBatch` (buffered
   deltas and tombstones, origin DC, send timestamp) to remote DCs using the DC controller’s `ActiveRecords()` and
   remoting.
+- The buffer holds **one entry per key**: a further change of a key is merged into the pending one, and a deletion
+  replaces it. Its size is bounded by the number of keys changed since the last successful flush.
+- The leader tracks what **each** remote DC has accepted. On every tick a DC is sent only the entries it has not
+  accepted yet, and nothing when it is up to date. A DC that could not be reached is sent its entries again on the next
+  tick; the DCs that accepted theirs are not. An entry leaves the buffer once every remote DC on record has accepted
+  it.
+- A DC that leaves the records stops holding entries back; one that appears is sent everything still pending. A node
+  that becomes the leader sends everything it has pending to every DC, which is harmless because merges and deletions
+  are idempotent.
 - Remote Replicators apply the batch locally; those updates then spread **within** that DC through the usual
   `goakt.crdt.deltas` topic.
+- A remote Replicator applies the tombstones of a batch before its deltas. A key that was deleted and, after its
+  tombstone expired, created again travels as both, and the receiver ends up with the new value only.
 - Optional **cross-DC anti-entropy** sends a digest to a random remote DC on a slower schedule, similar in spirit to
   intra-DC anti-entropy.
 
@@ -264,6 +289,8 @@ func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
 ### Subscribing to changes
 
 Actors can watch keys and receive `Changed` notifications whenever the value changes: from local updates or peer deltas.
+Each `Changed` carries the `Key` that changed and its current `Data`, so one actor can watch several keys and tell them
+apart with `msg.Key.ID()`.
 
 ```go Subscribing to changes
 func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
@@ -532,7 +559,7 @@ When a data entry is changed, the Replicator publishes a **delta** (incremental 
 state of the entry is replicated in several situations:
 
 - The serialized delta exceeds `MaxDeltaSize` (default 64KB): the Replicator falls back to full-state transfer.
-- During anti-entropy, when a peer is detected to be behind on a key.
+- During anti-entropy, when a peer's value of a key differs from the local one.
 - When new nodes join and need to catch up from scratch.
 
 This means you should avoid very large individual CRDT values (e.g., an ORSet with millions of elements), because
@@ -564,14 +591,21 @@ bottleneck.
 
 Cross-DC replication depends on the **DC control plane** (for active DC records), **cluster leadership** (only the
 leader sends batches), and **WAN** latency. If the control plane is unavailable or the DC cache is stale, cross-DC flush
-may pause; intra-DC replication continues. Tune `WithDataCenterSendTimeout`, replication interval, and datacenter
+pauses and the pending changes wait in the buffer, one entry per key, until a flush reaches every remote DC; intra-DC
+replication continues. Tune `WithDataCenterSendTimeout`, replication interval, and datacenter
 `FailOnStaleCache` for your SLOs.
 
 ### Tombstone window
 
-Deleted keys are protected by a tombstone for the configured TTL (default 24 hours). If a node is partitioned for longer
-than the TTL and still holds the key, it may resurrect the key when it rejoins. Set `WithTombstoneTTL` appropriately for
-your partition tolerance requirements.
+Deleted keys are protected by a tombstone for the configured TTL (default 24 hours). While a node retains the tombstone,
+anti-entropy carries the deletion to every peer it exchanges with, in both directions of a round: a node that missed the
+tombstone itself drops the key on its next round with a node that has it. This also holds across datacenters when
+cross-DC anti-entropy is on.
+
+Two cases remain outside the TTL. A node partitioned for longer than the TTL that still holds the key resurrects it when
+it rejoins, because no node retains the tombstone any more. And a key deleted and then created again after the TTL is
+merged with the old copy such a node brings back. Set `WithTombstoneTTL` to outlast the longest partition you want to
+tolerate.
 
 ### Value serialization
 

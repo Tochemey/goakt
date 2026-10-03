@@ -55,6 +55,11 @@ func TestOption(t *testing.T) {
 			expected: Config{readIdleTimeout: 10 * time.Second},
 		},
 		{
+			name:     "WithDialTimeout",
+			option:   WithDialTimeout(time.Second),
+			expected: Config{dialTimeout: time.Second},
+		},
+		{
 			name:     "WithOrdinaryLanes",
 			option:   WithOrdinaryLanes(4),
 			expected: Config{ordinaryLanes: 4},

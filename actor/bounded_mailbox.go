@@ -30,12 +30,14 @@ import (
 // buffer.
 //
 // Characteristics
-// - Bounded capacity: the queue has a fixed size.
-// - Blocking semantics:
-//   - Enqueue blocks when the mailbox is full until space becomes available
-//     or the mailbox is disposed.
-//   - Dequeue blocks when the mailbox is empty until a message is available
-//     or the mailbox is disposed.
+//   - Bounded capacity: the queue has a fixed size, the requested capacity
+//     rounded up to the next power of two by the underlying ring buffer
+//     (NewBoundedMailbox(10) holds 16 messages).
+//   - Blocking enqueue: Enqueue blocks when the mailbox is full until space
+//     becomes available or the mailbox is disposed. The sender's goroutine
+//     spins meanwhile; when the sender is an actor, that is a dispatcher worker.
+//   - Non-blocking dequeue: Dequeue returns nil when the mailbox is empty, as
+//     the dispatcher requires.
 //
 // - Concurrency: safe for multiple producers (MPSC) and a single consumer.
 // - FIFO ordering: messages are dequeued in the order they were enqueued.
@@ -50,13 +52,13 @@ type BoundedMailbox struct {
 var _ Mailbox = (*BoundedMailbox)(nil)
 
 // NewBoundedMailbox creates a new bounded, blocking mailbox with the given
-// capacity. Capacity must be a positive integer.
+// capacity. Capacity must be a positive integer, and is rounded up to the next
+// power of two.
 //
 // Behavior
 //   - When the mailbox reaches capacity, Enqueue blocks until space becomes
 //     available (or the mailbox is disposed).
-//   - When the mailbox is empty, Dequeue blocks until a message arrives (or the
-//     mailbox is disposed).
+//   - When the mailbox is empty, Dequeue returns nil.
 func NewBoundedMailbox(capacity int) *BoundedMailbox {
 	return &BoundedMailbox{
 		underlying: gods.NewRingBuffer(uint64(capacity)),
@@ -77,11 +79,11 @@ func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
 	return mailbox.underlying.Put(msg)
 }
 
-// Dequeue removes and returns the next message from the mailbox.
+// Dequeue removes and returns the next message from the mailbox, or nil when
+// the mailbox is empty. It never blocks: it reads the ring buffer only after
+// seeing a message in it.
 //
 // Semantics
-//   - Blocks when the mailbox is empty until a message is available or the
-//     mailbox is disposed.
 //   - FIFO order is preserved.
 //
 // Concurrency
@@ -110,8 +112,8 @@ func (mailbox *BoundedMailbox) Len() int64 {
 }
 
 // Dispose releases resources held by the underlying ring buffer and unblocks
-// any internal waiters maintained by it. Do not use the mailbox after
-// calling Dispose.
+// any internal waiters maintained by it. It is final: every later Enqueue
+// fails. The actor calls it on a terminal stop only, not when it restarts.
 func (mailbox *BoundedMailbox) Dispose() {
 	mailbox.underlying.Dispose()
 }

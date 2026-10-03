@@ -47,11 +47,14 @@ package actor
 // Ensure that any resources initialized in PreStart are safe for clustered environments (e.g., stateless,
 // replicated, or retryable).
 type Actor interface {
-	// PreStart is called once before the actor starts processing messages.
+	// PreStart is called before the actor starts processing messages.
 	//
 	// Use this method to initialize dependencies such as database clients,
-	// caches, or external service connections and persistent state recovery. If PreStart returns an error,
-	// the actor will not be started, and the failure will be handled by its supervisor.
+	// caches, or external service connections and persistent state recovery. A PreStart
+	// that returns an error is retried, up to the configured number of attempts
+	// (WithActorInitMaxRetries) and while the init timeout has not elapsed; if the last
+	// attempt fails, the actor is not started. PreStart runs again on every restart, on
+	// the same actor value, so it must be safe to run more than once.
 	PreStart(ctx *Context) error
 
 	// Receive handles all messages sent to the actor's mailbox.
@@ -67,8 +70,18 @@ type Actor interface {
 
 	// PostStop is called when the actor is about to shut down.
 	//
-	// This lifecycle hook is invoked after the actor has finished processing all messages
-	// in its mailbox and is guaranteed to run before the actor is fully terminated.
+	// How the actor is stopped decides what PostStop can rely on:
+	//   - PID.Shutdown, ActorSystem.Stop, system eviction and a parent stopping its children
+	//     stop the actor at once. They do not wait for the message in flight, so PostStop may run while Receive
+	//     is still handling that message on another goroutine: state the two share must be
+	//     safe for concurrent use.
+	//   - A PoisonPill, ReceiveContext.Shutdown and per-actor passivation stop the actor from
+	//     its own turn or while it is idle, so PostStop never runs concurrently with Receive.
+	//
+	// In every case the messages still queued in the mailbox are not processed: they are
+	// dropped when the actor stops. To handle everything sent before the stop, send the actor
+	// a message of your own and call ReceiveContext.Shutdown when it arrives. PostStop is
+	// guaranteed to run before the actor is fully terminated.
 	//
 	// Use this method to perform final cleanup actions such as:
 	//   - Releasing resources (e.g., database connections, goroutines, open files)

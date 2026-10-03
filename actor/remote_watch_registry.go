@@ -47,8 +47,8 @@ type remoteWatchEntry struct {
 	RemoteAddress *address.Address
 }
 
-// remoteHostEntries is the result of dropHost. It groups the entries that
-// were removed because their remote peer lived on a departed cluster host,
+// remoteHostEntries is the result of dropHost and dropNode. It groups the entries that
+// were removed because their remote peer lived on a departed cluster host or node,
 // split by which side of the watch relationship each entry represents so the
 // caller can apply the correct compensating action.
 //
@@ -390,6 +390,82 @@ func (r *remoteWatchRegistry) dropHost(host string) remoteHostEntries {
 			}
 		}
 		delete(r.watcheesByHost, host)
+	}
+
+	return entries
+}
+
+// dropNode removes every entry whose remote peer is the node listening on
+// host and port, and returns them grouped like dropHost does. Entries of other
+// nodes on the same host are left in place, and the host key of the by-host
+// indexes is deleted only once no entry under it remains. It is the
+// node-precise counterpart of dropHost, which stays the fallback when only the
+// host of the departed node is known.
+// Idempotent.
+func (r *remoteWatchRegistry) dropNode(host string, port int) remoteHostEntries {
+	if host == "" {
+		return remoteHostEntries{}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var entries remoteHostEntries
+
+	if hostMap, ok := r.watchersByHost[host]; ok {
+		for pidID, addrs := range hostMap {
+			pidMap := r.watchers[pidID]
+			for addrKey := range addrs {
+				addr, ok := pidMap[addrKey]
+				if !ok || addr.Port() != port {
+					continue
+				}
+
+				entries.Watchers = append(entries.Watchers, remoteWatchEntry{LocalID: pidID, RemoteAddress: addr})
+				delete(pidMap, addrKey)
+				delete(addrs, addrKey)
+			}
+
+			if len(pidMap) == 0 {
+				delete(r.watchers, pidID)
+			}
+
+			if len(addrs) == 0 {
+				delete(hostMap, pidID)
+			}
+		}
+
+		if len(hostMap) == 0 {
+			delete(r.watchersByHost, host)
+		}
+	}
+
+	if hostMap, ok := r.watcheesByHost[host]; ok {
+		for pidID, addrs := range hostMap {
+			pidMap := r.watchees[pidID]
+			for addrKey := range addrs {
+				addr, ok := pidMap[addrKey]
+				if !ok || addr.Port() != port {
+					continue
+				}
+
+				entries.Watchees = append(entries.Watchees, remoteWatchEntry{LocalID: pidID, RemoteAddress: addr})
+				delete(pidMap, addrKey)
+				delete(addrs, addrKey)
+			}
+
+			if len(pidMap) == 0 {
+				delete(r.watchees, pidID)
+			}
+
+			if len(addrs) == 0 {
+				delete(hostMap, pidID)
+			}
+		}
+
+		if len(hostMap) == 0 {
+			delete(r.watcheesByHost, host)
+		}
 	}
 
 	return entries

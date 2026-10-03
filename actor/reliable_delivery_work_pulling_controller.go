@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -148,8 +149,16 @@ type workPullingProducerController struct {
 
 	// failed marks that the terminal failure event was already published.
 	failed bool
-	// generation fences the recurring timer across restarts.
-	generation uint64
+	// reportLoadFailure is set once a start loaded the durable state, so the
+	// next Load failure belongs to a restart and is published. Publishing
+	// clears it: the start is retried on the same controller, and the retried
+	// attempts of one failed restart must not publish again. It stays false on
+	// a first start, whose failure is returned to the spawner instead.
+	reportLoadFailure bool
+	// generation fences the recurring timer across restarts. Atomic because
+	// PostStop can run on a different goroutine than the PreStart that last
+	// incremented it (restart racing a forced stop).
+	generation atomic.Uint64
 }
 
 // enforce the Actor contract
@@ -209,7 +218,7 @@ func (x *workPullingProducerController) PreStart(ctx *Context) error {
 	x.deferredOp = 0
 	x.dirtyConfirmIDs = nil
 	x.failed = false
-	x.generation++
+	x.generation.Add(1)
 
 	if x.queue == nil {
 		return nil
@@ -217,7 +226,8 @@ func (x *workPullingProducerController) PreStart(ctx *Context) error {
 
 	state, epoch, err := x.queue.Load(ctx.Context())
 	if err != nil {
-		if x.generation > 1 {
+		if x.reportLoadFailure {
+			x.reportLoadFailure = false
 			x.publishFailure(ReliableDeliveryStageLoad, err)
 		}
 
@@ -227,6 +237,7 @@ func (x *workPullingProducerController) PreStart(ctx *Context) error {
 	x.epoch = epoch
 	x.storeSeq = state.CurrentSeq()
 	x.pending = pendingFromWorkQueueState(state)
+	x.reportLoadFailure = true
 	return nil
 }
 
@@ -250,7 +261,7 @@ func pendingFromWorkQueueState(state WorkQueueState) []pendingWork {
 // PostStop cancels the recurring timer of this incarnation through its
 // derived reference, so no state shared with PostStart is read here.
 func (x *workPullingProducerController) PostStop(ctx *Context) error {
-	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation)); err != nil {
+	if err := ctx.ActorSystem().CancelSchedule(reliableTickReference(ctx.ActorName(), x.generation.Load())); err != nil {
 		ctx.ActorSystem().Logger().Debugf("work-pulling producer controller for endpoint=%s failed to cancel tick: %v", x.producer.Name(), err)
 	}
 
@@ -289,8 +300,8 @@ func (x *workPullingProducerController) Receive(ctx *ReceiveContext) {
 func (x *workPullingProducerController) handlePostStart(ctx *ReceiveContext) {
 	ctx.Watch(x.producer)
 
-	reference := reliableTickReference(ctx.Self().Name(), x.generation)
-	tick := &producerControllerTick{generation: x.generation}
+	reference := reliableTickReference(ctx.Self().Name(), x.generation.Load())
+	tick := &producerControllerTick{generation: x.generation.Load()}
 
 	if err := ctx.ActorSystem().Schedule(context.WithoutCancel(ctx.Context()), tick, ctx.Self(), x.retryInterval, WithReference(reference)); err != nil {
 		ctx.Err(err)
@@ -575,7 +586,7 @@ func (x *workPullingProducerController) owns(messageID string) bool {
 
 // handleTick retries the outstanding local handshake while it remains open.
 func (x *workPullingProducerController) handleTick(ctx *ReceiveContext, tick *producerControllerTick) {
-	if tick.generation != x.generation {
+	if tick.generation != x.generation.Load() {
 		return
 	}
 

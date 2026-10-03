@@ -38,7 +38,7 @@ type stashState struct {
 // linked into the main mailbox via its intrusive `next`, so a clone
 // is enqueued instead — the original completes its main-mailbox turn.
 func (pid *PID) stash(ctx *ReceiveContext) error {
-	state := pid.stashState
+	state := pid.stashState.Load()
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
@@ -49,7 +49,7 @@ func (pid *PID) stash(ctx *ReceiveContext) error {
 // main mailbox. The dequeued context is the stash mailbox's new
 // sentinel, so a clone is re-enqueued instead of the original.
 func (pid *PID) unstash() error {
-	state := pid.stashState
+	state := pid.stashState.Load()
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}
@@ -62,10 +62,11 @@ func (pid *PID) unstash() error {
 	return nil
 }
 
-// unstashAll unstashes all messages from the stash buffer and prepends in the mailbox
-// (it keeps the messages in the same order as received, unstashing older messages before newer).
+// unstashAll re-enters every stashed message into the main mailbox, oldest
+// first. Re-entering goes through doReceive, so the messages are appended
+// behind whatever the mailbox already holds.
 func (pid *PID) unstashAll() error {
-	state := pid.stashState
+	state := pid.stashState.Load()
 	if state == nil || state.box == nil {
 		return gerrors.ErrStashBufferNotSet
 	}

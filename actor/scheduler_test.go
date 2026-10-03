@@ -2878,3 +2878,270 @@ func TestGrainSchedulerMultiNode(t *testing.T) {
 
 	srv.Shutdown()
 }
+
+// TestSchedulerSurvivesCanceledStartContext pins that the scheduler's lifetime is bound to
+// Stop alone: cancelling the context a caller passed to ActorSystem.Start, a start-up
+// timeout for instance, must neither stop the scheduler nor silence the schedules it accepts.
+func TestSchedulerSurvivesCanceledStartContext(t *testing.T) {
+	startCtx, cancel := context.WithCancel(context.Background())
+	newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, newActorSystem.Start(startCtx))
+
+	cancel()
+
+	ctx := context.Background()
+	actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+	require.NoError(t, err)
+
+	require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, 20*time.Millisecond))
+	require.Eventually(t, func() bool {
+		return actorRef.ProcessedCount()-1 == 1
+	}, 2*time.Second, 10*time.Millisecond)
+
+	typedSystem := newActorSystem.(*actorSystem)
+	require.True(t, typedSystem.scheduler.started.Load())
+	require.True(t, typedSystem.scheduler.quartzScheduler.IsStarted())
+
+	require.NoError(t, newActorSystem.Stop(ctx))
+	require.False(t, typedSystem.scheduler.quartzScheduler.IsStarted())
+}
+
+// TestSchedulerFiredOneShotReleasesReference pins that a one-shot schedule releases its
+// reference when it fires: nothing is left in the scheduler's maps, management calls on the
+// reference report ErrScheduledReferenceNotFound and the reference can be scheduled again.
+func TestSchedulerFiredOneShotReleasesReference(t *testing.T) {
+	assertReleased := func(t *testing.T, system ActorSystem, reference string) {
+		t.Helper()
+		typedSystem := system.(*actorSystem)
+		require.Eventually(t, func() bool {
+			return typedSystem.scheduler.scheduledKeys.Len() == 0 && typedSystem.scheduler.scheduledMeta.Len() == 0
+		}, 2*time.Second, 10*time.Millisecond)
+
+		assert.Empty(t, system.ListSchedules())
+		require.ErrorIs(t, system.PauseSchedule(reference), errors.ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, system.ResumeSchedule(reference), errors.ErrScheduledReferenceNotFound)
+		require.ErrorIs(t, system.CancelSchedule(reference), errors.ErrScheduledReferenceNotFound)
+	}
+
+	t.Run("With an actor one-shot", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+
+		const reference = "fired-once"
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, 20*time.Millisecond, WithReference(reference)))
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 == 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		assertReleased(t, newActorSystem, reference)
+
+		// the released reference names a new schedule
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, time.Hour, WithReference(reference)))
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a grain one-shot", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "fired-once")
+		require.NoError(t, err)
+
+		const reference = "grain-fired-once"
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 20*time.Millisecond, WithReference(reference)))
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		assertReleased(t, newActorSystem, reference)
+
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, time.Hour, WithReference(reference)))
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+}
+
+// TestSchedulerDuplicateReferenceKeepsTarget pins that a registration rejected because its
+// reference is already scheduled leaves the recorded target of the existing schedule intact,
+// whichever scheduling method the rejected call used.
+func TestSchedulerDuplicateReferenceKeepsTarget(t *testing.T) {
+	t.Run("With actor schedules", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		first, err := newActorSystem.Spawn(ctx, "first", NewMockActor())
+		require.NoError(t, err)
+		second, err := newActorSystem.Spawn(ctx, "second", NewMockActor())
+		require.NoError(t, err)
+
+		const reference = "shared"
+		message := new(testpb.TestSend)
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, message, first, time.Hour, WithReference(reference)))
+
+		require.ErrorIs(t, newActorSystem.ScheduleOnce(ctx, message, second, time.Hour, WithReference(reference)), quartz.ErrJobAlreadyExists)
+		require.ErrorIs(t, newActorSystem.Schedule(ctx, message, second, time.Hour, WithReference(reference)), quartz.ErrJobAlreadyExists)
+		require.ErrorIs(t, newActorSystem.ScheduleWithCron(ctx, message, second, "0 0 12 * * *", WithReference(reference)), quartz.ErrJobAlreadyExists)
+
+		schedules := newActorSystem.ListSchedules()
+		require.Len(t, schedules, 1)
+		assert.Equal(t, reference, schedules[0].Reference)
+		assert.Equal(t, first.Path().String(), schedules[0].Path.String())
+
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With grain schedules", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		first, err := GrainOf[*MockGrain](ctx, newActorSystem, "first")
+		require.NoError(t, err)
+		second, err := GrainOf[*MockGrain](ctx, newActorSystem, "second")
+		require.NoError(t, err)
+
+		const reference = "shared"
+		message := new(testpb.TestSend)
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, message, first, time.Hour, WithReference(reference)))
+
+		require.ErrorIs(t, newActorSystem.ScheduleGrainOnce(ctx, message, second, time.Hour, WithReference(reference)), quartz.ErrJobAlreadyExists)
+		require.ErrorIs(t, newActorSystem.ScheduleGrain(ctx, message, second, time.Hour, WithReference(reference)), quartz.ErrJobAlreadyExists)
+		require.ErrorIs(t, newActorSystem.ScheduleGrainWithCron(ctx, message, second, "0 0 12 * * *", WithReference(reference)), quartz.ErrJobAlreadyExists)
+
+		schedules := newActorSystem.ListSchedules()
+		require.Len(t, schedules, 1)
+		assert.Equal(t, reference, schedules[0].Reference)
+		require.NotNil(t, schedules[0].Grain)
+		assert.Equal(t, first.String(), schedules[0].Grain.String())
+
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+}
+
+// TestSchedulerPauseResumeOneShot pins that a paused one-shot schedule can be resumed and keeps
+// the fire time it was scheduled with: resumed early it fires on time, resumed late it fires at
+// once. Quartz alone cannot do this, its run-once trigger expires at registration.
+func TestSchedulerPauseResumeOneShot(t *testing.T) {
+	t.Run("With a resume before the fire time", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+
+		const reference = "paused-once"
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, 600*time.Millisecond, WithReference(reference)))
+		require.NoError(t, newActorSystem.PauseSchedule(reference))
+		require.NoError(t, newActorSystem.ResumeSchedule(reference))
+
+		// resumed well before its fire time, it still waits for it
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+		require.Never(t, func() bool {
+			return actorRef.ProcessedCount()-1 > 0
+		}, 200*time.Millisecond, 20*time.Millisecond)
+
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 == 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		// a resumed one-shot still releases its reference once it has fired
+		require.Eventually(t, func() bool {
+			return len(newActorSystem.ListSchedules()) == 0
+		}, 2*time.Second, 10*time.Millisecond)
+		require.ErrorIs(t, newActorSystem.CancelSchedule(reference), errors.ErrScheduledReferenceNotFound)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a resume after the fire time", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+
+		const reference = "paused-once"
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, 50*time.Millisecond, WithReference(reference)))
+		require.NoError(t, newActorSystem.PauseSchedule(reference))
+
+		// the fire time passes while the schedule is paused: nothing is delivered
+		require.Never(t, func() bool {
+			return actorRef.ProcessedCount()-1 > 0
+		}, 200*time.Millisecond, 20*time.Millisecond)
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+
+		require.NoError(t, newActorSystem.ResumeSchedule(reference))
+		require.Eventually(t, func() bool {
+			return actorRef.ProcessedCount()-1 == 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a resume of an active one-shot", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		actorRef, err := newActorSystem.Spawn(ctx, "test", NewMockActor())
+		require.NoError(t, err)
+
+		const reference = "active-once"
+		require.NoError(t, newActorSystem.ScheduleOnce(ctx, new(testpb.TestSend), actorRef, time.Hour, WithReference(reference)))
+
+		// quartz's rule still applies: a schedule that is not paused cannot be resumed, and it is kept
+		require.ErrorIs(t, newActorSystem.ResumeSchedule(reference), quartz.ErrJobIsActive)
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+
+		require.NoError(t, newActorSystem.PauseSchedule(reference))
+		require.ErrorIs(t, newActorSystem.PauseSchedule(reference), quartz.ErrJobIsSuspended)
+		require.NoError(t, newActorSystem.ResumeSchedule(reference))
+		require.Len(t, newActorSystem.ListSchedules(), 1)
+
+		require.NoError(t, newActorSystem.CancelSchedule(reference))
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+	t.Run("With a grain one-shot", func(t *testing.T) {
+		ctx := context.Background()
+		newActorSystem, err := NewActorSystem("test", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, newActorSystem.Start(ctx))
+
+		identity, err := GrainOf[*MockGrain](ctx, newActorSystem, "paused-once")
+		require.NoError(t, err)
+
+		const reference = "grain-paused-once"
+		require.NoError(t, newActorSystem.ScheduleGrainOnce(ctx, new(testpb.TestSend), identity, 50*time.Millisecond, WithReference(reference)))
+		require.NoError(t, newActorSystem.PauseSchedule(reference))
+
+		require.Never(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) > 0
+		}, 200*time.Millisecond, 20*time.Millisecond)
+
+		require.NoError(t, newActorSystem.ResumeSchedule(reference))
+		require.Eventually(t, func() bool {
+			return grainProcessedCount(newActorSystem, identity) >= 1
+		}, 2*time.Second, 10*time.Millisecond)
+
+		require.NoError(t, newActorSystem.Stop(ctx))
+	})
+}

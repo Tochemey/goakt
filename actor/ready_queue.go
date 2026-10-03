@@ -38,6 +38,16 @@ const localQueueCap = 256
 // the amortised growth strategy used by Go's channel implementation.
 const globalQueueInitialCap = 64
 
+// globalQueueCheckInterval is how often, in takes, a worker looks at the
+// global queue before its own local ring. A worker otherwise reads its local
+// ring first, and an actor that spends its throughput budget goes back onto
+// that ring, so a worker serving an actor whose mailbox never drains would
+// never reach the global queue: with every worker in that state, an actor
+// scheduled meanwhile would wait until one of those mailboxes drained. Go's
+// scheduler checks its global run queue every 61 ticks for the same reason;
+// the odd number avoids falling into step with other periodic work.
+const globalQueueCheckInterval = 61
+
 // schedulable is the unit scheduled by the dispatcher. The interface is
 // intentionally minimal: scheduling state, throughput budgeting, and
 // mailbox handling are all delegated to the implementation's runTurn.
@@ -71,6 +81,10 @@ type localQueue struct {
 	// without taking mu to skip empty victims on the hot path; the
 	// worst-case false positive is a wasted lock, not a lost item.
 	sizeAtomic atomic.Int32
+	// takes counts the owner's calls to take, to schedule its periodic look
+	// at the global queue (see globalQueueCheckInterval). Only the owning
+	// worker reads or writes it, so it needs neither mu nor an atomic.
+	takes uint32
 }
 
 // globalQueue is an unbounded amortised-FIFO ring buffer guarded by an
@@ -232,11 +246,21 @@ func (rq *readyQueue) pushLocal(workerID int, s schedulable) {
 // when the queue has been closed and no items remain for this worker.
 //
 // Take order: own local ring -> global ring -> steal from siblings ->
-// park. This order maximises cache locality for the owner while still
-// guaranteeing fairness via the global queue and progress via stealing.
+// park. This order maximises cache locality for the owner, progress comes
+// from stealing, and every globalQueueCheckInterval takes the global ring
+// is read first, so a worker kept busy by its local ring still serves the
+// actors waiting there.
 func (rq *readyQueue) take(workerID int) (schedulable, bool) {
+	local := rq.locals[workerID]
 	for {
-		if s := rq.locals[workerID].popFront(); s != nil {
+		local.takes++
+		if local.takes%globalQueueCheckInterval == 0 {
+			if s := rq.popGlobal(); s != nil {
+				return s, true
+			}
+		}
+
+		if s := local.popFront(); s != nil {
 			return s, true
 		}
 

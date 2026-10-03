@@ -55,11 +55,14 @@ func (s Source[T]) To(sink Sink[T]) RunnableGraph {
 }
 
 // WithOverflowStrategy returns a new Source using the given overflow strategy.
+// The strategy is recorded on the source stage but not applied: sources are
+// bounded by demand and never overflow.
 func (s Source[T]) WithOverflowStrategy(os OverflowStrategy) Source[T] {
 	return s.withSourceConfig(func(c *StageConfig) { c.OverflowStrategy = os })
 }
 
-// WithTracer returns a new Source with the given tracer.
+// WithTracer returns a new Source with the given tracer. The tracer is stored
+// on the source stage; source stages do not call it yet.
 func (s Source[T]) WithTracer(t Tracer) Source[T] {
 	return s.withSourceConfig(func(c *StageConfig) { c.Tracer = t })
 }
@@ -73,8 +76,6 @@ func (s Source[T]) withSourceConfig(fn func(*StageConfig)) Source[T] {
 	copy(newStages, s.stages)
 	newDesc := *newStages[0]
 	fn(&newDesc.config)
-	prevMake := newStages[0].actorFn
-	newDesc.actorFn = func(_ StageConfig) actor.Actor { return prevMake(newDesc.config) }
 	newStages[0] = &newDesc
 	return Source[T]{stages: newStages}
 }
@@ -219,7 +220,8 @@ func Merge[T any](sources ...Source[T]) Source[T] {
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSourceActor[T](subStages, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[T]{stages: []*stage{desc}}
 }
@@ -241,7 +243,8 @@ func MergeLatest[T any](sources ...Source[T]) Source[[]T] {
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeLatestSourceActor[T](subStages, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[[]T]{stages: []*stage{desc}}
 }
@@ -273,7 +276,8 @@ func MergeSequence[T any](extractSeq func(T) int64, sources ...Source[T]) Source
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newMergeSequenceSourceActor[T](subStages, erased, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[T]{stages: []*stage{desc}}
 }
@@ -371,7 +375,8 @@ func newWeightedMergeSource[T any](sources []Source[T], selectSlot slotSelector)
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newWeightedMergeSourceActor[T](subStages, selectSlot, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[T]{stages: []*stage{desc}}
 }
@@ -395,7 +400,8 @@ func Concat[T any](sources ...Source[T]) Source[T] {
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newConcatSourceActor[T](subStages, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[T]{stages: []*stage{desc}}
 }
@@ -434,7 +440,8 @@ func ZipWith[T, V any](combine func([]T) V, sources ...Source[T]) Source[V] {
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newZipNSourceActor(subStages, combine, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[V]{stages: []*stage{desc}}
 }
@@ -450,7 +457,8 @@ func Combine[T, U, V any](left Source[T], right Source[U], combine func(T, U) V)
 		actorFn: func(cfg StageConfig) actor.Actor {
 			return newCombineSourceActor(left.stages, right.stages, combine, cfg)
 		},
-		config: config,
+		config:        config,
+		manyProducers: true,
 	}
 	return Source[V]{stages: []*stage{desc}}
 }
@@ -462,7 +470,12 @@ func Combine[T, U, V any](left Source[T], right Source[U], combine func(T, U) V)
 //
 // Each branch must be independently materialized by calling Run on its
 // RunnableGraph. The upstream pipeline is spawned once the last branch
-// materializes. Branches are decoupled: a fast branch is never blocked by a
+// materializes; a branch run without its siblings waits for them, and so does
+// a branch whose sibling was aborted before it registered: it waits for a new
+// partner. Stop or Abort on a waiting branch's handle ends the wait. The branch
+// graphs may be run again: the k-th run of each branch forms a generation
+// with its own hub and its own materialization of src. Balance and Partition
+// follow the same rule. Branches are decoupled: a fast branch is never blocked by a
 // slow sibling beyond the natural demand window.
 //
 // If n < 1, Broadcast returns an empty slice and src is not consumed.

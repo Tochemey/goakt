@@ -170,3 +170,39 @@ func TestGCounter(t *testing.T) {
 		assert.Equal(t, uint64(15), cloned.Value())
 	})
 }
+
+func TestGCounterStateHash(t *testing.T) {
+	t.Run("same state through different histories hashes alike", func(t *testing.T) {
+		a := NewGCounter().Increment("node-1", 2).Increment("node-2", 7).Increment("node-1", 3)
+		b := NewGCounter().Increment("node-2", 7).Increment("node-1", 5)
+		assert.Equal(t, a.StateHash(), b.StateHash())
+	})
+
+	t.Run("merge in either direction hashes alike", func(t *testing.T) {
+		a := NewGCounter().Increment("node-1", 5)
+		b := NewGCounter().Increment("node-2", 7).Increment("node-1", 1)
+		ab := a.Merge(b).(*GCounter)
+		ba := b.Merge(a).(*GCounter)
+		assert.Equal(t, ab.StateHash(), ba.StateHash())
+		assert.NotEqual(t, a.StateHash(), ab.StateHash())
+	})
+
+	t.Run("different states hash differently", func(t *testing.T) {
+		assert.NotEqual(t, NewGCounter().Increment("node-1", 5).StateHash(), NewGCounter().Increment("node-1", 6).StateHash())
+		assert.NotEqual(t, NewGCounter().Increment("node-1", 5).StateHash(), NewGCounter().Increment("node-2", 5).StateHash())
+		assert.NotEqual(t, NewGCounter().StateHash(), NewGCounter().Increment("node-1", 1).StateHash())
+	})
+
+	t.Run("a slot at zero is the same state as no slot", func(t *testing.T) {
+		assert.Equal(t, NewGCounter().StateHash(), NewGCounter().Increment("node-1", 0).StateHash())
+	})
+
+	t.Run("clone and delta bookkeeping do not change the hash", func(t *testing.T) {
+		c := NewGCounter().Increment("node-1", 5)
+		before := c.StateHash()
+		assert.Equal(t, before, c.Clone().(*GCounter).StateHash())
+		c.ResetDelta()
+		assert.Equal(t, before, c.StateHash())
+		assert.Equal(t, before, GCounterFromState(c.State()).StateHash())
+	})
+}

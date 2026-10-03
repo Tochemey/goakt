@@ -45,9 +45,10 @@ The system publishes these events to the event stream:
 - **ActorRestarted**: Actor was restarted by supervisor.
 - **ActorSuspended**: Actor was suspended after a failure.
 - **ActorReinstated**: Actor was reinstated by supervisor.
-- **Deadletter**: Message could not be delivered (non-existent or stopped actor), or a grain failed to handle a
+- **Deadletter**: Message was not handled by its receiver (`ctx.Unhandled`) or could not be delivered (for example a
+  `PipeTo` task that failed), or a grain failed to handle a
   [one-way message](/grains/overview#tell-acknowledged-or-one-way). For a grain the receiver is named by the grain
-  identity, `kind/name`.
+  identity, `kind/name`. A send to a stopped actor returns `ErrDead` to the sender and produces no dead letter.
 - **NodeJoined**: A node joined the cluster (cluster mode only).
 - **NodeLeft**: A node left the cluster (cluster mode only).
 - **LeaderChanged**: The cluster coordinator moved to a different node (cluster mode only).
@@ -64,6 +65,7 @@ if err != nil {
 }
 defer sys.Unsubscribe(subscriber)
 
+// Iterator() returns the events buffered so far; call it again for later ones
 for msg := range subscriber.Iterator() {
     switch e := msg.Payload().(type) {
     case *actor.ActorStarted:
@@ -86,15 +88,18 @@ for msg := range subscriber.Iterator() {
 }
 ```
 
-`Iterator()` returns a channel that drains buffered messages and then closes. Messages enqueued concurrently with (or
-after) the call may not be included. For continuous observation, loop over `Iterator()` or use a dedicated goroutine
-that reads from the channel.
+`Iterator()` returns a channel that holds the messages buffered at the time of the call and is already closed, so
+ranging over it ends once that snapshot is consumed. Messages enqueued concurrently with (or after) the call may not be
+included. For continuous observation, call `Iterator()` repeatedly, for example from a goroutine that polls on a ticker,
+and drain each returned channel in turn.
 
 ## Implementation notes
 
-- The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` at startup and
-  subscribes callers to the internal topic `topic.events`.
-- Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the PID and death-watch logic. Cluster events
+- The event stream is backed by the `eventstream` package. The actor system creates an `EventsStream` when it is
+  constructed (`NewActorSystem`), keeps it across `Stop`/`Start` cycles, and subscribes callers to the internal topic
+  `topic.events`.
+- Lifecycle events (ActorStarted, ActorStopped, etc.) are published by the actor's PID as it starts, stops, restarts,
+  passivates, is suspended or reinstated; the death watch publishes nothing to the stream. Cluster events
   (NodeJoined, NodeLeft) are published by the cluster events loop once the cluster's routing table has converged on the
   membership change, that is once the coordinator has redistributed partitions for the new member set, so subscribers
   and relocation act on a stable table. If no convergence is announced within the convergence timeout, 10 seconds by

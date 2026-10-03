@@ -214,6 +214,20 @@ func TestWithEvictionStrategy(t *testing.T) {
 		assert.Equal(t, strategy, system.evictionStrategy)
 		assert.EqualValues(t, 10, system.evictionStrategy.Limit())
 		assert.Equal(t, LRU, system.evictionStrategy.Policy())
+		assert.Equal(t, time.Second, system.evictionInterval)
+	})
+	t.Run("When interval is not positive", func(t *testing.T) {
+		strategy, err := NewEvictionStrategy(10, LRU, 1)
+		require.NoError(t, err)
+
+		for _, interval := range []time.Duration{0, -time.Second} {
+			system := new(actorSystem)
+			opt := WithEvictionStrategy(strategy, interval)
+			opt.Apply(system)
+
+			assert.Equal(t, strategy, system.evictionStrategy)
+			assert.Equal(t, DefaultEvictionInterval, system.evictionInterval)
+		}
 	})
 }
 

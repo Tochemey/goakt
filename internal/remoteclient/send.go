@@ -181,8 +181,9 @@ func (x *client) sendControlDuplex(ctx context.Context, peer *peer, req proto.Me
 			peer.retireLane(laneKey{role: role, index: index}, session)
 		}
 
+		err = duplexAskError(err, replyFrame)
 		session.ReleasePayload(replyFrame)
-		return nil, mapDuplexErr(err)
+		return nil, err
 	}
 
 	msg, err := decodeControlReply(replyFrame, session.DecodeReplyEnvelope)
@@ -483,8 +484,9 @@ func (x *client) sendAskDuplex(ctx context.Context, peer *peer, params askParams
 			peer.retireLane(entry.lane, session)
 		}
 
+		err = duplexAskError(err, replyFrame)
 		session.ReleasePayload(replyFrame)
-		return nil, mapDuplexErr(err)
+		return nil, err
 	}
 
 	defer session.ReleasePayload(replyFrame)
@@ -680,11 +682,12 @@ func (x *client) sendBatchAskDuplex(ctx context.Context, host string, port int, 
 					p.retireLane(entry.lane, session)
 				}
 
+				askErr = duplexAskError(askErr, replyFrame)
 				session.ReleasePayload(replyFrame)
 				// The payload was just released; the result must not carry a
 				// dangling slice into the pool's next reuse.
 				replyFrame.Payload = nil
-				out <- batchAskResult{index: idx, err: mapDuplexErr(askErr), reply: replyFrame, lane: entry.lane}
+				out <- batchAskResult{index: idx, err: askErr, reply: replyFrame, lane: entry.lane}
 				return
 			}
 
@@ -981,14 +984,31 @@ func metadataMapFromBytes(wire []byte) map[string]string {
 }
 
 // decodeErrorPayload parses a duplex ERROR frame payload into a Go error.
-// Unreadable payloads still return an error wrapping the unmarshal failure.
+// The decoded [internalpb.Error] goes through [checkProtoError], the mapping
+// the legacy path applies to the same message, so an error code yields the
+// same Go error on both protocols. Unreadable payloads still return an error
+// wrapping the unmarshal failure.
 func decodeErrorPayload(payload []byte) error {
 	var e internalpb.Error
 	if err := proto.Unmarshal(payload, &e); err != nil {
 		return fmt.Errorf("unreadable error payload: %w", err)
 	}
 
-	return fmt.Errorf("%s: %s", e.GetCode().String(), e.GetMessage())
+	return checkProtoError(&e)
+}
+
+// duplexAskError returns the error a failed duplex Ask reports to its caller.
+// When the peer answered the request with an ERROR frame (a nonzero
+// correlation), the frame's [internalpb.Error] is decoded with
+// [decodeErrorPayload] so the caller gets the error the legacy path returns
+// for it. Any other failure (transport loss, timeout, backpressure) goes
+// through [mapDuplexErr]. reply must not have been released yet.
+func duplexAskError(err error, reply inet.Frame) error {
+	if reply.Type == inet.FrameTypeError && reply.Correlation != 0 {
+		return decodeErrorPayload(reply.Payload)
+	}
+
+	return mapDuplexErr(err)
 }
 
 // buildUserTellParams attaches sender, receiver, wire serializer ID, type

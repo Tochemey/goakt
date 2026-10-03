@@ -58,6 +58,7 @@ import (
 	testkit "github.com/tochemey/goakt/v4/mocks/discovery"
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
+	"github.com/tochemey/goakt/v4/reentrancy"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -520,7 +521,8 @@ func TestRestart(t *testing.T) {
 		err = pid.Restart(ctx)
 		assert.NoError(t, err)
 		assert.True(t, pid.IsRunning())
-		assert.NotZero(t, pid.Uptime())
+		// the uptime starts again with the new incarnation
+		assert.Less(t, pid.Uptime(), int64(2))
 		// let us send 10 messages to the actor
 		count := 10
 		for range count {
@@ -3756,6 +3758,781 @@ func TestFailedPreStart(t *testing.T) {
 	})
 }
 
+// TestPassivationSkipsBusyActor checks that passivation only stops an idle
+// actor: while a message is in flight the attempt is refused, so PostStop
+// never runs alongside Receive, and the actor is passivated once it is idle.
+func TestPassivationSkipsBusyActor(t *testing.T) {
+	t.Run("time-based passivation leaves a busy actor alone and retries", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		actor := NewMockStopOverlapActor()
+		pid, err := actorSystem.Spawn(ctx, "busy", actor, WithPassivationStrategy(passivation.NewTimeBasedStrategy(100*time.Millisecond)))
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-actor.entered
+
+		// several deadlines pass while the handler is parked
+		select {
+		case <-actor.stopped:
+			t.Fatal("PostStop ran while Receive was still running")
+		case <-time.After(500 * time.Millisecond):
+		}
+
+		require.True(t, pid.IsRunning())
+		close(actor.release)
+
+		select {
+		case <-actor.stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the actor was not passivated once idle")
+		}
+
+		require.False(t, actor.overlapped.Load())
+		require.Eventually(t, func() bool { return !pid.IsRunning() }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("message-count passivation is refused while busy and retried when the turn ends", func(t *testing.T) {
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		actor := NewMockStopOverlapActor()
+		pid, err := actorSystem.Spawn(ctx, "busy", actor, WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(1)))
+		require.NoError(t, err)
+
+		// PostStart has been processed, so the threshold is already reached
+		// when the handler parks
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-actor.entered
+
+		require.False(t, pid.tryPassivation("test"))
+		require.True(t, pid.IsRunning())
+		require.True(t, actor.inReceive.Load())
+
+		close(actor.release)
+
+		select {
+		case <-actor.stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the actor was not passivated once idle")
+		}
+
+		require.False(t, actor.overlapped.Load())
+		require.Eventually(t, func() bool { return !pid.IsRunning() }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("a refused attempt never makes the busy actor refuse messages", func(t *testing.T) {
+		const rounds = 2000
+
+		ctx := context.TODO()
+		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, actorSystem.Start(ctx))
+		t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+		actor := NewMockStopOverlapActor()
+		pid, err := actorSystem.Spawn(ctx, "busy", actor, WithPassivationStrategy(passivation.NewMessageCountBasedStrategy(1)))
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-actor.entered
+
+		// every attempt is refused while the handler is parked, and a sender
+		// running alongside them must find the actor alive each time
+		attempts := make(chan struct{})
+		go func() {
+			defer close(attempts)
+			for range rounds {
+				pid.tryPassivation("test")
+			}
+		}()
+
+		refused := 0
+		for range rounds {
+			if err := Tell(ctx, pid, new(testpb.TestSend)); err != nil {
+				require.ErrorIs(t, err, errors.ErrDead)
+				refused++
+			}
+		}
+
+		<-attempts
+		require.Zero(t, refused, "a live actor refused messages during refused passivation attempts")
+		require.True(t, pid.IsRunning())
+
+		close(actor.release)
+
+		select {
+		case <-actor.stopped:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the actor was not passivated once idle")
+		}
+
+		require.False(t, actor.overlapped.Load())
+	})
+}
+
+// TestRestartKeepsMailbox checks that a restart keeps the actor's mailbox: the
+// message in flight finishes on the old incarnation, the messages queued
+// behind it reach the new one, and a bounded mailbox still accepts messages
+// afterwards.
+func TestRestartKeepsMailbox(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	t.Run("queued messages are handled by the new incarnation", func(t *testing.T) {
+		worker := NewMockWithheldWorkActor(50 * time.Millisecond)
+		pid, err := actorSystem.Spawn(ctx, "queued", worker)
+		require.NoError(t, err)
+
+		for range 10 {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
+
+		// one message in flight, the other nine queued behind it
+		pause.For(75 * time.Millisecond)
+		require.NoError(t, pid.Restart(ctx))
+
+		require.Eventually(t, func() bool { return worker.handled.Load() == 10 }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("a bounded mailbox still accepts messages after a restart", func(t *testing.T) {
+		pid, err := actorSystem.Spawn(ctx, "bounded", NewMockActor(), WithMailbox(NewBoundedMailbox(10)))
+		require.NoError(t, err)
+
+		_, err = Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+
+		require.NoError(t, pid.Restart(ctx))
+
+		_, err = Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+	})
+}
+
+// TestRestartNeverRunsTwoTurns checks that a restart hands the actor to one
+// worker at a time: a message that reaches the new incarnation as soon as it is
+// running must not be handled alongside the PostStart turn, or any later one.
+func TestRestartNeverRunsTwoTurns(t *testing.T) {
+	const (
+		restarts   = 20
+		perRestart = 50
+	)
+
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	worker := NewMockWithheldWorkActor(200 * time.Microsecond)
+	pid, err := actorSystem.Spawn(ctx, "overlap", worker)
+	require.NoError(t, err)
+
+	var sent int64
+	for range restarts {
+		// send from the moment the new incarnation accepts messages: the sends
+		// made while it is down fail with ErrDead and are retried
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for accepted := 0; accepted < perRestart; {
+				if Tell(ctx, pid, new(testpb.TestSend)) == nil {
+					accepted++
+				}
+			}
+		}()
+
+		require.NoError(t, pid.Restart(ctx))
+		<-done
+		sent += perRestart
+
+		require.Eventually(t, func() bool { return worker.handled.Load() == sent }, 5*time.Second, time.Millisecond)
+	}
+
+	require.Zero(t, worker.overlaps.Load(), "two workers ran the actor at once")
+}
+
+// TestFailureWithholdsQueuedMessages checks that the messages queued behind a
+// failure wait for the supervision decision: a suspended actor handles none of
+// them until it is reinstated, and a resume directive lets them run.
+func TestFailureWithholdsQueuedMessages(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// fail sends a slow message, the failing one and ten more, all queued
+	// while the first is in flight
+	fail := func(t *testing.T, pid *PID) {
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestTimeout)))
+		for range 10 {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
+	}
+
+	t.Run("a suspended actor handles nothing queued until reinstated", func(t *testing.T) {
+		worker := NewMockWithheldWorkActor(50 * time.Millisecond)
+		pid, err := actorSystem.Spawn(ctx, "suspended", worker)
+		require.NoError(t, err)
+		helper, err := actorSystem.Spawn(ctx, "helper", NewMockActor())
+		require.NoError(t, err)
+
+		fail(t, pid)
+		require.Eventually(t, pid.IsSuspended, 5*time.Second, 10*time.Millisecond)
+
+		pause.For(300 * time.Millisecond)
+		require.EqualValues(t, 1, worker.handled.Load(), "only the message before the failure")
+
+		require.NoError(t, helper.Reinstate(pid))
+		require.Eventually(t, func() bool { return worker.handled.Load() == 11 }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("a resume directive lets the queued messages run", func(t *testing.T) {
+		worker := NewMockWithheldWorkActor(10 * time.Millisecond)
+		resume := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.ResumeDirective))
+		pid, err := actorSystem.Spawn(ctx, "resumed", worker, WithSupervisor(resume))
+		require.NoError(t, err)
+
+		fail(t, pid)
+		require.Eventually(t, func() bool { return worker.handled.Load() == 11 }, 5*time.Second, 10*time.Millisecond)
+		require.False(t, pid.IsSuspended())
+	})
+
+	t.Run("a restart directive hands the queued messages to the new incarnation", func(t *testing.T) {
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+		require.NoError(t, err)
+
+		worker := NewMockWithheldWorkActor(50 * time.Millisecond)
+		restart := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+		pid, err := parent.SpawnChild(ctx, "restarted", worker, WithSupervisor(restart))
+		require.NoError(t, err)
+
+		fail(t, pid)
+		require.Eventually(t, func() bool { return worker.handled.Load() == 11 }, 5*time.Second, 10*time.Millisecond)
+		require.EqualValues(t, 1, pid.RestartCount())
+		require.False(t, pid.IsSuspended())
+	})
+
+	t.Run("ErrDead is not supervised and pauses nothing", func(t *testing.T) {
+		pid, err := actorSystem.Spawn(ctx, "dead-errors", NewMockActor())
+		require.NoError(t, err)
+
+		pid.submitSupervision(newSupervisionSignal(errors.ErrDead, nil))
+		require.False(t, pid.isStateSet(supervisionPendingState))
+
+		_, err = Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+	})
+}
+
+// TestBehaviorStackKeepsDefault checks that the default behavior is never lost:
+// UnBecomeStacked with nothing stacked has no effect, and UnBecome clears the
+// stacked behaviors instead of piling the default on top of them.
+func TestBehaviorStackKeepsDefault(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	behavior := func(t *testing.T, pid *PID) string {
+		reply, err := Ask(ctx, pid, new(testpb.TestReadiness), time.Second)
+		require.NoError(t, err)
+		return reply.(*testpb.Reply).GetContent()
+	}
+
+	command := func(t *testing.T, pid *PID, message any) {
+		_, err := Ask(ctx, pid, message, time.Second)
+		require.NoError(t, err)
+	}
+
+	t.Run("UnBecomeStacked with nothing stacked keeps the default", func(t *testing.T) {
+		pid, err := actorSystem.Spawn(ctx, "unstacked", new(MockBehaviorStackActor))
+		require.NoError(t, err)
+
+		command(t, pid, new(testpb.DebitAccount))
+		require.Equal(t, "default", behavior(t, pid))
+		require.EqualValues(t, 1, pid.behaviorStack.Len())
+	})
+
+	t.Run("UnBecome clears the stacked behaviors", func(t *testing.T) {
+		pid, err := actorSystem.Spawn(ctx, "unbecome", new(MockBehaviorStackActor))
+		require.NoError(t, err)
+
+		command(t, pid, new(testpb.CreateAccount))
+		require.Equal(t, "stacked", behavior(t, pid))
+
+		command(t, pid, new(testpb.TestBye))
+		require.Equal(t, "default", behavior(t, pid))
+
+		// nothing is left to return to
+		command(t, pid, new(testpb.DebitAccount))
+		require.Equal(t, "default", behavior(t, pid))
+		require.EqualValues(t, 1, pid.behaviorStack.Len())
+	})
+}
+
+// TestPanicSupervisedByItsErrorType checks that a panic is supervised by the
+// type of the error it carries, as a recorded error is: the default
+// PanicNilError rule restarts an actor that panics with nil, a rule for a user
+// error type applies when the actor panics with that error, and a panic with an
+// error that matches no rule still falls under the PanicError rule.
+func TestPanicSupervisedByItsErrorType(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+	require.NoError(t, err)
+
+	t.Run("panic(nil) is restarted by the default supervisor", func(t *testing.T) {
+		child := NewMockFailingLifecycleActor(nil)
+		pid, err := parent.SpawnChild(ctx, "nil-panic", child)
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestPanic)))
+		require.Eventually(t, func() bool { return child.starts.Load() == 2 && pid.IsRunning() }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("a rule for the panicked error's type applies", func(t *testing.T) {
+		resume := supervisor.NewSupervisor(supervisor.WithDirective(new(MockDirectiveError), supervisor.ResumeDirective))
+		child := NewMockFailingLifecycleActor(new(MockDirectiveError))
+		pid, err := parent.SpawnChild(ctx, "typed-panic", child, WithSupervisor(resume))
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestPanic)))
+
+		// resumed: the actor answers, was neither restarted nor stopped
+		_, err = Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, child.starts.Load())
+		require.Zero(t, child.stops.Load())
+	})
+
+	t.Run("a panic with an unmatched error uses the PanicError rule", func(t *testing.T) {
+		child := NewMockFailingLifecycleActor(fmt.Errorf("boom"))
+		pid, err := parent.SpawnChild(ctx, "plain-panic", child)
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestPanic)))
+		require.Eventually(t, func() bool { return child.stops.Load() == 1 && !pid.IsRunning() }, 5*time.Second, 10*time.Millisecond)
+	})
+}
+
+// TestRestartKeepsWatches checks that a restart is not a death: the restarted
+// actor's watchers are not told, keep watching it and learn of its real stop,
+// and the restarted actor keeps watching what it watched.
+func TestRestartKeepsWatches(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	t.Run("the watchers of a restarted actor", func(t *testing.T) {
+		watcher := NewMockTerminatedProbeActor()
+		watcherPID, err := actorSystem.Spawn(ctx, "watcher", watcher)
+		require.NoError(t, err)
+		watched, err := actorSystem.Spawn(ctx, "watched", NewMockActor())
+		require.NoError(t, err)
+		watcherPID.Watch(watched)
+
+		require.NoError(t, watched.Restart(ctx))
+
+		select {
+		case <-watcher.received:
+			t.Fatal("the watcher was told that a restarting actor terminated")
+		case <-time.After(300 * time.Millisecond):
+		}
+
+		require.NoError(t, watched.Shutdown(ctx))
+
+		select {
+		case terminated := <-watcher.received:
+			require.Equal(t, watched.Name(), terminated.ActorPath().Name())
+		case <-time.After(5 * time.Second):
+			t.Fatal("the watcher was not told of the stop after the restart")
+		}
+	})
+
+	t.Run("the watches of a restarted actor", func(t *testing.T) {
+		watcher := NewMockTerminatedProbeActor()
+		watcherPID, err := actorSystem.Spawn(ctx, "restarted-watcher", watcher)
+		require.NoError(t, err)
+		watched, err := actorSystem.Spawn(ctx, "other", NewMockActor())
+		require.NoError(t, err)
+		watcherPID.Watch(watched)
+
+		require.NoError(t, watcherPID.Restart(ctx))
+		require.NoError(t, watched.Shutdown(ctx))
+
+		select {
+		case <-watcher.received:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the restarted watcher lost its watch")
+		}
+	})
+}
+
+// TestTerminatedArrivesAfterNameRelease checks that a watcher told of a death
+// can spawn the dead actor's name again at once: the name is released before
+// the watchers are told. Extra watchers lengthen the window in which the old
+// code told the watchers before releasing the name.
+func TestTerminatedArrivesAfterNameRelease(t *testing.T) {
+	const (
+		rounds        = 200
+		extraWatchers = 16
+	)
+
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	respawner := NewMockRespawnOnTerminatedActor()
+	respawnerPID, err := actorSystem.Spawn(ctx, "respawner", respawner)
+	require.NoError(t, err)
+
+	// the extra watchers only need to be told; MockActor lets Terminated through
+	// as unhandled and never blocks a worker
+	extras := make([]*PID, extraWatchers)
+	for i := range extras {
+		extras[i], err = actorSystem.Spawn(ctx, fmt.Sprintf("extra-%d", i), NewMockActor())
+		require.NoError(t, err)
+	}
+
+	for round := range rounds {
+		worker, err := actorSystem.Spawn(ctx, fmt.Sprintf("worker-%d", round), NewMockActor())
+		require.NoError(t, err)
+
+		for _, extra := range extras {
+			extra.Watch(worker)
+		}
+
+		respawnerPID.Watch(worker)
+		require.NoError(t, worker.Shutdown(ctx))
+
+		select {
+		case err := <-respawner.results:
+			require.NoError(t, err, "round %d: the name was not free when Terminated arrived", round)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("round %d: the respawner was not told", round)
+		}
+	}
+}
+
+// TestSuspendedWatcherReceivesTerminated checks that a watcher suspended when
+// the watched actor stops is still told: Terminated is a control message, and
+// control messages are handled while an actor is suspended.
+func TestSuspendedWatcherReceivesTerminated(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	watcher := NewMockTerminatedProbeActor()
+	watcherPID, err := actorSystem.Spawn(ctx, "watcher", watcher)
+	require.NoError(t, err)
+	watched, err := actorSystem.Spawn(ctx, "watched", NewMockActor())
+	require.NoError(t, err)
+	watcherPID.Watch(watched)
+
+	watcherPID.suspend("test")
+	require.True(t, watcherPID.IsSuspended())
+
+	require.NoError(t, watched.Shutdown(ctx))
+
+	select {
+	case <-watcher.received:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the suspended watcher was not told")
+	}
+}
+
+// TestShutdownTellsRemoteWatchers checks that the remote watchers of a stopping
+// actor are sent Terminated: the registry entries that name them are cleared
+// only after they have been told.
+func TestShutdownTellsRemoteWatchers(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pid, err := actorSystem.Spawn(ctx, "watchee", NewMockActor())
+	require.NoError(t, err)
+
+	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
+	actorSystem.getRemoteWatchRegistry().addWatcher(pid.ID(), remoteWatcherAddr)
+
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteTell(mock.Anything, pid.getAddress(), remoteWatcherAddr, mock.AnythingOfType("*actor.Terminated")).
+		Return(nil).Once()
+
+	pid.fieldsLocker.Lock()
+	pid.remoting = remotingMock
+	pid.fieldsLocker.Unlock()
+
+	require.NoError(t, pid.Shutdown(ctx))
+	remotingMock.AssertExpectations(t)
+	require.Empty(t, actorSystem.getRemoteWatchRegistry().watchersFor(pid.ID()))
+}
+
+// TestRestartOfStoppedActorRejoinsTree checks that an actor restarted after it
+// stopped goes back into the tree, under its parent, counted once: a top-level
+// actor, a child, and a child whose supervised restart succeeds on a retry after
+// a failed attempt left it dead.
+func TestRestartOfStoppedActorRejoinsTree(t *testing.T) {
+	ctx := context.TODO()
+	// PreStart is retried by default; one attempt makes a PreStart failure fail
+	// the restart
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithActorInitMaxRetries(1))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	t.Run("a top-level actor", func(t *testing.T) {
+		pid, err := actorSystem.Spawn(ctx, "revived", NewMockActor())
+		require.NoError(t, err)
+		before := actorSystem.NumActors()
+
+		require.NoError(t, pid.Shutdown(ctx))
+		require.NoError(t, pid.Restart(ctx))
+
+		found, err := actorSystem.ActorOf(ctx, "revived")
+		require.NoError(t, err)
+		require.True(t, found.Equals(pid))
+		require.Equal(t, before, actorSystem.NumActors())
+
+		require.NoError(t, pid.Shutdown(ctx))
+		require.Equal(t, before-1, actorSystem.NumActors())
+	})
+
+	t.Run("a child", func(t *testing.T) {
+		parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+
+		require.NoError(t, child.Shutdown(ctx))
+		require.Empty(t, parent.Children())
+
+		require.NoError(t, child.Restart(ctx))
+		require.Len(t, parent.Children(), 1)
+	})
+
+	t.Run("a retried supervised restart", func(t *testing.T) {
+		parent, err := actorSystem.Spawn(ctx, "retrying-parent", NewMockSupervisor())
+		require.NoError(t, err)
+
+		child := NewMockFailingLifecycleActor(nil)
+		restart := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective), supervisor.WithRetry(3, 200*time.Millisecond))
+		pid, err := parent.SpawnChild(ctx, "retried", child, WithSupervisor(restart))
+		require.NoError(t, err)
+
+		// the first restart attempt fails in PreStart, the second succeeds
+		child.preStartFailures.Store(1)
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestTimeout)))
+
+		require.Eventually(t, func() bool { return child.starts.Load() == 3 && pid.IsRunning() }, 10*time.Second, 10*time.Millisecond)
+		require.Len(t, parent.Children(), 1)
+		require.True(t, parent.Children()[0].Equals(pid))
+	})
+}
+
+// TestFailedSupervisedRestartTellsParent checks that a parent whose child
+// cannot be restarted learns that the child died.
+func TestFailedSupervisedRestartTellsParent(t *testing.T) {
+	ctx := context.TODO()
+	// PreStart is retried by default; one attempt makes a PreStart failure fail
+	// the restart
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithActorInitMaxRetries(1))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	parent := NewMockTerminatedProbeActor()
+	parentPID, err := actorSystem.Spawn(ctx, "parent", parent)
+	require.NoError(t, err)
+
+	child := NewMockFailingLifecycleActor(nil)
+	restart := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+	pid, err := parentPID.SpawnChild(ctx, "child", child, WithSupervisor(restart))
+	require.NoError(t, err)
+
+	child.preStartFailures.Store(1)
+	require.NoError(t, Tell(ctx, pid, new(testpb.TestTimeout)))
+
+	select {
+	case terminated := <-parent.received:
+		require.Equal(t, pid.Name(), terminated.ActorPath().Name())
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parent was not told that its child died")
+	}
+
+	require.False(t, pid.IsRunning())
+}
+
+// TestSupervisedRestartRunsPostStop checks that a restart decided by the
+// supervisor stops the failed incarnation, PostStop included, before PreStart
+// runs again, as a restart of a running actor does.
+func TestSupervisedRestartRunsPostStop(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockSupervisor())
+	require.NoError(t, err)
+
+	child := NewMockFailingLifecycleActor(nil)
+	restart := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+	pid, err := parent.SpawnChild(ctx, "child", child, WithSupervisor(restart))
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, pid, new(testpb.TestTimeout)))
+
+	require.Eventually(t, func() bool { return child.starts.Load() == 2 && pid.IsRunning() }, 5*time.Second, 10*time.Millisecond)
+	require.EqualValues(t, 1, child.stops.Load())
+	require.Equal(t, 1, pid.RestartCount())
+}
+
+// TestRestartKeepsCountersAndDependencies checks what a restart of a running
+// actor keeps: the restart count accumulates, the uptime starts again, and the
+// dependencies are still there for the new incarnation's PreStart.
+func TestRestartKeepsCountersAndDependencies(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	actor := NewMockFailingLifecycleActor(nil)
+	pid, err := actorSystem.Spawn(ctx, "counted", actor, WithDependencies(NewMockDependency("dep", "user", "mail")))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, actor.dependencies.Load())
+
+	require.NoError(t, pid.Restart(ctx))
+	require.NoError(t, pid.Restart(ctx))
+
+	require.Equal(t, 2, pid.RestartCount())
+	require.Less(t, pid.Uptime(), int64(5))
+	require.NotNil(t, pid.Dependency("dep"))
+	require.EqualValues(t, 1, actor.dependencies.Load())
+	require.EqualValues(t, 3, actor.starts.Load())
+	require.EqualValues(t, 2, actor.stops.Load())
+}
+
+// TestMetricProcessedCountBeforePostStart checks that the snapshot of an actor
+// that has not handled PostStart yet reports zero processed messages rather
+// than an underflow.
+func TestMetricProcessedCountBeforePostStart(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pid, err := actorSystem.Spawn(ctx, "fresh", NewMockActor())
+	require.NoError(t, err)
+
+	// the count an actor has between init and its first turn
+	pid.processedCount.Store(0)
+
+	metric := pid.Metric(ctx)
+	require.NotNil(t, metric)
+	require.Zero(t, metric.ProcessedCount())
+}
+
+// TestStashSizeDuringStashModeRequest checks that reading the stash size while
+// a stash-mode request creates the stash buffer on the actor's turn is safe:
+// the race detector reports nothing.
+func TestStashSizeDuringStashModeRequest(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+	target := spawnReentrancyActor(t, sys, ctx, "stash-size-target", responderWithDelay(10*time.Millisecond, nil))
+	requester := spawnReentrancyActor(t, sys, ctx, "stash-size-requester", func(rctx *ReceiveContext) {
+		if msg, ok := rctx.Message().(*testpb.TestWait); ok {
+			rctx.Request(target, msg)
+		}
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+
+	done := make(chan struct{})
+	reads := make(chan struct{})
+	go func() {
+		defer close(reads)
+		for {
+			select {
+			case <-done:
+				return
+			default:
+				_ = requester.StashSize()
+			}
+		}
+	}()
+
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 1}.Build()))
+	require.Eventually(t, func() bool { return requester.stashState.Load() != nil }, 5*time.Second, time.Millisecond)
+
+	close(done)
+	<-reads
+}
+
+// TestPassivationRaces checks the two races between a passivation attempt and
+// the rest of the actor: an attempt that runs after a Shutdown stops nothing a
+// second time, and an attempt that takes the actor just after a message was
+// accepted hands it back with that message scheduled.
+func TestPassivationRaces(t *testing.T) {
+	ctx := context.TODO()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	t.Run("an attempt after a shutdown runs PostStop once", func(t *testing.T) {
+		actor := NewMockFailingLifecycleActor(nil)
+		pid, err := actorSystem.Spawn(ctx, "stopped", actor, WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Hour)))
+		require.NoError(t, err)
+
+		require.NoError(t, pid.Shutdown(ctx))
+		require.False(t, pid.tryPassivation("test"))
+		require.EqualValues(t, 1, actor.stops.Load())
+	})
+
+	t.Run("a message accepted just before the attempt is kept", func(t *testing.T) {
+		worker := NewMockWithheldWorkActor(0)
+		pid, err := actorSystem.Spawn(ctx, "busy", worker, WithPassivationStrategy(passivation.NewTimeBasedStrategy(time.Hour)))
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return pid.ProcessedCount() >= 1 }, time.Second, 10*time.Millisecond)
+
+		// a sender that enqueued and lost the race to schedule the actor
+		receiveContext := getContext(pid.ctxShard)
+		receiveContext.build(ctx, actorSystem.NoSender(), pid, new(testpb.TestSend), true)
+		require.NoError(t, pid.mailbox.Enqueue(receiveContext))
+
+		require.False(t, pid.tryPassivation("test"))
+		require.True(t, pid.IsRunning())
+		require.Eventually(t, func() bool { return worker.handled.Load() == 1 }, 5*time.Second, 10*time.Millisecond)
+	})
+}
+
 func TestFailedPostStop(t *testing.T) {
 	ctx := context.TODO()
 	host := "127.0.0.1"
@@ -4337,6 +5114,17 @@ func TestEquals(t *testing.T) {
 	assert.False(t, pid1.Equals(noSender))
 	assert.False(t, pid2.Equals(noSender))
 	assert.False(t, pid1.Equals(pid2))
+
+	// names are case-sensitive, so two names that differ only by case are two
+	// actors: neither equals the other, and each is the other's sibling
+	upper, err := sys.Spawn(ctx, "Worker", NewMockActor())
+	require.NoError(t, err)
+	lower, err := sys.Spawn(ctx, "worker", NewMockActor())
+	require.NoError(t, err)
+
+	assert.True(t, upper.Equals(upper))
+	assert.False(t, upper.Equals(lower))
+	assert.Contains(t, sys.tree().siblings(upper), lower)
 
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
@@ -5353,6 +6141,33 @@ func TestNewPID(t *testing.T) {
 		}
 		require.NotEmpty(t, observer.records)
 	})
+	t.Run("With the callbacks unregistered on Stop", func(t *testing.T) {
+		ctx := context.Background()
+
+		prevProvider := otel.GetMeterProvider()
+		meterProvider := NewMockManualMeterProvider()
+		otel.SetMeterProvider(meterProvider)
+		t.Cleanup(func() { otel.SetMeterProvider(prevProvider) })
+
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		manual, ok := meterProvider.meter.(*MockManualMeter)
+		require.True(t, ok)
+		registered := len(manual.callbacks)
+		require.NotZero(t, registered)
+
+		// a stopped system is observed no more, and a system started again
+		// registers its callbacks once
+		require.NoError(t, sys.Stop(ctx))
+		require.Equal(t, registered, manual.unregistered)
+
+		require.NoError(t, sys.Start(ctx))
+		require.Equal(t, registered, len(manual.callbacks)-manual.unregistered)
+		require.NoError(t, sys.Stop(ctx))
+	})
+
 	t.Run("With stopped actor removed from metrics scrapes", func(t *testing.T) {
 		ctx := context.Background()
 
@@ -5580,7 +6395,7 @@ func TestWatchUnWatchRemote(t *testing.T) {
 	t.Run("remote cid with nil remoting skips registration", func(t *testing.T) {
 		cid := newRemotePID(remoteCidAddr, nil)
 		pid.Watch(cid)
-		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
 	})
 
 	t.Run("RemoteWatch failure does not record locally", func(t *testing.T) {
@@ -5592,7 +6407,7 @@ func TestWatchUnWatchRemote(t *testing.T) {
 		cid := newRemotePID(remoteCidAddr, remotingMock)
 		pid.Watch(cid)
 
-		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
 		remotingMock.AssertExpectations(t)
 	})
 
@@ -5608,12 +6423,12 @@ func TestWatchUnWatchRemote(t *testing.T) {
 		cid := newRemotePID(remoteCidAddr, remotingMock)
 
 		pid.Watch(cid)
-		watchees := actorSystem.getRemoteWatches().watcheesFor(pid.ID())
+		watchees := actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID())
 		require.Len(t, watchees, 1)
 		require.Equal(t, remoteCidAddr.String(), watchees[0].String())
 
 		pid.UnWatch(cid)
-		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
 		remotingMock.AssertExpectations(t)
 	})
 
@@ -5629,10 +6444,10 @@ func TestWatchUnWatchRemote(t *testing.T) {
 		cid := newRemotePID(remoteCidAddr, remotingMock)
 
 		pid.Watch(cid)
-		require.Len(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()), 1)
+		require.Len(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()), 1)
 
 		pid.UnWatch(cid)
-		require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+		require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
 		remotingMock.AssertExpectations(t)
 	})
 }
@@ -5655,7 +6470,7 @@ func TestFreeWatchersRemotePass(t *testing.T) {
 	require.NoError(t, err)
 
 	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
-	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+	actorSystem.getRemoteWatchRegistry().addWatcher(pid.ID(), remoteWatcherAddr)
 
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().
@@ -5666,7 +6481,7 @@ func TestFreeWatchersRemotePass(t *testing.T) {
 	pid.remoting = remotingMock
 	pid.fieldsLocker.Unlock()
 
-	pid.freeWatchers(ctx)
+	pid.freeWatchers(ctx, actorSystem.tree().watchers(pid))
 
 	remotingMock.AssertExpectations(t)
 }
@@ -5689,7 +6504,7 @@ func TestFreeWatchersRemoteTellFailureIsLogged(t *testing.T) {
 	require.NoError(t, err)
 
 	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.1", 9000)
-	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+	actorSystem.getRemoteWatchRegistry().addWatcher(pid.ID(), remoteWatcherAddr)
 
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().
@@ -5700,7 +6515,7 @@ func TestFreeWatchersRemoteTellFailureIsLogged(t *testing.T) {
 	pid.remoting = remotingMock
 	pid.fieldsLocker.Unlock()
 
-	require.NotPanics(t, func() { pid.freeWatchers(ctx) })
+	require.NotPanics(t, func() { pid.freeWatchers(ctx, actorSystem.tree().watchers(pid)) })
 	remotingMock.AssertExpectations(t)
 }
 
@@ -5722,12 +6537,12 @@ func TestFreeWatcheesRemotePass(t *testing.T) {
 	require.NoError(t, err)
 
 	remoteWatcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.1", 9000)
-	actorSystem.getRemoteWatches().addWatchee(pid.ID(), remoteWatcheeAddr)
+	actorSystem.getRemoteWatchRegistry().addWatchee(pid.ID(), remoteWatcheeAddr)
 
 	// Pre-populate a remote watcher entry too so dropPID has work to do on both
 	// sides; we verify it is cleared.
 	remoteWatcherAddr := address.New("remoteWatcher", "remoteSys", "10.0.0.2", 9000)
-	actorSystem.getRemoteWatches().addWatcher(pid.ID(), remoteWatcherAddr)
+	actorSystem.getRemoteWatchRegistry().addWatcher(pid.ID(), remoteWatcherAddr)
 
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().
@@ -5740,8 +6555,17 @@ func TestFreeWatcheesRemotePass(t *testing.T) {
 
 	require.NoError(t, pid.freeWatchees(ctx))
 
-	require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
-	require.Empty(t, actorSystem.getRemoteWatches().watchersFor(pid.ID()))
+	// the remote watchers are kept until freeWatchers has told them; the
+	// registry is cleared once it has
+	require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
+	require.Len(t, actorSystem.getRemoteWatchRegistry().watchersFor(pid.ID()), 1)
+	remotingMock.AssertExpectations(t)
+
+	remotingMock.EXPECT().
+		RemoteTell(mock.Anything, pid.getAddress(), remoteWatcherAddr, mock.AnythingOfType("*actor.Terminated")).
+		Return(nil).Once()
+	pid.freeWatchers(ctx, nil)
+	require.Empty(t, actorSystem.getRemoteWatchRegistry().watchersFor(pid.ID()))
 	remotingMock.AssertExpectations(t)
 }
 
@@ -5763,7 +6587,7 @@ func TestFreeWatcheesRemoteUnWatchFailureIsLogged(t *testing.T) {
 	require.NoError(t, err)
 
 	remoteWatcheeAddr := address.New("remoteWatchee", "remoteSys", "10.0.0.1", 9000)
-	actorSystem.getRemoteWatches().addWatchee(pid.ID(), remoteWatcheeAddr)
+	actorSystem.getRemoteWatchRegistry().addWatchee(pid.ID(), remoteWatcheeAddr)
 
 	remotingMock := mocksremote.NewClient(t)
 	remotingMock.EXPECT().
@@ -5775,7 +6599,7 @@ func TestFreeWatcheesRemoteUnWatchFailureIsLogged(t *testing.T) {
 	pid.fieldsLocker.Unlock()
 
 	require.NoError(t, pid.freeWatchees(ctx))
-	require.Empty(t, actorSystem.getRemoteWatches().watcheesFor(pid.ID()))
+	require.Empty(t, actorSystem.getRemoteWatchRegistry().watcheesFor(pid.ID()))
 	remotingMock.AssertExpectations(t)
 }
 
@@ -6062,7 +6886,9 @@ func TestReinstate(t *testing.T) {
 func TestReinstateAvoidsPassivationRace(t *testing.T) {
 	ctx := context.Background()
 
-	actorSystem, err := NewActorSystem("reinstate-passivation-race", WithLogger(log.DiscardLogger))
+	// tryPassivation logs this line just before it waits for the stop lock
+	logger := NewMockSignalLogger("passivation mode triggered")
+	actorSystem, err := NewActorSystem("reinstate-passivation-race", WithLogger(logger))
 	require.NoError(t, err)
 	require.NoError(t, actorSystem.Start(ctx))
 	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
@@ -6109,9 +6935,11 @@ func TestReinstateAvoidsPassivationRace(t *testing.T) {
 		passivated.Store(pid.tryPassivation("test-passivation"))
 	}()
 
-	require.Eventually(t, func() bool {
-		return pid.isStateSet(passivatingState)
-	}, time.Second, 5*time.Millisecond)
+	select {
+	case <-logger.hit:
+	case <-time.After(time.Second):
+		t.Fatal("passivation attempt never reached the stop lock")
+	}
 
 	// Simulate a reinstate arriving after the initial skip check but before doStop executes.
 	pid.setState(suspendedState, true)
@@ -8188,7 +9016,7 @@ func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
 }
 
 // TestSpawnChildSharesDefaultSupervisor verifies that a child spawned without
-// a supervisor option shares the package-level default supervisor instead of
+// a supervisor option shares the actor system's default supervisor instead of
 // allocating one per child.
 func TestSpawnChildSharesDefaultSupervisor(t *testing.T) {
 	ctx := context.TODO()
@@ -8208,7 +9036,7 @@ func TestSpawnChildSharesDefaultSupervisor(t *testing.T) {
 	require.NotNil(t, child)
 	pause.For(500 * time.Millisecond)
 
-	require.Same(t, defaultSupervisor, child.supervisor)
+	require.Same(t, actorSystem.getDefaultSupervisor(), child.supervisor)
 
 	sibling, err := pid.SpawnChild(ctx, "sibling", NewMockActor())
 	require.NoError(t, err)
@@ -8218,6 +9046,35 @@ func TestSpawnChildSharesDefaultSupervisor(t *testing.T) {
 	require.Same(t, child.supervisor, sibling.supervisor)
 
 	require.NoError(t, actorSystem.Stop(ctx))
+}
+
+// TestSpawnChildInheritsSpawnOptions verifies that a child honors the system
+// default supervisor configured with WithDefaultSupervisor and the
+// reentrancy passed to SpawnChild, as a top-level actor does.
+func TestSpawnChildInheritsSpawnOptions(t *testing.T) {
+	ctx := context.TODO()
+	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
+
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDefaultSupervisor(custom))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	parent, err := actorSystem.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+
+	child, err := parent.SpawnChild(ctx, "child", NewMockActor(), WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))))
+	require.NoError(t, err)
+
+	require.Same(t, custom, child.supervisor)
+	require.NotNil(t, child.reentrancy.Load())
+
+	// an explicit supervisor still wins over the system default
+	explicit := supervisor.NewSupervisor()
+	sibling, err := parent.SpawnChild(ctx, "sibling", NewMockActor(), WithSupervisor(explicit))
+	require.NoError(t, err)
+	require.Same(t, explicit, sibling.supervisor)
+	require.Nil(t, sibling.reentrancy.Load())
 }
 
 // TestBuildObserveOptions verifies that the metric attribute cache is built
@@ -8420,8 +9277,16 @@ func TestMailboxSize(t *testing.T) {
 			return pid.observedMailboxSize() == backlog
 		}, time.Second, 10*time.Millisecond)
 
+		// a suspended actor handles none of its queued messages, so the backlog
+		// stays counted once the blocked handler returns
 		close(blocking.release)
+		require.Eventually(t, func() bool {
+			return pid.schedState.Load() == dispatchIdle
+		}, time.Second, 10*time.Millisecond)
+		require.EqualValues(t, backlog, pid.observedMailboxSize())
 
+		// reinstating the actor lets the backlog drain
+		pid.doReinstate()
 		require.Eventually(t, func() bool {
 			return pid.observedMailboxSize() == 0
 		}, time.Second, 10*time.Millisecond)
@@ -8454,7 +9319,7 @@ func TestMailboxSize(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 
-	t.Run("With the counters zeroed across a restart", func(t *testing.T) {
+	t.Run("With the queued messages counted across a restart", func(t *testing.T) {
 		ctx := context.TODO()
 
 		actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithMetrics())
@@ -8463,27 +9328,44 @@ func TestMailboxSize(t *testing.T) {
 
 		pause.For(time.Second)
 
-		pid, err := actorSystem.Spawn(ctx, "restarted", NewMockActor(), WithLongLived())
+		blocking := NewMockMailboxBlockingActor()
+		pid, err := actorSystem.Spawn(ctx, "restarted", blocking, WithLongLived())
 		require.NoError(t, err)
 		require.NotNil(t, pid)
 
-		// stand in for the backlog the teardown embedded in a restart abandons:
-		// reset() must clear both counters rather than carry a phantom count
-		// into the new incarnation. Both counters are cumulative, so the backlog
-		// is staged on top of the messages the actor has already drained.
-		pid.mailboxEnqueued.Store(pid.mailboxDequeued.Load() + 7)
-		require.EqualValues(t, 7, pid.observedMailboxSize())
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		<-blocking.entered
 
-		require.NoError(t, pid.Restart(ctx))
+		const backlog = 3
+		for range backlog {
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+		}
 
+		require.Eventually(t, func() bool {
+			return pid.observedMailboxSize() == backlog
+		}, time.Second, 10*time.Millisecond)
+
+		// the restart tears the actor down at once but waits for the blocked turn
+		// before it re-initializes the actor; the backlog stays queued and counted
+		// meanwhile, because a restart keeps the mailbox
+		restarted := make(chan error, 1)
+		go func() { restarted <- pid.Restart(ctx) }()
+
+		require.Eventually(t, func() bool {
+			return !pid.IsRunning()
+		}, time.Second, 10*time.Millisecond)
+		require.EqualValues(t, backlog, pid.observedMailboxSize())
+
+		close(blocking.release)
+		require.NoError(t, <-restarted)
+
+		// the new incarnation handles the backlog, and both counters kept
+		// counting across the restart
 		require.Eventually(t, func() bool {
 			return pid.observedMailboxSize() == 0
 		}, time.Second, 10*time.Millisecond)
-
-		// the phantom backlog is gone: both counters restarted from zero, and
-		// the PostStart of the new incarnation bypasses the mailbox.
-		require.Zero(t, pid.mailboxEnqueued.Load())
-		require.Zero(t, pid.mailboxDequeued.Load())
+		require.EqualValues(t, 1+backlog, pid.mailboxEnqueued.Load())
+		require.EqualValues(t, 1+backlog, pid.mailboxDequeued.Load())
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})

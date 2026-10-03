@@ -148,19 +148,28 @@ func makeFeedSourceDesc(splitter *actor.PID, key any, ackThreshold int64) *stage
 
 // makeUpstreamFeederSinkDesc returns a sink that forwards each element of the
 // original source pipeline to the splitter as *subUpstreamElem and reports
-// completion with *subUpstreamDone. It is appended to the upstream pipeline
-// when the splitter materializes itself.
+// its end with *subUpstreamDone, or with *subUpstreamErr when the pipeline
+// failed. It is appended to the upstream pipeline when the splitter
+// materializes itself.
 func makeUpstreamFeederSinkDesc(splitter *actor.PID) *stage {
 	config := defaultStageConfig()
 	return &stage{
 		id:   newStageID(),
 		kind: sinkKind,
 		actorFn: func(cfg StageConfig) actor.Actor {
-			return newSinkActor(func(v any) error {
+			var sink *sinkActor
+			sink = newSinkActor(func(v any) error {
 				return actor.Tell(context.Background(), splitter, &subUpstreamElem{value: v})
 			}, func() {
+				// The hook runs after the sink has recorded its terminal error, if any.
+				if err := sink.TermErr(); err != nil {
+					_ = actor.Tell(context.Background(), splitter, &subUpstreamErr{err: err})
+					return
+				}
+
 				_ = actor.Tell(context.Background(), splitter, &subUpstreamDone{})
 			}, cfg)
+			return sink
 		},
 		config: config,
 	}
@@ -282,6 +291,10 @@ type subFlowSourceActor[K comparable] struct {
 	activeChildren int
 	blocklist      map[K]struct{}
 
+	// subs tracks the upstream pipeline and every substream pipeline the
+	// splitter materialized; aborted in PostStop.
+	subs inputPipelines
+
 	// splitCounter is the synthetic substream key for SplitWhen / SplitAfter
 	// modes; incremented each time the splitter rotates to a new substream.
 	// splitHasElements tracks whether the current SplitWhen substream has
@@ -363,6 +376,9 @@ func (a *subFlowSourceActor[K]) Receive(rctx *actor.ReceiveContext) {
 
 		a.maybeComplete(rctx)
 
+	case *subUpstreamErr:
+		a.fail(rctx, msg.err)
+
 	case *subOut:
 		a.buf.push(msg.value)
 		a.tryFlush(rctx)
@@ -390,14 +406,23 @@ func (a *subFlowSourceActor[K]) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *subFlowSourceActor[K]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the upstream pipeline and the substream pipelines so they
+// do not outlive the splitter.
+func (a *subFlowSourceActor[K]) PostStop(_ *actor.Context) error {
+	a.subs.abort()
+	return nil
+}
 
+// spawnUpstream materializes the pipeline that feeds the splitter. A failure
+// to materialize it fails the stream.
 func (a *subFlowSourceActor[K]) spawnUpstream(rctx *actor.ReceiveContext) {
 	feeder := makeUpstreamFeederSinkDesc(rctx.Self())
 	all := make([]*stage, len(a.upstreamStages)+1)
 	copy(all, a.upstreamStages)
 	all[len(a.upstreamStages)] = feeder
-	spawnSubPipeline(rctx.Context(), a.system, all)
+	if err := a.subs.spawn(rctx.Context(), a.system, all); err != nil {
+		a.fail(rctx, err)
+	}
 }
 
 // routeElement applies the per-substream in-flight cap before pushing. When
@@ -521,7 +546,7 @@ func (a *subFlowSourceActor[K]) spawnSubstream(rctx *actor.ReceiveContext, key K
 	stages = append(stages, a.subStages...)
 	stages = append(stages, makeSubMergeSinkDesc(rctx.Self(), key))
 
-	_, feedHead, err := materializeWithHead(rctx.Context(), a.system, stages)
+	feedHead, err := a.subs.spawnWithHead(rctx.Context(), a.system, stages)
 	if err != nil {
 		a.fail(rctx, err)
 		return nil
@@ -613,6 +638,9 @@ func (a *subFlowSourceActor[K]) maybeComplete(rctx *actor.ReceiveContext) {
 	rctx.Shutdown()
 }
 
+// fail ends the merged stream with err: it cancels every open substream,
+// sends err downstream and stops; PostStop then aborts the remaining
+// pipelines. Later calls do nothing.
 func (a *subFlowSourceActor[K]) fail(rctx *actor.ReceiveContext, err error) {
 	if a.failed {
 		return

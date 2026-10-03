@@ -77,6 +77,13 @@ func (s *dispatchState) TakeForProcessing() bool {
 	return s.v.CompareAndSwap(dispatchScheduled, dispatchProcessing)
 }
 
+// TakeIdleForStop attempts the Idle -> Processing transition. Passivation
+// calls it to own an actor that has no turn running or waiting, so that no
+// worker can start one until the passivation resets the state.
+func (s *dispatchState) TakeIdleForStop() bool {
+	return s.v.CompareAndSwap(dispatchIdle, dispatchProcessing)
+}
+
 // YieldToScheduled performs the Processing -> Scheduled transition.
 // Called when a worker rotates off an actor that still has pending
 // messages after exhausting its throughput budget.

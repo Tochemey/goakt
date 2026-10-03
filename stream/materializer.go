@@ -50,6 +50,15 @@ type terminalErrorActor interface {
 	TermErr() error
 }
 
+// terminalError holds the error that terminated a sink stage. The sink
+// records it on its receive loop and completionWrapper reads it from PostStop,
+// which the runtime may run on another goroutine while a turn of the sink is
+// still in progress (an Abort during the turn that handles streamError), so
+// the error is stored atomically.
+type terminalError struct {
+	err atomic.Pointer[error]
+}
+
 // completionWrapper wraps any actor.Actor and calls onDone in PostStop.
 // The materializer uses this to detect when the sink terminates and to
 // propagate any terminal error to the StreamHandle.
@@ -68,6 +77,20 @@ func (w *completionWrapper) PostStop(ctx *actor.Context) error {
 	}
 	w.onDone(termErr)
 	return err
+}
+
+// set records err as the terminal error.
+func (x *terminalError) set(err error) {
+	x.err.Store(&err)
+}
+
+// get returns the recorded terminal error, or nil when none was recorded.
+func (x *terminalError) get() error {
+	if err := x.err.Load(); err != nil {
+		return *err
+	}
+
+	return nil
 }
 
 // materialize spawns one actor per stage under a shared stream coordinator,
@@ -152,6 +175,8 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 		spawnOpts := []actor.SpawnOption{actor.WithLongLived()}
 		if config.Mailbox != nil {
 			spawnOpts = append(spawnOpts, actor.WithMailbox(config.Mailbox))
+		} else if desc.manyProducers {
+			spawnOpts = append(spawnOpts, actor.WithMailbox(actor.NewUnboundedMailbox()))
 		} else if config.BufferSize > 0 {
 			spawnOpts = append(spawnOpts, actor.WithMailbox(actor.NewBoundedMailbox(config.BufferSize*2)))
 		}
@@ -165,6 +190,15 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 		}
 		pids[i] = pid
 	}
+
+	// Watch only the sink so the coordinator can detect an unexpected crash
+	// (a sink crash that bypasses completionWrapper.PostStop). Source and flow
+	// stages shut down as part of the normal completion flow, before the sink's
+	// onDone fires, so watching them would produce spurious errors. The sink is
+	// registered before the stages are wired: no stage acts before its
+	// stageWire, so the coordinator cannot miss a sink that terminates early.
+	coord.sinkPID.Store(pids[sinkIdx])
+	coordinator.Watch(pids[sinkIdx])
 
 	// Wire stages: send each actor its upstream and downstream PIDs
 	n := len(pids)
@@ -187,13 +221,6 @@ func materializeWithHead(ctx context.Context, system actor.ActorSystem, stages [
 		}
 	}
 
-	// Watch only the sink so the coordinator can detect an unexpected crash
-	// (a sink crash that bypasses completionWrapper.PostStop). Source and flow
-	// stages shut down as part of the normal completion flow — before the sink's
-	// onDone fires — so watching them would produce spurious errors.
-	coord.sinkPID.Store(pids[sinkIdx])
-	coordinator.Watch(pids[sinkIdx])
-
 	handle.source = pids[0]
 	handle.stageActors = pids
 
@@ -210,8 +237,8 @@ func applyFusion(stages []*stage, mode FusionMode) []*stage {
 	i := 0
 	for i < len(stages) {
 		s := stages[i]
-		// Only fuse flow-kind stages with a fuseFn set and Fusion enabled.
-		if s.kind != flowKind || s.fuseFn == nil || !s.config.Fusion {
+		// Only fuse stages the fused actor can stand in for.
+		if !fusable(s) {
 			result = append(result, s)
 			i++
 			continue
@@ -222,7 +249,7 @@ func applyFusion(stages []*stage, mode FusionMode) []*stage {
 		j := i + 1
 		for j < len(stages) {
 			next := stages[j]
-			if next.kind != flowKind || next.fuseFn == nil || !next.config.Fusion {
+			if !fusable(next) {
 				break
 			}
 			// Compose: apply s.fuseFn then next.fuseFn.
@@ -259,6 +286,19 @@ func applyFusion(stages []*stage, mode FusionMode) []*stage {
 		i = j
 	}
 	return result
+}
+
+// fusable reports whether s may be fused with its neighbors: a flow stage
+// with a fuseFn and Fusion enabled. A stage configured with an ErrorStrategy
+// other than FailFast or with a Tracer is left as its own actor, because the
+// fused actor always fails fast and reports to no tracer; fusing it would
+// silently drop that configuration.
+func fusable(s *stage) bool {
+	if s.kind != flowKind || s.fuseFn == nil || !s.config.Fusion {
+		return false
+	}
+
+	return s.config.ErrorStrategy == FailFast && s.config.Tracer == nil
 }
 
 // materializeAll materializes each pipeline independently and returns a

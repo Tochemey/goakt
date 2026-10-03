@@ -25,6 +25,8 @@ package net
 import (
 	"errors"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -244,4 +246,172 @@ func TestGetCompressedConn(t *testing.T) {
 	// Verify closer is wired.
 	_ = cc.closer()
 	require.True(t, closerCalled)
+}
+
+// compressionTestWrappers returns one [ConnWrapper] per supported codec, keyed
+// by codec name.
+func compressionTestWrappers(t *testing.T) map[string]ConnWrapper {
+	t.Helper()
+
+	gzipWrapper, err := NewGzipConnWrapper()
+	require.NoError(t, err)
+
+	zstdWrapper, err := NewZstdConnWrapper()
+	require.NoError(t, err)
+
+	return map[string]ConnWrapper{
+		"gzip":   gzipWrapper,
+		"zstd":   zstdWrapper,
+		"brotli": NewBrotliConnWrapper(),
+	}
+}
+
+// newParkingConn returns a raw connection whose Read parks until Close and,
+// when parkWrite is set, whose first Write parks until Close too, so a test
+// can hold goroutines inside the codec while it closes the wrapped connection.
+// readEntered and writeEntered are closed when the respective call parks.
+// Calls after Close fail with [net.ErrClosed]; other writes succeed.
+func newParkingConn(parkWrite bool) (raw *mockNetConn, readEntered, writeEntered chan struct{}) {
+	readEntered = make(chan struct{})
+	writeEntered = make(chan struct{})
+	closed := make(chan struct{})
+
+	var readOnce, writeOnce, closeOnce sync.Once
+
+	raw = &mockNetConn{
+		readFunc: func([]byte) (int, error) {
+			readOnce.Do(func() { close(readEntered) })
+			<-closed
+			return 0, net.ErrClosed
+		},
+		writeFunc: func(b []byte) (int, error) {
+			if parkWrite {
+				writeOnce.Do(func() {
+					close(writeEntered)
+					<-closed
+				})
+			}
+
+			select {
+			case <-closed:
+				return 0, net.ErrClosed
+			default:
+				return len(b), nil
+			}
+		},
+		closeFunc: func() error {
+			closeOnce.Do(func() { close(closed) })
+			return nil
+		},
+	}
+
+	return raw, readEntered, writeEntered
+}
+
+// countCodecReleases replaces the codec closer of conn with one that counts
+// its calls, and returns the counter.
+func countCodecReleases(t *testing.T, conn net.Conn) *atomic.Int32 {
+	t.Helper()
+
+	cc, ok := conn.(*compressedConn)
+	require.True(t, ok)
+
+	releases := new(atomic.Int32)
+	closer := cc.closer
+	cc.closer = func() error {
+		releases.Add(1)
+		return closer()
+	}
+
+	return releases
+}
+
+func TestCompressedConnCloseWhileReadBlocked(t *testing.T) {
+	for name, wrapper := range compressionTestWrappers(t) {
+		t.Run(name, func(t *testing.T) {
+			raw, readEntered, _ := newParkingConn(false)
+			conn, err := wrapper.Wrap(raw)
+			require.NoError(t, err)
+
+			releases := countCodecReleases(t, conn)
+
+			readErr := make(chan error, 1)
+			go func() {
+				_, err := conn.Read(make([]byte, 64))
+				readErr <- err
+			}()
+
+			<-readEntered
+			require.NoError(t, conn.Close())
+			require.Error(t, <-readErr)
+			require.Equal(t, int32(1), releases.Load())
+
+			_, err = conn.Read(make([]byte, 64))
+			require.ErrorIs(t, err, net.ErrClosed)
+			_, err = conn.Write([]byte("late"))
+			require.ErrorIs(t, err, net.ErrClosed)
+			require.NoError(t, conn.Close())
+			require.Equal(t, int32(1), releases.Load())
+		})
+	}
+}
+
+func TestCompressedConnCloseWhileWriteInFlight(t *testing.T) {
+	for name, wrapper := range compressionTestWrappers(t) {
+		t.Run(name, func(t *testing.T) {
+			raw, readEntered, writeEntered := newParkingConn(true)
+			conn, err := wrapper.Wrap(raw)
+			require.NoError(t, err)
+
+			releases := countCodecReleases(t, conn)
+
+			readErr := make(chan error, 1)
+			go func() {
+				_, err := conn.Read(make([]byte, 64))
+				readErr <- err
+			}()
+
+			writeErr := make(chan error, 1)
+			go func() {
+				_, err := conn.Write(make([]byte, 64<<10))
+				writeErr <- err
+			}()
+
+			<-readEntered
+			<-writeEntered
+			require.NoError(t, conn.Close())
+			require.Error(t, <-readErr)
+			require.Error(t, <-writeErr)
+			require.Equal(t, int32(1), releases.Load())
+			require.NoError(t, conn.Close())
+			require.Equal(t, int32(1), releases.Load())
+		})
+	}
+}
+
+func TestCompressedConnCloseIdle(t *testing.T) {
+	var order []string
+	cc := getCompressedConn(
+		&mockNetConn{closeFunc: func() error {
+			order = append(order, "raw")
+			return nil
+		}},
+		&mockReader{},
+		&mockFW{},
+		func() error {
+			order = append(order, "codec")
+			return nil
+		},
+	)
+
+	require.NoError(t, cc.Close())
+	require.Equal(t, []string{"codec", "raw"}, order)
+
+	require.NoError(t, cc.Close())
+	require.Equal(t, []string{"codec", "raw"}, order)
+
+	_, err := cc.Read(make([]byte, 1))
+	require.ErrorIs(t, err, net.ErrClosed)
+	_, err = cc.Write([]byte("x"))
+	require.ErrorIs(t, err, net.ErrClosed)
 }

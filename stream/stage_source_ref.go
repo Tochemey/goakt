@@ -81,6 +81,8 @@ type sourceRefEndpointActor[T any] struct {
 	pending    []any
 	completed  bool // set on mergeSubDone; final completeWire flushed after pending drains
 	terminated bool // set after the stream has finished — late subscribes get an error
+
+	inputs inputPipelines // the materialized source pipeline; aborted in PostStop
 }
 
 // newSourceRefEndpointActor constructs an endpoint actor over the given
@@ -95,7 +97,8 @@ func (a *sourceRefEndpointActor[T]) PreStart(ctx *actor.Context) error {
 }
 
 // Receive handles streamSubscribeWire, streamRequestWire, mergeSubValue,
-// mergeSubDone, and streamCancelWire.
+// mergeSubDone, mergeSubErr, streamCancelWire, and actor.Terminated for the
+// subscriber.
 func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *streamSubscribeWire:
@@ -116,6 +119,17 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		}
 		a.subscriber = rctx.Sender()
 		a.streamID = msg.StreamID
+		// Watch the subscriber: a consumer that is aborted sends no
+		// streamCancelWire, and its Terminated is then the only sign it is gone.
+		rctx.Watch(a.subscriber)
+
+		// Watching an actor that has already stopped delivers nothing, so a
+		// local consumer aborted before its subscription was handled is
+		// detected here, and the source is never started for it.
+		if a.subscriber.IsLocal() && !a.subscriber.IsRunning() {
+			rctx.Shutdown()
+			return
+		}
 
 		// Spawn the underlying source as a child sub-pipeline whose terminal
 		// sink forwards each element back to this actor via mergeSubValue.
@@ -125,7 +139,10 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		all := make([]*stage, len(a.srcStages)+1)
 		copy(all, a.srcStages)
 		all[len(a.srcStages)] = sink
-		spawnSubPipeline(rctx.Context(), a.system, all)
+		if err := a.inputs.spawn(rctx.Context(), a.system, all); err != nil {
+			rctx.Tell(a.subscriber, &streamErrorWire{StreamID: a.streamID, Err: err.Error()})
+			a.scheduleTermination(rctx)
+		}
 
 	case *streamRequestWire:
 		if msg.StreamID != a.streamID || a.terminated {
@@ -141,6 +158,11 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		if a.subscriber == nil || a.terminated {
 			return
 		}
+
+		// The endpoint bounds its backlog itself (sourceRefBufferLimit), so it
+		// acknowledges every element to the source pipeline on arrival.
+		a.inputs.arrived(msg)
+		a.inputs.release(rctx, msg.slot, 1)
 
 		// Fast path: credit available and no backlog — serialize and ship inline.
 		if a.wireCredit > 0 && len(a.pending) == 0 {
@@ -174,10 +196,29 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 		a.completed = true
 		a.maybeFinish(rctx)
 
+	case *mergeSubErr:
+		if a.terminated {
+			return
+		}
+
+		// The source pipeline failed: report the failure to the consumer in
+		// place of a completion. Buffered elements are discarded.
+		rctx.Tell(a.subscriber, &streamErrorWire{StreamID: a.streamID, Err: msg.err.Error()})
+		a.pending = nil
+		a.scheduleTermination(rctx)
+
 	case *streamCancelWire:
-		// Subscriber cancelled — shut down immediately. The sub-pipeline
-		// becomes unreferenced and is GC'd when its own coordinator stops.
+		// Subscriber cancelled: shut down immediately. PostStop aborts the
+		// source pipeline.
 		rctx.Shutdown()
+
+	case *actor.Terminated:
+		// The subscriber stopped. During a live stream that ends the
+		// subscription like a cancel; after the stream has finished it is the
+		// consumer's regular end and the grace window continues.
+		if !a.terminated {
+			rctx.Shutdown()
+		}
 
 	case *sourceRefShutdown:
 		// Grace window elapsed after stream termination — release the actor.
@@ -188,7 +229,11 @@ func (a *sourceRefEndpointActor[T]) Receive(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *sourceRefEndpointActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the source pipeline so it does not outlive the endpoint.
+func (a *sourceRefEndpointActor[T]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}
 
 // shipElement sends value to the subscriber as a plain remote message,
 // decrementing wire credit. The remoting layer serializes the value using
@@ -256,6 +301,9 @@ func (a *sourceRefEndpointActor[T]) scheduleTermination(rctx *actor.ReceiveConte
 		return
 	}
 	a.terminated = true
+	// The stream is over: stop the source pipeline now rather than let it run
+	// through the grace window.
+	a.inputs.abort()
 	if a.system == nil {
 		return
 	}

@@ -28,6 +28,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -148,6 +149,36 @@ func TestActorSystem(t *testing.T) {
 		assert.ErrorIs(t, err, gerrors.ErrActorSystemAlreadyStarted)
 
 		pause.For(500 * time.Millisecond)
+		require.NoError(t, sys.Stop(ctx))
+	})
+	t.Run("When started again after Stop", func(t *testing.T) {
+		ctx := context.TODO()
+		eviction, err := NewEvictionStrategy(100, LRU, 10)
+		require.NoError(t, err)
+
+		sys, err := NewActorSystem(
+			"test",
+			WithLogger(log.DiscardLogger),
+			WithExtensions(NewMockExtension()),
+			WithEvictionStrategy(eviction, time.Second),
+		)
+		require.NoError(t, err)
+
+		require.NoError(t, sys.Start(ctx))
+		require.NoError(t, sys.Stop(ctx))
+
+		// the second run processes messages and keeps the configured extension
+		require.NoError(t, sys.Start(ctx))
+		require.True(t, sys.Running())
+		require.NotNil(t, sys.Extension(NewMockExtension().ID()))
+
+		pid, err := sys.Spawn(ctx, "restarted", NewMockActor())
+		require.NoError(t, err)
+
+		reply, err := Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+
 		require.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("When metrics instruments cannot be created", func(t *testing.T) {
@@ -4994,6 +5025,14 @@ func TestStartupCleanup(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, sys.Running())
 
+		// the failed attempt stopped its dispatcher: the second run must process messages
+		pid, err := sys.Spawn(ctx, "restarted", NewMockActor())
+		require.NoError(t, err)
+
+		reply, err := Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.NotNil(t, reply)
+
 		require.NoError(t, sys.Stop(ctx))
 	})
 	t.Run("startup cleanup resets all state flags", func(t *testing.T) {
@@ -8488,6 +8527,34 @@ func TestPreShutdown(t *testing.T) {
 	})
 }
 
+func TestIsPeerLeaving(t *testing.T) {
+	reset := &net.OpError{Op: "read", Net: "tcp", Err: os.NewSyscallError("read", syscall.ECONNRESET)}
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+
+	testCases := []struct {
+		name    string
+		err     error
+		leaving bool
+	}{
+		{name: "remoting disabled", err: gerrors.ErrRemotingDisabled, leaving: true},
+		{name: "cluster disabled", err: gerrors.ErrClusterDisabled, leaving: true},
+		{name: "connection refused", err: refused, leaving: true},
+		{name: "connection reset", err: reset, leaving: true},
+		{name: "connection closed by the peer", err: io.EOF, leaving: true},
+		{name: "connection closed mid-frame", err: io.ErrUnexpectedEOF, leaving: true},
+		{name: "closed duplex session", err: dynaport.ErrDuplexClosed, leaving: true},
+		{name: "deadline", err: context.DeadlineExceeded, leaving: false},
+		{name: "send failure", err: gerrors.ErrRemoteSendFailure, leaving: false},
+		{name: "other failure", err: assert.AnError, leaving: false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.leaving, isPeerLeaving(fmt.Errorf("persist peer state: %w", tc.err)))
+		})
+	}
+}
+
 func TestPersistPeerStateToPeers(t *testing.T) {
 	// replicationPeers returns the three peers selectOldestPeers keeps for a
 	// replication factor of three, oldest first.
@@ -8705,12 +8772,12 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("returns nil when a stopped peer answers on a connection left open", func(t *testing.T) {
+	t.Run("returns nil when a stopped peer closed the connection left open", func(t *testing.T) {
 		ctx := context.TODO()
 		port := dynaport.Get(1)[0]
 
-		// A real node that has stopped: it closed its remoting listener, but it
-		// keeps serving the connection the client opened before the stop.
+		// A real node that has stopped: it closed its remoting listener and
+		// the connection the client opened before the stop.
 		peer, err := NewActorSystem("stoppedPeer", WithRemote(remote.NewConfig("127.0.0.1", port)), WithLogger(log.DiscardLogger))
 		require.NoError(t, err)
 		require.NoError(t, peer.Start(ctx))
@@ -8723,13 +8790,6 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		err = remoting.PersistPeerState(ctx, "127.0.0.1", port, newPeerState())
 		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
 
-		require.NoError(t, peer.Stop(ctx))
-
-		// this is the answer a node gets from a peer that membership still
-		// lists after it has stopped
-		err = remoting.PersistPeerState(ctx, "127.0.0.1", port, newPeerState())
-		require.ErrorIs(t, err, gerrors.ErrRemotingDisabled)
-
 		clusterMock := mockscluster.NewCluster(t)
 		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{
 			{Host: "127.0.0.1", RemotingPort: port, PeersPort: 9001, CreatedAt: 1000},
@@ -8738,6 +8798,9 @@ func TestPersistPeerStateToPeers(t *testing.T) {
 		system := newReplicationSystem(clusterMock)
 		system.remoting = remoting
 
+		// membership still lists the peer, and the peer state goes out right
+		// after the stop, on the connection the stopped peer closes
+		require.NoError(t, peer.Stop(ctx))
 		require.NoError(t, system.persistPeerStateToPeers(ctx, newPeerState()))
 	})
 

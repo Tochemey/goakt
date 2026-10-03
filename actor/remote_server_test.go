@@ -1856,6 +1856,39 @@ func TestRemoteReinstateHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
 	})
+
+	t.Run("zombie node returns CODE_NOT_FOUND", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithZombieNode(t, host, port, "actor1")
+		req := internalpb.RemoteReinstateRequest_builder{Host: host, Port: int32(port), Name: "actor1"}.Build()
+		resp, err := sys.remoteReinstateHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+	})
+
+	t.Run("suspended child is reinstated by bare name and by qualified name", func(t *testing.T) {
+		port := inet.Get(1)[0]
+		sys, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, port)), WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		parent, err := sys.Spawn(ctx, "parent", NewMockActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "child", NewMockActor())
+		require.NoError(t, err)
+
+		for _, name := range []string{"child", "parent/child"} {
+			child.suspend("test")
+			require.True(t, child.IsSuspended())
+
+			req := internalpb.RemoteReinstateRequest_builder{Host: host, Port: int32(port), Name: name}.Build()
+			resp, err := sys.(*actorSystem).remoteReinstateHandler(ctx, nullConn, req)
+			require.NoError(t, err)
+			_, ok := resp.(*internalpb.RemoteReinstateResponse)
+			require.True(t, ok, "name=%q: %v", name, resp)
+			require.False(t, child.IsSuspended(), "name=%q", name)
+		}
+	})
 }
 
 // TestDuplexRemoteAskHonorsCallerTimeoutBeyondAskTimeout pins the
@@ -2750,6 +2783,30 @@ func TestRemoteWatchHandler(t *testing.T) {
 		require.Len(t, registered, 1)
 		require.Equal(t, watcherAddr.String(), registered[0].String())
 	})
+
+	t.Run("child watchee resolves by bare name and by qualified name", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "parent")
+		parentNode, ok := sys.actors.nodeByName("parent")
+		require.True(t, ok)
+		parent := parentNode.value()
+		childAddr := address.NewWithParent("child", sys.Name(), host, port, parent.getAddress())
+		child := &PID{address: childAddr, path: newPath(childAddr), actorSystem: sys}
+		require.NoError(t, sys.actors.addNode(parent, child))
+
+		for _, name := range []string{"child", "parent/child"} {
+			req := internalpb.RemoteWatchRequest_builder{Host: host, Port: int32(port), Name: name, WatcherAddress: watcherAddr.String()}.Build()
+			resp, err := sys.remoteWatchHandler(ctx, nullConn, req)
+			require.NoError(t, err)
+			_, ok := resp.(*internalpb.RemoteWatchResponse)
+			require.True(t, ok, "name=%q: %v", name, resp)
+
+			registered := sys.remoteWatches.watchersFor(child.ID())
+			require.Len(t, registered, 1)
+			require.Equal(t, watcherAddr.String(), registered[0].String())
+			require.Empty(t, sys.remoteWatches.watchersFor(parent.ID()))
+			sys.remoteWatches.removeWatcher(child.ID(), watcherAddr)
+		}
+	})
 }
 
 func TestRemoteUnWatchHandler(t *testing.T) {
@@ -2828,6 +2885,27 @@ func TestRemoteUnWatchHandler(t *testing.T) {
 		require.True(t, ok)
 
 		require.Empty(t, sys.remoteWatches.watchersFor(watcheeID))
+	})
+
+	t.Run("child watchee resolves by bare name and by qualified name", func(t *testing.T) {
+		sys := newRemoteServerTestSystemWithStoppedActor(t, host, port, "parent")
+		parentNode, ok := sys.actors.nodeByName("parent")
+		require.True(t, ok)
+		parent := parentNode.value()
+		childAddr := address.NewWithParent("child", sys.Name(), host, port, parent.getAddress())
+		child := &PID{address: childAddr, path: newPath(childAddr), actorSystem: sys}
+		require.NoError(t, sys.actors.addNode(parent, child))
+
+		for _, name := range []string{"child", "parent/child"} {
+			sys.remoteWatches.addWatcher(child.ID(), watcherAddr)
+
+			req := internalpb.RemoteUnWatchRequest_builder{Host: host, Port: int32(port), Name: name, WatcherAddress: watcherAddr.String()}.Build()
+			resp, err := sys.remoteUnWatchHandler(ctx, nullConn, req)
+			require.NoError(t, err)
+			_, ok := resp.(*internalpb.RemoteUnWatchResponse)
+			require.True(t, ok)
+			require.Empty(t, sys.remoteWatches.watchersFor(child.ID()), "name=%q", name)
+		}
 	})
 }
 
@@ -3399,4 +3477,61 @@ func TestRemoteTellTrackAfterRestartParksHold(t *testing.T) {
 
 	hold.Release()
 	require.NoError(t, pid.Shutdown(ctx))
+}
+
+func TestRemoteServerNegotiatesDuplexCompression(t *testing.T) {
+	const (
+		none   = internalpb.CompressionCodec_COMPRESSION_CODEC_NONE
+		gzip   = internalpb.CompressionCodec_COMPRESSION_CODEC_GZIP
+		zstd   = internalpb.CompressionCodec_COMPRESSION_CODEC_ZSTD
+		brotli = internalpb.CompressionCodec_COMPRESSION_CODEC_BROTLI
+	)
+
+	testCases := []struct {
+		name       string
+		configured remote.Compression
+		proposal   internalpb.CompressionCodec
+		expected   internalpb.CompressionCodec
+	}{
+		{name: "gzip on both sides", configured: remote.GzipCompression, proposal: gzip, expected: gzip},
+		{name: "zstd on both sides", configured: remote.ZstdCompression, proposal: zstd, expected: zstd},
+		{name: "brotli on both sides", configured: remote.BrotliCompression, proposal: brotli, expected: brotli},
+		{name: "mismatched codecs", configured: remote.ZstdCompression, proposal: gzip, expected: none},
+		{name: "no compression configured", configured: remote.NoCompression, proposal: zstd, expected: none},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			host := "127.0.0.1"
+			port := inet.Get(1)[0]
+
+			sys, err := NewActorSystem("test", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig(host, port, remote.WithCompression(tc.configured))))
+			require.NoError(t, err)
+			require.NoError(t, sys.Start(ctx))
+			t.Cleanup(func() { assert.NoError(t, sys.Stop(context.Background())) })
+
+			maxFrame := uint32(1 << 20)
+			hello := internalpb.Hello_builder{
+				Revision:                    inet.CapabilityRevisionCredits,
+				SystemName:                  "test",
+				Host:                        host,
+				Port:                        uint32(port),
+				Compression:                 tc.proposal,
+				MaxFrameSize:                maxFrame,
+				MaxMessageSize:              uint64(maxFrame),
+				InitialCredits:              uint64(maxFrame),
+				MaxConcurrentLargeTransfers: 4,
+			}.Build()
+
+			lane := inet.LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL}
+			session, result, err := inet.OpenDuplex(ctx, inet.NewTCPTransport(), fmt.Sprintf("%s:%d", host, port), hello, lane, time.Second, 0, 0)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(t, tc.expected, result.Effective.GetCompression())
+			require.NoError(t, session.Close())
+		})
+	}
 }

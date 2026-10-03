@@ -27,12 +27,20 @@ import (
 	"time"
 )
 
+// supervisionSignal is one failure handed to supervision: the error to report,
+// the message being handled when it happened, and when it happened.
 type supervisionSignal struct {
-	err       error
+	err error
+	// cause is the error the handler panicked with, when it panicked with one.
+	// err then wraps it in a PanicError that adds the panic's location, and
+	// cause is what the supervisor's rules are matched against first: a rule
+	// for the panicked error's type applies as it would to ctx.Err.
+	cause     error
 	msg       any
 	timestamp time.Time
 }
 
+// newSupervisionSignal records a failure that happened while handling msg.
 func newSupervisionSignal(err error, msg any) *supervisionSignal {
 	return &supervisionSignal{
 		err:       err,
@@ -41,8 +49,22 @@ func newSupervisionSignal(err error, msg any) *supervisionSignal {
 	}
 }
 
+// newPanicSupervisionSignal records a panic whose value was the error cause,
+// reported as err (the PanicError wrapping it).
+func newPanicSupervisionSignal(err error, cause error, msg any) *supervisionSignal {
+	signal := newSupervisionSignal(err, msg)
+	signal.cause = cause
+	return signal
+}
+
+// Err returns the error to report: for a panic, the PanicError.
 func (s *supervisionSignal) Err() error {
 	return s.err
+}
+
+// Cause returns the error the handler panicked with, or nil.
+func (s *supervisionSignal) Cause() error {
+	return s.cause
 }
 
 func (s *supervisionSignal) Msg() any {

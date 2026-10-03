@@ -39,6 +39,7 @@ type zipNSourceActor[T, V any] struct {
 	subStages  [][]*stage
 	combineFn  func([]T) V
 	system     actor.ActorSystem
+	inputs     inputPipelines // materialized input pipelines; aborted in PostStop
 	downstream *actor.PID
 	subID      string
 	seqNo      uint64
@@ -68,7 +69,7 @@ func newZipNSourceActor[T, V any](subStages [][]*stage, combineFn func([]T) V, c
 
 func (a *zipNSourceActor[T, V]) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, and streamCancel.
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, mergeSubErr, and streamCancel.
 func (a *zipNSourceActor[T, V]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -88,7 +89,11 @@ func (a *zipNSourceActor[T, V]) Receive(rctx *actor.ReceiveContext) {
 			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
-			spawnSubPipeline(ctx, a.system, all)
+			if err := a.inputs.spawn(ctx, a.system, all); err != nil {
+				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+				rctx.Shutdown()
+				return
+			}
 		}
 
 	case *streamRequest:
@@ -97,12 +102,17 @@ func (a *zipNSourceActor[T, V]) Receive(rctx *actor.ReceiveContext) {
 
 	case *mergeSubValue:
 		a.metrics.elementsIn.Add(1)
+		a.inputs.arrived(msg)
 		a.bufs[msg.slot].push(msg.value)
 		a.tryEmit(rctx)
 
 	case *mergeSubDone:
 		a.done[msg.slot] = true
 		a.tryEmit(rctx)
+
+	case *mergeSubErr:
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
+		rctx.Shutdown()
 
 	case *streamCancel:
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
@@ -130,6 +140,7 @@ func (a *zipNSourceActor[T, V]) tryEmit(rctx *actor.ReceiveContext) {
 				return
 			}
 			tup[i] = v
+			a.inputs.release(rctx, i, 1)
 		}
 		a.seqNo++
 		rctx.Tell(a.downstream, &streamElement{
@@ -160,4 +171,8 @@ func (a *zipNSourceActor[T, V]) allReady() bool {
 	return true
 }
 
-func (a *zipNSourceActor[T, V]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the input pipelines so they do not outlive this stage.
+func (a *zipNSourceActor[T, V]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}

@@ -26,6 +26,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"os"
@@ -116,8 +117,8 @@ const (
 type ActorSystem interface {
 	// Metric retrieves the current set of runtime metrics for the actor system.
 	//
-	// This includes local actor system metrics such as the number of actors,
-	// mailbox sizes, and message throughput. It does not include metrics
+	// This includes the number of live actors, the dead-letter total, the
+	// system's uptime and the host's memory figures. It does not include metrics
 	// from other nodes in a distributed or clustered environment.
 	//
 	// Use this method for monitoring and debugging purposes within a single node.
@@ -316,12 +317,13 @@ type ActorSystem interface {
 	// ancestors' names and its own joined by '/' (e.g. "parent/child"), from any node, and by its bare
 	// name on its own node.
 	Kill(ctx context.Context, name string) error
-	// ReSpawn recreates a given actor in the system.
+	// ReSpawn restarts a given actor in the system, with its whole subtree.
 	//
-	// During restart all messages that are in the mailbox and not yet processed will be ignored.
-	// Only the direct alive children of the given actor will be shutdown and respawned with their initial state.
-	// Bear in mind that restarting an actor will reinitialize the actor to initial state.
-	// In case any of the direct child restart fails the given actor will not be started at all.
+	// Every running or suspended descendant, grandchildren included, is restarted with it, and
+	// the same parent/child topology is rebuilt. A restart reuses the same PID and the same
+	// actor value and only runs PreStart again: a field PreStart does not reset keeps its value.
+	// Each actor keeps its mailbox: queued messages are handled by the new incarnation, after
+	// PostStart. If the actor or any descendant fails to restart, the whole subtree is stopped.
 	//
 	// This method is location-transparent: it works identically whether the actor is local or on a
 	// remote node (when clustering/remoting is enabled).
@@ -519,15 +521,14 @@ type ActorSystem interface {
 	// that messages published to a topic are delivered to all registered subscribers.
 	//
 	// Requirements:
-	//   - PubSub mode must be enabled via the WithPubSub() option when initializing the actor system.
+	//   - The topic actor is started by the WithPubSub() option, and in cluster mode.
 	//
 	// Cluster Behavior:
-	//   - In cluster mode, messages published to a topic on one node are forwarded to other nodes,
-	//     but only once per topic actor with active local subscribers. This ensures efficient message
-	//     propagation without redundant network traffic.
+	//   - In cluster mode, a message published to a topic on one node is forwarded once to the
+	//     topic actor of every other node, which delivers it to its local subscribers.
 	//
 	// Usage:
-	//   system := NewActorSystem(WithPubSub())
+	//   system := NewActorSystem("sys", WithPubSub())
 	//
 	// Returns the actor reference for the topic actor.
 	TopicActor() *PID
@@ -925,13 +926,15 @@ type ActorSystem interface {
 	getCluster() cluster.Cluster
 	// tree returns the actors tree
 	tree() *tree
-	// getRemoteWatches returns the remote watch registry
-	getRemoteWatches() *remoteWatchRegistry
+	// getRemoteWatchRegistry returns the remote watch registry
+	getRemoteWatchRegistry() *remoteWatchRegistry
 	// getRemoteWatchTimeout returns the deadline applied to remote
 	// PID.Watch / PID.UnWatch RPCs
 	getRemoteWatchTimeout() time.Duration
 	// getInitTimeout returns the actor system's default init timeout
 	getInitTimeout() time.Duration
+	// getDefaultSupervisor returns the supervisor given to actors spawned without one
+	getDefaultSupervisor() *sup.Supervisor
 
 	beginRelocation(peerAddress string, peerState *internalpb.PeerState) bool
 	relocationJob(peerAddress string) (*internalpb.PeerState, bool)
@@ -1045,8 +1048,9 @@ type actorKindMetrics struct {
 	observeOptions []otelmetric.ObserveOption
 }
 
-// ActorSystem represent a collection of actors on a given node
-// Only a single instance of the ActorSystem can be created on a given node
+// actorSystem is the only implementation of ActorSystem: the collection of
+// actors on a given node. Run one per process; this is not enforced (see
+// NewActorSystem).
 type actorSystem struct {
 	_ locker.NoCopy
 	// hold the actors tree in the system
@@ -1080,7 +1084,7 @@ type actorSystem struct {
 	// Specifies the deadline applied to remote PID.Watch / PID.UnWatch RPCs.
 	// The default value is DefaultRemoteWatchTimeout (5s).
 	remoteWatchTimeout time.Duration
-	// Specifies the shutdown timeout. The default value is 3mn
+	// Specifies the shutdown timeout. The default value is DefaultShutdownTimeout (5 minutes)
 	shutdownTimeout time.Duration
 	// Specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
@@ -1264,6 +1268,11 @@ type actorSystem struct {
 	// written once during construction and only read afterwards, by the metrics
 	// callback and by each PID as it caches its observation attributes.
 	metricLowCardinality bool
+	// metricRegistrations holds the callbacks registered with the meter by
+	// this Start, so that shutdown can unregister them: a meter keeps calling
+	// a registered callback, and a system started again would otherwise be
+	// observed twice, with the stopped system still reachable from the meter.
+	metricRegistrations []otelmetric.Registration
 	// relocationMetric holds the synchronous relocation instruments. It is nil
 	// unless OpenTelemetry metrics are enabled, so all recording is guarded.
 	relocationMetric *metric.RelocationMetric
@@ -1286,8 +1295,10 @@ var (
 
 // NewActorSystem creates and configures a new ActorSystem instance.
 //
-// The actor system is the root container for all actors on a node. Only one ActorSystem
-// can exist per process. In cluster mode, the system name must be identical across all nodes.
+// The actor system is the root container for all actors on a node. Run one ActorSystem per
+// process: this is not enforced, and several systems can run side by side in one process as
+// long as their remoting and cluster ports differ. In cluster mode, the system name must be
+// identical across all nodes.
 //
 // Options allow customization of logging, clustering, remoting, pub/sub, TLS, extensions, and more.
 // The returned ActorSystem is not started; use Start or Run to initialize it.
@@ -1349,7 +1360,6 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 		pendingAsks:           pendingasks.New(),
 		askTimeout:            DefaultAskTimeout,
 		messageRetention:      DefaultMessageRetention,
-		evictionStopSig:       make(chan types.Unit, 1),
 		dispatcherThroughput:  dispatcherThroughput,
 	}
 
@@ -1476,6 +1486,14 @@ func (x *actorSystem) Start(ctx context.Context) error {
 	x.starting.Store(true)
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
+
+	// A stopped dispatcher cannot run again: signalStop closed its ready queue
+	// and its supervision consumer for good, and workers of the previous run may
+	// still be finishing their last turn on it. A Start that follows a Stop or a
+	// failed Start therefore gets a fresh pool of the same size.
+	if x.dispatcher.stopping.Load() {
+		x.dispatcher = newDispatcher(len(x.dispatcher.workers), x.dispatcher.throughput)
+	}
 
 	x.dispatcher.start()
 
@@ -2137,12 +2155,13 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 	return gerrors.NewErrActorNotFound(name)
 }
 
-// ReSpawn recreates a given actor in the system.
+// ReSpawn restarts a given actor in the system, with its whole subtree.
 //
-// During restart all messages that are in the mailbox and not yet processed will be ignored.
-// Only the direct alive children of the given actor will be shutdown and respawned with their initial state.
-// Bear in mind that restarting an actor will reinitialize the actor to initial state.
-// In case any of the direct child restart fails the given actor will not be started at all.
+// Every running or suspended descendant, grandchildren included, is restarted with it, and
+// the same parent/child topology is rebuilt. A restart reuses the same PID and the same
+// actor value and only runs PreStart again: a field PreStart does not reset keeps its value.
+// Each actor keeps its mailbox: queued messages are handled by the new incarnation, after
+// PostStart. If the actor or any descendant fails to restart, the whole subtree is stopped.
 //
 // This method is location-transparent: it works identically whether the actor is local or on a
 // remote node (when clustering/remoting is enabled).
@@ -3264,7 +3283,7 @@ func (x *actorSystem) setupCluster() error {
 	x.logger.Info("enabling clustering...")
 
 	if !x.remotingEnabled.Load() {
-		x.logger.Error("remoting must be enabled to use clustering (hint: call WithRemoting() before WithCluster())")
+		x.logger.Error("remoting must be enabled to use clustering (hint: call WithRemote() before WithCluster())")
 		return errors.New("clustering needs remoting to be enabled")
 	}
 
@@ -3529,10 +3548,13 @@ func (x *actorSystem) startMessagesScheduler(ctx context.Context) {
 	x.scheduler.Start(ctx)
 }
 
-// startEviction starts the eviction process for the actor system
+// startEviction starts the eviction process for the actor system. Each run
+// gets its own stop signal: shutdown closes it, and a Start that follows a
+// Stop must not reuse a closed one.
 func (x *actorSystem) startEviction() {
 	if x.evictionStrategy != nil {
-		go x.evictionLoop()
+		x.evictionStopSig = make(chan types.Unit, 1)
+		go x.evictionLoop(x.evictionStopSig)
 	}
 }
 
@@ -3571,7 +3593,9 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 func (x *actorSystem) reset() {
 	x.started.Store(false)
 	x.starting.Store(false)
-	x.extensions.Reset()
+	// the extensions are kept: they are configured once, by WithExtensions, and
+	// the next Start must find them; the CRDT config extension is set again by
+	// spawnReplicator on every Start
 	x.actors.reset()
 	x.grains.Reset()
 	x.remoteSenderAddresses.Reset()
@@ -3603,6 +3627,7 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 	x.shuttingDown.Store(true)
 
 	defer func() {
+		x.unregisterMetrics()
 		x.reset()
 		// Signal dispatcher shutdown after all actors are torn down and
 		// state is reset. We do not wait for workers to exit because this
@@ -3908,14 +3933,14 @@ func (x *actorSystem) handleNodeJoinedEvent(event *cluster.Event) {
 	// be O(total cluster actors) redundant writes. Repair on departure only
 	// (handleNodeLeftEvent), where partitions can actually be dropped.
 	//
-	// Tradeoff (deliberate): with replicaCount=1 (the default) a partition has
+	// Tradeoff (deliberate): with replicaCount=1 a partition has
 	// no backup, so if a migration to the joining node is disrupted mid-flight
 	// its entries can be lost, and that loss is not repaired until the next
 	// departure-triggered resync. Repairing here on every join would trade a
 	// rare, self-correcting gap for a guaranteed O(cluster actors) write storm on
 	// every membership addition. Running with replicaCount>1 removes the gap
-	// (olric keeps a backup of each partition during migration); single-replica
-	// clusters accept it as the cost of the default.
+	// (olric keeps a backup of each partition during migration), and the default
+	// is two replicas; a cluster configured with one replica accepts the gap.
 	x.triggerDataCentersReconciliation()
 }
 
@@ -3949,7 +3974,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 		}
 	}()
 
-	x.pruneRemoteWatchesForHost(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
+	x.pruneRemoteWatchesForNode(context.Background(), nodeLeft.Address, nodeLeft.Timestamp)
 	// Repair the cluster store after a departure. With a replica count of 1 the
 	// partitions owned by the departed node are lost, so surviving nodes re-put
 	// their own live actors and grains to restore any registry entries that were
@@ -4289,8 +4314,9 @@ type staleClaim struct {
 //
 // It returns ok=false when the remoting port cannot be resolved (the node was
 // never observed alive by this leader) or the registry scan fails, so the caller
-// skips the rebalance rather than acting on an incomplete set. Registry lookups
-// are a full scan here; a per-host index is a later optimization.
+// skips the rebalance rather than acting on an incomplete set. The registry is
+// read through ActorsByHost and GrainsByHost, which stream only the records of
+// the departed host.
 func (x *actorSystem) deriveRelocationSetFromRegistry(ctx context.Context, peerAddress string) (*internalpb.PeerState, []staleClaim, bool) {
 	host, peersPortStr, err := net.SplitHostPort(peerAddress)
 	if err != nil {
@@ -4462,13 +4488,43 @@ func (x *actorSystem) publishRelocationStarted(peerAddress string, peerState *in
 // identifier (typically true since both derive it from the same listen-address
 // configuration). When nodeAddress does not parse as host:port it is used
 // as-is so misconfigured callers still get a registry sweep.
+//
+// Several nodes may share a host, so the departed node is told apart by its
+// remoting port when the peer cache still knows it; only then are the watches
+// of the other nodes on that host left alone. Without the port, every watch on
+// the host is dropped.
+func (x *actorSystem) pruneRemoteWatchesForNode(ctx context.Context, nodeAddress string, deathTime time.Time) {
+	host, _, err := net.SplitHostPort(nodeAddress)
+	if err != nil {
+		host = nodeAddress
+	}
+
+	var entries remoteHostEntries
+	if port, ok := x.peerRemotingPort(nodeAddress); ok {
+		entries = x.remoteWatches.dropNode(host, port)
+	} else {
+		entries = x.remoteWatches.dropHost(host)
+	}
+
+	x.terminateRemoteWatchees(ctx, entries, deathTime)
+}
+
+// pruneRemoteWatchesForHost drops every remote watch touching host and tells
+// the local watchers that their remote watchees terminated. It is the sweep
+// pruneRemoteWatchesForNode falls back to when the departed node's remoting
+// port is unknown.
 func (x *actorSystem) pruneRemoteWatchesForHost(ctx context.Context, nodeAddress string, deathTime time.Time) {
 	host, _, err := net.SplitHostPort(nodeAddress)
 	if err != nil {
 		host = nodeAddress
 	}
 
-	entries := x.remoteWatches.dropHost(host)
+	x.terminateRemoteWatchees(ctx, x.remoteWatches.dropHost(host), deathTime)
+}
+
+// terminateRemoteWatchees delivers a synthesized Terminated, stamped with
+// deathTime, to the local watcher of every dropped watchee entry.
+func (x *actorSystem) terminateRemoteWatchees(ctx context.Context, entries remoteHostEntries, deathTime time.Time) {
 	if len(entries.Watchees) == 0 {
 		return
 	}
@@ -4723,8 +4779,8 @@ func (x *actorSystem) tree() *tree {
 	return x.actors
 }
 
-// getRemoteWatches returns the remote watch registry.
-func (x *actorSystem) getRemoteWatches() *remoteWatchRegistry {
+// getRemoteWatchRegistry returns the remote watch registry.
+func (x *actorSystem) getRemoteWatchRegistry() *remoteWatchRegistry {
 	return x.remoteWatches
 }
 
@@ -4737,6 +4793,12 @@ func (x *actorSystem) getRemoteWatchTimeout() time.Duration {
 // getInitTimeout returns the actor system's default init timeout
 func (x *actorSystem) getInitTimeout() time.Duration {
 	return x.actorInitTimeout
+}
+
+// getDefaultSupervisor returns the supervisor given to actors spawned without
+// one: the one configured with WithDefaultSupervisor, or the built-in default.
+func (x *actorSystem) getDefaultSupervisor() *sup.Supervisor {
+	return x.defaultSupervisor
 }
 
 // getCluster returns the cluster engine
@@ -5288,8 +5350,10 @@ func (x *actorSystem) runShutdownHooks(ctx context.Context) (err error) {
 	return nil
 }
 
-// evictionLoop starts the system wide eviction loop
-func (x *actorSystem) evictionLoop() {
+// evictionLoop runs the system wide eviction until stop is closed. stop is
+// the signal of the run that started the loop, so a loop of a stopped run
+// never picks up the signal of the next one.
+func (x *actorSystem) evictionLoop(stop <-chan types.Unit) {
 	x.logger.Info("start the system wide eviction loop")
 	x.logger.Debugf("system eviction policy=%s", x.evictionStrategy.String())
 	var clock *ticker.Ticker
@@ -5302,7 +5366,7 @@ func (x *actorSystem) evictionLoop() {
 			select {
 			case <-clock.Ticks:
 				x.runEviction()
-			case <-x.evictionStopSig:
+			case <-stop:
 				tickerStopSig <- types.Unit{}
 				return
 			}
@@ -5497,7 +5561,7 @@ func (x *actorSystem) registerSystemMetricsCallback(meter otelmetric.Meter, metr
 		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
 	}
 
-	_, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+	registration, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
 		return x.observeSystemMetrics(ctx, observer, metrics, observeOptions)
 	}, metrics.PIDsCount(),
 		metrics.Uptime(),
@@ -5509,7 +5573,7 @@ func (x *actorSystem) registerSystemMetricsCallback(meter otelmetric.Meter, metr
 		metrics.GrainsCount(),
 	)
 
-	return err
+	return x.keepMetricRegistration(registration, err)
 }
 
 // observeSystemMetrics reports the state of the actor system as a whole for one
@@ -5522,6 +5586,9 @@ func (x *actorSystem) observeSystemMetrics(ctx context.Context, observer otelmet
 		return err
 	}
 
+	// the dead-letter total is refreshed by the per-actor callback's single
+	// request to the deadletter actor (see deadletterSnapshot) and by
+	// ActorSystem.Metric, so a scrape reads it without a request of its own
 	observer.ObserveInt64(metrics.PIDsCount(), int64(x.actorsCounter.Load()), options...)
 	observer.ObserveInt64(metrics.GrainsCount(), int64(x.grains.Len()), options...)
 	observer.ObserveInt64(metrics.Uptime(), x.Uptime(), options...)
@@ -5567,13 +5634,13 @@ func (x *actorSystem) registerSchedulerMetricsCallback(meter otelmetric.Meter, m
 		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
 	}
 
-	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+	registration, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.ScheduledCount(), x.scheduler.scheduledCount.Load(), observeOptions...)
 		observer.ObserveInt64(metrics.CancelledCount(), x.scheduler.cancelledCount.Load(), observeOptions...)
 		return nil
 	}, metrics.ScheduledCount(), metrics.CancelledCount())
 
-	return err
+	return x.keepMetricRegistration(registration, err)
 }
 
 // registerClusterMetricsCallback registers the callback reporting the cluster
@@ -5584,19 +5651,19 @@ func (x *actorSystem) registerClusterMetricsCallback(meter otelmetric.Meter, met
 		otelmetric.WithAttributes(attribute.String("actor.system", x.Name())),
 	}
 
-	_, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
+	registration, err := meter.RegisterCallback(func(_ context.Context, observer otelmetric.Observer) error {
 		observer.ObserveInt64(metrics.MembersJoinedCount(), int64(x.membersJoinedCount.Load()), observeOptions...)
 		observer.ObserveInt64(metrics.MembersLeftCount(), int64(x.membersLeftCount.Load()), observeOptions...)
 		return nil
 	}, metrics.MembersJoinedCount(), metrics.MembersLeftCount())
 
-	return err
+	return x.keepMetricRegistration(registration, err)
 }
 
 // registerActorMetricsCallback registers the single callback that reports every
 // per-actor instrument, in whichever cardinality mode the system was built with.
 func (x *actorSystem) registerActorMetricsCallback(meter otelmetric.Meter, metrics *metric.ActorMetric) error {
-	_, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
+	registration, err := meter.RegisterCallback(func(ctx context.Context, observer otelmetric.Observer) error {
 		deadletterCounts := x.deadletterSnapshot(ctx)
 
 		// the low cardinality mode collapses the live population into one
@@ -5622,7 +5689,38 @@ func (x *actorSystem) registerActorMetricsCallback(meter otelmetric.Meter, metri
 		metrics.MailboxSize(),
 	)
 
-	return err
+	return x.keepMetricRegistration(registration, err)
+}
+
+// keepMetricRegistration records a callback registration so that shutdown can
+// unregister it. It passes the registration error through, so a registering
+// method can return it directly.
+func (x *actorSystem) keepMetricRegistration(registration otelmetric.Registration, err error) error {
+	if err != nil || registration == nil {
+		return err
+	}
+
+	x.locker.Lock()
+	x.metricRegistrations = append(x.metricRegistrations, registration)
+	x.locker.Unlock()
+	return nil
+}
+
+// unregisterMetrics removes the callbacks this Start registered with the
+// meter, so a stopped system is observed no more and a later Start registers
+// them once. Errors are logged: the meter is shared with the application and
+// an unregistration that fails leaves nothing for the system to do.
+func (x *actorSystem) unregisterMetrics() {
+	x.locker.Lock()
+	registrations := x.metricRegistrations
+	x.metricRegistrations = nil
+	x.locker.Unlock()
+
+	for _, registration := range registrations {
+		if err := registration.Unregister(); err != nil {
+			x.logger.Warnf("failed to unregister a metrics callback: %v", err)
+		}
+	}
 }
 
 // deadletterSnapshot asks the deadletter actor once per scrape for a snapshot of
@@ -5646,6 +5744,10 @@ func (x *actorSystem) deadletterSnapshot(ctx context.Context) map[string][]comma
 	if !ok || snapshot == nil {
 		return nil
 	}
+
+	// the same request carries the total every receiver included, which the
+	// system-level callback reports
+	x.deadlettersCounter.Store(uint64(snapshot.TotalCount))
 
 	counts := make(map[string][]commands.DeadletterCount, len(snapshot.Counts))
 	for _, entry := range snapshot.Counts {
@@ -6206,18 +6308,25 @@ func (x *actorSystem) replicatePeerState(ctx context.Context, peers []*cluster.P
 
 // isPeerLeaving reports whether err shows that a peer is leaving the cluster
 // itself, or has already left it. A stopping node turns clustering off and
-// then remoting, and keeps answering on the connections it already has open,
-// so it refuses a peer state with ErrClusterDisabled or ErrRemotingDisabled.
-// Once its remoting server is closed, a new connection to it is refused: a
-// node that is running always listens on its remoting port, so a refused
-// connection means the peer is gone. Such a peer is not a node the state could
-// have been handed to, which sets it apart from a peer that failed to store
-// the state. A peer that does not answer in time is not counted as leaving:
-// it may be a running node behind a network fault.
+// then remoting, and answers on the connections it already has open until its
+// remoting server shuts down, so it refuses a peer state with
+// ErrClusterDisabled or ErrRemotingDisabled. Its remoting server then closes
+// those connections, so a peer state sent on one of them as it closes ends
+// with the connection loss (EOF, a reset, or a closed duplex session), and a
+// new connection to it is refused: a node that is running always listens on
+// its remoting port and keeps its peers' connections open, so a refused or
+// closed connection means the peer is gone. Such a peer is not a node the
+// state could have been handed to, which sets it apart from a peer that failed
+// to store the state. A peer that does not answer in time is not counted as
+// leaving: it may be a running node behind a network fault.
 func isPeerLeaving(err error) bool {
 	return errors.Is(err, gerrors.ErrRemotingDisabled) ||
 		errors.Is(err, gerrors.ErrClusterDisabled) ||
-		errors.Is(err, syscall.ECONNREFUSED)
+		errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) ||
+		errors.Is(err, inet.ErrDuplexClosed)
 }
 
 // selectOldestPeers returns up to k peers sorted by age (oldest first).

@@ -605,3 +605,45 @@ func BenchmarkORMapCompact(b *testing.B) {
 		m.Compact()
 	}
 }
+
+// BenchmarkStateHash measures the canonical content hash the Replicator
+// computes when a key's value changed since its last digest.
+func BenchmarkStateHash(b *testing.B) {
+	b.Run("GCounter/nodes=5", func(b *testing.B) {
+		c := NewGCounter()
+		for i := range 5 {
+			c = c.Increment(fmt.Sprintf("node-%d", i), uint64(i+1))
+		}
+
+		b.ReportAllocs()
+		for b.Loop() {
+			c.StateHash()
+		}
+	})
+
+	for _, size := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprintf("ORSet/strings=%d", size), func(b *testing.B) {
+			s := NewORSet()
+			for i := range size {
+				s = s.Add("node-1", fmt.Sprintf("element-%d", i))
+			}
+
+			b.ReportAllocs()
+			for b.Loop() {
+				s.StateHash()
+			}
+		})
+
+		b.Run(fmt.Sprintf("ORSet/ints=%d", size), func(b *testing.B) {
+			s := NewORSet()
+			for i := range size {
+				s = s.Add("node-1", i)
+			}
+
+			b.ReportAllocs()
+			for b.Loop() {
+				s.StateHash()
+			}
+		})
+	}
+}

@@ -36,6 +36,7 @@ import (
 type mergeLatestSourceActor[T any] struct {
 	subStages        [][]*stage
 	system           actor.ActorSystem
+	inputs           inputPipelines // materialized input pipelines; aborted in PostStop
 	downstream       *actor.PID
 	subID            string
 	seqNo            uint64
@@ -67,7 +68,7 @@ func newMergeLatestSourceActor[T any](subStages [][]*stage, config StageConfig) 
 
 func (a *mergeLatestSourceActor[T]) PreStart(_ *actor.Context) error { return nil }
 
-// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, and streamCancel.
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone, mergeSubErr, and streamCancel.
 func (a *mergeLatestSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
@@ -88,7 +89,11 @@ func (a *mergeLatestSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			all := make([]*stage, len(sub)+1)
 			copy(all, sub)
 			all[len(sub)] = sink
-			spawnSubPipeline(ctx, a.system, all)
+			if err := a.inputs.spawn(ctx, a.system, all); err != nil {
+				rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+				rctx.Shutdown()
+				return
+			}
 		}
 
 	case *streamRequest:
@@ -97,6 +102,10 @@ func (a *mergeLatestSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 
 	case *mergeSubValue:
 		a.metrics.elementsIn.Add(1)
+		// Only the latest value of each input is kept, so an element is
+		// consumed, and acknowledged to its input, as soon as it arrives.
+		a.inputs.arrived(msg)
+		a.inputs.release(rctx, msg.slot, 1)
 		a.cache[msg.slot] = msg.value
 		if !a.seen[msg.slot] {
 			a.seen[msg.slot] = true
@@ -114,6 +123,10 @@ func (a *mergeLatestSourceActor[T]) Receive(rctx *actor.ReceiveContext) {
 			a.doneCount++
 		}
 		a.tryEmit(rctx)
+
+	case *mergeSubErr:
+		rctx.Tell(a.downstream, &streamError{subID: a.subID, err: msg.err})
+		rctx.Shutdown()
 
 	case *streamCancel:
 		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
@@ -158,4 +171,8 @@ func (a *mergeLatestSourceActor[T]) tryEmit(rctx *actor.ReceiveContext) {
 	}
 }
 
-func (a *mergeLatestSourceActor[T]) PostStop(_ *actor.Context) error { return nil }
+// PostStop aborts the input pipelines so they do not outlive this stage.
+func (a *mergeLatestSourceActor[T]) PostStop(_ *actor.Context) error {
+	a.inputs.abort()
+	return nil
+}

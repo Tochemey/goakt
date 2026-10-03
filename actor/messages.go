@@ -264,12 +264,14 @@ func (t *Terminated) TerminatedAt() time.Time { return t.terminatedAt }
 // PoisonPill is a special control message used to gracefully stop an actor.
 //
 // When an actor receives a PoisonPill, it will initiate a controlled shutdown sequence.
-// The PoisonPill is enqueued in the actor's mailbox like any other message, meaning:
-//   - It will not interrupt message processing.
-//   - It will only be handled after all previously enqueued messages are processed.
+// The PoisonPill is a control message handled by the actor itself, meaning:
+//   - It will not interrupt message processing: the actor finishes the message it is
+//     handling first, so PostStop never runs concurrently with Receive.
+//   - It skips the user mailbox: it is handled ahead of the messages still queued,
+//     which are dropped when the actor stops.
 //
-// This allows the actor to finish processing in-flight work before termination,
-// ensuring clean shutdown semantics without abrupt interruptions.
+// To stop only after everything already queued has been handled, send the actor a
+// message of your own and call ReceiveContext.Shutdown when it arrives.
 type PoisonPill struct{}
 
 // PostStart is used when an actor has successfully started

@@ -94,6 +94,12 @@ func (c *PNCounter) Merge(other ReplicatedData) ReplicatedData {
 	}
 }
 
+// StateHash returns the canonical content hash of the counter, built from the
+// slots of its increments and of its decrements. See StateHasher.
+func (c *PNCounter) StateHash() uint64 {
+	return hashParts(hashTagPNCounter, hashNodeCounters(c.increments.state), hashNodeCounters(c.decrements.state))
+}
+
 // Delta returns the state changes since the last call to ResetDelta.
 // Returns nil if neither GCounter has changes.
 func (c *PNCounter) Delta() ReplicatedData {

@@ -311,6 +311,14 @@ func (x *tree) addOrAttachNode(parent, pid *PID) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
+	// A parent that is stopping frees its children under this lock (see
+	// PID.freeChildren), so a child attached once the stop has begun would
+	// outlive it unsupervised. The stopping bits are raised before the parent
+	// reads its children, so a child attached before them is seen by the stop.
+	if parent.isStateSet(stoppingState) || parent.isStateSet(passivatingState) {
+		return errors.New("parent pid is stopping")
+	}
+
 	id := pid.ID()
 	if _, ok := x.pids[id]; ok {
 		return x.attachNodeLocked(parent, pid)

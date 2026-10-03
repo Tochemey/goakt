@@ -162,7 +162,11 @@ func WithPartitionHasher(hasher hash.Hasher) Option {
 	)
 }
 
-// WithActorInitTimeout sets how long in seconds an actor start timeout
+// WithActorInitTimeout sets the system-wide init timeout. It bounds the retries of an
+// actor's PreStart hook: a failed PreStart is retried, up to WithActorInitMaxRetries
+// attempts, only while the timeout has not elapsed. It does not interrupt a PreStart
+// attempt in progress, and the context PreStart receives carries no deadline from it.
+// WithInitTimeout overrides it for a single actor.
 func WithActorInitTimeout(timeout time.Duration) Option {
 	return OptionFunc(
 		func(a *actorSystem) {
@@ -192,7 +196,9 @@ func WithAskTimeout(timeout time.Duration) Option {
 
 // WithCoordinatedShutdown registers internal and user-defined tasks to be executed during the shutdown process.
 // The defined tasks will be executed in the same order of insertion.
-// Any failure will halt the shutdown process.
+// A failing hook is handled by its recovery strategy: under ShouldFail, the default, the remaining
+// hooks are skipped. A hook failure never stops the shutdown itself: the actor system still stops,
+// and Stop returns the hook errors.
 func WithCoordinatedShutdown(hooks ...ShutdownHook) Option {
 	return OptionFunc(func(system *actorSystem) {
 		system.shutdownHooks = append(system.shutdownHooks, hooks...)
@@ -325,6 +331,7 @@ func WithExtensions(extensions ...extension.Extension) Option {
 // The `interval` parameter controls how frequently the eviction engine evaluates
 // and passivates actors. A shorter interval results in more aggressive cleanup,
 // while a longer interval conserves resources but may retain inactive actors longer.
+// A zero or negative interval falls back to DefaultEvictionInterval.
 //
 // If the provided strategy is nil, no changes are applied.
 //
@@ -337,6 +344,11 @@ func WithEvictionStrategy(strategy *EvictionStrategy, interval time.Duration) Op
 		if strategy == nil {
 			return
 		}
+
+		if interval <= 0 {
+			interval = DefaultEvictionInterval
+		}
+
 		system.evictionStrategy = strategy
 		system.evictionInterval = interval
 	})

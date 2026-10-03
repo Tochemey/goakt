@@ -22,7 +22,11 @@
 
 package crdt
 
-import "maps"
+import (
+	"maps"
+
+	"github.com/zeebo/xxh3"
+)
 
 // ensure MVRegister implements ReplicatedData at compile time.
 var _ ReplicatedData = (*MVRegister)(nil)
@@ -118,6 +122,18 @@ func (r *MVRegister) Merge(other ReplicatedData) ReplicatedData {
 	}
 
 	return merged
+}
+
+// StateHash returns the canonical content hash of the register: its values
+// with their dots, in any order, and its clock. See StateHasher.
+func (r *MVRegister) StateHash() uint64 {
+	var entries uint64
+
+	for _, e := range r.entries {
+		entries += hashParts(hashTagMVRegisterEntry, xxh3.HashStringSeed(e.dot.nodeID, e.dot.counter), hashValue(e.value))
+	}
+
+	return hashParts(hashTagMVRegister, entries, hashNodeCounters(r.clock))
 }
 
 // Delta returns the register state if it has changed since the last ResetDelta.

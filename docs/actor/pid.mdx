@@ -32,7 +32,7 @@ before use.
 - **IsRunning**: Actor is active and processing.
 - **IsSuspended**: Actor suspended by supervisor.
 - **IsStopping**: Shutdown in progress.
-- **Watch**: Receive `Terminated` when `cid` stops. Local only.
+- **Watch**: Receive `Terminated` when `cid` stops; `cid` may live on another node.
 - **UnWatch**: Stop watching.
 
 ## Obtaining a PID

@@ -172,9 +172,12 @@ func DefaultConfig() *Config {
 	return cfg
 }
 
-// IdleTimeout specifies how long until idle clients should be
-// closed with a GOAWAY frame. PING frames are not considered
-// activity for the purposes of IdleTimeout.
+// IdleTimeout specifies how long the server keeps a connection that
+// receives nothing before closing it. On a duplex connection every inbound
+// frame counts as activity, PING and PONG included, so the liveness probes
+// armed by ReadIdleTimeout keep a healthy idle connection open. On a legacy
+// connection it is the deadline for reading the next request and for
+// writing its response.
 // If zero or negative, there is no timeout.
 func (x *Config) IdleTimeout() time.Duration {
 	return x.idleTimeout

@@ -61,9 +61,17 @@ const (
 // router is an actor that depending upon the routing
 // strategy route message to its routees.
 type router struct {
-	routingStrategy       RoutingStrategy
-	poolSize              int
-	routeesMap            map[string]*PID
+	routingStrategy RoutingStrategy
+	poolSize        int
+	// routees holds the live routees in a stable order: spawn order, with a
+	// routee that is re-inserted after a restart or a resume appended at the
+	// end. Round-robin indexes this slice, so the rotation is deterministic.
+	routees []*PID
+	// routeesMap indexes the same set as routees by routee ID for lookups.
+	routeesMap map[string]*PID
+	// nextRouteeIndex is the index of the next routee name. It only grows, so a
+	// routee spawned after a removal never reuses the name of a live routee.
+	nextRouteeIndex       int
 	routeesKind           reflect.Type
 	supervisorDirective   routeeSupervisorDirective
 	restartRouteeAttempts uint32
@@ -87,12 +95,42 @@ type router struct {
 
 var _ Actor = (*router)(nil)
 
+// askResult is the outcome of one Ask issued to a routee by a reply-based strategy.
+type askResult struct {
+	resp any
+	err  error
+}
+
+// gather owns one reply-based request (scatter-gather-first or tail-chopping)
+// once the router's turn has returned. It asks the routees from its own
+// goroutine and delivers the first successful reply, or a StatusFailure carrying
+// the original message, to the Broadcast sender. The router therefore never
+// waits for routees and keeps handling other messages meanwhile.
+type gather struct {
+	// router is the owning router; it supplies the time budget, the probing
+	// interval and the logger.
+	router *router
+	// self is the router's PID. Replies are sent through it so the Broadcast
+	// sender sees the router as the sender of the outcome.
+	self *PID
+	// sender is the original Broadcast sender that receives the outcome.
+	sender *PID
+	// noSender issues the asks so routees do not observe the router as sender.
+	noSender *PID
+	// message is the unwrapped payload asked of the routees.
+	message any
+	// ctx is the non-cancellable base context of the router's turn. The asks
+	// derive their deadline from it, so the goroutine lives at most `within`.
+	ctx context.Context
+}
+
 // newRouter creates an instance of router giving the routing strategy and poolSize
 // The poolSize specifies the number of routees to spawn by the router
 func newRouter(poolSize int, routeesKind Actor, logger log.Logger, opts ...RouterOption) *router {
 	router := &router{
 		routingStrategy:     FanOutRouting,
 		poolSize:            poolSize,
+		routees:             make([]*PID, 0, poolSize),
 		routeesMap:          make(map[string]*PID, poolSize),
 		routeesKind:         reflect.TypeOf(routeesKind).Elem(),
 		logger:              logger,
@@ -145,7 +183,7 @@ func (x *router) postStart(ctx *ReceiveContext) {
 		x.logger.Infof("router=%s started", x.name)
 		x.logger.Debugf("router=%s spawning routees=%d", x.name, x.poolSize)
 	}
-	x.spawnRoutees(ctx, 0, x.poolSize)
+	x.spawnRoutees(ctx, x.poolSize)
 	x.rebuildHashRing()
 	ctx.Become(x.broadcast)
 }
@@ -182,17 +220,21 @@ func (x *router) handleAdjustRouterPoolSize(ctx *ReceiveContext) {
 	x.scaleDown(ctx, -delta)
 }
 
+// scaleUp spawns delta new routees. Their names continue from nextRouteeIndex,
+// never from the current pool size, so they cannot collide with a live routee
+// left behind by an earlier removal.
 func (x *router) scaleUp(ctx *ReceiveContext, delta int) {
-	currentSize := len(x.routeesMap)
+	currentSize := len(x.routees)
 	targetSize := currentSize + delta
 	if x.logger.Enabled(log.InfoLevel) {
 		x.logger.Debugf("router=%s scaling up pool=%d to %d", x.name, currentSize, targetSize)
 	}
 	x.poolSize = targetSize
-	x.spawnRoutees(ctx, currentSize, targetSize)
+	x.spawnRoutees(ctx, delta)
 	x.rebuildHashRing()
 }
 
+// scaleDown stops the delta oldest live routees and removes them from the pool.
 func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
 	routees, ok := x.availableRoutees()
 	if !ok {
@@ -216,14 +258,17 @@ func (x *router) scaleDown(ctx *ReceiveContext, delta int) {
 			x.logger.Debugf("stopping routee=%s", routee.ID())
 		}
 		ctx.Stop(routee)
-		delete(x.routeesMap, routee.ID())
+		x.removeRoutee(routee.ID())
 	}
 	x.rebuildHashRing()
 }
 
-func (x *router) spawnRoutees(ctx *ReceiveContext, start, size int) {
-	for i := start; i < size; i++ {
-		routeeName := routeeName(i, x.name)
+// spawnRoutees spawns count routees as children of the router and adds them to
+// the pool. Each takes the next routee name index.
+func (x *router) spawnRoutees(ctx *ReceiveContext, count int) {
+	for range count {
+		routeeName := routeeName(x.nextRouteeIndex, x.name)
+		x.nextRouteeIndex++
 		actor := reflect.New(x.routeesKind).Interface().(Actor)
 		routee := ctx.Spawn(routeeName, actor,
 			asSystem(),
@@ -232,10 +277,35 @@ func (x *router) spawnRoutees(ctx *ReceiveContext, start, size int) {
 			WithSupervisor(
 				supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.EscalateDirective)),
 			))
-		x.routeesMap[routee.ID()] = routee
+		x.addRoutee(routee)
 	}
 }
 
+// addRoutee inserts a routee into the pool, at the end of the routing order.
+// A routee already in the pool is left where it is.
+func (x *router) addRoutee(routee *PID) {
+	if _, ok := x.routeesMap[routee.ID()]; ok {
+		return
+	}
+
+	x.routeesMap[routee.ID()] = routee
+	x.routees = append(x.routees, routee)
+}
+
+// removeRoutee takes the routee with the given ID out of the pool, keeping the
+// order of the remaining routees.
+func (x *router) removeRoutee(id string) {
+	if _, ok := x.routeesMap[id]; !ok {
+		return
+	}
+
+	delete(x.routeesMap, id)
+	x.routees = slices.DeleteFunc(x.routees, func(routee *PID) bool {
+		return routee.ID() == id
+	})
+}
+
+// handleGetRoutees replies with the names of the live routees.
 func (x *router) handleGetRoutees(ctx *ReceiveContext) {
 	routees, _ := x.availableRoutees()
 	names := make([]string, 0, len(routees))
@@ -286,24 +356,30 @@ func (x *router) handleRestartRoutee(ctx *ReceiveContext) {
 	if x.logger.Enabled(log.DebugLevel) {
 		x.logger.Debugf("routee=%s restarted", sender.ID())
 	}
-	x.routeesMap[sender.ID()] = sender
+	x.addRoutee(sender)
+	x.rebuildHashRing()
 }
 
+// handleResumeRoutee reinstates the failing routee and puts it back into the
+// pool, since a broadcast handled while it was suspended has removed it.
 func (x *router) handleResumeRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
 	if x.logger.Enabled(log.DebugLevel) {
 		x.logger.Debugf("resuming routee (%s)...", sender.ID())
 	}
 	ctx.Reinstate(sender)
+	x.addRoutee(sender)
+	x.rebuildHashRing()
 }
 
+// handleStopRoutee stops the failing routee and removes it from the pool.
 func (x *router) handleStopRoutee(ctx *ReceiveContext) {
 	sender := ctx.Sender()
 	if x.logger.Enabled(log.DebugLevel) {
 		x.logger.Debugf("stopping routee=%s", sender.ID())
 	}
 	ctx.Stop(sender)
-	delete(x.routeesMap, sender.ID())
+	x.removeRoutee(sender.ID())
 	x.rebuildHashRing()
 }
 
@@ -344,8 +420,9 @@ func (x *router) handleNoRoutees(ctx *ReceiveContext) {
 //  2. If the router is a plain one, the configured RoutingStrategy determines how the
 //     message is fanned out (round-robin, random, or fan-out).
 //
-// The method keeps the router non-blocking: every Tell happens asynchronously and
-// specialized strategies offload long-running work into goroutines.
+// The method keeps the router non-blocking: every Tell only enqueues into the routee's
+// mailbox, and the reply-based strategies wait for their routees on a goroutine of
+// their own, so Receive returns at once.
 func (x *router) dispatchToRoutees(ctx *ReceiveContext, msg any, routees []*PID) {
 	switch x.kind {
 	case tailChoppingRouter:
@@ -369,16 +446,17 @@ func (x *router) routeByStrategy(ctx *ReceiveContext, msg any, routees []*PID) {
 	case ConsistentHashRouting:
 		x.routeByConsistentHash(ctx, msg, routees)
 	default:
+		// Tell every routee from the router's turn: each Tell only enqueues into the
+		// routee's mailbox, and sending in turn order is what keeps consecutive
+		// broadcasts in order at every routee.
 		sender := ctx.Self()
 		sendCtx := ctx.withoutCancel()
 		for _, routee := range routees {
-			go func() {
-				if err := sender.Tell(sendCtx, routee, msg); err != nil {
-					if x.logger.Enabled(log.WarningLevel) {
-						x.logger.Warn(err)
-					}
+			if err := sender.Tell(sendCtx, routee, msg); err != nil {
+				if x.logger.Enabled(log.WarningLevel) {
+					x.logger.Warn(err)
 				}
-			}()
+			}
 		}
 	}
 }
@@ -414,63 +492,12 @@ func (x *router) routeByConsistentHash(ctx *ReceiveContext, msg any, routees []*
 //  4. Each failure is logged; if every routee errors or the deadline elapses, the router replays a
 //     StatusFailure back to the sender so the workflow can decide how to recover.
 //
-// The method never blocks the router actor: all IO happens in goroutines and outcomes are pushed
-// asynchronously back to the sender, preserving the router's fire-and-forget contract.
+// The method never blocks the router actor: the asks and the wait for their outcome run on a
+// goroutine owned by a gather, and the outcome is pushed asynchronously back to the sender,
+// preserving the router's fire-and-forget contract.
 func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg any, routees []*PID) {
-	logger := ctx.Logger()
-	sender := ctx.Sender()
-	broadcast := ctx.Message().(*Broadcast)
-	within := x.within
-
-	sendTimeout := func() {
-		ctx.Tell(sender, NewStatusFailure(gerrors.ErrRequestTimeout.Error(), broadcast.Message()))
-	}
-
-	noSender := ctx.ActorSystem().NoSender()
-
-	deadlineCtx, cancel := context.WithTimeout(ctx.Context(), within)
-	defer cancel()
-	type askResult struct {
-		resp any
-		err  error
-	}
-
-	results := make(chan askResult, len(routees))
-
-	for _, routee := range routees {
-		go func(to *PID, payload any) {
-			resp, err := noSender.Ask(deadlineCtx, to, payload, within)
-			results <- askResult{resp: resp, err: err}
-		}(routee, msg)
-	}
-
-	pending := len(routees)
-
-	for {
-		select {
-		case <-deadlineCtx.Done():
-			// no need to drain: channel is buffered
-			sendTimeout()
-			return
-
-		case r := <-results:
-			pending--
-			if r.err == nil {
-				// first success wins
-				cancel()
-				ctx.Tell(sender, r.resp)
-				return
-			}
-
-			if logger.Enabled(log.WarningLevel) {
-				logger.Warnf("scatter-gather-first: attempt failed: %v", r.err)
-			}
-			if pending == 0 {
-				sendTimeout()
-				return
-			}
-		}
-	}
+	gather := x.newGather(ctx, msg)
+	go gather.scatterGatherFirst(routees)
 }
 
 // tailChopping implements the Tail-Chopping routing pattern.
@@ -487,28 +514,85 @@ func (x *router) scatterGatherFirst(ctx *ReceiveContext, msg any, routees []*PID
 //     context, shutting down the remaining goroutines. If all routees fail or the deadline expires
 //     before any success, a StatusFailure is reported back.
 //
-// This keeps router behavior asynchronous: the router never blocks, and replies arrive to the
-// sender as ordinary messages rather than Ask responses.
+// This keeps router behavior asynchronous: the probing and the wait run on a goroutine owned
+// by a gather, so the router never blocks, and replies arrive to the sender as ordinary
+// messages rather than Ask responses.
 func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
-	sender := ctx.Sender()
-	broadcast := ctx.Message().(*Broadcast)
-	interval := x.interval
-	within := x.within
+	gather := x.newGather(ctx, msg)
+	go gather.tailChopping(routees)
+}
 
-	sendTimeout := func() {
-		ctx.Tell(sender, NewStatusFailure(gerrors.ErrRequestTimeout.Error(), broadcast.Message()))
+// newGather captures, from the router's turn, everything a reply-based request
+// needs once the turn has returned: the Broadcast sender, the router's own PID,
+// the system's NoSender and a context that outlives the turn. The receive
+// context itself is pooled and must not be touched after Receive returns.
+func (x *router) newGather(ctx *ReceiveContext, msg any) *gather {
+	return &gather{
+		router:   x,
+		self:     ctx.Self(),
+		sender:   ctx.Sender(),
+		noSender: ctx.ActorSystem().NoSender(),
+		message:  msg,
+		ctx:      ctx.withoutCancel(),
 	}
+}
 
-	shuffled := reshuffleRoutees(routees)
-	noSender := ctx.ActorSystem().NoSender()
-
-	deadlineCtx, cancel := context.WithTimeout(ctx.Context(), within)
+// scatterGatherFirst asks every routee at once and relays the first successful
+// reply; it fails the request when every ask failed or the time budget elapsed.
+func (g *gather) scatterGatherFirst(routees []*PID) {
+	within := g.router.within
+	deadlineCtx, cancel := context.WithTimeout(g.ctx, within)
 	defer cancel()
 
-	type askResult struct {
-		resp any
-		err  error
+	results := make(chan askResult, len(routees))
+
+	for _, routee := range routees {
+		go func(to *PID) {
+			resp, err := g.noSender.Ask(deadlineCtx, to, g.message, within)
+			results <- askResult{resp: resp, err: err}
+		}(routee)
 	}
+
+	pending := len(routees)
+
+	for {
+		select {
+		case <-deadlineCtx.Done():
+			// no need to drain: channel is buffered
+			g.fail()
+			return
+
+		case r := <-results:
+			pending--
+			if r.err == nil {
+				// first success wins
+				cancel()
+				g.reply(r.resp)
+				return
+			}
+
+			if g.router.logger.Enabled(log.WarningLevel) {
+				g.router.logger.Warnf("scatter-gather-first: attempt failed: %v", r.err)
+			}
+
+			if pending == 0 {
+				g.fail()
+				return
+			}
+		}
+	}
+}
+
+// tailChopping asks the routees one at a time in random order, moving to the
+// next one every interval, and relays the first successful reply; it fails the
+// request when every attempt failed or the time budget elapsed.
+func (g *gather) tailChopping(routees []*PID) {
+	interval := g.router.interval
+	within := g.router.within
+	shuffled := reshuffleRoutees(routees)
+
+	deadlineCtx, cancel := context.WithTimeout(g.ctx, within)
+	defer cancel()
 
 	results := make(chan askResult, len(shuffled))
 
@@ -524,7 +608,7 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 		}
 
 		go func(to *PID, timeout time.Duration) {
-			resp, err := noSender.Ask(deadlineCtx, to, msg, timeout)
+			resp, err := g.noSender.Ask(deadlineCtx, to, g.message, timeout)
 			results <- askResult{resp: resp, err: err}
 		}(routee, remaining)
 	}
@@ -545,7 +629,7 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 		select {
 		case <-deadlineCtx.Done():
 			// no need to drain: channel is buffered
-			sendTimeout()
+			g.fail()
 			return
 
 		case r := <-results:
@@ -553,15 +637,16 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 			if r.err == nil {
 				// first success wins
 				cancel()
-				ctx.Tell(sender, r.resp)
+				g.reply(r.resp)
 				return
 			}
 
-			if x.logger.Enabled(log.WarningLevel) {
-				x.logger.Warnf("tail-chopping: attempt failed: %v", r.err)
+			if g.router.logger.Enabled(log.WarningLevel) {
+				g.router.logger.Warnf("tail-chopping: attempt failed: %v", r.err)
 			}
+
 			if pending == 0 && next >= len(shuffled) {
-				sendTimeout()
+				g.fail()
 				return
 			}
 
@@ -583,6 +668,22 @@ func (x *router) tailChopping(ctx *ReceiveContext, msg any, routees []*PID) {
 	}
 }
 
+// reply delivers the winning response to the Broadcast sender as a message from
+// the router. A sender that has gone meanwhile is logged, not retried.
+func (g *gather) reply(resp any) {
+	if err := g.self.Tell(g.ctx, g.sender, resp); err != nil {
+		if g.router.logger.Enabled(log.WarningLevel) {
+			g.router.logger.Warnf("router=%s failed to deliver reply to %s: %v", g.router.name, g.sender.ID(), err)
+		}
+	}
+}
+
+// fail tells the Broadcast sender that no routee answered in time, with a
+// StatusFailure that carries the original message.
+func (g *gather) fail() {
+	g.reply(NewStatusFailure(gerrors.ErrRequestTimeout.Error(), g.message))
+}
+
 // rebuildHashRing populates the consistent hash ring from the current routee
 // set. It is a no-op when the router does not use ConsistentHashRouting.
 func (x *router) rebuildHashRing() {
@@ -594,9 +695,9 @@ func (x *router) rebuildHashRing() {
 		x.ring = newConsistentHashRing(x.hasher, x.virtualNodes)
 	}
 
-	members := make([]string, 0, len(x.routeesMap))
-	for id := range x.routeesMap {
-		members = append(members, id)
+	members := make([]string, 0, len(x.routees))
+	for _, routee := range x.routees {
+		members = append(members, routee.ID())
 	}
 	x.ring.set(members)
 }
@@ -606,15 +707,34 @@ func routeeName(index int, routerName string) string {
 	return fmt.Sprintf("%s%s%d", routerName, routeeNamePrefix, index)
 }
 
+// availableRoutees returns a snapshot of the live routees in routing order and
+// whether there is at least one. A routee that is no longer running is removed
+// from the pool and is not returned, so no message is routed to it.
 func (x *router) availableRoutees() ([]*PID, bool) {
-	routees := make([]*PID, 0, x.poolSize)
-	for _, routee := range x.routeesMap {
-		if !routee.IsRunning() {
-			delete(x.routeesMap, routee.ID())
+	live := make([]*PID, 0, len(x.routees))
+	removed := false
+
+	for _, routee := range x.routees {
+		if routee.IsRunning() {
+			live = append(live, routee)
+			continue
 		}
-		routees = append(routees, routee)
+
+		removed = true
 	}
-	return routees, len(routees) > 0
+
+	if removed {
+		x.routees = slices.Clone(live)
+		x.routeesMap = make(map[string]*PID, len(live))
+
+		for _, routee := range live {
+			x.routeesMap[routee.ID()] = routee
+		}
+
+		x.rebuildHashRing()
+	}
+
+	return live, len(live) > 0
 }
 
 // validate checks if the router is properly configured

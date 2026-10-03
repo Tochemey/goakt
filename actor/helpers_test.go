@@ -2465,6 +2465,21 @@ func awaitFailure(t *testing.T, subscriber eventstream.Subscriber) *ReliableDeli
 	return failure
 }
 
+// countFailures drains the events the subscriber holds and returns how many
+// are terminal reliable-delivery failures. Publication is synchronous, so a
+// call made after the publisher returned sees every event it published.
+func countFailures(subscriber eventstream.Subscriber) int {
+	total := 0
+
+	for message := range subscriber.Iterator() {
+		if _, ok := message.Payload().(*ReliableDeliveryFailed); ok {
+			total++
+		}
+	}
+
+	return total
+}
+
 // reliableProtocolPIDs creates distinct local PIDs for authorization tests.
 func reliableProtocolPIDs() (endpoint, controller, other *PID) {
 	return reliableProtocolPID("endpoint", 9000),
@@ -2930,6 +2945,10 @@ func newTestReplicator() *replicatorActor {
 	r.watchers = make(map[string][]*PID)
 	r.tombstones = make(map[string]*tombstone)
 	r.versions = make(map[string]uint64)
+	r.hashes = make(map[string]uint64)
+	r.pendingDeltas = make(map[string]*pendingDelta)
+	r.pendingTombstones = make(map[string]*pendingTombstone)
+	r.dataCenterAccepted = make(map[string]uint64)
 	return r
 }
 
@@ -2976,6 +2995,77 @@ func getORSet(t *testing.T, repl *PID, key crdt.Key) *crdt.ORSet {
 		return nil
 	}
 	return data.(*crdt.ORSet)
+}
+
+// probeIsQuiet reports that the probe has received nothing so far: it sends
+// the probe a marker and expects the marker to be the next message out. The
+// probe's mailbox is first-in first-out, so anything sent to it earlier would
+// come out first.
+func probeIsQuiet(t *testing.T, pid *PID, probe *MockMessageProbe) {
+	t.Helper()
+	marker := new(testpb.TestSend)
+	require.NoError(t, Tell(context.TODO(), pid, marker))
+
+	select {
+	case message := <-probe.received:
+		require.Same(t, marker, message, "expected nothing before the marker, got %T", message)
+	case <-time.After(3 * time.Second):
+		t.Fatal("the probe did not hand the marker over")
+	}
+}
+
+// spawnReplicatorPair starts two replicators in one actor system, with their
+// schedules off because the schedule references are per system, and returns
+// their PIDs and actors. The system has no TopicActor, so the two exchange
+// nothing but what a test sends between them.
+func spawnReplicatorPair(t *testing.T, sys ActorSystem, opts ...crdt.Option) (*PID, *PID, *replicatorActor, *replicatorActor) {
+	t.Helper()
+	ctx := context.TODO()
+
+	opts = append([]crdt.Option{crdt.WithAntiEntropyInterval(0), crdt.WithPruneInterval(0)}, opts...)
+	sys.(*actorSystem).extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: crdt.NewConfig(opts...)})
+
+	actorA, actorB := newReplicatorActor(), newReplicatorActor()
+	replA, err := sys.Spawn(ctx, "replicator-a", actorA, WithLongLived())
+	require.NoError(t, err)
+	replB, err := sys.Spawn(ctx, "replicator-b", actorB, WithLongLived())
+	require.NoError(t, err)
+	return replA, replB, actorA, actorB
+}
+
+// pullFrom runs one anti-entropy round by hand: from sends its digest to to,
+// which answers with what from needs. The two reads that follow are answered
+// once the digest and the answer have been processed.
+func pullFrom(t *testing.T, from, to *PID) {
+	t.Helper()
+	ctx := context.TODO()
+
+	resp, err := Ask(ctx, from, &dataCenterDigestRequest{}, time.Second)
+	require.NoError(t, err)
+	require.NoError(t, from.Tell(ctx, to, resp))
+
+	for _, repl := range []*PID{to, from} {
+		_, err = Ask(ctx, repl, &crdt.Get{Key: crdt.GCounterKey("barrier")}, time.Second)
+		require.NoError(t, err)
+	}
+}
+
+// replicatorDigestEntry asks the replicator for its digest and returns the
+// entry of the given key. The answer also proves that every message sent to
+// the replicator before the call has been processed.
+func replicatorDigestEntry(t *testing.T, repl *PID, keyID string) *internalpb.CRDTDigestEntry {
+	t.Helper()
+	resp, err := Ask(context.TODO(), repl, &dataCenterDigestRequest{}, time.Second)
+	require.NoError(t, err)
+
+	for _, entry := range resp.(*internalpb.CRDTDigest).GetEntries() {
+		if entry.GetKey().GetId() == keyID {
+			return entry
+		}
+	}
+
+	t.Fatalf("no digest entry for key=%s", keyID)
+	return nil
 }
 
 // spawnTestReplicatorWithDC registers the CRDT config extension with DC identity
@@ -3082,6 +3172,36 @@ func spawnReplicatorWithDCController(
 	impl.clusterEnabled.Store(false)
 
 	return sys, repl, replActor, clusterMock, remotingMock
+}
+
+// replaceDataCenterRecords gives the actor system a datacenter controller
+// that lists the given records, as a control plane whose records changed
+// would after a refresh. The controller spawnReplicatorWithDCController
+// starts reads its records once, so a test that changes them swaps it.
+func replaceDataCenterRecords(t *testing.T, sys ActorSystem, records ...datacenter.DataCenterRecord) {
+	t.Helper()
+
+	dcConfig := datacenter.NewConfig()
+	dcConfig.DataCenter = datacenter.DataCenter{Name: "local", Region: "r", Zone: "z"}
+	dcConfig.MaxCacheStaleness = 5 * time.Second
+	dcConfig.CacheRefreshInterval = 500 * time.Millisecond
+	dcConfig.ControlPlane = &MockControlPlane{listActive: remoteRecords(records)}
+
+	controller, err := datacentercontroller.NewController(dcConfig, []string{"127.0.0.1:8080"})
+	require.NoError(t, err)
+
+	startCtx, cancel := context.WithTimeout(context.TODO(), 2*time.Second)
+	err = controller.Start(startCtx)
+	cancel()
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), time.Second)
+		_ = controller.Stop(stopCtx)
+		stopCancel()
+	})
+
+	sys.(*actorSystem).dataCenterController = controller
 }
 
 // remoteRecords returns a ListActive function that produces the given records.

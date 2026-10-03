@@ -44,15 +44,18 @@ if m != nil {
 `pid.Metric(ctx)` returns an `*ActorMetric` struct with actor-level statistics. Returns `nil` when the actor is not
 running. For remote actors, metrics are fetched via remoting; the same fields are available.
 
-- **ProcessedCount**: Type: `uint64`. Description: Cumulative messages processed (excludes PostStart; excludes
-  stashed/dropped).
+- **ProcessedCount**: Type: `uint64`. Description: Messages handed to the handler since the last restart (excludes
+  PostStart; a message is counted when its handling starts, failed ones included).
 - **ChidrenCount**: Type: `uint64`. Description: Number of direct child actors.
-- **RestartCount**: Type: `uint64`. Description: Cumulative restarts (supervision).
-- **Uptime**: Type: `int64`. Description: Seconds since actor started (resets on restart).
-- **LatestProcessedDuration**: Type: `time.Duration`. Description: Duration of the most recent message processing.
+- **RestartCount**: Type: `uint64`. Description: Cumulative restarts, by supervision or by `Restart`/`ReSpawn`.
+- **Uptime**: Type: `int64`. Description: Seconds since the actor, or its latest incarnation, started.
+- **LatestProcessedDuration**: Type: `time.Duration`. Description: Time elapsed since the most recent message started
+  processing (how long the actor has been idle).
 - **StashSize**: Type: `uint64`. Description: Current number of stashed messages.
-- **DeadlettersCount**: Type: `uint64`. Description: Messages sent to dead letters by this actor.
-- **FailureCount**: Type: `uint64`. Description: Cumulative failures (panics, errors triggering supervision).
+- **DeadlettersCount**: Type: `uint64`. Description: Messages addressed to this actor that went to dead letters,
+  including those it rejected with `Unhandled`.
+- **FailureCount**: Type: `uint64`. Description: Cumulative failures the supervisor acted on (suspensions and resumed
+  failures); survives restarts.
 - **ReinstateCount**: Type: `uint64`. Description: Cumulative reinstatements (suspended → resumed).
 - **UnhandledCount**: Type: `uint64`. Description: Cumulative messages the actor rejected with
   `ReceiveContext.Unhandled`.
@@ -166,9 +169,9 @@ processed its `PostStart` message; suspended, stopping, and passivating actors a
 
 - **actor.children.count**: Type: Int64ObservableGauge. Description: Current child actors.
 - **actor.stash.size**: Type: Int64ObservableGauge. Description: Messages stashed.
-- **actor.deadletters.count**: Type: Int64ObservableCounter. Description: Dead letters sent by this actor.
+- **actor.deadletters.count**: Type: Int64ObservableCounter. Description: Dead letters addressed to this actor, per message type.
 - **actor.restart.count**: Type: Int64ObservableCounter. Description: Restarts.
-- **actor.last.received.duration**: Type: Int64ObservableGauge (ms). Description: Duration of last message processing.
+- **actor.last.received.duration**: Type: Int64ObservableGauge (ms). Description: Time since the last message started processing.
 - **actor.processed.count**: Type: Int64ObservableCounter. Description: Messages processed.
 - **actor.uptime**: Type: Int64ObservableGauge (s). Description: Actor uptime in seconds.
 - **actor.failure.count**: Type: Int64ObservableCounter. Description: Failures.
