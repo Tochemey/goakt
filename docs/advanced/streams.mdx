@@ -629,23 +629,36 @@ sf := stream.GroupBy(src, 100, keyFn) // up to 100 distinct keys
 
 ### Per-substream backpressure
 
-Each substream has an independent in-flight cap (default `256` elements). When a substream is at capacity, the
-configured `OverflowStrategy` decides what happens to new elements with that key. Substream feed sources acknowledge
-consumption to the splitter in batches (matching the `flowActor` watermark refill at `perKeyBuffer/4`), so per-key
-memory is bounded without per-element protocol overhead.
+The merged stream honors the demand of its downstream. Each substream runs at most one demand window (224 elements)
+ahead of what the downstream has taken, and the splitter stops taking elements from the source while its merged buffer
+holds a window. A slow downstream therefore holds the source back, whatever the overflow strategy, and nothing is dropped
+for it.
+
+Each substream also has an independent in-flight cap (default `256` elements). When a substream is slower than the
+source feeds it and reaches the cap, the configured `OverflowStrategy` decides what happens to new elements with that
+key. Substream feed sources acknowledge consumption to the splitter in batches (matching the `flowActor` watermark
+refill at `perKeyBuffer/4`), so per-key memory is bounded without per-element protocol overhead.
 
 ```go Per-substream backpressure
 sf := stream.GroupBy(src, 0, keyFn).
     WithSubstreamBuffer(64, stream.FailSource)
 ```
 
-- **DropTail** (default): Discard the newest element when the substream is at capacity.
-- **DropHead** / **BackpressureSource**: Currently collapse to drop-newest: `DropHead` would break per-key ordering and
-  `BackpressureSource` would deadlock the splitter on inbound.
+- **BackpressureSource** (default): Hold the source back until the substream has room. Nothing is lost, but the other
+  substreams wait too, because the source is one ordered stream: one slow key stalls the rest.
+- **DropTail** / **DropHead**: Discard the newest element when the substream is at capacity. `DropHead` is treated as
+  drop-newest, because dropping the oldest would need a queue per key.
 - **FailSource**: Terminate the stream with `ErrSubstreamOverflow`.
 
-Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For tighter or more elaborate
-bounds (e.g. time-based windowing per key), compose a `Buffer` or `Throttle` flow inside the per-substream chain.
+<Note>
+  The strategy applies only while the downstream asks for elements, so a slow downstream never causes a drop or a
+  failure. A key that carries most of the elements can still reach the cap in bursts while the downstream keeps up: the
+  source feeds one substream faster than the substream hands its elements on. Under `DropTail` such a key loses some
+  elements and under `FailSource` the stream can fail. Keep the default `BackpressureSource` to lose nothing.
+</Note>
+
+Drops are reported through the existing `OnDrop` hook and the `droppedElements` metric. For more elaborate pacing per
+key (e.g. time-based), compose a `Throttle` flow inside the per-substream chain.
 
 ### Per-substream error strategy
 
@@ -901,12 +914,13 @@ stream.From(stream.FromChannel(ch)).
 
 - **DropHead**: Discard the oldest buffered element.
 - **DropTail** (default): Discard the newest incoming element.
-- **BackpressureSource**: Block the producer until space is available.
+- **BackpressureSource**: Hold the producer back until space is available.
 - **FailSource**: Terminate the stream with an error.
 
 <Note>
-  Only substream buffers act on the strategy today (see `SubFlow.WithSubstreamBuffer`). Linear stages never overflow:
-  they are bounded by demand, so `Buffer` and `Source.WithOverflowStrategy` record the strategy but do not apply it.
+  Only substream buffers act on the strategy today (see `SubFlow.WithSubstreamBuffer`), and they default to
+  `BackpressureSource`. Linear stages never overflow: they are bounded by demand, so `Buffer` and
+  `Source.WithOverflowStrategy` record the strategy but do not apply it.
 </Note>
 
 ## Stage fusion

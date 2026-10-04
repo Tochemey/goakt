@@ -26,6 +26,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,9 +38,27 @@ import (
 	natsdisc "github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/stream"
+)
+
+const (
+	// slowDownstreamTotal is the length of the sources of the backpressure
+	// tests: long enough that a stream that ignores demand pulls far past
+	// heldBackLimit.
+	slowDownstreamTotal = 20_000
+	// heldBackLimit is the most elements a source held back by the merged
+	// stream may emit: one window per stage of each open substream, the
+	// merged window and the elements waiting in the splitter.
+	heldBackLimit = 5_000
+	// heldBackPeriod is how long a test watches a held back source.
+	heldBackPeriod = time.Second
+	// demandWindow is the demand a stage requests at once
+	// (defaultInitialDemand), so the most elements a substream runs ahead of
+	// what the merged stream has taken.
+	demandWindow = 224
 )
 
 // newTestSystem creates and starts a fresh ActorSystem for a test,
@@ -197,4 +217,139 @@ func requireNoStreamActorsLeft(t *testing.T, sys actor.ActorSystem) {
 
 		return true
 	}, 5*time.Second, 10*time.Millisecond, "stream actors still running")
+}
+
+// countingSource returns a source of the ints 0 to n-1 that adds every
+// element it emits to pulled, so a test can tell how far the source has been
+// pulled.
+func countingSource(n int, pulled *atomic.Int64) stream.Source[int] {
+	return stream.Via(stream.Range(0, int64(n)), stream.Map(func(v int64) int {
+		pulled.Add(1)
+		return int(v)
+	}))
+}
+
+// gatedSink stands for a downstream that stops asking for elements: it
+// records the elements it receives, in order, and blocks on the first one
+// until release is called.
+type gatedSink[T any] struct {
+	mu    sync.Mutex
+	items []T
+	// first is closed when the first element arrives.
+	first chan types.Unit
+	// gate is closed by release; the first element waits on it.
+	gate chan types.Unit
+}
+
+// newGatedSink returns a gatedSink that has received nothing.
+func newGatedSink[T any]() *gatedSink[T] {
+	return &gatedSink[T]{first: make(chan types.Unit), gate: make(chan types.Unit)}
+}
+
+// sink returns the stream sink backed by x.
+func (x *gatedSink[T]) sink() stream.Sink[T] {
+	return stream.ForEach(func(v T) {
+		x.mu.Lock()
+		x.items = append(x.items, v)
+		first := len(x.items) == 1
+		x.mu.Unlock()
+
+		if first {
+			close(x.first)
+			<-x.gate
+		}
+	})
+}
+
+// waitFirst waits until the first element has arrived.
+func (x *gatedSink[T]) waitFirst(t *testing.T) {
+	t.Helper()
+	select {
+	case <-x.first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sink received no element")
+	}
+}
+
+// release unblocks the sink, which then takes every element as it comes.
+func (x *gatedSink[T]) release() {
+	close(x.gate)
+}
+
+// received returns a copy of the elements received so far, in order.
+func (x *gatedSink[T]) received() []T {
+	x.mu.Lock()
+	items := append([]T(nil), x.items...)
+	x.mu.Unlock()
+	return items
+}
+
+// requireOrderedPerKey verifies that the elements of every key, as keyOf maps
+// them, arrived in increasing order.
+func requireOrderedPerKey(t *testing.T, items []int, keyOf func(int) int) {
+	t.Helper()
+	last := make(map[int]int)
+	for _, item := range items {
+		key := keyOf(item)
+		if previous, seen := last[key]; seen {
+			require.Greater(t, item, previous, "key %d out of order", key)
+		}
+
+		last[key] = item
+	}
+}
+
+// waitStream waits for handle to end and fails the test after timeout.
+func waitStream(t *testing.T, handle stream.StreamHandle, timeout time.Duration) {
+	t.Helper()
+	select {
+	case <-handle.Done():
+	case <-time.After(timeout):
+		t.Fatal("stream did not end in time")
+	}
+}
+
+// newGate returns a channel that blocks its readers until open is called.
+// The test's cleanup opens it as well, so a stage blocked on it does not
+// hold a dispatcher worker while the actor system stops after a failure.
+func newGate(t *testing.T) (<-chan types.Unit, func()) {
+	t.Helper()
+	gate := make(chan types.Unit)
+	var once sync.Once
+	open := func() { once.Do(func() { close(gate) }) }
+	t.Cleanup(open)
+	return gate, open
+}
+
+// requireHeldBack verifies that the source counted by pulled stays below
+// heldBackLimit for heldBackPeriod.
+func requireHeldBack(t *testing.T, pulled *atomic.Int64) {
+	t.Helper()
+	require.Never(t, func() bool { return pulled.Load() > heldBackLimit }, heldBackPeriod, 10*time.Millisecond,
+		"the source was not held back")
+}
+
+// holdKey returns a per-substream flow that blocks on the elements of key
+// until gate is closed, which makes that substream slower than its feed.
+func holdKey(gate <-chan types.Unit, key int) stream.Flow[int, int] {
+	return stream.Map(func(n int) int {
+		if n%4 == key {
+			<-gate
+		}
+
+		return n
+	})
+}
+
+// failKeyOnRelease returns a per-substream flow that blocks on the first
+// element of key until gate is closed and then fails on it.
+func failKeyOnRelease(gate <-chan types.Unit, key int) stream.Flow[int, int] {
+	return stream.TryMap(func(n int) (int, error) {
+		if n%4 == key {
+			<-gate
+			return 0, errInjected
+		}
+
+		return n, nil
+	})
 }

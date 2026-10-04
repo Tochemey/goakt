@@ -495,3 +495,348 @@ func TestSubFlow_UpstreamMaterializationFailure_FailsTheStream(t *testing.T) {
 
 	require.ErrorIs(t, handle.Err(), stream.ErrInvalidGraph)
 }
+
+// TestSubFlow_SlowDownstream_HoldsUpstreamBack verifies that a downstream
+// that stops asking for elements holds the source back under every overflow
+// strategy, and that every element is accounted for, in order within its
+// key, once the downstream asks again. It covers keys of equal share and keys
+// of which one carries (almost) every element, which cannot fill the merged
+// buffer on its own.
+//
+// A key that carries most of the elements also reaches its cap in bursts
+// while the downstream keeps up, so DropTail drops some of its elements and
+// FailSource can fail before the downstream stops: those cases check that
+// what was not delivered was counted as dropped, and FailSource runs with
+// keys of equal share only.
+func TestSubFlow_SlowDownstream_HoldsUpstreamBack(t *testing.T) {
+	fourKeys := func(n int) int { return n % 4 }
+	oneKey := func(int) int { return 0 }
+	skewedKeys := func(n int) int {
+		if n%100 == 0 {
+			return 1
+		}
+
+		return 0
+	}
+
+	backpressure := func(sf stream.SubFlow[int, int]) stream.SubFlow[int, int] { return sf }
+	dropTail := func(sf stream.SubFlow[int, int]) stream.SubFlow[int, int] {
+		return sf.WithSubstreamBuffer(256, stream.DropTail)
+	}
+	failSource := func(sf stream.SubFlow[int, int]) stream.SubFlow[int, int] {
+		return sf.WithSubstreamBuffer(256, stream.FailSource)
+	}
+
+	cases := []struct {
+		name      string
+		configure func(stream.SubFlow[int, int]) stream.SubFlow[int, int]
+		keyOf     func(int) int
+		// lossless tells that no element may be dropped.
+		lossless bool
+	}{
+		{name: "default/four keys", configure: backpressure, keyOf: fourKeys, lossless: true},
+		{name: "default/one key", configure: backpressure, keyOf: oneKey, lossless: true},
+		{name: "default/skewed keys", configure: backpressure, keyOf: skewedKeys, lossless: true},
+		{name: "DropTail/four keys", configure: dropTail, keyOf: fourKeys, lossless: true},
+		{name: "DropTail/one key", configure: dropTail, keyOf: oneKey},
+		{name: "DropTail/skewed keys", configure: dropTail, keyOf: skewedKeys},
+		{name: "FailSource/four keys", configure: failSource, keyOf: fourKeys, lossless: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sys := newTestSystem(t)
+
+			var pulled atomic.Int64
+			sf := tc.configure(stream.GroupBy(countingSource(slowDownstreamTotal, &pulled), 0, tc.keyOf))
+			sink := newGatedSink[int]()
+			handle, err := stream.From(stream.MergeSubstreams(sf)).To(sink.sink()).Run(context.Background(), sys)
+			require.NoError(t, err)
+
+			sink.waitFirst(t)
+			requireHeldBack(t, &pulled)
+
+			sink.release()
+			waitStream(t, handle, 30*time.Second)
+			require.NoError(t, handle.Err())
+
+			got := sink.received()
+			requireOrderedPerKey(t, got, tc.keyOf)
+
+			dropped := int(handle.Metrics().DroppedElements)
+			if tc.lossless {
+				require.Zero(t, dropped)
+			}
+
+			require.Equal(t, slowDownstreamTotal, len(got)+dropped, "an element was neither delivered nor counted as dropped")
+		})
+	}
+}
+
+// TestSubFlow_SlowDownstream_HoldsSplitUpstreamBack verifies that short
+// SplitAfter substreams do not let a stopped downstream pull the source or
+// open substreams without bound.
+func TestSubFlow_SlowDownstream_HoldsSplitUpstreamBack(t *testing.T) {
+	sys := newTestSystem(t)
+
+	var pulled atomic.Int64
+	sf := stream.SplitAfter(countingSource(slowDownstreamTotal, &pulled), func(n int) bool { return n%10 == 9 })
+	sink := newGatedSink[int]()
+	handle, err := stream.From(stream.MergeSubstreams(sf)).To(sink.sink()).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	sink.waitFirst(t)
+	requireHeldBack(t, &pulled)
+	require.Less(t, streamActorCount(t, sys), 100, "substreams were opened without bound")
+
+	sink.release()
+	waitStream(t, handle, 30*time.Second)
+	require.NoError(t, handle.Err())
+
+	// Each substream is ten consecutive elements, kept in order.
+	got := sink.received()
+	require.Len(t, got, slowDownstreamTotal)
+	requireOrderedPerKey(t, got, func(n int) int { return n / 10 })
+}
+
+// TestSubFlow_SlowSubstream_DropTail verifies that under DropTail a substream
+// slower than its feed does not hold the source back: its new elements are
+// dropped and counted, and every other element is delivered.
+func TestSubFlow_SlowSubstream_DropTail(t *testing.T) {
+	sys := newTestSystem(t)
+
+	const total = 4_000
+	gate, openGate := newGate(t)
+	var pulled atomic.Int64
+	sf := stream.GroupBy(countingSource(total, &pulled), 0, func(n int) int { return n % 4 }).
+		WithSubstreamBuffer(16, stream.DropTail)
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(stream.MergeSubstreams(stream.SubFlowVia(sf, holdKey(gate, 0)))).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	// The whole source is pulled while the slow substream is still held.
+	require.Eventually(t, func() bool { return pulled.Load() == total }, 10*time.Second, 10*time.Millisecond)
+
+	openGate()
+	waitStream(t, handle, 10*time.Second)
+	require.NoError(t, handle.Err())
+
+	slowDelivered := 0
+	for _, n := range collector.Items() {
+		if n%4 == 0 {
+			slowDelivered++
+		}
+	}
+
+	dropped := int(handle.Metrics().DroppedElements)
+	require.Less(t, slowDelivered, total/4, "the slow substream lost nothing")
+	require.Equal(t, total, len(collector.Items())+dropped, "an element was neither delivered nor counted as dropped")
+}
+
+// TestSubFlow_SlowSubstream_FailSource verifies that under FailSource a
+// substream slower than its feed fails the stream with ErrSubstreamOverflow.
+func TestSubFlow_SlowSubstream_FailSource(t *testing.T) {
+	sys := newTestSystem(t)
+
+	gate, _ := newGate(t)
+
+	var pulled atomic.Int64
+	sf := stream.GroupBy(countingSource(4_000, &pulled), 0, func(n int) int { return n % 4 }).
+		WithSubstreamBuffer(16, stream.FailSource)
+	handle, err := stream.From(stream.MergeSubstreams(stream.SubFlowVia(sf, holdKey(gate, 0)))).To(stream.Ignore[int]()).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	waitStream(t, handle, 10*time.Second)
+	require.ErrorIs(t, handle.Err(), stream.ErrSubstreamOverflow)
+}
+
+// TestSubFlow_SlowSubstream_Backpressure verifies that under the default
+// BackpressureSource a substream slower than its feed holds the source back
+// and loses nothing.
+func TestSubFlow_SlowSubstream_Backpressure(t *testing.T) {
+	sys := newTestSystem(t)
+
+	gate, openGate := newGate(t)
+	var pulled atomic.Int64
+	sf := stream.GroupBy(countingSource(slowDownstreamTotal, &pulled), 0, func(n int) int { return n % 4 })
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(stream.MergeSubstreams(stream.SubFlowVia(sf, holdKey(gate, 0)))).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	requireHeldBack(t, &pulled)
+
+	openGate()
+	waitStream(t, handle, 30*time.Second)
+	require.NoError(t, handle.Err())
+	require.Zero(t, handle.Metrics().DroppedElements)
+
+	got := collector.Items()
+	require.Len(t, got, slowDownstreamTotal)
+	requireOrderedPerKey(t, got, func(n int) int { return n % 4 })
+}
+
+// TestSubFlow_Backpressure_UpstreamEndsWhileElementsWait verifies that a
+// stream whose upstream completes while elements still wait in the splitter
+// delivers them all before it completes.
+func TestSubFlow_Backpressure_UpstreamEndsWhileElementsWait(t *testing.T) {
+	sys := newTestSystem(t)
+
+	values := make([]int, 200)
+	for i := range values {
+		values[i] = i
+	}
+
+	sf := stream.GroupBy(stream.Of(values...), 0, func(n int) int { return n % 2 }).
+		WithSubstreamBuffer(1, stream.BackpressureSource)
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(stream.MergeSubstreams(sf)).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	waitStream(t, handle, 10*time.Second)
+	require.NoError(t, handle.Err())
+
+	got := collector.Items()
+	require.Len(t, got, len(values))
+	requireOrderedPerKey(t, got, func(n int) int { return n % 2 })
+}
+
+// TestSubFlow_Backpressure_SplitBoundaries verifies that SplitWhen and
+// SplitAfter keep their substream boundaries when elements wait in the
+// splitter, and run the predicate at most once per element.
+func TestSubFlow_Backpressure_SplitBoundaries(t *testing.T) {
+	// The input and its substreams are those of the SplitWhen and SplitAfter
+	// tests above; each substream counts its elements with a Scan.
+	input := []int{1, 2, 0, 3, 4, 0, 5}
+	splits := []struct {
+		name  string
+		split func(stream.Source[int], func(int) bool) stream.SubFlow[int, int]
+		want  []int
+		// calls is the number of predicate calls: SplitWhen does not consult
+		// the predicate for the first element, which always starts
+		// substream 0.
+		calls int
+	}{
+		{name: "SplitWhen", split: stream.SplitWhen[int], want: []int{1, 1, 1, 2, 2, 2, 3}, calls: len(input) - 1},
+		{name: "SplitAfter", split: stream.SplitAfter[int], want: []int{1, 1, 1, 2, 2, 3, 3}, calls: len(input)},
+	}
+
+	for _, split := range splits {
+		t.Run(split.name, func(t *testing.T) {
+			sys := newTestSystem(t)
+
+			var calls atomic.Int64
+			sf := split.split(stream.Of(input...), func(n int) bool {
+				calls.Add(1)
+				return n == 0
+			}).WithSubstreamBuffer(1, stream.BackpressureSource)
+
+			counted := stream.SubFlowVia(sf, stream.Scan(0, func(acc int, _ int) int { return acc + 1 }))
+			collector, sink := stream.Collect[int]()
+			handle, err := stream.From(stream.MergeSubstreams(counted)).To(sink).Run(context.Background(), sys)
+			require.NoError(t, err)
+
+			waitStream(t, handle, 5*time.Second)
+			require.NoError(t, handle.Err())
+
+			got := collector.Items()
+			sort.Ints(got)
+			require.Equal(t, split.want, got)
+			require.EqualValues(t, split.calls, calls.Load())
+		})
+	}
+}
+
+// TestSubFlow_Backpressure_DropWhileElementsWait verifies that under
+// SubstreamDrop the elements of a failed key that waited in the splitter are
+// dropped and counted, while the other keys deliver all of theirs.
+func TestSubFlow_Backpressure_DropWhileElementsWait(t *testing.T) {
+	sys := newTestSystem(t)
+
+	const total = 2_000
+	gate, openGate := newGate(t)
+	var pulled atomic.Int64
+	sf := stream.GroupBy(countingSource(total, &pulled), 0, func(n int) int { return n % 4 }).
+		WithSubstreamBuffer(4, stream.BackpressureSource).
+		WithErrorStrategy(stream.SubstreamDrop)
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(stream.MergeSubstreams(stream.SubFlowVia(sf, failKeyOnRelease(gate, 0)))).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	// The held key stalls the source, so elements wait in the splitter.
+	require.Never(t, func() bool { return pulled.Load() == total }, 200*time.Millisecond, 10*time.Millisecond)
+
+	openGate()
+	waitStream(t, handle, 10*time.Second)
+	require.NoError(t, handle.Err())
+
+	got := collector.Items()
+	require.Len(t, got, total*3/4)
+	for _, n := range got {
+		require.NotZero(t, n%4, "an element of the failed key was delivered")
+	}
+
+	require.Positive(t, handle.Metrics().DroppedElements, "the waiting elements were not counted as dropped")
+}
+
+// TestSubFlow_Backpressure_RestartWhileElementsWait verifies that under
+// SubstreamRestart the elements that waited for a failed key start a new
+// substream, which reuses the failed one's input slot and carries more than
+// one window: the merged buffer acknowledges its elements to the new sink.
+func TestSubFlow_Backpressure_RestartWhileElementsWait(t *testing.T) {
+	sys := newTestSystem(t)
+
+	const total = 2_000
+	gate, openGate := newGate(t)
+	var pulled atomic.Int64
+	// A single key, so every element goes to the substream that fails and,
+	// once it is forgotten, to the one that replaces it.
+	sf := stream.GroupBy(countingSource(total, &pulled), 0, func(int) int { return 0 }).
+		WithSubstreamBuffer(4, stream.BackpressureSource).
+		WithErrorStrategy(stream.SubstreamRestart)
+	var failed atomic.Bool
+	flow := stream.TryMap(func(n int) (int, error) {
+		if n == 0 && failed.CompareAndSwap(false, true) {
+			<-gate
+			return 0, errInjected
+		}
+
+		return n, nil
+	})
+
+	collector, sink := stream.Collect[int]()
+	handle, err := stream.From(stream.MergeSubstreams(stream.SubFlowVia(sf, flow))).To(sink).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	require.Never(t, func() bool { return pulled.Load() == total }, 200*time.Millisecond, 10*time.Millisecond)
+
+	openGate()
+	waitStream(t, handle, 10*time.Second)
+	require.NoError(t, handle.Err())
+
+	// The failed substream took its elements with it; the new one delivers
+	// every later element, in order.
+	got := collector.Items()
+	require.Greater(t, len(got), 2*demandWindow, "the restarted substream carried no more than one window")
+	for i, n := range got {
+		require.Equal(t, total-len(got)+i, n)
+	}
+}
+
+// TestSubFlow_Abort_WhileElementsWait verifies that aborting a stream whose
+// splitter holds waiting elements stops every stream actor.
+func TestSubFlow_Abort_WhileElementsWait(t *testing.T) {
+	sys := newTestSystem(t)
+
+	var pulled atomic.Int64
+	sf := stream.GroupBy(countingSource(slowDownstreamTotal, &pulled), 0, func(n int) int { return n % 4 })
+	sink := newGatedSink[int]()
+	handle, err := stream.From(stream.MergeSubstreams(sf)).To(sink.sink()).Run(context.Background(), sys)
+	require.NoError(t, err)
+
+	sink.waitFirst(t)
+	requireHeldBack(t, &pulled)
+
+	handle.Abort()
+	sink.release()
+	requireNoStreamActorsLeft(t, sys)
+}
