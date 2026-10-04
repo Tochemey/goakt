@@ -61,7 +61,8 @@ type GetResponse struct {
 
 // Subscribe registers the sender for change notifications on a key.
 // The subscriber will receive Changed messages whenever the key's value
-// is updated, either by a local mutation or a peer delta.
+// is updated, either by a local mutation or a peer delta, and a Deleted
+// message when the key is deleted.
 // The subscriber is automatically unsubscribed if it terminates.
 type Subscribe struct {
 	Key Key
@@ -77,6 +78,16 @@ type Unsubscribe struct {
 type Changed struct {
 	Key  Key
 	Data ReplicatedData
+}
+
+// Deleted is sent to watchers when a CRDT key they watch is deleted.
+// It is delivered when the node's copy of the key is removed, whether the
+// deletion was made on this node, on a peer or in another datacenter. A
+// deletion of a key the node does not hold sends nothing. The watcher stays
+// subscribed: if the key is created again once its tombstone has expired,
+// the watcher receives Changed for it.
+type Deleted struct {
+	Key Key
 }
 
 // Delete is sent to the Replicator to remove a CRDT key.

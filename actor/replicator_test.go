@@ -580,7 +580,7 @@ func TestReplicatorTombstones(t *testing.T) {
 			DeletedAtNanos: time.Now().UnixNano(),
 			DeletedByNode:  "remote-node",
 		}.Build()
-		r.handleProtoTombstone(pbTombstone)
+		r.handleProtoTombstone(nil, pbTombstone)
 
 		_, exists := r.store["counter"]
 		assert.False(t, exists)
@@ -598,7 +598,7 @@ func TestReplicatorTombstones(t *testing.T) {
 			DeletedAtNanos: time.Now().UnixNano(),
 			DeletedByNode:  "local-node",
 		}.Build()
-		r.handleProtoTombstone(pbTombstone)
+		r.handleProtoTombstone(nil, pbTombstone)
 
 		_, exists := r.store["counter"]
 		assert.True(t, exists)
@@ -1234,6 +1234,43 @@ func TestReplicatorCluster(t *testing.T) {
 		// verify node1 no longer has it
 		data := getPNCounter(t, c.repls[0], counterKey)
 		assert.Nil(t, data, "node1 should not have the counter after delete")
+	})
+
+	t.Run("delete notifies watchers on every node", func(t *testing.T) {
+		c := setupCRDTCluster(t)
+		defer c.shutdown(t)
+
+		ctx := context.TODO()
+		counterKey := crdt.PNCounterKey("watched-delete")
+
+		_, err := Ask(ctx, c.repls[0], &crdt.Update{
+			Key:     counterKey,
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 3)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		// wait for replication to all nodes
+		pause.For(3 * time.Second)
+
+		watchers := make([]*PID, len(c.repls))
+		probes := make([]*MockMessageProbe, len(c.repls))
+		for i, repl := range c.repls {
+			require.NotNil(t, getPNCounter(t, repl, counterKey), "node %d should have the counter before delete", i+1)
+			watchers[i], probes[i] = subscribeProbe(t, c.nodes[i], repl, fmt.Sprintf("watcher-%d", i+1), counterKey)
+		}
+
+		// delete on node1: node1 notifies at once, the others when the tombstone arrives
+		_, err = Ask(ctx, c.repls[0], &crdt.Delete{Key: counterKey}, time.Second)
+		require.NoError(t, err)
+
+		for i := range c.repls {
+			expectDeleted(t, probes[i], counterKey)
+			assert.Nil(t, getPNCounter(t, c.repls[i], counterKey), "node %d should not have the counter after delete", i+1)
+			probeIsQuiet(t, watchers[i], probes[i])
+		}
 	})
 
 	t.Run("GCounter replication across all three nodes", func(t *testing.T) {
@@ -2232,7 +2269,7 @@ func TestReplicatorProtoTombstoneWithBadKey(t *testing.T) {
 		DeletedAtNanos: time.Now().UnixNano(),
 		DeletedByNode:  "remote-node",
 	}.Build()
-	r.handleProtoTombstone(pbTombstone)
+	r.handleProtoTombstone(nil, pbTombstone)
 	_, exists := r.tombstones["bad"]
 	assert.False(t, exists)
 }
@@ -2483,6 +2520,8 @@ func TestReplicatorIncomingBatch(t *testing.T) {
 		}, time.Second)
 		require.NoError(t, err)
 
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", counterKey)
+
 		// send a batch with a tombstone from remote DC
 		batch := internalpb.CRDTDeltaBatch_builder{
 			Tombstones: []*internalpb.CRDTTombstone{
@@ -2509,6 +2548,10 @@ func TestReplicatorIncomingBatch(t *testing.T) {
 		require.NoError(t, err)
 		getResp := resp.(*crdt.GetResponse)
 		assert.Nil(t, getResp.Data)
+
+		// the watcher is told of the deletion from the remote DC
+		expectDeleted(t, probe, counterKey)
+		probeIsQuiet(t, watcher, probe)
 
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
@@ -5127,6 +5170,166 @@ func TestReplicatorChangedCarriesKey(t *testing.T) {
 	assert.NoError(t, sys.Stop(ctx))
 }
 
+// TestReplicatorDeletedNotification verifies that the watchers of a key are
+// sent one Deleted when the node removes a value it held because of a
+// deletion, whichever way the deletion arrives, and nothing otherwise.
+func TestReplicatorDeletedNotification(t *testing.T) {
+	key := crdt.ORSetKey("sessions")
+
+	// start spawns a replicator with its schedules off, so that a tombstone is
+	// pruned only when a test asks for it
+	start := func(t *testing.T, opts ...crdt.Option) (ActorSystem, *PID, *replicatorActor) {
+		t.Helper()
+		ctx := context.TODO()
+		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+		opts = append([]crdt.Option{crdt.WithAntiEntropyInterval(0), crdt.WithPruneInterval(0)}, opts...)
+		sys.(*actorSystem).extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: crdt.NewConfig(opts...)})
+
+		actor := newReplicatorActor()
+		repl, err := sys.Spawn(ctx, "replicator", actor, WithLongLived())
+		require.NoError(t, err)
+		return sys, repl, actor
+	}
+
+	add := func(t *testing.T, repl *PID, element string) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewORSet(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.ORSet).Add("node-a", element)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+	}
+
+	remove := func(t *testing.T, repl *PID) {
+		t.Helper()
+		_, err := Ask(context.TODO(), repl, &crdt.Delete{Key: key}, time.Second)
+		require.NoError(t, err)
+	}
+
+	// holds reports whether the replicator holds the key; its answer also
+	// proves that every message sent to the replicator before has been handled
+	holds := func(t *testing.T, repl *PID) bool {
+		t.Helper()
+		resp, err := Ask(context.TODO(), repl, &crdt.Get{Key: key}, time.Second)
+		require.NoError(t, err)
+		return resp.(*crdt.GetResponse).Data != nil
+	}
+
+	tombstoneOf := func(deletedAt time.Time, deletedBy string) *internalpb.CRDTTombstone {
+		return internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey(key.ID(), key.Type()),
+			DeletedAtNanos: deletedAt.UnixNano(),
+			DeletedByNode:  deletedBy,
+		}.Build()
+	}
+
+	t.Run("a local delete of a held key is announced after the change that created it", func(t *testing.T) {
+		sys, repl, _ := start(t)
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+
+		add(t, repl, "session-1")
+		expectChanged(t, probe, key)
+
+		remove(t, repl)
+		expectDeleted(t, probe, key)
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("every watcher of the key is told and a watcher of another key is not", func(t *testing.T) {
+		sys, repl, _ := start(t)
+		firstWatcher, firstProbe := subscribeProbe(t, sys, repl, "first", key)
+		secondWatcher, secondProbe := subscribeProbe(t, sys, repl, "second", key)
+		otherWatcher, otherProbe := subscribeProbe(t, sys, repl, "other", crdt.ORSetKey("other"))
+
+		add(t, repl, "session-1")
+		expectChanged(t, firstProbe, key)
+		expectChanged(t, secondProbe, key)
+
+		remove(t, repl)
+		expectDeleted(t, firstProbe, key)
+		expectDeleted(t, secondProbe, key)
+		probeIsQuiet(t, firstWatcher, firstProbe)
+		probeIsQuiet(t, secondWatcher, secondProbe)
+		probeIsQuiet(t, otherWatcher, otherProbe)
+	})
+
+	t.Run("a delete of a key this node does not hold announces nothing", func(t *testing.T) {
+		sys, repl, actor := start(t)
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+
+		remove(t, repl)
+		assert.Contains(t, actor.tombstones, key.ID())
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("a peer tombstone is announced once", func(t *testing.T) {
+		sys, repl, _ := start(t)
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+		add(t, repl, "session-1")
+		expectChanged(t, probe, key)
+
+		ctx := context.TODO()
+		deletedAt := time.Now()
+		require.NoError(t, Tell(ctx, repl, tombstoneOf(deletedAt, "node-b")))
+		require.False(t, holds(t, repl))
+		expectDeleted(t, probe, key)
+
+		// the same deletion delivered again, then a later deletion of the key
+		require.NoError(t, Tell(ctx, repl, tombstoneOf(deletedAt, "node-b")))
+		require.NoError(t, Tell(ctx, repl, tombstoneOf(deletedAt.Add(time.Second), "node-c")))
+		require.False(t, holds(t, repl))
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("an expired tombstone that still removes a held key is announced", func(t *testing.T) {
+		sys, repl, actor := start(t, crdt.WithTombstoneTTL(time.Minute))
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+		add(t, repl, "session-1")
+		expectChanged(t, probe, key)
+
+		require.NoError(t, Tell(context.TODO(), repl, tombstoneOf(time.Now().Add(-time.Hour), "node-b")))
+		require.False(t, holds(t, repl))
+		assert.NotContains(t, actor.tombstones, key.ID())
+		expectDeleted(t, probe, key)
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("a watcher stays subscribed after the deletion", func(t *testing.T) {
+		sys, repl, _ := start(t, crdt.WithTombstoneTTL(time.Nanosecond))
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+		add(t, repl, "session-1")
+		expectChanged(t, probe, key)
+
+		remove(t, repl)
+		expectDeleted(t, probe, key)
+
+		// once the tombstone is pruned the key can be created again
+		require.NoError(t, Tell(context.TODO(), repl, &pruneTick{}))
+		add(t, repl, "session-2")
+
+		changed := expectChanged(t, probe, key)
+		assert.ElementsMatch(t, []any{"session-2"}, changed.Data.(*crdt.ORSet).Elements())
+		probeIsQuiet(t, watcher, probe)
+	})
+
+	t.Run("an unsubscribed actor is not told", func(t *testing.T) {
+		sys, repl, _ := start(t)
+		watcher, probe := subscribeProbe(t, sys, repl, "watcher", key)
+		add(t, repl, "session-1")
+		expectChanged(t, probe, key)
+
+		require.NoError(t, watcher.Tell(context.TODO(), repl, &crdt.Unsubscribe{Key: key}))
+		remove(t, repl)
+		probeIsQuiet(t, watcher, probe)
+	})
+}
+
 // TestReplicatorCoordinatedReadTracksUnknownKey verifies that a coordinated
 // read of a key only a peer holds records the key with its real data type:
 // the digest advertises that type and the snapshot still encodes.
@@ -5836,7 +6039,8 @@ func TestReplicatorAntiEntropyDeletions(t *testing.T) {
 				assert.Empty(t, actorA.store)
 				assert.Empty(t, actorB.store)
 
-				// the watcher heard nothing: a deletion is not a change
+				// the watcher heard of the deletion once, however many rounds carried it
+				expectDeleted(t, watcher, key)
 				probeIsQuiet(t, watcherPID, watcher)
 			})
 		}
@@ -6734,6 +6938,8 @@ func TestReplicatorStaleKeys(t *testing.T) {
 		repl, actor, peer, _ := start(t)
 		increment(t, repl, kept)
 		increment(t, repl, deleted)
+		keptWatcher, keptProbe := subscribeProbe(t, actor.actorSystem, repl, "kept-watcher", kept)
+		deletedWatcher, deletedProbe := subscribeProbe(t, actor.actorSystem, repl, "deleted-watcher", deleted)
 		gapStart := awayFor(t, repl, actor, 2*ttl)
 
 		peerSince := gapStart.Add(-time.Hour)
@@ -6743,6 +6949,11 @@ func TestReplicatorStaleKeys(t *testing.T) {
 		assert.False(t, holds(t, repl, deleted))
 		assert.False(t, actor.hasStaleKeys())
 		assert.True(t, peerSince.Equal(actor.since))
+
+		// the key deleted during the gap is announced, the kept one is not
+		expectDeleted(t, deletedProbe, deleted)
+		probeIsQuiet(t, deletedWatcher, deletedProbe)
+		probeIsQuiet(t, keptWatcher, keptProbe)
 	})
 
 	t.Run("a peer that came after the gap resolves nothing and is sent no stale key", func(t *testing.T) {

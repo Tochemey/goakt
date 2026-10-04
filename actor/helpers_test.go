@@ -3056,6 +3056,55 @@ func probeIsQuiet(t *testing.T, pid *PID, probe *MockMessageProbe) {
 	}
 }
 
+// subscribeProbe spawns a probe under the given name and subscribes it to the
+// key on the replicator. It returns once the replicator has handled the
+// subscription: the read that follows is queued behind it.
+func subscribeProbe(t *testing.T, sys ActorSystem, repl *PID, name string, key crdt.Key) (*PID, *MockMessageProbe) {
+	t.Helper()
+	ctx := context.TODO()
+
+	probe := NewMockMessageProbe()
+	pid, err := sys.Spawn(ctx, name, probe, WithLongLived())
+	require.NoError(t, err)
+	require.NoError(t, pid.Tell(ctx, repl, &crdt.Subscribe{Key: key}))
+
+	_, err = Ask(ctx, repl, &crdt.Get{Key: key}, time.Second)
+	require.NoError(t, err)
+	return pid, probe
+}
+
+// expectChanged requires the next message of the probe to be a crdt.Changed
+// for the key and returns it.
+func expectChanged(t *testing.T, probe *MockMessageProbe, key crdt.Key) *crdt.Changed {
+	t.Helper()
+
+	select {
+	case message := <-probe.received:
+		changed, ok := message.(*crdt.Changed)
+		require.True(t, ok, "expected a Changed notification, got %T", message)
+		require.Equal(t, key, changed.Key)
+		return changed
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no Changed notification for key=%s", key.ID())
+		return nil
+	}
+}
+
+// expectDeleted requires the next message of the probe to be a crdt.Deleted
+// for the key.
+func expectDeleted(t *testing.T, probe *MockMessageProbe, key crdt.Key) {
+	t.Helper()
+
+	select {
+	case message := <-probe.received:
+		deleted, ok := message.(*crdt.Deleted)
+		require.True(t, ok, "expected a Deleted notification, got %T", message)
+		assert.Equal(t, key, deleted.Key)
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no Deleted notification for key=%s", key.ID())
+	}
+}
+
 // spawnReplicatorPair starts two replicators in one actor system, with their
 // schedules off because the schedule references are per system, and returns
 // their PIDs and actors. The system has no TopicActor, so the two exchange

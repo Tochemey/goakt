@@ -291,7 +291,8 @@ func (a *Dashboard) Receive(ctx *actor.ReceiveContext) {
 
 Actors can watch keys and receive `Changed` notifications whenever the value changes: from local updates or peer deltas.
 Each `Changed` carries the `Key` that changed and its current `Data`, so one actor can watch several keys and tell them
-apart with `msg.Key.ID()`.
+apart with `msg.Key.ID()`. When a watched key is deleted, the watcher receives a `Deleted` carrying the `Key`. It stays
+subscribed, and receives `Changed` again if the key is created after its tombstone has expired.
 
 ```go Subscribing to changes
 func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
@@ -307,6 +308,8 @@ func (a *SessionMonitor) Receive(ctx *actor.ReceiveContext) {
         if set, ok := msg.Data.(*crdt.ORSet); ok {
             log.Printf("active sessions updated: %v", set.Elements())
         }
+    case *crdt.Deleted:
+        log.Printf("active sessions deleted: %s", msg.Key.ID())
     }
 }
 ```
@@ -323,6 +326,10 @@ ctx.Tell(replicator, &crdt.Delete{
 Deletion removes the key from the local store and publishes a tombstone to all peers. Tombstones are retained for the
 configured TTL and pruned periodically. While a tombstone is active, updates for that key are rejected to prevent
 resurrection.
+
+Each node sends `Deleted` to its watchers of the key when it removes its copy: at once on the node that deleted it, when
+the tombstone arrives on its peers, and after the cross-DC flush or anti-entropy round that brings the deletion in
+another datacenter. A node that does not hold the key sends nothing, and a deletion is announced once per node.
 
 ## Consistency model
 
@@ -488,6 +495,8 @@ func (a *SessionReporter) Receive(ctx *actor.ReceiveContext) {
             log.Printf("[reporter] sessions changed: %v (count=%d)",
                 set.Elements(), set.Len())
         }
+    case *crdt.Deleted:
+        log.Printf("[reporter] sessions deleted")
     }
 }
 
