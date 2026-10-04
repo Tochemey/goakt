@@ -30,10 +30,13 @@ const (
 	// DropHead drops the oldest element in the buffer to make room.
 	DropHead OverflowStrategy = iota
 	// DropTail drops the newest (incoming) element when the buffer is full.
-	// This is the default strategy.
+	// This is the default strategy, except for substream buffers, which
+	// default to BackpressureSource.
 	DropTail
-	// BackpressureSource blocks the producing goroutine until space is available.
-	// Only valid for pull-based or goroutine-driven sources.
+	// BackpressureSource holds the producer back until space is available.
+	// A substream buffer (see SubFlow.WithSubstreamBuffer) applies it by
+	// holding back the pipeline that feeds the substreams, and uses it by
+	// default.
 	BackpressureSource
 	// FailSource terminates the stream with an error when the buffer overflows.
 	FailSource

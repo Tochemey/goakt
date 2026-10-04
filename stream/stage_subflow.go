@@ -23,9 +23,18 @@
 package stream
 
 import (
-	"context"
-
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/types"
+)
+
+const (
+	// upstreamSlot is the input slot of the pipeline that feeds the splitter.
+	// The substream pipelines take the slots from 1 up.
+	upstreamSlot = 0
+	// mergedWindow is the number of substream elements the splitter's merged
+	// buffer holds before it stops delivering upstream elements, so a slow
+	// downstream holds the upstream back instead of growing the buffer.
+	mergedWindow = defaultInitialDemand
 )
 
 // feedSourceActor is the head of a per-substream sub-pipeline. The splitter
@@ -49,6 +58,114 @@ type feedSourceActor struct {
 	unackedDispatches int64
 	ackThreshold      int64
 	config            StageConfig
+}
+
+// substreamState holds per-key bookkeeping inside the splitter.
+type substreamState struct {
+	head *actor.PID
+	// slot is the input slot of the substream's sink at the splitter. It
+	// identifies the substream in the sink's mergeSubDone and mergeSubErr.
+	slot     int
+	inFlight int64 // pushed via subPush but not yet acked via subFeedAck
+}
+
+// routedElement is an upstream element whose substream is decided. It waits
+// in the splitter while it cannot be delivered.
+type routedElement[K comparable] struct {
+	key   K
+	value any
+	// last marks a SplitAfter element whose predicate held: its substream
+	// is closed once the element has been delivered.
+	last bool
+}
+
+// subFlowSourceActor backs MergeSubstreams. It is the source of the new
+// pipeline produced by collapsing a SubFlow, and is responsible for:
+//
+//  1. Spawning the upstream pipeline (everything before GroupBy) terminated
+//     by a mergeSinkActor on upstreamSlot.
+//  2. Routing each upstream element to the per-substream sub-pipeline keyed
+//     by keyFn(elem). New keys spawn a fresh sub-pipeline (subject to the
+//     maxSubs cap); known keys reuse the existing feedSourceActor.
+//  3. Holding the upstream back. An upstream element is acknowledged to the
+//     upstream sink only once delivered, and it waits while the merged
+//     buffer holds mergedWindow elements (the downstream is slow), or while
+//     its substream is at its in-flight cap under BackpressureSource (the
+//     substream is slow). Under the other OverflowStrategy values an element
+//     for a substream at its cap is dropped (DropTail, DropHead) or fails the
+//     stream (FailSource).
+//  4. Collecting the output of every substream, each ending in a
+//     mergeSinkActor on a slot of its own, and forwarding it to its own
+//     downstream as demand permits. An element is acknowledged to its sink
+//     when it leaves the merged buffer, so a substream runs at most one
+//     window ahead of the downstream.
+//  5. Dispatching substream-level errors per the SubstreamErrorStrategy:
+//     FailAll terminates the whole stream, Drop blocklists the key, and
+//     Restart simply forgets the failed pipeline so the next element with
+//     the same key spawns a fresh substream.
+type subFlowSourceActor[K comparable] struct {
+	upstreamStages []*stage
+	subStages      []*stage
+	mode           splitMode
+	keyFn          func(any) K    // GroupBy only
+	splitPred      func(any) bool // SplitWhen / SplitAfter only
+	maxSubs        int
+	system         actor.ActorSystem
+
+	perKeyBuffer  int64
+	overflow      OverflowStrategy
+	errorStrategy SubstreamErrorStrategy
+
+	downstream *actor.PID
+	subID      string
+	seqNo      uint64
+
+	// buf is the merged buffer: the *mergeSubValue elements of every
+	// substream that wait for downstream demand.
+	buf    queue
+	demand int64
+
+	children  map[K]*substreamState
+	blocklist map[K]types.Unit
+	// slotKeys maps the input slot of each open substream to its key.
+	slotKeys map[int]K
+	// freeSlots holds the input slots of ended substreams, for reuse.
+	freeSlots []int
+	// nextSlot is the next never-used input slot.
+	nextSlot int
+
+	// pending holds, in upstream order, the routedElement values that wait
+	// to be delivered. It holds at most one upstream window: an upstream
+	// element is acknowledged only once delivered.
+	pending queue
+
+	// subs tracks the upstream pipeline and every substream pipeline the
+	// splitter materialized; aborted in PostStop.
+	subs inputPipelines
+
+	// splitCounter is the synthetic substream key for SplitWhen / SplitAfter
+	// modes; incremented each time the splitter rotates to a new substream.
+	// splitHasElements tracks whether the current SplitWhen substream has
+	// already been assigned at least one element — needed because the very
+	// first element must land in substream 0 regardless of the predicate's
+	// value.
+	splitCounter     int
+	splitHasElements bool
+	// feeding is the key of the SplitWhen / SplitAfter substream that the
+	// last delivered element went to; feedingOpen tells whether that
+	// substream has not been told yet that no more elements will arrive.
+	feeding     K
+	feedingOpen bool
+
+	upstreamDone bool
+	// feedsClosed is set once the substreams have been told that no more
+	// elements will arrive: the upstream ended and no element waits.
+	feedsClosed bool
+	failed      bool
+	completed   bool
+
+	config  StageConfig
+	metrics *stageMetrics
 }
 
 func newFeedSourceActor(splitter *actor.PID, key any, ackThreshold int64, config StageConfig) *feedSourceActor {
@@ -146,171 +263,6 @@ func makeFeedSourceDesc(splitter *actor.PID, key any, ackThreshold int64) *stage
 	}
 }
 
-// makeUpstreamFeederSinkDesc returns a sink that forwards each element of the
-// original source pipeline to the splitter as *subUpstreamElem and reports
-// its end with *subUpstreamDone, or with *subUpstreamErr when the pipeline
-// failed. It is appended to the upstream pipeline when the splitter
-// materializes itself.
-func makeUpstreamFeederSinkDesc(splitter *actor.PID) *stage {
-	config := defaultStageConfig()
-	return &stage{
-		id:   newStageID(),
-		kind: sinkKind,
-		actorFn: func(cfg StageConfig) actor.Actor {
-			var sink *sinkActor
-			sink = newSinkActor(func(v any) error {
-				return actor.Tell(context.Background(), splitter, &subUpstreamElem{value: v})
-			}, func() {
-				// The hook runs after the sink has recorded its terminal error, if any.
-				if err := sink.TermErr(); err != nil {
-					_ = actor.Tell(context.Background(), splitter, &subUpstreamErr{err: err})
-					return
-				}
-
-				_ = actor.Tell(context.Background(), splitter, &subUpstreamDone{})
-			}, cfg)
-			return sink
-		},
-		config: config,
-	}
-}
-
-// subMergeSinkActor is the terminal sink of a per-substream pipeline.
-// Elements are forwarded to the splitter as *subOut, normal completion as
-// *subDone, and pipeline failures as *subErr. Replacing the standard
-// newSinkActor lets the splitter distinguish "substream finished" from
-// "substream errored" — which the SubstreamErrorStrategy needs to act on.
-type subMergeSinkActor struct {
-	splitter *actor.PID
-	key      any
-	upstream *actor.PID
-	subID    string
-	credit   int64
-}
-
-func newSubMergeSinkActor(splitter *actor.PID, key any) *subMergeSinkActor {
-	return &subMergeSinkActor{splitter: splitter, key: key}
-}
-
-func (a *subMergeSinkActor) PreStart(_ *actor.Context) error { return nil }
-
-func (a *subMergeSinkActor) Receive(rctx *actor.ReceiveContext) {
-	switch msg := rctx.Message().(type) {
-	case *stageWire:
-		a.subID = msg.subID
-		a.upstream = msg.upstream
-		a.credit = defaultInitialDemand
-		if a.upstream != nil {
-			rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: a.credit})
-		}
-
-	case *streamElement:
-		rctx.Tell(a.splitter, &subOut{value: msg.value})
-		a.credit--
-
-		if a.credit <= defaultRefillThreshold && a.upstream != nil {
-			refill := int64(defaultInitialDemand) - a.credit
-			a.credit += refill
-			rctx.Tell(a.upstream, &streamRequest{subID: a.subID, n: refill})
-		}
-
-	case *streamComplete:
-		rctx.Tell(a.splitter, &subDone{key: a.key})
-		rctx.Shutdown()
-
-	case *streamError:
-		rctx.Tell(a.splitter, &subErr{key: a.key, err: msg.err})
-		rctx.Shutdown()
-
-	case *streamCancel:
-		rctx.Shutdown()
-
-	default:
-		rctx.Unhandled()
-	}
-}
-
-func (a *subMergeSinkActor) PostStop(_ *actor.Context) error { return nil }
-
-// makeSubMergeSinkDesc returns the terminal sink of a per-substream pipeline.
-func makeSubMergeSinkDesc(splitter *actor.PID, key any) *stage {
-	config := defaultStageConfig()
-	return &stage{
-		id:   newStageID(),
-		kind: sinkKind,
-		actorFn: func(cfg StageConfig) actor.Actor {
-			return newSubMergeSinkActor(splitter, key)
-		},
-		config: config,
-	}
-}
-
-// substreamState holds per-key bookkeeping inside the splitter.
-type substreamState struct {
-	head     *actor.PID
-	inFlight int64 // pushed via subPush but not yet acked via subFeedAck
-}
-
-// subFlowSourceActor backs MergeSubstreams. It is the source of the new
-// pipeline produced by collapsing a SubFlow, and is responsible for:
-//
-//  1. Spawning the upstream pipeline (everything before GroupBy) terminated
-//     by an upstream feeder sink that forwards elements back as *subUpstreamElem.
-//  2. Routing each upstream element to the per-substream sub-pipeline keyed
-//     by keyFn(elem). New keys spawn a fresh sub-pipeline (subject to the
-//     maxSubs cap); known keys reuse the existing feedSourceActor.
-//  3. Enforcing per-key backpressure via an in-flight counter and the
-//     OverflowStrategy (DropTail by default; FailSource fails the stream).
-//  4. Collecting *subOut messages from every per-substream merge sink and
-//     forwarding them to its own downstream as demand permits.
-//  5. Dispatching substream-level errors per the SubstreamErrorStrategy:
-//     FailAll terminates the whole stream, Drop blocklists the key, and
-//     Restart simply forgets the failed pipeline so the next element with
-//     the same key spawns a fresh substream.
-type subFlowSourceActor[K comparable] struct {
-	upstreamStages []*stage
-	subStages      []*stage
-	mode           splitMode
-	keyFn          func(any) K    // GroupBy only
-	splitPred      func(any) bool // SplitWhen / SplitAfter only
-	maxSubs        int
-	system         actor.ActorSystem
-
-	perKeyBuffer  int64
-	overflow      OverflowStrategy
-	errorStrategy SubstreamErrorStrategy
-
-	downstream *actor.PID
-	subID      string
-	seqNo      uint64
-
-	buf    queue
-	demand int64
-
-	children       map[K]*substreamState
-	activeChildren int
-	blocklist      map[K]struct{}
-
-	// subs tracks the upstream pipeline and every substream pipeline the
-	// splitter materialized; aborted in PostStop.
-	subs inputPipelines
-
-	// splitCounter is the synthetic substream key for SplitWhen / SplitAfter
-	// modes; incremented each time the splitter rotates to a new substream.
-	// splitHasElements tracks whether the current SplitWhen substream has
-	// already received at least one element — needed because the very first
-	// element must land in substream 0 regardless of the predicate's value.
-	splitCounter     int
-	splitHasElements bool
-
-	upstreamDone bool
-	failed       bool
-	completed    bool
-
-	config  StageConfig
-	metrics *stageMetrics
-}
-
 func newSubFlowSourceActor[K comparable](
 	upstream []*stage,
 	sub []*stage,
@@ -344,61 +296,72 @@ func newSubFlowSourceActor[K comparable](
 		overflow:       overflow,
 		errorStrategy:  errorStrategy,
 		children:       make(map[K]*substreamState),
-		blocklist:      make(map[K]struct{}),
+		blocklist:      make(map[K]types.Unit),
+		slotKeys:       make(map[int]K),
+		nextSlot:       upstreamSlot + 1,
 		config:         config,
 		metrics:        metrics,
 	}
 }
 
-func (a *subFlowSourceActor[K]) PreStart(_ *actor.Context) error { return nil }
+// PreStart does nothing: the splitter starts on its stageWire.
+func (x *subFlowSourceActor[K]) PreStart(_ *actor.Context) error { return nil }
 
-func (a *subFlowSourceActor[K]) Receive(rctx *actor.ReceiveContext) {
+// Receive handles stageWire, streamRequest, mergeSubValue, mergeSubDone,
+// mergeSubErr, subFeedAck, and streamCancel. The mergeSub messages of
+// upstreamSlot come from the upstream pipeline, the others from a substream.
+func (x *subFlowSourceActor[K]) Receive(rctx *actor.ReceiveContext) {
 	switch msg := rctx.Message().(type) {
 	case *stageWire:
-		a.downstream = msg.downstream
-		a.subID = msg.subID
-		a.spawnUpstream(rctx)
+		x.downstream = msg.downstream
+		x.subID = msg.subID
+		x.spawnUpstream(rctx)
 
 	case *streamRequest:
-		a.demand += msg.n
-		a.tryFlush(rctx)
+		x.demand += msg.n
+		x.tryFlush(rctx)
 
-	case *subUpstreamElem:
-		a.metrics.elementsIn.Add(1)
-		a.routeElement(rctx, msg.value)
+	case *mergeSubValue:
+		x.subs.arrived(msg)
 
-	case *subUpstreamDone:
-		a.upstreamDone = true
-		// Tell every active substream that no more elements will arrive.
-		for _, state := range a.children {
-			rctx.Tell(state.head, &subFeedDone{})
+		if msg.slot == upstreamSlot {
+			x.metrics.elementsIn.Add(1)
+			x.routeElement(rctx, msg.value)
+			return
 		}
 
-		a.maybeComplete(rctx)
+		x.buf.push(msg)
+		x.tryFlush(rctx)
 
-	case *subUpstreamErr:
-		a.fail(rctx, msg.err)
+	case *mergeSubDone:
+		if msg.slot == upstreamSlot {
+			x.upstreamDone = true
+			x.closeFeeds(rctx)
+			x.maybeComplete(rctx)
+			return
+		}
 
-	case *subOut:
-		a.buf.push(msg.value)
-		a.tryFlush(rctx)
+		x.handleDone(rctx, msg.slot)
 
-	case *subDone:
-		a.handleDone(rctx, msg.key)
+	case *mergeSubErr:
+		if msg.slot == upstreamSlot {
+			x.fail(rctx, msg.err)
+			return
+		}
 
-	case *subErr:
-		a.handleErr(rctx, msg.key, msg.err)
+		x.handleErr(rctx, msg.slot, msg.err)
 
 	case *subFeedAck:
-		a.handleAck(msg.key, msg.n)
+		x.handleAck(rctx.Sender(), msg.key, msg.n)
+		x.drainPending(rctx)
 
 	case *streamCancel:
 		// Tear down: ask every substream to stop, then complete downstream.
-		for _, state := range a.children {
+		for _, state := range x.children {
 			rctx.Tell(state.head, &streamCancel{})
 		}
 
-		rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
+		rctx.Tell(x.downstream, &streamComplete{subID: x.subID})
 		rctx.Shutdown()
 
 	default:
@@ -408,161 +371,262 @@ func (a *subFlowSourceActor[K]) Receive(rctx *actor.ReceiveContext) {
 
 // PostStop aborts the upstream pipeline and the substream pipelines so they
 // do not outlive the splitter.
-func (a *subFlowSourceActor[K]) PostStop(_ *actor.Context) error {
-	a.subs.abort()
+func (x *subFlowSourceActor[K]) PostStop(_ *actor.Context) error {
+	x.subs.abort()
 	return nil
 }
 
-// spawnUpstream materializes the pipeline that feeds the splitter. A failure
-// to materialize it fails the stream.
-func (a *subFlowSourceActor[K]) spawnUpstream(rctx *actor.ReceiveContext) {
-	feeder := makeUpstreamFeederSinkDesc(rctx.Self())
-	all := make([]*stage, len(a.upstreamStages)+1)
-	copy(all, a.upstreamStages)
-	all[len(a.upstreamStages)] = feeder
-	if err := a.subs.spawn(rctx.Context(), a.system, all); err != nil {
-		a.fail(rctx, err)
+// spawnUpstream materializes the pipeline that feeds the splitter, ending in
+// a mergeSinkActor on upstreamSlot. A failure to materialize it fails the
+// stream.
+func (x *subFlowSourceActor[K]) spawnUpstream(rctx *actor.ReceiveContext) {
+	all := make([]*stage, len(x.upstreamStages)+1)
+	copy(all, x.upstreamStages)
+	all[len(x.upstreamStages)] = makeMergeSinkDesc(rctx.Self(), upstreamSlot)
+	if err := x.subs.spawn(rctx.Context(), x.system, all); err != nil {
+		x.fail(rctx, err)
 	}
 }
 
-// routeElement applies the per-substream in-flight cap before pushing. When
-// a substream is at capacity the configured OverflowStrategy decides whether
-// to drop the element or terminate the stream. The routing key comes from
-// keyFn (GroupBy mode) or from a monotonic counter rotated on a predicate-true
-// element (SplitWhen / SplitAfter modes).
-func (a *subFlowSourceActor[K]) routeElement(rctx *actor.ReceiveContext, value any) {
-	if a.failed {
+// routeElement decides the substream of an upstream element and delivers it.
+// The element waits in pending when it cannot be delivered yet, or when
+// earlier elements wait already, so upstream order is kept.
+func (x *subFlowSourceActor[K]) routeElement(rctx *actor.ReceiveContext, value any) {
+	if x.failed {
 		return
 	}
 
-	// SplitWhen rotates BEFORE the push so a predicate-true element starts
-	// the new substream. The very first element of the source must land in
-	// substream 0 regardless of the predicate's value, so we require that
-	// the current substream has already received at least one element.
-	if a.mode == splitModeWhen && a.splitHasElements && a.splitPred(value) {
-		a.rotateSplitSubstream(rctx)
+	element := x.assign(value)
+	if !x.pending.empty() || !x.deliver(rctx, element) {
+		x.pending.push(element)
+	}
+}
+
+// assign returns value with the key of its substream, on arrival, so the key
+// function and the predicate run once per element. GroupBy takes the key
+// from keyFn. SplitWhen and SplitAfter use a counter: SplitWhen advances it
+// before a predicate-true element, so that element starts the new substream,
+// and SplitAfter after one, so that element ends its substream. The very
+// first element of the source lands in substream 0 regardless of the
+// predicate's value.
+func (x *subFlowSourceActor[K]) assign(value any) routedElement[K] {
+	switch x.mode {
+	case splitModeGroupBy:
+		return routedElement[K]{key: x.keyFn(value), value: value}
+	case splitModeWhen:
+		if x.splitHasElements && x.splitPred(value) {
+			x.splitCounter++
+		}
+
+		x.splitHasElements = true
+		return routedElement[K]{key: x.counterKey(), value: value}
+	default: // splitModeAfter
+		element := routedElement[K]{key: x.counterKey(), value: value}
+		if x.splitPred(value) {
+			element.last = true
+			x.splitCounter++
+		}
+
+		return element
+	}
+}
+
+// counterKey returns the split counter as a substream key. SplitWhen and
+// SplitAfter only ever instantiate K=int (see their constructors), so the
+// assertion is safe by construction.
+func (x *subFlowSourceActor[K]) counterKey() K {
+	key, _ := any(x.splitCounter).(K)
+	return key
+}
+
+// deliver hands element to its substream and acknowledges it to the upstream
+// sink, which may then request another. It reports false, and changes
+// nothing, when the element must wait: the merged buffer holds mergedWindow
+// elements, or the substream is at its in-flight cap and either the strategy
+// is BackpressureSource or the downstream asks for nothing.
+//
+// The second case keeps a slow downstream from reaching the other
+// strategies. One substream cannot fill the merged buffer on its own: up to
+// inputAckBatch-1 of its acknowledgements wait to be batched, so it can stop
+// with fewer than mergedWindow elements there. The strategy applies only
+// while the downstream waits for elements, when the substream itself is the
+// slow part.
+func (x *subFlowSourceActor[K]) deliver(rctx *actor.ReceiveContext, element routedElement[K]) bool {
+	if x.buf.len() >= mergedWindow {
+		return false
 	}
 
-	key := a.deriveKey(value)
+	state, open := x.children[element.key]
+	if open && state.inFlight >= x.perKeyBuffer && (x.overflow == BackpressureSource || x.demand == 0) {
+		return false
+	}
 
-	if _, blocked := a.blocklist[key]; blocked {
+	x.subs.release(rctx, upstreamSlot, 1)
+
+	// A split element for another substream than the one being fed closes
+	// that one: SplitWhen rotated before this element.
+	if x.mode != splitModeGroupBy {
+		if x.feedingOpen && x.feeding != element.key {
+			x.closeFeeding(rctx)
+		}
+
+		x.feeding, x.feedingOpen = element.key, true
+	}
+
+	x.push(rctx, element.key, element.value)
+
+	if element.last {
+		x.closeFeeding(rctx)
+	}
+
+	return true
+}
+
+// push sends value to the substream of key, spawning the substream for a new
+// key. An element of a blocklisted key is dropped. An element for a
+// substream at its in-flight cap fails the stream under FailSource and is
+// dropped otherwise; under BackpressureSource deliver holds it back before
+// it gets here.
+func (x *subFlowSourceActor[K]) push(rctx *actor.ReceiveContext, key K, value any) {
+	if _, blocked := x.blocklist[key]; blocked {
 		// SubstreamDrop: silently discard further elements for this key.
-		a.metrics.droppedElements.Add(1)
-		if a.config.OnDrop != nil {
-			a.config.OnDrop(value, "substream-drop: key blocklisted after error")
+		x.metrics.droppedElements.Add(1)
+		if x.config.OnDrop != nil {
+			x.config.OnDrop(value, "substream-drop: key blocklisted after error")
 		}
 
 		return
 	}
 
-	state, exists := a.children[key]
+	state, exists := x.children[key]
 	if !exists {
-		if a.maxSubs > 0 && len(a.children) >= a.maxSubs {
-			a.fail(rctx, ErrTooManySubstreams)
+		if x.maxSubs > 0 && len(x.children) >= x.maxSubs {
+			x.fail(rctx, ErrTooManySubstreams)
 			return
 		}
 
-		feedHead := a.spawnSubstream(rctx, key)
-		if feedHead == nil {
+		state = x.spawnSubstream(rctx, key)
+		if state == nil {
 			return
 		}
-
-		state = &substreamState{head: feedHead}
-		a.children[key] = state
-		a.activeChildren++
 	}
 
-	if state.inFlight >= a.perKeyBuffer {
-		switch a.overflow {
-		case FailSource:
-			a.fail(rctx, ErrSubstreamOverflow)
-			return
-		default:
-			// DropTail / DropHead / BackpressureSource: drop the new element.
-			// DropHead would require a pending queue inside the splitter; for
-			// v2 we treat all non-FailSource strategies as drop-newest.
-			a.metrics.droppedElements.Add(1)
-			if a.config.OnDrop != nil {
-				a.config.OnDrop(value, "substream-overflow: per-key in-flight cap reached")
-			}
-
+	if state.inFlight >= x.perKeyBuffer {
+		if x.overflow == FailSource {
+			x.fail(rctx, ErrSubstreamOverflow)
 			return
 		}
+
+		// DropTail / DropHead: drop the new element. DropHead would require
+		// a queue per key; it is treated as drop-newest.
+		x.metrics.droppedElements.Add(1)
+		if x.config.OnDrop != nil {
+			x.config.OnDrop(value, "substream-overflow: per-key in-flight cap reached")
+		}
+
+		return
 	}
 
 	state.inFlight++
 	rctx.Tell(state.head, &subPush{value: value})
-
-	// Track that the current SplitWhen substream is no longer empty so the
-	// next predicate-true element can trigger a rotation.
-	if a.mode == splitModeWhen {
-		a.splitHasElements = true
-	}
-
-	// SplitAfter rotates AFTER the push so the predicate-true element is the
-	// LAST element of the substream it terminates.
-	if a.mode == splitModeAfter && a.splitPred(value) {
-		a.rotateSplitSubstream(rctx)
-	}
 }
 
-// deriveKey returns the routing key for value under the active split mode.
-// In SplitWhen / SplitAfter modes the key is the synthetic counter cast to K
-// — these modes only ever instantiate with K=int (see SplitWhen / SplitAfter
-// constructors), so the assertion is safe by construction.
-func (a *subFlowSourceActor[K]) deriveKey(value any) K {
-	if a.mode == splitModeGroupBy {
-		return a.keyFn(value)
+// closeFeeding tells the SplitWhen / SplitAfter substream being fed that no
+// more elements will arrive. Its pipeline drains and completes as usual.
+func (x *subFlowSourceActor[K]) closeFeeding(rctx *actor.ReceiveContext) {
+	if !x.feedingOpen {
+		return
 	}
 
-	key, _ := any(a.splitCounter).(K)
-	return key
-}
+	x.feedingOpen = false
 
-// rotateSplitSubstream closes the current SplitWhen / SplitAfter substream
-// and advances the counter so subsequent elements land in a fresh substream.
-// Closing means sending subFeedDone — the substream's pipeline drains and
-// reports completion via subDone in the normal way.
-func (a *subFlowSourceActor[K]) rotateSplitSubstream(rctx *actor.ReceiveContext) {
-	currentKey, _ := any(a.splitCounter).(K)
-	if state, exists := a.children[currentKey]; exists {
+	if state, open := x.children[x.feeding]; open {
 		rctx.Tell(state.head, &subFeedDone{})
 	}
-
-	a.splitCounter++
-	a.splitHasElements = false
 }
 
-// spawnSubstream materializes a fresh per-substream pipeline:
-// feedSource → subStages → subMergeSink.
-func (a *subFlowSourceActor[K]) spawnSubstream(rctx *actor.ReceiveContext, key K) *actor.PID {
-	ackThreshold := a.perKeyBuffer / 4
+// closeFeeds tells the open substreams that no more elements will arrive,
+// once the upstream has ended and no element waits. It runs once.
+func (x *subFlowSourceActor[K]) closeFeeds(rctx *actor.ReceiveContext) {
+	if x.feedsClosed || x.failed || !x.upstreamDone || !x.pending.empty() {
+		return
+	}
+
+	x.feedsClosed = true
+
+	// The earlier split substreams were closed as the next one started.
+	if x.mode != splitModeGroupBy {
+		x.closeFeeding(rctx)
+		return
+	}
+
+	for _, state := range x.children {
+		rctx.Tell(state.head, &subFeedDone{})
+	}
+}
+
+// drainPending delivers the waiting elements in upstream order until one must
+// wait again, then closes the substreams' feeds if the upstream has ended.
+func (x *subFlowSourceActor[K]) drainPending(rctx *actor.ReceiveContext) {
+	for !x.failed && !x.pending.empty() {
+		if !x.deliver(rctx, x.pending.peek().(routedElement[K])) {
+			return
+		}
+
+		x.pending.pop()
+	}
+
+	x.closeFeeds(rctx)
+}
+
+// spawnSubstream materializes a fresh per-substream pipeline,
+// feedSource → subStages → mergeSink, on a free input slot and records it
+// under key. It returns nil after failing the stream when the pipeline
+// cannot be materialized.
+func (x *subFlowSourceActor[K]) spawnSubstream(rctx *actor.ReceiveContext, key K) *substreamState {
+	ackThreshold := x.perKeyBuffer / 4
 	if ackThreshold < 1 {
 		ackThreshold = 1
 	}
 
-	stages := make([]*stage, 0, len(a.subStages)+2)
-	stages = append(stages, makeFeedSourceDesc(rctx.Self(), key, ackThreshold))
-	stages = append(stages, a.subStages...)
-	stages = append(stages, makeSubMergeSinkDesc(rctx.Self(), key))
+	slot := x.nextSlot
+	if n := len(x.freeSlots); n > 0 {
+		slot = x.freeSlots[n-1]
+		x.freeSlots = x.freeSlots[:n-1]
+	} else {
+		x.nextSlot++
+	}
 
-	feedHead, err := a.subs.spawnWithHead(rctx.Context(), a.system, stages)
+	stages := make([]*stage, 0, len(x.subStages)+2)
+	stages = append(stages, makeFeedSourceDesc(rctx.Self(), key, ackThreshold))
+	stages = append(stages, x.subStages...)
+	stages = append(stages, makeMergeSinkDesc(rctx.Self(), slot))
+
+	feedHead, err := x.subs.spawnWithHead(rctx.Context(), x.system, stages)
 	if err != nil {
-		a.fail(rctx, err)
+		x.fail(rctx, err)
 		return nil
 	}
 
-	return feedHead
+	state := &substreamState{head: feedHead, slot: slot}
+	x.children[key] = state
+	x.slotKeys[slot] = key
+	return state
 }
 
-func (a *subFlowSourceActor[K]) handleAck(rawKey any, ackedCount int64) {
+// handleAck lowers the in-flight count of the substream of rawKey by the
+// ackedCount elements its feed source has dispatched. An acknowledgement from
+// another feed source than the substream's own is ignored: under
+// SubstreamRestart the feed source of a failed substream can acknowledge
+// after a new substream has taken its key.
+func (x *subFlowSourceActor[K]) handleAck(sender *actor.PID, rawKey any, ackedCount int64) {
 	key, ok := rawKey.(K)
 	if !ok {
 		return
 	}
 
-	state, exists := a.children[key]
-	if !exists {
+	state, exists := x.children[key]
+	if !exists || !state.head.Equals(sender) {
 		return
 	}
 
@@ -572,85 +636,95 @@ func (a *subFlowSourceActor[K]) handleAck(rawKey any, ackedCount int64) {
 	}
 }
 
-func (a *subFlowSourceActor[K]) handleDone(rctx *actor.ReceiveContext, rawKey any) {
-	if key, ok := rawKey.(K); ok {
-		delete(a.children, key)
-	}
-
-	a.activeChildren--
-	a.maybeComplete(rctx)
+// handleDone forgets the substream that completed on slot.
+func (x *subFlowSourceActor[K]) handleDone(rctx *actor.ReceiveContext, slot int) {
+	x.forget(slot)
+	x.maybeComplete(rctx)
 }
 
-func (a *subFlowSourceActor[K]) handleErr(rctx *actor.ReceiveContext, rawKey any, err error) {
-	key, ok := rawKey.(K)
-	if !ok {
-		// Should not happen — sink captures the key at construction. Fall back
-		// to FailAll so the error is at least surfaced.
-		a.fail(rctx, err)
+// handleErr applies the SubstreamErrorStrategy to the substream that failed
+// on slot. Under SubstreamDrop and SubstreamRestart a waiting element of its
+// key can then be delivered: it is dropped, or starts a new substream.
+func (x *subFlowSourceActor[K]) handleErr(rctx *actor.ReceiveContext, slot int, err error) {
+	switch x.errorStrategy {
+	case SubstreamDrop:
+		x.blocklist[x.forget(slot)] = types.Unit{}
+	case SubstreamRestart:
+		x.forget(slot)
+	default: // SubstreamFailAll
+		x.fail(rctx, err)
 		return
 	}
 
-	switch a.errorStrategy {
-	case SubstreamDrop:
-		a.blocklist[key] = struct{}{}
-		delete(a.children, key)
-		a.activeChildren--
-		a.maybeComplete(rctx)
-	case SubstreamRestart:
-		delete(a.children, key)
-		a.activeChildren--
-		a.maybeComplete(rctx)
-	default: // SubstreamFailAll
-		a.fail(rctx, err)
-	}
+	x.drainPending(rctx)
+	x.maybeComplete(rctx)
 }
 
-// tryFlush forwards merged-buffer elements downstream while demand remains.
-func (a *subFlowSourceActor[K]) tryFlush(rctx *actor.ReceiveContext) {
-	for a.demand > 0 && !a.buf.empty() {
-		a.seqNo++
-		a.metrics.elementsOut.Add(1)
-		rctx.Tell(a.downstream, &streamElement{
-			subID: a.subID,
-			value: a.buf.pop(),
-			seqNo: a.seqNo,
-		})
-		a.demand--
+// forget removes the substream of slot from the splitter's state, frees the
+// slot for reuse and returns the substream's key.
+func (x *subFlowSourceActor[K]) forget(slot int) K {
+	key := x.slotKeys[slot]
+	delete(x.slotKeys, slot)
+	x.freeSlots = append(x.freeSlots, slot)
+
+	if state, open := x.children[key]; open && state.slot == slot {
+		delete(x.children, key)
 	}
 
-	a.maybeComplete(rctx)
+	return key
+}
+
+// tryFlush forwards merged-buffer elements downstream while demand remains,
+// acknowledging each to the sink that sent it, then delivers the upstream
+// elements the drained buffer has room for.
+func (x *subFlowSourceActor[K]) tryFlush(rctx *actor.ReceiveContext) {
+	for x.demand > 0 && !x.buf.empty() {
+		element := x.buf.pop().(*mergeSubValue)
+		x.seqNo++
+		x.metrics.elementsOut.Add(1)
+		rctx.Tell(x.downstream, &streamElement{
+			subID: x.subID,
+			value: element.value,
+			seqNo: x.seqNo,
+		})
+		x.demand--
+		x.subs.releaseValue(rctx, element)
+	}
+
+	x.drainPending(rctx)
+	x.maybeComplete(rctx)
 }
 
 // maybeComplete emits streamComplete downstream once the upstream pipeline
-// has finished, every substream has reported done, and the merged buffer is
-// drained.
-func (a *subFlowSourceActor[K]) maybeComplete(rctx *actor.ReceiveContext) {
-	if a.completed || a.failed {
+// has finished, no upstream element waits, every substream has reported
+// done, and the merged buffer is drained.
+func (x *subFlowSourceActor[K]) maybeComplete(rctx *actor.ReceiveContext) {
+	if x.completed || x.failed {
 		return
 	}
 
-	if !a.upstreamDone || a.activeChildren > 0 || !a.buf.empty() {
+	if !x.upstreamDone || !x.pending.empty() || len(x.slotKeys) > 0 || !x.buf.empty() {
 		return
 	}
 
-	a.completed = true
-	rctx.Tell(a.downstream, &streamComplete{subID: a.subID})
+	x.completed = true
+	rctx.Tell(x.downstream, &streamComplete{subID: x.subID})
 	rctx.Shutdown()
 }
 
 // fail ends the merged stream with err: it cancels every open substream,
 // sends err downstream and stops; PostStop then aborts the remaining
 // pipelines. Later calls do nothing.
-func (a *subFlowSourceActor[K]) fail(rctx *actor.ReceiveContext, err error) {
-	if a.failed {
+func (x *subFlowSourceActor[K]) fail(rctx *actor.ReceiveContext, err error) {
+	if x.failed {
 		return
 	}
 
-	a.failed = true
-	for _, state := range a.children {
+	x.failed = true
+	for _, state := range x.children {
 		rctx.Tell(state.head, &streamCancel{})
 	}
 
-	rctx.Tell(a.downstream, &streamError{subID: a.subID, err: err})
+	rctx.Tell(x.downstream, &streamError{subID: x.subID, err: err})
 	rctx.Shutdown()
 }

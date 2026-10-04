@@ -79,8 +79,9 @@ type inputPipelines struct {
 }
 
 // mergeSinkActor is the internal sink at the end of every input pipeline of a
-// fan-in source. It forwards each element to the fan-in actor as mergeSubValue
-// and the end of the input as mergeSubDone or mergeSubErr.
+// fan-in source, of the nested streams of a FlatMap, and of the upstream and
+// the substreams of a splitter. It forwards each element to the fan-in actor
+// as mergeSubValue and the end of the input as mergeSubDone or mergeSubErr.
 //
 // It does not refill its upstream demand on its own. It requests one window
 // when it is wired and then only what the fan-in actor acknowledges with

@@ -63,12 +63,20 @@ const (
 // independently to each substream's pipeline — so e.g. a Scan inside the
 // substream chain carries its own accumulator per substream.
 //
-// Backpressure: each substream has a per-substream in-flight cap (see
-// WithSubstreamBuffer). When a substream is at capacity new elements for
-// it are handled by the configured OverflowStrategy — by default dropped
-// (DropTail) — and reported via the OnDrop hook / metrics. Substream
-// pipelines acknowledge consumption to the splitter in batches, keeping
-// per-substream memory bounded without per-element protocol overhead.
+// Backpressure: the merged stream honors the demand of its downstream. A
+// substream runs at most one demand window ahead of what the downstream has
+// taken, and a slow downstream holds back the pipeline that feeds the
+// substreams, whatever the OverflowStrategy, so nothing is dropped for it.
+// Each substream also has an in-flight cap (see WithSubstreamBuffer). When a
+// substream is slower than its feed and reaches the cap while the downstream
+// asks for elements, the configured OverflowStrategy handles its new
+// elements: by default (BackpressureSource) the feeding pipeline is held back
+// until the substream has room, which holds back the other substreams too;
+// DropTail drops them and reports them via the OnDrop hook / metrics. A key
+// that carries most of the elements can reach the cap in bursts while the
+// downstream keeps up. Substream pipelines acknowledge consumption
+// to the splitter in batches, keeping per-substream memory bounded without
+// per-element protocol overhead.
 //
 // Errors: when a per-substream pipeline fails the SubstreamErrorStrategy
 // decides how to react. The default (SubstreamFailAll) terminates the
@@ -94,9 +102,15 @@ type SubFlow[K comparable, T any] struct {
 // WithSubstreamBuffer overrides the per-substream in-flight cap. Pass
 // perKeyBuffer ≥ 1; non-positive values fall back to the default. The
 // OverflowStrategy controls behaviour when a substream reaches the cap:
-// DropTail (default), DropHead, BackpressureSource — all currently
-// implemented as drop-newest — or FailSource which terminates the stream
-// with ErrSubstreamOverflow.
+// BackpressureSource (default) holds back the pipeline that feeds every
+// substream until the substream has room; DropTail and DropHead both drop
+// the newest element; FailSource terminates the stream with
+// ErrSubstreamOverflow. The strategy applies only while the downstream asks
+// for elements: when it asks for nothing, a substream at its cap holds the
+// feeding pipeline back under every strategy. A key that carries most of the
+// elements can still reach the cap in bursts while the downstream keeps up,
+// so DropTail drops some of its elements and FailSource can fail; use
+// BackpressureSource to lose nothing.
 func (sf SubFlow[K, T]) WithSubstreamBuffer(perKeyBuffer int, strategy OverflowStrategy) SubFlow[K, T] {
 	sf.perKeyBuffer = perKeyBuffer
 	sf.overflow = strategy
@@ -129,7 +143,7 @@ func GroupBy[T any, K comparable](src Source[T], maxSubstreams int, keyFn func(T
 		keyFn:        erasedKeyFn,
 		maxSubs:      maxSubstreams,
 		perKeyBuffer: defaultSubstreamPerKeyBuffer,
-		overflow:     DropTail,
+		overflow:     BackpressureSource,
 	}
 }
 
@@ -168,7 +182,7 @@ func newSplitSubFlow[T any](src Source[T], predicate func(T) bool, mode splitMod
 		mode:         mode,
 		splitPred:    erasedPredicate,
 		perKeyBuffer: defaultSubstreamPerKeyBuffer,
-		overflow:     DropTail,
+		overflow:     BackpressureSource,
 	}
 }
 
