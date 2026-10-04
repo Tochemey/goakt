@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -196,7 +197,7 @@ func settlePostStart(b *testing.B, pids []*actor.PID) {
 				b.Fatalf("actor %d did not process PostStart within %s", i, footprintSettleTimeout)
 			}
 
-			time.Sleep(time.Millisecond)
+			pause.For(time.Millisecond)
 		}
 	}
 }

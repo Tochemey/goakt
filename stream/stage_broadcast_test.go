@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 var errBad = errors.New("bad element")
@@ -139,21 +140,21 @@ func TestBroadcastHubActor_SlotCancel_Unit(t *testing.T) {
 		upstream:   upPID,
 		downstream: nil,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Deliver demand from both slots so hub starts pulling.
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotDemand{slot: 0, n: 10}))
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotDemand{slot: 1, n: 10}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 	// Hub has sent streamRequest to upPID (dummy, ignored); pending > 0.
 
 	// Cancel slot 0: covers slotCancel with remaining slots → maybePull.
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotCancel{slot: 0}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Inject a streamElement: slot0 is nil → continue (covered); slot1 is non-nil → Tell.
 	require.NoError(t, actor.Tell(ctx, hubPID, &streamElement{subID: "unit", value: 42, seqNo: 1}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Cancel slot 1: all cancelled → cancel upstream + shutdown.
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotCancel{slot: 1}))
@@ -187,11 +188,11 @@ func TestBroadcastHubActor_StreamComplete_WithNilSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, actor.Tell(ctx, hubPID, &stageWire{subID: "unit", upstream: upPID}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Cancel slot 0 so it is nil when streamComplete arrives.
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotCancel{slot: 0}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Send streamComplete: slot0 nil (skip), slot1 non-nil (Tell) → hub shuts down.
 	require.NoError(t, actor.Tell(ctx, hubPID, &streamComplete{subID: "unit"}))
@@ -225,11 +226,11 @@ func TestBroadcastHubActor_StreamError_WithNilSlot(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, actor.Tell(ctx, hubPID, &stageWire{subID: "unit", upstream: upPID}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Cancel slot 0 so it is nil when streamError arrives.
 	require.NoError(t, actor.Tell(ctx, hubPID, &slotCancel{slot: 0}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Send streamError: slot0 nil (skip), slot1 non-nil (Tell) → hub shuts down.
 	require.NoError(t, actor.Tell(ctx, hubPID, &streamError{subID: "unit", err: errBad}))
@@ -266,11 +267,11 @@ func TestBroadcastSlotActor_StreamCancel_Unit(t *testing.T) {
 		upstream:   nil,
 		downstream: downPID,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Give the slot a hub PID so it can forward slotCancel.
 	require.NoError(t, actor.Tell(ctx, slotPID, &hubReady{hub: hubPID}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Send streamCancel — slot should forward slotCancel to hub and shut down.
 	require.NoError(t, actor.Tell(ctx, slotPID, &streamCancel{subID: "unit"}))
@@ -302,11 +303,11 @@ func TestBroadcastHubActor_Unhandled(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, actor.Tell(ctx, hubPID, &stageWire{subID: "unit", upstream: upPID}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Send an unknown message — hits the default Unhandled branch.
 	require.NoError(t, actor.Tell(ctx, hubPID, &struct{ x int }{x: 99}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Hub is still alive (Unhandled does not shut it down).
 	_, err = sys.ActorOf(ctx, hubPID.Name())
@@ -341,11 +342,11 @@ func TestBroadcastSlotActor_Unhandled(t *testing.T) {
 		upstream:   nil,
 		downstream: downPID,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Send an unknown message — hits the default Unhandled branch.
 	require.NoError(t, actor.Tell(ctx, slotPID, &struct{ x int }{x: 99}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Slot is still alive (Unhandled does not shut it down).
 	_, err = sys.ActorOf(ctx, slotPID.Name())

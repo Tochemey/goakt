@@ -38,6 +38,8 @@ Run `make help` to list every target. The common ones are:
 | `make mock`      | Regenerate mocks under `mocks/`                      |
 | `make protogen`  | Regenerate protobuf Go code                          |
 | `make certs`     | Regenerate test TLS fixtures under `test/data/certs` |
+| `make book-check` | Check the maintainers' book in `book/`: cited code names, links, diagrams |
+| `make book-affected` | List the book chapters that cite files changed since `BASE` (default `origin/main`) |
 | `make clean`     | Remove the tools image and its cache volume          |
 
 ### Test shards
@@ -56,7 +58,7 @@ Run `make help` to list every target. The common ones are:
 ### Making Contributions
 
 1. Make your changes in your fork.
-2. Ensure your code adheres to the project's style and passes tests: `make test`.
+2. Ensure your code follows the [coding standards](CODING_STANDARDS.md) and passes tests: `make test`.
 3. Document user-visible changes in [`changelogs/unreleased.md`](changelogs/unreleased.md) (see [Changelog entries](#changelog-entries) below).
 4. Commit your changes using a **Conventional Commit** message. See [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 5. Submit a [pull request](https://help.github.com/articles/using-pull-requests) from your fork to the `main` branch of the original repository.
@@ -110,6 +112,10 @@ Guidelines:
 GoAkt requires every contributor to sign our [Contributor License Agreement](CLA.md) before their pull request can be merged. This protects both you and the project, and only needs to be done once.
 
 When you open your first pull request, the **CLA Assistant** bot (powered by [cla-assistant.io](https://cla-assistant.io)) will comment with a link to sign the CLA. Click the link, authenticate with GitHub, and confirm your acceptance. The signature covers all of your future contributions. The PR cannot be merged until the CLA check passes.
+
+### The maintainers' book
+
+`book/` explains how GoAkt is implemented, chapter by chapter. A pull request that changes the behaviour of code a chapter cites must update that chapter in the same pull request. Run `make book-affected` to see which chapters cite the files you changed, and `make book-check` before you push. [Keeping the book true](book/README.md#keeping-the-book-true) explains both.
 
 ### Previewing Documentation
 

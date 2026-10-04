@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestBroadcast_encodePacket(t *testing.T) {
@@ -144,7 +145,7 @@ func TestBroadcast_getPeers_excludesExpired(t *testing.T) {
 	b.handlePacket(fmt.Appendf(nil, "%s|%s|192.168.1.20:7947", protocolVersion, cfg.ClusterName))
 	peers := b.getPeers(cfg.SelfAddress)
 	require.Len(t, peers, 1)
-	time.Sleep(cfg.peerExpiry() + 50*time.Millisecond)
+	pause.For(cfg.peerExpiry() + 50*time.Millisecond)
 	peers = b.getPeers(cfg.SelfAddress)
 	assert.Empty(t, peers)
 }
@@ -160,7 +161,7 @@ func TestBroadcast_startStop(t *testing.T) {
 	}
 	b := newBroadcast(cfg)
 	require.NoError(t, b.start())
-	time.Sleep(150 * time.Millisecond)
+	pause.For(150 * time.Millisecond)
 	b.stop()
 }
 
@@ -222,7 +223,7 @@ func TestBroadcast_recvLoop_survivesIdle(t *testing.T) {
 	defer b.stop()
 
 	// Idle for longer than the read deadline (100ms) so multiple timeouts elapse.
-	time.Sleep(400 * time.Millisecond)
+	pause.For(400 * time.Millisecond)
 
 	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: broadcastPort})
 	require.NoError(t, err)
@@ -232,7 +233,7 @@ func TestBroadcast_recvLoop_survivesIdle(t *testing.T) {
 	_, err = conn.Write(pkt)
 	require.NoError(t, err)
 
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 	peers := b.getPeers(cfg.SelfAddress)
 	require.Len(t, peers, 1, "recvLoop must keep receiving after idle period")
 	assert.Equal(t, "192.168.1.88:7950", peers[0])
@@ -260,7 +261,7 @@ func TestBroadcast_receivesPacket(t *testing.T) {
 	_, err = conn.Write(pkt)
 	require.NoError(t, err)
 
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 	peers := b.getPeers(cfg.SelfAddress)
 	require.Len(t, peers, 1)
 	assert.Equal(t, "192.168.1.99:7950", peers[0])

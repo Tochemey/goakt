@@ -25,3 +25,6 @@ bench/*.txt
 *.test
 *.prof
 .local/
+# Python bytecode from the book tools (book/tools)
+__pycache__/
+*.py[cod]

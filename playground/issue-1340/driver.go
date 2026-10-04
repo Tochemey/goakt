@@ -206,7 +206,7 @@ func (x *driver) probeSingleton(ctx context.Context) {
 	for {
 		x.askSingleton(ctx)
 
-		if !pause(ctx, probeInterval) {
+		if !waitOrCancel(ctx, probeInterval) {
 			return
 		}
 	}
@@ -220,7 +220,7 @@ func (x *driver) probeGrains(ctx context.Context) {
 		x.askGrain(ctx, index)
 		index = (index + 1) % grainCount
 
-		if !pause(ctx, probeInterval) {
+		if !waitOrCancel(ctx, probeInterval) {
 			return
 		}
 	}
@@ -283,9 +283,9 @@ func (x *driver) askGrain(ctx context.Context, index int) {
 	x.grains.success(value.GetValue())
 }
 
-// pause waits for the given duration and reports whether the caller should
+// waitOrCancel waits for the given duration and reports whether the caller should
 // keep going.
-func pause(ctx context.Context, duration time.Duration) bool {
+func waitOrCancel(ctx context.Context, duration time.Duration) bool {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
 

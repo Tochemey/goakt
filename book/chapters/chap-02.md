@@ -1,15 +1,25 @@
 # 2. Building, Running and Testing the Code
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
+- [What you will learn](#what-you-will-learn)
 - [Everything runs in a container](#everything-runs-in-a-container)
   - [`vendor/` is not committed](#vendor-is-not-committed)
 - [Running one test while you read](#running-one-test-while-you-read)
 - [How the full suite is split](#how-the-full-suite-is-split)
 - [Generated code](#generated-code)
 - [Lint rules that affect how code reads](#lint-rules-that-affect-how-code-reads)
+
+## What you will learn
+
+- Why every `make` target runs in a container, which tool versions the image pins, and where they differ from CI.
+- Why `vendor/` is not committed and how the build still uses it.
+- How to run a single test while reading the code.
+- How the full suite is split into shards.
+- Which code is generated, and from what.
+- The lint rules that shape how the code reads.
+
+Source files: `Dockerfile.tools`, `Makefile`, `scripts/unit-test.sh`, `scripts/test-shard.sh`, `.github/workflows/pr.yml`, `.golangci.yml`, `.mockery.yml`, `buf.gen.yaml`, `go.mod`.
 
 ## Everything runs in a container
 
@@ -78,4 +88,4 @@ The opaque API changes how every protobuf message is used in this codebase. Gene
 - **`goheader`** requires the exact MIT license header, including the year range `2022-2026`, at the top of every Go file (`.golangci.yml`).
 - **`misspell`** runs with the US locale but whitelists British spellings (`.golangci.yml`). Comments say "behaviour", "serialise" and "cancelled", and the linter accepts them.
 
-House style uses `x` as the method receiver name in most of the code (`func (x *actorSystem) Start(...)`). Some older types keep their own: `pid` on `PID` in `actor/pid.go`, `rctx` on `ReceiveContext` in `actor/receive_context.go`.
+House style uses `x` as the method receiver name in most of the code (`func (x *actorSystem) Start(...)`). Some older types keep their own: `pid` on `PID` in `actor/pid.go`, `rctx` on `ReceiveContext` in `actor/receive_context.go`. revive's `receiver-naming` rule (`.golangci.yml`) rejects two receiver names for one type within a file, so a method added to such a file keeps the file's name.

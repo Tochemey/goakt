@@ -33,6 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -357,7 +358,7 @@ func TestControllerActiveRecords(t *testing.T) {
 	require.False(t, stale)
 
 	manager.config.MaxCacheStaleness = time.Nanosecond
-	time.Sleep(2 * time.Nanosecond)
+	pause.For(2 * time.Nanosecond)
 	records, stale = manager.ActiveRecords()
 	require.Len(t, records, 1)
 	require.True(t, stale)
@@ -442,7 +443,7 @@ func TestControllerLastRefresh(t *testing.T) {
 		})
 		firstRefresh := manager.LastRefresh()
 
-		time.Sleep(time.Millisecond)
+		pause.For(time.Millisecond)
 
 		manager.cache.replace([]DataCenterRecord{
 			{ID: "dc-1", State: datacenter.DataCenterActive, Version: 2},

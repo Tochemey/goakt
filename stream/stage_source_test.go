@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestPullSourceActor_NaturalCompletion(t *testing.T) {
@@ -65,7 +66,7 @@ func TestPullSourceActor_Cancel_ViaStop(t *testing.T) {
 	}).To(Ignore[int]()).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	require.NoError(t, handle.Stop(ctx))
 
 	select {
@@ -224,11 +225,11 @@ func TestCombineSourceActor_TypeMismatch(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, actorPID, &stageWire{
 		subID: "unit", upstream: nil, downstream: downPID,
 	}))
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 
 	// Signal demand first so tryEmit will attempt to emit.
 	require.NoError(t, actor.Tell(ctx, actorPID, &streamRequest{subID: "unit", n: 5}))
-	time.Sleep(5 * time.Millisecond)
+	pause.For(5 * time.Millisecond)
 
 	// Inject wrong-typed value into left slot (expects int, receives string).
 	require.NoError(t, actor.Tell(ctx, actorPID, &mergeSubValue{slot: 0, value: "not-an-int"}))
@@ -271,7 +272,7 @@ func TestActorSourceActor_Cancel(t *testing.T) {
 	handle, err := FromActor[int](pid).To(Ignore[int]()).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	require.NoError(t, handle.Stop(ctx))
 
 	select {

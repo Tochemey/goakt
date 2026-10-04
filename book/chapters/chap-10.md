@@ -1,7 +1,5 @@
 # 10. Passivation and Eviction
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -15,7 +13,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -60,7 +57,7 @@ There is one `passivationManager` per actor system, created with the system and 
 
 ## 10.3 Activity
 
-Inside a turn, `handleReceived` marks activity and counts the message **before** the handler runs (`actor/pid.go`). Control messages are dispatched elsewhere and are not activity (`PID.dispatchOne` in `actor/pid.go`). The time is read once per turn (Chapter 7, §7.3), so every message of a turn records the turn's start.
+Inside a turn, `handleReceived` marks activity and counts the message **before** the handler runs (`actor/pid.go`). Control messages are dispatched elsewhere and are not activity (`PID.dispatchOne` in `actor/pid.go`). The time is read once per turn ([Chapter 7, §7.3](chap-07.md#73-one-turn)), so every message of a turn records the turn's start.
 
 `markActivity` (`actor/pid.go`) stores the time in the PID and, at most once per 100 ms (`passivationTouchInterval` in `actor/pid.go`), tells the manager with `Touch`, which recomputes the entry's deadline and fixes the heap (`actor/passivation_manager.go`). The heap's deadline can therefore lag the actor's true latest activity by up to 100 ms. The manager knows that: when a deadline fires, it reads the actor's latest activity and, if the actor has not been idle for the whole timeout yet, re-arms the entry for the remaining time instead of attempting (`passivationManager.trigger` in `actor/passivation_manager.go`).
 
@@ -70,7 +67,7 @@ Inside a turn, `handleReceived` marks activity and counts the message **before**
 
 One goroutine runs `run` (`actor/passivation_manager.go`). Each iteration takes the earliest time-based entry, skipping paused ones (`passivationManager.nextEntry` in `actor/passivation_manager.go`). With no entry it waits for a heap change, a message-count trigger or the stop signal. With an entry whose deadline has passed it checks the stop signal and calls `trigger`; otherwise it waits for the deadline, a trigger, a heap change or the stop signal, with one reused timer.
 
-`trigger` (`actor/passivation_manager.go`) runs one pass: it checks that the entry is still at the top and due, re-arms it if the actor's latest activity says it is not idle yet (§10.3), pops it, releases the mutex, and calls the actor's `tryPassivation`. Afterwards, under the mutex again: an entry removed or replaced meanwhile is left alone; a passivated one is deleted; a paused one stays out of the heap; a refused one is re-armed for its refreshed deadline, pushed to at least one timeout from now when the attempt was deferred or when nothing moved the deadline, so the loop never spins on an actor it cannot stop.
+`trigger` (`actor/passivation_manager.go`) runs one pass: it checks that the entry is still at the top and due, re-arms it if the actor's latest activity says it is not idle yet ([§10.3](#103-activity)), pops it, releases the mutex, and calls the actor's `tryPassivation`. Afterwards, under the mutex again: an entry removed or replaced meanwhile is left alone; a passivated one is deleted; a paused one stays out of the heap; a refused one is re-armed for its refreshed deadline, pushed to at least one timeout from now when the attempt was deferred or when nothing moved the deadline, so the loop never spins on an actor it cannot stop.
 
 `processMessageEntry` is the message-count counterpart (`actor/passivation_manager.go`). After a deferred attempt it retries only if a trigger was raised during the attempt; otherwise it waits for the next one.
 
@@ -83,7 +80,7 @@ One goroutine runs `run` (`actor/passivation_manager.go`). Each iteration takes 
 1. Return `false` for a long-lived strategy, while the system is stopping, when the one-shot skip flag is set (consuming it), and when the actor is stopping, suspended or paused.
 2. Take the actor's stop lock, which `Shutdown` also takes, and **check again that the actor is running and not stopping**: a `Shutdown` that took the lock first has already stopped it, and `PostStop` must not run twice.
 3. Check the skip flag again: a reinstate that landed after step 1 cancels the attempt.
-4. **Take the dispatch state from `Idle` to `Processing`** with `TakeIdleForStop` (`actor/dispatch_state.go`). This succeeds only when no turn is running or waiting, and while the attempt owns the state no worker can start one, so `PostStop` cannot overlap `Receive` (Chapter 3, §3.5). A busy actor refuses the attempt: `Defer` is recorded and the attempt returns `false`.
+4. **Take the dispatch state from `Idle` to `Processing`** with `TakeIdleForStop` (`actor/dispatch_state.go`). This succeeds only when no turn is running or waiting, and while the attempt owns the state no worker can start one, so `PostStop` cannot overlap `Receive` ([Chapter 3, §3.5](chap-03.md#35-stop)). A busy actor refuses the attempt: `Defer` is recorded and the attempt returns `false`.
 5. **Check for work.** A sender that enqueued a message just before step 4 and lost the race to schedule the actor has left it in the mailbox. If the mailbox, the system queue or the `PostStart` slot is not empty, the attempt hands the actor back, schedules that work, defers and returns `false` (`PID.hasRunnableWork` and `PID.scheduleWithheldWork` in `actor/pid.go`).
 6. **Raise the passivating bit**, only now that the stop is certain. The bit makes `Tell` refuse the actor and `IsRunning` report false; raising it earlier would make a live, busy actor look dead to its senders, its parent and the actors it watches for the length of a refused attempt.
 7. Unregister the entry and run `doStop` (`actor/pid.go`): cancel the requests in flight, release what the actor watches, stop its children, run `PostStop`, release the name, tell the watchers. The children are stopped with `Shutdown`, which does not wait for a child's running handler, so a child's `PostStop` can overlap its `Receive` even though the parent's cannot.
@@ -95,7 +92,7 @@ A `PostStop` that fails still leaves the actor dead: `doStop` releases the name 
 
 `PausePassivation` and `ResumePassivation` are control messages, handled between two user messages (`PID.pausePassivation` and `PID.resumePassivation` in `actor/pid.go`). Pausing marks the entry paused and removes it from the heap (`passivationManager.Pause` in `actor/passivation_manager.go`); resuming puts a time-based entry back with a fresh deadline, or re-signals a pending message-count entry (`passivationManager.Resume` in `actor/passivation_manager.go`). A `ResumePassivation` sent to an actor that was never paused registers it again, which for a message-count actor restarts the count.
 
-A suspension pauses passivation and a reinstate resumes it (Chapter 9, §9.7). A reinstate also sets the one-shot skip flag and marks activity, so an attempt that was already past its first check is cancelled and the actor is not stopped the moment it comes back.
+A suspension pauses passivation and a reinstate resumes it ([Chapter 9, §9.7](chap-09.md#97-reinstate)). A reinstate also sets the one-shot skip flag and marks activity, so an attempt that was already past its first check is cancelled and the actor is not stopped the moment it comes back.
 
 ## 10.7 System eviction
 
@@ -149,11 +146,3 @@ Eviction is a system-wide bound on the number of user actors, independent of per
 | A zero timeout or count passivates the actor right after it starts; neither is validated | `NewTimeBasedStrategy` in `passivation/strategy.go` |
 | Eviction ignores strategies, counts children among its candidates, and applies its percentage to all candidates | `actorSystem.runEviction` and `computeEvictionCount` in `actor/actor_system.go` |
 | `Stop` does not wait for an eviction round in progress | `actorSystem.evictionLoop` in `actor/actor_system.go` |
-
-## Exercises
-
-1. An actor with a 400 ms timeout receives a message every 350 ms. Using §10.3, explain why it is never passivated, and what the manager does on each deadline it fires.
-2. A message-count actor with a threshold of 1 receives three messages in one turn. When does the attempt happen, and what does the first one find?
-3. A sender's `Tell` returns `nil` at the moment the manager takes the actor's dispatch state. Trace, through §10.5, how the message is still handled.
-4. A system has 120 user actors, a limit of 100 and an LRU policy at 50%. How many actors does one eviction round stop, and why may more than that disappear?
-5. Why must the passivating bit be raised after the dispatch state is taken rather than before? Name the three observers that would be misled otherwise.

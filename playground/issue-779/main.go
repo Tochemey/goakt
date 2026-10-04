@@ -31,6 +31,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	errors2 "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 var _actorSystem actor.ActorSystem
@@ -106,7 +107,7 @@ type MyShutdownHook struct{}
 func (m *MyShutdownHook) Execute(context.Context, actor.ActorSystem) error {
 	fmt.Println("Before shutdown hook executed")
 	fmt.Printf("Actor system running: %v\n", actorSystemIsRunning()) // should be true
-	time.Sleep(1 * time.Second)
+	pause.For(1 * time.Second)
 	fmt.Printf("Before shutdown hook completed\n\n")
 	return nil
 }

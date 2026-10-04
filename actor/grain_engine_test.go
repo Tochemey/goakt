@@ -25,6 +25,7 @@ package actor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -5552,5 +5553,96 @@ func TestAskAndTellGrain_ReachTheGrainPastAStaleOwner(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
 		requireOwnedByB(asked)
+	})
+}
+
+func TestGrainRegistryReadRetry(t *testing.T) {
+	// a registry read that ran out of its own timeout, as registryReadError reports it
+	timedOut := fmt.Errorf("%w: %w", gerrors.ErrClusterRegistryTimeout, context.DeadlineExceeded)
+	ownerHost, ownerPort := "192.0.2.41", 18041
+	ownerOf := func(identity *GrainIdentity) *internalpb.Grain {
+		return internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    ownerHost,
+			Port:    int32(ownerPort),
+		}.Build()
+	}
+
+	t.Run("AskGrain reads the registry again after a read timeout", func(t *testing.T) {
+		sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-ask", true)
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(ownerOf(identity), nil).Once()
+		rem.EXPECT().RemoteAskGrain(mock.Anything, ownerHost, ownerPort, mock.Anything, mock.Anything, time.Second).Return(new(testpb.TestReply), nil).Once()
+
+		reply, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.TestReply), reply)
+	})
+
+	t.Run("TellGrain reads the registry again after a read timeout", func(t *testing.T) {
+		sys, cl, rem, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-tell", true)
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(ownerOf(identity), nil).Once()
+		rem.EXPECT().RemoteTellGrain(mock.Anything, ownerHost, ownerPort, mock.Anything, mock.Anything).Return(nil).Once()
+
+		require.NoError(t, sys.TellGrain(context.Background(), identity, new(testpb.TestSend)))
+	})
+
+	t.Run("a read that keeps timing out fails after the bounded attempts", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-exhausted", true)
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Times(grainRegistryReadAttempts)
+
+		_, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), time.Second)
+		require.ErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+	})
+
+	t.Run("a read error other than a timeout is returned at once", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-other-error", true)
+		readErr := errors.New("registry unavailable")
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, readErr).Once()
+
+		_, err := sys.AskGrain(context.Background(), identity, new(testpb.TestReply), time.Second)
+		require.ErrorIs(t, err, readErr)
+	})
+
+	t.Run("a stopping node does not read again", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-stopping", true)
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Once()
+
+		sys.shuttingDown.Store(true)
+		defer sys.shuttingDown.Store(false)
+		_, err := sys.getGrainRecord(context.Background(), identity.String())
+		require.ErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+	})
+
+	t.Run("the owner lookup of GrainOf reads again after a read timeout", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-owner", true)
+		owner := ownerOf(identity)
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(false, timedOut).Once()
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+
+		got, err := sys.getGrainOwner(context.Background(), identity)
+		require.NoError(t, err)
+		assert.Same(t, owner, got)
+	})
+
+	t.Run("a lost claim reads the winner again after a read timeout", func(t *testing.T) {
+		sys, cl, _, identity := newActivationTestSystem(t, NewMockGrain(), "read-retry-claim", true)
+		owner := ownerOf(identity)
+		mine := internalpb.Grain_builder{
+			GrainId: internalpb.GrainId_builder{Value: identity.String(), Kind: identity.Kind(), Name: identity.Name()}.Build(),
+			Host:    "127.0.0.1",
+			Port:    15000,
+		}.Build()
+		cl.EXPECT().GrainExists(mock.Anything, identity.String()).Return(true, nil).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(nil, timedOut).Once()
+		cl.EXPECT().GetGrain(mock.Anything, identity.String()).Return(owner, nil).Once()
+
+		claimed, got, err := sys.tryClaimGrain(context.Background(), mine)
+		require.NoError(t, err)
+		assert.False(t, claimed)
+		assert.Same(t, owner, got)
 	})
 }

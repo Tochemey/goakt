@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -72,7 +73,7 @@ func (x *B) Receive(ctx *actor.ReceiveContext) {
 				supervisor.WithAnyErrorDirective(supervisor.EscalateDirective),
 			)),
 		)
-		time.Sleep(5 * time.Second)
+		pause.For(5 * time.Second)
 	case *actor.PanicSignal:
 		ctx.Stop(ctx.Sender())
 		ctx.Stop(ctx.Self())

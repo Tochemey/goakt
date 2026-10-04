@@ -48,6 +48,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 )
 
 func TestReplicatorActor(t *testing.T) {
@@ -7305,5 +7306,302 @@ func TestReplicatorStaleKeys(t *testing.T) {
 		saved, _, err := r.snapshotStore.Contact()
 		require.NoError(t, err)
 		assert.True(t, r.lastContact.Equal(saved))
+	})
+}
+
+func TestReplicatorSkipsPeersWithoutReplicator(t *testing.T) {
+	noReplicator := mock.MatchedBy(func(to *address.Address) bool { return to.Equals(address.NoSender()) })
+	plainPeer := &cluster.Peer{Host: "10.0.0.2", RemotingPort: 9090}
+	rolePeer := &cluster.Peer{Host: "10.0.0.3", RemotingPort: 9090, Roles: []string{"crdt"}}
+	rolePeerReplicator := address.New("GoAktReplicator", "remoteSys", "10.0.0.3", 9090)
+
+	t.Run("anti-entropy sends no digest to a peer without a Replicator", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig())
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		require.NoError(t, Tell(context.TODO(), repl, &antiEntropyTick{}))
+		pause.For(500 * time.Millisecond)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		assert.Zero(t, replActor.antiEntropyCount.Load())
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("anti-entropy picks only peers with the CRDT role", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig(crdt.WithRole("crdt")))
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer, rolePeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, mock.Anything, 9090, "GoAktReplicator").Return(rolePeerReplicator, nil).Maybe()
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		const rounds = 10
+		for range rounds {
+			require.NoError(t, Tell(context.TODO(), repl, &antiEntropyTick{}))
+		}
+		require.Eventually(t, func() bool { return replActor.antiEntropyCount.Load() == rounds }, 2*time.Second, 20*time.Millisecond)
+
+		remotingMock.AssertNotCalled(t, "RemoteLookup", mock.Anything, "10.0.0.2", 9090, "GoAktReplicator")
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("anti-entropy runs no round when no peer has the CRDT role", func(t *testing.T) {
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig(crdt.WithRole("crdt")))
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer}, nil)
+
+		require.NoError(t, Tell(context.TODO(), repl, &antiEntropyTick{}))
+		pause.For(500 * time.Millisecond)
+
+		remotingMock.AssertNotCalled(t, "RemoteLookup", mock.Anything, mock.Anything, mock.Anything, mock.Anything)
+		assert.Zero(t, replActor.antiEntropyCount.Load())
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("coordinated write sends no delta to a peer without a Replicator", func(t *testing.T) {
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig())
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		resp, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     crdt.GCounterKey("write-no-replicator"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-1", 1)
+			},
+			WriteTo: crdt.All,
+		}, time.Second)
+		require.NoError(t, err)
+		require.IsType(t, &crdt.UpdateResponse{}, resp)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("coordinated write reaches only peers with the CRDT role", func(t *testing.T) {
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig(crdt.WithRole("crdt")))
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer, rolePeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.3", 9090, "GoAktReplicator").Return(rolePeerReplicator, nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, rolePeerReplicator, mock.Anything).Return(nil).Once()
+
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     crdt.GCounterKey("write-role"),
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-1", 1)
+			},
+			WriteTo: crdt.All,
+		}, time.Second)
+		require.NoError(t, err)
+
+		remotingMock.AssertNotCalled(t, "RemoteLookup", mock.Anything, "10.0.0.2", 9090, "GoAktReplicator")
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("coordinated read asks no peer without a Replicator", func(t *testing.T) {
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig())
+		key := crdt.GCounterKey("read-no-replicator")
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-1", 3)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteAsk(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("unreachable")).Maybe()
+
+		resp, err := Ask(context.TODO(), repl, &crdt.Get{Key: key, ReadFrom: crdt.All}, time.Second)
+		require.NoError(t, err)
+		got, ok := resp.(*crdt.GetResponse)
+		require.True(t, ok)
+		assert.EqualValues(t, 3, got.Data.(*crdt.GCounter).Value())
+
+		remotingMock.AssertNotCalled(t, "RemoteAsk", mock.Anything, mock.Anything, noReplicator, mock.Anything, mock.Anything)
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("coordinated delete sends no tombstone to a peer without a Replicator", func(t *testing.T) {
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithMocks(t, crdt.NewConfig())
+		key := crdt.GCounterKey("delete-no-replicator")
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     key,
+			Initial: crdt.NewGCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.GCounter).Increment("node-1", 1)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		clusterMock.EXPECT().Peers(mock.Anything).Return([]*cluster.Peer{plainPeer}, nil)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		_, err = Ask(context.TODO(), repl, &crdt.Delete{Key: key, WriteTo: crdt.All}, time.Second)
+		require.NoError(t, err)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("cross-DC flush moves on to an endpoint that has a Replicator", func(t *testing.T) {
+		records := []datacenter.DataCenterRecord{{
+			ID:         "zrremote",
+			DataCenter: datacenter.DataCenter{Name: "remote", Region: "r", Zone: "z"},
+			Endpoints:  []string{"10.0.0.1:9090", "10.0.0.2:9090"},
+			State:      datacenter.DataCenterActive,
+			Version:    1,
+		}}
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		remoteReplicator := address.New("GoAktReplicator", "remoteSys", "10.0.0.2", 9090)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.1", 9090, "GoAktReplicator").Return(address.NoSender(), nil).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(remoteReplicator, nil).Maybe()
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     crdt.PNCounterKey("flush-next-endpoint"),
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 2)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(context.TODO(), repl, &dataCenterFlushTick{}))
+		require.Eventually(t, func() bool { return replActor.crossDCSendCount.Load() == 1 }, 2*time.Second, 20*time.Millisecond)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		remotingMock.AssertCalled(t, "RemoteTell", mock.Anything, mock.Anything, remoteReplicator, mock.Anything)
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("cross-DC flush does not count a datacenter without a Replicator as reached", func(t *testing.T) {
+		records := []datacenter.DataCenterRecord{{
+			ID:         "zrremote",
+			DataCenter: datacenter.DataCenter{Name: "remote", Region: "r", Zone: "z"},
+			Endpoints:  []string{"10.0.0.1:9090"},
+			State:      datacenter.DataCenterActive,
+			Version:    1,
+		}}
+		sys, repl, replActor, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.1", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		_, err := Ask(context.TODO(), repl, &crdt.Update{
+			Key:     crdt.PNCounterKey("flush-no-replicator"),
+			Initial: crdt.NewPNCounter(),
+			Modify: func(current crdt.ReplicatedData) crdt.ReplicatedData {
+				return current.(*crdt.PNCounter).Increment("node-1", 2)
+			},
+		}, time.Second)
+		require.NoError(t, err)
+
+		require.NoError(t, Tell(context.TODO(), repl, &dataCenterFlushTick{}))
+		pause.For(time.Second)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		assert.Zero(t, replActor.crossDCSendCount.Load())
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+
+	t.Run("cross-DC anti-entropy sends no digest to an endpoint without a Replicator", func(t *testing.T) {
+		records := []datacenter.DataCenterRecord{{
+			ID:         "z2r2remote2",
+			DataCenter: datacenter.DataCenter{Name: "remote2", Region: "r2", Zone: "z2"},
+			Endpoints:  []string{"10.0.0.5:9090"},
+			State:      datacenter.DataCenterActive,
+			Version:    1,
+		}}
+		sys, repl, _, clusterMock, remotingMock := spawnReplicatorWithDCController(t, remoteRecords(records), nil)
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(true).Maybe()
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.5", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		remotingMock.EXPECT().RemoteTell(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
+
+		require.NoError(t, Tell(context.TODO(), repl, &dataCenterAntiEntropyTick{}))
+		pause.For(time.Second)
+
+		remotingMock.AssertNotCalled(t, "RemoteTell", mock.Anything, mock.Anything, noReplicator, mock.Anything)
+		require.NoError(t, sys.Stop(context.TODO()))
+	})
+}
+
+func TestReplicatorReplicatorPeers(t *testing.T) {
+	plain := &cluster.Peer{Host: "10.0.0.2", RemotingPort: 9090}
+	withRole := &cluster.Peer{Host: "10.0.0.3", RemotingPort: 9090, Roles: []string{"crdt"}}
+	otherRole := &cluster.Peer{Host: "10.0.0.4", RemotingPort: 9090, Roles: []string{"web"}}
+
+	t.Run("keeps every peer when distributed data has no role", func(t *testing.T) {
+		r := newTestReplicator()
+		assert.Equal(t, []*cluster.Peer{plain, withRole, otherRole}, r.replicatorPeers([]*cluster.Peer{plain, withRole, otherRole}))
+	})
+
+	t.Run("keeps only peers with the role", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithRole("crdt"))
+		assert.Equal(t, []*cluster.Peer{withRole}, r.replicatorPeers([]*cluster.Peer{plain, withRole, otherRole}))
+	})
+
+	t.Run("returns no peer when none has the role", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithRole("crdt"))
+		assert.Empty(t, r.replicatorPeers([]*cluster.Peer{plain, otherRole}))
+		assert.Empty(t, r.replicatorPeers(nil))
+	})
+}
+
+func TestReplicatorLookupReplicator(t *testing.T) {
+	replicator := address.New("GoAktReplicator", "remoteSys", "10.0.0.3", 9090)
+
+	t.Run("returns the address of a running Replicator", func(t *testing.T) {
+		r := newTestReplicator()
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.3", 9090, "GoAktReplicator").Return(replicator, nil)
+		r.remoting = remotingMock
+
+		to, found, err := r.lookupReplicator(context.TODO(), "10.0.0.3", 9090)
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Same(t, replicator, to)
+	})
+
+	t.Run("reports no Replicator when the lookup answers NoSender", func(t *testing.T) {
+		r := newTestReplicator()
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(address.NoSender(), nil)
+		r.remoting = remotingMock
+
+		to, found, err := r.lookupReplicator(context.TODO(), "10.0.0.2", 9090)
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Nil(t, to)
+	})
+
+	t.Run("reports no Replicator when the lookup answers no address", func(t *testing.T) {
+		r := newTestReplicator()
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(nil, nil)
+		r.remoting = remotingMock
+
+		to, found, err := r.lookupReplicator(context.TODO(), "10.0.0.2", 9090)
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Nil(t, to)
+	})
+
+	t.Run("returns the lookup error", func(t *testing.T) {
+		r := newTestReplicator()
+		remotingMock := mocksremote.NewClient(t)
+		remotingMock.EXPECT().RemoteLookup(mock.Anything, "10.0.0.2", 9090, "GoAktReplicator").Return(nil, errors.New("dial failed"))
+		r.remoting = remotingMock
+
+		to, found, err := r.lookupReplicator(context.TODO(), "10.0.0.2", 9090)
+		require.EqualError(t, err, "dial failed")
+		assert.False(t, found)
+		assert.Nil(t, to)
 	})
 }

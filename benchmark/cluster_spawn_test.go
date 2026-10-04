@@ -34,6 +34,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/static"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -159,7 +160,7 @@ func startBenchCluster(b *testing.B) *benchCluster {
 				b.Fatalf("the %d nodes did not see each other within %s", clusterSpawnNodeCount, clusterSpawnPeersTimeout)
 			}
 
-			time.Sleep(clusterSpawnPeersPoll)
+			pause.For(clusterSpawnPeersPoll)
 		}
 	}
 

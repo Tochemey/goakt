@@ -1,7 +1,5 @@
 # 4. Spawning and the PID
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -23,7 +21,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -45,8 +42,8 @@ Source files: `actor/spawn.go`, `actor/pid.go`, `actor/pid_state.go`, `internal/
 | `SpawnFromFunc` | here | user guardian | same, with a random UUID name (`actorSystem.SpawnFromFunc` in `actor/spawn.go`) |
 | `SpawnOn` | a cluster member chosen by placement strategy, or another data center | user guardian of that node | Part V (`actorSystem.SpawnOn` in `actor/spawn.go`) |
 | `SpawnSingleton` | the cluster coordinator, or with `WithSingletonRole` the oldest member that advertises the role | singleton manager | Part V |
-| `SpawnRouter` | here | user guardian | Chapter 11 |
-| `PID.SpawnChild` | the parent's node | the calling PID | §4.6 (`PID.SpawnChild` in `actor/pid.go`) |
+| `SpawnRouter` | here | user guardian | [Chapter 11](chap-11.md) |
+| `PID.SpawnChild` | the parent's node | the calling PID | [§4.6](#46-children) (`PID.SpawnChild` in `actor/pid.go`) |
 
 With `WithHostAndPort`, `Spawn` does not create anything locally. It sends a `RemoteSpawn` request naming the actor's kind and returns a remote PID (`actor/spawn.go`). The kind must be registered on the target node. The rest of this chapter follows the local path.
 
@@ -116,19 +113,19 @@ In cluster mode step 3 runs first, and it finds this node's own live record and 
 4. Fall back to the system's default supervisor when none was given (`actorSystem.configPID` in `actor/actor_system.go`).
 5. Fall back to the system's default passivation strategy (two minutes idle), or to long-lived for reliable-delivery endpoints (`actorSystem.configPID` in `actor/actor_system.go`).
 
-`newPID` is covered in §4.3. It runs `PreStart`, so **by the time `configPID` returns, the actor has started but is not yet in the tree.**
+`newPID` is covered in [§4.3](#43-inside-newpid). It runs `PreStart`, so **by the time `configPID` returns, the actor has started but is not yet in the tree.**
 
 **Step 6. Attach.** `completeSpawn` calls `attachAndPublish` (`actor/actor_system.go`), which:
 
 1. Increments the live-actor counter for non-system actors.
-2. Inserts the PID under its parent, which also makes the parent a watcher of the child (Chapter 3, §3.4).
-3. Adds the death watch actor as a watcher (`actorSystem.attachAndPublish` in `actor/actor_system.go`). In a cluster, this is how a stopped actor's registry record is removed; the stopping actor leaves the tree and the live-actor count by itself (Chapter 9, §9.8).
+2. Inserts the PID under its parent, which also makes the parent a watcher of the child ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)).
+3. Adds the death watch actor as a watcher (`actorSystem.attachAndPublish` in `actor/actor_system.go`). In a cluster, this is how a stopped actor's registry record is removed; the stopping actor leaves the tree and the live-actor count by itself ([Chapter 9, §9.8](chap-09.md#98-death-watch)).
 
 If the tree already holds this ID with a *different* PID, a concurrent spawn won. The function returns the canonical PID and undoes the counter. The duplicate is deliberately not shut down, because stopping it would tear down tree state keyed by the shared ID (`actorSystem.attachAndPublish` in `actor/actor_system.go`). The comment says this path should be unreachable while every entry point goes through `runSpawnActivation`.
 
 **Step 7. Publish.** In cluster mode, `putActorOnCluster` writes the registry record **synchronously**. `Spawn` returns only after the write, so a successful spawn is resolvable by name from any node (`actor/actor_system.go`). A conflicting record held by a departed node is replaced, fenced by its incarnation ID. If publication fails, `rollbackSpawn` shuts the actor down with a non-cancellable context, so a failed spawn leaves nothing behind (`actorSystem.attachAndPublish` in `actor/actor_system.go`).
 
-**Step 8. Count.** `recordActorSpawned` updates the per-kind metric (`actorSystem.attachAndPublish` in `actor/actor_system.go`). It derives the kind name with `types.Name`, which requires a pointer; this is one of the places that makes pointer actors a requirement (Chapter 1).
+**Step 8. Count.** `recordActorSpawned` updates the per-kind metric (`actorSystem.attachAndPublish` in `actor/actor_system.go`). It derives the kind name with `types.Name`, which requires a pointer; this is one of the places that makes pointer actors a requirement ([Chapter 1](chap-01.md)).
 
 ## 4.3 Inside `newPID`
 
@@ -136,10 +133,10 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 
 1. Validates the address and allocates the struct, with a context-pool shard chosen round-robin so that concurrently busy actors take contexts from different pool shards (`newPID` in `actor/pid.go`).
 2. Sets the `relocationState` bit (relocatable unless an option clears it), then applies the options.
-3. **Embeds the default mailbox in the PID.** Without a custom mailbox, the PID's own `mailboxHead`/`mailboxTail` words become a lock-free MPSC list seeded with one sentinel, and `pid.mailbox` is the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). An ordinary actor allocates no separate mailbox object. Chapter 6 covers this.
-4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor (§4.6).
+3. **Embeds the default mailbox in the PID.** Without a custom mailbox, the PID's own `mailboxHead`/`mailboxTail` words become a lock-free MPSC list seeded with one sentinel, and `pid.mailbox` is the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). An ordinary actor allocates no separate mailbox object. [Chapter 6](chap-06.md) covers this.
+4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
-6. Runs `init`, which runs `PreStart` (§4.4).
+6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
 7. Registers with the passivation manager, builds metric attributes, and schedules the first turn so that `PostStart` is delivered (`newPID` and `PID.firePostStart` in `actor/pid.go`).
 
 ### `PostStart` is always the first message
@@ -164,18 +161,18 @@ Thirteen independent flags live in one `atomic.Uint32` (`actor/pid_state.go`). T
 | Flag | Meaning while set | Chapter |
 |---|---|---|
 | `runningState` | initialisation is complete and the actor may handle messages; a suspended actor keeps this bit | 4 |
-| `stoppingState` | a stop is in progress | 3, §3.5 |
+| `stoppingState` | a stop is in progress | 3, [§3.5](chap-03.md#35-stop) |
 | `suspendedState` | supervision has suspended the actor | 9 |
-| `passivatingState` | the actor is being passivated, and the stop is certain | 10, §10.5 |
-| `passivationPausedState` | passivation is paused while the actor is suspended | 10, §10.6 |
-| `passivationSkipNextState` | the next passivation attempt must be skipped, once | 10, §10.6 |
+| `passivatingState` | the actor is being passivated, and the stop is certain | 10, [§10.5](chap-10.md#105-one-attempt) |
+| `passivationPausedState` | passivation is paused while the actor is suspended | 10, [§10.6](chap-10.md#106-pause-resume-reinstate) |
+| `passivationSkipNextState` | the next passivation attempt must be skipped, once | 10, [§10.6](chap-10.md#106-pause-resume-reinstate) |
 | `singletonState` | the actor is a cluster singleton | 21 |
 | `relocationState` | the actor may be relocated to another node | 21 |
-| `systemState` | the actor is a system actor | 3, §3.4 |
+| `systemState` | the actor is a system actor | 3, [§3.4](chap-03.md#34-the-guardian-tree) |
 | `remoteState` | the PID is a handle for an actor on another node | 4 |
 | `remoteHoldsClosedState` | teardown has drained the remote hold registry, so a flow-control credit tracked after it is repaid at once | 17 |
-| `restartingState` | the teardown in progress belongs to a restart, not a stop | 9, §9.6 |
-| `supervisionPendingState` | a failure awaits a supervision decision, and no user message is handled | 7, §7.6 |
+| `restartingState` | the teardown in progress belongs to a restart, not a stop | 9, [§9.6](chap-09.md#96-the-restart-itself) |
+| `supervisionPendingState` | a failure awaits a supervision decision, and no user message is handled | 7, [§7.6](chap-07.md#76-failures-leave-the-turn) |
 
 Several bits are set at once, so the lifecycle is easier to read as the combinations an observer can see:
 
@@ -196,9 +193,9 @@ stateDiagram-v2
 
 Passivation never starts from `running + suspended`: `PID.tryPassivation` refuses while `suspendedState` or `passivationPausedState` is set (`actor/pid.go`). Eviction stops its actors with `Shutdown` (`actorSystem.runEviction` in `actor/actor_system.go`), so it reaches a suspended actor.
 
-A restart passes through `restarting` + `stopping` and returns to `running` on the same PID (Chapter 9, §9.6).
+A restart passes through `restarting` + `stopping` and returns to `running` on the same PID ([Chapter 9, §9.6](chap-09.md#96-the-restart-itself)).
 
-Two mutexes complete the picture. `stopLocker` serialises the two ways an actor can be stopped, `Shutdown` and a passivation attempt, so `PostStop` runs once (Chapter 10, §10.5). `fieldsLocker` is a read-write mutex over the fields that can change after construction and are read from other goroutines. These include the actor system pointer, through which the logger and the event stream are looked up, the address and the behaviour stack's switches (`PID.getLogger`, `PID.getEventsStream`, `PID.getAddress`, `PID.setBehavior` in `actor/pid.go`). Neither is taken on the send path, which uses only the bitmask and the dispatch state (Chapter 7, §7.2).
+Two mutexes complete the picture. `stopLocker` serialises the two ways an actor can be stopped, `Shutdown` and a passivation attempt, so `PostStop` runs once ([Chapter 10, §10.5](chap-10.md#105-one-attempt)). `fieldsLocker` is a read-write mutex over the fields that can change after construction and are read from other goroutines. These include the actor system pointer, through which the logger and the event stream are looked up, the address and the behaviour stack's switches (`PID.getLogger`, `PID.getEventsStream`, `PID.getAddress`, `PID.setBehavior` in `actor/pid.go`). Neither is taken on the send path, which uses only the bitmask and the dispatch state ([Chapter 7, §7.2](chap-07.md#72-the-dispatch-state)).
 
 ### Local and remote PIDs share one type
 
@@ -227,7 +224,7 @@ if err := retrier.RunContext(cctx, func(_ context.Context) error {
 
 A `PreStart` that takes 2 s succeeds, and `Spawn` blocks for 2 s. `WithInitTimeout`'s comment says so: the timeout bounds the retries, not an attempt in progress (`actor/spawn_option.go`). If you need a bound, impose it inside `PreStart` with your own context. Passing the timeout context to `PreStart`, as grains do with `OnActivate`, would make running code fail where it succeeds today, and would cancel any work `PreStart` starts on its context as soon as the actor starts.
 
-Because `newPID` runs inside the `singleflight` execution (§4.2, step 2), a slow `PreStart` also holds every concurrent spawn of the same name for as long as it runs.
+Because `newPID` runs inside the `singleflight` execution ([§4.2](#42-the-local-spawn-path-step-by-step), step 2), a slow `PreStart` also holds every concurrent spawn of the same name for as long as it runs.
 
 ## 4.5 Names, addresses and identity
 
@@ -246,7 +243,7 @@ Two kinds of constructor exist on purpose:
 - `New`, and `NewWithParent` for a child, mint a fresh incarnation UUID and are meant for creating an actor (`actorSystem.actorAddress` in `actor/actor_system.go`, `PID.childAddress` in `actor/pid.go`). One other caller uses `New` for a record: `GrainContext.toDeadletter` in `actor/grain_context.go` builds a grain's dead-letter receiver address with it.
 - `NewReference` mints none, for lookup keys and references to existing actors (`internal/address/address.go`).
 
-The incarnation ID tells two lives of the same name apart: it fences registry writes (§4.2, step 7) and `SameIncarnation` compares it (`internal/address/address.go`).
+The incarnation ID tells two lives of the same name apart: it fences registry writes ([§4.2](#42-the-local-spawn-path-step-by-step), step 7) and `SameIncarnation` compares it (`internal/address/address.go`).
 
 ### Name rules
 
@@ -300,7 +297,7 @@ Without `WithDefaultSupervisor`, the system default is `supervisor.NewSupervisor
 
 `ActorOf` (`actor/actor_system.go`) resolves locally first, by qualified name and then by bare name (`actorSystem.localActor` in `actor/actor_system.go`). A bare child name that several parents share returns the most recently spawned child. The local lookup takes only the tree's lock. A stopping actor is reported as not found; a suspended one is returned. In cluster mode it then reads the registry and returns a remote PID. With remoting but no cluster, a name that is not local gives `ErrMethodCallNotAllowed`, not `ErrActorNotFound`.
 
-`Kill` resolves the same way and calls `PID.Shutdown`, or `RemoteStop` for an actor on another node (`actor/actor_system.go`). It inherits everything Chapter 3, §3.5 says about `Shutdown`: queued messages are dropped and `PostStop` may overlap a running `Receive`.
+`Kill` resolves the same way and calls `PID.Shutdown`, or `RemoteStop` for an actor on another node (`actor/actor_system.go`). It inherits everything [Chapter 3, §3.5](chap-03.md#35-stop) says about `Shutdown`: queued messages are dropped and `PostStop` may overlap a running `Receive`.
 
 `ReSpawn` calls `PID.Restart` (`actor/actor_system.go`, `actor/pid.go`). `Restart`:
 
@@ -347,11 +344,3 @@ Without `WithDefaultSupervisor`, the system default is `supervisor.NewSupervisor
 | A repeated `Spawn` of a running name returns the PID locally but `ErrActorAlreadyExists` in a cluster | `actorSystem.Spawn` in `actor/spawn.go` |
 | A name with surrounding whitespace is accepted and kept | `Address.Validate` in `internal/address/address.go` |
 | `ActorOf` returns `ErrMethodCallNotAllowed` for a missing name with remoting but no cluster | `actorSystem.ActorOf` in `actor/actor_system.go` |
-
-## Exercises
-
-1. Two goroutines call `Spawn(ctx, "a", ...)` at once; the first passes a context that is cancelled 1 ms later. Trace both calls through `runSpawnActivation` and say what each returns.
-2. Explain why `attachAndPublish` does not shut down the duplicate PID it detects. What would break?
-3. Write a `PreStart` that is correct under five attempts and a caller-imposed deadline.
-4. A field on `PID` is written by producers on every `Tell`. Where should it go in the struct, and why?
-5. `SpawnChild` rejects `AsReliableProducer` instead of ignoring it. Trace what a child endpoint without a controller would have done with its first message.

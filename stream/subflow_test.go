@@ -32,6 +32,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/stream"
 )
 
@@ -337,7 +338,7 @@ func TestSubFlow_ErrorStrategyRestart_RespawnsKey(t *testing.T) {
 	// Send the doomed first element, wait long enough for the substream
 	// failure to round-trip back to the splitter, then send the survivors.
 	ch <- 7
-	time.Sleep(300 * time.Millisecond)
+	pause.For(300 * time.Millisecond)
 	ch <- 7
 	ch <- 7
 	ch <- 7

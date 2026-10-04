@@ -240,7 +240,7 @@ func runBlast(ctx context.Context, ping *actor.PID, targets []*actor.PID, pongs 
 	goroutines := runtime.NumGoroutine()
 	libGoroutines := countLibraryGoroutines()
 	wg.Wait()
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	s := sent.Load()
 	r := int64(0)
@@ -652,7 +652,7 @@ func runIsolation(ctx context.Context, ping *actor.PID, remotePong *actor.PID, p
 		}()
 	}
 	wg.Wait()
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	fastReceived := askCount(ctx, pongPID)
 	fmt.Printf("isolation results\n")
@@ -751,11 +751,11 @@ func runControlLatency(ctx context.Context, ping *actor.PID, remotePong *actor.P
 				lat.add(time.Since(start))
 				lookups.Add(1)
 			}
-			time.Sleep(5 * time.Millisecond)
+			pause.For(5 * time.Millisecond)
 		}
 	}()
 	wg.Wait()
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	fmt.Printf("controllatency results\n")
 	fmt.Printf("  duration=%s blastSenders=%d\n", duration, senders)

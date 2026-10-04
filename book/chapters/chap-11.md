@@ -1,7 +1,5 @@
 # 11. Scheduling, Routers, Event Stream, Pub/Sub
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -19,7 +17,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -29,7 +26,7 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - How the event stream delivers system events, and what a subscriber must do to read them.
 - How the topic actor implements publish and subscribe, locally and across nodes.
 
-Source files: `actor/scheduler.go`, `actor/schedule_option.go`, `actor/router.go`, `actor/router_option.go`, `actor/routing_strategy.go`, `eventstream/eventstream.go`, `eventstream/subscriber.go`, `internal/queue/queue.go`, `actor/topic_actor.go`. The scheduler runs on [go-quartz](https://github.com/reugn/go-quartz) v0.15.2 (`go.mod`); its behaviour is described from that version's `quartz/scheduler.go` and `quartz/trigger.go`.
+Source files: `actor/scheduler.go`, `actor/schedule_option.go`, `actor/router.go`, `actor/router_option.go`, `actor/routing_strategy.go`, `eventstream/eventstream.go`, `eventstream/subscriber.go`, `internal/queue/queue.go`, `actor/topic_actor.go`. The scheduler runs on [go-quartz](https://github.com/reugn/go-quartz) v0.15.2 (`go.mod`); its behaviour is described from that version's `github.com/reugn/go-quartz/quartz/scheduler.go` and `github.com/reugn/go-quartz/quartz/trigger.go`.
 
 ## 11.1 The scheduler
 
@@ -64,7 +61,7 @@ go-quartz runs one loop goroutine and, with no worker limit, which is how GoAkt 
 
 The actor job (`scheduler.makeJobFn` in `actor/scheduler.go`) resolves its sender once, at registration: `WithSender`, or the system's `NoSender` actor, which is not `nil`. On each tick it runs the cluster claim, if any (below), then `sender.Tell(ctx, to, message)`. Three things follow from this closure:
 
-- `Tell` to an actor that is not running fails with `ErrDead` before any dead letter is built (Chapter 5), so a tick to a stopped, suspended or passivated actor is lost without trace. A passivated actor is not reactivated by its schedules; a grain is, because the grain job uses `TellGrain` (`scheduler.makeGrainJobFn` in `actor/scheduler.go`).
+- `Tell` to an actor that is not running fails with `ErrDead` before any dead letter is built ([Chapter 5](chap-05.md)), so a tick to a stopped, suspended or passivated actor is lost without trace. A passivated actor is not reactivated by its schedules; a grain is, because the grain job uses `TellGrain` (`scheduler.makeGrainJobFn` in `actor/scheduler.go`).
 - The closure holds the **PID**, not the name. A recurring schedule whose target stopped keeps firing into it, and an actor later spawned under the same name does not receive it. Cancel the schedule yourself.
 - The same message value is sent on every tick, and two ticks can be in flight at once, on two goroutines.
 
@@ -117,7 +114,7 @@ Two consequences for routee code:
 
 ### When a routee fails or stops
 
-A routee's error escalates: the routee is suspended and the router receives a `PanicSignal` (Chapter 9, §9.5). `handlePanicSignal` applies the router's directive (`actor/router.go`):
+A routee's error escalates: the routee is suspended and the router receives a `PanicSignal` ([Chapter 9, §9.5](chap-09.md#95-escalation-and-the-guardians)). `handlePanicSignal` applies the router's directive (`actor/router.go`):
 
 - **stop** (the default): stop the routee, remove it from the map, rebuild the hash ring;
 - **restart**: `Restart` the routee, trying up to the configured number of attempts with an exponential backoff whose interval starts at, and is capped by, the configured delay, each wait randomised by up to half of it (`Retrier.RunContext` in `internal/retry/retry.go`), all on the router's turn; with zero attempts or no delay it tries once; if that fails, stop it;
@@ -227,11 +224,3 @@ A peer's topic actor delivers a `TopicMessage` to its local subscribers the same
 | Every publication goes to every peer, and a slow peer slows every publication | `topicActor.sendToRemoteTopicActors` in `actor/topic_actor.go` |
 | A topic exists only while it has subscribers | `topicActor.forgetTopicIfEmpty` in `actor/topic_actor.go` |
 | `TopicStats` runs its peer fan-out off the topic actor's turn | `topicActor.handleGetTopicStats` in `actor/topic_actor.go` |
-
-## Exercises
-
-1. Your service starts the actor system with `ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second); defer cancel()`. A minute later, which schedules fire? How do you start it safely?
-2. Ten thousand requests each schedule a five-second timeout with `ScheduleOnce`, and all fire. What remains in the scheduler, and what does it cost later?
-3. A pool of five routees uses round robin. Explain, from `availableRoutees` and `routeByStrategy`, why each routee receives every fifth message, and why a routee that is restarted or resumed after a broadcast removed it moves to the end of the rotation.
-4. A routee answers with `ctx.Response` to a router built with scatter-gather. Trace the reply to the original caller, and explain why an `Ask` to the router itself times out.
-5. Why does the topic actor wait for all its delivery goroutines before ending the turn? What would subscribers see if it did not?

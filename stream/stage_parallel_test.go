@@ -37,6 +37,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 // TestParallelMap_BasicTransform verifies that all elements are transformed and
@@ -154,7 +155,7 @@ func TestParallelMap_ConcurrencyActuallyParallel(t *testing.T) {
 	handle, err := Via(
 		Of(1, 2, 3, 4),
 		ParallelMap(workers, func(n int) int {
-			time.Sleep(sleep)
+			pause.For(sleep)
 			return n
 		}),
 	).To(sink).Run(ctx, sys)
@@ -242,7 +243,7 @@ func TestParallelMap_StreamCancel(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, paPID, &stageWire{
 		subID: "unit", upstream: upPID, downstream: downPID,
 	}))
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 
 	// Send streamCancel (simulating a downstream cancel).
 	require.NoError(t, actor.Tell(ctx, paPID, &streamCancel{subID: "unit"}))
@@ -316,7 +317,7 @@ func TestParallelMap_WorkerCountMatchesConcurrency(t *testing.T) {
 					break
 				}
 			}
-			time.Sleep(10 * time.Millisecond)
+			pause.For(10 * time.Millisecond)
 			active.Add(-1)
 			return n
 		}),
@@ -416,7 +417,7 @@ func TestOrderedParallelMap_LargeInput(t *testing.T) {
 			// Odd elements sleep briefly so results arrive out of natural order,
 			// exercising the resequencer heap.
 			if v%2 != 0 {
-				time.Sleep(2 * time.Millisecond)
+				pause.For(2 * time.Millisecond)
 			}
 			return v * 2
 		}),
@@ -522,7 +523,7 @@ func TestOrderedParallelMap_StreamCancel_Unit(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, oaPID, &stageWire{
 		subID: "unit", upstream: upPID, downstream: downPID,
 	}))
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 
 	require.NoError(t, actor.Tell(ctx, oaPID, &streamCancel{subID: "unit"}))
 

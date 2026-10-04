@@ -1,7 +1,5 @@
 # 8. The Receive Context
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -30,7 +28,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -52,10 +49,10 @@ Source files: `actor/receive_context.go`, `actor/context.go`, `actor/context_poo
 
 - the message, its sender, the receiving PID and the sender's `context.Context`;
 - for an `Ask`, a reply channel, a once-only guard on it, and the asker's deadline;
-- for a request (§8.5), a correlation ID and where to route the reply;
+- for a request ([§8.5](#85-reentrancy-requests-that-do-not-block)), a correlation ID and where to route the reply;
 - the error recorded with `Err`, the flow-control credit of a remote message, and the pool shard it belongs to.
 
-The same type is the mailbox node: its first field, `next`, links it into a mailbox (Chapter 6). That is why its lifetime is short and precise. The mailbox recycles a context on the dequeue *after* the one that returned it (Chapter 6, §6.1), and recycling clears every message field: `ReceiveContext.reset` in `actor/receive_context.go` leaves only the reply guard, which the next `build` or `cloneContext` clears, and the pool shard stamp. A handler that stores the context, or passes it to a goroutine that outlives `Receive`, will find it reused for an unrelated message. Copy what you need out of it.
+The same type is the mailbox node: its first field, `next`, links it into a mailbox ([Chapter 6](chap-06.md)). That is why its lifetime is short and precise. The mailbox recycles a context on the dequeue *after* the one that returned it ([Chapter 6, §6.1](chap-06.md#61-the-contract)), and recycling clears every message field: `ReceiveContext.reset` in `actor/receive_context.go` leaves only the reply guard, which the next `build` or `cloneContext` clears, and the pool shard stamp. A handler that stores the context, or passes it to a goroutine that outlives `Receive`, will find it reused for an unrelated message. Copy what you need out of it.
 
 `PreStart` and `PostStop` get a different and simpler type, `Context`: a `context.Context`, the actor system, the actor's name and its dependencies, with no message and no sending methods (`newContext` in `actor/context.go`).
 
@@ -74,18 +71,18 @@ A context can sit in only one queue at a time. When a message must enter a secon
 | Purpose | Methods | Chapter |
 |---|---|---|
 | Identity | `Self`, `Sender`, `Message`, `CorrelationID`, `Logger`, `ActorSystem` | 5 |
-| Context | `Context` | 5, §5.2 |
-| Reply | `Response` | 5, §5.3 |
+| Context | `Context` | 5, [§5.2](chap-05.md#52-what-a-message-carries) |
+| Reply | `Response` | 5, [§5.3](chap-05.md#53-how-a-reply-gets-back) |
 | Send | `Tell`, `BatchTell`, `Ask`, `BatchAsk`, `SendAsync`, `SendSync`, `Forward`, `ForwardTo`, `PipeTo`, `PipeToName`, `RemoteLookup` | 5 |
-| Request without blocking | `Request`, `RequestName`, `RequestGrain`, `EnableReentrancy`, `DisableReentrancy` | 8, §8.5 |
+| Request without blocking | `Request`, `RequestName`, `RequestGrain`, `EnableReentrancy`, `DisableReentrancy` | 8, [§8.5](#85-reentrancy-requests-that-do-not-block) |
 | Children and others | `Spawn`, `Children`, `Child`, `Stop`, `Watch`, `UnWatch`, `Reinstate`, `ReinstateNamed`, `RemoteReSpawn` | 4, 9 |
-| Behaviour | `Become`, `BecomeStacked`, `UnBecome`, `UnBecomeStacked` | 8, §8.3 |
-| Stash | `Stash`, `Unstash`, `UnstashAll` | 8, §8.4 |
-| Failure | `Err`, `Unhandled` | 5, §5.6 |
-| Lifecycle | `Shutdown` | 3, §3.5 |
+| Behaviour | `Become`, `BecomeStacked`, `UnBecome`, `UnBecomeStacked` | 8, [§8.3](#83-behaviours) |
+| Stash | `Stash`, `Unstash`, `UnstashAll` | 8, [§8.4](#84-the-stash) |
+| Failure | `Err`, `Unhandled` | 5, [§5.6](chap-05.md#56-sending-from-inside-receive-errors-become-supervision) |
+| Lifecycle | `Shutdown` | 3, [§3.5](chap-03.md#35-stop) |
 | Extensions | `Extensions`, `Extension`, `Dependencies`, `Dependency` | 12 |
 
-Every method that can fail reports through `Err` instead of returning an error, except `EnableReentrancy`, which returns the error for a nil or invalid configuration (`ReceiveContext.EnableReentrancy` in `actor/receive_context.go`). As Chapter 5 showed, an error recorded there is supervised once the handler returns.
+Every method that can fail reports through `Err` instead of returning an error, except `EnableReentrancy`, which returns the error for a nil or invalid configuration (`ReceiveContext.EnableReentrancy` in `actor/receive_context.go`). As [Chapter 5](chap-05.md) showed, an error recorded there is supervised once the handler returns.
 
 ## 8.3 Behaviours
 
@@ -100,13 +97,13 @@ An actor's handler is the top of a **behaviour stack**, a lock-free linked stack
 
 The stack therefore always holds at least one behaviour. `UnBecomeStacked` with nothing stacked has no effect, as its comment says, instead of leaving an actor with nothing to handle its messages; and `UnBecome` returns to `Receive` for good, so a later `UnBecomeStacked` has nothing to go back to (`actor/receive_context.go`).
 
-A stop empties the stack in `reset`, and a restart puts `Receive` back with `resetBehavior` before `init` (`restartSubtree` in `actor/pid.go`). No message is handled in between: the turn hands out no user message while the actor is stopping or restarting (Chapter 7, §7.3). A restarted actor therefore always starts on `Receive`, whatever it had switched to.
+A stop empties the stack in `reset`, and a restart puts `Receive` back with `resetBehavior` before `init` (`restartSubtree` in `actor/pid.go`). No message is handled in between: the turn hands out no user message while the actor is stopping or restarting ([Chapter 7, §7.3](chap-07.md#73-one-turn)). A restarted actor therefore always starts on `Receive`, whatever it had switched to.
 
 ## 8.4 The stash
 
-`Stash` sets the current message aside to handle later. It needs a stash buffer, created by `WithStashing` (`withStash` in `actor/pid_option.go`) or, lazily, by the first request in stash mode (§8.5). Without one, `Stash` records `ErrStashBufferNotSet` (`actor/receive_context.go`). The buffer is an `UnboundedMailbox`, so it is FIFO and has no limit (`stashState` in `actor/stash.go`).
+`Stash` sets the current message aside to handle later. It needs a stash buffer, created by `WithStashing` (`withStash` in `actor/pid_option.go`) or, lazily, by the first request in stash mode ([§8.5](#85-reentrancy-requests-that-do-not-block)). Without one, `Stash` records `ErrStashBufferNotSet` (`actor/receive_context.go`). The buffer is an `UnboundedMailbox`, so it is FIFO and has no limit (`stashState` in `actor/stash.go`).
 
-- **`Stash`** enqueues a clone of the current context, because the original is still the mailbox's sentinel (`PID.stash` in `actor/stash.go`). The clone keeps the reply route and the deadline, so a stashed `Ask` can still be answered later, and is skipped if its asker has given up by the time it comes back (Chapter 5, §5.2).
+- **`Stash`** enqueues a clone of the current context, because the original is still the mailbox's sentinel (`PID.stash` in `actor/stash.go`). The clone keeps the reply route and the deadline, so a stashed `Ask` can still be answered later, and is skipped if its asker has given up by the time it comes back ([Chapter 5, §5.2](chap-05.md#52-what-a-message-carries)).
 - **`Unstash`** takes the oldest stashed message and sends it to the actor again through `doReceive` (`PID.unstash` in `actor/stash.go`). **`UnstashAll`** does that for every stashed message, oldest first (`PID.unstashAll` in `actor/stash.go`).
 
 Going through `doReceive` means **appending** to the mailbox. An unstashed message is handled after every message already in the mailbox, and before those that arrive after the unstash; the comments on `Unstash`, `UnstashAll` and `unstashAll` say so (`actor/receive_context.go`, `actor/stash.go`). A handler that stashes while it waits for some event, then unstashes, sees its stashed messages after everything that queued up meanwhile. Akka's `unstashAll` prepends instead.
@@ -130,7 +127,7 @@ Going through `doReceive` means **appending** to the mailbox. An unstashed messa
 1. **Register.** `request` checks the target is running and the mode is not `Off`, creates a `requestState` under a fresh UUID, and registers it (`actor/pid.go`). Registration enforces the in-flight cap with a compare-and-swap loop and, in stash mode, increments the blocking count and creates the stash buffer if there is none (`PID.registerRequestState` in `actor/pid.go`).
 2. **Time out, if asked.** `WithRequestTimeout` starts a goroutine with a pooled timer (`requestState.startTimeout` in `actor/reentrancy.go`). There is no default timeout for actors.
 3. **Send.** The message travels inside an `AsyncRequest` envelope, sent with an ordinary `Tell`.
-4. **On the receiving side**, `dispatchOne` unwraps the envelope, puts the original message on the context together with the correlation ID and reply address, and calls the handler as for any message (`PID.handleAsyncRequest` in `actor/pid.go`). The receiving actor needs no reentrancy of its own. Its `Response` routes an `AsyncResponse` back instead of writing to a channel (Chapter 5, §5.3).
+4. **On the receiving side**, `dispatchOne` unwraps the envelope, puts the original message on the context together with the correlation ID and reply address, and calls the handler as for any message (`PID.handleAsyncRequest` in `actor/pid.go`). The receiving actor needs no reentrancy of its own. Its `Response` routes an `AsyncResponse` back instead of writing to a channel ([Chapter 5, §5.3](chap-05.md#53-how-a-reply-gets-back)).
 5. **Back home**, the `AsyncResponse` is a message to the requester, so it is handled on the requester's turn. `completeRequest` finds the state, completes it once, deregisters it, and runs the `Then` callback right there, on the actor's turn (`PID.handleAsyncResponse` in `actor/pid.go`).
 
 Timeouts and cancellations happen on other goroutines, so they are not completed in place. `enqueueAsyncError` turns them into an `AsyncResponse` carrying an error and sends it to the actor like the real reply. Whichever arrives first wins, and the callback still runs on the actor's turn (`actor/pid.go`). The only exception is `Then` registered after the request has completed: it runs immediately, on the goroutine that calls `Then` (`requestState.setCallback` in `actor/reentrancy.go`).
@@ -139,7 +136,7 @@ Errors cross the envelope as strings. `asyncErrorFromString` turns the known one
 
 ### Stash mode
 
-While the blocking count is above zero, `dispatchOne` stashes every message except the reply envelopes and the control messages (`PID.enableReentrancyStash` in `actor/pid.go`). When the last blocking request is deregistered, `unstashAll` releases them (`PID.deregisterRequestState` in `actor/pid.go`). Since unstashing appends (§8.4), the messages that arrived after the reply, but before the turn handled it, are handled before the ones that were stashed. The mode's documentation says so (`Mode` in `reentrancy/reentrancy.go`): the mode keeps user messages from running while a request is in flight, not their arrival order.
+While the blocking count is above zero, `dispatchOne` stashes every message except the reply envelopes and the control messages (`PID.enableReentrancyStash` in `actor/pid.go`). When the last blocking request is deregistered, `unstashAll` releases them (`PID.deregisterRequestState` in `actor/pid.go`). Since unstashing appends ([§8.4](#84-the-stash)), the messages that arrived after the reply, but before the turn handled it, are handled before the ones that were stashed. The mode's documentation says so (`Mode` in `reentrancy/reentrancy.go`): the mode keeps user messages from running while a request is in flight, not their arrival order.
 
 A stash-mode request that is never answered and has no timeout keeps the actor stashing forever.
 
@@ -149,12 +146,12 @@ A stash-mode request that is never answered and has no timeout keeps the actor s
 
 ### The envelopes and their rules
 
-Actors and grains (§8.6) share one request machinery. Its two messages are plain structs in `internal/commands/async.go`:
+Actors and grains ([§8.6](#86-reentrancy-in-grains)) share one request machinery. Its two messages are plain structs in `internal/commands/async.go`:
 
 | Struct | Field | Meaning |
 |---|---|---|
 | `AsyncRequest` | `CorrelationID` | a UUID; the key of the request in the requester's `requestStates` map |
-| | `ReplyTo` | an `*AsyncReplyTo`: where the reply goes. Nil when a caller blocked in an ask on this node awaits it (§8.6) |
+| | `ReplyTo` | an `*AsyncReplyTo`: where the reply goes. Nil when a caller blocked in an ask on this node awaits it ([§8.6](#86-reentrancy-in-grains)) |
 | | `Message` | the user's message |
 | | `Deadline` | when the sender of an ask stops waiting, as a reading of the node's ask clock. It has no meaning on another node, so the serialiser does not send it |
 | `AsyncResponse` | `CorrelationID` | the ID of the request it answers |
@@ -201,21 +198,21 @@ Requests are admitted from the owner's handler and completed on its turn, so the
 
 ### One reply router
 
-Every reply to a request goes through `actorSystem.routeAsyncReply` in `actor/async_reply.go`. It is called by `ReceiveContext.Response`, by the reply methods of `GrainContext`, and by `GrainReply` (§8.6). It refuses an empty correlation ID or a malformed target with `ErrInvalidMessage`, builds the `AsyncResponse`, and picks one of three arms:
+Every reply to a request goes through `actorSystem.routeAsyncReply` in `actor/async_reply.go`. It is called by `ReceiveContext.Response`, by the reply methods of `GrainContext`, and by `GrainReply` ([§8.6](#86-reentrancy-in-grains)). It refuses an empty correlation ID or a malformed target with `ErrInvalidMessage`, builds the `AsyncResponse`, and picks one of three arms:
 
 | Target | What it does |
 |---|---|
 | nil `ReplyTo` | a caller is blocked in an ask on this node: `pendingAsks.Complete` hands it the response. A caller that has already given up is not an error; the response is dropped with a debug log |
 | `ReplyToActor` | `tellAsyncResponse` resolves the recorded **address** with `pidOf` and tells the response, across the network if need be. The sender is the replying actor, or `NoSender` when the replier is a grain |
-| `ReplyToGrain` | rebuilds the identity with `toIdentity` and calls `deliverAsyncEnvelope` (§8.6) |
+| `ReplyToGrain` | rebuilds the identity with `toIdentity` and calls `deliverAsyncEnvelope` ([§8.6](#86-reentrancy-in-grains)) |
 
 The actor arm uses the address, not the name. The comment on `tellAsyncResponse` gives two reasons. The correlation ID lives in one process's memory, so another incarnation of the same name would only discard the response. And an address can be reached wherever remoting works, while a name can be resolved only where the cluster registry can.
 
 ## 8.6 Reentrancy in grains
 
-A grain is a virtual actor: it is addressed by an identity (a kind and a name), activated when the first message for it arrives, and deactivated after a period of idleness, which is called passivation. Its process is a `grainPID` and its handler, `OnReceive`, gets a `*GrainContext`. Chapters 13 and 14 cover grains; this section covers only what requests add.
+A grain is a virtual actor: it is addressed by an identity (a kind and a name), activated when the first message for it arrives, and deactivated after a period of idleness, which is called passivation. Its process is a `grainPID` and its handler, `OnReceive`, gets a `*GrainContext`. Chapters [13](chap-13.md) and [14](chap-14.md) cover grains; this section covers only what requests add.
 
-A grain issues requests with `GrainContext.RequestGrain` and `GrainContext.RequestActor` (`actor/grain_context.go`). It needs a policy from `WithGrainReentrancy` at activation or from `EnableReentrancy`. The machinery of §8.5 is shared; the differences are these:
+A grain issues requests with `GrainContext.RequestGrain` and `GrainContext.RequestActor` (`actor/grain_context.go`). It needs a policy from `WithGrainReentrancy` at activation or from `EnableReentrancy`. The machinery of [§8.5](#85-reentrancy-requests-that-do-not-block) is shared; the differences are these:
 
 | | Actor | Grain |
 |---|---|---|
@@ -245,7 +242,7 @@ Timeouts and `Cancel` reach the grain the same way as on an actor. `grainPID.enq
 
 ### Stash mode is a pause
 
-`paused` is simply `blockingCount > 0`. Nothing is copied to a side buffer. User messages, timer ticks and a `PoisonPill` wait where they are and are handled in their arrival order once the last blocking request completes; `grainPID.deregisterRequestState` has no unstash step. This differs from the actor, where the stashed messages go to the back of the mailbox (§8.5).
+`paused` is simply `blockingCount > 0`. Nothing is copied to a side buffer. User messages, timer ticks and a `PoisonPill` wait where they are and are handled in their arrival order once the last blocking request completes; `grainPID.deregisterRequestState` has no unstash step. This differs from the actor, where the stashed messages go to the back of the mailbox ([§8.5](#85-reentrancy-requests-that-do-not-block)).
 
 One consequence. An acknowledged `TellGrain` waits until the grain has processed the message. Against a paused grain that wait can end with `ErrRequestTimeout`, although the message is in the mailbox and will be processed after the pause.
 
@@ -375,13 +372,3 @@ One window stays open by design. A user message queued ahead of the pill can sta
 | A deferred reply does not hold back passivation | `GrainContext.DeferResponse` in `actor/grain_context.go` |
 | Requests in flight do not survive relocation or a crash of the requester | `reentrancyState` in `actor/reentrancy.go` |
 | A stash-mode grain request with its timeout disabled and a lost reply pauses the grain until shutdown | `grainPID.paused` in `actor/grain_pid.go` |
-
-## Exercises
-
-1. A handler starts a goroutine that calls `ctx.Sender()` after `Receive` returns. Describe what it may read, using §8.1.
-2. Show that no sequence of behaviour calls can leave the stack empty, using the four rows of the table in §8.3.
-3. An actor stashes every message until it receives `Ready`, then calls `UnstashAll`. Five messages arrived between `Ready` and the moment `Ready` was handled. In what order does it handle everything?
-4. Two actors each issue a `StashNonReentrant` request to the other at the same time. What happens, and what does `WithRequestTimeout` change?
-5. Why can a timeout not complete a request directly from its goroutine? What would break if it did?
-6. A grain in `StashNonReentrant` mode has one request in flight and three user messages waiting. The request times out. Follow `runTurn` from the timeout goroutine to the third message, naming the queue each item sits in and the point where `paused` changes.
-7. The passivation manager fires for a grain, and a message already in the mailbox starts a request before the pill is handled. Walk the table in §8.6 to say what the pill does, and which function puts the grain back under the manager's watch.

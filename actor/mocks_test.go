@@ -34,6 +34,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/crdt"
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/extension"
@@ -45,6 +49,8 @@ import (
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
+	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
+	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
@@ -4738,4 +4744,43 @@ func logLevelOf(t *testing.T, output, fragment string) string {
 
 	t.Fatalf("no log line contains %q in:\n%s", fragment, output)
 	return ""
+}
+
+// spawnReplicatorWithMocks starts an actor system whose cluster and remoting
+// are mocks, registers the given CRDT configuration and spawns a Replicator on
+// it. The Replicator reads the mocks in PreStart, so a test drives its peer
+// view through the cluster mock and observes its sends on the remoting mock.
+// The cluster flag is cleared after the spawn so that Stop does not reach for
+// cluster state the mocks do not provide.
+func spawnReplicatorWithMocks(t *testing.T, config *crdt.Config) (ActorSystem, *PID, *replicatorActor, *mockcluster.Cluster, *mocksremote.Client) {
+	t.Helper()
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithPubSub())
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	pause.For(time.Second)
+
+	impl := sys.(*actorSystem)
+	clusterMock := mockcluster.NewCluster(t)
+	remotingMock := mocksremote.NewClient(t)
+	clusterMock.EXPECT().ActorExists(mock.Anything, mock.Anything).Return(false, nil).Maybe()
+	clusterMock.EXPECT().PutActor(mock.Anything, mock.Anything).Return(nil).Maybe()
+	remotingMock.EXPECT().Close().Maybe()
+
+	impl.locker.Lock()
+	impl.cluster = clusterMock
+	impl.remoting = remotingMock
+	impl.locker.Unlock()
+	impl.clusterEnabled.Store(true)
+	impl.remotingEnabled.Store(true)
+	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: config})
+
+	replActor := newReplicatorActor()
+	repl, err := sys.Spawn(ctx, "replicator", replActor, WithLongLived())
+	require.NoError(t, err)
+	pause.For(500 * time.Millisecond)
+
+	impl.clusterEnabled.Store(false)
+	return sys, repl, replActor, clusterMock, remotingMock
 }

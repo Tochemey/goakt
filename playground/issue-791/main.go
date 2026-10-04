@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -51,7 +52,7 @@ func main() {
 	spawnActor(ctx, sys1, "actor1")
 
 	// ideally this sleep should not be needed, but omitting it will fail the next step
-	time.Sleep(1 * time.Second)
+	pause.For(1 * time.Second)
 
 	// system 2 should be able to retrieve the remote actor from system 1
 	fmt.Println("\nRetrieving remote actor from system 1...")
@@ -72,7 +73,7 @@ func main() {
 	stopActorSystem(ctx, sys1)
 
 	// ideally this sleep should not be needed, but let's leave time for the expected relocation to happen
-	time.Sleep(5 * time.Second)
+	pause.For(5 * time.Second)
 
 	// system 2 should now be able to retrieve the local actor - but it fails to do so
 	fmt.Println("\nRetrieving local actor from system 2...")

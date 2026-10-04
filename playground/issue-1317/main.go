@@ -44,6 +44,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 )
@@ -109,7 +110,7 @@ func settle() int64 {
 
 	for range maxGCRounds {
 		runtime.GC()
-		time.Sleep(50 * time.Millisecond)
+		pause.For(50 * time.Millisecond)
 
 		current := reclaimed.Load()
 		if current == population || current == last {
@@ -156,7 +157,7 @@ func main() {
 			fmt.Printf("FAIL: %d actors still active after %s\n", system.NumActors(), passivationDeadline)
 			os.Exit(1)
 		}
-		time.Sleep(100 * time.Millisecond)
+		pause.For(100 * time.Millisecond)
 	}
 
 	collected := settle()

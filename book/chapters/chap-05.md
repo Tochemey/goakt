@@ -1,7 +1,5 @@
 # 5. Messaging
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -19,7 +17,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -30,7 +27,7 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - What happens when a send from inside `Receive` fails: errors become supervision.
 - How `Forward`, `PipeTo` and dead letters work, and their edges.
 
-Asynchronous requests with continuations (`ctx.Request`) belong with reentrancy, in Chapter 8. Name-based sends during relocation are covered in Part V.
+Asynchronous requests with continuations (`ctx.Request`) belong with reentrancy, in [Chapter 8](chap-08.md). Name-based sends during relocation are covered in Part V.
 
 ## 5.1 Three ways to send
 
@@ -38,7 +35,7 @@ Asynchronous requests with continuations (`ctx.Request`) belong with reentrancy,
 |---|---|---|---|
 | Package functions | `actor.Tell(ctx, pid, msg)`, `actor.Ask(...)` | the system's NoSender | returned `error` |
 | PID methods | `pid.Tell(ctx, to, msg)`, `pid.Ask(...)`, `pid.SendAsync(ctx, name, msg)` | `pid` | returned `error` |
-| ReceiveContext methods, inside `Receive` | `ctx.Tell(to, msg)`, `ctx.Ask(...)`, `ctx.Forward(to)` | the current actor, except `ctx.Forward`, which keeps the original sender (§5.5) | **`ctx.Err`**, which goes to supervision (§5.6) |
+| ReceiveContext methods, inside `Receive` | `ctx.Tell(to, msg)`, `ctx.Ask(...)`, `ctx.Forward(to)` | the current actor, except `ctx.Forward`, which keeps the original sender ([§5.5](#55-forwarding)) | **`ctx.Err`**, which goes to supervision ([§5.6](#56-sending-from-inside-receive-errors-become-supervision)) |
 
 The ReceiveContext methods are thin wrappers around the PID methods. Each one detaches cancellation from the handler's context first (`withoutCancel`, `actor/receive_context.go`), so a send started in a handler is not cut short when the turn ends. An example is `ctx.Tell`.
 
@@ -82,7 +79,7 @@ The deadline is used twice on the receiving side:
 `ctx.Response(v)` (`actor/receive_context.go`) has three cases:
 
 1. **No reply channel and no request ID.** The message was a `Tell`, so `Response` does nothing, silently.
-2. **A request ID** (`ctx.Request`, Chapter 8). The reply is routed as an asynchronous response message. `nil` is rejected with `ErrInvalidMessage`.
+2. **A request ID** (`ctx.Request`, [Chapter 8](chap-08.md)). The reply is routed as an asynchronous response message. `nil` is rejected with `ErrInvalidMessage`.
 3. **A reply channel** (an `Ask`). A compare-and-swap on `responseClosed` lets only the first `Response` through, and the send on the channel is non-blocking. A second `Response`, or a reply to an asker who has gone, is dropped.
 
 On the asking side, `Ask` captures the reply channel *before* handing the context to the mailbox, because after that the pooled context may be recycled for another message (`actor/api.go`). It then waits on the channel, the timer and `ctx.Done()`. A timeout is also reported as a dead letter with the reason `request timed out`.
@@ -93,11 +90,11 @@ A dead letter is a record that a message was not delivered or not handled. `hand
 
 | Produces a dead letter | Does not |
 |---|---|
-| `Ask` timeout or context end (`Ask` in `actor/api.go`) | `Tell`/`Ask` to a stopped or suspended actor, or `actor.Tell`/`actor.Ask` to nil: these return `ErrDead` before anything is built (`pid.Tell` to nil panics, §5.1) |
+| `Ask` timeout or context end (`Ask` in `actor/api.go`) | `Tell`/`Ask` to a stopped or suspended actor, or `actor.Tell`/`actor.Ask` to nil: these return `ErrDead` before anything is built (`pid.Tell` to nil panics, [§5.1](#51-three-ways-to-send)) |
 | `ctx.Unhandled()` (`ReceiveContext.Unhandled` in `actor/receive_context.go`) | A reply to an asker that has gone (dropped silently) |
-| Mailbox refuses the message, for example when a bounded mailbox is full (`PID.doReceive` in `actor/pid.go`) | Messages abandoned in a mailbox at `Shutdown` (Chapter 3, §3.5) |
+| Mailbox refuses the message, for example when a bounded mailbox is full (`PID.doReceive` in `actor/pid.go`) | Messages abandoned in a mailbox at `Shutdown` ([Chapter 3, §3.5](chap-03.md#35-stop)) |
 | A message sent while the system is stopping (`PID.doReceive` in `actor/pid.go`) | An `Ask` skipped as expired: its timeout was already recorded by the asker |
-| `PipeTo` task failure or timeout (§5.7) | |
+| `PipeTo` task failure or timeout ([§5.7](#57-pipeto)) | |
 
 
 The dead-letter actor (`deadLetter.handleDeadletter` in `actor/dead_letter.go`) does three things with each one:
@@ -120,7 +117,7 @@ To observe dead letters, subscribe to the system event stream (`ActorSystem.Subs
 
 `ctx.Forward(to)` (`actor/receive_context.go`) re-sends the current message with the **original sender**:
 
-- **Local target.** A new `Tell`-style context is built with `async = true`, then given the reply route of the message it forwards (`ReceiveContext.inheritReplyRoute` in `actor/receive_context.go`): the asker's reply channel, the routed-reply metadata of an `Ask` that arrived over remoting, and the asker's deadline. For an `Ask`, the final actor's `Response` therefore answers the original asker (`TestReceiveContext` in `actor/receive_context_test.go`). Because the deadline travels too, a forwarded `Ask` whose asker has given up is skipped (§5.2). If both the forwarding actor and the final actor respond, the first reply wins, since the reply channel holds one value.
+- **Local target.** A new `Tell`-style context is built with `async = true`, then given the reply route of the message it forwards (`ReceiveContext.inheritReplyRoute` in `actor/receive_context.go`): the asker's reply channel, the routed-reply metadata of an `Ask` that arrived over remoting, and the asker's deadline. For an `Ask`, the final actor's `Response` therefore answers the original asker (`TestReceiveContext` in `actor/receive_context_test.go`). Because the deadline travels too, a forwarded `Ask` whose asker has given up is skipped ([§5.2](#52-what-a-message-carries)). If both the forwarding actor and the final actor respond, the first reply wins, since the reply channel holds one value.
 - **Remote target.** The message is sent as `sender.Tell`, so an `Ask`'s reply is lost; the `Forward` comment says so. If the original sender is NoSender it returns silently.
 - **Target not running.** `ErrDead` through `ctx.Err`.
 
@@ -131,12 +128,12 @@ To observe dead letters, subscribe to the system event stream (`ActorSystem.Subs
 `ctx.Err(err)` only records the error. Its comment describes what follows (`actor/receive_context.go`). After the turn, `recovery` submits any recorded error to supervision (`actor/pid.go`). Every ReceiveContext send method reports its failure through `ctx.Err`, so **a failed send is a supervised failure of the sender**:
 
 - `notifyParent` ignores `ErrDead` (`actor/pid.go`), so `ctx.Tell` to a stopped actor leaves the sender running.
-- Any other error has no directive in the default supervisor, which knows only `PanicError` and `PanicNilError` (`NewSupervisor` in `supervisor/supervisor.go`), and a missing directive **suspends** the actor (`PID.notifyParent` in `actor/pid.go`). A `ctx.Ask` that times out therefore suspends the actor that asked. A suspended actor accepts no messages (§5.1).
+- Any other error has no directive in the default supervisor, which knows only `PanicError` and `PanicNilError` (`NewSupervisor` in `supervisor/supervisor.go`), and a missing directive **suspends** the actor (`PID.notifyParent` in `actor/pid.go`). A `ctx.Ask` that times out therefore suspends the actor that asked. A suspended actor accepts no messages ([§5.1](#51-three-ways-to-send)).
 
 Practical rules for handler code:
 
 - Prefer the PID methods (`ctx.Self().Ask(...)`), which return the error to you, when a failure is expected and should be handled in place.
-- Or give the actor a supervisor with a directive for the errors you expect (Chapter 9).
+- Or give the actor a supervisor with a directive for the errors you expect ([Chapter 9](chap-09.md)).
 - `ctx.Ask` blocks the dispatcher worker running this turn for up to `timeout` (`actor/receive_context.go`). On a small worker pool, a few actors asking each other synchronously can stall the whole system. `PipeTo` or `ctx.Request` keep the worker free.
 
 ## 5.7 `PipeTo`
@@ -193,10 +190,3 @@ They differ in one way, explained in Part V. While a departed node's actors are 
 | `pid.Tell(ctx, nil, …)` panics; `actor.Tell` returns `ErrDead` | `PID.Tell` in `actor/pid.go`; `Tell` in `actor/api.go` |
 | `actor.Ask` does not reject a non-positive local timeout | `Ask` in `actor/api.go` |
 | `ForwardTo` is a silent no-op outside cluster mode | `ReceiveContext.ForwardTo` in `actor/receive_context.go` |
-
-## Exercises
-
-1. Explain why `Ask` reads `receiveContext.response` before calling `doReceive`, and what would go wrong otherwise.
-2. A handler calls `ctx.Response(a)` and then `ctx.Response(b)`. Which value does the asker get, and why?
-3. `inheritReplyRoute` resets `responseClosed` on the forwarded context. Trace what would happen to a forwarded `Ask` without that reset when the pooled context last served an `Ask` that was answered.
-4. Rewrite an actor that uses `ctx.Ask` to call a slow dependency so that it neither blocks a worker nor gets suspended on timeout.

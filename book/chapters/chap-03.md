@@ -1,7 +1,5 @@
 # 3. The Actor System
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -25,7 +23,7 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [3.8 `Run`](#38-run)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
-- [Exercises](#exercises)
+- [Behaviours to know](#behaviours-to-know)
 
 ## What you will learn
 
@@ -37,22 +35,24 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 
 Functions and types named in this chapter are in `actor/actor_system.go` unless another file is named.
 
+Source files: `actor/actor_system.go`, `actor/option.go`, `actor/defaults.go`, `actor/pid.go`, `actor/pid_tree.go`, `actor/root_guardian.go`, `actor/reserved.go`, `actor/passivation_manager.go`, `actor/dispatcher.go`.
+
 ## 3.1 One interface, one struct
 
-`ActorSystem` is an interface of 59 exported and 58 unexported methods (`actor/actor_system.go`). The unexported methods (`isStopping`, `tree`, `getCluster`, …) seal it: no type outside `package actor` can implement it. It has exactly one implementation, the unexported `actorSystem` struct, and a compile-time assertion pins the two together (`_` in `actor/actor_system.go`). Internal code such as `rootGuardian.handlePanicSignal` reaches those unexported methods through the interface value it gets from `ctx.ActorSystem()`. The interface exists so users program against a stable surface. The struct is where every subsystem keeps its state, because, as Chapter 1 showed, `actor` is the hub that wires everything together.
+`ActorSystem` is an interface of 59 exported and 58 unexported methods (`actor/actor_system.go`). The unexported methods (`isStopping`, `tree`, `getCluster`, …) seal it: no type outside `package actor` can implement it. It has exactly one implementation, the unexported `actorSystem` struct, and a compile-time assertion pins the two together (`_` in `actor/actor_system.go`). Internal code such as `rootGuardian.handlePanicSignal` reaches those unexported methods through the interface value it gets from `ctx.ActorSystem()`. The interface exists so users program against a stable surface. The struct is where every subsystem keeps its state, because, as [Chapter 1](chap-01.md) showed, `actor` is the hub that wires everything together.
 
 The struct (`actorSystem` in `actor/actor_system.go`) is easier to read as groups of fields:
 
 | Group | Fields | Notes |
 |---|---|---|
 | Lifecycle flags | `started`, `starting`, `shuttingDown`, `startedAt` | All `atomic` values. Read on hot paths (every `Tell` checks `isStopping`) without a lock |
-| Actor bookkeeping | `actors *tree`, `actorsCounter`, `remoteWatches`, `spawnActivation` | The tree is the single source of truth for local actors (§3.4). `spawnActivation` is a `singleflight.Group` that collapses concurrent spawns of one name into one PID (`actorSystem` in `actor/actor_system.go`) |
+| Actor bookkeeping | `actors *tree`, `actorsCounter`, `remoteWatches`, `spawnActivation` | The tree is the single source of truth for local actors ([§3.4](#34-the-guardian-tree)). `spawnActivation` is a `singleflight.Group` that collapses concurrent spawns of one name into one PID (`actorSystem` in `actor/actor_system.go`) |
 | Well-known PIDs | `rootGuardian`, `userGuardian`, `systemGuardian`, `deathWatch`, `deadletter`, `noSender`, `singletonManager`, `relocator`, `topicActor`, `replicator` | Set during `Start` (`actorSystem` in `actor/actor_system.go`) |
-| Scheduling | `dispatcher`, `dispatcherThroughput`, `dispatcherWorkers`, `passivator`, `scheduler`, `evictionStrategy` | The dispatcher is built in `NewActorSystem` and replaced by `Start` once it has been stopped (§3.7); the scheduler is rebuilt on every `Start` |
+| Scheduling | `dispatcher`, `dispatcherThroughput`, `dispatcherWorkers`, `passivator`, `scheduler`, `evictionStrategy` | The dispatcher is built in `NewActorSystem` and replaced by `Start` once it has been stopped ([§3.7](#37-starting-again)); the scheduler is rebuilt on every `Start` |
 | Remoting | `remotingEnabled`, `remoting`, `remoteServer`, `remoteConfig`, `remoteHostPort`, `listenHost`, `coalescedFailureQueue` | `listenHost` and `remoteHostPort` differ only for a wildcard bind address (`actorSystem` in `actor/actor_system.go`) |
 | Cluster | `clusterEnabled`, `cluster`, `eventsQueue`, `clusterNode`, `clusterConfig`, `clusterStore`, `relocationJobs`, `peerRemotingPorts`, `relocatingEndpoints`, `recentDepartures` | Belong to the clustering chapters (Part V), which are not written yet |
 | Grains | `grains`, `lateGrainMessages`, `grainBarrier`, `grainActivation`, `pendingAsks`, `grainDefaultOptions` | Belong to the grain chapters (Part III), which are not written yet |
-| Metrics | `metricProvider`, `actorKinds`, `actorKindsLocker`, `relocationMetric`, … | Explained in Chapter 12 |
+| Metrics | `metricProvider`, `actorKinds`, `actorKindsLocker`, `relocationMetric`, … | Explained in [Chapter 12](chap-12.md) |
 | Data centers | `dataCenterController`, `dataCenterLeaderTicker`, … | Belong to the clustering chapters (19 to 22), which are not written yet |
 
 Three kinds of synchronisation coexist in the struct, and knowing which applies to a field saves a lot of reading:
@@ -98,7 +98,7 @@ The passivation row surprises most readers. An actor spawned without a passivati
 - In cluster mode, the cluster config is validated, and its partition hasher overrides the deprecated `WithPartitionHasher` (`actorSystem.validate` in `actor/actor_system.go`).
 - TLS from `remote.Config` overrides the deprecated `WithTLS`, with a warning if both were set. With remoting enabled, TLS needs both a server and a client config (`actorSystem.validate` in `actor/actor_system.go`).
 
-Note what validation does not check: that clustering has remoting. That check happens in `Start` (§3.3).
+Note what validation does not check: that clustering has remoting. That check happens in `Start` ([§3.3](#33-start)).
 
 ## 3.3 Start
 
@@ -108,7 +108,7 @@ Startup then proceeds in three phases.
 
 ### Phase 1: before the chain
 
-A new message scheduler is created and the dispatcher's workers are started (`actor/actor_system.go`). A dispatcher that a previous `Stop` or failed `Start` stopped cannot run again, so it is first replaced by a fresh one of the same size (§3.7).
+A new message scheduler is created and the dispatcher's workers are started (`actor/actor_system.go`). A dispatcher that a previous `Stop` or failed `Start` stopped cannot run again, so it is first replaced by a fresh one of the same size ([§3.7](#37-starting-again)).
 
 ### Phase 2: the startup chain
 
@@ -122,7 +122,7 @@ Fifteen steps run through `internal/chain` in fail-fast mode: the first error st
 | 4 | `spawnSystemGuardian` | always | Parent of every system actor |
 | 5 | `spawnNoSender` | always | The PID used as sender when there is none (`actorSystem.spawnNoSender` in `actor/no_sender.go`) |
 | 6 | `spawnUserGuardian` | always | Parent of every top-level user actor |
-| 7 | `spawnDeathWatch` | always | Processes `Terminated` messages and cleans up (Chapter 9) |
+| 7 | `spawnDeathWatch` | always | Processes `Terminated` messages and cleans up ([Chapter 9](chap-09.md)) |
 | 8 | `spawnDeadletter` | always | Receives undeliverable messages |
 | 9 | `spawnSingletonManager` | cluster | `actorSystem.spawnSingletonManager` in `actor/cluster_singleton.go` |
 | 10 | `spawnRelocator` | cluster and relocation enabled | Re-creates a departed node's actors |
@@ -146,7 +146,7 @@ Metrics are registered last. If that fails, the system is already marked started
 
 ### When a step fails
 
-A failure inside the chain calls `startupCleanup` (`actor/actor_system.go`). Unlike `shutdown`, it can run while `starting` is true. It stops the data-center components, cluster, remoting and event stream, signals the dispatcher to stop, and calls `reset`, which clears the flags and the actor tree but keeps the configured extensions. A second `Start` then works: the test suite spawns an actor and asks it after a failed first `Start` (`TestStartupCleanup` in `actor/actor_system_test.go`). §3.7 explains what that requires.
+A failure inside the chain calls `startupCleanup` (`actor/actor_system.go`). Unlike `shutdown`, it can run while `starting` is true. It stops the data-center components, cluster, remoting and event stream, signals the dispatcher to stop, and calls `reset`, which clears the flags and the actor tree but keeps the configured extensions. A second `Start` then works: the test suite spawns an actor and asks it after a failed first `Start` (`TestStartupCleanup` in `actor/actor_system_test.go`). [§3.7](#37-starting-again) explains what that requires.
 
 ## 3.4 The guardian tree
 
@@ -188,7 +188,7 @@ Every name comes from the `reservedNames` table (`actor/reserved.go`). Any name 
 
 | Actor | Directive on error | Source |
 |---|---|---|
-| System guardian, user guardian, death watch | Escalate (death watch resumes on a cluster-cleanup error, issue #1337) | `actorSystem.spawnSystemGuardian`, `actorSystem.spawnUserGuardian` and `actorSystem.spawnDeathWatch` in `actor/actor_system.go` |
+| System guardian, user guardian, death watch | Escalate (death watch resumes on a `clusterCleanupError`) | `actorSystem.spawnSystemGuardian`, `actorSystem.spawnUserGuardian` and `actorSystem.spawnDeathWatch` in `actor/actor_system.go` |
 | Dead letter, NoSender, topic actor | Resume | `actorSystem.spawnDeadletter` in `actor/actor_system.go` |
 | Singleton manager, replicator | Restart | `actorSystem.spawnSingletonManager` in `actor/cluster_singleton.go` |
 | Relocator | Restart on panic and rebalancing errors; resume on internal and spawn errors | `actorSystem.spawnRelocator` in `actor/actor_system.go` |
@@ -211,7 +211,7 @@ The tree (`actor/pid_tree.go`) is one `sync.RWMutex` protecting three indexes ov
 
 Each node caches its ID and names, and holds its PID in an `atomic.Pointer` so it can be read without the lock (`pidNode` and `pidNode.value` in `actor/pid_tree.go`).
 
-Adding a child does more than link it. The child goes into the parent's `descendants`, **and the parent is recorded as the child's watcher and the child as the parent's watchee** (`tree.addNodeLocked` in `actor/pid_tree.go`). Parenthood is a death-watch relationship: when a child stops, its parent receives `Terminated` through the same mechanism any watcher uses (Chapter 9).
+Adding a child does more than link it. The child goes into the parent's `descendants`, **and the parent is recorded as the child's watcher and the child as the parent's watchee** (`tree.addNodeLocked` in `actor/pid_tree.go`). Parenthood is a death-watch relationship: when a child stops, its parent receives `Terminated` through the same mechanism any watcher uses ([Chapter 9](chap-09.md)).
 
 One ordering subtlety: `addRootNode` caches `ActorSystem().NoSender()` so that later inserts can refuse NoSender as a parent (`actor/pid_tree.go`). The root guardian is spawned before NoSender exists, so the cached value is `nil` at first. `addNodeLocked` re-reads it while it is still `nil`, and it is filled in by the time NoSender itself is inserted. The design works only because of that re-read.
 
@@ -225,7 +225,7 @@ The guardians are inserted with errors from `configPID` discarded (`x.rootGuardi
 2. **Stop background loops** with the caller's context: eviction, passivation manager, scheduler (`actorSystem.shutdown` in `actor/actor_system.go`).
 3. **Snapshot the local user actors** (`actorSystem.shutdown` in `actor/actor_system.go`).
 4. **Bound the rest by `shutdownTimeout`** (`actorSystem.shutdown` in `actor/actor_system.go`). Step 2 is not covered by this bound.
-5. **Run the coordinated shutdown hooks** in registration order (§3.6).
+5. **Run the coordinated shutdown hooks** in registration order ([§3.6](#36-coordinated-shutdown-hooks)).
 6. **Stop the data-center components.**
 7. **Build the peer-state snapshot** for relocation, in cluster mode with relocation enabled. Only relocatable actors that are still running and not stopping are included, so an actor stopped just before `Stop` is not resurrected elsewhere (`actorSystem.preShutdown` in `actor/actor_system.go`).
 8. **Shut down user-facing actors** in fail-fast order: user guardian (and with it every user actor), singleton manager, relocator, dead letter, death watch (`actorSystem.shutdown` in `actor/actor_system.go`).
@@ -245,7 +245,7 @@ If step 8 or step 10 fails, `shutdown` jumps straight to the cluster and remotin
 3. Stop the cluster engine.
 4. Close the BoltDB store.
 
-Persistence chooses peers oldest first, because the oldest member is the cluster coordinator (`actorSystem.selectOldestPeers` in `actor/actor_system.go`). It sends to groups of three (`defaultReplicationFactor`) and returns as soon as two acknowledge (`defaultReplicationQuorum`, `actor/actor_system.go`). One acknowledgement is accepted as partial success. The next group is tried only when every peer of the current group answers that it is itself leaving (`actorSystem.persistPeerStateToPeers` and `isPeerLeaving` in `actor/actor_system.go`). A peer counts as leaving when it refuses the state with `ErrRemotingDisabled` or `ErrClusterDisabled`, refuses the connection, or closes it under the request (a reset, an end of stream, or a closed duplex session): a running node keeps its remoting port open and its peers' connections up, while a stopping node closes them (Chapter 15). A peer that does not answer in time is not counted as leaving.
+Persistence chooses peers oldest first, because the oldest member is the cluster coordinator (`actorSystem.selectOldestPeers` in `actor/actor_system.go`). It sends to groups of three (`defaultReplicationFactor`) and returns as soon as two acknowledge (`defaultReplicationQuorum`, `actor/actor_system.go`). One acknowledgement is accepted as partial success. The next group is tried only when every peer of the current group answers that it is itself leaving (`actorSystem.persistPeerStateToPeers` and `isPeerLeaving` in `actor/actor_system.go`). A peer counts as leaving when it refuses the state with `ErrRemotingDisabled` or `ErrClusterDisabled`, refuses the connection, or closes it under the request (a reset, an end of stream, or a closed duplex session): a running node keeps its remoting port open and its peers' connections up, while a stopping node closes them ([Chapter 15](chap-15.md)). A peer that does not answer in time is not counted as leaving.
 
 ### How one actor stops: `PID.Shutdown`
 
@@ -267,7 +267,7 @@ The order is post-order: every descendant's `PostStop` finishes before its paren
 
 Two consequences follow from `doStop` running **on the caller's goroutine**, outside the actor's mailbox and turn:
 
-- **Messages still queued are not handled, and not dead-lettered.** Once the actor is stopping, a turn that is still running hands out no more user messages (`PID.runTurn` and `PID.handlesUserMessages` in `actor/pid.go`). The queued messages stay in the mailbox and are abandoned with the PID on a terminal stop; a restart keeps them for the new incarnation (Chapter 6, §6.8).
+- **Messages still queued are not handled, and not dead-lettered.** Once the actor is stopping, a turn that is still running hands out no more user messages (`PID.runTurn` and `PID.handlesUserMessages` in `actor/pid.go`). The queued messages stay in the mailbox and are abandoned with the PID on a terminal stop; a restart keeps them for the new incarnation ([Chapter 6, §6.8](chap-06.md#68-stops-restarts-and-other-nodes)).
 - **`PostStop` can run while `Receive` is still executing.** `Shutdown` does not wait for a turn in progress on a dispatcher worker.
 
 The comment on `Actor.PostStop` states both, and divides the ways an actor stops in two (`actor/actor.go`):
@@ -287,7 +287,7 @@ When the actor is busy, the attempt is refused and recorded with `passivationMan
 
 ## 3.6 Coordinated shutdown hooks
 
-A hook implements `Execute(ctx, system)` and `Recovery()` (`ShutdownHook` in `actor/shutdown_hook.go`). `runShutdownHooks` (`actor/actor_system.go`) runs the hooks in registration order. A panic in a hook is converted into a `PanicError`. A failing hook is handled according to its strategy:
+A hook implements `Execute(ctx, system)` and `Recovery()` (`ShutdownHook` in `actor/shutdown_hook.go`). `runShutdownHooks` (`actor/actor_system.go`) runs the hooks in registration order. A failing hook is handled according to its strategy. A panic is different: one deferred `recover` wraps the whole loop, so a panicking hook ends the loop with a `PanicError` and no later hook runs, whatever the panicking hook's strategy:
 
 | Strategy | Effect on the remaining hooks | Source |
 |---|---|---|
@@ -331,17 +331,24 @@ The test suite checks both cases: a restart after `Stop`, with an extension and 
 | Second `Start` → `ErrActorSystemAlreadyStarted`; `Stop` before `Start` → `ErrActorSystemNotStarted` | `TestActorSystem` in `actor/actor_system_test.go` |
 | A stopped system, or one whose `Start` failed, starts again and processes messages | `TestActorSystem` and `TestStartupCleanup` in `actor/actor_system_test.go` |
 | Passivation never runs `PostStop` alongside `Receive` | `TestPassivationSkipsBusyActor` in `actor/pid_test.go` |
-| A failing hook stops the remaining hooks under `ShouldFail`, under `ShouldRetryAndFail` after its retries, with no recovery, and when it panics; the remaining hooks still run under `ShouldSkip` and `ShouldRetryAndSkip`; `Stop` returns the hooks' error in every case | `TestActorSystem` in `actor/actor_system_test.go` and the tests after it |
+| A failing hook stops the remaining hooks under `ShouldFail`, under `ShouldRetryAndFail` after its retries, with no recovery, and when it panics; the remaining hooks still run under `ShouldSkip` and `ShouldRetryAndSkip`; `Stop` returns the hooks' error in every case | `TestActorSystem` in `actor/actor_system_test.go` |
 
 ## Implementation details (may change)
 
-- The fifteen-step startup order and the shutdown order. Only their dependencies (§3.3) are load-bearing.
+- The fifteen-step startup order and the shutdown order. Only their dependencies ([§3.3](#33-start)) are load-bearing.
 - Concurrent shutdown of siblings.
 - The 3/2 replication factor and quorum for the peer-state snapshot.
 
-## Exercises
+## Behaviours to know
 
-1. Explain why `startupCleanup` exists separately from `shutdown`. (Hint: `actor/actor_system.go`.)
-2. A user calls `Stop` from inside an actor's `Receive`. Trace why this does not deadlock on the dispatcher. (Hint: `actorSystem.shutdown` in `actor/actor_system.go`.)
-3. `Start` replaces a stopped dispatcher instead of starting it again. Why can the old one not simply be restarted? (Hint: `dispatcher.start` and `dispatcher.signalStop` in `actor/dispatcher.go`.)
-4. Sketch an actor that loses data because of §3.5, then fix it with the self-shutdown pattern.
+| Behaviour | Source |
+|---|---|
+| Messages still queued when an actor stops are neither handled nor dead-lettered | `PID.runTurn` and `PID.handlesUserMessages` in `actor/pid.go` |
+| `PID.Shutdown`, `ActorSystem.Stop`, eviction and a parent's stop can run `PostStop` while `Receive` is still executing; a `PoisonPill`, `ctx.Shutdown()` and passivation cannot | `PID.Shutdown` and `PID.dispatchOne` in `actor/pid.go` |
+| A `PoisonPill` overtakes the messages queued before it: it goes to the system queue, which a turn serves first | `isControlMessage` in `actor/pid.go` |
+| A panic escalated by a system actor stops the whole actor system | `rootGuardian.handlePanicSignal` in `actor/root_guardian.go`; `systemGuardian.handlePanicSignal` in `actor/system_guardian.go` |
+| A panicking shutdown hook ends the hook loop whatever its strategy | `actorSystem.runShutdownHooks` in `actor/actor_system.go` |
+| `shutdownTimeout` does not bound stopping the background loops; it starts after them | `actorSystem.shutdown` in `actor/actor_system.go` |
+| A failure while stopping the user-facing actors skips grain deactivation and the remaining system actors, and leaves the event stream open | `actorSystem.shutdown` in `actor/actor_system.go` |
+| `Stop` does not wait for the dispatcher's workers | `actorSystem.shutdown` in `actor/actor_system.go` |
+| `Run` sends its own process `SIGTERM` after `Stop`, so code after `Run` may not finish | `actorSystem.Run` in `actor/actor_system.go` |

@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/stream"
 )
 
@@ -226,7 +227,7 @@ func TestToActor_ForwardsElements(t *testing.T) {
 	<-handle.Done()
 
 	// Give the echo actor a brief moment to flush its mailbox.
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 	assert.Equal(t, []int{1, 2, 3}, echo.snapshot())
 }
 
@@ -246,7 +247,7 @@ func TestToActorNamed_ForwardsElements(t *testing.T) {
 	require.NoError(t, err)
 	<-handle.Done()
 
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 	assert.Equal(t, []int{10, 20}, echo.snapshot())
 }
 

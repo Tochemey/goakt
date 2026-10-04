@@ -135,7 +135,7 @@ func activateGrain(ctx context.Context, actorSystem actor.ActorSystem, grainName
 		os.Exit(1)
 	}
 
-	time.Sleep(time.Second) // wait for grain to be ready
+	pause.For(time.Second) // wait for grain to be ready
 	fmt.Printf("Grain %s activated successfully.\n", grainName)
 }
 
@@ -147,7 +147,7 @@ func spawnActor(ctx context.Context, actorSystem actor.ActorSystem, actorName st
 		os.Exit(1)
 	}
 
-	time.Sleep(time.Second) // wait for actor to be ready
+	pause.For(time.Second) // wait for actor to be ready
 	fmt.Printf("Actor %s spawned successfully on %s.\n", actorName, peersAddr)
 }
 

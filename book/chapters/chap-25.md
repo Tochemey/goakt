@@ -1,7 +1,5 @@
 # 25. Streams
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -31,7 +29,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -53,7 +50,7 @@ The design rests on four principles, as the maintainer states them:
 
 | Principle | Meaning |
 |---|---|
-| Correctness | Exactly-once delivery inside a local pipeline: an element a stage accepts is passed on once, unless a strategy drops it on purpose (§25.9) |
+| Correctness | Exactly-once delivery inside a local pipeline: an element a stage accepts is passed on once, unless a strategy drops it on purpose ([§25.9](#259-error-handling)) |
 | Backpressure | Demand-driven pull; a stage sends only what was requested |
 | Composability | Stages are values; pipelines are assembled declaratively |
 | Actor-native | Every stage is an actor |
@@ -78,11 +75,11 @@ flowchart LR
 | `Flow[In, Out]` | transformation; subscriber to its upstream and publisher to its downstream | one `*stage` | `stream/flow.go` |
 | `Sink[T]` | terminal consumer; the stage that starts demand | one `*stage` | `stream/sink.go` |
 | `RunnableGraph` | a complete pipeline | `stages` for one linear pipeline, or `pipelines` for several (Graph DSL), and a `FusionMode` | `stream/graph.go` |
-| `StreamHandle` | control of a running stream | see §25.5 | `stream/handle.go` |
+| `StreamHandle` | control of a running stream | see [§25.5](#255-materialisation) | `stream/handle.go` |
 
 A `stage` is a description, not an actor: an id, a kind (`sourceKind`, `flowKind`, `sinkKind`), a `StageConfig`, an `actorFn` that builds the stage actor from a config, and for stateless stages a `fuseFn` (`stage` in `stream/graph.go`). Elements are type-erased to `any` between stages. Go generics check the types when the pipeline is assembled; at runtime each stage type-asserts the element and fails the stream on a mismatch.
 
-**Execution is fully lazy.** `Via` and `To` copy stage slices and allocate descriptors; no actor exists until `Run`. A `RunnableGraph` is a value, and `Run` may be called on it several times; each call produces an independent stream, because the per-run state of a stage is created inside its `actorFn`. The branches of a `Broadcast`, `Balance` or `Partition` are separate graphs that share a pairing object; each run of all the branches gets its own hub (§25.8).
+**Execution is fully lazy.** `Via` and `To` copy stage slices and allocate descriptors; no actor exists until `Run`. A `RunnableGraph` is a value, and `Run` may be called on it several times; each call produces an independent stream, because the per-run state of a stage is created inside its `actorFn`. The branches of a `Broadcast`, `Balance` or `Partition` are separate graphs that share a pairing object; each run of all the branches gets its own hub ([§25.8](#258-fan-in-fan-out-and-sub-pipelines)).
 
 ## 25.2 The public surface in brief
 
@@ -132,20 +129,20 @@ All signalling between stages is ordinary actor messages (`stream/protocol.go`).
 | `streamError{subID, err}` | upstream → downstream | failure |
 | `streamCancel{subID}` | downstream → upstream | stop producing |
 
-`subID` identifies the materialisation. Every message carries it, but no local stage compares it; only the remote wire messages are filtered by stream id (§25.11).
+`subID` identifies the materialisation. Every message carries it, but no local stage compares it; only the remote wire messages are filtered by stream id ([§25.11](#2511-stream-refs-across-nodes)).
 
 The demand rules:
 
 1. A stage sends elements only after it has received demand.
 2. Demand is cumulative: `Request(10)` then `Request(5)` leaves 15 outstanding.
-3. A stage asks its upstream for more before its outstanding credit is used up (the refill, §25.4).
+3. A stage asks its upstream for more before its outstanding credit is used up (the refill, [§25.4](#254-the-demand-ledger-and-credit-refill)).
 4. `streamCancel` ends the subscription upstream.
 
 Other internal messages exist for one stage each: `chanBatch` and `chanDone` (channel source), `fetchResult` and `fetchErr` (actor source), `tickTick`, `batchFlush`, `throttleTick`, `mergeSubValue`, `mergeSubDone`, `mergeSubErr` and `mergeSubAck` (fan-in), `slotDemand`, `hubReady` and `slotCancel` (fan-out hubs), and the `sub*` family (substreams and nested streams).
 
 ## 25.4 The demand ledger and credit refill
 
-Each stage keeps a **demand ledger**: plain `int64` counters. Because an actor processes one message at a time, the counters need no atomics and no locks. A flow has no input buffer; its mailbox plays that role. Outputs it cannot send yet wait in a `queue` (§25.13).
+Each stage keeps a **demand ledger**: plain `int64` counters. Because an actor processes one message at a time, the counters need no atomics and no locks. A flow has no input buffer; its mailbox plays that role. Outputs it cannot send yet wait in a `queue` ([§25.13](#2513-performance-considerations)).
 
 The flow stage actor keeps these fields:
 
@@ -195,11 +192,11 @@ A flow's request does not depend on how much its downstream asked for. Any `stre
 | `parallelMapActor` | on the first request from downstream, at most one per worker | yes: it requests the smaller of its free workers and the downstream demand not yet covered |
 | `flatMapStreamActor` | at wire time, `breadth` | yes, for its output buffer |
 
-**Backpressure towards a user actor.** The stage mailbox is bounded and blocking (§25.10), and demand reaches `FromActor` sources as a normal `Ask`. The actor source keeps one pull in flight; demand that arrives meanwhile accumulates in `pendingDemand` and goes out with the next pull. A reply with fewer elements than asked restores the missing demand and pulls again (`actorSourceActor` in `stream/stage_source.go`).
+**Backpressure towards a user actor.** The stage mailbox is bounded and blocking ([§25.10](#2510-concurrency-model)), and demand reaches `FromActor` sources as a normal `Ask`. The actor source keeps one pull in flight; demand that arrives meanwhile accumulates in `pendingDemand` and goes out with the next pull. A reply with fewer elements than asked restores the missing demand and pulls again (`actorSourceActor` in `stream/stage_source.go`).
 
 ## 25.5 Materialisation
 
-`RunnableGraph.Run` applies fusion (§25.7) and calls `materialize` for a linear graph, or `materializeAll` for a multi-pipeline graph (`stream/graph.go`, `stream/materializer.go`). `materializeWithHead` does the work:
+`RunnableGraph.Run` applies fusion ([§25.7](#257-stage-fusion)) and calls `materialize` for a linear graph, or `materializeAll` for a multi-pipeline graph (`stream/graph.go`, `stream/materializer.go`). `materializeWithHead` does the work:
 
 1. **Validate.** At least two stages, or `ErrInvalidGraph`; the first must be a source and the last a sink (`RunnableGraph.validate`).
 2. **Allocate the id and the handle.** The id is the next value of a process-wide counter, as a decimal string (`newStreamSubID`). A counter is used instead of a UUID because it only needs to be unique inside the process and costs no entropy read.
@@ -227,7 +224,7 @@ The names are deterministic within a materialisation, which makes a stream easy 
 
 The stream is done when the sink stops. The `completionWrapper` runs the sink's own `PostStop`, reads the sink's terminal error through the `terminalErrorActor` interface if the sink implements it, and calls `signalDone` with it. `signalDone` stores the first error and closes the `Done` channel exactly once (`streamHandleImpl.signalDone` in `stream/handle.go`). This lets completion travel from source to sink with no cross-stage supervision wiring.
 
-The coordinator has three jobs (`streamCoordinator.Receive` in `stream/stage_coordinator.go`). It is a single root, so that `Abort` is one `Shutdown`. It catches a sink that stops without the handle being signalled: it signals `stream: sink … terminated unexpectedly` and shuts down at once, which stops the stages that would otherwise wait for a sink that is gone. And it stops itself when the stream has ended, so a finished stream leaves no actor behind.
+The coordinator has three jobs (`streamCoordinator.Receive` in `stream/stage_coordinator.go`). It is a single root, so that `Abort` is one `Shutdown`. It catches a sink that stops without the handle being signalled: it signals `stream: sink … terminated unexpectedly` and shuts down at once, which stops the stages that would otherwise wait for a sink that is gone. For a materialised stream this branch is narrow. The sink is always inside a `completionWrapper`, and `PID.doStop` in `actor/pid.go` runs `PostStop`, which signals the handle, before it tells the watchers, so the sink's `Terminated` normally finds the handle already signalled, even after a crash ([§25.9](#259-error-handling)). The branch is reached only when the stop chain fails before `PostStop`, which it runs fail-fast after freeing the watchees and the children. And it stops itself when the stream has ended, so a finished stream leaves no actor behind.
 
 A parent receives `Terminated` for each of its children. After a regular end the coordinator waits for the sink's `Terminated` and then for its last stage to stop, and only then shuts down. It does not stop the remaining stages itself, because stopping an actor discards its mailbox, and a stage must be left to handle a pending `streamCancel`: a fan-out slot, for example, tells its hub. The handle does not depend on the coordinator. `Done`, `Err` and `Metrics` read state the handle holds, so they keep working after the coordinator is gone.
 
@@ -242,7 +239,7 @@ The sink actor also fires its completion hook from `PostStop`, behind a `sync.On
 | `Err` | the first error stored; nil on normal completion | `streamHandleImpl.Err` |
 | `Stop(ctx)` | sends `streamCancel` to stage 0 and waits for `Done` or for `ctx`. The source answers a cancel with `streamComplete`, so the stages downstream drain what they hold and the stream ends with a nil error. A stream whose in-flight work never finishes, such as a `FlatMapMerge` with endless inner sources, does not end on `Stop`; `Abort` ends it | `streamHandleImpl.Stop` |
 | `Abort` | signals the handle with `ErrStreamCanceled` first, then shuts the coordinator down, which stops every stage; buffered elements are discarded. On a stream that has already ended it changes nothing: the handle keeps its first signal and the coordinator has stopped | `streamHandleImpl.Abort` |
-| `Metrics` | sum of the source-stage and sink-stage counters (§25.12) | `streamHandleImpl.Metrics` |
+| `Metrics` | sum of the source-stage and sink-stage counters ([§25.12](#2512-observability)) | `streamHandleImpl.Metrics` |
 
 A multi-pipeline graph returns a `multiHandle`: `Done` closes when every pipeline is done, `Err` is the first error seen, `Stop` runs the pipelines' `Stop` concurrently, `Abort` and `Metrics` fan out (`stream/handle.go`). If one pipeline fails to materialise, those already started are aborted.
 
@@ -254,7 +251,7 @@ Every stage type implements `actor.Actor`. The lifecycle of the generic flow:
 |---|---|
 | `stageWire` | record neighbours and id |
 | `streamRequest` | add to downstream demand; flush the output queue; maybe refill upstream |
-| `streamElement` | transform; on success decrement credit, queue outputs, flush, maybe refill; on error apply the `ErrorStrategy` (§25.9) |
+| `streamElement` | transform; on success decrement credit, queue outputs, flush, maybe refill; on error apply the `ErrorStrategy` ([§25.9](#259-error-handling)) |
 | `streamComplete` | mark completing; flush; once the queue is empty forward `streamComplete` and stop. With elements still queued the actor stays alive and serves further requests |
 | `streamError` | forward downstream and stop |
 | `streamCancel` | forward upstream and stop |
@@ -304,7 +301,7 @@ A `fusedFlowActor` is deliberately minimal (`stream/stage_flow.go`):
 - It has no output buffer, because the composed function yields at most one output per input. It requests from upstream only the downstream demand that its outstanding credit does not cover, in batches once the credit has fallen to `RefillThreshold`, and forwards each result as it is produced. A filtered-out element leaves demand unmet and is requested again (`fusedFlowActor.maybeRequestUpstream`).
 - A `streamCancel` from downstream is forwarded upstream and answered with `streamComplete` downstream.
 
-`WithFusion(FuseNone)` keeps every stage as its own actor. The `Fusion` field would disable fusion for one stage, but no exported builder sets it (§25.16). Sub-pipelines spawned by composite stages (§25.8) call `materialize` directly and are never fused.
+`WithFusion(FuseNone)` keeps every stage as its own actor. The `Fusion` field would disable fusion for one stage, but no exported builder sets it ([§25.16](#2516-stage-configuration-reference)). Sub-pipelines spawned by composite stages ([§25.8](#258-fan-in-fan-out-and-sub-pipelines)) call `materialize` directly and are never fused.
 
 Akka Streams fuses everything into one interpreter by default. GoAkt fuses only adjacent stateless stages, and keeps stateful stage boundaries visible as distinct actors for easier supervision and debugging.
 
@@ -400,17 +397,22 @@ A sink that receives `streamError` records it as its terminal error, which the c
 
 The retries come after the failed first call, so `MaxAttempts: 1`, the default, means two calls in total. `WithRetryConfig` raises a value below 1 to 1.
 
+**Panics.** `ErrorStrategy` covers returned errors only. The one stage that recovers a panic in a user function is `ParallelMap`: its workers turn the panic into an error that fails the stream (`parallelMapActor` in `stream/stage_parallel.go`, [§25.10](#2510-concurrency-model)). In every other stage, `flowActor.Receive` and `fusedFlowActor.Receive` in `stream/stage_flow.go` and `sinkActor.Receive` in `stream/stage_sink.go` among them, a panic leaves `Receive` and goes to the stage actor's supervisor. Stages are spawned without a supervisor option, so the default one applies, and it stops an actor on a `*PanicError` (`NewSupervisor` in `supervisor/supervisor.go`). No `streamError` or `streamCancel` is sent:
+
+- **A sink that panics** is stopped, and the completion wrapper signals the handle from `PostStop` with the sink's terminal error, which was never recorded: `Done` closes and `Err` is nil. The stages upstream are not cancelled and keep running, and the coordinator waits for them ([§25.5](#255-materialisation)).
+- **A source or middle stage that panics** is stopped, and its neighbours are not told. The sink never stops, so `Done` never closes; `Abort` ends the stream.
+
 The sentinels: `ErrInvalidGraph`, `ErrStreamCanceled` (set by `Abort`), `ErrTooManySubstreams`, `ErrSubstreamOverflow`, and `ErrPullTimeout`, which is declared but returned nowhere; a pull that times out fails the stream with the error `Ask` returned.
 
-**Overflow.** `OverflowStrategy` has four values: `DropHead`, `DropTail` (default), `BackpressureSource`, `FailSource` (`stream/overflow.go`). The only code that reads a strategy is the splitter (§25.8), whose default is `BackpressureSource`: it holds the upstream back, `FailSource` fails the stream, and `DropHead` and `DropTail` drop the newest element. The strategy applies only while the downstream asks for elements, to a substream slower than its feed; a slow downstream holds the upstream back under every strategy. A key that carries most of the elements reaches the cap in bursts while the downstream keeps up, so `DropTail` drops some of its elements and `FailSource` can fail. `Source.WithOverflowStrategy` and `Buffer` store the strategy in the stage config and nothing consults it. The linear sources never drop: they emit only on demand and queue what arrives early. `Buffer(size, strategy)` is an identity flow whose window is `size` and whose refill threshold is `size / 4`.
+**Overflow.** `OverflowStrategy` has four values: `DropHead`, `DropTail` (default), `BackpressureSource`, `FailSource` (`stream/overflow.go`). The only code that reads a strategy is the splitter ([§25.8](#258-fan-in-fan-out-and-sub-pipelines)), whose default is `BackpressureSource`: it holds the upstream back, `FailSource` fails the stream, and `DropHead` and `DropTail` drop the newest element. The strategy applies only while the downstream asks for elements, to a substream slower than its feed; a slow downstream holds the upstream back under every strategy. A key that carries most of the elements reaches the cap in bursts while the downstream keeps up, so `DropTail` drops some of its elements and `FailSource` can fail. `Source.WithOverflowStrategy` and `Buffer` store the strategy in the stage config and nothing consults it. The linear sources never drop: they emit only on demand and queue what arrives early. `Buffer(size, strategy)` is an identity flow whose window is `size` and whose refill threshold is `size / 4`.
 
 **Dropped elements.** `StageConfig.OnDrop(value, reason)` is called by `flowActor` and `sinkActor` on `Resume`, by the sink on exhausted retries, and by the splitter on overflow and on a blocklisted key. No exported builder sets `OnDrop`.
 
 ## 25.10 Concurrency model
 
-Each stage actor processes one message at a time, the guarantee every actor has (Chapter 7, §7.2). So there are no locks inside `Receive`, no races on stage state, and elements from one upstream arrive in the order they were sent. Stage actors run on the shared dispatcher pool like any other actor; a stage has no goroutine of its own. State shared across goroutines is limited and guarded: the metrics counters, the sink's `terminalError`, the coordinator's sink PID and the channel source's read credit are atomic, and the result objects (`Collector`, `FoldResult`), the sub-pipeline list (`inputPipelines`) and the fan-out pairing (`fanOutGenerations`) have a mutex.
+Each stage actor processes one message at a time, the guarantee every actor has ([Chapter 7, §7.2](chap-07.md#72-the-dispatch-state)). So there are no locks inside `Receive`, no races on stage state, and elements from one upstream arrive in the order they were sent. Stage actors run on the shared dispatcher pool like any other actor; a stage has no goroutine of its own. State shared across goroutines is limited and guarded: the metrics counters, the sink's `terminalError`, the coordinator's sink PID and the channel source's read credit are atomic, and the result objects (`Collector`, `FoldResult`), the sub-pipeline list (`inputPipelines`) and the fan-out pairing (`fanOutGenerations`) have a mutex.
 
-Three stages start goroutines or block: `FromChannel` runs one reader goroutine, and `FromConn` and the `Chan` sink block inside `Receive` (on `Read` and on a full channel) and hold a worker while they do (Chapter 7, §7.1). In addition, the fan-out slot that completes a generation materialises the upstream on a goroutine of its own (`spawnFanOutUpstream`, §25.8).
+Three stages start goroutines or block: `FromChannel` runs one reader goroutine, and `FromConn` and the `Chan` sink block inside `Receive` (on `Read` and on a full channel) and hold a worker while they do ([Chapter 7, §7.1](chap-07.md#71-the-pieces)). In addition, the fan-out slot that completes a generation materialises the upstream on a goroutine of its own (`spawnFanOutUpstream`, [§25.8](#258-fan-in-fan-out-and-sub-pipelines)).
 
 | Scenario | Ordering |
 |---|---|
@@ -422,7 +424,7 @@ Three stages start goroutines or block: `FromChannel` runs one reader goroutine,
 
 `ParallelMap` spawns `n` function actors with `SpawnFromFunc` at wire time and dispatches each element round-robin with a sequence number. After each downstream request and each result it requests the smaller of two numbers: its free workers, and the downstream demand that no element is already on its way for (`parallelMapActor.maybeRequestUpstream`). So at most `n` elements are in flight, and because each input yields exactly one output, a result can always be emitted without exceeding downstream demand. A worker recovers a panic in the user function and reports it as an error, which fails the stream. The ordered variant pushes results on a min-heap and emits while the top carries the next expected number (`parallelMapActor` in `stream/stage_parallel.go`).
 
-**Mailboxes.** The default stage mailbox is `actor.NewBoundedMailbox(BufferSize × 2)`, 512 slots, whose `Enqueue` blocks when full (Chapter 6). With demand control it is rarely full, and it has better cache locality than an unbounded one. `WithMailbox` replaces it per stage; `UnboundedFairMailbox` is the alternative when one busy upstream must not starve other senders. The stages that receive from many producers get an unbounded mailbox (§25.8); their demand windows bound it.
+**Mailboxes.** The default stage mailbox is `actor.NewBoundedMailbox(BufferSize × 2)`, 512 slots, whose `Enqueue` blocks when full ([Chapter 6](chap-06.md)). With demand control it is rarely full, and it has better cache locality than an unbounded one. `WithMailbox` replaces it per stage; `UnboundedFairMailbox` is the alternative when one busy upstream must not starve other senders. The stages that receive from many producers get an unbounded mailbox ([§25.8](#258-fan-in-fan-out-and-sub-pipelines)); their demand windows bound it.
 
 ## 25.11 Stream refs across nodes
 
@@ -446,14 +448,14 @@ An endpoint accepts one subscription; a second subscriber receives `streamErrorW
 - `Errors` and `DroppedElements` reflect the sink and the source stage only, not the flows between them.
 - `BackpressureMs` is always zero: the field and its aggregation exist, and no stage writes the counter.
 
-`Tracer` has four hooks: `OnElement`, `OnDemand`, `OnError`, `OnComplete` (`stream/tracer.go`). Only `flowActor` calls them. `Source.WithTracer` and `Sink.WithTracer` store the tracer and nothing calls it. A flow with a tracer is never fused (§25.7), so the tracer of a `Map`, `TryMap` or `Filter` always fires. `flowActor` reads the clock per element only when a tracer is attached, because `time.Now` on every element is not free. `MetricsReporter` is an interface with no caller, and `StageConfig.Tags` is stored and never read.
+`Tracer` has four hooks: `OnElement`, `OnDemand`, `OnError`, `OnComplete` (`stream/tracer.go`). Only `flowActor` calls them. `Source.WithTracer` and `Sink.WithTracer` store the tracer and nothing calls it. A flow with a tracer is never fused ([§25.7](#257-stage-fusion)), so the tracer of a `Map`, `TryMap` or `Filter` always fires. `flowActor` reads the clock per element only when a tracer is attached, because `time.Now` on every element is not free. `MetricsReporter` is an interface with no caller, and `StageConfig.Tags` is stored and never read.
 
 ## 25.13 Performance considerations
 
 - **The queue.** `queue` is a slice with a head index (`stream/queue.go`). `pop` sets the vacated slot to nil at once, so the garbage collector can free the value while the backing array lives, and compacts when the dead prefix reaches half the slice, which amortises the copy.
 - **Plain counters** for demand, protected by the one-message-at-a-time rule; atomics only for metrics. No mutex on the element path.
 - **Refill batching.** One `streamRequest` covers a window of elements.
-- **Fusion** (§25.7).
+- **Fusion** ([§25.7](#257-stage-fusion)).
 - **Batching.** Each element between two stages costs one mailbox enqueue and dequeue. `Batch(n, maxWait)` turns `n` elements into one message for everything downstream of it, which the design document calls the single most effective throughput measure.
 - **`FromChannel`** batches up to 64 values per message, within the outstanding demand. **`FromConn`** reads into pooled buffers of `bufSize` (default 4,096) and emits an exact-sized copy.
 
@@ -540,7 +542,7 @@ sequenceDiagram
 | `OnDrop` | nil | `flowActor`, `sinkActor`, splitter | no builder |
 | `Fusion` | true | `applyFusion` | no builder |
 
-Builder calls compose. Each `With…` method copies the stage descriptor and changes one field of its config; the `actorFn` is untouched and receives, at `Run`, the config the materialiser completed (§25.5). A chain of calls therefore applies every option, in any order.
+Builder calls compose. Each `With…` method copies the stage descriptor and changes one field of its config; the `actorFn` is untouched and receives, at `Run`, the config the materialiser completed ([§25.5](#255-materialisation)). A chain of calls therefore applies every option, in any order.
 
 ## Guarantees
 
@@ -557,7 +559,7 @@ Builder calls compose. Each `With…` method copies the stage descriptor and cha
 | Builder calls compose in any order, and a stage built with them still gets the materialiser's actor system, shared metrics and default name | `TestBuilders_ComposeAndKeepMaterializerConfig` in `stream/graph_builder_test.go` |
 | A stage with `Resume` and a tracer next to a fusable stage keeps both: the failing element is skipped and the tracer fires | `TestFusion_KeepsStageErrorStrategy` in `stream/materializer_test.go` |
 | When a stream ends, by completion, `Stop`, failure or a sink that cancels, no stream actor remains, sub-pipelines of `FlatMapConcat` included; `Done`, `Err` and `Metrics` still work, and `Abort` afterwards changes nothing | `TestStreamHandle_CoordinatorStopsWhenStreamEnds` in `stream/handle_test.go` |
-| A sink that stops without the handle having been signalled ends the stream with an error, and the coordinator stops the remaining stages | `TestStreamCoordinator_SinkCrash_StopsTheStream` in `stream/handle_test.go` |
+| A sink that stops without the handle having been signalled ends the stream with an error, and the coordinator stops the remaining stages (the test uses an unwrapped stage) | `TestStreamCoordinator_SinkCrash_StopsTheStream` in `stream/handle_test.go` |
 | A `FlatMapMerge` stream aborted right after `Run` leaves no nested stream behind | `TestFlatMapMerge_AbortRightAfterRun_StopsSubPipelines` in `stream/flow_test.go` |
 | A `flowActor` with an empty queue forwards completion exactly once | `TestFlowActor_StreamComplete_EmptyBuffer_CompletesOnce` in `stream/stage_flow_test.go` |
 | A fused stage requests only what downstream asked for and replaces a filtered-out element; on an error it cancels its upstream, and the source stops | `TestFusedFlowActor_RespectsDownstreamDemand`, `TestFusedFlowActor_FnError_CancelsUpstream` and `TestFusedFlow_FnError_StopsSource` in `stream/stage_flow_test.go` |
@@ -610,17 +612,11 @@ Builder calls compose. Each `With…` method copies the stage descriptor and cha
 | With no outstanding demand `FromChannel` does not read its channel, so it notices that the channel was closed only when the next demand arrives | `chanSourceActor.readLoop` in `stream/stage_source.go` |
 | A fan-out branch that is run without its siblings waits until they are run or until it is stopped or aborted; nothing times the wait out | `fanOutGenerations.register` in `stream/stage_broadcast.go` |
 | The coordinator outlives the sink until its last stage has stopped; a stage that never stops keeps it alive | `streamCoordinator.Receive` in `stream/stage_coordinator.go` |
+| A panic in a user function outside `ParallelMap` stops that stage through the default supervisor: in the sink it completes the handle with a nil `Err` and leaves upstream running; in any other stage `Done` never closes | `flowActor.Receive` and `fusedFlowActor.Receive` in `stream/stage_flow.go`; `sinkActor.Receive` in `stream/stage_sink.go` |
+| The coordinator's "terminated unexpectedly" branch is reached for a materialised sink only when `PID.doStop` fails before `PostStop` | `completionWrapper` in `stream/materializer.go`; `PID.doStop` in `actor/pid.go` |
 | An actor source's user actor must answer every pull within `PullTimeout`, and an empty answer ends the stream; it cannot answer "nothing yet" | `actorSourceActor.startFetch` in `stream/stage_source.go` |
 | By default a substream with 256 unacknowledged elements holds the upstream back, and with it every other substream: one slow key stalls the rest | `subFlowSourceActor.deliver` in `stream/stage_subflow.go` |
 | `FromConn` and `Chan` block inside `Receive` and hold a dispatcher worker | `connSourceActor.Receive` in `stream/stage_source.go`; `Chan` in `stream/sink.go` |
 | `ElementsIn` double-counts; flow errors and drops are not in the handle's metrics; `BackpressureMs` is zero | `streamHandleImpl.Metrics` in `stream/handle.go` |
 | The tracer fires only in the generic flows; `Tags`, `OverflowStrategy` outside substreams, `MetricsReporter` and `ErrPullTimeout` are declared and unused | `flowActor` in `stream/stage_flow.go`; `stream/config.go`; `stream/tracer.go`; `stream/errors.go` |
 | `WithContext(key, value)` discards both arguments; it is an identity flow | `WithContext` in `stream/flow.go` |
-
-## Exercises
-
-1. A pipeline is `Of(1..1000) → Scan → Collect`. Using §25.4, list the `streamRequest` messages the sink and the `Scan` stage send until the first refill of each, with their sizes.
-2. `Stop` and `Abort` both end a `Tick` stream. Trace each through §25.5 and §25.6: which actor receives what, what the sink's `Collector` sees, and what `Err` returns.
-3. A graph is `Of(...) → Map → TryMap.WithErrorStrategy(Resume) → Filter → Collect`, run with the default fusion mode. Using §25.7, say which actors exist and why none of the three flows is fused, and what happens when the `TryMap` function returns an error. How does the answer change without `WithErrorStrategy(Resume)`?
-4. `Merge(a, b)` feeds a sink that takes one second per element, and `a` and `b` are `Range(0, 1_000_000)`. Using §25.8, say where the elements wait, how many of them at most, and through which messages the sink's slowness reaches `a` and `b`.
-5. A `TryMap` stage is built with `WithErrorStrategy(Retry).WithRetryConfig(RetryConfig{MaxAttempts: 5}).WithName("parse")`. How many times is the function called for an element that always fails, and what is the actor called? Using §25.5 and §25.16, explain why the order of the three builder calls does not matter.

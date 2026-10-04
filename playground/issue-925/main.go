@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -50,7 +51,7 @@ func main() {
 	}
 
 	// wait for a while to let actor start and spawn its children
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	fmt.Println("\nTotal children...")
 	kids := pid.Children()

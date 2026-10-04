@@ -1,0 +1,10 @@
+{
+  "name": "goakt-book-tools",
+  "private": true,
+  "description": "Dependencies of mermaid-check.mjs, which parses the book's Mermaid diagrams.",
+  "type": "module",
+  "dependencies": {
+    "jsdom": "30.1.2",
+    "mermaid": "11.17.2"
+  }
+}

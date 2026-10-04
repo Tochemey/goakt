@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/stream"
 )
 
@@ -380,7 +381,7 @@ func TestMerge_Cancel(t *testing.T) {
 	handle, err := stream.Merge(inf, inf).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	require.NoError(t, handle.Stop(ctx))
 
 	select {
@@ -445,7 +446,7 @@ func TestCombine_Cancel(t *testing.T) {
 	handle, err := stream.Combine(inf, inf, func(a, b int) int { return a + b }).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	require.NoError(t, handle.Stop(ctx))
 
 	select {

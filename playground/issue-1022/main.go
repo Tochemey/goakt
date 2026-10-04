@@ -56,7 +56,7 @@ func (x *Grain) OnActivate(ctx context.Context, props *actor.GrainProps) error {
 	}
 	instanceSeen[x.name] = true
 
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 
 	return nil
 }

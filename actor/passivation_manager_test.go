@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 )
@@ -902,7 +903,7 @@ func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 		}
 	}, time.Second, 10*time.Millisecond, "expected message entry passivation")
 
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 	manager.notify()
 	require.Eventually(t, func() bool {
 		return len(manager.wake) == 0
@@ -913,7 +914,7 @@ func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 
 func TestStopTimerDrainsExpiredTimer(t *testing.T) {
 	timer := time.NewTimer(5 * time.Millisecond)
-	time.Sleep(10 * time.Millisecond) // ensure the timer fires
+	pause.For(10 * time.Millisecond) // ensure the timer fires
 
 	stopTimer(timer)
 

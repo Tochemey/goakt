@@ -63,6 +63,7 @@ import (
 	"github.com/tochemey/goakt/v4/discovery/static"
 	gerrors "github.com/tochemey/goakt/v4/errors"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 	goaktlog "github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -228,7 +229,7 @@ func raceScenario(ctx context.Context, nodeA, nodeB, observer actor.ActorSystem)
 		}
 
 		// the loser was rolled back; its cleanup must leave the winner's record
-		time.Sleep(settleWait)
+		pause.For(settleWait)
 
 		fromObserver := resolve(ctx, observer, name)
 		fmt.Printf("   winner %s running: %t\n", pids[winner].ID(), pids[winner].IsRunning())
@@ -282,7 +283,7 @@ func cleanupScenario(ctx context.Context, nodeA, nodeB, observer actor.ActorSyst
 		return false
 	}
 
-	time.Sleep(settleWait)
+	pause.For(settleWait)
 
 	fromObserver := resolve(ctx, observer, name)
 	fromStaleNode := resolve(ctx, staleNode, name)
@@ -340,7 +341,7 @@ func reliableScenario(ctx context.Context, nodeA, nodeB, observer actor.ActorSys
 		return false
 	}
 
-	time.Sleep(settleWait)
+	pause.For(settleWait)
 
 	fromObserver := resolve(ctx, observer, name)
 	exists, _ := observer.ActorExists(ctx, name)
@@ -392,7 +393,7 @@ func recipeScenario(ctx context.Context) bool {
 
 		close(start)
 		wg.Wait()
-		time.Sleep(settleWait)
+		pause.For(settleWait)
 
 		pidA, errA := nodes[0].ActorOf(ctx, name)
 		pidB, errB := nodes[1].ActorOf(ctx, name)
@@ -503,7 +504,7 @@ func startCluster(ctx context.Context, count int) []actor.ActorSystem {
 				fatal("the %d nodes did not see each other in time", count)
 			}
 
-			time.Sleep(100 * time.Millisecond)
+			pause.For(100 * time.Millisecond)
 		}
 	}
 

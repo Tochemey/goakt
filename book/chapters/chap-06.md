@@ -1,7 +1,5 @@
 # 6. Mailboxes
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -20,7 +18,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -37,12 +34,12 @@ Source files: `actor/mailbox.go`, every `actor/*_mailbox.go`, `actor/priority_in
 
 `Mailbox` has five methods (`actor/mailbox.go`): `Enqueue`, `Dequeue`, `IsEmpty`, `Len` and `Dispose`. Its comment asks for "a thread-safe FIFO", but the priority and fair mailboxes are not FIFO, so read that as "the order the mailbox defines".
 
-Only user messages go through the mailbox. `doReceive` sends control messages (`PoisonPill`, `Panicking`, `PausePassivation`, `ResumePassivation`, `PanicSignal`, `Terminated`, `SendDeadletter`) to the separate system queue instead (`isControlMessage` in `actor/pid.go`), which a turn serves first (Chapter 7). The async request and response messages used by reentrancy stay in the mailbox, so they keep their place relative to user messages (`isControlMessage` in `actor/pid.go`).
+Only user messages go through the mailbox. `doReceive` sends control messages (`PoisonPill`, `Panicking`, `PausePassivation`, `ResumePassivation`, `PanicSignal`, `Terminated`, `SendDeadletter`) to the separate system queue instead (`isControlMessage` in `actor/pid.go`), which a turn serves first ([Chapter 7](chap-07.md)). The async request and response messages used by reentrancy stay in the mailbox, so they keep their place relative to user messages (`isControlMessage` in `actor/pid.go`).
 
 The two sides of the mailbox run on different goroutines:
 
 - **Producers** are whoever sends: `doReceive` calls `Enqueue` on the sender's goroutine (`actor/pid.go`).
-- **The consumer** is the actor's turn. `runTurn` calls `Dequeue` until it is empty or the throughput budget is spent (`actor/pid.go`), and `finishOrReclaim` calls `IsEmpty` before releasing the actor. Successive turns may run on different worker goroutines, but never two at once: the dispatch state hands the actor from one worker to the next (Chapter 7).
+- **The consumer** is the actor's turn. `runTurn` calls `Dequeue` until it is empty or the throughput budget is spent (`actor/pid.go`), and `finishOrReclaim` calls `IsEmpty` before releasing the actor. Successive turns may run on different worker goroutines, but never two at once: the dispatch state hands the actor from one worker to the next ([Chapter 7](chap-07.md)).
 
 Reading those call sites gives the contract a mailbox really has to meet. The interface comment states only the first point:
 
@@ -51,7 +48,7 @@ Reading those call sites gives the contract a mailbox really has to meet. The in
 3. **Once `Enqueue` returns, `IsEmpty` must report the message until it is dequeued.** `doReceive` enqueues first and only then tries to schedule the actor (`actor/pid.go`). If that attempt loses because a turn is still running, the message is picked up only because `finishOrReclaim` resets the dispatch state *and then* checks `IsEmpty`. A mailbox whose `IsEmpty` could miss a completed enqueue would leave that message stranded until the next send.
 4. **An `Enqueue` error drops the message.** `doReceive` logs the error, turns the message into a dead letter, and returns (`actor/pid.go`). The sender is not told: `Tell` has already returned nil, and an `Ask` waits until it times out.
 
-Together with the single consumer, a FIFO mailbox gives the ordering guarantee users rely on: **messages from one sender to one receiver are handled in the order they were sent**. Nothing is promised across senders. The guarantee is the mailbox's, so it holds for the FIFO mailboxes only; the priority, fair and segmented mailboxes define their own order (§6.5 to §6.7), and control messages overtake user messages (Chapter 7, §7.4).
+Together with the single consumer, a FIFO mailbox gives the ordering guarantee users rely on: **messages from one sender to one receiver are handled in the order they were sent**. Nothing is promised across senders. The guarantee is the mailbox's, so it holds for the FIFO mailboxes only; the priority, fair and segmented mailboxes define their own order ([§6.5](#65-priority-mailboxes) to [§6.7](#67-the-segmented-mailbox)), and control messages overtake user messages ([Chapter 7, §7.4](chap-07.md#74-the-system-queue)).
 
 `Len` is not part of the hot path. The `actor.mailbox.size` metric is computed from two counters the actor keeps, one written by producers and one by the turn, on separate cache lines (`PID.observedMailboxSize` in `actor/pid.go`). The interface comment warns that `Len` on the default mailbox walks the whole list (`Mailbox` in `actor/mailbox.go`).
 
@@ -120,7 +117,7 @@ The capacity is rounded up to a power of two, with a floor of two, so a position
 
 ## 6.5 Priority mailboxes
 
-A `PriorityFunc` is `func(msg1, msg2 any) bool`, and returning true means `msg1` goes first (`heap.Less` in `actor/unbounded_priority_mailbox.go`). In the three intake-based mailboxes it is called on the consumer's goroutine, during `Dequeue`, for every comparison the heap makes. In `UnboundedPriorityMailBox` it also runs on the sender's goroutine, because `Enqueue` pushes into the heap under the mutex. It receives every message that enters the mailbox, including the reentrancy messages from §6.1, so it must handle types it does not know.
+A `PriorityFunc` is `func(msg1, msg2 any) bool`, and returning true means `msg1` goes first (`heap.Less` in `actor/unbounded_priority_mailbox.go`). In the three intake-based mailboxes it is called on the consumer's goroutine, during `Dequeue`, for every comparison the heap makes. In `UnboundedPriorityMailBox` it also runs on the sender's goroutine, because `Enqueue` pushes into the heap under the mutex. It receives every message that enters the mailbox, including the reentrancy messages from [§6.1](#61-the-contract), so it must handle types it does not know.
 
 There are two designs:
 
@@ -129,7 +126,7 @@ There are two designs:
 
 The stable variants give each drained message an increasing sequence number and use it to break ties (`stableHeap.less` in `actor/unbounded_stable_priority_mailbox.go`). Deciding a tie takes two calls to the priority function, one in each direction.
 
-The bounded variants admit a message by incrementing the length first and undoing it if that exceeds the capacity (`BoundedPriorityMailbox.Enqueue` in `actor/bounded_priority_mailbox.go`). Unlike the ring-based mailboxes, their capacity is exact. The stable unbounded variant also increments the length before pushing (`UnboundedStablePriorityMailbox.Enqueue` in `actor/unbounded_stable_priority_mailbox.go`), so briefly `IsEmpty` is false while the intake is still empty. That is the same harmless retry as in §6.4.
+The bounded variants admit a message by incrementing the length first and undoing it if that exceeds the capacity (`BoundedPriorityMailbox.Enqueue` in `actor/bounded_priority_mailbox.go`). Unlike the ring-based mailboxes, their capacity is exact. The stable unbounded variant also increments the length before pushing (`UnboundedStablePriorityMailbox.Enqueue` in `actor/unbounded_stable_priority_mailbox.go`), so briefly `IsEmpty` is false while the intake is still empty. That is the same harmless retry as in [§6.4](#64-bounded-mailboxes).
 
 Priority is decided only among messages already in the mailbox when the turn takes one: a high-priority message that arrives later still has to wait for the message being handled.
 
@@ -161,7 +158,7 @@ Two details keep the list consistent under concurrent producers:
 
 **Stop.** Every stop ends in `reset` (`actor/pid.go`). Once the actor is stopping, a turn that is still running hands out no more user messages (`PID.runTurn` in `actor/pid.go`), so the queued messages stay in the mailbox. On a terminal stop they are abandoned with the PID, and none of them becomes a dead letter; `reset` then disposes of the mailbox. Remote messages among them hold flow-control credit, which `reset` returns to their peers through the actor's hold registry.
 
-**Restart.** A restart reuses the same PID and the same mailbox (Chapter 4, §4.7), and keeps the messages in it:
+**Restart.** A restart reuses the same PID and the same mailbox ([Chapter 4, §4.7](chap-04.md#47-looking-up-killing-and-restarting-by-name)), and keeps the messages in it:
 
 - The message in flight when the restart begins finishes on the old incarnation. The turn then stops handing out user messages, as for any stop, and `Restart` waits for it to give the actor up before it re-initializes the actor (`restartSubtree` in `actor/pid.go`).
 - `reset` does not dispose of the mailbox, and keeps the two counters behind `actor.mailbox.size`, when the stop belongs to a restart (`actor/pid.go`). That matters for `BoundedMailbox`, whose `Dispose` is final (`actor/bounded_mailbox.go`).
@@ -173,7 +170,7 @@ Messages sent while the restart is under way are refused: the actor is not runni
 
 ## 6.9 Writing your own mailbox
 
-A custom mailbox is passed to `WithMailbox` like the built-in ones. From §6.1, it must:
+A custom mailbox is passed to `WithMailbox` like the built-in ones. From [§6.1](#61-the-contract), it must:
 
 1. Accept concurrent `Enqueue` calls and assume one `Dequeue` caller at a time, possibly a different goroutine each turn. Publish its state with atomics or a lock, never with plain fields shared across turns.
 2. Return nil from `Dequeue` when empty, without blocking.
@@ -215,11 +212,3 @@ A custom mailbox is passed to `WithMailbox` like the built-in ones. From §6.1, 
 | `WithMailbox` has no effect on an actor placed on another node or relocated | `actorSystem.SpawnOn` in `actor/spawn.go` |
 | The fair mailbox keeps a sub-queue per distinct sender for its whole life | `UnboundedFairMailbox.Enqueue` in `actor/unbounded_fair_mailbox.go` |
 | A priority function sees the reentrancy messages too | `isControlMessage` in `actor/pid.go` |
-
-## Exercises
-
-1. In the embedded mailbox, a producer has swapped itself in as the tail but has not linked the previous tail yet. Walk through `finishOrReclaim` and `doReceive` and show that the message is still handled.
-2. Why may `BoundedMailbox.Dequeue` not call the ring's `Get` directly? What would a worker be doing if it did?
-3. A priority function orders `*Order` before everything else. With reentrancy enabled, what does it receive besides `*Order`, and what should it return for those?
-4. Write a mailbox that drops the oldest message instead of the newest when full, and check it against each point of §6.9.
-5. An actor uses `UnboundedFairMailbox` and receives one message from each of a million short-lived actors. Describe its memory after they have all stopped.

@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/stream"
 )
 
@@ -60,7 +61,7 @@ func TestMaterialize_HandleStop(t *testing.T) {
 	handle, err := stream.Tick(10*time.Millisecond).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(30 * time.Millisecond)
+	pause.For(30 * time.Millisecond)
 	require.NoError(t, handle.Stop(ctx))
 
 	select {
@@ -78,7 +79,7 @@ func TestMaterialize_HandleAbort(t *testing.T) {
 	handle, err := stream.Tick(10*time.Millisecond).To(sink).Run(ctx, sys)
 	require.NoError(t, err)
 
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	handle.Abort()
 
 	select {

@@ -148,7 +148,7 @@ func TestDuplexChunkInboundFullBlocksUntilDrained(t *testing.T) {
 
 	// The reassembled frame waits for queue space; a full inbound queue is
 	// local consumer slowness, not a peer protocol violation.
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 	require.False(t, right.IsClosed())
 
 	var got Frame
@@ -592,7 +592,7 @@ func TestDuplexChunked100MiBNoOrdinaryLatencyImpact(t *testing.T) {
 			Payload: payload,
 		})
 	}()
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 
 	underLoad := measureTellLatencies(ctx, t, ordLeft, ordRight, samples)
 	underLoadP99 := percentile(underLoad, 0.99)
@@ -710,7 +710,7 @@ func TestControlLaneLatencyDuringLargeChunkTransfer(t *testing.T) {
 			Payload: payload,
 		})
 	}()
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 
 	latencies := measureAskLatencies(ctx, t, ctrlLeft, ctrlRight, 32)
 	p99 := percentile(latencies, 0.99)
