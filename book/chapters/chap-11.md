@@ -26,8 +26,6 @@
 - How the event stream delivers system events, and what a subscriber must do to read them.
 - How the topic actor implements publish and subscribe, locally and across nodes.
 
-Source files: `actor/scheduler.go`, `actor/schedule_option.go`, `actor/router.go`, `actor/router_option.go`, `actor/routing_strategy.go`, `eventstream/eventstream.go`, `eventstream/subscriber.go`, `internal/queue/queue.go`, `actor/topic_actor.go`. The scheduler runs on [go-quartz](https://github.com/reugn/go-quartz) v0.15.2 (`go.mod`); its behaviour is described from that version's `github.com/reugn/go-quartz/quartz/scheduler.go` and `github.com/reugn/go-quartz/quartz/trigger.go`.
-
 ## 11.1 The scheduler
 
 The scheduling methods of `ActorSystem` forward to a private `scheduler` (`actorSystem.Schedule` in `actor/actor_system.go`). Their `ctx` argument is not used.

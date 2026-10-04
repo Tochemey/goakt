@@ -30,8 +30,6 @@
 - How a network profile selects memberlist's failure detection preset, and what TLS changes.
 - How the TCP transport carries memberlist traffic when TLS is on.
 
-Source files: `discovery/provider.go`, `discovery/node.go`, `discovery/provider_types.go`, `discovery/errors.go`, `discovery/consul/config.go`, `discovery/consul/discovery.go`, `discovery/dnssd/config.go`, `discovery/dnssd/discovery.go`, `discovery/etcd/config.go`, `discovery/etcd/discovery.go`, `discovery/kubernetes/config.go`, `discovery/kubernetes/discovery.go`, `discovery/mdns/config.go`, `discovery/mdns/option.go`, `discovery/mdns/discovery.go`, `discovery/nats/config.go`, `discovery/nats/option.go`, `discovery/nats/discovery.go`, `discovery/selfmanaged/config.go`, `discovery/selfmanaged/discovery.go`, `discovery/selfmanaged/broadcast.go` and its platform files, `discovery/static/config.go`, `discovery/static/discovery.go`, `internal/cluster/discovery.go`, `internal/memberlist/addr.go`, `internal/memberlist/transport.go`, `internal/memberlist/transport_config.go`, `remote/peer.go`, `internal/cluster/peer.go`, and the discovery and network-profile parts of `internal/cluster/config.go`, `internal/cluster/cluster.go` and `actor/cluster_config.go`. Olric (`github.com/tochemey/olric` v0.3.22) and memberlist (`github.com/hashicorp/memberlist` v0.7.0), the versions in `go.mod`, are described from their sources where GoAkt depends on their behaviour; their files are cited by module path.
-
 ## 19.1 Three ports and a node's identity
 
 A clustered node listens on three ports. All three are fields of `Node` in `discovery/node.go`:

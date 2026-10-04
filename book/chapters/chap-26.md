@@ -30,8 +30,6 @@
 - How the `memory` package reads total, free and used memory on each platform, what "free" means on each, and the one place GoAkt reads these figures.
 - How `TestKit`, `Probe`, `GrainProbe` and `MultiNodes` work inside, and the traps in using them.
 
-Source files: `breaker/state.go`, `breaker/bucket.go`, `breaker/metrics.go`, `breaker/options.go`, `breaker/errors.go`, `breaker/breaker.go`, `actor/pipe_option.go`, `memory/memory.go`, `memory/memory_linux.go`, `memory/memory_darwin.go`, `memory/memory_bsd.go`, `memory/memory_windows.go`, `memory/memory_unsupported.go`, `testkit/testkit.go`, `testkit/option.go`, `testkit/probe.go`, `testkit/grain_probe.go`, `testkit/grain_of.go`, `testkit/multi_nodes.go`, `testkit/testnode.go`, and the call sites in `actor/pid.go`, `actor/grain_context.go` and `actor/actor_system.go`.
-
 The three packages are independent of each other. `breaker` and `memory` are small leaf packages the actor system imports; `testkit` sits on top of the actor system and is never imported by it. How the repository's own test suite is organised is [Chapter 27](chap-27.md), Testing GoAkt.
 
 ## 26.1 The circuit breaker's states

@@ -27,8 +27,6 @@
 - What each client operation sends, to which node, and what it returns when the actor does not exist.
 - How the three balancers pick a node, where least load gets its figures, and how refresh and `Close` behave.
 
-Source files: `tls/info.go`, `remote/option.go`, `remote/config.go`, `actor/option.go`, `actor/actor_system.go`, `actor/remote_server.go`, `internal/net/tcp_server.go`, `internal/net/remoting_server.go`, `internal/net/client.go`, `internal/remoteclient/client.go`, `internal/remoteclient/peer.go`, `internal/cluster/cluster.go`, `internal/cluster/config.go`, `internal/memberlist/transport.go`, `internal/memberlist/transport_config.go`, `client/client.go`, `client/node.go`, `client/option.go`, `client/balancer.go`, `client/round_robin.go`, `client/random.go`, `client/least_load.go`, `client/tell_grain_option.go`.
-
 ## 18.1 `tls.Info` and where it is set
 
 `Info` in `tls/info.go` is a plain struct with two `crypto/tls` configurations and no behaviour:

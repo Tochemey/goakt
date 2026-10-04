@@ -28,8 +28,6 @@
 - What happens to a mailbox when its actor stops, restarts, or is placed on another node.
 - What you must get right to write a mailbox of your own.
 
-Source files: `actor/mailbox.go`, every `actor/*_mailbox.go`, `actor/priority_intake.go`, and the turn loop in `actor/pid.go`.
-
 ## 6.1 The contract
 
 `Mailbox` has five methods (`actor/mailbox.go`): `Enqueue`, `Dequeue`, `IsEmpty`, `Len` and `Dispose`. Its comment asks for "a thread-safe FIFO", but the priority and fair mailboxes are not FIFO, so read that as "the order the mailbox defines".

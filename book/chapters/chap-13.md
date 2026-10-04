@@ -38,8 +38,6 @@
 - How a cluster keeps one activation per identity, what the activation barrier adds, and what a call does when the recorded owner is gone.
 - How a grain is deactivated: by passivation, by a `PoisonPill`, and at shutdown.
 
-Source files: `actor/grain.go`, `actor/grain_identity.go`, `actor/grain_props.go`, `actor/grain_of.go`, `actor/grain_option.go`, `actor/grain_engine.go`, `actor/grain_activation_barrier.go`, `remote/grain_request.go`, and the grain parts of `actor/grain_pid.go`, `actor/actor_system.go`, `actor/option.go`, `actor/cluster_config.go` and `actor/remote_server.go`.
-
 ## 13.1 The model
 
 A grain is a virtual actor. Nobody spawns it: a caller names it by identity, and the runtime activates it when it is first needed, keeps it in memory while it is used, and deactivates it after a period of idleness. In a cluster the runtime also decides where it lives.

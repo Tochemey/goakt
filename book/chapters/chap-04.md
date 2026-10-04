@@ -31,8 +31,6 @@
 - How children differ from top-level actors, and which spawn options do not apply to a child.
 - How actors are named and addressed, what `PID.Equals` compares, and what `Restart` keeps.
 
-Source files: `actor/spawn.go`, `actor/pid.go`, `actor/pid_state.go`, `internal/address/address.go`, and the spawn helpers in `actor/actor_system.go`.
-
 ## 4.1 The spawn entry points
 
 | Entry point | Places the actor | Parent | Notes |

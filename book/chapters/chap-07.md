@@ -30,8 +30,6 @@
 - How failures leave the turn and reach supervision, and what that delay means.
 - What happens when the pool is saturated.
 
-Source files: `actor/dispatcher.go`, `actor/ready_queue.go`, `actor/worker.go`, `actor/dispatch_state.go`, `actor/system_queue.go`, `actor/supervision.go`, and the turn in `actor/pid.go`.
-
 ## 7.1 The pieces
 
 An actor is not a goroutine. The `dispatcher` owns a fixed pool of worker goroutines that take ready actors from a shared ready queue and run them one *turn* at a time (`actor/dispatcher.go`). An actor or grain is anything with a `runTurn(w *worker)` method, the `schedulable` interface (`actor/ready_queue.go`). The worker knows nothing about mailboxes or actor state: it takes, runs a turn, and takes again (`actor/worker.go`). Keeping the worker ignorant of what it runs is deliberate: the dispatcher is a scheduling primitive, and a new kind of schedulable needs no change to the worker loop. Grains are the second kind ([Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn)).

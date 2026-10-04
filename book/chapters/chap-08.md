@@ -41,8 +41,6 @@
 - How reentrancy is switched on and off at runtime without losing the requests in flight.
 - How a grain does the same work with a second queue and a pause instead of a stash, and how that meets passivation and shutdown.
 
-Source files: `actor/receive_context.go`, `actor/context.go`, `actor/context_pool.go`, `actor/behavior_stack.go`, `actor/stash.go`, `actor/reentrancy.go`, `reentrancy/reentrancy.go`, and the request path in `actor/pid.go`. For the envelopes and the grain side: `internal/commands/async.go`, `internal/commands/async_serializer.go`, `actor/async_reply.go`, `actor/grain_pid.go`, `actor/grain_context.go`, `actor/grain_reply.go`, `internal/pendingasks/table.go`, and the envelope paths in `actor/grain_engine.go` and `actor/remote_server.go`.
-
 ## 8.1 One object per message
 
 `Receive` gets a `*ReceiveContext` that carries one message (`actor/receive_context.go`):

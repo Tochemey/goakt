@@ -25,8 +25,6 @@
 - How a restart runs, and what it keeps and loses.
 - How death watch works locally and across nodes, and in what order a watcher learns of a death.
 
-Source files: `supervisor/supervisor.go`, `actor/supervision.go`, `actor/supervision_signal.go`, `actor/death_watch.go`, `actor/remote_watch_registry.go`, `actor/terminated_serializer.go`, the guardians (`actor/user_guardian.go`, `actor/system_guardian.go`, `actor/root_guardian.go`), and the failure, restart and watch paths in `actor/pid.go` and `actor/pid_tree.go`.
-
 ## 9.1 The `Supervisor` value
 
 A `Supervisor` holds a strategy, a set of rules from error type to directive, and the retry and backoff settings (`supervisor/supervisor.go`).

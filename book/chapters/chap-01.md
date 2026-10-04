@@ -15,13 +15,11 @@
 
 ## What you will learn
 
-- What GoAkt is, in terms of the code rather than marketing.
+- What GoAkt is, described in terms of the code rather than marketing.
 - The shape of the repository: which packages exist, how big they are, and which depend on which.
-- The one interface every actor implements, and the four functions that send messages.
-- How a message travels from a caller to an actor's `Receive`, at the level of detail you need before reading Part II.
+- The interface every actor implements, and the four functions that send messages.
+- How a message travels from a caller to an actor's `Receive`, in the detail you need before reading the chapters that follow.
 - What is public API and what is internal, and why that line matters when you contribute.
-
-Source files: `actor/actor.go`, `actor/api.go`, `actor/pid.go`, `actor/dispatcher.go`, `go.mod`, `Makefile`, `.mockery.yml`.
 
 ## The model
 
@@ -37,19 +35,19 @@ type Actor interface {
 }
 ```
 
-- `PreStart` runs before the actor handles messages. A failing `PreStart` is retried, and if the last attempt fails the actor is not started. It runs again on every restart, on the same actor value (`Actor` in `actor/actor.go`).
+- `PreStart` runs before the actor handles messages. A failing `PreStart` is retried, and if the last attempt fails, the actor is not started. It runs again on every restart, on the same actor value (`Actor` in `actor/actor.go`).
 - `Receive` handles every message, one at a time.
 - `PostStop` runs when the actor stops, including when it is passivated for being idle. Depending on how the actor is stopped, it may run while `Receive` is still handling a message ([Chapter 3, §3.5](chap-03.md#35-stop)). An error from it is logged but does not prevent the stop (`Actor` in `actor/actor.go`).
 
-An actor never runs on its own goroutine. The **actor system** owns a fixed pool of worker goroutines, the dispatcher, and lends a worker to an actor whenever that actor has messages waiting ([Chapter 7](chap-07.md)). A **PID** is the handle you hold to send an actor messages. It can point to an actor in this process or, with remoting enabled, to one on another node.
+An actor never runs on its own goroutine. The **actor system** owns a fixed pool of worker goroutines, the dispatcher, and lends a worker to an actor whenever that actor has messages waiting ([Chapter 7](chap-07.md)). A **PID** is the handle you hold to send messages to an actor. It can point to an actor in this process or, with remoting enabled, to one on another node.
 
 > **Actors are pointers.** Implement the three methods on a pointer receiver and pass a pointer to `Spawn` (`&MyActor{}`). GoAkt does not support actors passed by value.
 
-On top of that core sit grains (virtual actors that activate on first message, Part III), remoting (Part IV), clustering (Part V), and higher-level subsystems: reliable delivery, CRDT-based distributed data and reactive streams (Part VI).
+On top of that core sit grains (virtual actors that activate on first message, [Chapter 13](chap-13.md)), remoting ([Chapter 15](chap-15.md)), clustering ([Chapter 19](chap-19.md)), and higher-level subsystems: reliable delivery ([Chapter 23](chap-23.md)), CRDT-based distributed data ([Chapter 24](chap-24.md)), and reactive streams ([Chapter 25](chap-25.md)).
 
 The same code runs in three shapes. **Standalone**: one process and no network. **Clustered**: nodes discover each other and share a registry of actors and grains, so a name resolves to whichever node holds it. **Multi-datacenter**: several clusters linked through a control plane. Remoting can also be enabled on its own, without a cluster.
 
-A message is any Go value: the API takes `any`. A local send passes the value itself, so nothing is serialised and no `.proto` definition is needed inside one process. A message is serialised only when it crosses the network, by a serializer chosen for its type (Part IV).
+A message is any Go value; the API takes `any`. A local send passes the value itself, so nothing is serialised and no `.proto` definition is needed inside one process. A message is serialised only when it crosses the network, by a serializer chosen for its type ([Chapter 17](chap-17.md)).
 
 ## Sending messages
 
@@ -68,7 +66,7 @@ Their error contract:
 - An `Ask` that gets no reply within `timeout` gives `ErrRequestTimeout` (`actor/api.go`). If `ctx` ends first, the error joins `ctx.Err()` with `ErrRequestTimeout`.
 - A remote PID on a system without remoting gives `ErrRemotingDisabled`; a remote `Ask` with a non-positive timeout gives `ErrInvalidTimeout` (`actor/api.go`).
 
-`BatchAsk` is easy to misread. It is not a pipelined request: each message waits for its reply before the next one is sent, and on error it returns `nil` with no partial results (`actor/api.go`).
+`BatchAsk` is easy to misread. It is not pipelined: each message waits for its reply before the next one is sent, and on error it returns `nil` with no partial results (`actor/api.go`).
 
 ## How a message reaches `Receive`
 
@@ -98,27 +96,27 @@ One detail in `Ask` matters when you debug it. After the context is handed to th
 
 ## The repository
 
-Line counts in the working tree (commit `cf7a7c6d` plus the uncommitted changes), counted over the files `git ls-files --cached --others --exclude-standard` lists:
+Line counts, taken over the files that `git ls-files --cached --others --exclude-standard` lists:
 
 | Package | Purpose | Source lines | Test lines |
 |---|---|---:|---:|
-| `actor` | Actor system, PIDs, mailboxes, dispatcher, supervision, grains, clustering glue, reliable delivery, relocation | 48,167 | 96,446 |
+| `actor` | Actor system, PIDs, mailboxes, dispatcher, supervision, grains, clustering glue, reliable delivery, relocation | 48,898 | 99,005 |
 | `internal/net` | Wire transport: frames, chunking, compression, handshake, duplex streams | 10,881 | 15,143 |
-| `stream` | Reactive streams on top of actors | 9,655 | 8,984 |
-| `internal/remoteclient` | Outbound remoting client | 6,412 | 7,601 |
+| `stream` | Reactive streams on top of actors | 9,710 | 9,547 |
+| `internal/remoteclient` | Outbound remoting client | 6,424 | 7,617 |
 | `internal/cluster` | Cluster membership state, partitioning, registry stores | 3,609 | 7,614 |
-| `discovery/...` | Discovery providers: consul, dnssd, etcd, kubernetes, mdns, nats, selfmanaged, static | 3,303 | 3,833 |
+| `discovery/...` | Discovery providers: consul, dnssd, etcd, kubernetes, mdns, nats, selfmanaged, static | 3,303 | 3,835 |
 | `remote` | Public remoting configuration and serializers | 2,800 | 2,178 |
-| `crdt` | CRDT data types | 2,219 | 3,182 |
-| `datacenter/...` | Multi-datacenter configuration and control planes (etcd, NATS) | 1,589 | 3,052 |
-| `log`, `testkit`, `client`, `internal/commands`, `breaker`, … | Smaller packages | none | none |
-| `internal/internalpb` | Generated protobuf code | 15,407 | 0 |
+| `crdt` | CRDT data types | 2,230 | 3,182 |
+| `datacenter/...` | Multi-datacenter configuration and control planes (etcd, NATS) | 1,589 | 3,053 |
+| `log`, `testkit`, `client`, `internal/commands`, `breaker`, … | Smaller packages | — | — |
+| `internal/internalpb` | Generated protobuf code | 15,528 | 0 |
 
-In total there are about 103,900 hand-written source lines (excluding `playground/`, `mocks/`, `benchmark/` and generated code) and about 167,500 test lines (including `benchmark/`). `actor` alone holds almost half of the source and well over half of the tests. Becoming fluent in GoAkt mostly means becoming fluent in `actor`.
+In total there are about 105,000 hand-written source lines (excluding `playground/`, `mocks/`, `benchmark/` and generated code) and about 170,800 test lines (including `benchmark/`). `actor` alone holds almost half of the source and well over half of the tests. Becoming fluent in GoAkt mostly means becoming fluent in `actor`.
 
 ### Dependency layers
 
-Running `go list -f '{{.ImportPath}}: {{.Imports}}' ./...` and keeping only the module's own packages gives this shape:
+Running `go list -f '{{.ImportPath}}: {{.Imports}}' ./...` and keeping only the module's own packages gives this structure:
 
 ```mermaid
 flowchart TD
@@ -137,20 +135,20 @@ flowchart TD
     errors["errors"] --> passiv["passivation"] --> duration["internal/duration"]
 ```
 
-An arrow points from a package to a package it imports. The `errors → passivation → internal/duration` chain at the bottom is drawn on its own.
+An arrow points from a package to a package it imports. The `errors → passivation → internal/duration` chain at the bottom is drawn separately.
 
-Four facts from the import graph are worth keeping in mind:
+Keep four facts from the import graph in mind:
 
 - **`actor` is the only package that ties everything together.** Remoting, clustering, distributed data and reliable delivery all have their entry points in `actor`, not in their own packages. When you look for "where does X start", start in `actor`.
-- **Among library packages, only `stream` and `testkit` sit above `actor`.** Apart from the `playground/` programs, nothing else imports `actor`, so lower packages cannot call back into the actor system except through interfaces passed down to them.
+- **Among library packages, only `stream` and `testkit` sit above `actor`.** Apart from the `playground/` and `benchmark/` programs, nothing else imports `actor`, so lower packages cannot call back into the actor system except through interfaces passed down to them.
 - **`crdt`, `log` and `extension` are leaves.** They import no other package of the module. `errors` is close to the bottom but is not a leaf: it imports `passivation`, which imports `internal/duration`.
 - **`internal/cluster` does not import `actor`.** Cluster membership events are delivered to the actor system through a channel (`cluster.Events()`), which `actor` drains in its own loop ([Chapter 3](chap-03.md)).
 
 ### Public and internal
 
-Everything under `internal/` cannot be imported by users, and generated protobuf code lives there too (`Makefile`). The public surface is `actor` plus the small configuration packages it accepts (`remote`, `discovery/*`, `supervisor`, `passivation`, `reentrancy`, `extension`, `log`, `tls`, `hash`, `datacenter`), the `errors` package of sentinel errors, `eventstream` and `memory`, and the higher-level `stream`, `crdt`, `client`, `breaker` and `testkit`.
+Users cannot import anything under `internal/`, and the generated protobuf code lives there too (`Makefile`). The public surface is `actor` plus the small configuration packages it accepts (`remote`, `discovery/*`, `supervisor`, `passivation`, `reentrancy`, `extension`, `log`, `tls`, `hash`, `datacenter`), the `errors` package of sentinel errors, `eventstream` and `memory`, and the higher-level `stream`, `crdt`, `client`, `breaker` and `testkit`.
 
-The practical consequence for contributors: a change under `internal/` can be made freely, but a change to an exported identifier in a public package is a breaking change for users.
+> **Warning for contributors.** You can change code under `internal/` freely. Changing an exported identifier in a public package is a breaking change for users.
 
 ### What else is in the repository
 

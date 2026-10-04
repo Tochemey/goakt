@@ -46,8 +46,6 @@
 - How deletion, tombstones, pruning and snapshots work.
 - How one cluster per datacenter exchanges CRDT state through the cluster leader.
 
-Source files: `crdt/crdt.go`, `crdt/hash.go`, `crdt/key.go`, `crdt/gcounter.go`, `crdt/pncounter.go`, `crdt/lww_register.go`, `crdt/or_set.go`, `crdt/or_map.go`, `crdt/flag.go`, `crdt/mv_register.go`, `crdt/consistency.go`, `crdt/config.go`, `crdt/messages.go`, `actor/replicator.go`, `internal/ddata/crdt_codec.go`, `internal/ddata/crdt_serializer.go`, `internal/ddata/snapshot.go`, `internal/metric/replicator_metric.go`, `protos/internal/crdt.proto`, the CRDT key helpers in `internal/codec/codec.go`, `ClusterConfig.WithCRDT` in `actor/cluster_config.go`, and the replicator wiring in `actor/actor_system.go`.
-
 ## 24.1 Motivation and design principles
 
 GoAkt has actors, clustering, remoting and grains. The CRDT layer adds **replicated data that actors on different nodes can read and write without coordination**. Without it, shared state means routing through one actor, using Olric maps directly, or adding an external store.

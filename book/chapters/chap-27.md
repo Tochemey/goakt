@@ -37,8 +37,6 @@
 - How coverage is measured per shard and judged by Codecov.
 - How the testing rules in `CODING_STANDARDS.md` map to the suite as it stands.
 
-Source files: `scripts/unit-test.sh`, `scripts/test-shard.sh`, `.github/workflows/pr.yml`, `.github/workflows/build.yml`, `.mockery.yml`, `codecov.yml`, `Makefile`, `CODING_STANDARDS.md`, `internal/pause/pause.go`, `internal/net/dynaport.go`, `internal/tlstest/tlstest.go`, `actor/helpers_test.go`, `actor/mocks_test.go`, `internal/cluster/helpers_test.go`, `stream/mocks_test.go`, `testkit/multi_nodes.go`.
-
 ## 27.1 The suite in numbers
 
 Counted over the committed `_test.go` files outside `vendor/` and `playground/`:

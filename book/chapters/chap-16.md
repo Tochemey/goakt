@@ -32,8 +32,6 @@
 - How the coalescer batches tells without a delay, bounds its memory, and never loses a message it accepted.
 - How asks and control requests carry their deadline and propagated headers, and how every failure, local or remote, becomes a Go error.
 
-Source files: `internal/remoteclient/client.go`, `internal/remoteclient/config.go`, `internal/remoteclient/peer.go`, `internal/remoteclient/protocol_cache.go`, `internal/remoteclient/routing.go`, `internal/remoteclient/send.go`, `internal/remoteclient/serializer_dispatch.go`, `internal/remoteclient/coalescer.go`, `internal/remoteclient/tell_pump.go`, and the call sites in `actor/api.go`, `actor/pid.go`, `actor/actor_system.go` and `actor/remote_server.go`.
-
 ## 16.1 The client and its operations
 
 `internal/remoteclient` is the outbound half of remoting: everything a node does to reach another node goes through one `Client` (`Client` in `internal/remoteclient/client.go`). [Chapter 15](chap-15.md) describes the transport underneath it; [Chapter 17](chap-17.md) describes the server that answers it and the public `remote` package that configures it.

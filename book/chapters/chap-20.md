@@ -52,8 +52,6 @@
 - How Olric's membership and rebalance events become `NodeJoined`, `NodeLeft` and `LeaderChanged`, who the leader is, and what the actor system does with each event.
 - How partitions are hashed, what the local peer-state store holds, and what the code does, and does not do, during a network partition.
 
-Source files: `internal/cluster/cluster.go`, `internal/cluster/config.go`, `internal/cluster/codec.go`, `internal/cluster/errors.go`, `internal/cluster/event.go`, `internal/cluster/hasher.go`, `internal/cluster/peer.go`, `internal/cluster/store.go`, `internal/cluster/memory_store.go`, `internal/cluster/boltdb_store.go`, `internal/cluster/logwriter.go`, `hash/hasher.go`, `internal/quorum/quorum.go`, `actor/cluster_config.go`, the cluster setup and events loop in `actor/actor_system.go`, `protos/internal/cluster.proto`.
-
 ## 20.1 The engine and what it delegates
 
 The cluster core is one type, `cluster` in `internal/cluster/cluster.go`, behind the `Cluster` interface in the same file. The actor system holds it as `x.cluster` and never talks to Olric directly. Discovery providers, the memberlist transport and the network profiles that tune failure detection are configured by this engine but explained in [Chapter 19](chap-19.md); placement, singletons and relocation are built on it and explained in [Chapter 21](chap-21.md).

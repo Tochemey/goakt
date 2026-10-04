@@ -35,8 +35,6 @@
 
 Functions and types named in this chapter are in `actor/actor_system.go` unless another file is named.
 
-Source files: `actor/actor_system.go`, `actor/option.go`, `actor/defaults.go`, `actor/pid.go`, `actor/pid_tree.go`, `actor/root_guardian.go`, `actor/reserved.go`, `actor/passivation_manager.go`, `actor/dispatcher.go`.
-
 ## 3.1 One interface, one struct
 
 `ActorSystem` is an interface of 59 exported and 58 unexported methods (`actor/actor_system.go`). The unexported methods (`isStopping`, `tree`, `getCluster`, …) seal it: no type outside `package actor` can implement it. It has exactly one implementation, the unexported `actorSystem` struct, and a compile-time assertion pins the two together (`_` in `actor/actor_system.go`). Internal code such as `rootGuardian.handlePanicSignal` reaches those unexported methods through the interface value it gets from `ctx.ActorSystem()`. The interface exists so users program against a stable surface. The struct is where every subsystem keeps its state, because, as [Chapter 1](chap-01.md) showed, `actor` is the hub that wires everything together.

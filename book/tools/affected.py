@@ -22,7 +22,7 @@
 
 """affected.py: list the book chapters that cite files changed since a base revision.
 
-Every chapter names the code it describes by path, in its "Source files" line and in the text. This script
+Every chapter names the code it describes by path in the text. This script
 compares those paths with the files changed between a base revision and HEAD and prints, as Markdown, which
 chapters to reread. Only file paths are matched; a cited directory (such as `actor/`) is ignored, because
 the package maps cite every directory.

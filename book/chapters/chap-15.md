@@ -43,13 +43,11 @@
 - How a node speaks both the duplex and the legacy protocol during a rolling upgrade, and what the legacy frames look like.
 - What remoting promises on failure: at-most-once, per-pair FIFO, backpressure instead of drops.
 
-Source files: `internal/net/frame.go`, `internal/net/transport.go`, `internal/net/handshake.go`, `internal/net/duplex.go`, `internal/net/duplex_open.go`, `internal/net/duplex_chunk.go`, `internal/net/chunk.go`, `internal/net/reassembly.go`, `internal/net/duplex_table.go`, `internal/net/table.go`, `internal/net/duplex_credit.go`, `internal/net/duplex_lease.go`, `internal/net/envelope.go`, `internal/net/pending.go`, `internal/net/duplex_dispatch.go`, `internal/net/remoting_server.go`, `internal/net/tcp_server.go`, `internal/net/proto_serializer.go`, `internal/net/client.go`, `internal/net/frame_pool.go`, `internal/remoteclient/peer.go`, `internal/remoteclient/routing.go`, `internal/remoteclient/protocol_cache.go`, `internal/remoteclient/send.go`, `internal/remoteclient/tell_pump.go`, `remote/config.go`, `remote/option.go`, `remote/protocol_pin.go`, `protos/internal/handshake.proto`, and the duplex handlers in `actor/remote_server.go`.
-
 ## 15.1 What remoting is
 
 Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node keeps a few long-lived connections to each peer, called lanes. Every connection carries frames in both directions, and many requests are in flight on it at once. An older protocol, one protobuf request and one response per socket exchange, is still in the code for mixed-version clusters ([§15.9](#159-compatibility-two-protocols-on-one-port)).
 
-**Goals**, as the maintainer set them:
+**Goals:**
 
 1. Remove head-of-line blocking in socket use, server dispatch and outbound batching.
 2. Carry messages above the legacy 16 MiB frame ceiling without starving small messages.

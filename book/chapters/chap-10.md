@@ -23,8 +23,6 @@
 - How pause, resume and reinstate interact with passivation.
 - What system eviction is, how it picks actors, and why it is a stop rather than a passivation.
 
-Source files: `passivation/strategy.go`, `actor/passivation_manager.go`, `actor/system_eviction.go`, and the passivation path in `actor/pid.go` and `actor/actor_system.go`.
-
 ## 10.1 Strategies
 
 A `Strategy` is a name and a string (`passivation/strategy.go`); the three implementations carry the parameters:

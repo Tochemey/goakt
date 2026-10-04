@@ -53,8 +53,6 @@
 - What a durable queue must guarantee, and how work pulling reuses the same protocol with one sequence space per worker.
 - How controllers are spawned, published, resolved, relocated and stopped, and which failures are terminal.
 
-Source files: `actor/reliable_delivery_protocol.go`, `actor/reliable_delivery_producer_controller.go`, `actor/reliable_delivery_consumer_controller.go`, `actor/reliable_delivery_work_pulling_controller.go`, `actor/reliable_delivery_durable_queue.go`, `actor/reliable_delivery_durable_work_queue.go`, `actor/reliable_delivery_options.go`, `actor/reliable_delivery_config.go`, `actor/reliable_delivery_companion.go`, `remote/reliable_delivery.go`, `internal/commands/delivery.go`, `internal/commands/delivery_serializer.go`, `protos/internal/delivery.proto`, and the spawn, relocation and cleanup paths in `actor/actor_system.go`, `actor/spawn.go`, `actor/pid.go` and `actor/remote_server.go`.
-
 ## 23.1 The model and its principles
 
 Ordinary messaging is at-most-once: a `Tell` that races a crash, a full bounded mailbox or a network fault is lost without a trace. Reliable delivery adds a confirmed, flow-controlled flow above that transport, in two modes. **Point-to-point** connects one producer actor to one consumer actor, in order. **Work pulling** spreads one producer's messages over a changing set of workers, with no order across workers ([§23.12](#2312-work-pulling)).

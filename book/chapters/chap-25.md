@@ -40,13 +40,11 @@
 - How errors travel, what each `ErrorStrategy` does in the code, and which configuration fields nothing reads yet.
 - How `SourceRef` and `SinkRef` carry the same protocol across nodes.
 
-Source files: `stream/stream.go`, `stream/source.go`, `stream/flow.go`, `stream/sink.go`, `stream/pipeline.go`, `stream/graph.go`, `stream/graph_builder.go`, `stream/subflow.go`, `stream/materializer.go`, `stream/handle.go`, `stream/protocol.go`, `stream/config.go`, `stream/errors.go`, `stream/overflow.go`, `stream/queue.go`, `stream/metrics.go`, `stream/tracer.go`, `stream/remote.go`, `stream/remote_protocol.go` and the stage actors in `stream/stage_*.go`.
-
 ## 25.1 What a stream is
 
 The `stream` package is a demand-driven processing library built on the actor model. It does not replace actors; it composes with them. A pipeline is a graph of three kinds of stage, and **every stage runs as an actor**, so a stream gets a mailbox, a lifecycle and a place in the actor tree from the runtime. Of GoAkt's own packages it imports only `actor` and `remote`, plus `internal/retry` for endpoint lookup.
 
-The design rests on four principles, as the maintainer states them:
+The design rests on four principles:
 
 | Principle | Meaning |
 |---|---|

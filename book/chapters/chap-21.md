@@ -30,8 +30,6 @@
 - How the relocator, its workers and the `RelocateBatch` handler split, send and recreate the work, and how failures are counted.
 - What the handoff window hides from senders, and why `SendSync` waits while `SendAsync` fails with `ErrRelocationInProgress`.
 
-Source files: `actor/spawn.go`, `actor/spawn_option.go`, `actor/cluster_singleton.go`, `actor/cluster_singleton_option.go`, `actor/relocator.go`, `actor/relocation_worker.go`, `actor/relocation_handoff.go`, `actor/pid_companion.go`, the departure, snapshot, crash-recovery and registry-repair code in `actor/actor_system.go`, and the relocation handlers in `actor/remote_server.go` and `actor/grain_engine.go`.
-
 ## 21.1 Placement with `SpawnOn`
 
 `Spawn` always creates the actor on the calling node, or on the node named by `WithHostAndPort` ([Chapter 4, §4.1](chap-04.md#41-the-spawn-entry-points)). `SpawnOn` lets the cluster choose. It is the actor system's only balanced-spawn entry point; the standalone client balances with its own `Client.SpawnBalanced` in `client/client.go` ([Chapter 18](chap-18.md)). In order (`actorSystem.SpawnOn` in `actor/spawn.go`):

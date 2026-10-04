@@ -19,8 +19,6 @@
 - Which code is generated, and from what.
 - The lint rules that shape how the code reads.
 
-Source files: `Dockerfile.tools`, `Makefile`, `scripts/unit-test.sh`, `scripts/test-shard.sh`, `.github/workflows/pr.yml`, `.golangci.yml`, `.mockery.yml`, `buf.gen.yaml`, `go.mod`.
-
 ## Everything runs in a container
 
 Every `make` target runs inside a Docker image built from `Dockerfile.tools`, so the only host requirements are Docker and Make (`Makefile`). The image pins the tools:

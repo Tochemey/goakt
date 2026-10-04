@@ -23,8 +23,6 @@
 - Which OpenTelemetry instruments exist, how they are registered, and what one scrape costs.
 - How logging is wired: the `Logger` interface, its three implementations, and why every actor shares one logger.
 
-Source files: `extension/extension.go`, `extension/dependency.go`, `actor/metric.go`, `internal/metric/provider.go`, `log/logger.go`, `log/level.go`, `log/zap.go`, `log/slog.go`, `log/discard.go`, and the relevant parts of `actor/actor_system.go` and `actor/pid.go`.
-
 ## 12.1 Extensions
 
 An extension is anything with an `ID() string` (`Extension` in `extension/extension.go`). The interface has nothing else: no `Start`, no `Stop`. The runtime calls `ID()` and nothing more, so an extension that owns resources must be started before `NewActorSystem` and closed by the application after `Stop`.

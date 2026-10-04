@@ -40,8 +40,6 @@
 - How grain timers are scoped to one activation, and how a panic in a handler is answered.
 - How a message that arrived from another node is handed to the grain.
 
-Source files: `actor/grain_pid.go`, `actor/grain_mailbox.go`, `actor/embedded_grain_mailbox.go`, `actor/grain_context.go`, `actor/grain_context_pool.go`, `actor/grain_reply.go`, `actor/grain_late_message.go`, `actor/grain_timer.go`, `actor/grain_timer_option.go`, `actor/tell_grain_option.go`, and the delivery paths in `actor/grain_engine.go`, `actor/remote_server.go` and `actor/actor_system.go`.
-
 [Chapter 13](chap-13.md) covers what comes before a grain runs: the `Grain` interface, `GrainIdentity`, props and options, and how the grain engine finds or activates the one process for an identity. This chapter starts once that process exists.
 
 ## 14.1 The grain process

@@ -47,8 +47,6 @@
 - How the remote watch registry and the remote hold registry keep cross-node state outside the actor tree.
 - What `internal/codec` converts, and which details of a supervisor, a passivation strategy or a reentrancy setting survive the trip.
 
-Source files: `remote/config.go`, `remote/option.go`, `remote/compression.go`, `remote/protocol_pin.go`, `remote/context_propagator.go`, `remote/serializer.go`, `remote/proto_serializer.go`, `remote/cbor_serializer.go`, `remote/json_serializer.go`, `remote/spawn_request.go`, `remote/grain_request.go`, `remote/actor_state.go`, `remote/peer.go`, `actor/remote_server.go`, `actor/remote_watch_registry.go`, `actor/remote_hold_registry.go`, `actor/poison_pill_serializer.go`, `actor/terminated_serializer.go`, the remoting setup and validation in `actor/actor_system.go`, `internal/types/global.go`, `internal/codec/codec.go`, and the request messages of `protos/internal/remoting.proto`.
-
 ## 17.1 The `remote` package
 
 `remote` is the public face of remoting. It holds no network code: the transport is `internal/net` ([Chapter 15](chap-15.md)) and the outbound client is `internal/remoteclient` ([Chapter 16](chap-16.md), Remote Client). It holds values that both sides of a connection, and users, need to name.
