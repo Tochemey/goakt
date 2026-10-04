@@ -1,7 +1,5 @@
 # 1. What GoAkt Is
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -14,7 +12,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
   - [What else is in the repository](#what-else-is-in-the-repository)
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -23,6 +20,8 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - The one interface every actor implements, and the four functions that send messages.
 - How a message travels from a caller to an actor's `Receive`, at the level of detail you need before reading Part II.
 - What is public API and what is internal, and why that line matters when you contribute.
+
+Source files: `actor/actor.go`, `actor/api.go`, `actor/pid.go`, `actor/dispatcher.go`, `go.mod`, `Makefile`, `.mockery.yml`.
 
 ## The model
 
@@ -40,9 +39,9 @@ type Actor interface {
 
 - `PreStart` runs before the actor handles messages. A failing `PreStart` is retried, and if the last attempt fails the actor is not started. It runs again on every restart, on the same actor value (`Actor` in `actor/actor.go`).
 - `Receive` handles every message, one at a time.
-- `PostStop` runs when the actor stops, including when it is passivated for being idle. Depending on how the actor is stopped, it may run while `Receive` is still handling a message (Chapter 3, §3.5). An error from it is logged but does not prevent the stop (`Actor` in `actor/actor.go`).
+- `PostStop` runs when the actor stops, including when it is passivated for being idle. Depending on how the actor is stopped, it may run while `Receive` is still handling a message ([Chapter 3, §3.5](chap-03.md#35-stop)). An error from it is logged but does not prevent the stop (`Actor` in `actor/actor.go`).
 
-An actor never runs on its own goroutine. The **actor system** owns a fixed pool of worker goroutines, the dispatcher, and lends a worker to an actor whenever that actor has messages waiting (Chapter 7). A **PID** is the handle you hold to send an actor messages. It can point to an actor in this process or, with remoting enabled, to one on another node.
+An actor never runs on its own goroutine. The **actor system** owns a fixed pool of worker goroutines, the dispatcher, and lends a worker to an actor whenever that actor has messages waiting ([Chapter 7](chap-07.md)). A **PID** is the handle you hold to send an actor messages. It can point to an actor in this process or, with remoting enabled, to one on another node.
 
 > **Actors are pointers.** Implement the three methods on a pointer receiver and pass a pointer to `Spawn` (`&MyActor{}`). GoAkt does not support actors passed by value.
 
@@ -145,7 +144,7 @@ Four facts from the import graph are worth keeping in mind:
 - **`actor` is the only package that ties everything together.** Remoting, clustering, distributed data and reliable delivery all have their entry points in `actor`, not in their own packages. When you look for "where does X start", start in `actor`.
 - **Among library packages, only `stream` and `testkit` sit above `actor`.** Apart from the `playground/` programs, nothing else imports `actor`, so lower packages cannot call back into the actor system except through interfaces passed down to them.
 - **`crdt`, `log` and `extension` are leaves.** They import no other package of the module. `errors` is close to the bottom but is not a leaf: it imports `passivation`, which imports `internal/duration`.
-- **`internal/cluster` does not import `actor`.** Cluster membership events are delivered to the actor system through a channel (`cluster.Events()`), which `actor` drains in its own loop (Chapter 3).
+- **`internal/cluster` does not import `actor`.** Cluster membership events are delivered to the actor system through a channel (`cluster.Events()`), which `actor` drains in its own loop ([Chapter 3](chap-03.md)).
 
 ### Public and internal
 
@@ -163,7 +162,7 @@ The practical consequence for contributors: a change under `internal/` can be ma
 | `benchmark/` | Benchmarks |
 | `test/data/` | Test fixtures: TLS certificates, generated test protobufs |
 | `docs/` | The Mintlify documentation site |
-| `vendor/` | Not committed (it is in `.gitignore`); created by `make vendor` (Chapter 2) |
+| `vendor/` | Not committed (it is in `.gitignore`); created by `make vendor` ([Chapter 2](chap-02.md)) |
 
 ## Guarantees
 
@@ -176,9 +175,3 @@ The practical consequence for contributors: a change under `internal/` can be ma
 
 - The default throughput budget of 32 messages per turn.
 - The `ReceiveContext` pool, and the fact that a late `Ask` reply is silently dropped rather than dead-lettered.
-
-## Exercises
-
-1. Run `go list -f '{{.ImportPath}}: {{join .Imports " "}}' ./...` from the repository root and confirm that, apart from the `playground/` programs, no package except `stream` and `testkit` imports `github.com/tochemey/goakt/v4/actor`.
-2. In `actor/api.go`, find the reason `Ask` checks `IsRemote` before `IsRunning`. (Answer: `actor/api.go`.)
-3. Write a test showing that `BatchAsk` returns no partial results when its second message times out, and decide which `_test.go` file it belongs in.

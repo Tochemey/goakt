@@ -1,7 +1,5 @@
 # Migrating from v3 to v4
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every v4 statement checked against the code
-
 ## Contents
 
 - [What changed](#what-changed)

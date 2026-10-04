@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 // TestBatchFlowActor_TimerFlush_NonEmptyWindow tests that a batchFlush message
@@ -47,7 +48,7 @@ func TestBatchFlowActor_TimerFlush_NonEmptyWindow(t *testing.T) {
 	ch := make(chan int)
 	go func() {
 		ch <- 1
-		time.Sleep(150 * time.Millisecond) // let the 50ms timer fire with 1 element in window
+		pause.For(150 * time.Millisecond) // let the 50ms timer fire with 1 element in window
 		ch <- 2
 		close(ch)
 	}()
@@ -228,7 +229,7 @@ func TestFlowActor_StreamCancel_Unit(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, flowPID, &stageWire{
 		subID: "unit", upstream: upPID, downstream: downPID,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Send a streamCancel (simulating a downstream cancel) and wait for the actor to stop.
 	require.NoError(t, actor.Tell(ctx, flowPID, &streamCancel{subID: "unit"}))
@@ -258,7 +259,7 @@ func TestBatchFlowActor_StreamCancel_Unit(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, batchPID, &stageWire{
 		subID: "unit", upstream: upPID, downstream: downPID,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	require.NoError(t, actor.Tell(ctx, batchPID, &streamCancel{subID: "unit"}))
 
@@ -408,13 +409,13 @@ func TestFlowActor_MaybeRequestUpstream_NoAvailable(t *testing.T) {
 	require.NoError(t, actor.Tell(ctx, flowPID, &stageWire{
 		subID: "unit", upstream: upPID, downstream: downPID,
 	}))
-	time.Sleep(10 * time.Millisecond)
+	pause.For(10 * time.Millisecond)
 
 	// Push InitialDemand elements to saturate upstreamCredit so available becomes <= 0.
 	for i := range cfg.InitialDemand {
 		require.NoError(t, actor.Tell(ctx, flowPID, &streamElement{subID: "unit", value: int(i), seqNo: uint64(i + 1)}))
 	}
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 
 	// Actor is still alive; shutdown cleanly.
 	require.NoError(t, flowPID.Shutdown(ctx))

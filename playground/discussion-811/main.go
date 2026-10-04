@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/supervisor"
@@ -51,7 +52,7 @@ func main() {
 	_ = actorSystem.Start(ctx)
 
 	// wait for system to start properly
-	time.Sleep(1 * time.Second)
+	pause.For(1 * time.Second)
 
 	// create the parent actor
 	_, err := actorSystem.Spawn(ctx, "Parent", &Parent{},
@@ -61,7 +62,7 @@ func main() {
 		logger.Fatal(err)
 	}
 
-	time.Sleep(1 * time.Second)
+	pause.For(1 * time.Second)
 
 	// send a message to child actor
 	err = actorSystem.NoSender().SendAsync(ctx, "child", &testpb.TestBye{})

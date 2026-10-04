@@ -23,7 +23,7 @@ DOCKER_RUN := docker run --rm \
 	-w $(WORKDIR) \
 	$(IMAGE)
 
-.PHONY: help image test lint unit-test mock protogen proto-format proto-lint certs vendor clean
+.PHONY: help image test lint unit-test mock protogen proto-format proto-lint certs vendor book-check book-affected clean
 
 help: ## Show available targets
 	@awk 'BEGIN{FS=":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -77,6 +77,27 @@ certs: image ## Regenerate TLS test fixtures under test/data/certs
 		openssl req -sha1 -key client-auth.key -new -out client-auth.req -subj "/C=US/ST=TX/O=Opensource/CN=client.com/emailAddress=admin@auto-rpc.org" && \
 		openssl x509 -req -days 3650 -in client-auth.req -CA client-auth-ca.pem -CAkey client-auth-ca.key -set_serial 3 -passin pass:test -out client-auth.pem && \
 		openssl x509 -extfile client-auth.conf -extensions ssl_client -req -days 3650 -in client-auth.req -CA client-auth-ca.pem -CAkey client-auth-ca.key -set_serial 4 -passin pass:test -out client-auth.pem'
+
+# The book checks run in stock Python and Node images, so they need nothing
+# beyond Docker either. npm installs the diagram parser inside the container,
+# so nothing is written to the checkout.
+BOOK_PYTHON_IMAGE := python:3.13-alpine
+BOOK_NODE_IMAGE   := node:22-alpine
+BASE              ?= origin/main
+
+book-check: ## Check the book: cited code names, links, unlinked chapter references, Mermaid diagrams
+	docker run --rm --user $(UID):$(GID) -v "$(CURDIR)":$(WORKDIR) -w $(WORKDIR) $(BOOK_PYTHON_IMAGE) sh -c '\
+		python3 book/tools/checknames.py && \
+		python3 book/tools/checklinks.py && \
+		python3 book/tools/linkrefs.py --check'
+	docker run --rm --user $(UID):$(GID) -e HOME=/tmp -v "$(CURDIR)":$(WORKDIR):ro $(BOOK_NODE_IMAGE) sh -c '\
+		mkdir -p /tmp/book-tools && \
+		cp $(WORKDIR)/book/tools/package.json $(WORKDIR)/book/tools/mermaid-check.mjs /tmp/book-tools && \
+		cd /tmp/book-tools && npm install --silent --no-audit --no-fund && \
+		node mermaid-check.mjs $(WORKDIR)/book/chapters/*.md $(WORKDIR)/book/architecture.md'
+
+book-affected: ## List the book chapters that cite files changed since BASE (default origin/main)
+	git diff --name-only $(BASE)...HEAD | docker run --rm -i --user $(UID):$(GID) -v "$(CURDIR)":$(WORKDIR) -w $(WORKDIR) $(BOOK_PYTHON_IMAGE) python3 book/tools/affected.py -
 
 clean: ## Remove the tools image and its cache volume
 	docker rmi -f $(IMAGE)

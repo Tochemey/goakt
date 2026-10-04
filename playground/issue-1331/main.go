@@ -34,6 +34,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -65,7 +66,7 @@ func main() {
 	nodes := make([]actor.ActorSystem, 0, 3)
 	for i := range 3 {
 		nodes = append(nodes, startNode(ctx, i+1, ns.ClientURL()))
-		time.Sleep(500 * time.Millisecond)
+		pause.For(500 * time.Millisecond)
 	}
 	defer func() {
 		for _, node := range nodes[1:] {
@@ -77,7 +78,7 @@ func main() {
 
 	_, err = nodes[0].SpawnSingleton(ctx, "singleton", &singleton{})
 	must(err)
-	time.Sleep(2 * time.Second)
+	pause.For(2 * time.Second)
 	must(ping(ctx, nodes[2]))
 
 	started := time.Now()
@@ -95,7 +96,7 @@ func main() {
 			fmt.Printf("singleton recovered after %s (%s after node-1 stopped)\n", time.Since(started).Round(10*time.Millisecond), (time.Since(started) - stopped).Round(10*time.Millisecond))
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		pause.For(100 * time.Millisecond)
 	}
 	fmt.Println("singleton did not recover within 45s")
 	os.Exit(1)

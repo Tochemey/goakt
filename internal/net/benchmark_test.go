@@ -32,6 +32,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
@@ -81,7 +82,7 @@ func startBenchTCPServer(b *testing.B, handler RequestHandlerFunc) (*TCPServer, 
 	addr := srv.ListenAddr().String()
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve() }()
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 
 	return srv, addr, done
 }
@@ -110,7 +111,7 @@ func startBenchRemotingServer(b *testing.B) (*RemotingServer, string, <-chan err
 	addr := ps.ListenAddr().String()
 	done := make(chan error, 1)
 	go func() { done <- ps.Serve() }()
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 
 	return ps, addr, done
 }

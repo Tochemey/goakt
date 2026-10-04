@@ -36,6 +36,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	goaktlog "github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -80,7 +81,7 @@ func main() {
 
 	// let the startup budget expire; before the fix, remoting on this node is
 	// permanently poisoned from this moment on
-	time.Sleep(1500 * time.Millisecond)
+	pause.For(1500 * time.Millisecond)
 
 	client := remoteclient.NewClient()
 	defer client.Close()

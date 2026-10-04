@@ -35,6 +35,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	discoverynats "github.com/tochemey/goakt/v4/discovery/nats"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/remote"
 )
 
@@ -104,7 +105,7 @@ func main() {
 	log.Printf("STARTED id=%s roles=%v remoting=%d", *id, roles, *remotingPort)
 
 	if *activate {
-		time.Sleep(8 * time.Second)
+		pause.For(8 * time.Second)
 		identity, err := actor.GrainOf[*roleGrain](ctx, system, "role-bound-grain",
 			actor.WithActivationRole("game-worker"),
 			actor.WithActivationStrategy(actor.RoundRobinActivation),

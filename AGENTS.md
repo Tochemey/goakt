@@ -29,9 +29,9 @@ All code must meet the following standards:
 ## 3. Tech Stack & Code Rules
 
 * **Language (Go):** GoAkt is a pure Go library. The minimum supported Go version is the one declared in `go.mod` (currently `go 1.26.0`) and is strictly enforced. You must use Go modules for dependency management.
-* **Tests:** Every new feature or bug fix must include comprehensive unit tests. Tests should be written using Go's standard `testing` package and should cover both positive and negative cases.
+* **Tests:** Every new feature or bug fix must include unit tests that follow the Testing section of [CODING_STANDARDS.md](CODING_STANDARDS.md).
 * **Dependencies:** Only use dependencies that are already present in the `go.mod` file. If you need to add a new dependency, you must first create an issue to justify its inclusion and get approval from a maintainer.
-* **Coding Standard & Format:** All code must respect the repository's coding standard and formatting conventions. Run `gofmt` and `make lint` to ensure your changes conform before committing.
+* **Coding Standard & Format:** All code must follow [CODING_STANDARDS.md](CODING_STANDARDS.md). `make lint` enforces the formatting and lint rules in it; run it before committing.
 
 ## 4. Required Local Checks (Do This Before Committing)
 
@@ -43,6 +43,7 @@ Do not finalize your code or suggest a commit to your user without ensuring the 
 4. **Proto lint/format:** `make proto-lint` and `make proto-format` *(only if `.proto` files changed)*
 5. **Mocks:** `make mock` *(only if `.mockery.yml` or any mocked interface changed)*
 6. **Vendor refresh:** `make vendor` *(only if `go.mod` changed)*
+7. **Book checks:** `make book-check` *(only if `book/` or any Go file changed)*
 
 If any of these commands fail, you must fix the errors before proceeding.
 
@@ -55,10 +56,12 @@ The site under `docs/` is a [Mintlify](https://mintlify.com) project (`docs.json
 * When adding a new page, register it in `docs/docs.json` so it appears in navigation.
 * Code examples must be complete, accurate, and include a language identifier for syntax highlighting (e.g., ```` ```go ````).
 
+The maintainers' book under `book/` is not published. If you change the behaviour of code one of its chapters cites, update that chapter as described in [CONTRIBUTING.md](CONTRIBUTING.md#the-maintainers-book).
+
 ## Summary of Agent Workflow
 
 1. Verify an open, approved issue exists (filed with one of the GoAkt issue templates).
-2. Write code matching GoAkt standards, including unit tests.
-3. Run `make lint` and `make test`; run `make protogen` / `make proto-lint` only if `.proto` files changed, and `make mock` only if mocked interfaces or `.mockery.yml` changed.
+2. Write code that follows [CODING_STANDARDS.md](CODING_STANDARDS.md), including unit tests.
+3. Run `make lint` and `make test`; run `make protogen` / `make proto-lint` only if `.proto` files changed, and `make mock` only if mocked interfaces or `.mockery.yml` changed; run `make book-check` if `book/` or any Go file changed.
 4. Format the PR title properly (e.g., `fix: resolve panic in remote scheduler on rebalance (#1234)`).
 5. Remove any AI authorship from commits and the PR description (`Co-Authored-By` trailers, "Generated with ..." footers).

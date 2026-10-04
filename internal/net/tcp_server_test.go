@@ -1020,7 +1020,7 @@ func TestServeConnSniffRoutesFirstByte(t *testing.T) {
 			require.NoError(t, err)
 
 			if !tc.wantDuplex {
-				time.Sleep(20 * time.Millisecond)
+				pause.For(20 * time.Millisecond)
 			}
 
 			_ = c1.Close()

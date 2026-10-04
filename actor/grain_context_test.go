@@ -419,7 +419,7 @@ func TestGrainContextPipeToGrain(t *testing.T) {
 
 		gctx := &GrainContext{ctx: ctx, actorSystem: sys}
 		err = gctx.PipeToGrain(identity, func() (any, error) {
-			time.Sleep(150 * time.Millisecond)
+			pause.For(150 * time.Millisecond)
 			return testpb.Reply_builder{Content: "late"}.Build(), nil
 		}, WithTimeout(50*time.Millisecond))
 		require.NoError(t, err)

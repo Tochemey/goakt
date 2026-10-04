@@ -635,7 +635,7 @@ func TestSwitchoverDrainOrder(t *testing.T) {
 	order := make(chan string, 2)
 	p.beginLegacySend()
 	go func() {
-		time.Sleep(80 * time.Millisecond)
+		pause.For(80 * time.Millisecond)
 		order <- "legacy-done"
 		p.endLegacySend()
 	}()

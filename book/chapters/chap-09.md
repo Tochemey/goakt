@@ -1,7 +1,5 @@
 # 9. Supervision and Death Watch
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -17,7 +15,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -47,15 +44,15 @@ A `Supervisor` holds a strategy, a set of rules from error type to directive, an
 
 The comments on `DirectiveRule` and `SetDirectiveByType` say the same thing: the key is the package name and the type name, never the import path (`supervisor/supervisor.go`).
 
-**Lookup.** `Supervisor.Directive` returns the rule for the exact type and does not fall back to the any-error rule (`supervisor/supervisor.go`). The fallback is done by the caller (§9.2).
+**Lookup.** `Supervisor.Directive` returns the rule for the exact type and does not fall back to the any-error rule (`supervisor/supervisor.go`). The fallback is done by the caller ([§9.2](#92-from-a-failure-to-a-decision)).
 
 **After construction.** `SetDirectiveByType` adds a rule by type name without removing the any-error rule, and since the exact lookup comes first, it takes precedence (`supervisor/supervisor.go`). The death watch uses this to resume on its own cleanup error while escalating everything else (`actorSystem.spawnDeathWatch` in `actor/actor_system.go`). `Reset` deletes every rule and sets the strategy to one-for-all.
 
-**Sharing.** A `Supervisor` holds no per-actor state: the fault counters live on each PID (`actor/pid.go`), and a stop leaves the supervisor alone (`PID.reset` in `actor/pid.go`). One instance can therefore serve many actors, and does: PIDs built without one share a package default, and spawned actors share the system default (Chapter 4, §4.6). `Reset` and `SetDirectiveByType` change a shared instance for every actor that uses it.
+**Sharing.** A `Supervisor` holds no per-actor state: the fault counters live on each PID (`actor/pid.go`), and a stop leaves the supervisor alone (`PID.reset` in `actor/pid.go`). One instance can therefore serve many actors, and does: PIDs built without one share a package default, and spawned actors share the system default ([Chapter 4, §4.6](chap-04.md#46-children)). `Reset` and `SetDirectiveByType` change a shared instance for every actor that uses it.
 
 ## 9.2 From a failure to a decision
 
-The first half of the path is Chapter 7, §7.6: `recovery` turns a panic or a `ctx.Err` into a signal, `submitSupervision` pauses the actor's user messages and hands the signal to the system's one supervision goroutine, and that goroutine calls `notifyParent` and then lifts the pause.
+The first half of the path is [Chapter 7, §7.6](chap-07.md#76-failures-leave-the-turn): `recovery` turns a panic or a `ctx.Err` into a signal, `submitSupervision` pauses the actor's user messages and hands the signal to the system's one supervision goroutine, and that goroutine calls `notifyParent` and then lifts the pause.
 
 **A panic is supervised by the error it carries.** `recovery` passes a recovered `*PanicError` on as it is, and wraps any other recovered value in a new `PanicError` that adds the location of the panic; when the value was an error, the signal keeps it as the **cause** (`actor/pid.go`; `newPanicSupervisionSignal` in `actor/supervision_signal.go`). The lookup, `directiveFor`, tries the cause's type first, then the reported error's type, then the any-error rule. So a panic with an error is supervised like `ctx.Err` with that error, as Akka matches the thrown exception's class:
 
@@ -72,7 +69,7 @@ The first half of the path is Chapter 7, §7.6: `recovery` turns a panic or a `c
    - Any other directive suspends the actor and sends the parent a `commands.Panicking` carrying the directive, the strategy and the supervisor (`PID.notifyParent` in `actor/pid.go`). The send's error is discarded, and `Tell` refuses a target that is suspended or stopping, so a failure reported to a parent in that state is lost and the child stays suspended.
 4. With no parent, it suspends the actor. Every actor in the tree except the root guardian has a parent; top-level actors have the user guardian.
 
-`suspend` sets the suspended bit, counts a failure, pauses passivation and publishes `ActorSuspended` (`actor/pid.go`). It leaves the running bit set; `IsRunning` is false because it also checks the suspended bit. A suspended actor refuses `Tell` and `Ask` with `ErrDead`, and keeps its queued messages for later (Chapter 7, §7.6).
+`suspend` sets the suspended bit, counts a failure, pauses passivation and publishes `ActorSuspended` (`actor/pid.go`). It leaves the running bit set; `IsRunning` is false because it also checks the suspended bit. A suspended actor refuses `Tell` and `Ask` with `ErrDead`, and keeps its queued messages for later ([Chapter 7, §7.6](chap-07.md#76-failures-leave-the-turn)).
 
 ## 9.3 The parent carries it out
 
@@ -81,9 +78,9 @@ The first half of the path is Chapter 7, §7.6: `recovery` turns a panic or a `c
 | Directive | What the parent does | Source |
 |---|---|---|
 | Stop | Shuts the child down (and its siblings, one-for-all) concurrently, and **waits** for every shutdown, `PostStop` included, on its own turn; errors are logged | `PID.handleStopDirective` in `actor/pid.go` |
-| Restart | Starts a goroutine per actor to restart and returns at once (§9.4) | `PID.handleRestartDirective` in `actor/pid.go` |
-| Resume | Reinstates the child; in practice the child has already resumed itself (§9.2) | `PID.handlePanicking` in `actor/pid.go` |
-| Escalate | Sends itself a `PanicSignal`, with the child as sender; the child stays suspended (§9.5) | `PID.handlePanicking` in `actor/pid.go` |
+| Restart | Starts a goroutine per actor to restart and returns at once ([§9.4](#94-restart-budget-backoff-and-retries)) | `PID.handleRestartDirective` in `actor/pid.go` |
+| Resume | Reinstates the child; in practice the child has already resumed itself ([§9.2](#92-from-a-failure-to-a-decision)) | `PID.handlePanicking` in `actor/pid.go` |
+| Escalate | Sends itself a `PanicSignal`, with the child as sender; the child stays suspended ([§9.5](#95-escalation-and-the-guardians)) | `PID.handlePanicking` in `actor/pid.go` |
 | any other value | Suspends the child again | `PID.handlePanicking` in `actor/pid.go` |
 
 **Siblings.** Under one-for-all, the group is the failing child plus every other child of the same parent (`actor/pid_tree.go`), whatever their own supervisors. For a top-level actor, the parent is the user guardian, so the group is every top-level user actor. Only Stop and Restart reach siblings: Resume is carried out by the child alone, and Escalate concerns only the child.
@@ -102,11 +99,11 @@ The first half of the path is Chapter 7, §7.6: `recovery` turns a panic or a `c
 `restartChild` (`actor/pid.go`):
 
 - After the delay, if any, it gives up if the parent is no longer running or the system is stopping.
-- A successful restart tells no watcher (§9.8). A failed attempt does: `Restart` terminates the subtree, so the parent is told that the child died after each failed attempt, even when a later retry succeeds and makes the parent a watcher again (`restartNode.terminate` in `actor/pid.go`).
+- A successful restart tells no watcher ([§9.8](#98-death-watch)). A failed attempt does: `Restart` terminates the subtree, so the parent is told that the child died after each failed attempt, even when a later retry succeeds and makes the parent a watcher again (`restartNode.terminate` in `actor/pid.go`).
 - Without `WithRetry` (or with a non-positive timeout) it calls `Restart` once. Otherwise it calls `Restart` up to `maxRetries` times in all, the first attempt included, and tries again while it fails, for example when `PreStart` fails. It does this with `internal/retry`, whose bounds are the timeout, or the backoff bounds when backoff is configured: `maxRetries` is the retrier's attempt count (`NewRetrier` in `internal/retry/retry.go`). That retrier is exponential with jitter (`NewRetrier`, `Retrier.Run` and `Retrier.RunContext` in `internal/retry/retry.go`), so with equal bounds the pace is constant only before jitter.
 - If every attempt fails, it shuts the child down, and suspends it if that fails too.
 
-A failed `Restart` stops the subtree it was restarting (§9.6). A retry therefore restarts an actor that is already dead and out of the tree; `Restart` puts it back under its parent (§9.6).
+A failed `Restart` stops the subtree it was restarting ([§9.6](#96-the-restart-itself)). A retry therefore restarts an actor that is already dead and out of the tree; `Restart` puts it back under its parent ([§9.6](#96-the-restart-itself)).
 
 ## 9.5 Escalation and the guardians
 
@@ -128,7 +125,7 @@ The system and user guardians and the death watch escalate any error. The root g
 
 1. Snapshot the subtree of running and suspended actors (`buildRestartSubtree` in `actor/pid.go`).
 2. Find the parent with `restartParent` (`actor/pid.go`): in the tree for a running or suspended actor; for a stopped actor, which has left the tree, from its address, that is its parent actor, or the user guardian for a top-level actor. A parent that is gone fails the restart with `ErrDead`.
-3. Mark the whole subtree as restarting, so each teardown keeps its name and registry record (Chapter 4, §4.7).
+3. Mark the whole subtree as restarting, so each teardown keeps its name and registry record ([Chapter 4, §4.7](chap-04.md#47-looking-up-killing-and-restarting-by-name)).
 4. Run `restartSubtree`; if it fails, stop the whole subtree (`restartNode.terminate` in `actor/pid.go`).
 
 `restartSubtree` (`actor/pid.go`), for each node:
@@ -157,7 +154,7 @@ Whether a supervisor decided it or `Restart` was called, a restart keeps and res
 | Supervisor, fault counters, spawn-time configuration | kept |
 | Tree node and registry record | kept |
 
-The actor value is the same Go value (Chapter 4, §4.7), and messages sent while the restart runs are refused with `ErrDead`.
+The actor value is the same Go value ([Chapter 4, §4.7](chap-04.md#47-looking-up-killing-and-restarting-by-name)), and messages sent while the restart runs are refused with `ErrDead`.
 
 ## 9.7 Reinstate
 
@@ -193,7 +190,7 @@ The actor value is the same Go value (Chapter 4, §4.7), and messages sent while
 
 **Watching.** `Watch` on a remote PID calls `RemoteWatch` on the caller's goroutine, bounded by the remote watch timeout (5 s by default), and records the watch locally only once the other node has acknowledged it (`actor/pid.go`; `DefaultRemoteWatchTimeout` in `actor/defaults.go`). A failure is logged at debug level and leaves no watch. From a handler, the call holds the worker.
 
-**The other node.** The watcher sends the actor's qualified name, `parent/child` for a child (Chapter 4, §4.5), and `remoteWatchHandler` (`actor/remote_server.go`) resolves it with `localActor` (`actor/actor_system.go`). That function tries the qualified name first and then a bare actor name, a child's included; when several actors share the bare name, it takes the most recently spawned one. Remote unwatch and remote reinstate resolve names the same way.
+**The other node.** The watcher sends the actor's qualified name, `parent/child` for a child ([Chapter 4, §4.5](chap-04.md#45-names-addresses-and-identity)), and `remoteWatchHandler` (`actor/remote_server.go`) resolves it with `localActor` (`actor/actor_system.go`). That function tries the qualified name first and then a bare actor name, a child's included; when several actors share the bare name, it takes the most recently spawned one. Remote unwatch and remote reinstate resolve names the same way.
 
 **The registry** keeps remote watchers and watchees per local actor, with reverse indexes by **host**, under one lock (`remoteWatchRegistry` in `actor/remote_watch_registry.go`).
 
@@ -240,7 +237,7 @@ The actor value is the same Go value (Chapter 4, §4.7), and messages sent while
 
 ## Implementation details (may change)
 
-- One supervision goroutine with a 1,024-signal buffer (Chapter 7).
+- One supervision goroutine with a 1,024-signal buffer ([Chapter 7](chap-07.md)).
 - Retried restarts use `internal/retry`, exponential with jitter.
 - The 10 ms ticker waiting for the teardown, and the spin on the dispatch state.
 - The 5 s remote watch timeout, and the death watch's five retries from 500 ms.
@@ -271,11 +268,3 @@ The actor value is the same Go value (Chapter 4, §4.7), and messages sent while
 | A departing node's watches are pruned by host and port, so other nodes on the same host keep theirs | `actorSystem.pruneRemoteWatchesForNode` in `actor/actor_system.go` |
 | `Reinstate` with a PID that lives on another node forwards the call there | `PID.Reinstate` in `actor/pid.go` |
 | Any local actor may stop or reinstate any other; neither checks parenthood | `PID.Stop` in `actor/pid.go` |
-
-## Exercises
-
-1. A child is spawned with `WithDirective(&ValidationError{}, ResumeDirective)` under the default supervisor. List what happens when its handler calls `ctx.Err(&ValidationError{})`, then when it calls `panic(&ValidationError{})`.
-2. A supervisor has `WithRetry(3, time.Minute)` and `OneForAllStrategy`. Two siblings fail alternately, twice each, within a minute. Using §9.4, say when the group is suspended and why the counts are kept on every member.
-3. A parent stops its child with `ctx.Stop`, then `Terminated` arrives and the parent spawns the same name again. Using the order in §9.8, explain how the spawn can fail and how to make it reliable.
-4. Draw the restart of §9.6 for an actor that opens a file in `PreStart` and closes it in `PostStop`. After three supervised restarts, how many handles are open?
-5. Why does `freeChildren` unwatch each child before stopping it? What would the parent receive otherwise, and when?

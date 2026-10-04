@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -316,7 +317,7 @@ func TestGrainTimerIntervalDeliversUntilCancelled(t *testing.T) {
 	require.NoError(t, fx.props.CancelSchedule(reference))
 
 	// drain any tick already in flight, then the beat must stop
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 	for len(fx.grain.received) > 0 {
 		<-fx.grain.received
 	}
@@ -337,7 +338,7 @@ func TestGrainTimerTickDoesNotPreventPassivation(t *testing.T) {
 	}, 3*time.Second, 20*time.Millisecond)
 
 	// deactivation stopped the registry: the beat must stop
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 	for len(fx.grain.received) > 0 {
 		<-fx.grain.received
 	}
@@ -353,7 +354,7 @@ func TestGrainTimerKeepAliveTickPreventsPassivation(t *testing.T) {
 	// each tick resets the passivation clock: well past the deactivate-after
 	// window the grain must still be active
 	require.Equal(t, "beat", expectGrainMessage(t, fx.grain))
-	time.Sleep(3 * 400 * time.Millisecond)
+	pause.For(3 * 400 * time.Millisecond)
 	require.True(t, fx.pid.isActive())
 
 	// once the keep-alive beat stops, passivation proceeds

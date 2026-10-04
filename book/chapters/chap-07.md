@@ -1,7 +1,5 @@
 # 7. Dispatch
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -20,7 +18,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 - [Further reading](#further-reading)
 
 ## What you will learn
@@ -37,7 +34,7 @@ Source files: `actor/dispatcher.go`, `actor/ready_queue.go`, `actor/worker.go`, 
 
 ## 7.1 The pieces
 
-An actor is not a goroutine. The `dispatcher` owns a fixed pool of worker goroutines that take ready actors from a shared ready queue and run them one *turn* at a time (`actor/dispatcher.go`). An actor or grain is anything with a `runTurn(w *worker)` method, the `schedulable` interface (`actor/ready_queue.go`). The worker knows nothing about mailboxes or actor state: it takes, runs a turn, and takes again (`actor/worker.go`). Keeping the worker ignorant of what it runs is deliberate: the dispatcher is a scheduling primitive, and a new kind of schedulable needs no change to the worker loop. Grains are the second kind (Chapter 13).
+An actor is not a goroutine. The `dispatcher` owns a fixed pool of worker goroutines that take ready actors from a shared ready queue and run them one *turn* at a time (`actor/dispatcher.go`). An actor or grain is anything with a `runTurn(w *worker)` method, the `schedulable` interface (`actor/ready_queue.go`). The worker knows nothing about mailboxes or actor state: it takes, runs a turn, and takes again (`actor/worker.go`). Keeping the worker ignorant of what it runs is deliberate: the dispatcher is a scheduling primitive, and a new kind of schedulable needs no change to the worker loop. Grains are the second kind ([Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn)).
 
 ```mermaid
 flowchart TD
@@ -72,13 +69,13 @@ The workers are not the system's only goroutines, but the others are few and non
 | Goroutine | Count | Chapter |
 |---|---|---|
 | Dispatcher workers | the pool size | this chapter |
-| Supervision consumer | 1 | §7.6 |
-| Passivation manager | 1 | 10, §10.4 |
-| Eviction loop | 1, when an eviction strategy is set | 10, §10.7 |
-| Scheduler | go-quartz's own, while the scheduler runs | 11, §11.1 |
+| Supervision consumer | 1 | [§7.6](#76-failures-leave-the-turn) |
+| Passivation manager | 1 | 10, [§10.4](chap-10.md#104-the-loop) |
+| Eviction loop | 1, when an eviction strategy is set | 10, [§10.7](chap-10.md#107-system-eviction) |
+| Scheduler | go-quartz's own, while the scheduler runs | 11, [§11.1](chap-11.md#111-the-scheduler) |
 | Cluster events loop | 1, in cluster mode | 3 |
 
-Grains use the same dispatcher and the same pool (Chapter 13). `NewActorSystem` builds the dispatcher once the options are applied, and `Start` starts its workers before any actor is spawned (Chapter 3, §3.3).
+Grains use the same dispatcher and the same pool ([Chapter 14, §14.3](chap-14.md#143-scheduling-and-the-turn)). `NewActorSystem` builds the dispatcher once the options are applied, and `Start` starts its workers before any actor is spawned ([Chapter 3, §3.3](chap-03.md#33-start)).
 
 ## 7.2 The dispatch state
 
@@ -90,7 +87,7 @@ Every PID has a `dispatchState`: one atomic word holding `Idle`, `Scheduled` or 
 | Scheduled → Processing | `TakeForProcessing` | the worker that took the actor from the ready queue | `dispatchState.TakeForProcessing` in `actor/dispatch_state.go` |
 | Processing → Scheduled | `YieldToScheduled` | the turn, when its budget is spent | `dispatchState.YieldToScheduled` in `actor/dispatch_state.go` |
 | Processing → Idle | `reset` | the turn, when it finds nothing left; a restart also forces `Idle`, once it has waited for the running turn to end and before `init` makes the new incarnation reachable, so no turn can be running when it does (`restartSubtree` in `actor/pid.go`) | `dispatchState.reset` in `actor/dispatch_state.go` |
-| Idle → Processing | `TakeIdleForStop` | passivation, to own an idle actor while it stops it (Chapter 3, §3.5) | `dispatchState.TakeIdleForStop` in `actor/dispatch_state.go` |
+| Idle → Processing | `TakeIdleForStop` | passivation, to own an idle actor while it stops it ([Chapter 3, §3.5](chap-03.md#35-stop)) | `dispatchState.TakeIdleForStop` in `actor/dispatch_state.go` |
 
 Only `Processing` lets anyone run the actor's handler, and only one party can hold it, so an actor's messages are handled one at a time. `TrySchedule` reads before it tries the swap: when many producers send at once, all but one see `Scheduled` or `Processing` and return without touching the cache line in exclusive mode (`actor/dispatch_state.go`).
 
@@ -111,10 +108,10 @@ Because the reset comes before the check, every message falls into one of two ca
 `runTurn` (`actor/pid.go`) starts by claiming the actor with `TakeForProcessing`. A worker that loses this race returns at once: the actor is already owned. Then, for at most `budget` iterations:
 
 1. **Run a pending `PostStart`.** It is kept in its own slot rather than in a queue (`PID` in `actor/pid.go`), filled by `armPostStart` before the actor is announced as running. The turn checks the slot at every message boundary, because a restart can arm it while a turn is already running (`PID.runPendingPostStart` in `actor/pid.go`).
-2. **Take one control message** from the system queue, if there is one, and dispatch it (§7.4).
-3. **Check that the actor may handle user messages.** It may not while it is suspended, stopping or restarting, or while a failure awaits a supervision decision (§7.6). Then the turn gives the actor up and leaves the user messages queued (`PID.runTurn` and `PID.handlesUserMessages` in `actor/pid.go`). Giving up resets the state first and then looks again for work it may do, a control message or a resume that raced with it, with the same reset-then-check as below (`PID.releaseWithheldTurn` in `actor/pid.go`).
+2. **Take one control message** from the system queue, if there is one, and dispatch it ([§7.4](#74-the-system-queue)).
+3. **Check that the actor may handle user messages.** It may not while it is suspended, stopping or restarting, or while a failure awaits a supervision decision ([§7.6](#76-failures-leave-the-turn)). Then the turn gives the actor up and leaves the user messages queued (`PID.runTurn` and `PID.handlesUserMessages` in `actor/pid.go`). Giving up resets the state first and then looks again for work it may do, a control message or a resume that raced with it, with the same reset-then-check as below (`PID.releaseWithheldTurn` in `actor/pid.go`).
 4. **Otherwise take one user message** from the mailbox. If there is none, call `finishOrReclaim`, which either ends the turn or reclaims the actor and goes round again.
-5. **Dispatch it** with `dispatchOne`, which skips an `Ask` whose sender has given up, stashes it if reentrancy requires, and otherwise calls the handler on top of the behaviour stack (Chapters 5 and 8).
+5. **Dispatch it** with `dispatchOne`, which skips an `Ask` whose sender has given up, stashes it if reentrancy requires, and otherwise calls the handler on top of the behaviour stack (Chapters [5](chap-05.md) and [8](chap-08.md)).
 
 When the loop runs out of budget, the turn moves the actor back to `Scheduled` and pushes it onto **its own worker's local queue** (`PID.runTurn` in `actor/pid.go`; `worker.reschedule` in `actor/worker.go`). It does so without looking whether work remains: an actor whose queues emptied on its last message is simply taken again, finds nothing, and goes to `Idle` through `finishOrReclaim`. The actor is appended at the **tail** of the ring, behind every actor already waiting there, so a busy actor cannot keep its worker from the others on that ring.
 
@@ -125,11 +122,11 @@ Two consequences follow from the loop:
 
 ## 7.4 The system queue
 
-`doReceive` routes control messages to the actor's system queue instead of the mailbox (`actor/pid.go`): `PoisonPill`, `Panicking`, `PausePassivation`, `ResumePassivation`, `PanicSignal`, `Terminated` and `SendDeadletter` (`isControlMessage` in `actor/pid.go`). The queue is two pointers embedded in the PID, so an idle actor pays nothing for it. Its own comment says so too: `PostStart` is not among them, because it has its own slot (§7.3).
+`doReceive` routes control messages to the actor's system queue instead of the mailbox (`actor/pid.go`): `PoisonPill`, `Panicking`, `PausePassivation`, `ResumePassivation`, `PanicSignal`, `Terminated` and `SendDeadletter` (`isControlMessage` in `actor/pid.go`). The queue is two pointers embedded in the PID, so an idle actor pays nothing for it. Its own comment says so too: `PostStart` is not among them, because it has its own slot ([§7.3](#73-one-turn)).
 
 The split between a system queue and a user mailbox is the one Akka and Pekko use, and it exists so that the control plane never waits behind a backlog: a `PoisonPill` sent to an actor with 10,000 user messages queued stops it after the handler in progress, not after the 10,000. A custom mailbox given with `WithMailbox` only ever sees user messages and knows nothing of the system queue.
 
-The reentrancy envelopes, `AsyncRequest` and `AsyncResponse`, are **not** control messages. They take part in the reentrancy stash and must keep their order relative to user messages, so they travel through the mailbox (Chapter 8, §8.5).
+The reentrancy envelopes, `AsyncRequest` and `AsyncResponse`, are **not** control messages. They take part in the reentrancy stash and must keep their order relative to user messages, so they travel through the mailbox ([Chapter 8, §8.5](chap-08.md#85-reentrancy-requests-that-do-not-block)).
 
 It is a lock-free stack with a twist that restores send order (`systemQueue` in `actor/system_queue.go`):
 
@@ -183,19 +180,19 @@ A worker reads its own local ring before the global queue, and a busy actor that
 When a handler panics or records an error with `ctx.Err`, `recovery` hands a supervision signal to the dispatcher (`actor/pid.go`). The dispatcher owns one supervision goroutine for the whole system (`actor/supervision.go`):
 
 - `Submit` sends to a channel buffered for 1,024 signals, and blocks when it is full, unless the dispatcher is stopping (`actor/supervision.go`).
-- `run` takes each signal and calls `notifyParent` unless the actor is no longer running, which drops signals for actors already suspended or stopping (`actor/supervision.go`). A resume directive does not suspend the actor, so under it every failure is decided in turn (Chapter 9, §9.2).
+- `run` takes each signal and calls `notifyParent` unless the actor is no longer running, which drops signals for actors already suspended or stopping (`actor/supervision.go`). A resume directive does not suspend the actor, so under it every failure is decided in turn ([Chapter 9, §9.2](chap-09.md#92-from-a-failure-to-a-decision)).
 
-The turn does not wait for supervision, but it does not carry on as if nothing happened either. `submitSupervision` marks the actor with `supervisionPendingState` before it queues the signal, on the failing turn itself (`actor/pid.go`). From then on the turn hands out no user message (§7.3); control messages still run. When `run` has decided, it clears the mark and schedules the waiting messages (`PID.resumeAfterSupervision` in `actor/pid.go`):
+The turn does not wait for supervision, but it does not carry on as if nothing happened either. `submitSupervision` marks the actor with `supervisionPendingState` before it queues the signal, on the failing turn itself (`actor/pid.go`). From then on the turn hands out no user message ([§7.3](#73-one-turn)); control messages still run. When `run` has decided, it clears the mark and schedules the waiting messages (`PID.resumeAfterSupervision` in `actor/pid.go`):
 
 - after a resume, they run on the same actor;
 - after a suspension they keep waiting, because a suspended actor handles no user message either, and `doReinstate` schedules them when the actor is reinstated (`actor/pid.go`);
-- after a restart, the new incarnation handles them (Chapter 6, §6.8).
+- after a restart, the new incarnation handles them ([Chapter 6, §6.8](chap-06.md#68-stops-restarts-and-other-nodes)).
 
 `ErrDead` is never supervised, so it pauses nothing. A failure handed to no consumer, because the dispatcher is stopping, lifts the pause at once.
 
 ## 7.7 Stopping the pool
 
-`signalStop` closes the ready queue and stops the supervision goroutine, without waiting for either (`actor/dispatcher.go`). Like `start`, it is idempotent: a second call does nothing. Closing claims every parked worker and wakes it with `nil`; a worker that parks after that sees the closed flag in its own check (`readyQueue.close` in `actor/ready_queue.go`). A worker in the middle of a turn finishes it and exits on its next take. Not waiting is deliberate: `ActorSystem.Stop` may run on a worker, from inside a handler (Chapter 3, §3.5). A stopped dispatcher cannot be started again, so `Start` builds a new one (Chapter 3, §3.7).
+`signalStop` closes the ready queue and stops the supervision goroutine, without waiting for either (`actor/dispatcher.go`). Like `start`, it is idempotent: a second call does nothing. Closing claims every parked worker and wakes it with `nil`; a worker that parks after that sees the closed flag in its own check (`readyQueue.close` in `actor/ready_queue.go`). A worker in the middle of a turn finishes it and exits on its next take. Not waiting is deliberate: `ActorSystem.Stop` may run on a worker, from inside a handler ([Chapter 3, §3.5](chap-03.md#35-stop)). A stopped dispatcher cannot be started again, so `Start` builds a new one ([Chapter 3, §3.7](chap-03.md#37-starting-again)).
 
 ## Guarantees
 
@@ -229,14 +226,6 @@ The turn does not wait for supervision, but it does not carry on as if nothing h
 | When every worker serves a never-draining actor, another ready actor waits up to 61 of their turns | `globalQueueCheckInterval` in `actor/ready_queue.go` |
 | A failure stops the actor's user messages until supervision decides; frequent errors under a resume directive pay a round trip through the supervision goroutine each | `PID.submitSupervision` in `actor/pid.go` |
 | A full supervision buffer blocks the failing actor's worker | `supervision.Submit` in `actor/supervision.go` |
-
-## Exercises
-
-1. A producer enqueues while the actor's turn is between `reset` and the `IsEmpty` check in `finishOrReclaim`. List the interleavings and show that the message is handled in each.
-2. Why does `TrySchedule` load before it swaps, and why would an unconditional compare-and-swap be slower under fan-in?
-3. A worker publishes its idle flag; at the same instant a producer appends to the global queue. Using only the two atomics in §7.5, show that one of them wakes the worker.
-4. Why does the periodic check read the global queue before the local ring, rather than after it? What would a worker with a never-empty local ring do otherwise?
-5. An actor fails on its first message and has 100 messages queued behind it. Trace what happens to them under the default supervisor, then under a resume directive.
 
 ## Further reading
 

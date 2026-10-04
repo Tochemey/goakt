@@ -28,6 +28,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestStream(t *testing.T) {
@@ -154,7 +156,7 @@ func TestStream(t *testing.T) {
 		inactive.Shutdown()
 
 		broker.Publish("t1", "hi")
-		time.Sleep(50 * time.Millisecond)
+		pause.For(50 * time.Millisecond)
 
 		var activeMsgs []*Message
 		for msg := range active.Iterator() {
@@ -202,7 +204,7 @@ func TestStream(t *testing.T) {
 		broker.Publish("t1", "hi")
 		broker.Publish("t2", "hello")
 
-		time.Sleep(time.Second)
+		pause.For(time.Second)
 
 		var messages []*Message
 		for message := range cons.Iterator() {
@@ -237,7 +239,7 @@ func TestStream(t *testing.T) {
 
 		broker.Broadcast("hi", []string{"t1", "t2"})
 
-		time.Sleep(time.Second)
+		pause.For(time.Second)
 
 		var messages []*Message
 		for message := range cons.Iterator() {

@@ -1,7 +1,5 @@
 # 12. Extensions, Dependencies, Observability, Logging
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -16,7 +14,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -60,7 +57,7 @@ Extensions survive a `Stop` followed by a `Start` of the same system: the shutdo
 
 A dependency is an extension that can be serialized: `ID()` plus `MarshalBinary` and `UnmarshalBinary` (`Dependency` and `Serializable` in `extension/dependency.go`). Extensions belong to the system; dependencies belong to one actor and travel with it.
 
-**Configuration.** `WithDependencies` replaces the spawn configuration's list rather than appending to it, so only the last `WithDependencies` option counts (`actor/spawn_option.go`). The IDs are checked by the validator of §12.1 (`spawnConfig.Validate` in `actor/spawn_option.go`); duplicates are not detected.
+**Configuration.** `WithDependencies` replaces the spawn configuration's list rather than appending to it, so only the last `WithDependencies` option counts (`actor/spawn_option.go`). The IDs are checked by the validator of [§12.1](#121-extensions) (`spawnConfig.Validate` in `actor/spawn_option.go`); duplicates are not detected.
 
 **Type registration.** A dependency is rebuilt on another node from its type name, so its Go type must be in that node's type registry. A local `Spawn` registers it (`actorSystem.configPID` in `actor/actor_system.go`), as does `SpawnChild` through `Inject` (`PID.spawnChildLocal` in `actor/pid.go`). `ActorSystem.Inject` only registers types, and fails before `Start`. The registry key is the lower-cased `reflect.Type.String()` of the pointed-to type (`Name` and `lowTrim` in `internal/types/registry.go`), for example `db.client`: the package name and type name, without the import path. Two types with the same package and type name in different modules collide. `reflectType` calls `Elem()`, so a dependency must be a pointer.
 
@@ -79,7 +76,7 @@ Two methods return a snapshot on demand.
 **`PID.Metric`** (`actor/pid.go`):
 
 - On a remote PID, it makes one `RemoteMetric` call.
-- On a local PID that is not running, it returns `nil`. Suspended, stopping and passivating actors are not running (Chapter 4), so a suspended actor has no snapshot.
+- On a local PID that is not running, it returns `nil`. Suspended, stopping and passivating actors are not running ([Chapter 4](chap-04.md)), so a suspended actor has no snapshot.
 - Otherwise it reads the PID's counters and asks the deadletter actor for the dead letters addressed to this actor (`PID.getDeadlettersCount` in `actor/pid.go`).
 
 Both methods send an `Ask` to the deadletter actor. Called from `Receive`, they hold the worker for up to the ask timeout.
@@ -105,7 +102,7 @@ Reading the table against the restart paths gives the values a user sees:
 - **Failures** count the failures the supervisor acted on: suspensions, and failures resumed with a resume directive. They survive restarts.
 - **Last processed duration** is `time.Since` the last received time: how long ago the turn that handled the last message started, not how long handling took (`PID.LatestProcessedDuration` in `actor/pid.go`).
 - **Dead letters** in an actor's snapshot are those **addressed to** that actor, including the messages it rejected with `Unhandled`, because the deadletter actor keys its counts by receiver (`deadletterKey` in `actor/dead_letter.go`).
-- **Mailbox size** is `enqueued − dequeued`, clamped at zero because the two loads are not taken together (`PID.observedMailboxSize` in `actor/pid.go`). It counts user messages only: control messages go to the system queue, and the message in flight has already been dequeued. A restart keeps the mailbox (Chapter 6, §6.8), so it keeps both counts.
+- **Mailbox size** is `enqueued − dequeued`, clamped at zero because the two loads are not taken together (`PID.observedMailboxSize` in `actor/pid.go`). It counts user messages only: control messages go to the system queue, and the message in flight has already been dequeued. A restart keeps the mailbox ([Chapter 6, §6.8](chap-06.md#68-stops-restarts-and-other-nodes)), so it keeps both counts.
 
 ## 12.4 OpenTelemetry instruments
 
@@ -219,11 +216,3 @@ There is no tracing in the actor runtime.
 | Zap on a file buffers lines below `Error`, so an error line can precede an earlier info line in the file | `bufferedWriteSize` and `Zap` in `log/zap.go` |
 | Level constants are not ordered by severity | `InfoLevel` in `log/level.go` |
 | Even `DiscardLogger.Fatal` exits the process | `discardLogger` in `log/discard.go` |
-
-## Exercises
-
-1. A database client is passed with `WithDependencies` to an actor that is later relocated. List what the receiving node needs, and what `UnmarshalBinary` must do, for `Receive` to use the client there.
-2. An actor is restarted twice with `ReSpawn`, and once by its supervisor. Using the table in §12.3, give its restart count, failure count and uptime after each restart.
-3. Why does the scrape read the processed count once into a local variable before deciding to skip an actor? What could it report otherwise?
-4. Your dashboard alerts on `actorsystem.deadletters.count`. Explain which request refreshes it during a scrape, and what the scrape reports when the deadletter actor does not answer within the ask timeout.
-5. You log to a file with `log.NewZap(log.InfoLevel, file)`, stop the actor system, start it again and keep logging. Where do the new info lines go?

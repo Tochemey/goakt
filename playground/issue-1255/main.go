@@ -51,6 +51,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -106,7 +107,7 @@ func main() {
 
 	// a freshly formed replicaCount>1 cluster keeps rebalancing partitions for
 	// a while; perturbing membership before that settles causes spurious churn
-	time.Sleep(5 * time.Second)
+	pause.For(5 * time.Second)
 
 	if runA {
 		// Scenario A: graceful departure relocates from the shutdown snapshot.
@@ -115,7 +116,7 @@ func main() {
 		names := spawnActors(ctx, sys3, "graceful-actor", numActors)
 
 		// let the registry writes and their backups settle before the departure
-		time.Sleep(3 * time.Second)
+		pause.For(3 * time.Second)
 
 		start := time.Now()
 		stopActorSystem(ctx, sys3)
@@ -139,7 +140,7 @@ func main() {
 		// still migrating to it takes those records with it (the documented
 		// join-migration window, see handleNodeJoinedEvent); crash recovery is
 		// specified for a settled cluster, so the harness waits it out.
-		time.Sleep(20 * time.Second)
+		pause.For(20 * time.Second)
 
 		start := time.Now()
 		fmt.Println("Killing the victim node with SIGKILL...")
@@ -168,7 +169,7 @@ func runVictim() {
 
 	// let the join-triggered partition rebalancing settle before loading the
 	// registry with this node's actors
-	time.Sleep(5 * time.Second)
+	pause.For(5 * time.Second)
 
 	spawnActors(ctx, system, "crash-actor", actorCount())
 
@@ -249,7 +250,7 @@ func awaitRecovery(ctx context.Context, sys1, sys2 actor.ActorSystem, names []st
 		}
 
 		if len(unresolved) > 0 {
-			time.Sleep(200 * time.Millisecond)
+			pause.For(200 * time.Millisecond)
 		}
 	}
 }

@@ -63,6 +63,14 @@ const (
 	grainRegistryWriteAttempts     = 3
 	grainRegistryWriteInitialDelay = 100 * time.Millisecond
 	grainRegistryWriteMaxDelay     = 500 * time.Millisecond
+
+	// grainRegistryReadAttempts, grainRegistryReadInitialDelay and
+	// grainRegistryReadMaxDelay bound the retries of a read of the grain
+	// registry that ran out of its timeout. While the registry converges after
+	// a node leaves the cluster, a read routed to that node can time out.
+	grainRegistryReadAttempts     = 3
+	grainRegistryReadInitialDelay = 100 * time.Millisecond
+	grainRegistryReadMaxDelay     = 500 * time.Millisecond
 )
 
 type grainOwnerMismatchError struct {
@@ -838,7 +846,7 @@ func (x *actorSystem) remoteTellGrain(ctx context.Context, id *GrainIdentity, me
 	}
 
 	// Try local cluster first
-	grain, err := x.getCluster().GetGrain(ctx, id.String())
+	grain, err := x.getGrainRecord(ctx, id.String())
 	if err == nil {
 		// When the grain is owned by the calling node, deliver in-process and
 		// skip the remoting round trip (loopback serialization/connection).
@@ -887,7 +895,7 @@ func (x *actorSystem) remoteAskGrain(ctx context.Context, id *GrainIdentity, mes
 	}
 
 	// Try local cluster first
-	grain, err := x.getCluster().GetGrain(ctx, id.String())
+	grain, err := x.getGrainRecord(ctx, id.String())
 	if err == nil {
 		// When the grain is owned by the calling node, deliver in-process and
 		// skip the remoting round trip (loopback serialization/connection).
@@ -1713,7 +1721,12 @@ func (x *actorSystem) isLocalGrainOwner(grain *internalpb.Grain) bool {
 }
 
 func (x *actorSystem) getGrainOwner(ctx context.Context, id *GrainIdentity) (*internalpb.Grain, error) {
-	exists, err := x.getCluster().GrainExists(ctx, id.String())
+	var exists bool
+	err := x.retryGrainRegistryRead(ctx, func(ctx context.Context) error {
+		var err error
+		exists, err = x.getCluster().GrainExists(ctx, id.String())
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1721,7 +1734,7 @@ func (x *actorSystem) getGrainOwner(ctx context.Context, id *GrainIdentity) (*in
 		return nil, nil
 	}
 
-	owner, err := x.getCluster().GetGrain(ctx, id.String())
+	owner, err := x.getGrainRecord(ctx, id.String())
 	if err != nil {
 		if errors.Is(err, cluster.ErrGrainNotFound) {
 			return nil, nil
@@ -1735,14 +1748,15 @@ func (x *actorSystem) getGrainOwner(ctx context.Context, id *GrainIdentity) (*in
 // atomic put-if-absent. It reports whether the claim was made. When the grain
 // is already claimed it returns the record of its owner, or no record when
 // that owner released it meanwhile. A claim the registry fails is tried again
-// (retryGrainRegistryWrite).
+// (retryGrainRegistryWrite), and so is a read of the owner's record that timed
+// out (getGrainRecord).
 func (x *actorSystem) tryClaimGrain(ctx context.Context, grain *internalpb.Grain) (bool, *internalpb.Grain, error) {
 	err := x.retryGrainRegistryWrite(ctx, func(ctx context.Context) error {
 		return cluster.PutGrainIfAbsent(ctx, x.getCluster(), grain)
 	})
 	if err != nil {
 		if errors.Is(err, cluster.ErrGrainAlreadyExists) {
-			owner, err := x.getCluster().GetGrain(ctx, grain.GetGrainId().GetValue())
+			owner, err := x.getGrainRecord(ctx, grain.GetGrainId().GetValue())
 			if err != nil {
 				if errors.Is(err, cluster.ErrGrainNotFound) {
 					return false, nil, nil
@@ -1769,6 +1783,40 @@ func (x *actorSystem) retryGrainRegistryWrite(ctx context.Context, write func(ct
 	return retrier.RunContext(ctx, func(ctx context.Context) error {
 		err := write(ctx)
 		if err != nil && (errors.Is(err, cluster.ErrGrainAlreadyExists) || x.isStoppingOrStopped()) {
+			return retry.Stop(err)
+		}
+
+		return err
+	})
+}
+
+// getGrainRecord reads the registry record of the grain whose identity is id,
+// reading again when the read times out (retryGrainRegistryRead). A grain
+// without a record is reported with cluster.ErrGrainNotFound, as GetGrain does.
+func (x *actorSystem) getGrainRecord(ctx context.Context, id string) (*internalpb.Grain, error) {
+	var record *internalpb.Grain
+	err := x.retryGrainRegistryRead(ctx, func(ctx context.Context) error {
+		var err error
+		record, err = x.getCluster().GetGrain(ctx, id)
+		return err
+	})
+
+	return record, err
+}
+
+// retryGrainRegistryRead runs read, a read of the grain registry, and runs it
+// again a bounded number of times when it ran out of its timeout
+// (ErrClusterRegistryTimeout), with a growing delay and within ctx. It returns
+// the last error of read. While the registry converges after a node leaves the
+// cluster, a read routed to that node can time out, and failing the send at
+// once would fail it over a condition that clears by itself. Any other error is
+// an answer and is returned at once, and nothing is read again once this node
+// is stopping.
+func (x *actorSystem) retryGrainRegistryRead(ctx context.Context, read func(ctx context.Context) error) error {
+	retrier := retry.NewRetrier(grainRegistryReadAttempts, grainRegistryReadInitialDelay, grainRegistryReadMaxDelay)
+	return retrier.RunContext(ctx, func(ctx context.Context) error {
+		err := read(ctx)
+		if err != nil && (!errors.Is(err, gerrors.ErrClusterRegistryTimeout) || x.isStoppingOrStopped()) {
 			return retry.Stop(err)
 		}
 

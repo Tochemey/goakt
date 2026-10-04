@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/internal/address"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
@@ -199,7 +200,7 @@ func BenchmarkRemoteTellThroughput(b *testing.B) {
 	quietPolls := 0
 
 	for replicaReceiveCount.Load() < sent && quietPolls < 3 {
-		time.Sleep(50 * time.Millisecond)
+		pause.For(50 * time.Millisecond)
 
 		seen := replicaReceiveCount.Load()
 		if seen == lastSeen {

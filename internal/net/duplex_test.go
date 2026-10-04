@@ -543,7 +543,7 @@ func TestDuplexConnIdleTimeoutRefreshedByPing(t *testing.T) {
 		pong, err := right.ReadFrame()
 		require.NoError(t, err)
 		require.Equal(t, FrameTypePong, pong.Type)
-		time.Sleep(25 * time.Millisecond)
+		pause.For(25 * time.Millisecond)
 	}
 
 	assert.False(t, left.IsClosed())

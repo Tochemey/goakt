@@ -33,6 +33,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/discovery"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestNewDiscovery(t *testing.T) {
@@ -183,7 +184,7 @@ func TestDiscovery_DiscoverPeers(t *testing.T) {
 		_, _ = conn.Write(pkt)
 		conn.Close()
 
-		time.Sleep(50 * time.Millisecond)
+		pause.For(50 * time.Millisecond)
 		peers, err := d.DiscoverPeers()
 		require.NoError(t, err)
 		require.Len(t, peers, 1)

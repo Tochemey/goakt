@@ -37,6 +37,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 var bucketNameSanitizer = regexp.MustCompile(`[^a-zA-Z0-9_-]+`)
@@ -1211,7 +1212,7 @@ func TestControlPlaneListActiveFiltersExpiredLease(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for lease to expire
-	time.Sleep(2 * time.Second)
+	pause.For(2 * time.Second)
 
 	// ListActive should filter out expired records
 	records, err := cp.ListActive(context.Background())

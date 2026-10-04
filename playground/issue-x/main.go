@@ -33,6 +33,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -66,7 +67,7 @@ func main() {
 		// restarting system 1 should relocate the actor to system 2
 		stopActorSystem(ctx, sys1)
 
-		time.Sleep(3 * time.Second)
+		pause.For(3 * time.Second)
 
 		sys1 = startActorSystem(ctx, system, serverAddr)
 
@@ -78,7 +79,7 @@ func main() {
 		stopActorSystem(ctx, sys2)
 
 		// for rebalancing to work, we need to wait a bit
-		time.Sleep(3 * time.Second)
+		pause.For(3 * time.Second)
 
 		sys2 = startActorSystem(ctx, system, serverAddr)
 	}
@@ -180,7 +181,7 @@ func spawnActor(ctx context.Context, actorSystem actor.ActorSystem, actorName st
 		os.Exit(1)
 	}
 
-	time.Sleep(time.Second) // wait for actor to be ready
+	pause.For(time.Second) // wait for actor to be ready
 	fmt.Printf("Actor %s spawned successfully on %s.\n", actorName, systemName)
 }
 

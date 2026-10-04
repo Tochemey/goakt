@@ -59,6 +59,7 @@ import (
 	noopmetric "go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/tochemey/goakt/v4/actor"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -301,7 +302,7 @@ func main() {
 	}
 
 	// let the deadletters reach the deadletter actor before the first scrape.
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	afterSpawn := scrape(ctx, meter)
 
@@ -326,7 +327,7 @@ func main() {
 	}
 
 	// let the live actor count settle after the stops before the next scrape.
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	afterStop := scrape(ctx, meter)
 	remainingCount, okRemaining := single(afterStop, "actorsystem.actors.count")

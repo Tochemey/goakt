@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 func TestNewGrainActivationBarrier(t *testing.T) {
@@ -111,7 +112,7 @@ func TestGrainActivationBarrierWait(t *testing.T) {
 		barrier := newGrainActivationBarrier(1, 100*time.Millisecond)
 
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			pause.For(10 * time.Millisecond)
 			barrier.open()
 		}()
 
@@ -131,7 +132,7 @@ func TestGrainActivationBarrierWait(t *testing.T) {
 		barrier := newGrainActivationBarrier(1, 0)
 
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			pause.For(10 * time.Millisecond)
 			barrier.open()
 		}()
 

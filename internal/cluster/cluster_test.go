@@ -3957,7 +3957,7 @@ func TestStopWaitsForConsume(t *testing.T) {
 	}
 
 	// Give it time to process
-	time.Sleep(50 * time.Millisecond)
+	pause.For(50 * time.Millisecond)
 
 	// Test the shutdown synchronization - cancel context and wait for consume
 	cl.consumeCancel()
@@ -3994,7 +3994,7 @@ func TestStopNoPanicOnClosedChannel(t *testing.T) {
 	})
 
 	// Wait for consume to finish
-	time.Sleep(100 * time.Millisecond)
+	pause.For(100 * time.Millisecond)
 
 	// Test that closing events channel after consume finishes doesn't panic
 	cl.consumeCancel()

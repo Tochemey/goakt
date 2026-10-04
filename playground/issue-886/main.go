@@ -31,6 +31,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/actor"
 	gerrors "github.com/tochemey/goakt/v4/errors"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 )
 
@@ -52,7 +53,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	fmt.Println("\nStopping actor...")
 	if err := pid.Shutdown(ctx); err != nil {
@@ -61,7 +62,7 @@ func main() {
 	}
 
 	// wait for a while to ensure the actor is stopped
-	time.Sleep(time.Second)
+	pause.For(time.Second)
 
 	ok, err := actorSystem.ActorExists(ctx, "actor1")
 	if err != nil {

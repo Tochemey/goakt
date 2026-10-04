@@ -1,7 +1,5 @@
 # 23. Reliable Delivery
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -44,7 +42,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -60,7 +57,7 @@ Source files: `actor/reliable_delivery_protocol.go`, `actor/reliable_delivery_pr
 
 ## 23.1 The model and its principles
 
-Ordinary messaging is at-most-once: a `Tell` that races a crash, a full bounded mailbox or a network fault is lost without a trace. Reliable delivery adds a confirmed, flow-controlled flow above that transport, in two modes. **Point-to-point** connects one producer actor to one consumer actor, in order. **Work pulling** spreads one producer's messages over a changing set of workers, with no order across workers (§23.12).
+Ordinary messaging is at-most-once: a `Tell` that races a crash, a full bounded mailbox or a network fault is lost without a trace. Reliable delivery adds a confirmed, flow-controlled flow above that transport, in two modes. **Point-to-point** connects one producer actor to one consumer actor, in order. **Work pulling** spreads one producer's messages over a changing set of workers, with no order across workers ([§23.12](#2312-work-pulling)).
 
 The mechanism is a pair of unexported controller actors that the actor system spawns next to the user's actors: a `producerController` beside the producer endpoint and a `consumerController` beside the consumer endpoint. The user enables it with one spawn option per side. Work still enters the producer through an ordinary `Tell`.
 
@@ -105,7 +102,7 @@ The design rests on seven principles.
 
 "Once, in order" holds only on the no-fault path. Any lost `Delivery` or `Confirmed`, any controller restart and any relocation permits redelivery. The library never claims exactly-once business effects; a consumer that needs them commits the `MessageID` and the business change in one transaction.
 
-The guarantee **begins at the producer's handoff to its controller**, not at the producer's mailbox. The hop into the producer is an ordinary at-most-once `Tell`. A producer that needs reliable ingress feeds itself from its own durable source and removes an item only at the acceptance boundary (§23.11).
+The guarantee **begins at the producer's handoff to its controller**, not at the producer's mailbox. The hop into the producer is an ordinary at-most-once `Tell`. A producer that needs reliable ingress feeds itself from its own durable source and removes an item only at the acceptance boundary ([§23.11](#2311-the-durable-producer-queue)).
 
 Work pulling keeps the per-message at-least-once guarantee and orders delivery only within one worker's sub-flow.
 
@@ -133,8 +130,8 @@ The user documentation (`docs/clustering/reliable-delivery/point-to-point.mdx` a
 - The consumer processes each `Delivery` idempotently and tells the sender `NewConfirmed(delivery)`.
 - `RequestNext`, `Stored`, `Delivery` and `DeliveryConfirmed` carry the endpoint and controller PIDs they were built for; `IsAuthorizedFor(ctx.Self(), ctx.Sender())` rejects a spoofed copy without the user knowing any controller name (`isAuthorizedFor` in `actor/reliable_delivery_protocol.go`).
 - `Ask` works only at the edges. A caller may `Ask` the producer, which can answer "accepted into my buffer" and nothing more. The consumer cannot reply to the submitter through the flow, because the sender of `Delivery` is the consumer controller.
-- `WithReliableDeliveryConfirmation` makes the producer controller tell the producer one `DeliveryConfirmed` per confirmed message (§23.9).
-- `WithReliableChunking(maxChunkBytes)` splits a large payload into sequenced chunks (§23.9, §23.10).
+- `WithReliableDeliveryConfirmation` makes the producer controller tell the producer one `DeliveryConfirmed` per confirmed message ([§23.9](#239-the-producer-controller)).
+- `WithReliableChunking(maxChunkBytes)` splits a large payload into sequenced chunks ([§23.9](#239-the-producer-controller), [§23.10](#2310-the-consumer-controller)).
 
 ## 23.4 The wire protocol
 
@@ -230,7 +227,7 @@ A `SequencedMessage` whose session differs from the current one is dropped.
 
 `producerController.handleRegisterConsumer`:
 
-1. Resolves the consumer endpoint's current controller (§23.13) under `DefaultReliableRegistrationLookupTimeout` and requires it to equal the sender. A failed lookup, a timeout or a different sender drops the registration; the consumer controller retries. This rejects an unrelated consumer and a delayed controller of an earlier incarnation alike.
+1. Resolves the consumer endpoint's current controller ([§23.13](#2313-companions-identity-spawn-and-resolution)) under `DefaultReliableRegistrationLookupTimeout` and requires it to equal the sender. A failed lookup, a timeout or a different sender drops the registration; the consumer controller retries. This rejects an unrelated consumer and a delayed controller of an earlier incarnation alike.
 2. A repeat with the same PID and the same nonce only sends the ack again.
 3. A new PID or a new nonce starts a new registration generation: watch the sender, store the PID and the nonce, and **reset demand to `currentSeq`**, because a grant from a dead generation must not authorise new emissions. Unconfirmed messages are kept; they are still owed to the consumer.
 4. The ack always carries `NextSeq = confirmedSeq + 1`.
@@ -246,7 +243,7 @@ A `SequencedMessage` whose session differs from the current one is dropped.
 | Producer controller restarts, no queue | Same handshake with `NextSeq = 1`. Messages the controller held are lost. An item that never received `Stored` is still in the producer and is resubmitted |
 | Consumer controller restarts | The fresh incarnation resolves the producer's controller, registers with a new nonce, adopts the unchanged session at the acked `NextSeq` and requests with `ViaTimeout`; the unconfirmed delivery is delivered again |
 | Both restart | The two rules compose; nothing extra is needed |
-| Node loss or relocation | See §23.14 |
+| Node loss or relocation | See [§23.14](#2314-cluster-publication-relocation-and-placement) |
 
 ## 23.7 Flow control and confirmation batching
 
@@ -276,7 +273,7 @@ Watch and `Terminated` are a fast path only. Remote watch registration can fail 
 
 1. No session yet, or no valid producer-controller message since the previous tick: resolve the producer endpoint's current controller again and send `RegisterConsumer` with a fresh nonce. This one rule covers a lost registration, a producer-controller restart, an endpoint respawned on another node and plain idleness. A failed resolution is retried on the next tick.
 2. Else a `Delivery` is in flight: tell the same `Delivery` to the consumer again. This recovers a drop by a bounded mailbox or a lost `Confirmed`, and deliberately allows duplicate processing.
-3. Else a gap is open: check the head chunk run for a structural violation (§23.10), then send `Request{ViaTimeout: true}`.
+3. Else a gap is open: check the head chunk run for a structural violation ([§23.10](#2310-the-consumer-controller)), then send `Request{ViaTimeout: true}`.
 
 The "valid traffic" flag is cleared at the end of every tick.
 
@@ -335,6 +332,7 @@ Queue calls must not block the mailbox. `producerController.launchOp` runs each 
 - `handleQueueOpResult` accepts a result only if the session matches, the lane is occupied and the operation ID is the latest. A result piped by a previous incarnation is dropped.
 - `pumpLane` launches the deferred handshake operation first, then a `Confirm` if the dirty watermark is above the persisted one. Message progress gates throughput; confirmation persistence can wait a turn.
 - `retryQueueOp` stops at once on `ErrQueueFenced`, `ErrQueueConflict` and `ErrQueueChunkedBatch`; these are verdicts a retry cannot change.
+- A queue call has no timeout: `retryQueueOp` runs every attempt under `context.Background()`, and the retrier adds no deadline (`Retrier.RunContext` in `internal/retry/retry.go`). A call that never returns keeps the lane occupied, and the controller makes no durable progress until it is restarted or stopped.
 
 `Store` returns the assigned sequence and the authoritative first-write payload. For a `MessageID` already stored, `completeStore` reuses the original sequence and payload and appends nothing, even if this incarnation's serializer produced different bytes.
 
@@ -366,7 +364,7 @@ State (`consumerController` in `actor/reliable_delivery_consumer_controller.go`)
 | Event | Condition | Action |
 |---|---|---|
 | `PostStart` | | watch the consumer, try to register (a failure is tolerated), start the tick |
-| `RegistrationAck` | | the rules of §23.6 |
+| `RegistrationAck` | | the rules of [§23.6](#236-sessions-and-restart-resync) |
 | `SequencedMessage` | wrong sender, no session or another session | drop |
 | | `seq < 1` or `seq > requestUpToSeq` | drop; the producer still holds it |
 | | `seq < expectedSeq` | duplicate: send `Ack` with the current watermark |
@@ -375,8 +373,8 @@ State (`consumerController` in `actor/reliable_delivery_consumer_controller.go`)
 | | `seq` equals the in-flight sequence | drop; the tick retries it |
 | | otherwise | buffer, drain |
 | `Confirmed` | not from the consumer, or not matching the in-flight session, `MessageID` and `Seq` | drop; a late confirmation is not a violation |
-| | matches | advance `confirmedSeq` and `expectedSeq`, purge the buffer below `expectedSeq`, rebuild the hint, batch the confirmation (§23.7), drain, and ask for a resend if a gap is now open |
-| tick | | the rules of §23.8 |
+| | matches | advance `confirmedSeq` and `expectedSeq`, purge the buffer below `expectedSeq`, rebuild the hint, batch the confirmation ([§23.7](#237-flow-control-and-confirmation-batching)), drain, and ask for a resend if a gap is now open |
+| tick | | the rules of [§23.8](#238-timers-and-liveness) |
 | `Terminated` | the consumer | stop |
 | | the producer controller | clear the resolved PID, the session and the nonce; keep ticking |
 
@@ -406,7 +404,7 @@ The value types (`DurableQueueState`, `UnconfirmedMessage`, `StoreRequest`, `Sto
 
 **Fencing.** All methods must be linearisable and safe for concurrent use. Every write under an epoch that is zero or no longer the owner returns `ErrQueueFenced`. The epoch must be checked in the same transaction as the state. This is what makes relocation safe: the replacement controller's `Load` fences the departed incarnation's writes.
 
-**First write wins.** The first successful `Store` of a `MessageID` is authoritative, so a serializer that is not deterministic cannot create a conflict or change an accepted message. The batch rule holds in both directions (§23.9), so a chunked message that is confirmed but still indexed can never be appended a second time as a whole message.
+**First write wins.** The first successful `Store` of a `MessageID` is authoritative, so a serializer that is not deterministic cannot create a conflict or change an accepted message. The batch rule holds in both directions ([§23.9](#239-the-producer-controller)), so a chunked message that is confirmed but still indexed can never be appended a second time as a whole message.
 
 **Acceptance boundary.** Durability begins when `Store` returns nil. The producer's retention handoff happens before `StoredAck`. An implementation may drop a `MessageID` from its index only after both `Accept` and `Confirm` cover it, so normal traffic does not grow a permanent index. A crash inside the `Stored`, `StoredAck`, `Accept` window keeps that one mapping until the producer resubmits and acceptance completes.
 
@@ -429,7 +427,7 @@ Delivery is ordered within one worker's sub-flow exactly as in point-to-point; a
 
 `completeAccept` appends the accepted message to the pending pool unless the pool or a binding already owns that `MessageID` (`owns`), which absorbs a first-write-wins resubmission. `dispatchPending` takes the pool head and gives it to the next binding with free demand, round-robin over registration order (`nextEligibleBinding`). The dispatch assigns the worker's next sequence and appends to that binding's unconfirmed list before it emits.
 
-Credit is pool-aware: `allowNextRequest` opens a `RequestNext` only when the free demand summed over all bindings exceeds the pool size. Accepted work that is still waiting for a worker therefore never takes capacity that is not there, and with no worker registered the producer receives no credit at all. The handshake phases, the tick and the single durable lane are those of §23.9.
+Credit is pool-aware: `allowNextRequest` opens a `RequestNext` only when the free demand summed over all bindings exceeds the pool size. Accepted work that is still waiting for a worker therefore never takes capacity that is not there, and with no worker registered the producer receives no credit at all. The handshake phases, the tick and the single durable lane are those of [§23.9](#239-the-producer-controller).
 
 ### Worker lifecycle
 
@@ -533,11 +531,11 @@ Relocating a reliable endpoint needs a registry replica count of at least two. W
 - **Obsolete traffic.** A wrong sender, a stale session or nonce and an old operation result are dropped without a state change, with a debug log.
 - **Duplicates.** An exact duplicate is idempotent and repeats the earlier response where the protocol needs one.
 - **Contract violations.** A violation from the bound endpoint or the registered controller of the current incarnation (an unexpected `Produced`, a changed token, an illegal demand range, an impossible sequence, a broken chunk run, a value the constructors reject) is terminal: publish `ReliableDeliveryFailed` with `ReliableDeliveryStageProtocol`, stop the controller, leave the endpoint alive. The exception is the work-pulling controller, which ends only the offending binding.
-- **Payload failures.** A missing serializer and an encode or decode error are terminal, as explained in §23.4.
-- **Queue backend errors.** An error other than fencing and conflict is retried under the queue retry policy. When the attempts are used up, the controller escalates the cause wrapped in `ErrReliableStore`, `ErrReliableAccept` or `ErrReliableConfirm` (`handleQueueFailure`); the supervisor restarts it and `Load` reloads the authoritative state. No terminal event is published.
+- **Payload failures.** A missing serializer and an encode or decode error are terminal, as explained in [§23.4](#234-the-wire-protocol).
+- **Queue backend errors.** An error other than fencing and conflict is retried under the queue retry policy. When the attempts are used up, the controller escalates the cause wrapped in `ErrReliableStore`, `ErrReliableAccept` or `ErrReliableConfirm` (`handleQueueFailure`); the supervisor restarts it and `Load` reloads the authoritative state. No terminal event is published. The restart budget is unbounded: the controller's supervisor restarts on any error with no retry limit and no backoff, so a backend that keeps failing produces one restart per exhausted operation, without end (`reliableCompanionSupervisor` in `actor/reliable_delivery_companion.go`; `PID.handleRestartDirective` in `actor/pid.go`). A restart whose `Load` keeps failing through the init retries is not tried again: `PID.restartChild` in `actor/pid.go` shuts the controller down, and it stays stopped until `ReSpawn` is called for the endpoint (see `Load` below for the event it publishes).
 - **Fencing and conflict.** `ErrQueueFenced` and `ErrQueueConflict` are verdicts about ownership and integrity: no retry, no restart. The controller stops and publishes `ReliableDeliveryFailed` with the stage of the operation.
-- **`ErrQueueChunkedBatch`** from `Store` is a routing verdict, not a failure (§23.9).
-- **`Load`.** `PreStart` calls `Load` once per attempt; the actor's init retries (Chapter 4, §4.4) repeat `PreStart`. A failing initial or remote spawn rolls back the endpoint and the controller and returns the error; during relocation the departed record is restored. `PreStart` publishes `ReliableDeliveryFailed` with `ReliableDeliveryStageLoad` once, on the first failed `Load` that follows a start which had loaded successfully, that is, on a restart. The retried attempts of that restart publish nothing more, and neither does any attempt of a first start, whose error goes to the spawner (the `reportLoadFailure` field of `producerController` and `workPullingProducerController`).
+- **`ErrQueueChunkedBatch`** from `Store` is a routing verdict, not a failure ([§23.9](#239-the-producer-controller)).
+- **`Load`.** `PreStart` calls `Load` once per attempt; the actor's init retries ([Chapter 4, §4.4](chap-04.md#44-prestart-retries-and-the-timeout-that-is-not-one)) repeat `PreStart`. A failing initial or remote spawn rolls back the endpoint and the controller and returns the error; during relocation the departed record is restored. `PreStart` publishes `ReliableDeliveryFailed` with `ReliableDeliveryStageLoad` once, on the first failed `Load` that follows a start which had loaded successfully, that is, on a restart. The retried attempts of that restart publish nothing more, and neither does any attempt of a first start, whose error goes to the spawner (the `reportLoadFailure` field of `producerController` and `workPullingProducerController`).
 - **Late `Confirmed`.** A `Confirmed` that no longer matches the in-flight delivery is dropped.
 
 `terminate` (producer side) and `fail` (consumer side) publish one event per incarnation: a `failed` flag suppresses a second. `ReliableDeliveryFailed` exposes `EndpointName`, `ControllerRole`, `Stage`, `Err` and `Timestamp`, and names the flow by the user-visible endpoint, never by the controller. A terminally stopped controller is not created again until `ReSpawn` is called for the endpoint.
@@ -605,17 +603,9 @@ Relocating a reliable endpoint needs a registry replica count of at least two. W
 | A chunked message is delivered and confirmed under its last chunk's sequence, and occupies the receive buffer until it is confirmed | `consumerController.assemble` in `actor/reliable_delivery_consumer_controller.go` |
 | A full receive buffer drops the arriving message even when its sequence is lower than buffered ones | `consumerController.bufferMessage` in `actor/reliable_delivery_consumer_controller.go` |
 | `DeliveryConfirmed` is best effort and can repeat; in work pulling it is sent before `ConfirmMessage` is durable | `producerController.sendConfirmation` in `actor/reliable_delivery_producer_controller.go`; `workPullingProducerController.advanceConfirmed` in `actor/reliable_delivery_work_pulling_controller.go` |
-| Queue operations run with a background context; stopping the controller does not cancel one in flight | `retryQueueOp` in `actor/reliable_delivery_producer_controller.go` |
+| Queue operations run with a background context and no timeout; stopping the controller does not cancel one in flight, and one that never returns stalls the durable lane | `retryQueueOp` in `actor/reliable_delivery_producer_controller.go` |
 | A work-pulling producer receives no `RequestNext` until a worker has granted demand | `workPullingProducerController.allowNextRequest` in `actor/reliable_delivery_work_pulling_controller.go` |
 | A worker's bounds violation ends its binding and requeues its work; the same violation stops a point-to-point flow | `workPullingProducerController.handleRequest` in `actor/reliable_delivery_work_pulling_controller.go` |
 | Requeued work goes to the head of the pool and may reach another worker while the first still processes it | `workPullingProducerController.endBinding` in `actor/reliable_delivery_work_pulling_controller.go` |
+| Queue retry exhaustion restarts the controller with no restart limit and no backoff; a restart whose `Load` fails stops the controller until `ReSpawn` | `reliableCompanionSupervisor` in `actor/reliable_delivery_companion.go`; `PID.restartChild` in `actor/pid.go` |
 | A terminal failure stops the controller only; the endpoint keeps running with no flow until `ReSpawn` | `producerController.terminate` in `actor/reliable_delivery_producer_controller.go`; `actorSystem.ensureReliableCompanion` in `actor/reliable_delivery_companion.go` |
-
-## Exercises
-
-1. A consumer with a window of 6 has confirmed sequences 1 to 3 and holds nothing else. Using §23.7, say which message the consumer controller sends on the third confirmation and what its `RequestUpToSeq` is. What does it send if a fourth message then arrives and is confirmed?
-2. A producer controller without a queue restarts while sequence 7 is delivered but unconfirmed. Trace through §23.6 and §23.8 what the consumer controller does on its next ticks, which `NextSeq` it adopts, and what happens to the consumer's late `Confirmed` for sequence 7.
-3. Why does a top-up `Request` never trigger a resend, and which two events make the consumer controller send a `ViaTimeout` request outside the tick?
-4. A durable producer resubmits a `MessageID` that was stored as three chunks and is already confirmed, and this time the payload encodes below the chunk size. Name the queue calls the controller makes and explain why no second copy is appended.
-5. In work pulling, a worker endpoint restarts under a new incarnation while it holds two unconfirmed jobs. Using §23.12, describe what the producer-side controller does at the new registration and where the two jobs go.
-6. Why is the controller a child of its endpoint, and why does its name contain the endpoint's incarnation ID? Give one failure that each choice prevents.

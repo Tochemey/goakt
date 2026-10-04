@@ -55,6 +55,7 @@ import (
 
 	goakt "github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/dnssd"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -251,7 +252,7 @@ func awaitCluster(ctx context.Context, actorSystem goakt.ActorSystem, logger log
 			return nil
 		}
 
-		time.Sleep(membershipPollInterval)
+		pause.For(membershipPollInterval)
 	}
 
 	return context.DeadlineExceeded

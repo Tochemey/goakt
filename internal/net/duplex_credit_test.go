@@ -36,6 +36,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/tochemey/goakt/v4/internal/internalpb"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/types"
 )
 
@@ -138,7 +139,7 @@ func TestCreditWindowExhaustionParksAndCreditResumes(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return left.outBytes == int64(FrameHeaderSize)+int64(len(second)) && left.sendWindow.Load() == 0
 	}, time.Second, 5*time.Millisecond)
-	time.Sleep(20 * time.Millisecond)
+	pause.For(20 * time.Millisecond)
 	assert.Equal(t, int64(0), left.sendWindow.Load())
 	assert.Equal(t, int64(FrameHeaderSize)+int64(len(second)), left.outBytes)
 

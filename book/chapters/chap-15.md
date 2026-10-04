@@ -1,7 +1,5 @@
 # 15. Remoting: the Transport
 
-Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` (2026-10-03): every statement checked against the code
-
 ## Contents
 
 - [What you will learn](#what-you-will-learn)
@@ -34,7 +32,6 @@ Verified against: `cf7a7c6d` and the uncommitted changes of branch `issue-1432` 
 - [Guarantees](#guarantees)
 - [Implementation details (may change)](#implementation-details-may-change)
 - [Behaviours to know](#behaviours-to-know)
-- [Exercises](#exercises)
 
 ## What you will learn
 
@@ -50,7 +47,7 @@ Source files: `internal/net/frame.go`, `internal/net/transport.go`, `internal/ne
 
 ## 15.1 What remoting is
 
-Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node keeps a few long-lived connections to each peer, called lanes. Every connection carries frames in both directions, and many requests are in flight on it at once. An older protocol, one protobuf request and one response per socket exchange, is still in the code for mixed-version clusters (§15.9).
+Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node keeps a few long-lived connections to each peer, called lanes. Every connection carries frames in both directions, and many requests are in flight on it at once. An older protocol, one protobuf request and one response per socket exchange, is still in the code for mixed-version clusters ([§15.9](#159-compatibility-two-protocols-on-one-port)).
 
 **Goals**, as the maintainer set them:
 
@@ -281,7 +278,7 @@ sequenceDiagram
     P-->>C: REPLY corr=42
 ```
 
-A request-scoped `ERROR` is decoded on the client with the same table as a legacy error reply (`decodeErrorPayload` and `checkProtoError` in `internal/remoteclient`), so the same server answer gives the same Go error on both protocols: `CODE_UNAVAILABLE` is `ErrRemoteSendFailure`, `CODE_FAILED_PRECONDITION` is parsed into `ErrRemotingDisabled` and its siblings, a full mailbox is `ErrMailboxFull`. A decode failure of one envelope is answered with a request-scoped `ERROR` and the connection stays up. A handler panic in the pool is recovered and answered with an `ERROR` (`RemotingServer.recoverDuplexAsk`). A full pool is answered with `CODE_UNAVAILABLE`.
+A request-scoped `ERROR` is decoded on the client with the same table as a legacy error reply (`decodeErrorPayload` and `checkProtoError` in `internal/remoteclient`), so the same server answer gives the same Go error on both protocols: `CODE_UNAVAILABLE` is `ErrRemoteSendFailure`, `CODE_FAILED_PRECONDITION` is parsed into `ErrRemotingDisabled` and its siblings, a full mailbox is `ErrMailboxFull`. A decode failure of one envelope is answered with a request-scoped `ERROR` and the connection stays up. A handler panic in the pool is recovered and answered with an `ERROR` (`RemotingServer.recoverDuplexAsk`). The pool has no capacity limit: when no worker is idle it starts a new goroutine, and `AddTask` fails only when the pool is stopped or not yet started (`WorkerPool.AddTask` in `internal/net/worker_pool.go`). A stopped pool closes the connection ([§15.3](#153-architecture)); a pool that has not started is answered with `CODE_UNAVAILABLE` (`RemotingServer.handleDuplexData`). The number of asks a server runs at once is therefore bounded only by what its peers send.
 
 **Pipelined dispatch.** On the acceptor the read loop calls the handler inline while the connection is quiet. When more bytes are already buffered, or frames are queued, it queues the frame and a transient goroutine drains the queue in arrival order (`duplexConn.deliverInbound`, `duplexConn.dispatchLoop`). The drainer exits ten milliseconds after the queue runs dry, so an idle connection holds no dispatch goroutine.
 
@@ -429,7 +426,8 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 - A tell with no live lane is queued on a per-lane pump, byte-capped at the credit window (`peer.admitTell`, `tellPump`). A full pump blocks until the caller's deadline, or `writeTimeout`, and then returns `errors.ErrRemoteSendBackpressure`.
 - A tell that fails after admission (dial, encode, write) is reported through the tell-failure handler and becomes a dead letter. The caller is not told.
 - A tell whose write fails because the lane died never reached the writer queue. The pump dials once more and sends it again, in place, before the tells behind it (`peer.deliverAdmittedTell`). Frames already queued on a dead connection are not resent.
-- A slow receiver slows its senders through credits. Nothing is dropped silently.
+- A slow receiver slows its senders through credits. A direct send waits in the admission queue and returns `errors.ErrRemoteSendBackpressure` to its caller after the deadline or `writeTimeout`. A tell sent by the pump or the coalescer waits the same way with no caller: one still not admitted after `writeTimeout` fails and becomes a dead letter, like any other failure after admission (`peer.deliverAdmittedTell` in `internal/remoteclient/peer.go`; `coalescer.sendBatch` in `internal/remoteclient/coalescer.go`).
+- Two losses leave no dead letter. Tells still in a writer's queue when its connection dies are discarded with the connection: they have no waiter, and the writer only stops (`duplexConn.writeLoop` and `duplexConn.drainOutboundPending` in `internal/net/duplex.go`). A chunked tell the receiver refuses at its first chunk ([§15.6](#156-large-messages)) gets a request-scoped `ERROR` under the tell's fresh group correlation; no waiter is registered for it, so the read loop releases the frame and the tell is lost (`duplexConn.readLoop` in `internal/net/duplex.go`).
 - An ask timeout is local to its waiter and does not disturb the lane.
 - Connection loss fails pending asks and discards partial reassembly.
 
@@ -448,7 +446,7 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | `WriteTimeout` | 10 s | Socket writes and admission waits | No |
 | `ReadIdleTimeout` | 10 s | Liveness probe interval | No |
 | `IdleTimeout` | 1,200 s | Server reclaim of a silent duplex connection; on a legacy connection, the deadline for reading the next request and writing its response | No |
-| `ProtocolPin` | `auto` | §15.9 | No |
+| `ProtocolPin` | `auto` | [§15.9](#159-compatibility-two-protocols-on-one-port) | No |
 | Table capacity | 8,192 | Per kind, per connection; not configurable | No |
 
 `Config.Validate` (`remote/config.go`) also requires `MaxFrameSize ≥ ChunkSize`, `MaxMessageSize ≥ MaxFrameSize` and at most 4 GiB, `CreditWindow ≥ ChunkSize`, and `ReadIdleTimeout < IdleTimeout` when both are set. `MaxFrameSize` stays much larger than a chunk because a revision-1 peer cannot chunk.
@@ -531,7 +529,7 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 
 ## Implementation details (may change)
 
-- The defaults of §15.10, the 16 KiB frame floor, the 8,192-entry tables and route cache, and the 16 MiB limit on a table literal.
+- The defaults of [§15.10](#1510-semantics-defaults-and-invariants), the 16 KiB frame floor, the 8,192-entry tables and route cache, and the 16 MiB limit on a table literal.
 - 64-slot outbound and inbound channels per connection; at most 32 frames per vectored write; a 64 KiB read buffer installed after the handshake.
 - The quarter-window grant threshold, the ten-millisecond drainer linger, the five-second close grace, the ten-second accept handshake window.
 - Two missed probes as the liveness limit; the 30-second legacy re-probe; lane dial backoff from one second to 30 seconds.
@@ -556,18 +554,11 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | A peer marked legacy is not probed for 30 seconds, even if it was upgraded a second later | `peer.ensureLane` in `internal/remoteclient/peer.go` |
 | After a failed dial, sends on that lane fail at once with the same error until the backoff expires | `peer.ensureLane` and `peer.recordDialFailure` in `internal/remoteclient/peer.go` |
 | A fire-and-forget tell never returns a transport error; only backpressure and the caller's own cancellation come back | `client.sendTellDuplex` in `internal/remoteclient/send.go` |
-| A full table, or a `TABLE` frame refused by a full writer queue, silently costs an inline literal | `senderTable.register` in `internal/net/table.go` |
+| A full table, or a `TABLE` frame refused by a full writer queue, makes the value travel as an inline literal, without an error | `senderTable.register` in `internal/net/table.go` |
+| A server's ask worker pool has no capacity limit; it grows a goroutine per concurrent ask | `WorkerPool.AddTask` in `internal/net/worker_pool.go` |
+| Tells queued on a connection that dies, and a chunked tell refused at its first chunk, are lost without a dead letter | `duplexConn.writeLoop` and `duplexConn.readLoop` in `internal/net/duplex.go` |
 | The `HELLO` proposes a lane, but the session enforces the lane of the `HELLO_ACK` | `OpenDuplex` in `internal/net/duplex_open.go` |
 | `Close` on a session from its own inbound or closed handler deadlocks; the peer closes lanes from another goroutine | `peer.retireLaneAsync` in `internal/remoteclient/peer.go` |
 | With a negotiated message limit of zero the sender applies no size check, while the receiver falls back to 16 MiB. A GoAkt peer never advertises zero: both sides ignore a zero setting and default to 16 MiB, so only a foreign peer can cause it | `duplexConn.submitLogical` in `internal/net/duplex_chunk.go`; `newChunkReassembler` in `internal/net/reassembly.go` |
 | In the legacy metadata frame, `metaLen` comes before the type name | `ProtoSerializer.MarshalBinaryWithMetadataTo` in `internal/net/proto_serializer.go` |
 | Legacy brotli can start with `0x02`; in `auto` mode such a connection is taken for duplex | `TCPServer.serveAutoConn` in `internal/net/tcp_server.go` |
-
-## Exercises
-
-1. A node runs with `OrdinaryLanes` 4 and no large destinations. Actor `a` sends 1, 2 to actor `x` and 3 to actor `y` on the same peer. Which orders can the peer observe, and why? What changes if `a` also triggers a control request?
-2. Both nodes set `MaxMessageSize` to 64 MiB and keep the 16 MiB credit window. A sender submits a 40 MiB tell to a receiver not listed in `LargeMessageDestinations`. Using §15.6 and §15.8, say which lane it uses, how many transfer slots it holds, and why it completes even though it exceeds the window.
-3. The actor behind a lane stops taking messages from its mailbox. Trace what happens to the grants, to the sender's writer, to `PING` frames, and finally to a `RemoteTell` on the sending node.
-4. A `DATA` frame arrives with table ID 9 as its receiver reference, and no `TABLE` frame ever registered 9. What does the server do, and how could a correct sender never cause this?
-5. A cluster is upgraded node by node from a legacy-only release. Describe the first send from a new node to an old one, the next sends within 30 seconds, and the first send after the old node is upgraded. Why are no messages reordered at the switch?
-6. Why must a read deadline that expires in the middle of a frame not lose the bytes already read, and which method keeps them?

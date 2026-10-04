@@ -782,17 +782,22 @@ func (r *replicatorActor) handleAntiEntropy(ctx *ReceiveContext) {
 		r.keepStaleKeys(time.Now())
 	}
 
-	if len(peers) == 0 {
+	candidates := r.replicatorPeers(peers)
+	if len(candidates) == 0 {
 		return
 	}
 
-	// select a random peer
-	peer := peers[rand.IntN(len(peers))] //nolint:gosec // cryptographic randomness not needed for peer selection
-	actorName := reservedName(replicatorType)
+	// select a random peer that runs a Replicator
+	peer := candidates[rand.IntN(len(candidates))] //nolint:gosec // cryptographic randomness not needed for peer selection
 
-	to, err := r.remoting.RemoteLookup(cctx, peer.Host, peer.RemotingPort, actorName)
+	to, found, err := r.lookupReplicator(cctx, peer.Host, peer.RemotingPort)
 	if err != nil {
 		r.logger.Debugf("anti-entropy: failed to lookup peer replicator on %s:%d: %v", peer.Host, peer.RemotingPort, err)
+		return
+	}
+
+	if !found {
+		r.logger.Debugf("anti-entropy: peer %s:%d runs no replicator", peer.Host, peer.RemotingPort)
 		return
 	}
 
@@ -1031,14 +1036,10 @@ func (r *replicatorActor) resolveStaleKeys(ctx *ReceiveContext, msg *internalpb.
 
 // heardFromEveryPeer reports whether the digest of every given peer that runs
 // a Replicator arrived while this node has stale keys. When distributed data
-// is restricted to a role, a peer without the role runs none and is skipped.
+// is restricted to a role, a peer without the role runs none and is skipped
+// (replicatorPeers).
 func (r *replicatorActor) heardFromEveryPeer(peers []*cluster.Peer) bool {
-	role := r.config.Role()
-	for _, peer := range peers {
-		if role != "" && !peer.HasRole(role) {
-			continue
-		}
-
+	for _, peer := range r.replicatorPeers(peers) {
 		if _, heard := r.heardWhileStale[peer.Host+":"+strconv.Itoa(peer.RemotingPort)]; !heard {
 			return false
 		}
@@ -1474,13 +1475,20 @@ func (r *replicatorActor) coordinatedWrite(ctx *ReceiveContext, keyID string, da
 	r.coordinatedWriteCount.Add(1)
 	cctx := context.WithoutCancel(ctx.Context())
 	peers, err := r.clusterRef.Peers(cctx)
-	if err != nil || len(peers) == 0 {
+	if err != nil {
 		// fall back to TopicActor
 		r.publishDelta(ctx, keyID, dataType, delta)
 		return
 	}
 
-	selected := r.selectPeers(peers, r.targetCount(len(peers), level))
+	candidates := r.replicatorPeers(peers)
+	if len(candidates) == 0 {
+		// fall back to TopicActor
+		r.publishDelta(ctx, keyID, dataType, delta)
+		return
+	}
+
+	selected := r.selectPeers(candidates, r.targetCount(len(candidates), level))
 
 	pb, err := r.encodeDelta(&crdtDelta{
 		KeyID:    keyID,
@@ -1494,14 +1502,19 @@ func (r *replicatorActor) coordinatedWrite(ctx *ReceiveContext, keyID string, da
 		return
 	}
 
-	actorName := reservedName(replicatorType)
 	from := pathToAddress(r.pid.Path())
 	for _, peer := range selected {
-		to, lookupErr := r.remoting.RemoteLookup(cctx, peer.Host, peer.RemotingPort, actorName)
+		to, found, lookupErr := r.lookupReplicator(cctx, peer.Host, peer.RemotingPort)
 		if lookupErr != nil {
 			r.logger.Debugf("coordinated write: failed to lookup peer %s:%d: %v", peer.Host, peer.RemotingPort, lookupErr)
 			continue
 		}
+
+		if !found {
+			r.logger.Debugf("coordinated write: peer %s:%d runs no replicator", peer.Host, peer.RemotingPort)
+			continue
+		}
+
 		if tellErr := r.remoting.RemoteTell(cctx, from, to, pb); tellErr != nil {
 			r.logger.Debugf("coordinated write: failed to send to %s:%d: %v", peer.Host, peer.RemotingPort, tellErr)
 		}
@@ -1516,27 +1529,32 @@ func (r *replicatorActor) coordinatedRead(ctx *ReceiveContext, keyID string, loc
 	r.coordinatedReadCount.Add(1)
 	cctx := context.WithoutCancel(ctx.Context())
 	peers, err := r.clusterRef.Peers(cctx)
-	if err != nil || len(peers) == 0 {
+	if err != nil {
 		return local
 	}
 
-	selected := r.selectPeers(peers, r.targetCount(len(peers), level))
+	candidates := r.replicatorPeers(peers)
+	if len(candidates) == 0 {
+		return local
+	}
+
+	selected := r.selectPeers(candidates, r.targetCount(len(candidates), level))
 
 	dataType := r.keyTypes[keyID]
 	req := &internalpb.CRDTReadRequest{}
 	req.SetKey(codec.EncodeCRDTKey(keyID, dataType))
 	req.SetFromNode(r.nodeID)
 
-	actorName := reservedName(replicatorType)
 	from := pathToAddress(r.pid.Path())
 	timeout := r.config.CoordinationTimeout()
 
 	merged := local
 	for _, peer := range selected {
-		to, lookupErr := r.remoting.RemoteLookup(cctx, peer.Host, peer.RemotingPort, actorName)
-		if lookupErr != nil {
+		to, found, lookupErr := r.lookupReplicator(cctx, peer.Host, peer.RemotingPort)
+		if lookupErr != nil || !found {
 			continue
 		}
+
 		resp, askErr := r.remoting.RemoteAsk(cctx, from, to, req, timeout)
 		if askErr != nil {
 			r.logger.Debugf("coordinated read: failed to ask %s:%d: %v", peer.Host, peer.RemotingPort, askErr)
@@ -1563,19 +1581,24 @@ func (r *replicatorActor) coordinatedRead(ctx *ReceiveContext, keyID string, loc
 func (r *replicatorActor) coordinatedTombstone(ctx *ReceiveContext, pb *internalpb.CRDTTombstone, level crdt.Coordination) {
 	cctx := context.WithoutCancel(ctx.Context())
 	peers, err := r.clusterRef.Peers(cctx)
-	if err != nil || len(peers) == 0 {
+	if err != nil {
 		return
 	}
 
-	selected := r.selectPeers(peers, r.targetCount(len(peers), level))
-	actorName := reservedName(replicatorType)
+	candidates := r.replicatorPeers(peers)
+	if len(candidates) == 0 {
+		return
+	}
+
+	selected := r.selectPeers(candidates, r.targetCount(len(candidates), level))
 	from := pathToAddress(r.pid.Path())
 
 	for _, peer := range selected {
-		to, lookupErr := r.remoting.RemoteLookup(cctx, peer.Host, peer.RemotingPort, actorName)
-		if lookupErr != nil {
+		to, found, lookupErr := r.lookupReplicator(cctx, peer.Host, peer.RemotingPort)
+		if lookupErr != nil || !found {
 			continue
 		}
+
 		if tellErr := r.remoting.RemoteTell(cctx, from, to, pb); tellErr != nil {
 			r.logger.Debugf("coordinated delete: failed to send tombstone to %s:%d: %v", peer.Host, peer.RemotingPort, tellErr)
 		}
@@ -1615,6 +1638,42 @@ func (r *replicatorActor) selectPeers(peers []*cluster.Peer, count int) []*clust
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	}
 	return shuffled[:count]
+}
+
+// replicatorPeers keeps the peers that run a Replicator. When distributed data
+// is restricted to a role, only nodes with that role spawn one, so a peer
+// without the role is left out; otherwise every peer is kept.
+func (r *replicatorActor) replicatorPeers(peers []*cluster.Peer) []*cluster.Peer {
+	role := r.config.Role()
+	if role == "" {
+		return peers
+	}
+
+	kept := make([]*cluster.Peer, 0, len(peers))
+	for _, peer := range peers {
+		if peer.HasRole(role) {
+			kept = append(kept, peer)
+		}
+	}
+
+	return kept
+}
+
+// lookupReplicator resolves the address of the Replicator on the node at
+// host:port. found is false when that node runs none: RemoteLookup reports a
+// missing actor as the NoSender address rather than as an error, and a message
+// sent to that address reaches nobody.
+func (r *replicatorActor) lookupReplicator(ctx context.Context, host string, port int) (to *address.Address, found bool, err error) {
+	to, err = r.remoting.RemoteLookup(ctx, host, port, reservedName(replicatorType))
+	if err != nil {
+		return nil, false, err
+	}
+
+	if to == nil || to.Equals(address.NoSender()) {
+		return nil, false, nil
+	}
+
+	return to, true, nil
 }
 
 // crdtDelta is an internal message carrying a CRDT delta between replicators
@@ -1999,7 +2058,6 @@ func (r *replicatorActor) sendPendingToRemoteDataCenters(ctx *ReceiveContext, re
 	}
 
 	from := pathToAddress(r.pid.Path())
-	actorName := reservedName(replicatorType)
 	me := r.dc.ID()
 
 	for _, record := range records {
@@ -2013,7 +2071,7 @@ func (r *replicatorActor) sendPendingToRemoteDataCenters(ctx *ReceiveContext, re
 			continue
 		}
 
-		if r.sendToDataCenter(ctx, record, from, actorName, batch) {
+		if r.sendToDataCenter(ctx, record, from, batch) {
 			r.dataCenterAccepted[id] = highest
 		}
 	}
@@ -2200,10 +2258,14 @@ func (r *replicatorActor) handleDataCenterAntiEntropy(ctx *ReceiveContext) {
 	sendCtx, cancel := context.WithTimeout(cctx, r.config.DataCenterSendTimeout())
 	defer cancel()
 
-	actorName := reservedName(replicatorType)
-	to, err := r.remoting.RemoteLookup(sendCtx, host, port, actorName)
+	to, found, err := r.lookupReplicator(sendCtx, host, port)
 	if err != nil {
 		r.logger.Warnf("cross-DC anti-entropy: failed to lookup replicator on %s: %v", endpoint, err)
+		return
+	}
+
+	if !found {
+		r.logger.Warnf("cross-DC anti-entropy: endpoint %s runs no replicator", endpoint)
 		return
 	}
 
@@ -2216,9 +2278,10 @@ func (r *replicatorActor) handleDataCenterAntiEntropy(ctx *ReceiveContext) {
 
 // sendToDataCenter attempts to deliver a batch to a single remote DC.
 // It shuffles the endpoint list and tries each one until a send succeeds
-// or all endpoints are exhausted. It reports whether an endpoint took the
-// batch.
-func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacenter.DataCenterRecord, from *address.Address, actorName string, batch *internalpb.CRDTDeltaBatch) bool {
+// or all endpoints are exhausted. An endpoint that runs no Replicator is
+// skipped like one whose lookup fails. It reports whether an endpoint took
+// the batch.
+func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacenter.DataCenterRecord, from *address.Address, batch *internalpb.CRDTDeltaBatch) bool {
 	endpoints := make([]string, len(record.Endpoints))
 	copy(endpoints, record.Endpoints)
 	rand.Shuffle(len(endpoints), func(i, j int) { //nolint:gosec
@@ -2243,10 +2306,16 @@ func (r *replicatorActor) sendToDataCenter(ctx *ReceiveContext, record datacente
 
 		sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx.Context()), timeout)
 
-		to, err := r.remoting.RemoteLookup(sendCtx, host, port, actorName)
+		to, found, err := r.lookupReplicator(sendCtx, host, port)
 		if err != nil {
 			cancel()
 			r.logger.Warnf("cross-DC flush: failed to lookup replicator on %s: %v", endpoint, err)
+			continue
+		}
+
+		if !found {
+			cancel()
+			r.logger.Warnf("cross-DC flush: endpoint %s runs no replicator", endpoint)
 			continue
 		}
 

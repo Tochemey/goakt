@@ -35,6 +35,7 @@ import (
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/nats"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
@@ -162,7 +163,7 @@ func main() {
 		fmt.Printf("Error spawning singleton actor: %v\n", err)
 	}
 
-	time.Sleep(2 * time.Second)
+	pause.For(2 * time.Second)
 
 	err = actorSystem.NoSender().SendAsync(ctx, "hello-world", &testpb.TestPing{})
 	if err != nil {

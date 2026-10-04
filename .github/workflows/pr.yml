@@ -21,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      book: ${{ steps.filter.outputs.book }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -39,6 +40,37 @@ jobs:
               - '.golangci.yml'
               - '.github/workflows/build.yml'
               - '.github/workflows/pr.yml'
+            # "book" is true if the book or any code it cites may have changed
+            book:
+              - 'book/**'
+              - '**/*.go'
+              - '.github/workflows/pr.yml'
+
+  book:
+    name: Book (names, links, diagrams)
+    needs: changes
+    if: needs.changes.outputs.book == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check cited code names
+        run: python3 book/tools/checknames.py
+      - name: Check links
+        run: python3 book/tools/checklinks.py
+      - name: Check chapter references are linked
+        run: python3 book/tools/linkrefs.py --check
+      - name: Check Mermaid diagrams
+        run: |
+          mkdir -p "$RUNNER_TEMP/book-tools"
+          cp book/tools/package.json book/tools/mermaid-check.mjs "$RUNNER_TEMP/book-tools"
+          cd "$RUNNER_TEMP/book-tools"
+          npm install --silent --no-audit --no-fund
+          node mermaid-check.mjs "$GITHUB_WORKSPACE"/book/chapters/*.md "$GITHUB_WORKSPACE"/book/architecture.md
+      - name: List chapters that cite changed files
+        run: python3 book/tools/affected.py "origin/${{ github.base_ref }}" >> "$GITHUB_STEP_SUMMARY"
 
   lint:
     name: Lint (golangci-lint)

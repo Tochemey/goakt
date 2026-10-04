@@ -37,6 +37,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/address"
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
+	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/remote"
 )
 
@@ -395,7 +396,7 @@ func TestDeliverAdmittedTellRetriesInPlaceThenFansOut(t *testing.T) {
 
 	// A re-queue regression would produce a second fan-out during this settle
 	// window; the in-place retry must dead-letter exactly once.
-	time.Sleep(150 * time.Millisecond)
+	pause.For(150 * time.Millisecond)
 	assert.Equal(t, 1, recorder.count())
 	assert.Equal(t, []byte("p"), recorder.message(0).GetMessage())
 }
