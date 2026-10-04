@@ -450,7 +450,7 @@ func (r *replicatorActor) handleMessage(ctx *ReceiveContext) {
 	case *crdtDelta:
 		r.handleDelta(ctx, msg)
 	case *internalpb.CRDTTombstone:
-		r.handleProtoTombstone(msg)
+		r.handleProtoTombstone(ctx, msg)
 	case *internalpb.CRDTReadRequest:
 		r.handleReadRequest(ctx, msg)
 	case *internalpb.CRDTDigest:
@@ -587,11 +587,14 @@ func (r *replicatorActor) handleTerminated(msg *Terminated) {
 }
 
 // handleDelete removes a CRDT key from the local store and publishes a tombstone.
+// When it removes a value, the key's watchers are sent Deleted.
 func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 	keyID := msg.KeyID()
 
 	dataType, hasType := r.keyTypes[keyID]
-	r.removeValue(keyID)
+	if r.removeValue(keyID) {
+		r.notifyDeleted(ctx, keyID)
+	}
 
 	now := time.Now()
 	r.tombstones[keyID] = &tombstone{
@@ -633,13 +636,13 @@ func (r *replicatorActor) handleDelete(ctx *ReceiveContext, msg deleteCommand) {
 // or in a batch from another datacenter. One this node issued is ignored: the
 // TopicActor delivers a publication to its publisher too. Any other is a
 // contact with a peer: see observeContact.
-func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
+func (r *replicatorActor) handleProtoTombstone(ctx *ReceiveContext, msg *internalpb.CRDTTombstone) {
 	if msg.GetDeletedByNode() == r.nodeID {
 		return
 	}
 
 	r.observeContact()
-	r.applyTombstone(msg)
+	r.applyTombstone(ctx, msg)
 }
 
 // applyTombstone applies a deletion made on another node, or one this node
@@ -649,7 +652,9 @@ func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 //
 // The deletion wins over whatever value is stored, whenever that value was
 // written: the key is removed, and so is a change of it still waiting for
-// the remote datacenters. Watchers are not notified.
+// the remote datacenters. When this node held a value for the key, its
+// watchers are sent Deleted, however old the tombstone; a tombstone for a key
+// this node does not hold sends nothing, so a deletion is announced once.
 //
 // The tombstone is then kept to reject the deltas of the deleted key that
 // arrive late, for the tombstone TTL counted from the deletion. One that
@@ -661,7 +666,7 @@ func (r *replicatorActor) handleProtoTombstone(msg *internalpb.CRDTTombstone) {
 // is left alone, so a tombstone that comes back on every anti-entropy round is
 // applied once, and two nodes that deleted the same key on their own settle
 // on the later deletion.
-func (r *replicatorActor) applyTombstone(msg *internalpb.CRDTTombstone) {
+func (r *replicatorActor) applyTombstone(ctx *ReceiveContext, msg *internalpb.CRDTTombstone) {
 	keyID, dataType, err := codec.DecodeCRDTKey(msg.GetKey())
 	if err != nil {
 		r.logger.Warnf("tombstone: failed to decode key: %v", err)
@@ -673,7 +678,10 @@ func (r *replicatorActor) applyTombstone(msg *internalpb.CRDTTombstone) {
 		return
 	}
 
-	r.removeValue(keyID)
+	if r.removeValue(keyID) {
+		r.notifyDeleted(ctx, keyID)
+	}
+
 	delete(r.pendingDeltas, keyID)
 
 	if time.Since(deletedAt) > r.config.TombstoneTTL() {
@@ -847,7 +855,7 @@ func (r *replicatorActor) handleDigest(ctx *ReceiveContext, msg *internalpb.CRDT
 	r.observeContact()
 
 	for _, ts := range msg.GetTombstones() {
-		r.applyTombstone(ts)
+		r.applyTombstone(ctx, ts)
 	}
 
 	peerEntries := make(map[string]*internalpb.CRDTDigestEntry, len(msg.GetEntries()))
@@ -987,9 +995,10 @@ func (r *replicatorActor) markStaleKeys() {
 // is recorded as heard. A peer whose since is at or before the start of the
 // gap saw every deletion of the gap, and its digest lists every key it holds:
 // a stale key it lists is kept, one it does not list was deleted during the
-// gap and is removed, as a tombstone would remove it. This node then takes
-// the peer's since. A digest without a since, from a node that has stale keys
-// itself or that predates the field, or with a later since, resolves nothing.
+// gap and is removed, as a tombstone would remove it, and its watchers are
+// sent Deleted. This node then takes the peer's since. A digest without a
+// since, from a node that has stale keys itself or that predates the field,
+// or with a later since, resolves nothing.
 func (r *replicatorActor) resolveStaleKeys(ctx *ReceiveContext, msg *internalpb.CRDTDigest, peerEntries map[string]*internalpb.CRDTDigestEntry) {
 	if ctx.Sender() != nil {
 		r.heardWhileStale[ctx.Sender().Path().HostPort()] = types.Unit{}
@@ -1012,6 +1021,7 @@ func (r *replicatorActor) resolveStaleKeys(ctx *ReceiveContext, msg *internalpb.
 
 		r.removeValue(keyID)
 		delete(r.pendingDeltas, keyID)
+		r.notifyDeleted(ctx, keyID)
 		removed++
 	}
 
@@ -1064,7 +1074,7 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 	r.observeContact()
 
 	for _, ts := range msg.GetTombstones() {
-		r.applyTombstone(ts)
+		r.applyTombstone(ctx, ts)
 	}
 
 	if !r.hasStaleKeys() && msg.HasSinceNanos() {
@@ -1196,13 +1206,16 @@ func (r *replicatorActor) setValue(keyID string, data crdt.ReplicatedData) {
 }
 
 // removeValue forgets the value of a deleted key together with its version
-// and its cached content hash.
-func (r *replicatorActor) removeValue(keyID string) {
+// and its cached content hash. It reports whether there was a value to
+// remove, which is when the deletion is news to the key's watchers.
+func (r *replicatorActor) removeValue(keyID string) bool {
+	_, exists := r.store[keyID]
 	delete(r.store, keyID)
 	delete(r.versions, keyID)
 	delete(r.hashes, keyID)
 	delete(r.changedAt, keyID)
 	delete(r.staleKeys, keyID)
+	return exists
 }
 
 // contentHash returns the canonical content hash of the value stored under a
@@ -1303,9 +1316,26 @@ func (r *replicatorActor) publishDelta(ctx *ReceiveContext, keyID string, dataTy
 
 // notifyChanged sends a Changed message to all local watchers of a key.
 // The message names the key, so an actor watching several keys can tell
-// which one changed. Dead watchers are pruned from the list to prevent
-// unbounded growth.
+// which one changed.
 func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data crdt.ReplicatedData) {
+	r.notifyWatchers(ctx, keyID, func(key crdt.Key) any {
+		return &crdt.Changed{Key: key, Data: data}
+	})
+}
+
+// notifyDeleted sends a Deleted message to all local watchers of a key whose
+// value this node has just removed. The watchers stay subscribed, so they
+// hear of the key again if it is created once its tombstone has expired.
+func (r *replicatorActor) notifyDeleted(ctx *ReceiveContext, keyID string) {
+	r.notifyWatchers(ctx, keyID, func(key crdt.Key) any {
+		return &crdt.Deleted{Key: key}
+	})
+}
+
+// notifyWatchers sends every running watcher of a key its own message, built
+// by newMessage from the key. Dead watchers are pruned from the list to
+// prevent unbounded growth.
+func (r *replicatorActor) notifyWatchers(ctx *ReceiveContext, keyID string, newMessage func(key crdt.Key) any) {
 	watchers, ok := r.watchers[keyID]
 	if !ok {
 		return
@@ -1315,7 +1345,7 @@ func (r *replicatorActor) notifyChanged(ctx *ReceiveContext, keyID string, data 
 	alive := watchers[:0]
 	for _, watcher := range watchers {
 		if watcher.IsRunning() {
-			ctx.Tell(watcher, &crdt.Changed{Key: key, Data: data})
+			ctx.Tell(watcher, newMessage(key))
 			alive = append(alive, watcher)
 		}
 	}
@@ -2088,7 +2118,7 @@ func (r *replicatorActor) handleIncomingBatch(ctx *ReceiveContext, batch *intern
 	r.crossDCReceiveCount.Add(1)
 
 	for _, ts := range batch.GetTombstones() {
-		r.handleProtoTombstone(ts)
+		r.handleProtoTombstone(ctx, ts)
 	}
 
 	for _, delta := range batch.GetDeltas() {
