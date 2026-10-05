@@ -616,6 +616,38 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("ActorOf, ActorExists and Kill treat a cleared PID slot as a missing actor", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		actorName := "actorCleared"
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+		require.NotNil(t, actorRef)
+
+		// An actor leaving the tree clears its node's PID slot; a lookup that found
+		// the node just before that reads a nil PID.
+		node, ok := sys.(*actorSystem).tree().node(actorRef.ID())
+		require.True(t, ok)
+		node.pid.Store(nil)
+
+		pid, err := sys.ActorOf(ctx, actorName)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Nil(t, pid)
+
+		exists, err := sys.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		require.ErrorIs(t, sys.Kill(ctx, actorName), gerrors.ErrActorNotFound)
+
+		// restore the slot so the system can stop the actor
+		node.pid.Store(actorRef)
+	})
+
 	t.Run("With ReSpawn", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

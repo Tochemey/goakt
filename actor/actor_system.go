@@ -2146,7 +2146,13 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 
 	pidNode, exist := x.localActor(name)
 	if exist {
+		// The node's PID slot is cleared when the actor leaves the tree, which can
+		// happen between the lookup and this read: the actor is then already gone.
 		pid := pidNode.value()
+		if pid == nil {
+			return gerrors.NewErrActorNotFound(name)
+		}
+
 		return pid.Shutdown(ctx)
 	}
 
@@ -2350,8 +2356,11 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 	// system lock is needed. This avoids the double-lock contention that
 	// dominated SendAsync/SendSync throughput under high parallelism.
 	if pidnode, ok := x.localActor(actorName); ok {
+		// The node's PID slot is cleared when the actor leaves the tree, which can
+		// happen between the lookup and this read: the actor is then already gone,
+		// the same answer as for an actor that is stopping.
 		pid := pidnode.value()
-		if pid.IsStopping() {
+		if pid == nil || pid.IsStopping() {
 			return nil, gerrors.NewErrActorNotFound(actorName)
 		}
 		return pid, nil
@@ -2417,8 +2426,9 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 
 	// check locally
 	if node, ok := x.localActor(actorName); ok {
+		// A cleared PID slot means the actor already left the tree (see ActorOf).
 		pid := node.value()
-		if pid.IsStopping() {
+		if pid == nil || pid.IsStopping() {
 			return false, nil
 		}
 		return true, nil
