@@ -58,6 +58,20 @@ func (n *pidNode) value() *PID {
 	return n.pid.Load()
 }
 
+// pidInTree returns the PID a node lookup resolved. A node is handed out without
+// the tree lock and deleteNode clears its PID when the actor leaves the tree,
+// so a node found a moment ago may hold no PID any more: that is reported as
+// not found. Callers that need the PID go through the tree's pid lookups
+// rather than reading value() themselves.
+func pidInTree(node *pidNode, found bool) (*PID, bool) {
+	if !found {
+		return nil, false
+	}
+
+	pid := node.value()
+	return pid, pid != nil
+}
+
 // newPidNode creates a pidNode with cached id/name fields.
 // If pid is nil the cached strings remain empty (used for the initial root node).
 // The watchers slice and the watchees and descendants maps stay nil until
@@ -543,6 +557,51 @@ func (x *tree) nodeByQualifiedName(qualifiedName string) (*pidNode, bool) {
 	return node, ok
 }
 
+// pidOf returns the PID of the actor registered under id. It reports false
+// when no node carries id or when the actor has left the tree, so a PID it
+// returns with true is never nil.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1).
+func (x *tree) pidOf(id string) (*PID, bool) {
+	return pidInTree(x.node(id))
+}
+
+// pidByName returns the PID of the actor called name, the most recently added
+// one when several share it (see nodeByName). It reports false when no node
+// carries the name or when the actor has left the tree.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1).
+func (x *tree) pidByName(name string) (*PID, bool) {
+	return pidInTree(x.nodeByName(name))
+}
+
+// pidByQualifiedName returns the PID of the actor whose qualified name is
+// qualifiedName (see nodeByQualifiedName). It reports false when no node
+// carries the name or when the actor has left the tree.
+// Time Complexity: O(1) (amortized).
+// Space Complexity: O(1).
+func (x *tree) pidByQualifiedName(qualifiedName string) (*PID, bool) {
+	return pidInTree(x.nodeByQualifiedName(qualifiedName))
+}
+
+// pidList returns the PID of every actor in the tree. A node whose actor left
+// the tree while the nodes were collected is skipped.
+// Time Complexity: O(n) where n is the number of nodes.
+// Space Complexity: O(n) for the returned slice.
+func (x *tree) pidList() []*PID {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	result := make([]*PID, 0, len(x.pids))
+	for _, n := range x.pids {
+		if pid := n.value(); pid != nil {
+			result = append(result, pid)
+		}
+	}
+
+	return result
+}
+
 // removeNameLocked drops n from the name index, leaving the other nodes that
 // share its name in place, and deletes the entry once no node carries the name.
 // The caller MUST hold x.mu (write).
@@ -554,19 +613,6 @@ func (x *tree) removeNameLocked(n *pidNode) {
 	}
 
 	x.names[n.name] = nodes
-}
-
-// nodes returns all pidNodes currently registered.
-// Time Complexity: O(n) where n is the number of nodes.
-// Space Complexity: O(n) for the returned slice.
-func (x *tree) nodes() []*pidNode {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	result := make([]*pidNode, 0, len(x.pids))
-	for _, n := range x.pids {
-		result = append(result, n)
-	}
-	return result
 }
 
 // siblings returns all sibling PIDs of pid (excluding pid itself).

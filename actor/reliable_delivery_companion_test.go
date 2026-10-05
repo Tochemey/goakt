@@ -1085,6 +1085,55 @@ func TestAuthenticateWorkPullingWorkerLocalEdges(t *testing.T) {
 		require.ErrorIs(t, err, errReliableCompanionUnavailable)
 		assert.ErrorContains(t, err, "has no local record")
 	})
+
+	t.Run("With a companion whose endpoint left the tree", func(t *testing.T) {
+		endpoint, err := system.Spawn(ctx, "leaving-worker", NewMockActor())
+		require.NoError(t, err)
+
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleConsumer, "leaving-worker", endpoint.incarnationID())
+		require.NoError(t, err)
+
+		companion, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleConsumer, spec.endpointIncarnationID), &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+		require.NoError(t, err)
+
+		clearPIDSlot(t, system, endpoint)
+
+		_, _, err = system.authenticateWorkPullingWorker(ctx, companion, "jobs-producer")
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "has no local record")
+	})
+
+	t.Run("With an endpoint that left the tree on local resolution", func(t *testing.T) {
+		endpoint, err := system.Spawn(ctx, "leaving-producer", NewMockActor())
+		require.NoError(t, err)
+
+		clearPIDSlot(t, system, endpoint)
+
+		_, err = system.resolveLocalReliableCompanion("leaving-producer", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "has no local record")
+	})
+
+	t.Run("With a controller that left the tree on local resolution", func(t *testing.T) {
+		endpoint, err := system.Spawn(ctx, "orphaned-producer", NewMockActor())
+		require.NoError(t, err)
+
+		spec, err := newReliableCompanionSpec(ReliableControllerRoleProducer, "orphaned-producer", endpoint.incarnationID())
+		require.NoError(t, err)
+
+		companion, err := system.Spawn(ctx, reliableCompanionName(ReliableControllerRoleProducer, spec.endpointIncarnationID), &MockDeliveryRecorder{}, asSystem(), asReliableCompanion(spec))
+		require.NoError(t, err)
+
+		resolved, err := system.resolveLocalReliableCompanion("orphaned-producer", ReliableControllerRoleProducer)
+		require.NoError(t, err)
+		require.True(t, resolved.Equals(companion))
+
+		clearPIDSlot(t, system, companion)
+
+		_, err = system.resolveLocalReliableCompanion("orphaned-producer", ReliableControllerRoleProducer)
+		require.ErrorIs(t, err, errReliableCompanionUnavailable)
+		assert.ErrorContains(t, err, "has no producer controller")
+	})
 }
 
 func TestAuthenticateRemoteWorkPullingWorker(t *testing.T) {

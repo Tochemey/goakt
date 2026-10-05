@@ -220,6 +220,47 @@ func TestRemoteHandlersContextPropagation(t *testing.T) {
 	}
 }
 
+// TestRemoteHandlersActorLeftTree verifies that the handlers that look an actor
+// up by its address answer CODE_NOT_FOUND for an actor that left the tree after
+// its node was found. The handlers with a subtest of their own for that case
+// (ask, tell, respawn, stop, reinstate, watch and unwatch) are not repeated.
+func TestRemoteHandlersActorLeftTree(t *testing.T) {
+	const host = "127.0.0.1"
+	const port = 9098
+	const name = "actor1"
+	ctx := context.Background()
+
+	sys := newRemoteServerTestSystemWithZombieNode(t, host, port, name)
+
+	type handlerCase struct {
+		name    string
+		handler func(context.Context, inet.Connection, proto.Message) (proto.Message, error)
+		req     proto.Message
+	}
+
+	cases := []handlerCase{
+		{"RemoteLookup", sys.remoteLookupHandler, internalpb.RemoteLookupRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteSpawnChild", sys.remoteSpawnChildHandler, internalpb.RemoteSpawnChildRequest_builder{Host: host, Port: int32(port), ActorName: "child", ActorType: "*actor.MockActor", Parent: name}.Build()},
+		{"RemotePassivationStrategy", sys.remotePassivationStrategyHandler, internalpb.RemotePassivationStrategyRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteState", sys.remoteStateHandler, internalpb.RemoteStateRequest_builder{Host: host, Port: int32(port), Name: name, State: internalpb.State_STATE_RUNNING}.Build()},
+		{"RemoteChildren", sys.remoteChildrenHandler, internalpb.RemoteChildrenRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteParent", sys.remoteParentHandler, internalpb.RemoteParentRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteKind", sys.remoteKindHandler, internalpb.RemoteKindRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteDependencies", sys.remoteDependenciesHandler, internalpb.RemoteDependenciesRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteMetric", sys.remoteMetricHandler, internalpb.RemoteMetricRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteRole", sys.remoteRoleHandler, internalpb.RemoteRoleRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+		{"RemoteStashSize", sys.remoteStashSizeHandler, internalpb.RemoteStashSizeRequest_builder{Host: host, Port: int32(port), Name: name}.Build()},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			resp, err := c.handler(ctx, nullConn, c.req)
+			require.NoError(t, err)
+			requireProtoError(t, resp, internalpb.Code_CODE_NOT_FOUND)
+		})
+	}
+}
+
 // TestRemoteHandlersContextPropagationSuccess verifies that handlers succeed when
 // a propagator is configured and metadata is present (extract succeeds).
 func TestRemoteHandlersContextPropagationSuccess(t *testing.T) {

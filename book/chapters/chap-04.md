@@ -293,7 +293,7 @@ Without `WithDefaultSupervisor`, the system default is `supervisor.NewSupervisor
 
 ## 4.7 Looking up, killing and restarting by name
 
-`ActorOf` (`actor/actor_system.go`) resolves locally first, by qualified name and then by bare name (`actorSystem.localActor` in `actor/actor_system.go`). A bare child name that several parents share returns the most recently spawned child. The local lookup takes only the tree's lock. A stopping actor is reported as not found; a suspended one is returned. In cluster mode it then reads the registry and returns a remote PID. With remoting but no cluster, a name that is not local gives `ErrMethodCallNotAllowed`, not `ErrActorNotFound`.
+`ActorOf` (`actor/actor_system.go`) resolves locally first, by qualified name and then by bare name (`actorSystem.localActor` in `actor/actor_system.go`). A bare child name that several parents share returns the most recently spawned child. The local lookup takes only the tree's lock. A node is handed out without that lock and `tree.deleteNode` clears its PID slot when the actor stops, so every caller that needs the PID goes through the tree's PID lookups (`pidOf`, `pidByName` and `pidByQualifiedName` in `actor/pid_tree.go`), which report an actor that has left the tree as not found. A stopping actor is reported as not found; a suspended one is returned. In cluster mode it then reads the registry and returns a remote PID. With remoting but no cluster, a name that is not local gives `ErrMethodCallNotAllowed`, not `ErrActorNotFound`.
 
 `Kill` resolves the same way and calls `PID.Shutdown`, or `RemoteStop` for an actor on another node (`actor/actor_system.go`). It inherits everything [Chapter 3, §3.5](chap-03.md#35-stop) says about `Shutdown`: queued messages are dropped and `PostStop` may overlap a running `Receive`.
 
@@ -327,6 +327,9 @@ Without `WithDefaultSupervisor`, the system default is `supervisor.NewSupervisor
 | `PID.Equals` is exact and case-sensitive | `TestEquals` in `actor/pid_test.go` |
 | In cluster mode, spawning a running name returns `ErrActorAlreadyExists` | `TestSpawn` in `actor/spawn_test.go` |
 | Children are not relocatable | `TestRestartPreservesSpawnTimeConfiguration` in `actor/pid_test.go` |
+| `ActorOf`, `Kill` and `ReSpawn` answer an actor that left the tree after its node was found with `ErrActorNotFound`, `ActorExists` with `false` | `TestActorSystem` in `actor/actor_system_test.go` |
+| `PID.Child` answers a child that left the tree after its node was found with `ErrActorNotFound` | `TestPIDMethodsWithTwoActorSystems` in `actor/pid_test.go` |
+| The tree's PID lookups report an unknown actor and one that left the tree as not found | `TestPIDLookups` in `actor/pid_tree_test.go` |
 
 ## Implementation details (may change)
 

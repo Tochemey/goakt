@@ -149,22 +149,20 @@ func (x *actorSystem) resolveReliableCompanion(ctx context.Context, endpointName
 // must pass ownership validation. It is the resolution the GetReliableCompanion
 // handler serves to remoting-only peers, so it never consults the registry.
 func (x *actorSystem) resolveLocalReliableCompanion(endpointName string, role ReliableControllerRole) (*PID, error) {
-	node, ok := x.actors.nodeByName(endpointName)
+	endpoint, ok := x.actors.pidByName(endpointName)
 	if !ok {
 		return nil, fmt.Errorf("%w: endpoint=%s has no local record", errReliableCompanionUnavailable, endpointName)
 	}
 
-	endpoint := node.value()
 	if !endpoint.IsRunning() {
 		return nil, fmt.Errorf("%w: endpoint=%s is not running", errReliableCompanionUnavailable, endpointName)
 	}
 
-	companionNode, ok := x.actors.nodeByName(reliableCompanionName(role, endpoint.incarnationID()))
+	companion, ok := x.actors.pidByName(reliableCompanionName(role, endpoint.incarnationID()))
 	if !ok {
 		return nil, fmt.Errorf("%w: endpoint=%s has no %s controller for incarnation=%s", errReliableCompanionUnavailable, endpointName, role, endpoint.incarnationID())
 	}
 
-	companion := companionNode.value()
 	if err := validateReliableCompanion(endpoint, companion, role); err != nil {
 		return nil, err
 	}
@@ -309,8 +307,8 @@ func (x *actorSystem) ensureReliableCompanion(ctx context.Context, endpoint *PID
 	role := endpoint.reliableDelivery().role()
 
 	name := reliableCompanionName(role, endpoint.incarnationID())
-	if node, ok := x.actors.nodeByName(name); ok {
-		if companion := node.value(); companion != nil && companion.IsRunning() {
+	if companion, ok := x.actors.pidByName(name); ok {
+		if companion.IsRunning() {
 			return nil
 		}
 
@@ -430,12 +428,11 @@ func (x *actorSystem) authenticateLocalWorkPullingWorker(sender *PID, producerNa
 		return nil, "", fmt.Errorf("%w: sender=%s is not a consumer companion", errReliableCompanionUnavailable, sender.Name())
 	}
 
-	node, ok := x.actors.nodeByName(spec.endpointName)
+	endpoint, ok := x.actors.pidByName(spec.endpointName)
 	if !ok {
 		return nil, "", fmt.Errorf("%w: worker endpoint=%s has no local record", errReliableCompanionUnavailable, spec.endpointName)
 	}
 
-	endpoint := node.value()
 	if !endpoint.IsRunning() {
 		return nil, "", fmt.Errorf("%w: worker endpoint=%s is not running", errReliableCompanionUnavailable, spec.endpointName)
 	}

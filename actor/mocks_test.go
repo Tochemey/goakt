@@ -4784,3 +4784,14 @@ func spawnReplicatorWithMocks(t *testing.T, config *crdt.Config) (ActorSystem, *
 	impl.clusterEnabled.Store(false)
 	return sys, repl, replActor, clusterMock, remotingMock
 }
+
+// clearPIDSlot clears the tree slot of pid as deleteNode does when the actor
+// leaves the tree, so a lookup that already holds the node reads a nil PID. The
+// slot is restored when the test ends so the actor system can stop the actor.
+func clearPIDSlot(t *testing.T, system ActorSystem, pid *PID) {
+	t.Helper()
+	node, ok := system.tree().node(pid.ID())
+	require.True(t, ok)
+	node.pid.Store(nil)
+	t.Cleanup(func() { node.pid.Store(pid) })
+}

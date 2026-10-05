@@ -995,7 +995,6 @@ type ActorSystem interface {
 	getSingletonManager() *PID
 	getRelocator() *PID
 	getReflection() *reflection
-	findRoutee(routeeName string) (*PID, bool)
 	isStopping() bool
 	getRemoting() remoteclient.Client
 	// getLogger returns the system logger without taking the system lock. The
@@ -2144,9 +2143,8 @@ func (x *actorSystem) Kill(ctx context.Context, name string) error {
 		return gerrors.NewErrActorNotFound(name)
 	}
 
-	pidNode, exist := x.localActor(name)
+	pid, exist := x.localActor(name)
 	if exist {
-		pid := pidNode.value()
 		return pid.Shutdown(ctx)
 	}
 
@@ -2193,9 +2191,8 @@ func (x *actorSystem) ReSpawn(ctx context.Context, name string) (*PID, error) {
 		return nil, gerrors.NewErrActorNotFound(name)
 	}
 
-	node, exist := x.localActor(name)
+	pid, exist := x.localActor(name)
 	if exist {
-		pid := node.value()
 		if err := pid.Restart(ctx); err != nil {
 			return nil, fmt.Errorf("failed to restart actor=%s: %w", pid.ID(), err)
 		}
@@ -2245,14 +2242,10 @@ func (x *actorSystem) Name() string {
 // This is an internal helper; use Actors for the full cluster-aware view.
 func (x *actorSystem) localActors() []*PID {
 	x.locker.RLock()
-	nodes := x.actors.nodes()
+	pids := x.actors.pidList()
 	x.locker.RUnlock()
 	var actors []*PID
-	for _, node := range nodes {
-		pid := node.value()
-		if pid == nil {
-			continue
-		}
+	for _, pid := range pids {
 		if !isSystemName(pid.Name()) {
 			actors = append(actors, pid)
 		}
@@ -2349,8 +2342,7 @@ func (x *actorSystem) ActorOf(ctx context.Context, actorName string) (*PID, erro
 	// The tree reference (x.actors) is immutable after construction, so no
 	// system lock is needed. This avoids the double-lock contention that
 	// dominated SendAsync/SendSync throughput under high parallelism.
-	if pidnode, ok := x.localActor(actorName); ok {
-		pid := pidnode.value()
+	if pid, ok := x.localActor(actorName); ok {
 		if pid.IsStopping() {
 			return nil, gerrors.NewErrActorNotFound(actorName)
 		}
@@ -2416,8 +2408,7 @@ func (x *actorSystem) ActorExists(ctx context.Context, actorName string) (bool, 
 	}
 
 	// check locally
-	if node, ok := x.localActor(actorName); ok {
-		pid := node.value()
+	if pid, ok := x.localActor(actorName); ok {
 		if pid.IsStopping() {
 			return false, nil
 		}
@@ -2831,18 +2822,6 @@ func (x *actorSystem) getReflection() *reflection {
 	return r
 }
 
-// findRoutee searches for a routee by its name within the actor system and returns its PID if found or an error otherwise.
-func (x *actorSystem) findRoutee(routeeName string) (*PID, bool) {
-	x.locker.RLock()
-	if pidnode, ok := x.actors.nodeByName(routeeName); ok {
-		pid := pidnode.value()
-		x.locker.RUnlock()
-		return pid, true
-	}
-	x.locker.RUnlock()
-	return nil, false
-}
-
 // isStopping checks whether the actor system is shutting down
 func (x *actorSystem) isStopping() bool {
 	return x.shuttingDown.Load()
@@ -3177,23 +3156,21 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 
 	if err := x.actors.addNode(parent, pid); err != nil {
 		if errors.Is(err, errNodeAlreadyExists) {
-			if node, ok := x.actors.node(pid.ID()); ok {
-				if canonical := node.value(); canonical != nil && canonical != pid {
-					// A concurrent spawn already registered this identity: hand back the
-					// canonical instance and undo the counter bump above, which accounted
-					// for a node that was never inserted. The duplicate is deliberately
-					// NOT shut down: freeWatchers/freeChildren/freeWatchees resolve tree
-					// state by the shared pid.ID(), so stopping the duplicate would
-					// detach the canonical instance from the tree.
-					if !pid.isStateSet(systemState) {
-						x.decreaseActorsCounter()
-					}
-					// This path should be unreachable while every spawn entry point is
-					// serialized through runSpawnActivation; log loudly so an unserialized
-					// caller (and the intentionally leaked duplicate) does not go unnoticed.
-					x.logger.Warnf("duplicate spawn detected for actor=%s: returning the canonical instance; the duplicate instance is left unmanaged", pid.Name())
-					return canonical, nil
+			if canonical, ok := x.actors.pidOf(pid.ID()); ok && canonical != pid {
+				// A concurrent spawn already registered this identity: hand back the
+				// canonical instance and undo the counter bump above, which accounted
+				// for a node that was never inserted. The duplicate is deliberately
+				// NOT shut down: freeWatchers/freeChildren/freeWatchees resolve tree
+				// state by the shared pid.ID(), so stopping the duplicate would
+				// detach the canonical instance from the tree.
+				if !pid.isStateSet(systemState) {
+					x.decreaseActorsCounter()
 				}
+				// This path should be unreachable while every spawn entry point is
+				// serialized through runSpawnActivation; log loudly so an unserialized
+				// caller (and the intentionally leaked duplicate) does not go unnoticed.
+				x.logger.Warnf("duplicate spawn detected for actor=%s: returning the canonical instance; the duplicate instance is left unmanaged", pid.Name())
+				return canonical, nil
 			}
 		}
 		// Same-instance re-adds and other insertion failures keep the historical
@@ -4560,13 +4537,12 @@ func (x *actorSystem) terminateRemoteWatchees(ctx context.Context, entries remot
 	}
 
 	for _, watchee := range entries.Watchees {
-		node, ok := x.actors.node(watchee.LocalID)
+		watcher, ok := x.actors.pidOf(watchee.LocalID)
 		if !ok {
 			continue
 		}
 
-		watcher := node.value()
-		if watcher == nil || !watcher.IsRunning() {
+		if !watcher.IsRunning() {
 			continue
 		}
 
@@ -4873,13 +4849,14 @@ func (x *actorSystem) actorReference(name string) *address.Address {
 // tried first because it names exactly one actor: a top-level actor by its
 // name, a child by parent/child. The bare name comes second so that a child
 // still resolves by its own name on this node, and when several children share
-// that name the most recently spawned one is returned.
-func (x *actorSystem) localActor(name string) (*pidNode, bool) {
-	if node, ok := x.actors.nodeByQualifiedName(name); ok {
-		return node, true
+// that name the most recently spawned one is returned. An actor that has left
+// the tree is not found, so the PID returned with true is never nil.
+func (x *actorSystem) localActor(name string) (*PID, bool) {
+	if pid, ok := x.actors.pidByQualifiedName(name); ok {
+		return pid, true
 	}
 
-	return x.actors.nodeByName(name)
+	return x.actors.pidByName(name)
 }
 
 // topLevelActor resolves name to a top-level actor of the local tree only: its
@@ -4887,13 +4864,13 @@ func (x *actorSystem) localActor(name string) (*pidNode, bool) {
 // already running under the name they create, so neither a child that shares
 // the name nor a child whose qualified name is passed as the name can satisfy
 // them; an invalid name is then rejected when the actor is configured.
-func (x *actorSystem) topLevelActor(name string) (*pidNode, bool) {
-	node, ok := x.actors.nodeByQualifiedName(name)
-	if !ok || node.name != name {
+func (x *actorSystem) topLevelActor(name string) (*PID, bool) {
+	pid, ok := x.actors.pidByQualifiedName(name)
+	if !ok || pid.Name() != name {
 		return nil, false
 	}
 
-	return node, true
+	return pid, true
 }
 
 // spawnRootGuardian creates the rootGuardian guardian
@@ -5105,10 +5082,8 @@ func (x *actorSystem) departedClaim(ctx context.Context, qualifiedName string) (
 		// a stopped actor leaves the tree before its stop returns, so the
 		// record is live only while the local actor under the name is the
 		// incarnation the record names
-		if node, ok := x.actors.nodeByQualifiedName(qualifiedName); ok {
-			if pid := node.value(); pid != nil && pid.incarnationID() == existing.GetIncarnationId() {
-				return nil, false, nil
-			}
+		if pid, ok := x.actors.pidByQualifiedName(qualifiedName); ok && pid.incarnationID() == existing.GetIncarnationId() {
+			return nil, false, nil
 		}
 
 		return existing, true, nil
@@ -5786,9 +5761,8 @@ func (x *actorSystem) deadletterSnapshot(ctx context.Context) map[string][]comma
 // the default mode: one time series per live actor, identified by the attribute
 // set cached on the PID at spawn.
 func (x *actorSystem) observeEachActor(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
-	for _, node := range x.actors.nodes() {
-		pid := node.value()
-		if pid == nil || pid.observeOptions() == nil {
+	for _, pid := range x.actors.pidList() {
+		if pid.observeOptions() == nil {
 			continue
 		}
 
@@ -5910,9 +5884,8 @@ func (a *actorKindAggregate) accumulate(pid *PID, processed int64, deadletters [
 func (x *actorSystem) observeActorKinds(observer otelmetric.Observer, metrics *metric.ActorMetric, deadletterCounts map[string][]commands.DeadletterCount) {
 	aggregates := make(map[string]*actorKindAggregate)
 
-	for _, node := range x.actors.nodes() {
-		pid := node.value()
-		if pid == nil || !pid.metricsEnabled {
+	for _, pid := range x.actors.pidList() {
+		if !pid.metricsEnabled {
 			continue
 		}
 
