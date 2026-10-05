@@ -32,7 +32,7 @@ The book goes stale in two ways, and each has its defence.
 | `book/tools/linkrefs.py --check` | a "Chapter N" or "§N.k" reference that is not linked, or that names a missing chapter or section |
 | `book/tools/mermaid-check.mjs` | a Mermaid diagram that does not parse |
 
-**The code changes behaviour under the same names.** No check catches this, so the review must. `make book-affected` (with `BASE=<revision>`, default `origin/main`) lists the chapters that cite a file changed since that revision; the `book` job writes the same list to the pull request's job summary. Reread each listed chapter against the change.
+**The code changes behaviour under the same names.** No check catches this, so the review must. `make book-affected` (with `BASE=<revision>`, default `origin/main`) lists the chapters that cite code changed since that revision: for a Go file, a chapter that cites the file and one of the functions, methods, types, fields, constants or variables whose lines changed; for any other file, a chapter that cites its path; the `book` job writes the same list to the pull request's job summary. Reread each listed chapter against the change.
 
 Two scripts help when editing: `python3 book/tools/linkrefs.py` turns new chapter and section references into links, and `python3 book/tools/toc.py` regenerates every chapter's `## Contents` list.
 

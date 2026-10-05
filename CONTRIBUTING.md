@@ -39,7 +39,7 @@ Run `make help` to list every target. The common ones are:
 | `make protogen`  | Regenerate protobuf Go code                          |
 | `make certs`     | Regenerate test TLS fixtures under `test/data/certs` |
 | `make book-check` | Check the maintainers' book in `book/`: cited code names, links, diagrams |
-| `make book-affected` | List the book chapters that cite files changed since `BASE` (default `origin/main`) |
+| `make book-affected` | List the book chapters that cite code changed since `BASE` (default `origin/main`) |
 | `make clean`     | Remove the tools image and its cache volume          |
 
 ### Test shards
@@ -115,7 +115,7 @@ When you open your first pull request, the **CLA Assistant** bot (powered by [cl
 
 ### The maintainers' book
 
-`book/` explains how GoAkt is implemented, chapter by chapter. A pull request that changes the behaviour of code a chapter cites must update that chapter in the same pull request. Run `make book-affected` to see which chapters cite the files you changed, and `make book-check` before you push. [Keeping the book true](book/README.md#keeping-the-book-true) explains both.
+`book/` explains how GoAkt is implemented, chapter by chapter. A pull request that changes the behaviour of code a chapter cites must update that chapter in the same pull request. Run `make book-affected` to see which chapters cite the code you changed, and `make book-check` before you push. [Keeping the book true](book/README.md#keeping-the-book-true) explains both.
 
 ### Previewing Documentation
 
