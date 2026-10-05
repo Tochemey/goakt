@@ -96,8 +96,8 @@ book-check: ## Check the book: cited code names, links, unlinked chapter referen
 		cd /tmp/book-tools && npm install --silent --no-audit --no-fund && \
 		node mermaid-check.mjs $(WORKDIR)/book/chapters/*.md $(WORKDIR)/book/architecture.md'
 
-book-affected: ## List the book chapters that cite files changed since BASE (default origin/main)
-	git diff --name-only $(BASE)...HEAD | docker run --rm -i --user $(UID):$(GID) -v "$(CURDIR)":$(WORKDIR) -w $(WORKDIR) $(BOOK_PYTHON_IMAGE) python3 book/tools/affected.py -
+book-affected: ## List the book chapters that cite code changed since BASE (default origin/main)
+	git diff --no-color --no-ext-diff --unified=1000000 $(BASE)...HEAD | docker run --rm -i --user $(UID):$(GID) -v "$(CURDIR)":$(WORKDIR) -w $(WORKDIR) $(BOOK_PYTHON_IMAGE) python3 book/tools/affected.py -
 
 clean: ## Remove the tools image and its cache volume
 	docker rmi -f $(IMAGE)

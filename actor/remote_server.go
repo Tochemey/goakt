@@ -1613,7 +1613,13 @@ func (x *actorSystem) persistPeerStateHandler(ctx context.Context, conn inet.Con
 	peerAddr := fmt.Sprintf("%s:%d", request.GetPeerState().GetHost(), request.GetPeerState().GetPeersPort())
 	logger.Debugf("node=%s persisting peer=%s state", x.PeersAddress(), peerAddr)
 
-	if err := x.clusterStore.PersistPeerState(ctx, request.GetPeerState()); err != nil {
+	// a request still in flight when Stop reset the system finds no store
+	store := x.getClusterStore()
+	if store == nil {
+		return toProtoError(internalpb.Code_CODE_FAILED_PRECONDITION, gerrors.ErrClusterDisabled), nil
+	}
+
+	if err := store.PersistPeerState(ctx, request.GetPeerState()); err != nil {
 		logger.Errorf("node=%s failed to persist peer=%s state: %v", x.PeersAddress(), peerAddr, err)
 		return toProtoError(internalpb.Code_CODE_INTERNAL_ERROR, err), nil
 	}

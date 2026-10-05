@@ -2308,6 +2308,25 @@ func TestPersistPeerStateHandler(t *testing.T) {
 		require.NoError(t, err)
 		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
 	})
+
+	t.Run("store cleared by Stop returns CODE_FAILED_PRECONDITION", func(t *testing.T) {
+		sys := newRemoteServerTestSystem(host, port)
+		sys.clusterEnabled.Store(true)
+		// the request passed the cluster check before Stop reset the system,
+		// which leaves clusterStore nil
+		request := internalpb.PersistPeerStateRequest_builder{
+			PeerState: internalpb.PeerState_builder{Host: host, PeersPort: 9000}.Build(),
+		}.Build()
+
+		var resp proto.Message
+		require.NotPanics(t, func() {
+			var err error
+			resp, err = sys.persistPeerStateHandler(ctx, nullConn, request)
+			require.NoError(t, err)
+		})
+		requireProtoError(t, resp, internalpb.Code_CODE_FAILED_PRECONDITION)
+		assert.Contains(t, resp.(*internalpb.Error).GetMessage(), gerrors.ErrClusterDisabled.Error())
+	})
 }
 
 func TestGetNodeMetricHandler(t *testing.T) {

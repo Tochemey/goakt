@@ -4010,13 +4010,22 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	// because any node may route a message to the departed node's actors.
 	x.markEndpointRelocating(nodeLeft.Address)
 
+	// Stop does not wait for this handler: once it has reset the system the
+	// store is gone and the departure is no longer this node's to handle. A
+	// store read here and closed by Stop afterwards fails its calls instead.
+	store := x.getClusterStore()
+	if store == nil {
+		x.logger.Debugf("node=%s stopped; ignoring node=%s left", x.String(), nodeLeft.Address)
+		return
+	}
+
 	ctx := context.Background()
 
 	if x.cluster.IsLeader(ctx) {
 		x.logger.Infof("leader=%s initiating rebalancing for node=%s", x.String(), nodeLeft.Address)
 
 		// fetch the peer state of the node that left from the cluster store
-		peerState, ok := x.clusterStore.GetPeerState(ctx, nodeLeft.Address)
+		peerState, ok := store.GetPeerState(ctx, nodeLeft.Address)
 		if !ok {
 			// No graceful-shutdown snapshot: the node most likely crashed.
 			// Reconstruct the relocation set from the replicated registry so its
@@ -4042,7 +4051,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 			// deriveRelocationSetFromRegistry crash-recovery path and losing the
 			// rejoined node's actors silently. Deleting here keeps the skip path
 			// self-cleaning; DeletePeerState is a no-op when nothing is stored.
-			if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.Address); err != nil {
+			if err := store.DeletePeerState(ctx, nodeLeft.Address); err != nil {
 				x.logger.Errorf("leader=%s failed to remove stale peer=%s state on skipped rebalance: %v (hint: check cluster store)", x.String(), nodeLeft.Address, err)
 			}
 			return
@@ -4076,7 +4085,7 @@ func (x *actorSystem) handleNodeLeftEvent(event *cluster.Event) {
 	// clean up the peer state of the node that left from the cluster store
 	x.logger.Debugf("node=%s not leader; cleaning up node=%s left from state cache", x.String(), nodeLeft.Address)
 
-	if err := x.clusterStore.DeletePeerState(ctx, nodeLeft.Address); err != nil {
+	if err := store.DeletePeerState(ctx, nodeLeft.Address); err != nil {
 		x.logger.Errorf("node=%s failed to remove left node=%s from cluster store: %v (hint: check cluster store)", x.String(), nodeLeft.Address, err)
 	}
 
