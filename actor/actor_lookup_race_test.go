@@ -35,11 +35,11 @@ import (
 	"github.com/tochemey/goakt/v4/log"
 )
 
-// TestActorOfWhileActorsLeaveTheTree hammers ActorOf, ActorExists and Kill with
+// TestActorLookupWhileActorsLeaveTheTree hammers ActorOf, ActorExists and Kill with
 // lookups of names whose actors are being stopped and spawned again. Without the
 // nil-PID guard a lookup that finds a node just before its PID slot is cleared
 // panics in PID.IsStopping.
-func TestActorOfWhileActorsLeaveTheTree(t *testing.T) {
+func TestActorLookupWhileActorsLeaveTheTree(t *testing.T) {
 	ctx := context.Background()
 	sys, err := NewActorSystem("race-repro", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
