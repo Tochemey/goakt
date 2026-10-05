@@ -9897,6 +9897,57 @@ func TestHandleClusterEventCountsMembershipChurn(t *testing.T) {
 	require.EqualValues(t, 1, system.membersLeftCount.Load())
 }
 
+// TestHandleNodeLeftEventAfterStop drives a NodeLeft through the handler of a
+// node whose Stop reset the system while the event was being handled, which
+// leaves the cluster store nil, and through a running node as the control.
+func TestHandleNodeLeftEventAfterStop(t *testing.T) {
+	const peer = "127.0.0.1:3320"
+
+	newSystem := func(t *testing.T, leader bool) *actorSystem {
+		clusterMock := mockscluster.NewCluster(t)
+		clusterMock.EXPECT().LastRebalanceEvent().Return(time.Time{}).Maybe()
+		clusterMock.EXPECT().IsLeader(mock.Anything).Return(leader).Maybe()
+
+		system := newReplicationSystem(clusterMock)
+		system.remoteWatches = newRemoteWatchRegistry()
+		system.relocationEnabled.Store(true)
+		return system
+	}
+
+	nodeLeft := &cluster.Event{
+		Type:    cluster.NodeLeft,
+		Payload: &cluster.NodeLeftEvent{Address: peer, Timestamp: time.Now()},
+	}
+
+	t.Run("non-leader ignores the departure once Stop cleared the store", func(t *testing.T) {
+		system := newSystem(t, false)
+		system.clusterStore = nil
+
+		require.NotPanics(t, func() { system.handleNodeLeftEvent(nodeLeft) })
+	})
+
+	t.Run("leader ignores the departure once Stop cleared the store", func(t *testing.T) {
+		system := newSystem(t, true)
+		system.clusterStore = nil
+
+		require.NotPanics(t, func() { system.handleNodeLeftEvent(nodeLeft) })
+		system.relocationJobsLocker.Lock()
+		require.Empty(t, system.relocationJobs)
+		system.relocationJobsLocker.Unlock()
+	})
+
+	t.Run("non-leader removes the departed node's state from the store", func(t *testing.T) {
+		system := newSystem(t, false)
+		store := &MockRecordingPeerStateStore{}
+		system.clusterStore = store
+
+		system.handleNodeLeftEvent(nodeLeft)
+
+		require.True(t, store.deleteCalled)
+		require.Equal(t, peer, store.deletedAddr)
+	})
+}
+
 // TestPoisonAllGrainsDrainsAFullMailbox drives shutdown against a grain whose
 // bounded mailbox is full: the pill goes past the capacity, the grain handles
 // the queued message once its turn is released, OnDeactivate runs, and Stop

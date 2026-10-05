@@ -176,8 +176,9 @@ Membership events reach the actor system through its cluster events loop, one go
 3. Trigger data-center reconciliation ([Chapter 22](chap-22.md)).
 4. Stop here when relocation is disabled.
 5. Open the handoff window for the departed endpoint ([§21.12](#2112-the-handoff-window)). Every node does this, "because any node may route a message to the departed node's actors".
-6. On the **leader** (`IsLeader` at the time the event is handled): read the departed node's snapshot from its own store. With a snapshot, start the relocation from it ([§21.8](#218-graceful-leave-the-peer-state-snapshot)); with an empty one, delete it and stop; with none, start crash recovery on its own goroutine ([§21.7](#217-crash-deriving-the-relocation-set-from-the-registry)).
-7. On **any other node**, delete its copy of the departed node's snapshot.
+6. Stop here when this node's own `Stop` has already reset the system. `Stop` does not wait for the events loop, so a handler that passed the check in `handleClusterEvent` can outlive it; the reset clears the local store, which the handler reads through `actorSystem.getClusterStore`.
+7. On the **leader** (`IsLeader` at the time the event is handled): read the departed node's snapshot from its own store. With a snapshot, start the relocation from it ([§21.8](#218-graceful-leave-the-peer-state-snapshot)); with an empty one, delete it and stop; with none, start crash recovery on its own goroutine ([§21.7](#217-crash-deriving-the-relocation-set-from-the-registry)).
+8. On **any other node**, delete its copy of the departed node's snapshot.
 
 The cached remoting port of the departed node is forgotten when the handler returns, except when crash recovery takes it over, because the recovery needs it seconds later (comment in `handleNodeLeftEvent`).
 
@@ -262,7 +263,7 @@ A node that stops gracefully hands its relocation set to its peers before it lea
 4. **Withdraw** this node's registry records (`actorSystem.cleanupCluster` in `actor/actor_system.go`), for every non-system actor listed when the shutdown began: each removal is fenced by the actor's incarnation, so a record another incarnation owns stays; a reliable endpoint's controller record is removed with it; and each grain record is released while it still names this node. The removals run in parallel under one `errgroup` whose context the first failure cancels, so one failed removal can cut the others short. Failures are logged, never returned: a leftover record names a node that is leaving, and lookups and spawns already cope with such records (comment on `shutdownCluster`).
 5. **Leave** the membership (`cluster.Stop`), then close the local store.
 
-A peer stores the snapshot in its own local store, a BoltDB file (`actorSystem.persistPeerStateHandler` in `actor/remote_server.go`; `NewBoltStore` in `internal/cluster/boltdb_store.go`), not in the registry; a peer whose remoting or clustering is already off refuses it with `ErrRemotingDisabled` or `ErrClusterDisabled`. The records are normally withdrawn before the node leaves, so the relocation that follows finds no record to release and respawns directly ([§21.10](#2110-inside-one-relocation)).
+A peer stores the snapshot in its own local store, a BoltDB file (`actorSystem.persistPeerStateHandler` in `actor/remote_server.go`; `NewBoltStore` in `internal/cluster/boltdb_store.go`), not in the registry; a peer whose remoting or clustering is already off refuses it with `ErrRemotingDisabled` or `ErrClusterDisabled`, and so does a peer whose `Stop` cleared the store while the request was in flight. The records are normally withdrawn before the node leaves, so the relocation that follows finds no record to release and respawns directly ([§21.10](#2110-inside-one-relocation)).
 
 On `NodeLeft` the leader reads **its own store** (`actorSystem.handleNodeLeftEvent` in `actor/actor_system.go`):
 
