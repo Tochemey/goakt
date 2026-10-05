@@ -4338,6 +4338,19 @@ func TestRestartOfStoppedActorRejoinsTree(t *testing.T) {
 		require.Len(t, parent.Children(), 1)
 	})
 
+	t.Run("a child whose parent left the tree", func(t *testing.T) {
+		parent, err := actorSystem.Spawn(ctx, "leaving-parent", NewMockSupervisor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "orphan", NewMockActor())
+		require.NoError(t, err)
+
+		require.NoError(t, child.Shutdown(ctx))
+		clearPIDSlot(t, actorSystem, parent)
+
+		require.ErrorIs(t, child.Restart(ctx), errors.ErrDead)
+		require.False(t, child.IsRunning())
+	})
+
 	t.Run("a retried supervised restart", func(t *testing.T) {
 		parent, err := actorSystem.Spawn(ctx, "retrying-parent", NewMockSupervisor())
 		require.NoError(t, err)
@@ -8434,6 +8447,19 @@ func TestPIDMethodsWithTwoActorSystems(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, remoteChild)
 		assert.True(t, strings.Contains(remoteChild.Name(), "remoteChildA"))
+	})
+
+	t.Run("Child that left the tree after its node was found", func(t *testing.T) {
+		parent, err := sys1.Spawn(ctx, "leavingParent", NewMockActor())
+		require.NoError(t, err)
+		child, err := parent.SpawnChild(ctx, "leavingChild", NewMockActor())
+		require.NoError(t, err)
+
+		clearPIDSlot(t, impl1, child)
+
+		found, err := parent.Child("leavingChild")
+		require.ErrorIs(t, err, errors.ErrActorNotFound)
+		require.Nil(t, found)
 	})
 
 	t.Run("Parent", func(t *testing.T) {

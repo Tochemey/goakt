@@ -77,11 +77,11 @@ func TestRouter(t *testing.T) {
 		workerOneName := routeeName(0, routerName)
 		workerTwoName := routeeName(1, routerName)
 
-		workerOneRef, ok := system.findRoutee(workerOneName)
+		workerOneRef, ok := system.tree().pidByName(workerOneName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		workerTwoRef, ok := system.findRoutee(workerTwoName)
+		workerTwoRef, ok := system.tree().pidByName(workerTwoName)
 		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
@@ -130,11 +130,11 @@ func TestRouter(t *testing.T) {
 		workerOneName := routeeName(0, routerName)
 		workerTwoName := routeeName(1, routerName)
 
-		workerOneRef, ok := system.findRoutee(workerOneName)
+		workerOneRef, ok := system.tree().pidByName(workerOneName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
-		workerTwoRef, ok := system.findRoutee(workerTwoName)
+		workerTwoRef, ok := system.tree().pidByName(workerTwoName)
 		require.True(t, ok)
 		require.NotNil(t, workerTwoRef)
 
@@ -188,7 +188,7 @@ func TestRouter(t *testing.T) {
 		// this is just for tests purpose
 		workerName := routeeName(0, routerName)
 
-		workerOneRef, ok := system.findRoutee(workerName)
+		workerOneRef, ok := system.tree().pidByName(workerName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
@@ -236,7 +236,7 @@ func TestRouter(t *testing.T) {
 
 		// this is just for tests purpose
 		workerName := routeeName(0, routerName)
-		workerOneRef, ok := system.findRoutee(workerName)
+		workerOneRef, ok := system.tree().pidByName(workerName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
@@ -300,7 +300,7 @@ func TestRouter(t *testing.T) {
 		// this is just for tests purpose
 		workerName := routeeName(0, routerName)
 
-		workerOneRef, ok := system.findRoutee(workerName)
+		workerOneRef, ok := system.tree().pidByName(workerName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 
@@ -653,7 +653,7 @@ func TestRouter(t *testing.T) {
 
 		// this is just for tests purpose
 		workerOneName := routeeName(0, routerName)
-		workerOneRef, ok := system.findRoutee(workerOneName)
+		workerOneRef, ok := system.tree().pidByName(workerOneName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 		require.True(t, workerOneRef.IsRunning())
@@ -695,7 +695,7 @@ func TestRouter(t *testing.T) {
 
 		// this is just for tests purpose
 		workerOneName := routeeName(0, routerName)
-		workerOneRef, ok := system.findRoutee(workerOneName)
+		workerOneRef, ok := system.tree().pidByName(workerOneName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 		require.True(t, workerOneRef.IsRunning())
@@ -737,7 +737,7 @@ func TestRouter(t *testing.T) {
 
 		// this is just for tests purpose
 		workerOneName := routeeName(0, routerName)
-		workerOneRef, ok := system.findRoutee(workerOneName)
+		workerOneRef, ok := system.tree().pidByName(workerOneName)
 		require.True(t, ok)
 		require.NotNil(t, workerOneRef)
 		require.Zero(t, workerOneRef.RestartCount())
@@ -780,7 +780,7 @@ func TestRouter(t *testing.T) {
 		// this is just for tests purpose
 		workerOneName := routeeName(0, routerName)
 		require.Eventually(t, func() bool {
-			workerOneRef, ok := system.findRoutee(workerOneName)
+			workerOneRef, ok := system.tree().pidByName(workerOneName)
 			return !ok && workerOneRef == nil
 		}, 5*time.Second, 100*time.Millisecond, "expected routee to be removed")
 
@@ -877,7 +877,7 @@ func TestRouter(t *testing.T) {
 		var routeesWithMessages int
 		for i := range poolSize {
 			name := routeeName(i, routerName)
-			ref, ok := system.findRoutee(name)
+			ref, ok := system.tree().pidByName(name)
 			require.True(t, ok)
 			require.NotNil(t, ref)
 
@@ -939,7 +939,7 @@ func TestRouter(t *testing.T) {
 		var routeesWithTraffic int
 		for i := range poolSize {
 			name := routeeName(i, routerName)
-			ref, ok := system.findRoutee(name)
+			ref, ok := system.tree().pidByName(name)
 			require.True(t, ok)
 			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
 			require.NoError(t, err)
@@ -988,7 +988,7 @@ func TestRouter(t *testing.T) {
 		var totalCount int32
 		for i := range poolSize {
 			name := routeeName(i, routerName)
-			ref, ok := system.findRoutee(name)
+			ref, ok := system.tree().pidByName(name)
 			require.True(t, ok)
 			reply, err := Ask(ctx, ref, new(testpb.TestGetCount), time.Second)
 			require.NoError(t, err)
@@ -1081,7 +1081,7 @@ func TestRouter(t *testing.T) {
 		var receiversAfterScale int
 		for i := range 5 {
 			name := routeeName(i, routerName)
-			ref, ok := system.findRoutee(name)
+			ref, ok := system.tree().pidByName(name)
 			if !ok || ref == nil {
 				continue
 			}
@@ -1123,7 +1123,7 @@ func TestRouterRoundRobinRotatesInOrder(t *testing.T) {
 
 	routees := make([]*PID, 0, poolSize)
 	for i := range poolSize {
-		routee, ok := system.findRoutee(routeeName(i, routerName))
+		routee, ok := system.tree().pidByName(routeeName(i, routerName))
 		require.True(t, ok)
 		routees = append(routees, routee)
 	}
@@ -1170,7 +1170,7 @@ func TestRouterFanOutPreservesPerRouteeOrder(t *testing.T) {
 	require.NoError(t, Tell(ctx, router, NewBroadcast(testpb.TestLog_builder{Text: "done"}.Build())))
 
 	for i := range poolSize {
-		routee, ok := system.findRoutee(routeeName(i, routerName))
+		routee, ok := system.tree().pidByName(routeeName(i, routerName))
 		require.True(t, ok)
 
 		// PostStart, the TestCount broadcasts and the trailing one
@@ -1205,7 +1205,7 @@ func TestRouterDropsStoppedRouteeBeforeRouting(t *testing.T) {
 	require.NoError(t, err)
 	waitForRouteeCount(t, ctx, router, 1)
 
-	routee, ok := system.findRoutee(routeeName(0, routerName))
+	routee, ok := system.tree().pidByName(routeeName(0, routerName))
 	require.True(t, ok)
 	require.NoError(t, routee.Shutdown(ctx))
 	require.False(t, routee.IsRunning())
@@ -1240,7 +1240,7 @@ func TestRouterResumeReinsertsRoutee(t *testing.T) {
 	require.NoError(t, err)
 	waitForRouteeCount(t, ctx, router, 2)
 
-	routee, ok := system.findRoutee(routeeName(0, routerName))
+	routee, ok := system.tree().pidByName(routeeName(0, routerName))
 	require.True(t, ok)
 	routee.suspend("test suspension")
 
@@ -1268,7 +1268,7 @@ func TestRouterScaleUpAfterRemovalGrowsPool(t *testing.T) {
 	require.NoError(t, err)
 	waitForRouteeCount(t, ctx, router, 2)
 
-	routee, ok := system.findRoutee(routeeName(0, routerName))
+	routee, ok := system.tree().pidByName(routeeName(0, routerName))
 	require.True(t, ok)
 	require.NoError(t, routee.Tell(ctx, router, NewPanicSignal(&anypb.Any{}, "test panic signal", time.Now())))
 	waitForRouteeCount(t, ctx, router, 1)
@@ -1277,7 +1277,7 @@ func TestRouterScaleUpAfterRemovalGrowsPool(t *testing.T) {
 	waitForRouteeCount(t, ctx, router, 2)
 
 	// the new routee takes the next free index, not the removed routee's
-	_, ok = system.findRoutee(routeeName(2, routerName))
+	_, ok = system.tree().pidByName(routeeName(2, routerName))
 	require.True(t, ok)
 }
 
@@ -1343,20 +1343,6 @@ func TestRouterTailChoppingDoesNotBlockRouter(t *testing.T) {
 
 	require.True(t, probe.WaitForFailure(2*within), "expected status failure")
 	assert.EqualValues(t, 1, probe.FailureCount())
-}
-
-func TestFindRouteeMissReleasesLock(t *testing.T) {
-	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
-	require.NoError(t, err)
-
-	system := sys.(*actorSystem)
-	_, ok := system.findRoutee("does-not-exist")
-	require.False(t, ok)
-
-	// The not-found path used to leak read locks, deadlocking the next
-	// write-lock acquisition during shutdown.
-	require.True(t, system.locker.TryLock(), "findRoutee leaked a read lock")
-	system.locker.Unlock()
 }
 
 func TestConsistentHashRing(t *testing.T) {

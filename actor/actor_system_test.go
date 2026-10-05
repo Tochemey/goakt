@@ -616,6 +616,39 @@ func TestActorSystem(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("With an actor that left the tree after its node was found", func(t *testing.T) {
+		ctx := context.TODO()
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { assert.NoError(t, sys.Stop(ctx)) })
+
+		impl := sys.(*actorSystem)
+		actorName := "leaving"
+		actorRef, err := sys.Spawn(ctx, actorName, NewMockActor())
+		require.NoError(t, err)
+
+		found, err := sys.ActorOf(ctx, actorName)
+		require.NoError(t, err)
+		require.True(t, found.Equals(actorRef))
+
+		clearPIDSlot(t, impl, actorRef)
+
+		pid, err := sys.ActorOf(ctx, actorName)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Nil(t, pid)
+
+		exists, err := sys.ActorExists(ctx, actorName)
+		require.NoError(t, err)
+		require.False(t, exists)
+
+		require.ErrorIs(t, sys.Kill(ctx, actorName), gerrors.ErrActorNotFound)
+
+		pid, err = sys.ReSpawn(ctx, actorName)
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Nil(t, pid)
+	})
+
 	t.Run("With ReSpawn", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))

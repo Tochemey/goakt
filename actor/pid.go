@@ -660,11 +660,8 @@ func (pid *PID) Child(name string) (*PID, error) {
 	}
 
 	childAddress := pid.childAddress(name)
-	if cidNode, ok := pid.actorSystem.tree().node(childAddress.String()); ok {
-		cid := cidNode.value()
-		if cid.IsRunning() {
-			return cid, nil
-		}
+	if cid, ok := pid.actorSystem.tree().pidOf(childAddress.String()); ok && cid.IsRunning() {
+		return cid, nil
 	}
 	return nil, gerrors.NewErrActorNotFound(childAddress.String())
 }
@@ -976,12 +973,12 @@ func (pid *PID) restartParent(tree *tree) (*PID, error) {
 		return pid.ActorSystem().getUserGuardian(), nil
 	}
 
-	node, ok := tree.node(parentAddress.String())
-	if !ok || node.value() == nil {
+	parent, ok := tree.pidOf(parentAddress.String())
+	if !ok {
 		return nil, gerrors.ErrDead
 	}
 
-	return node.value(), nil
+	return parent, nil
 }
 
 // RestartCount returns the total number of times this actor has been restarted.
@@ -4111,12 +4108,12 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 // ErrActorAlreadyExists when it holds the name without running, and a nil PID
 // with a nil error when the name is free (see nameResolver).
 func (pid *PID) childNameResolver(tree *tree, childAddress, name string) (*PID, error) {
-	cnode, ok := tree.node(childAddress)
+	child, ok := tree.pidOf(childAddress)
 	if !ok {
 		return nil, nil
 	}
 
-	return nameResolver(cnode, name)
+	return nameResolver(child, name)
 }
 
 // buildChildOptions translates a spawn config into the pidOption list used

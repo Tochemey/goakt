@@ -152,10 +152,8 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		}
 
 		// only a top-level actor: a child that shares the name is not this actor
-		if pidNode, exist := x.topLevelActor(name); exist {
-			if pid, err := nameResolver(pidNode, name); pid != nil || err != nil {
-				return pid, err
-			}
+		if holder, exist := x.topLevelActor(name); exist {
+			return nameResolver(holder, name)
 		}
 
 		pid, err := x.configPID(ctx, name, actor, opts...)
@@ -203,10 +201,8 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 		}
 
 		// only a top-level actor: a child that shares the name is not this actor
-		if pidNode, exist := x.topLevelActor(name); exist {
-			if pid, err := nameResolver(pidNode, name); pid != nil || err != nil {
-				return pid, err
-			}
+		if holder, exist := x.topLevelActor(name); exist {
+			return nameResolver(holder, name)
 		}
 
 		pid, err := x.configPID(ctx, name, actor, WithMailbox(config.mailbox), WithRelocationDisabled())
@@ -544,10 +540,8 @@ func (x *actorSystem) retrySpawnSingleton(ctx context.Context, cfg *clusterSingl
 // caller the actor it just created does not exist.
 func (x *actorSystem) resolveExistingSingleton(ctx context.Context, actorName, confirmedAddr string) (*PID, error) {
 	// only a top-level actor: a child that shares the name is not the singleton
-	if pidnode, ok := x.topLevelActor(actorName); ok {
-		if pid := pidnode.value(); pid != nil && !pid.IsStopping() {
-			return pid, nil
-		}
+	if pid, ok := x.topLevelActor(actorName); ok && !pid.IsStopping() {
+		return pid, nil
 	}
 
 	if strings.TrimSpace(confirmedAddr) != "" {
@@ -866,10 +860,8 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 		// A running local instance already satisfies the singleton contract; return
 		// it instead of creating (and immediately discarding) a duplicate.
 		// only a top-level actor: a child that shares the name is not the singleton
-		if node, exist := x.topLevelActor(name); exist {
-			if pid, err := nameResolver(node, name); pid != nil || err != nil {
-				return pid, err
-			}
+		if holder, exist := x.topLevelActor(name); exist {
+			return nameResolver(holder, name)
 		}
 
 		pid, err := x.configPID(ctx, name, actor,
@@ -891,25 +883,20 @@ func (x *actorSystem) spawnSingletonOnLocal(ctx context.Context, name string, ac
 	})
 }
 
-// nameResolver resolves a spawn against the actor that holds its name in the
-// local tree. A running holder is returned: spawning a taken name hands back
-// the actor that owns it. A holder that is not running, because it is
+// nameResolver resolves a spawn against holder, the actor that holds its name
+// in the local tree. A running holder is returned: spawning a taken name hands
+// back the actor that owns it. A holder that is not running, because it is
 // suspended, stopping, passivating or restarting, is alive or not gone yet, so
 // the name is still taken: the spawn is refused with ErrActorAlreadyExists
-// rather than starting a second actor the tree has no place for. A nil PID
-// with a nil error means the node holds no actor any more and the name is
-// free.
-func nameResolver(node *pidNode, name string) (*PID, error) {
-	pid := node.value()
-	if pid == nil {
-		return nil, nil
-	}
-
-	if !pid.IsRunning() {
+// rather than starting a second actor the tree has no place for. A name whose
+// actor has left the tree has no holder and is free: the callers' lookups do
+// not find it.
+func nameResolver(holder *PID, name string) (*PID, error) {
+	if !holder.IsRunning() {
 		return nil, gerrors.NewErrActorAlreadyExists(name)
 	}
 
-	return pid, nil
+	return holder, nil
 }
 
 // defaultSingletonSupervisor returns the supervisor attached to singleton actors when

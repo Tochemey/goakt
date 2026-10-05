@@ -254,14 +254,13 @@ func (x *actorSystem) remoteLookupHandler(ctx context.Context, conn inet.Connect
 	}
 
 	addr := address.NewReference(actorName, x.Name(), request.GetHost(), int(request.GetPort()))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remote lookup: address=%s not found: %v (hint: verify address, check remoting config)", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	rlr := &internalpb.RemoteLookupResponse{}
 	rlr.SetAddress(pid.ID())
 	return rlr, nil
@@ -346,7 +345,7 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 		// the happy path needs no parse and no self-address rebuild. Parsing
 		// and host validation only run on the miss path to classify the
 		// failure.
-		node, exist := x.actors.node(receiver)
+		pid, exist := x.actors.pidOf(receiver)
 		if !exist {
 			addr, err := address.Parse(receiver)
 			if err != nil {
@@ -360,19 +359,12 @@ func (x *actorSystem) remoteAskHandler(ctx context.Context, conn inet.Connection
 			// A parseable receiver may spell the same actor differently from
 			// Address.String() (e.g. zero-padded port), so retry with the
 			// canonical form before reporting the actor missing.
-			node, exist = x.actors.node(addr.String())
+			pid, exist = x.actors.pidOf(addr.String())
 			if !exist {
 				notFound := gerrors.NewErrAddressNotFound(receiver)
 				logger.Errorf("remote ask: address=%s not found: %v (hint: verify actor exists on target node)", receiver, notFound)
 				return toProtoError(internalpb.Code_CODE_NOT_FOUND, notFound), nil
 			}
-		}
-
-		pid := node.value()
-		if pid == nil {
-			err := gerrors.NewErrAddressNotFound(receiver)
-			logger.Errorf("remote ask: address=%s not found (actor was removed): %v", receiver, err)
-			return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 		}
 
 		if !pid.IsRunning() {
@@ -487,19 +479,13 @@ func (x *actorSystem) remoteReSpawnHandler(ctx context.Context, conn inet.Connec
 	// Fetch the actor address. The name is the actor's qualified name, so a
 	// child named parent/child resolves to its own address.
 	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
-	node, exist := x.actors.node(actorAddress.String())
+	pid, exist := x.actors.pidOf(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
 		logger.Errorf("remote respawn: address=%s not found: %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := node.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Errorf("remote respawn: address=%s not found (actor was removed): %v", actorAddress.String(), err)
-		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-	}
 	// Enforce the client-propagated deadline within this handler's scope.
 	ctx, cancel := deadlineContext(ctx)
 	defer cancel()
@@ -548,17 +534,10 @@ func (x *actorSystem) remoteStopHandler(ctx context.Context, conn inet.Connectio
 	// Fetch the actor address. The name is the actor's qualified name, so a
 	// child named parent/child resolves to its own address.
 	actorAddress := address.NewReference(request.GetName(), x.Name(), request.GetHost(), int(request.GetPort()))
-	pidNode, exist := x.actors.node(actorAddress.String())
+	pid, exist := x.actors.pidOf(actorAddress.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(actorAddress.String())
 		logger.Errorf("remote stop: address=%s not found: %v", actorAddress.String(), err)
-		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-	}
-
-	pid := pidNode.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(actorAddress.String())
-		logger.Errorf("remote stop: address=%s not found (actor was removed): %v", actorAddress.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
@@ -607,17 +586,10 @@ func (x *actorSystem) remoteWatchHandler(_ context.Context, _ inet.Connection, r
 
 	// the name resolves a top-level actor or a child, by qualified name or by
 	// bare name, like a local lookup does
-	cidNode, exist := x.localActor(request.GetName())
+	cid, exist := x.localActor(request.GetName())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(request.GetName())
 		logger.Errorf("remote watch: actor=%s not found: %v", request.GetName(), err)
-		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-	}
-
-	cid := cidNode.value()
-	if cid == nil {
-		err := gerrors.NewErrAddressNotFound(request.GetName())
-		logger.Errorf("remote watch: actor=%s not found (actor was removed): %v", request.GetName(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
@@ -656,15 +628,10 @@ func (x *actorSystem) remoteUnWatchHandler(_ context.Context, _ inet.Connection,
 
 	// the name resolves a top-level actor or a child, by qualified name or by
 	// bare name, like a local lookup does
-	cidNode, exist := x.localActor(request.GetName())
+	cid, exist := x.localActor(request.GetName())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(request.GetName())
 		logger.Debugf("remote unwatch: actor=%s not found (already gone): %v", request.GetName(), err)
-		return new(internalpb.RemoteUnWatchResponse), nil
-	}
-
-	cid := cidNode.value()
-	if cid == nil {
 		return new(internalpb.RemoteUnWatchResponse), nil
 	}
 
@@ -858,14 +825,13 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 
 	parentAddress := address.NewReference(parentName, x.Name(), host, int(port))
 	parentAddrStr := parentAddress.String()
-	parentNode, exist := x.actors.node(parentAddrStr)
+	pid, exist := x.actors.pidOf(parentAddrStr)
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(parentAddrStr)
 		x.logger.Errorf("spawn child: parent=%s not found: %v", parentAddrStr, err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := parentNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(parentAddrStr)
 		x.logger.Errorf("spawn child: parent=%s not running: %v", parentAddrStr, err)
@@ -953,14 +919,13 @@ func (x *actorSystem) remotePassivationStrategyHandler(ctx context.Context, conn
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("passivation strategy: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("passivation strategy: actor=%s not running: %v", addr.String(), err)
@@ -996,14 +961,13 @@ func (x *actorSystem) remoteStateHandler(ctx context.Context, conn inet.Connecti
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remote state: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	switch state {
 	case internalpb.State_STATE_RUNNING:
 		rsr := &internalpb.RemoteStateResponse{}
@@ -1055,14 +1019,13 @@ func (x *actorSystem) remoteChildrenHandler(ctx context.Context, conn inet.Conne
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remote children: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remote children: actor=%s not running: %v", addr.String(), err)
@@ -1102,22 +1065,27 @@ func (x *actorSystem) remoteParentHandler(ctx context.Context, conn inet.Connect
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remote parent: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
-	if !pid.IsRunning() || pid.Parent() == nil {
+	// the parent is read once: it leaves the tree when the actor stops
+	var parent *PID
+	if pid.IsRunning() {
+		parent = pid.Parent()
+	}
+
+	if parent == nil {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remote parent: actor=%s not running or has no parent: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
 	rpr := &internalpb.RemoteParentResponse{}
-	rpr.SetAddress(pid.Parent().ID())
+	rpr.SetAddress(parent.ID())
 	return rpr, nil
 }
 
@@ -1144,14 +1112,13 @@ func (x *actorSystem) remoteKindHandler(ctx context.Context, conn inet.Connectio
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remoteKindHandler: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remoteKindHandler: actor=%s not running: %v", addr.String(), err)
@@ -1186,13 +1153,12 @@ func (x *actorSystem) remoteDependenciesHandler(ctx context.Context, conn inet.C
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remoteDependenciesHandler: actor=%s not running: %v", addr.String(), err)
@@ -1240,14 +1206,13 @@ func (x *actorSystem) remoteMetricHandler(ctx context.Context, conn inet.Connect
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remoteMetricHandler: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remoteMetricHandler: actor=%s not running: %v", addr.String(), err)
@@ -1302,14 +1267,13 @@ func (x *actorSystem) remoteRoleHandler(ctx context.Context, conn inet.Connectio
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remoteRoleHandler: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remoteRoleHandler: actor=%s not running: %v", addr.String(), err)
@@ -1344,14 +1308,13 @@ func (x *actorSystem) remoteStashSizeHandler(ctx context.Context, conn inet.Conn
 	}
 
 	addr := address.NewReference(name, x.Name(), host, int(port))
-	pidNode, exist := x.actors.node(addr.String())
+	pid, exist := x.actors.pidOf(addr.String())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(addr.String())
 		logger.Errorf("remoteStashSizeHandler: address=%s not found: %v", addr.String(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
-	pid := pidNode.value()
 	if !pid.IsRunning() {
 		err := gerrors.NewErrActorNotFound(addr.String())
 		logger.Errorf("remoteStashSizeHandler: actor=%s not running: %v", addr.String(), err)
@@ -1390,17 +1353,10 @@ func (x *actorSystem) remoteReinstateHandler(ctx context.Context, conn inet.Conn
 
 	// Locate the given actor: the name resolves a top-level actor or a child,
 	// by qualified name or by bare name, like a local lookup does
-	pidNode, exist := x.localActor(request.GetName())
+	pid, exist := x.localActor(request.GetName())
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(request.GetName())
 		logger.Errorf("remote reinstate: actor=%s not found: %v", request.GetName(), err)
-		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
-	}
-
-	pid := pidNode.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(request.GetName())
-		logger.Errorf("remote reinstate: actor=%s not found (actor was removed): %v", request.GetName(), err)
 		return toProtoError(internalpb.Code_CODE_NOT_FOUND, err), nil
 	}
 
@@ -2026,7 +1982,7 @@ func (x *actorSystem) duplexRemoteAsk(ctx context.Context, env inet.DataEnvelope
 	}
 
 	receiver := env.Receiver
-	node, exist := x.actors.node(receiver)
+	pid, exist := x.actors.pidOf(receiver)
 	if !exist {
 		addr, parseErr := address.Parse(receiver)
 		if parseErr != nil {
@@ -2037,18 +1993,12 @@ func (x *actorSystem) duplexRemoteAsk(ctx context.Context, env inet.DataEnvelope
 			return duplexErrorReply(toProtoError(internalpb.Code_CODE_INVALID_ARGUMENT, err)), nil
 		}
 
-		node, exist = x.actors.node(addr.String())
+		pid, exist = x.actors.pidOf(addr.String())
 		if !exist {
 			notFound := gerrors.NewErrAddressNotFound(receiver)
 			x.logger.Errorf("duplex remote ask: address=%s not found: %v", receiver, notFound)
 			return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, notFound)), nil
 		}
-	}
-
-	pid := node.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(receiver)
-		return duplexErrorReply(toProtoError(internalpb.Code_CODE_NOT_FOUND, err)), nil
 	}
 
 	if !pid.IsRunning() {
@@ -2224,7 +2174,7 @@ func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, rece
 		return addr, true
 	}
 
-	node, exist := x.actors.node(receiver)
+	pid, exist := x.actors.pidOf(receiver)
 	if !exist {
 		err := gerrors.NewErrAddressNotFound(receiver)
 		addr, ok := parseForFailure(err)
@@ -2233,19 +2183,6 @@ func (x *actorSystem) deliverRemoteTellFrom(ctx context.Context, from *PID, rece
 		}
 
 		logger.Errorf("remote tell: address=%s not found: %v", addr.String(), err)
-		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
-		return
-	}
-
-	pid := node.value()
-	if pid == nil {
-		err := gerrors.NewErrAddressNotFound(receiver)
-		addr, ok := parseForFailure(err)
-		if !ok {
-			return
-		}
-
-		logger.Errorf("remote tell: address=%s not found (actor was removed): %v", addr.String(), err)
 		x.deadLetterRemoteMessage(from.getAddress(), addr, payload, err)
 		return
 	}

@@ -105,12 +105,12 @@ func TestTree(t *testing.T) {
 
 	// get all the nodes in the tree
 	// this should return all the nodes in the tree
-	nodes := tree.nodes()
-	require.Len(t, nodes, 6)
+	pids := tree.pidList()
+	require.Len(t, pids, 6)
 	expected = []string{"a", "b", "c", "d", "e", "f"}
-	actual = make([]string, len(nodes))
-	for i, node := range nodes {
-		actual[i] = node.name
+	actual = make([]string, len(pids))
+	for i, pid := range pids {
+		actual[i] = pid.Name()
 	}
 	require.ElementsMatch(t, expected, actual)
 
@@ -177,12 +177,12 @@ func TestTree(t *testing.T) {
 	require.ElementsMatch(t, expected, actual)
 
 	// get all the nodes in the tree
-	nodes = tree.nodes()
-	require.Len(t, nodes, 3)
+	pids = tree.pidList()
+	require.Len(t, pids, 3)
 	expected = []string{"a", "e", "f"}
-	actual = make([]string, len(nodes))
-	for i, node := range nodes {
-		actual[i] = node.name
+	actual = make([]string, len(pids))
+	for i, pid := range pids {
+		actual[i] = pid.Name()
 	}
 	require.ElementsMatch(t, expected, actual)
 
@@ -878,6 +878,71 @@ func TestNodeByQualifiedName(t *testing.T) {
 	t.Run("a PID without a path has no qualified name", func(t *testing.T) {
 		pid := &PID{address: address.New("orphan", "TestSys", "host", 1)}
 		require.Empty(t, pid.qualifiedName())
+	})
+}
+
+// TestPIDLookups checks the lookups that hand out a PID: they find an actor by
+// ID, name and qualified name, and report an unknown actor and one that left
+// the tree after its node was found as not found.
+func TestPIDLookups(t *testing.T) {
+	system, _ := NewActorSystem("TestSys")
+	tree := newTree()
+	root := newPIDAt(system, "root", 1)
+	child := newPIDAt(system, "child", 2)
+	require.NoError(t, tree.addRootNode(root))
+	require.NoError(t, tree.addNode(root, child))
+	t.Cleanup(tree.reset)
+
+	t.Run("an actor in the tree", func(t *testing.T) {
+		found, ok := tree.pidOf(child.ID())
+		require.True(t, ok)
+		require.Same(t, child, found)
+
+		found, ok = tree.pidByName(child.Name())
+		require.True(t, ok)
+		require.Same(t, child, found)
+
+		found, ok = tree.pidByQualifiedName(child.qualifiedName())
+		require.True(t, ok)
+		require.Same(t, child, found)
+
+		require.ElementsMatch(t, []*PID{root, child}, tree.pidList())
+	})
+
+	t.Run("an unknown actor", func(t *testing.T) {
+		found, ok := tree.pidOf("missing")
+		require.False(t, ok)
+		require.Nil(t, found)
+
+		found, ok = tree.pidByName("missing")
+		require.False(t, ok)
+		require.Nil(t, found)
+
+		found, ok = tree.pidByQualifiedName("missing")
+		require.False(t, ok)
+		require.Nil(t, found)
+	})
+
+	t.Run("an actor that left the tree after its node was found", func(t *testing.T) {
+		// the node is still in the indexes with its PID cleared, as a lookup
+		// that found it just before deleteNode sees it
+		node, ok := tree.node(child.ID())
+		require.True(t, ok)
+		node.pid.Store(nil)
+
+		found, ok := tree.pidOf(child.ID())
+		require.False(t, ok)
+		require.Nil(t, found)
+
+		found, ok = tree.pidByName(child.Name())
+		require.False(t, ok)
+		require.Nil(t, found)
+
+		found, ok = tree.pidByQualifiedName(child.qualifiedName())
+		require.False(t, ok)
+		require.Nil(t, found)
+
+		require.Equal(t, []*PID{root}, tree.pidList())
 	})
 }
 
