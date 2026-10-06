@@ -1,27 +1,8 @@
-# Migrating from v3 to v4
-
-## Contents
-
-- [What changed](#what-changed)
-- [Quick reference](#quick-reference)
-- [Breaking changes](#breaking-changes)
-  - [1. Module path](#1-module-path)
-  - [2. Messages are `any`](#2-messages-are-any)
-  - [3. System messages moved to the `actor` package](#3-system-messages-moved-to-the-actor-package)
-  - [4. `*PID` is the only actor reference](#4-pid-is-the-only-actor-reference)
-  - [5. One lookup: `ActorOf`](#5-one-lookup-actorof)
-  - [6. `Actors` replaces `ActorRefs`](#6-actors-replaces-actorrefs)
-  - [7. Remote scheduling uses the ordinary scheduler](#7-remote-scheduling-uses-the-ordinary-scheduler)
-  - [8. `GetPartition` is now `Partition`](#8-getpartition-is-now-partition)
-  - [9. Addresses became paths](#9-addresses-became-paths)
-  - [10. Remoting is configured, not constructed](#10-remoting-is-configured-not-constructed)
-  - [11. The `Logger` interface](#11-the-logger-interface)
-- [New in v4](#new-in-v4)
-  - [Serializers for any Go type](#serializers-for-any-go-type)
-  - [New error sentinels](#new-error-sentinels)
-  - [`PID.Kind`](#pidkind)
-  - [Logger implementations](#logger-implementations)
-- [Migration checklist](#migration-checklist)
+---
+title: Migrating from v3 to v4
+description: Breaking changes between GoAkt v3 and v4, what to do about each one, and what v4 adds.
+sidebarTitle: "Migrating from v3 to v4"
+---
 
 ## What changed
 
@@ -166,7 +147,10 @@ func (w *Watcher) PostStop(*actor.Context) error { return nil }
 `LocalActor` and `RemoteActor` are gone, and `ActorOf` has a new signature:
 
 ```go
-ActorOf(ctx context.Context, actorName string) (*PID, error)
+type ActorSystem interface {
+	ActorOf(ctx context.Context, actorName string) (*PID, error)
+	// ...
+}
 ```
 
 | Case | v3 result | v4 result |
@@ -309,7 +293,7 @@ The main options of `remote.NewConfig`:
 | Option | Purpose | Default |
 |---|---|---|
 | `WithTLS` | Secures remoting and, in cluster mode, the cluster transports. | none |
-| `WithCompression` | `NoCompression`, `GzipCompression`, `ZstdCompression` or `BrotliCompression`. Configure every node with the same algorithm. | `NoCompression` |
+| `WithCompression` | `NoCompression`, `GzipCompression`, `ZstdCompression` or `BrotliCompression`. Configure every node with the same algorithm: on the duplex protocol a mismatch keeps the connection up but sends uncompressed traffic; on the legacy protocol it makes frames unreadable. | `NoCompression` |
 | `WithSerializables`, `WithJSONSerializables`, `WithSerializers` | Serializers for message types that are not Protocol Buffers. | `ProtoSerializer` for every `proto.Message` |
 | `WithContextPropagator` | Carries request metadata, such as trace IDs or auth tokens, across nodes. | none |
 | `WithMaxFrameSize` | Largest single wire frame, from 16 KiB to 16 MiB. | 16 MiB |
@@ -370,7 +354,7 @@ The `log.Logger` interface has new methods. A custom implementation must add:
 
 The interface has no `Fatal`, `Panic` or `LogOutput` methods: a library must not stop the process. `log.Zap` and `log.Slog` still have them, so call them on the concrete type if you need them.
 
-**What to do:** add the missing methods and check with `var _ log.Logger = (*MyLogger)(nil)`. Use `log.DiscardLogger` where you need a logger that writes nothing, such as in tests.
+**What to do:** add the missing methods and check with `var _ log.Logger = (*MyLogger)(nil)`. Use `log.DiscardLogger` where you need a logger that writes nothing, such as in tests. It is a `log.Logger` value, so it does not expose the `Fatal`, `Panic` and `LogOutput` methods of the concrete types.
 
 ## New in v4
 
@@ -382,7 +366,9 @@ A message that crosses the network is encoded by the serializer registered for i
 - `CBORSerializer` and `JSONSerializer` encode plain Go types. Register types with `remote.WithSerializables(new(MyMessage))` for CBOR or `remote.WithJSONSerializables(new(MyMessage))` for JSON. A typed nil interface pointer, such as `(*MyInterface)(nil)`, registers every type that implements the interface.
 - A custom serializer implements `remote.Serializer` and is registered with `remote.WithSerializers(new(MyMessage), mySerializer)`.
 
-Register the same types on every node that sends or receives them: a node cannot decode a type it has not registered.
+<Warning>
+Register the same serializable types on every node that sends or receives them: a node cannot decode a type it has not registered.
+</Warning>
 
 ### New error sentinels
 

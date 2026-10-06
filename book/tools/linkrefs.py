@@ -81,10 +81,8 @@ def target(chapter, here, frag=''):
     """Relative link to a chapter (and fragment) from the file being edited."""
     if here.parent == CHAPTERS:
         base = '' if here.stem == f'chap-{chapter:02d}' and frag else f'chap-{chapter:02d}.md'
-    elif here.parent == BOOK:
-        base = f'chapters/chap-{chapter:02d}.md'
     else:
-        base = f'../chapters/chap-{chapter:02d}.md'
+        base = f'chapters/chap-{chapter:02d}.md'
     return base + (f'#{frag}' if frag else '')
 
 
@@ -161,7 +159,7 @@ def process(path):
     return changed
 
 
-files = sorted(CHAPTERS.glob('chap-*.md')) + [BOOK / 'architecture.md', BOOK / 'README.md'] + sorted((BOOK / 'migration').glob('*.md'))
+files = sorted(CHAPTERS.glob('chap-*.md')) + [BOOK / 'architecture.md', BOOK / 'README.md']
 total = 0
 for f in files:
     n = process(f)

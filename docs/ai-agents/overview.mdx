@@ -72,7 +72,7 @@ The actor model is a specification. Whether an agent built on it holds up is dec
 positioned for agents by what it already ships:
 
 - **An agent costs its state, not a goroutine.** Actors and grains do not own goroutines; they run on a fixed
-  [dispatcher pool](/architecture/dispatcher-pool), so thousands of idle sessions cost their fields, not a thread each.
+  [dispatcher pool](/actor/actor-system#tuning-the-dispatcher), so thousands of idle sessions cost their fields, not a thread each.
 - **Sessions the runtime manages.** [Grains](/grains/overview) give one activation per identity: activated on the first
   message, passivated when idle, claimed once across the cluster, relocated on node loss. The session lifecycle every
   agent product otherwise writes by hand is the framework's job.

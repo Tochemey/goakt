@@ -26,7 +26,7 @@ Trade-offs driving the change:
 Every user-visible semantic is unchanged: per-actor FIFO, single-threaded execution, `PreStart` / `PostStop` contract,
 reentrancy, panic recovery, and supervision all hold: the three-state `Idle` / `Scheduled` / `Processing` CAS on each
 PID enforces the single-consumer invariant the mailbox contract depends on. See
-[Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
+[chapter 7 of the maintainers' book](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md) for the full design.
 
 ## Why a sharded context pool instead of a channel or `sync.Pool`?
 
@@ -37,9 +37,8 @@ single-actor rate. `sync.Pool` is per-P and may drop everything on GC, which is 
 The pool is sharded by actor: each PID is assigned a home shard at spawn, and contexts for that actor are taken from and
 returned to that shard. Shard count tracks `GOMAXPROCS` so concurrently active actors _spread_ across rings; many actors
 still share a shard. Capacity is a memory cap, not a throughput cap: empty shards allocate, full shards drop for GC.
-Grains use a separate copy of the same ring (`grain_context_pool.go`) plus a sharded Tell-ack channel pool. See
-[Context Pools](/architecture/context-pools) for the actor ring and
-[Grain sibling](/architecture/context-pools#grain-sibling) for the delta.
+Grains use a separate copy of the same ring (`grain_context_pool.go`) plus a sharded Tell-ack channel pool. See the maintainers' book for
+[the actor ring](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool) and [the grain pool](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-14.md#145-the-context-pool).
 
 ## Why `any` instead of `proto.Message` (v4)?
 

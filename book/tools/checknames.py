@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""checknames.py: check that every code name the book cites still exists (chapters, architecture overview, migration guides).
+"""checknames.py: check that every code name the book cites still exists (chapters, architecture overview).
 
 For every "`Name` in `path/file.go`" (and "`A` and `B` in `path`") in the chapters, the
 name must be declared in that file: a function, a method (`Type.method`), a type, a
@@ -57,7 +57,7 @@ def declared(text, name):
 
 missing = 0
 BOOK = ROOT / 'book'
-for chapter in sorted(CHAPTERS.glob('chap-*.md')) + [BOOK / 'architecture.md'] + sorted((BOOK / 'migration').glob('*.md')):
+for chapter in sorted(CHAPTERS.glob('chap-*.md')) + [BOOK / 'architecture.md']:
     body = chapter.read_text()
     for path in sorted(set(PATH.findall(body))):
         if not (ROOT / path).exists():

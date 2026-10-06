@@ -80,7 +80,11 @@
     },
     {
       "source": "/getting-started/migration-v3",
-      "destination": "/reference/v400-changes"
+      "destination": "/reference/migration-v3-to-v4"
+    },
+    {
+      "source": "/reference/v400-changes",
+      "destination": "/reference/migration-v3-to-v4"
     },
     {
       "source": "/clustering/standalone",
@@ -96,7 +100,15 @@
     },
     {
       "source": "/architecture/context-pool",
-      "destination": "/architecture/context-pools"
+      "destination": "https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool"
+    },
+    {
+      "source": "/architecture/context-pools",
+      "destination": "https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool"
+    },
+    {
+      "source": "/architecture/dispatcher-pool",
+      "destination": "/actor/actor-system#tuning-the-dispatcher"
     }
   ],
   "navigation": {
@@ -196,9 +208,7 @@
             "pages": [
               "/architecture/overview",
               "/architecture/code-map",
-              "/architecture/design-decisions",
-              "/architecture/dispatcher-pool",
-              "/architecture/context-pools"
+              "/architecture/design-decisions"
             ]
           }
         ]
@@ -212,7 +222,8 @@
             "icon": "book",
             "pages": [
               "/reference/glossary",
-              "/reference/interfaces"
+              "/reference/interfaces",
+              "/reference/migration-v3-to-v4"
             ]
           }
         ]

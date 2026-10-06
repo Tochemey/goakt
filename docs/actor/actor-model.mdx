@@ -157,7 +157,7 @@ func (a *Counter) Receive(ctx *actor.ReceiveContext) {
 
 <Warning>A `Receive` handler must never block. In GoAkt this is a hard rule, not a performance preference.</Warning>
 
-Actors do not own goroutines. They run on a fixed [dispatcher pool](/architecture/dispatcher-pool) of
+Actors do not own goroutines. They run on a fixed [dispatcher pool](/actor/actor-system#tuning-the-dispatcher) of
 `max(GOMAXPROCS, 2)` workers that multiplexes the entire actor population. A worker picks up an actor, runs its turn to
 completion, and only then moves on. A handler that blocks holds its worker for as long as it is stuck, withdrawing a
 fixed fraction of the whole process's processing capacity. Block a handful of handlers at once and every actor in the

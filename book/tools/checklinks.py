@@ -35,8 +35,8 @@ HEADING = re.compile(r'^#{1,6} (.+?)\s*$')
 
 
 def pages():
-    """The book's own pages: README, the architecture overview, the chapters and the migration guides."""
-    return [BOOK / 'README.md', BOOK / 'architecture.md'] + sorted((BOOK / 'chapters').glob('*.md')) + sorted((BOOK / 'migration').glob('*.md'))
+    """The book's own pages: README, the architecture overview and the chapters."""
+    return [BOOK / 'README.md', BOOK / 'architecture.md'] + sorted((BOOK / 'chapters').glob('*.md'))
 
 
 def anchors(path):

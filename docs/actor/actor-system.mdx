@@ -144,12 +144,92 @@ concern.
   - **WithEvictionStrategy**: Passivation when actor count exceeds limit.
 - **Advanced**
   - **WithThroughputBudget**: Messages an actor may process per scheduler turn (default: 32). See
-    [Dispatcher Pool](/architecture/dispatcher-pool#tuning-the-throughput-budget) for tuning profiles.
+    [Throughput budget](#throughput-budget) for tuning profiles.
   - **WithDispatcherPoolSize**: Size of the worker pool that runs actor and grain turns (default:
     `max(GOMAXPROCS, 2)`), for handlers that block in their turn. See
-    [Dispatcher Pool](/architecture/dispatcher-pool#sizing-the-worker-pool) for the trade-off.
+    [Worker pool size](#worker-pool-size) for the trade-off.
   - **WithPartitionHasher**: Deprecated: use `ClusterConfig.WithPartitionHasher`. See
     [Partition Hashing](/clustering/partition-hashing).
+
+## Tuning the dispatcher
+
+Actors and grains do not own goroutines. Each `ActorSystem` runs them on one fixed pool of worker goroutines, the
+dispatcher. A worker takes an actor that has messages, handles up to a budget of them in one turn, and then moves on so
+other actors get a turn. `runtime.NumGoroutine()` therefore stays near the worker count however many actors are active.
+Two options tune the dispatcher. Neither changes the guarantees your code relies on: an actor or grain still handles one
+message at a time, and messages from one sender to one actor still arrive in the order they were sent.
+
+### Throughput budget
+
+`WithThroughputBudget` sets how many messages a worker handles from one actor before it yields to the next. The default
+of 32 favors fairness and predictable tail latency. A larger budget spreads the cost of scheduling over more messages
+and keeps a busy actor's state in the CPU caches, which raises aggregate throughput. The cost is fairness: a busy actor
+holds its worker longer before its peers get a turn.
+
+```go Tuning the throughput budget
+system, err := actor.NewActorSystem("my-system",
+    actor.WithLogger(logger),
+    actor.WithThroughputBudget(64), // prefer aggregate throughput over strict fairness
+)
+```
+
+- **8 to 16**: latency-critical systems with many small actors, such as control planes and request routing.
+- **32** (default): a balanced setting for most mixed workloads.
+- **64**: a safe upgrade for throughput-oriented systems, typically 5 to 15% more aggregate throughput on
+  message-heavy workloads.
+- **128**: ingest and aggregation, such as log pipelines, event firehoses and batch processors.
+- **256 and above**: synthetic benchmarks or a single hot actor only. Throughput flattens and tail latency grows.
+
+Values of zero or less keep the default. A yield is a pause, not a reorder: the messages left in the mailbox are handled
+in order on the actor's next turn.
+
+### Worker pool size
+
+The pool defaults to `max(GOMAXPROCS, 2)` workers, one per OS thread, which is right for handlers that compute and
+return. A handler that blocks in its turn, on a database call or a synchronous request, holds its worker for the whole
+wait. With the default pool, no more than `GOMAXPROCS` actors and grains make progress at once, whatever their number:
+on a two-CPU container, two. `WithDispatcherPoolSize` sets the pool size for the system:
+
+```go Sizing the worker pool
+system, err := actor.NewActorSystem("orders",
+    actor.WithLogger(logger),
+    actor.WithDispatcherPoolSize(256), // grains that wait on the database in their turn
+)
+```
+
+Values of zero or less keep the default, and a value of one is raised to two. With a single worker, a handler that waits
+on another actor inside its turn would hold the only worker that could answer it. Size the pool like a connection pool:
+the number of workers is about the throughput you need times the latency of the blocking call.
+
+<Warning>
+A larger pool is not free. Every actor and grain shares it, and producers scan the pool for a parked worker on each
+wake, so a pool much larger than `GOMAXPROCS` slows dispatch for handlers that do not block. Raise the pool only when
+handlers wait in their turn, and prefer `PipeTo` where the wait can leave the turn.
+</Warning>
+
+The table shows the [benchmark suite](https://github.com/Tochemey/goakt/tree/main/benchmark) with the default pool and
+with `WithDispatcherPoolSize(256)`, on an 8-CPU Apple M1 with `GOMAXPROCS=8`, five runs each. These handlers do not
+block, so the numbers are the pure dispatch cost of the larger pool. Per-actor and per-grain heap did not change.
+
+| Benchmark        | Default pool  | 256 workers   | Change    |
+|------------------|---------------|---------------|-----------|
+| Ask              | 1.38M msg/s   | 0.82M msg/s   | -41%      |
+| GrainAsk         | 1.34M msg/s   | 0.80M msg/s   | -40%      |
+| AskPairwise      | 3.23M msg/s   | 2.22M msg/s   | -31%      |
+| GrainTellFanOut  | 2.48M msg/s   | 1.89M msg/s   | -24%      |
+| GrainTell        | 2.09M msg/s   | 1.87M msg/s   | -10%      |
+| TellSinglePair   | 13.5M msg/s   | 13.3M msg/s   | -2%       |
+| TellPairwise     | 31.9M msg/s   | 32.0M msg/s   | unchanged |
+
+Request/reply pays the most because every round trip wakes a parked worker, and with a large pool that is usually a
+cold one. Plain tells to a busy actor are unaffected: the worker never parks.
+
+The gain on the other side is what the option exists for. With 200 grains that each wait 10 ms in their turn, five
+messages each and all 1000 asks in flight, a node with `GOMAXPROCS=2` takes 5.5 s with the default pool and 53 ms with
+256 workers, because the 200 grains wait at the same time instead of two at a time.
+
+How the dispatcher is built (its ready queue, work stealing and the state machine that keeps one actor on one worker) is
+covered in [chapter 7 of the maintainers' book](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md).
 
 ## Component relationships
 

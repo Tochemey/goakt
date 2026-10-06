@@ -46,7 +46,7 @@ Grouped by subsystem.
   structure.
 - **receive_context.go**: `ReceiveContext` passed to `Receive`; messaging, stash, behaviors.
 - **context_pool.go**: Sharded lock-free pool for `ReceiveContext` objects. See
-  [Context Pools](/architecture/context-pools).
+  [the book's chapter on the receive context](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool).
 - **context.go**: `Context` passed to `PreStart` / `PostStop`.
 - **option.go**: Options for `NewActorSystem` (logger, remoting, cluster, `WithThroughputBudget`, …).
 - **defaults.go**: Package-level default constants.
@@ -61,7 +61,7 @@ Grouped by subsystem.
 
 ### Scheduler: the dispatcher pool
 
-See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
+See [the book's chapter on dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md) for the full design.
 
 - **dispatcher.go**: Fixed worker pool; `start` / `stop` / `signalStop` / `schedule`.
 - **worker.go**: Worker goroutine loop; local-queue reschedule helper.
@@ -119,7 +119,7 @@ See [Dispatcher Pool](/architecture/dispatcher-pool) for the full design.
 - **grain_pid.go**: `grainPID`: `PID` variant for virtual actors; implements `schedulable`.
 - **grain_context.go**: `GrainContext` for `OnReceive`.
 - **grain_context_pool.go**: Sharded lock-free pool for `GrainContext`, Tell ack channels and Ask reply channels. See
-  [Grain sibling](/architecture/context-pools#grain-sibling).
+  [the book's chapter on the grain runtime](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-14.md#145-the-context-pool).
 - **grain_identity.go**: `GrainIdentity` with memoised validation (hot-path allocation fix).
 - **grain_mailbox.go**: Standalone grain mailbox for bounded user mailboxes and the response queue.
 - **embedded_grain_mailbox.go**: Default unbounded grain mailbox, run on two words inside `grainPID` with no separate object.
@@ -262,13 +262,10 @@ protos/
 ## See also
 
 - [Architecture Overview](/architecture/overview)
-- [Dispatcher Pool](/architecture/dispatcher-pool): the scheduler every actor and grain runs on
-- [Context Pools](/architecture/context-pools): sharded `ReceiveContext` / `GrainContext` recycling on the messaging hot
-  path
 - [Design Decisions](/architecture/design-decisions): rationale for architectural choices
 - [Streams](/advanced/streams): reactive pipelines on actors
 - [Distributed data](/advanced/distributed-data): CRDTs and the Replicator
 - The maintainers' book in the repository, [GoAkt from the Inside](https://github.com/tochemey/goakt/blob/main/book/README.md): implementation detail for
-  [dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md), [remoting](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-15.md),
+  [dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md), [context pools](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool), [remoting](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-15.md),
   [reliable delivery](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-23.md), [distributed data](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-24.md) and
   [streams](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-25.md)

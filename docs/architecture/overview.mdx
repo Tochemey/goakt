@@ -51,11 +51,14 @@ not through Olric DMap writes.
 
 ## Deep dives
 
-The following pages describe the internal architecture of each major subsystem:
+The maintainers' book in the repository, [GoAkt from the Inside](https://github.com/tochemey/goakt/blob/main/book/README.md),
+describes the internal architecture of each major subsystem. Two of its chapters cover the messaging hot path:
 
-- **Scheduler**: Page: [Dispatcher Pool](/architecture/dispatcher-pool). What it covers: Fixed worker pool, actor state
-  machine, ready queue, work stealing, system-message priority, throughput tuning.
-- **Context pools**: Page: [Context Pools](/architecture/context-pools). What it covers: Sharded lock-free
+- **Scheduler**: [Chapter 7, Dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md). What it covers: Fixed worker pool, actor state
+  machine, ready queue, work stealing, system-message priority. To tune the pool, see
+  [Tuning the dispatcher](/actor/actor-system#tuning-the-dispatcher).
+- **Context pools**: [Chapter 8, The pool](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-08.md#the-pool) and, for grains,
+  [Chapter 14, The context pool](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-14.md#145-the-context-pool). What they cover: Sharded lock-free
   `ReceiveContext` / `GrainContext` recycling, MPMC rings, ABA safety, pairwise Tell as the scaling surface.
 
 ## See also

@@ -6,7 +6,7 @@ A book that explains how GoAkt is implemented: its data structures, algorithms, 
 
 - [Architecture](architecture.md): the whole system on a few pages, its main data flows and the reasons behind its design. Read it before the chapters; it points to the chapter that covers each part in depth.
 - [Chapters](#chapters): one subsystem each, in reading order.
-- [Migrating from v3 to v4](migration/v3-to-v4.md): what changed for users between the two major versions.
+- [Migrating from v3 to v4](https://docs.goakt.dev/reference/migration-v3-to-v4): what changed for users between the two major versions. It is user documentation, so it lives in `docs/`.
 
 ## How the book is written
 

@@ -60,7 +60,7 @@ The floor of two workers has two reasons, each recorded in a comment. A handler 
 
 The option's comment explains the other trade-off at length: every handler that blocks, on a database or an HTTP call, holds a worker for the whole wait, so with the default pool no more than `GOMAXPROCS` actors make progress at once. A larger pool lets more handlers wait, but slows dispatch for everyone: a producer scans the idle flags of the whole pool on each wake (`readyQueue.claimIdleWorker`), and a worker that finds nothing probes every sibling's ring (`readyQueue.trySteal`), both linear in the pool size. The comment gives the measured cost: with 256 workers on 8 CPUs, request/reply throughput drops by about 40% and grain tells by 10 to 25%, while the heap per actor is unchanged (`WithDispatcherPoolSize` in `actor/option.go`). Raise the pool only for handlers that wait in their turn, and size it like a connection pool.
 
-The budget of 32 messages is a compromise between two costs: it spreads the cost of parking and waking a worker over a batch, and it bounds how long one actor can keep a worker from its peers (`dispatcherThroughput` in `actor/dispatcher.go`; `WithThroughputBudget` in `actor/option.go`).
+The budget of 32 messages is a compromise between two costs: it spreads the cost of parking and waking a worker over a batch, and it bounds how long one actor can keep a worker from its peers (`dispatcherThroughput` in `actor/dispatcher.go`; `WithThroughputBudget` in `actor/option.go`). The option's comment names a second gain from a larger budget, often the larger one: handling one actor's messages back to back keeps its mailbox, its state and its handler's code in the CPU caches. Past some point the system is bound by the handlers rather than by scheduling, and raising the budget gains nothing more.
 
 The workers are not the system's only goroutines, but the others are few and none belongs to an actor:
 
@@ -86,6 +86,16 @@ Every PID has a `dispatchState`: one atomic word holding `Idle`, `Scheduled` or 
 | Processing → Scheduled | `YieldToScheduled` | the turn, when its budget is spent | `dispatchState.YieldToScheduled` in `actor/dispatch_state.go` |
 | Processing → Idle | `reset` | the turn, when it finds nothing left; a restart also forces `Idle`, once it has waited for the running turn to end and before `init` makes the new incarnation reachable, so no turn can be running when it does (`restartSubtree` in `actor/pid.go`) | `dispatchState.reset` in `actor/dispatch_state.go` |
 | Idle → Processing | `TakeIdleForStop` | passivation, to own an idle actor while it stops it ([Chapter 3, §3.5](chap-03.md#35-stop)) | `dispatchState.TakeIdleForStop` in `actor/dispatch_state.go` |
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Scheduled: TrySchedule (a producer wins the swap and pushes the actor)
+    Scheduled --> Processing: TakeForProcessing (the worker that took the actor)
+    Processing --> Scheduled: YieldToScheduled (budget spent, back onto the local ring)
+    Processing --> Idle: reset (nothing left, or a restart)
+    Idle --> Processing: TakeIdleForStop (passivation)
+```
 
 Only `Processing` lets anyone run the actor's handler, and only one party can hold it, so an actor's messages are handled one at a time. `TrySchedule` reads before it tries the swap: when many producers send at once, all but one see `Scheduled` or `Processing` and return without touching the cache line in exclusive mode (`actor/dispatch_state.go`).
 
@@ -155,7 +165,7 @@ Both rings exist to keep locks off the common path. The global queue is a ring r
 
 `take` tries, in order, its own local ring, the global queue, stealing from a sibling, and finally parking (`actor/ready_queue.go`):
 
-- **Stealing** visits the siblings in rotated order, skips any whose atomic size reads zero, and takes half of the first non-empty one. It returns the first stolen actor to run and appends the rest to its own ring, locking the two rings in address order so two thieves never deadlock (`readyQueue.trySteal` and `localQueue.stealHalf` in `actor/ready_queue.go`).
+- **Stealing** visits the siblings in rotated order, skips any whose atomic size reads zero, and takes half of the first non-empty one. It returns the first stolen actor to run and appends the rest to its own ring, locking the two rings in address order so two thieves never deadlock (`readyQueue.trySteal`, `localQueue.stealHalf` and `lockOrder` in `actor/ready_queue.go`).
 - **Parking** uses a per-worker *idle flag* and a one-slot *handoff* channel instead of a condition variable. A producer that finds a parked worker claims it with a compare-and-swap on its flag and sends the actor through the channel, bypassing the global queue and its mutex (`readyQueue.claimIdleWorker` in `actor/ready_queue.go`). The comment records why: with a shared condition variable, request/reply throughput under load fell below that of a single pair (`readyQueue` in `actor/ready_queue.go`).
 
 The claim scan always starts at worker 0. That keeps wake-ups on the same few workers and their caches warm, and lets the rest sleep (`readyQueue.claimIdleWorker` in `actor/ready_queue.go`).
@@ -190,7 +200,7 @@ The turn does not wait for supervision, but it does not carry on as if nothing h
 
 ## 7.7 Stopping the pool
 
-`signalStop` closes the ready queue and stops the supervision goroutine, without waiting for either (`actor/dispatcher.go`). Like `start`, it is idempotent: a second call does nothing. Closing claims every parked worker and wakes it with `nil`; a worker that parks after that sees the closed flag in its own check (`readyQueue.close` in `actor/ready_queue.go`). A worker in the middle of a turn finishes it and exits on its next take. Not waiting is deliberate: `ActorSystem.Stop` may run on a worker, from inside a handler ([Chapter 3, §3.5](chap-03.md#35-stop)). A stopped dispatcher cannot be started again, so `Start` builds a new one ([Chapter 3, §3.7](chap-03.md#37-starting-again)).
+`signalStop` closes the ready queue and stops the supervision goroutine, without waiting for either (`actor/dispatcher.go`). Like `start`, it is idempotent: a second call does nothing. Closing claims every parked worker and wakes it with `nil`; a worker that parks after that sees the closed flag in its own check (`readyQueue.close` in `actor/ready_queue.go`). A worker in the middle of a turn finishes it and exits on its next take. Not waiting is deliberate: `ActorSystem.Stop` may run on a worker, from inside a handler ([Chapter 3, §3.5](chap-03.md#35-stop)). `ActorSystem.Stop` signals the dispatcher last, in a deferred step after every actor has been torn down and the system reset (`actorSystem.shutdown` in `actor/actor_system.go`). There is no blocking stop. A stopped dispatcher cannot be started again, so `Start` builds a new one ([Chapter 3, §3.7](chap-03.md#37-starting-again)).
 
 ## Guarantees
 
