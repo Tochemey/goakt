@@ -44,7 +44,7 @@
 // reachable from an external program, so the per-scrape ask count is guarded by
 // the actor-package test TestDeadletter; here the sample confirms the exported
 // per-actor deadletter counts are still delivered correctly through the single
-// snapshot, and that the system registers a constant two meter callbacks.
+// snapshot, and that the system registers a constant three meter callbacks.
 package main
 
 import (
@@ -74,8 +74,9 @@ const (
 	// so its per-address deadletter count is non-zero.
 	deadletterMessages = 6
 	// expectedRegistrations is the constant number of meter callbacks a
-	// non-cluster metrics-enabled system registers regardless of population.
-	expectedRegistrations = 2
+	// non-cluster metrics-enabled system registers regardless of population:
+	// one each for the system, the actors and the scheduler.
+	expectedRegistrations = 3
 )
 
 // gaugeInstruments lists the instruments that must be observable gauges because

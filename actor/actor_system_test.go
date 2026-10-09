@@ -10285,3 +10285,66 @@ func TestClusterWildcardBindAddress(t *testing.T) {
 		return err == nil && pid != nil && pid.getAddress().Host() == advertised && pid.getAddress().Port() == port1
 	}, 10*time.Second, 100*time.Millisecond, "node2 must resolve the actor at node1's advertised address")
 }
+
+// TestPostStartSeesTheRegistryRecord asserts that an actor's PostStart runs
+// once the actor is fully started: in a cluster its registry record exists,
+// the partition it reads for its own name is the one the cluster assigns it,
+// and the other nodes already find it. This holds for a child spawned from
+// its parent's PostStart as well.
+func TestPostStartSeesTheRegistryRecord(t *testing.T) {
+	ctx := context.TODO()
+	srv := startNatsServer(t)
+	nodes, providers := startNATsSystems(t, srv.Addr().String(), 3)
+	node, peers := nodes[0], nodes[1:]
+
+	const parentsCount = 10
+	probes := make([]*registryProbe, 0, 2*parentsCount)
+
+	for range parentsCount {
+		parentName := uuid.NewString()
+		childName := uuid.NewString()
+		child := &registryProbe{registryName: parentName + "/" + childName, peers: peers}
+		parent := &registryProbe{registryName: parentName, childName: childName, child: child, peers: peers}
+		probes = append(probes, parent, child)
+
+		pid, err := node.Spawn(ctx, parentName, parent)
+		require.NoError(t, err)
+		require.NotNil(t, pid)
+	}
+
+	require.Eventually(t, func() bool {
+		for _, probe := range probes {
+			if _, done, _, _ := probe.snapshot(); !done {
+				return false
+			}
+		}
+
+		return true
+	}, 10*time.Second, 50*time.Millisecond, "every probe must handle PostStart")
+
+	nonZero := 0
+
+	for _, probe := range probes {
+		partition, _, recordErr, peerErrs := probe.snapshot()
+		require.NoErrorf(t, recordErr, "actor %s found no registry record from PostStart", probe.registryName)
+		require.Equalf(t, node.Partition(probe.registryName), partition, "actor %s read a different partition from PostStart", probe.registryName)
+
+		for i, err := range peerErrs {
+			require.NoErrorf(t, err, "node %d did not find actor %s during its PostStart", i+1, probe.registryName)
+		}
+
+		if partition != 0 {
+			nonZero++
+		}
+	}
+
+	// with the default 271 partitions, 20 names cannot all land on partition 0
+	require.NotZero(t, nonZero)
+
+	for i := range nodes {
+		require.NoError(t, nodes[i].Stop(ctx))
+		require.NoError(t, providers[i].Close())
+	}
+
+	srv.Shutdown()
+}

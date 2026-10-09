@@ -12,7 +12,7 @@ The sample reruns the issue's reproduction and guards the fix with deterministic
 2. Measures the allocation and GC cycle cost of 20k spawn/stop cycles.
 3. Measures the retained live heap per idle actor for 50k flat spawns.
 4. Measures the retained live heap per idle child for 50k `SpawnChild` actors, the path that allocated a supervisor and strategy per child before the fix.
-5. Measures the wall time of one full metrics scrape over 10k resident actors and guards that a metrics-enabled system registers a constant 2 meter callbacks instead of one per actor plus one.
+5. Measures the wall time of one full metrics scrape over 10k resident actors and guards that a metrics-enabled system registers a constant 3 meter callbacks (system, actors, scheduler) instead of one per actor plus one.
 
 ## Run
 
@@ -40,7 +40,7 @@ Spawn/stop churn, 20k cycles:
 
 The GC gains follow directly from those numbers: the collector marks 10.5% to 24% fewer objects per resident actor on every cycle, and under churn the process triggers 9.8% fewer collections because each spawn allocates 2.1 KB less garbage.
 
-Metrics-enabled systems additionally drop from N+1 meter callback registrations and N instrument sets to a constant 2 registrations and 1 instrument set; the per-actor cost is a cached 4-entry attribute slice. `unsafe.Sizeof(PID{})` grew from 456 to 464 bytes because the cached attribute slice header is 8 bytes larger than the registration handle it replaced; the retained-footprint numbers above already include that.
+Metrics-enabled systems additionally drop from N+1 meter callback registrations and N instrument sets to a constant 3 registrations (system, actors, scheduler) and 1 instrument set; the per-actor cost is a cached 4-entry attribute slice. `unsafe.Sizeof(PID{})` grew from 456 to 464 bytes because the cached attribute slice header is 8 bytes larger than the registration handle it replaced; the retained-footprint numbers above already include that.
 
 A full scrape over 10k resident actors takes about 16ms, roughly 2µs per actor. Each per-actor observation still asks the deadletter actor for its count, so scrape wall time grows linearly with the resident population (about 160ms extrapolated at 100k actors); batching those counts into one request is possible follow-up work if very large metrics-enabled populations need faster scrapes. Actors that are suspended, stopping, passivating, or whose PostStart has not yet been processed are skipped by the scrape; the per-actor callbacks previously kept reporting suspended actors, so this is a deliberate output change, not an accident.
 

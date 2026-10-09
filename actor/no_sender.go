@@ -87,5 +87,5 @@ func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 		WithSupervisor(supervisor),
 	)
 
-	return x.actors.addNode(x.systemGuardian, x.noSender)
+	return x.attachSystemActor(x.systemGuardian, x.noSender)
 }

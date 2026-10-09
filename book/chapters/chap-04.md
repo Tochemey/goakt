@@ -135,11 +135,13 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
-7. Registers with the passivation manager, builds metric attributes, and schedules the first turn so that `PostStart` is delivered (`newPID` and `PID.firePostStart` in `actor/pid.go`).
+7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry (`PID.firePostStart` in `actor/pid.go`), and `attachSystemActor` does the same for system actors.
 
 ### `PostStart` is always the first message
 
 `init` arms `PostStart` in a dedicated slot *before* setting `runningState` (`actor/pid.go`). Every turn runs the pending `PostStart` before anything else (`PID.runPendingPostStart` in `actor/pid.go`), and the slot is separate from both queues (`PID` in `actor/pid.go`). So even if a user message, a child's `Terminated` or a `PanicSignal` arrives first, the actor sees `PostStart` first. The ordering is deliberate: from the moment `runningState` is set, senders can reach the actor.
+
+`PostStart` also means the actor has fully started. Its turn is scheduled after the actor is attached to the tree and, in a cluster, after its registry record is written, so a `PostStart` handler can rely on the registry: `ActorSystem.Partition` and `ActorExists` answer for the actor's own name, and another node can already reach it. One window remains: `init` marks the actor running before `attachAndPublish` attaches it, so a message that reaches the actor through a local name lookup between the tree attachment and the registry write triggers a turn that runs `PostStart` before the record exists. A spawn whose publication fails stops the actor without scheduling `PostStart`; only a message that arrived in that window could have run it.
 
 ### The PID struct is laid out for the cache
 

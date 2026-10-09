@@ -3142,13 +3142,13 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 }
 
 // attachAndPublish counts the actor, attaches pid to the tree under parent,
-// registers death-watch supervision, and synchronously publishes the registry
-// record to the cluster. On publication failure the actor is stopped, so a
-// failed spawn leaves nothing behind: the death watch removes the tree node,
-// decrements the counter and, for singletons, removes the kind. It is the
-// spawn-completion core shared by completeSpawn and the reliable companion
-// transaction, which must attach its controller without re-entering the
-// endpoint logic above.
+// registers death-watch supervision, synchronously publishes the registry
+// record to the cluster and then schedules the turn that delivers PostStart.
+// On publication failure the actor is stopped, so a failed spawn leaves
+// nothing behind: the death watch removes the tree node, decrements the
+// counter and, for singletons, removes the kind. It is the spawn-completion
+// core shared by completeSpawn and the reliable companion transaction, which
+// must attach its controller without re-entering the endpoint logic above.
 func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*PID, error) {
 	if !pid.isStateSet(systemState) {
 		x.increaseActorsCounter()
@@ -3183,8 +3183,26 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 		return nil, err
 	}
 
+	// The actor has fully started only now: its PostStart is delivered once
+	// it is in the tree and, in a cluster, in the registry, so the handler
+	// can rely on both. A spawn that fails before this point does not
+	// schedule it; only a message that reached the actor through a local
+	// name lookup in the meantime could have run it already.
+	pid.firePostStart()
 	x.recordActorSpawned(pid)
 	return pid, nil
+}
+
+// attachSystemActor attaches a system actor to the tree under parent and
+// delivers its PostStart. System actors are not published to the cluster, so
+// attaching them is all that fully starting them takes.
+func (x *actorSystem) attachSystemActor(parent, pid *PID) error {
+	if err := x.actors.addNode(parent, pid); err != nil {
+		return err
+	}
+
+	pid.firePostStart()
+	return nil
 }
 
 // rollbackSpawn stops a partially spawned actor so a failed spawn leaves
@@ -4878,7 +4896,12 @@ func (x *actorSystem) spawnRootGuardian(ctx context.Context) error {
 	actorName := reservedName(rootGuardianType)
 	x.rootGuardian, _ = x.configPID(ctx, actorName, newRootGuardian(), asSystem(), WithLongLived())
 	// rootGuardian is the rootGuardian node of the actors tree
-	return x.actors.addRootNode(x.rootGuardian)
+	if err := x.actors.addRootNode(x.rootGuardian); err != nil {
+		return err
+	}
+
+	x.rootGuardian.firePostStart()
+	return nil
 }
 
 // spawnSystemGuardian creates the system guardian
@@ -4895,7 +4918,7 @@ func (x *actorSystem) spawnSystemGuardian(ctx context.Context) error {
 		)))
 
 	// systemGuardian is a child actor of the rootGuardian actor
-	return x.actors.addNode(x.rootGuardian, x.systemGuardian)
+	return x.attachSystemActor(x.rootGuardian, x.systemGuardian)
 }
 
 // spawnUserGuardian creates the user guardian
@@ -4912,7 +4935,7 @@ func (x *actorSystem) spawnUserGuardian(ctx context.Context) error {
 		)))
 
 	// userGuardian is a child actor of the rootGuardian actor
-	return x.actors.addNode(x.rootGuardian, x.userGuardian)
+	return x.attachSystemActor(x.rootGuardian, x.userGuardian)
 }
 
 // spawnDeathWatch creates the deathWatch actor
@@ -4941,7 +4964,7 @@ func (x *actorSystem) spawnDeathWatch(ctx context.Context) error {
 	)
 
 	// the deathWatch is a child actor of the system guardian
-	return x.actors.addNode(x.systemGuardian, x.deathWatch)
+	return x.attachSystemActor(x.systemGuardian, x.deathWatch)
 }
 
 // spawnRelocator creates the actor responsible for re-deploying actors when a node leaves the cluster
@@ -4967,7 +4990,7 @@ func (x *actorSystem) spawnRelocator(ctx context.Context) error {
 			WithSupervisor(supervisor),
 		)
 		// the relocator is a child actor of the system guardian
-		return x.actors.addNode(x.systemGuardian, x.relocator)
+		return x.attachSystemActor(x.systemGuardian, x.relocator)
 	}
 	return nil
 }
@@ -4988,7 +5011,7 @@ func (x *actorSystem) spawnDeadletter(ctx context.Context) error {
 		),
 	)
 	// the deadletter is a child actor of the system guardian
-	return x.actors.addNode(x.systemGuardian, x.deadletter)
+	return x.attachSystemActor(x.systemGuardian, x.deadletter)
 }
 
 // checkSpawnPreconditions rejects a spawn before the actor is built when its
