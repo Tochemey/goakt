@@ -10348,3 +10348,43 @@ func TestPostStartSeesTheRegistryRecord(t *testing.T) {
 
 	srv.Shutdown()
 }
+
+// TestAttachSystemActor covers attachSystemActor: a system actor attached
+// under its parent receives PostStart, and a tree insertion failure is
+// returned without the actor entering the tree or receiving PostStart.
+func TestAttachSystemActor(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	impl := sys.(*actorSystem)
+
+	t.Run("attaches the actor and delivers PostStart", func(t *testing.T) {
+		postStartCount.Store(0)
+		pid, err := impl.configPID(ctx, "attached", &MockPostStartCountingActor{}, asSystem(), WithLongLived())
+		require.NoError(t, err)
+		require.NoError(t, impl.attachSystemActor(impl.systemGuardian, pid))
+
+		_, ok := impl.tree().pidOf(pid.ID())
+		require.True(t, ok)
+		require.Eventually(t, func() bool { return postStartCount.Load() == 1 }, 5*time.Second, 50*time.Millisecond)
+	})
+
+	t.Run("returns the tree insertion error without delivering PostStart", func(t *testing.T) {
+		postStartCount.Store(0)
+		pid, err := impl.configPID(ctx, "orphan", &MockPostStartCountingActor{}, asSystem(), WithLongLived())
+		require.NoError(t, err)
+
+		// the parent was never inserted into the tree
+		detached := newPIDAt(sys, "detached", 0)
+		require.EqualError(t, impl.attachSystemActor(detached, pid), "parent pid does not exist")
+
+		_, ok := impl.tree().pidOf(pid.ID())
+		require.False(t, ok)
+		pause.For(200 * time.Millisecond)
+		require.Zero(t, postStartCount.Load())
+		require.NoError(t, pid.Shutdown(ctx))
+	})
+
+	require.NoError(t, sys.Stop(ctx))
+}
