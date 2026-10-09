@@ -409,7 +409,6 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 
 	pid.startPassivation()
 	pid.buildObserveOptions()
-	pid.firePostStart()
 
 	pid.startedAt.Store(time.Now().Unix())
 	return pid, nil
@@ -3775,6 +3774,14 @@ func (pid *PID) armPostStart(ctx context.Context) {
 // firePostStart schedules a turn so the armed PostStart runs even when no
 // other message arrives. A turn that some other message already triggered
 // handles PostStart first, so this only ensures that one happens.
+//
+// It is called once the actor has fully started: attached to the tree and, in
+// a cluster, published to the registry (attachAndPublish, attachSystemActor,
+// restartSubtree), so a PostStart handler can rely on the registry and the
+// actor is reachable by name from every node. One exception remains: the
+// actor is marked running before it is attached, so a message that reaches
+// it through a local name lookup in that window triggers a turn that runs
+// PostStart before the registry write.
 func (pid *PID) firePostStart() {
 	if pid.schedState.TrySchedule() {
 		pid.dispatcher.schedule(pid)

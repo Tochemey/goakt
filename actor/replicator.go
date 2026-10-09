@@ -1849,7 +1849,7 @@ func (x *actorSystem) spawnReplicator(ctx context.Context) error {
 	}
 
 	// the replicator is a child actor of the system guardian
-	return x.actors.addNode(x.systemGuardian, x.replicator)
+	return x.attachSystemActor(x.systemGuardian, x.replicator)
 }
 
 // registerReplicatorMetrics registers OpenTelemetry observable counters for the Replicator.

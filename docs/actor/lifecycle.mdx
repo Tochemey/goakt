@@ -114,7 +114,9 @@ Go structs in the `actor` package. Handle them in `Receive` when you need to rea
 - **PostStart**: Delivered as the first message after the actor is spawned or restarted. Use it to capture `ctx.Self`,
   set up references, or perform logic that must run after the actor is fully started. No other message overtakes it,
   including system messages such as `Terminated` from a child that stopped right away, so state set in `PostStart` is
-  always ready when the next message arrives.
+  always ready when the next message arrives. When `PostStart` runs, the actor is in the actor tree and, in a cluster,
+  its registry record is written, so `ActorExists`, `Partition` and lookups from other nodes already answer for its
+  name. A message that reaches the actor by name while the spawn is still publishing it can run `PostStart` earlier.
 - **PoisonPill**: Gracefully stops the actor. It is a system message: it skips the user mailbox and is handled as soon
   as the actor finishes the message in hand, ahead of any user messages still queued. The actor then stops its
   children, runs `PostStop` and notifies its watchers. User messages still in the mailbox are discarded, not processed.

@@ -106,7 +106,7 @@ func (x *actorSystem) spawnSingletonManager(ctx context.Context) error {
 	)
 
 	// the singletonManager is a child actor of the system guardian
-	return x.actors.addNode(x.systemGuardian, x.singletonManager)
+	return x.attachSystemActor(x.systemGuardian, x.singletonManager)
 }
 
 func (x *actorSystem) spawnSingletonOnLeader(ctx context.Context, cl cluster.Cluster, name string, actor Actor, spawnTimeout, waitInterval time.Duration, retries int32, singletonSupervisor *sup.Supervisor) (*PID, error) {

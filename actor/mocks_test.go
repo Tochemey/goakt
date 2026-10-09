@@ -4795,3 +4795,61 @@ func clearPIDSlot(t *testing.T, system ActorSystem, pid *PID) {
 	node.pid.Store(nil)
 	t.Cleanup(func() { node.pid.Store(pid) })
 }
+
+// registryProbe records, from its own PostStart, what the cluster registry
+// says about the actor: the partition the actor system reports for its name,
+// whether the local registry handle already holds its record and whether each
+// peer node already finds the actor. With a child name set it also spawns a
+// child probe from PostStart.
+type registryProbe struct {
+	mu           sync.Mutex
+	registryName string
+	childName    string
+	child        *registryProbe
+	peers        []ActorSystem
+	partition    uint64
+	recordErr    error
+	peerErrs     []error
+	done         bool
+}
+
+func (p *registryProbe) PreStart(*Context) error { return nil }
+func (p *registryProbe) PostStop(*Context) error { return nil }
+
+func (p *registryProbe) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*PostStart); !ok {
+		return
+	}
+
+	system := ctx.ActorSystem()
+	_, recordErr := system.(*actorSystem).getCluster().GetActor(ctx.Context(), p.registryName)
+
+	peerErrs := make([]error, 0, len(p.peers))
+
+	for _, peer := range p.peers {
+		exists, err := peer.ActorExists(ctx.Context(), p.registryName)
+		if err == nil && !exists {
+			err = gerrors.NewErrActorNotFound(p.registryName)
+		}
+
+		peerErrs = append(peerErrs, err)
+	}
+
+	p.mu.Lock()
+	p.partition = system.Partition(p.registryName)
+	p.recordErr = recordErr
+	p.peerErrs = peerErrs
+	p.done = true
+	p.mu.Unlock()
+
+	if p.childName != "" {
+		ctx.Spawn(p.childName, p.child)
+	}
+}
+
+// snapshot returns what the probe recorded from PostStart and whether it ran.
+func (p *registryProbe) snapshot() (partition uint64, done bool, recordErr error, peerErrs []error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.partition, p.done, p.recordErr, p.peerErrs
+}

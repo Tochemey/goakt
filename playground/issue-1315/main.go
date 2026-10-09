@@ -79,9 +79,9 @@ const maxChurnObjectsPerCycle = 300.0
 const scrapePopulation = 10_000
 
 // maxMeterRegistrations is the constant number of meter callbacks a
-// metrics-enabled system registers after the fix; before the fix it was one
-// per actor plus one.
-const maxMeterRegistrations = 2.0
+// metrics-enabled system registers after the fix: one each for the system,
+// the actors and the scheduler; before the fix it was one per actor plus one.
+const maxMeterRegistrations = 3.0
 
 // noop is the smallest possible actor: no state, no message handling.
 type noop struct{}

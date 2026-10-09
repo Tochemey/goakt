@@ -14,7 +14,7 @@ The sample guards both fixes without an OpenTelemetry SDK, matching how the libr
 
 1. Spawns actors and stops some, then reads the live actor count through the public `Metric` API and asserts it rises to the spawned total and falls after the stops. A monotonic counter cannot represent that fall; a gauge can.
 2. Spawns children under a parent and stops some, asserting the child count rises then falls the same way, and sends messages to a black-hole actor to confirm per-actor deadletter counts are recorded.
-3. Runs one full metrics scrape over 10k resident actors through an in-process meter and asserts a metrics-enabled system registers a constant two meter callbacks and the scrape completes without error. Before the fix the same scrape blocked on one deadletter ask per actor.
+3. Runs one full metrics scrape over 10k resident actors through an in-process meter and asserts a metrics-enabled system registers a constant three meter callbacks (system, actors, scheduler) and the scrape completes without error. Before the fix the same scrape blocked on one deadletter ask per actor.
 
 This is the follow-up called out in the `issue-1315` sample, which noted that batching the per-actor deadletter counts into one request was possible future work for large metrics-enabled populations.
 
