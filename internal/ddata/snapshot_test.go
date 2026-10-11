@@ -25,12 +25,14 @@ package ddata
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.etcd.io/bbolt"
+	bbolterrors "go.etcd.io/bbolt/errors"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/crdt"
@@ -285,6 +287,101 @@ func TestStore(t *testing.T) {
 		err = store.Remove()
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "store is still open")
+	})
+
+	t.Run("NewStore fails when the snapshot file path is a directory", func(t *testing.T) {
+		dir := t.TempDir()
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, fileName), 0o755))
+
+		_, err := NewStore(dir)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "opening snapshot db")
+	})
+
+	t.Run("a snapshot file without the entries bucket loads nothing and cannot be saved", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		require.NoError(t, store.db.Update(func(tx *bbolt.Tx) error {
+			return tx.DeleteBucket([]byte(bucketName))
+		}))
+
+		loaded, err := store.Load()
+		require.NoError(t, err)
+		assert.Empty(t, loaded)
+
+		err = store.Save(nil, nil, time.Time{}, time.Time{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), bucketName)
+	})
+
+	t.Run("an entry or a tombstone whose key is not valid UTF-8 fails the save", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		entries := map[string]*internalpb.CRDTSnapshotEntry{
+			"bad": internalpb.CRDTSnapshotEntry_builder{Key: codec.EncodeCRDTKey("\xff", crdt.GCounterType)}.Build(),
+		}
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "marshal snapshot entry")
+
+		tombstones := []*internalpb.CRDTTombstone{
+			internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("\xff", crdt.GCounterType)}.Build(),
+		}
+		err = store.Save(nil, tombstones, time.Time{}, time.Time{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "marshal snapshot tombstone")
+	})
+
+	t.Run("an entry or a tombstone whose key is too large for the store fails the save", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		huge := strings.Repeat("k", bbolt.MaxKeySize+1)
+
+		entries := map[string]*internalpb.CRDTSnapshotEntry{
+			huge: internalpb.CRDTSnapshotEntry_builder{Key: codec.EncodeCRDTKey(huge, crdt.GCounterType)}.Build(),
+		}
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
+		require.ErrorIs(t, err, bbolterrors.ErrKeyTooLarge)
+
+		tombstones := []*internalpb.CRDTTombstone{
+			internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey(huge, crdt.GCounterType)}.Build(),
+		}
+		err = store.Save(nil, tombstones, time.Time{}, time.Time{})
+		require.ErrorIs(t, err, bbolterrors.ErrKeyTooLarge)
+	})
+
+	t.Run("clearBucket fails in a read-only transaction", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		entries := map[string]*internalpb.CRDTSnapshotEntry{
+			"counter-1": internalpb.CRDTSnapshotEntry_builder{Key: codec.EncodeCRDTKey("counter-1", crdt.GCounterType)}.Build(),
+		}
+		require.NoError(t, store.Save(entries, nil, time.Time{}, time.Time{}))
+
+		err = store.db.View(func(tx *bbolt.Tx) error {
+			return clearBucket(tx.Bucket(store.bucket))
+		})
+		require.ErrorIs(t, err, bbolterrors.ErrTxNotWritable)
+	})
+
+	t.Run("remove reports a path that cannot be removed", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.Close())
+
+		occupied := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(occupied, "keep"), []byte("x"), 0o600))
+		store.path = occupied
+
+		require.Error(t, store.Remove())
 	})
 
 	t.Run("NewStore with invalid directory", func(t *testing.T) {
