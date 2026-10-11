@@ -23,7 +23,11 @@
 package actor
 
 import (
+	"runtime"
+
 	gods "github.com/Workiva/go-datastructures/queue"
+
+	gerrors "github.com/tochemey/goakt/v4/errors"
 )
 
 // BoundedMailbox is a bounded, blocking MPSC mailbox backed by a ring
@@ -33,9 +37,15 @@ import (
 //   - Bounded capacity: the queue has a fixed size, the requested capacity
 //     rounded up to the next power of two by the underlying ring buffer
 //     (NewBoundedMailbox(10) holds 16 messages).
-//   - Blocking enqueue: Enqueue blocks when the mailbox is full until space
-//     becomes available or the mailbox is disposed. The sender's goroutine
-//     spins meanwhile; when the sender is an actor, that is a dispatcher worker.
+//   - Blocking enqueue for local senders: Enqueue blocks when the mailbox is
+//     full until space becomes available or the mailbox is disposed. The
+//     sender's goroutine spins meanwhile; when the sender is an actor, that is
+//     a dispatcher worker.
+//   - Non-blocking enqueue for remote messages: a message that arrived over
+//     remoting is refused with ErrMailboxFull when the mailbox is full, like a
+//     NonBlockingBoundedMailbox, and the runtime routes it to dead letters. Its
+//     producer is the connection's inbound dispatcher, and blocking it would
+//     stall every receiver sharing the connection.
 //   - Non-blocking dequeue: Dequeue returns nil when the mailbox is empty, as
 //     the dispatcher requires.
 //
@@ -56,8 +66,9 @@ var _ Mailbox = (*BoundedMailbox)(nil)
 // power of two.
 //
 // Behavior
-//   - When the mailbox reaches capacity, Enqueue blocks until space becomes
-//     available (or the mailbox is disposed).
+//   - When the mailbox reaches capacity, Enqueue blocks a local sender until
+//     space becomes available (or the mailbox is disposed) and refuses a
+//     message that arrived over remoting with ErrMailboxFull.
 //   - When the mailbox is empty, Dequeue returns nil.
 func NewBoundedMailbox(capacity int) *BoundedMailbox {
 	return &BoundedMailbox{
@@ -68,15 +79,42 @@ func NewBoundedMailbox(capacity int) *BoundedMailbox {
 // Enqueue inserts a message into the mailbox.
 //
 // Semantics
-//   - Blocks when the mailbox is full until space is available or the mailbox is
-//     disposed.
+//   - A message from a local sender blocks when the mailbox is full until
+//     space is available or the mailbox is disposed.
+//   - A message that arrived over remoting never blocks: when the mailbox is
+//     full it is refused with ErrMailboxFull, and the runtime routes it to
+//     dead letters and repays its credit. Blocking here would hold the
+//     connection's inbound dispatcher, and with it every receiver sharing
+//     the connection.
 //   - Returns an error when the mailbox has been disposed or the underlying
 //     buffer reports a failure.
 //
 // Concurrency
 // - Safe for concurrent producers.
 func (mailbox *BoundedMailbox) Enqueue(msg *ReceiveContext) error {
-	return mailbox.underlying.Put(msg)
+	if !msg.remote {
+		return mailbox.underlying.Put(msg)
+	}
+
+	// The ring's Offer reports false when it lost the race for a free slot
+	// to another producer as well as when the ring is full. Only a ring seen
+	// full refuses the message; a lost race retries, as Put does.
+	for {
+		ok, err := mailbox.underlying.Offer(msg)
+		if err != nil {
+			return err
+		}
+
+		if ok {
+			return nil
+		}
+
+		if mailbox.underlying.Len() >= mailbox.underlying.Cap() {
+			return gerrors.ErrMailboxFull
+		}
+
+		runtime.Gosched()
+	}
 }
 
 // Dequeue removes and returns the next message from the mailbox, or nil when

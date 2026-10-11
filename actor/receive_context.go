@@ -118,6 +118,15 @@ type ReceiveContext struct {
 	// a pooled context can never carry a live share.
 	remoteHold *inet.CreditShare
 
+	// remote reports that the message arrived over remoting. Its producer is
+	// then the connection's inbound dispatcher, which must never wait on one
+	// actor's mailbox: a BoundedMailbox refuses such a message when it is
+	// full instead of blocking, as it does for a local sender. Set once by
+	// the remote tell and remote ask handlers; remoteHold cannot stand in
+	// for it, because an ask, a chunked message or a lease-less path
+	// delivers without a hold.
+	remote bool
+
 	// poolShard is the context-pool shard this object belongs to, stamped
 	// once at allocation. Recycling always returns the object to its home
 	// shard, keeping every shard's population closed. Deliberately left
@@ -921,6 +930,7 @@ func (rctx *ReceiveContext) reset() {
 	rctx.requestReplyTo = nil
 	rctx.deadline = 0
 	rctx.deadlineScope = nil
+	rctx.remote = false
 
 	// responseClosed is not reset: build() overwrites it in the sync
 	// path, cloneContext() clears it for clones, and async (Tell) never

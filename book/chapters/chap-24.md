@@ -128,7 +128,7 @@ type ReplicatedData interface {
 |---|---|---|---|---|
 | `GCounter` | one `uint64` slot per node ID | `Increment(nodeID, n)`, `Value` (sum of slots) | per-node maximum | the **full slot value** of each node that changed, not the increment |
 | `PNCounter` | two `GCounter`s, increments and decrements | `Increment`, `Decrement`, `Value` (difference, `int64`) | each `GCounter` merged on its own | the two `GCounter` deltas |
-| `LWWRegister` | value, timestamp in nanoseconds, node ID | `Set(value, time, nodeID)`, `Value` | higher timestamp wins; on a tie the lexicographically higher node ID wins | the whole register |
+| `LWWRegister` | value, timestamp in nanoseconds, node ID | `Set(value, time, nodeID)`, `Value` | higher timestamp wins; on a tie the lexicographically higher node ID wins. `Set` stamps the write one nanosecond past the current timestamp when the given time is not later, so a write never ties with or loses to the value it replaces | the whole register |
 | `ORSet` | per element a list of dots `(nodeID, counter)`, and a clock per node | `Add(nodeID, e)`, `Remove(e)`, `Contains`, `Elements`, `Len`, `Compact` | a dot is kept if the other side's clock does not cover it, or if the other side also holds it; an element with no dot left is gone (add wins) | every live dot of the nodes whose dots changed, and their clock entries (see below) |
 | `ORMap` | an `ORSet` of keys and a map of key to `ReplicatedData` | `Set(nodeID, k, v)`, `Remove(k)`, `Get`, `Keys`, `Entries`, `Len`, `Compact` | keys by `ORSet` merge; a value present on both sides by its own `Merge` | the **whole map** |
 | `Flag` | one boolean | `Enable`, `Enabled` | logical OR; it never returns to false | the whole flag |
@@ -198,16 +198,17 @@ If `spawnReplicator` fails, `Start` shuts the Replicator down if it exists, stop
 | `changedAt` | key ID to the time of the last local update |
 | `staleKeys`, `gapStart`, `heardWhileStale` | while back from a gap longer than the tombstone TTL: the keys held before the gap, the start of the gap, and the peers whose digest arrived since ([§24.7](#247-deletion-tombstones-and-pruning)) |
 | `watchers` | key ID to the PIDs subscribed to changes |
-| `subscriptions` | key IDs seen; written by `trackKey`, never read |
+| `subscriptions` | key IDs seen; written by `trackKey`, cleared by `forgetKey`, never read |
 | `pendingDeltas`, `pendingTombstones` | key ID to the one delta or the one tombstone waiting for the cross-datacenter flush, each with the sequence number of its last write ([§24.9](#249-cluster-integration-and-multi-datacenter)) |
 | `pendingSeq` | the counter that numbers the writes to the two pending buffers |
 | `dataCenterAccepted` | remote datacenter ID to the highest pending sequence number that datacenter accepted; filled on the leader only ([§24.9](#249-cluster-integration-and-multi-datacenter)) |
 | `nodeID` | the Replicator's own actor ID, used as delta origin and as `deleted_by_node` |
+| `msgSeq` | the sequence in the topic message IDs; seeded in `PreStart` with the start time in nanoseconds, so the IDs of a new incarnation of the node are above those of the previous one, which the topic actors' duplicate filter still remembers under the same sender path |
 | atomic counters | values read by the metrics callback on another goroutine |
 
 ### Lifecycle
 
-`PreStart` reads the extension, builds the `internalpb.DataCenter` used as batch origin, allocates the maps, and calls `restoreFromSnapshot` ([§24.8](#248-snapshots)). The two pending maps and the accepted marks are allocated only when they do not exist, so what is owed to the remote datacenters survives a supervisor restart. A missing extension fails the start.
+`PreStart` reads the extension, builds the `internalpb.DataCenter` used as batch origin, allocates the maps, seeds `msgSeq` with the current time, and calls `restoreFromSnapshot` ([§24.8](#248-snapshots)). The two pending maps and the accepted marks are allocated only when they do not exist, so what is owed to the remote datacenters survives a supervisor restart. A missing extension fails the start.
 
 On `PostStart`, `handlePostStart`:
 
@@ -297,7 +298,7 @@ Each Replicator holds its own store, and each subscribes to the topic at its loc
 5. Send `Changed` to the key's watchers.
 6. Reply with `UpdateResponse` when there is a sender.
 
-`publishDelta` encodes the delta as an `internalpb.CRDTDelta` with the Replicator's ID as origin, and tells the topic actor to publish it under the message ID `<nodeID>:<sequence>`. It counts the publish, and when cross-datacenter replication is enabled it hands the delta, not yet encoded, to `bufferDelta` ([§24.9](#249-cluster-integration-and-multi-datacenter)). An encoding error is reported with `ctx.Err`.
+`publishDelta` encodes the delta as an `internalpb.CRDTDelta` with the Replicator's ID as origin, and tells the topic actor to publish it under the message ID `<nodeID>:<sequence>`, where the sequence counts from the start time of this incarnation of the node. It counts the publish, and when cross-datacenter replication is enabled it hands the delta, not yet encoded, to `bufferDelta` ([§24.9](#249-cluster-integration-and-multi-datacenter)). An encoding error is reported with `ctx.Err`.
 
 Every write to `store` after `PreStart` goes through `setValue`, which also drops the key's cached content hash ([§24.5](#245-anti-entropy)). `restoreFromSnapshot` fills `store` directly in `PreStart`, while `hashes` is still empty.
 
@@ -432,7 +433,7 @@ While a tombstone exists, local updates, peer deltas and full-state entries for 
 
 On each `pruneTick` (default every 5 minutes), `handlePrune`:
 
-1. Removes every tombstone older than the tombstone TTL (default 24 hours).
+1. Removes every tombstone older than the tombstone TTL (default 24 hours), and with it (`forgetKey`) the key's type and subscription entry, unless a coordinated read has stored the key again meanwhile. The key's watchers stay subscribed, and a tombstone still waiting for the remote datacenters stays in its buffer: it deletes the key where it arrives even past the TTL, ahead of the delta of a new incarnation of the key ([§24.9](#249-cluster-integration-and-multi-datacenter)).
 2. Replaces every stored value that implements `Compactable` with its `CompactData()`. The content hash of the value is the same after compaction ([§24.5](#245-anti-entropy)).
 
 After a tombstone expires the key can be created again by a new update. The TTL must outlast the time a deletion needs to reach every replica, across datacenters too.
@@ -456,18 +457,19 @@ When `observeContact` finds the previous contact older than the TTL (`gapBeyondT
 
 Snapshots are enabled when both `WithSnapshotInterval` (default zero, disabled) and `WithSnapshotDir` are set.
 
-`ddata.Store` (`internal/ddata/snapshot.go`) is a BoltDB file `crdt-snapshot.db` in that directory, mode `0600`, with a bucket `crdt_snapshots` for the entries and a bucket `crdt_snapshot_meta` for the last contact and the `since`. It stores bytes: the Replicator does the encoding. `Save` clears the entries bucket and writes every entry, keyed by key ID, the last contact and the `since` in one transaction. `Load` returns every entry. `Contact` returns the last contact and the `since`; zero, or none saved as in a file of an older version, reads back as the zero time. `Close` is idempotent; `Save`, `Load` and `Contact` on a closed store return `ErrStoreClosed`; `Remove` deletes the file and requires a closed store.
+`ddata.Store` (`internal/ddata/snapshot.go`) is a BoltDB file `crdt-snapshot.db` in that directory, mode `0600`, with a bucket `crdt_snapshots` for the entries, a bucket `crdt_snapshot_tombstones` for the tombstones and a bucket `crdt_snapshot_meta` for the last contact and the `since`. It stores bytes: the Replicator does the encoding. `Save` clears the entries and tombstones buckets and writes every entry and every tombstone, each keyed by key ID, the last contact and the `since` in one transaction; an entry or a tombstone with an empty key ID cannot be stored and is skipped. `Load` returns every entry and `Tombstones` every tombstone; a file of an older version holds no tombstones bucket and reads back none. `Contact` returns the last contact and the `since`; zero, or none saved as in a file of an older version, reads back as the zero time. `Close` is idempotent; `Save`, `Load`, `Tombstones` and `Contact` on a closed store return `ErrStoreClosed`; `Remove` deletes the file and requires a closed store.
 
 `restoreFromSnapshot`, in `PreStart`:
 
 1. Does nothing when snapshots are not configured.
 2. Opens the store. A failure to open or to load is logged as a warning and the Replicator starts without that data; it does not fail the start.
 3. For each entry, decodes the key and the data with a `CRDTValueSerializer`; an entry that fails is skipped with a warning. The value, its type, its **version** and the time of its last local update are restored.
-4. Applies the last contact and the `since` (`restoreContact`, [§24.7](#247-deletion-tombstones-and-pruning)). Times that cannot be read are logged as a warning and count as none.
+4. For each saved tombstone, `restoreTombstone` keeps it with its deletion time and node, unless its key cannot be decoded or the deletion is older than the tombstone TTL, by the rule of `applyTombstone` ([§24.7](#247-deletion-tombstones-and-pruning)). A node restored within the TTL therefore holds its deletions again and does not take a deleted key back from a peer that still has it. Tombstones that cannot be read are logged as a warning and count as none.
+5. Applies the last contact and the `since` (`restoreContact`, [§24.7](#247-deletion-tombstones-and-pruning)). Times that cannot be read are logged as a warning and count as none.
 
-`handleSnapshot`, on each `snapshotTick`, builds one `CRDTSnapshotEntry` per stored key (`buildSnapshotEntries`) and saves them with the times `snapshotContact` returns. An error is logged. `PostStop` does the same and returns the error. `buildSnapshotEntries` fails for the whole snapshot when one stored key has no recorded type or cannot be encoded.
+`handleSnapshot`, on each `snapshotTick`, builds one `CRDTSnapshotEntry` per stored key (`buildSnapshotEntries`) and the wire form of every tombstone within its TTL (`liveTombstones`, the same list a digest carries), and saves them with the times `snapshotContact` returns. An error is logged. `PostStop` does the same and returns the error. `buildSnapshotEntries` fails for the whole snapshot when one stored key has no recorded type or cannot be encoded.
 
-Tombstones, watchers and the cross-datacenter buffers are not part of the snapshot.
+Watchers and the cross-datacenter buffers are not part of the snapshot.
 
 ## 24.9 Cluster integration and multi-datacenter
 
@@ -633,9 +635,9 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 
 | Statement | Enforced by |
 |---|---|
-| Each type's `Merge` is commutative and idempotent and leaves its inputs unchanged; every type but `LWWRegister` is also tested for associativity; a merge with another type returns the receiver | `TestGCounter` in `crdt/gcounter_test.go`, `TestPNCounter` in `crdt/pncounter_test.go`, `TestLWWRegister` in `crdt/lww_register_test.go`, `TestORSet` in `crdt/or_set_test.go`, `TestORMap` in `crdt/or_map_test.go`, `TestFlag` in `crdt/flag_test.go`, `TestMVRegister` in `crdt/mv_register_test.go` |
+| Each type's `Merge` is commutative, associative and idempotent and leaves its inputs unchanged; a merge with another type returns the receiver | `TestGCounter` in `crdt/gcounter_test.go`, `TestPNCounter` in `crdt/pncounter_test.go`, `TestLWWRegister` and `TestLWWRegisterMergeAssociative` in `crdt/lww_register_test.go`, `TestORSet` in `crdt/or_set_test.go`, `TestORMap` in `crdt/or_map_test.go`, `TestFlag` in `crdt/flag_test.go`, `TestMVRegister` in `crdt/mv_register_test.go` |
 | A `GCounter` delta holds the full slot value of the nodes that changed | `TestGCounter` in `crdt/gcounter_test.go` |
-| In an `LWWRegister` the higher timestamp wins, and on a tie the higher node ID | `TestLWWRegister` in `crdt/lww_register_test.go` |
+| In an `LWWRegister` the higher timestamp wins, and on a tie the higher node ID; `Set` keeps a later timestamp and raises one that is not later to one nanosecond past the current one, so two writes with one clock reading converge on the second | `TestLWWRegister` and `TestLWWRegisterSetClock` in `crdt/lww_register_test.go` |
 | An `ORSet` keeps an element added concurrently with its removal | `TestORSet` in `crdt/or_set_test.go` |
 | An `ORSet` delta never removes an element its sender still has, omits an element added and removed before it was taken, and converges in any delivery order with duplicates; delta merge is commutative, associative and idempotent | `TestORSet` in `crdt/or_set_test.go` |
 | A `Changed` notification carries the key that changed | `TestReplicatorChangedCarriesKey` in `actor/replicator_test.go` |
@@ -649,7 +651,7 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | An update on one of three nodes is readable on all three; concurrent counter updates on three nodes converge; an `ORSet` with one add per node holds all three elements everywhere | `TestReplicatorCluster` in `actor/replicator_test.go` |
 | A peer delta merges into the store; a delta with the local origin is ignored; a delta for an unknown key creates it | `TestReplicatorActor` in `actor/replicator_test.go` |
 | After a delete, `Get` returns no data and an update to the key is answered and changes nothing; a peer's tombstone removes the key and one's own is ignored | `TestReplicatorTombstones` in `actor/replicator_test.go` |
-| Pruning removes tombstones older than the TTL and compacts an `ORSet` in the store | `TestReplicatorPrune` and `TestReplicatorPruneCompacts` in `actor/replicator_test.go` |
+| Pruning removes tombstones older than the TTL and compacts an `ORSet` in the store; an expired tombstone takes the key's type and subscription entry with it and leaves its pending cross-datacenter tombstone, a live one keeps them, and a key stored again keeps its type | `TestReplicatorPrune` and `TestReplicatorPruneCompacts` in `actor/replicator_test.go` |
 | The digest has one entry per stored key with its version | `TestReplicatorDigest` in `actor/replicator_test.go` |
 | Each type's content hash is the same for the same state reached through different operation orders and through merges in either direction, differs for different states, and is unchanged by `Clone` and `ResetDelta`; for `GCounter`, `LWWRegister`, `MVRegister`, `ORSet` and `ORMap` also by a round trip through the raw state | `TestGCounterStateHash` in `crdt/gcounter_test.go`, `TestPNCounterStateHash` in `crdt/pncounter_test.go`, `TestFlagStateHash` in `crdt/flag_test.go`, `TestLWWRegisterStateHash` in `crdt/lww_register_test.go`, `TestMVRegisterStateHash` in `crdt/mv_register_test.go`, `TestORSetStateHash` in `crdt/or_set_test.go`, `TestORMapStateHash` in `crdt/or_map_test.go` |
 | Compaction does not change the content hash of an `ORSet` or an `ORMap`; only the highest dot of a node counts for an element | `TestORSetStateHash` in `crdt/or_set_test.go`, `TestORMapStateHash` in `crdt/or_map_test.go`, `TestHashLiveDots` in `crdt/hash_test.go` |
@@ -661,8 +663,9 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | A write with `Majority` or `All` is visible on all three nodes; a read with `Majority` or `All` returns the merge of the peers' values; a delete with `Majority` removes the key on all three; a delete on one node sends `Deleted` to the watchers on all three | `TestReplicatorCluster` in `actor/replicator_test.go` |
 | A full-state entry for a tombstoned key is skipped | `TestReplicatorHandleDigestAndFullState` in `actor/replicator_test.go` |
 | A read request is answered with the local value, or with no data for an unknown key | `TestReplicatorHandleReadRequest` in `actor/replicator_test.go` |
-| A snapshot restores value, type and version; stopping the system writes a final snapshot; a stored key without a type fails the snapshot build | `TestReplicatorRestoreFromSnapshot`, `TestReplicatorPostStopWithSnapshot` and `TestReplicatorBuildSnapshotEntriesErrors` in `actor/replicator_test.go` |
-| The snapshot store round-trips entries and both contact times, overwrites on save, reads a missing or zero time as the zero time, fails on a malformed one, and refuses use after `Close` | `TestStore` in `internal/ddata/snapshot_test.go` |
+| The message sequence of a Replicator starts at its start time, and a new incarnation of the Replicator starts above every ID the previous one took | `TestReplicatorMessageSequenceAfterRestart` in `actor/replicator_test.go` |
+| A snapshot restores value, type and version, and the tombstones within the TTL with their deletion time and node, skipping an expired one and one whose key cannot be decoded; a snapshot saves the tombstones within the TTL and not the expired ones; stopping the system writes a final snapshot with its tombstones; a stored key without a type fails the snapshot build | `TestReplicatorRestoreFromSnapshot`, `TestReplicatorPostStopWithSnapshot` and `TestReplicatorBuildSnapshotEntriesErrors` in `actor/replicator_test.go` |
+| The snapshot store round-trips entries, tombstones and both contact times, overwrites both on save, skips an entry or a tombstone with an empty key ID, reads a missing or zero time as the zero time and a missing tombstones bucket as no tombstones, opens a file of a version without tombstones and saves to it, fails on a malformed time or tombstone, on a key that is not valid UTF-8 or is larger than BoltDB allows, on a file whose entries bucket is missing, on a snapshot path that is a directory and on a file that cannot be removed, and refuses use after `Close` | `TestStore` in `internal/ddata/snapshot_test.go` |
 | A contact within the TTL marks no key stale. After a longer gap, a peer that saw the whole gap removes the stale keys it does not list, and their watchers are sent `Deleted`; a peer that came after the gap, or that sends no `since`, resolves nothing and is sent no stale key. A key written after the gap, or received from a peer in a delta or an answer, is not stale. A coordinated read gets no stale key, and a node with stale keys sends no `since`. An answer passes on an earlier `since` only, and a digest with a later `since` is answered with it even when nothing else differs. Without anti-entropy no key is marked stale. A node restored after the TTL marks its keys stale before any contact; one restored within the TTL keeps its earlier `since`; a snapshot taken while keys are stale keeps the gap. The stale keys are kept once every peer that runs a Replicator is heard from, and the cross-datacenter flush waits until then. The last contact and the local update times come back from the snapshot, and a last contact that cannot be read counts as no contact | `TestReplicatorStaleKeys` in `actor/replicator_test.go` |
 | In a three-node cluster, a node restored from its snapshot after the tombstone TTL does not bring back a key deleted while it was away, nor one whose tombstone is still live, whether its peers kept running or restarted from their snapshots during the gap | `TestReplicatorCluster` in `actor/replicator_test.go` |
 | A batch from another datacenter merges its deltas and applies its tombstones, and the watchers of a deleted key are sent `Deleted`; a batch from the local datacenter is dropped; a batch without origin is processed | `TestReplicatorIncomingBatch` and `TestReplicatorIncomingBatchEdgeCases` in `actor/replicator_test.go` |
@@ -714,6 +717,9 @@ The design set these targets; no test enforces them: more than 500,000 local upd
 | A remote datacenter that cannot be reached keeps the entries it has not accepted in the buffer for as long as it stays on record | `replicatorActor.dropAcceptedPending` in `actor/replicator.go` |
 | A node that becomes the leader sends every remote datacenter everything it has pending, whatever the previous leader had delivered | `replicatorActor.handleDataCenterFlush` in `actor/replicator.go` |
 | A `RemoteTell` that returns no error counts as acceptance; a receiver that then rejects an entry, for example a delta of a key whose tombstone it still holds, is not sent it again | `replicatorActor.sendToDataCenter` and `replicatorActor.handleDelta` in `actor/replicator.go` |
+| A node that restarts with an empty or stale store and the same node ID writes slots and dots the cluster has already seen: a counter increment is dominated by the peers' higher slot and an `ORSet` add by their clock, so the write is lost until the node's next anti-entropy round pulls the key; the caller still gets an `UpdateResponse` | `GCounter.Merge` in `crdt/gcounter.go`, `ORSet.isDominated` in `crdt/or_set.go` |
+| `ORMap.Remove` followed by `Set` does not reset the value: the removal carries no causal record, so a peer merges the new value into the old one it still holds, and anti-entropy brings the merged value back | `ORMap.Remove` and `ORMap.Merge` in `crdt/or_map.go` |
+| A snapshot saves no tombstones, so a key deleted while a node was away comes back within the TTL if every node that held the tombstone restarts before that node returns | `replicatorActor.buildSnapshotEntries` and `replicatorActor.restoreFromSnapshot` in `actor/replicator.go` |
 | With cross-datacenter replication enabled and no remote datacenter on record, the pending entries are never cleared | `replicatorActor.dropAcceptedPending` in `actor/replicator.go` |
 | A tombstone that arrives later than the tombstone TTL after the deletion deletes the key and is not kept | `replicatorActor.handleProtoTombstone` in `actor/replicator.go` |
 | A receiver whose clock or tombstone TTL makes an old tombstone look live keeps it and rejects the delta of the recreated key in the same batch | `replicatorActor.handleProtoTombstone` and `replicatorActor.handleDelta` in `actor/replicator.go` |

@@ -243,6 +243,10 @@ func recycleContext(ctx *ReceiveContext) {
 // mailbox: a ReceiveContext can be linked into only one mailbox at a
 // time via its intrusive `next` field, so callers enqueue the clone
 // and let the original complete its current lifecycle.
+//
+// The clone carries neither remote nor remoteHold: it is enqueued by the
+// actor's own turn, through a stash or an unstash, not by the connection's
+// inbound dispatcher, and the credit share is released once, by the original.
 func cloneContext(src *ReceiveContext) *ReceiveContext {
 	dst := getContext(src.poolShard)
 	dst.ctx = src.ctx

@@ -124,7 +124,9 @@ if call != nil {
   `EnableReentrancy`), or the effective mode is `Off`.
 - **ErrReentrancyInFlightLimit**: `MaxInFlight` cap reached; no new async requests until some complete.
 - **ErrRequestTimeout**: Request timed out (via `WithRequestTimeout`).
-- **ErrRequestCanceled**: Request was canceled via `Cancel`.
+- **ErrRequestCanceled**: Request was canceled via `Cancel`, or by the actor stopping or restarting. In that case the
+  continuation does not run: the actor abandons its in-flight requests as it abandons its mailbox, and a caller waiting
+  on a deferred reply times out, as for any ask to an actor that stops before answering.
 
 ## StashNonReentrant and stashing
 
@@ -132,6 +134,11 @@ In `StashNonReentrant` mode, user messages are automatically stashed while any s
 buffer is created on demand; you do **not** need `WithStashing()` for reentrancy-driven stashing. When the last blocking
 request completes, the stashed messages are appended to the mailbox, oldest first. Messages that arrived after the
 response but before the actor handled it are already in the mailbox, so they run before the stashed ones.
+
+A restart cancels the request in flight and replays the stashed messages to the new incarnation, in order, after
+`PostStart`, as it keeps every queued message. Messages the actor stashed on its own with `WithStashing`, with no
+request in flight, are not replayed: they stay stashed for the new incarnation to unstash. A stop abandons the stash
+with the mailbox.
 
 ## When to use
 
@@ -146,6 +153,8 @@ response but before the actor handled it are already in the mailbox, so they run
   - A finite `MaxInFlight` limit to bound memory.
   - Per-request timeouts (`WithRequestTimeout`) to avoid unbounded stashing if dependencies stall.
 - `AllowAll` can introduce state races if your logic assumes strict ordering between request and response.
+- Passivation is not held for an in-flight request: an actor waiting on a reply is idle to its passivation strategy.
+  Set the idle timeout above the request timeout, or the actor can be passivated before the reply arrives.
 - Mixed-version clusters may decode unknown modes as `Off`, disabling async requests.
 
 ## Example

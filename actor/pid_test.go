@@ -9626,3 +9626,362 @@ func TestPostStartIsTheFirstMessage(t *testing.T) {
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 }
+
+// TestDoReceiveRefusesRemoteOverflowOnBoundedMailbox pins the remote
+// delivery refusal: a message that arrived over remoting for an actor whose
+// blocking BoundedMailbox is full is refused at once with a dead letter and
+// repays its credit share, instead of blocking the goroutine that delivers
+// it. A remote message that finds room is queued and keeps its share until
+// the actor dequeues it.
+func TestDoReceiveRefusesRemoteOverflowOnBoundedMailbox(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	const capacity = 2
+
+	blocking := NewMockMailboxBlockingActor()
+	pid, err := sys.Spawn(ctx, "blocking", blocking, WithLongLived(), WithMailbox(NewBoundedMailbox(capacity)))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	// park the actor on its first message so nothing is dequeued
+	require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+	<-blocking.entered
+
+	// deliver through the remote tell handler, which marks the message as
+	// remote and attaches its credit share
+	deliverRemote := func() *dynaport.CreditShare {
+		share := dynaport.DetachedCreditShare(1)
+		require.NoError(t, sys.(*actorSystem).handleRemoteTellHeld(ctx, nil, pid, new(testpb.TestSend), share))
+		return share
+	}
+
+	// fill the mailbox through the remote path: a queued message keeps its share
+	queued := make([]*dynaport.CreditShare, 0, capacity)
+	for range capacity {
+		queued = append(queued, deliverRemote())
+	}
+
+	require.EqualValues(t, capacity, pid.mailbox.Len())
+
+	for _, share := range queued {
+		assert.False(t, share.Released(), "a queued message keeps its share until it is dequeued")
+	}
+
+	// the overflow is refused at once: no block, share repaid, dead letter
+	var refused *dynaport.CreditShare
+	delivered := make(chan struct{})
+
+	go func() {
+		refused = deliverRemote()
+		close(delivered)
+	}()
+
+	select {
+	case <-delivered:
+	case <-time.After(time.Second):
+		t.Fatal("remote delivery blocked on a full BoundedMailbox")
+	}
+
+	assert.True(t, refused.Released(), "a refused message must repay its share immediately")
+	require.EqualValues(t, capacity, pid.mailbox.Len())
+	require.Eventually(t, func() bool {
+		return sys.Metric(ctx).DeadlettersCount() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	// the queued messages drain once the actor resumes and repay their shares
+	close(blocking.release)
+
+	require.Eventually(t, func() bool {
+		for _, share := range queued {
+			if !share.Released() {
+				return false
+			}
+		}
+		return true
+	}, time.Second, 10*time.Millisecond)
+}
+
+// TestRestartReplaysReentrancyStash pins that a restart keeps the messages a
+// StashNonReentrant request stashed before the restart, as it keeps every
+// queued message: the new incarnation handles them, in order, after its
+// PostStart, instead of leaving them in the stash box until some later
+// blocking request happens to complete.
+func TestRestartReplaysReentrancyStash(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+
+	// a target that never answers keeps the requester paused
+	target := spawnReentrancyActor(t, sys, ctx, "stash-restart-target", func(*ReceiveContext) {})
+
+	events := make(chan string, 10)
+
+	requester := spawnReentrancyActor(t, sys, ctx, "stash-restart-requester", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *PostStart:
+			events <- "poststart"
+		case *testpb.TestWait:
+			rctx.Request(target, msg, WithRequestTimeout(10*time.Second))
+		case *testpb.TestLog:
+			events <- msg.GetText()
+		}
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+
+	require.Equal(t, "poststart", <-events, "the first incarnation starts")
+
+	// pause the requester on a request, then queue two messages behind it
+	require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: 1}.Build()))
+	require.NoError(t, Tell(ctx, requester, testpb.TestLog_builder{Text: "first"}.Build()))
+	require.NoError(t, Tell(ctx, requester, testpb.TestLog_builder{Text: "second"}.Build()))
+
+	require.Eventually(t, func() bool {
+		state := requester.stashState.Load()
+		return state != nil && state.box.Len() == 2
+	}, 2*time.Second, 10*time.Millisecond, "both messages must be stashed behind the pause")
+
+	require.NoError(t, requester.Restart(ctx))
+
+	var received []string
+
+	require.Eventually(t, func() bool {
+		for {
+			select {
+			case event := <-events:
+				received = append(received, event)
+			default:
+				return len(received) == 3
+			}
+		}
+	}, 2*time.Second, 10*time.Millisecond, "the new incarnation must handle PostStart and both stashed messages, got %v", received)
+
+	assert.Equal(t, []string{"poststart", "first", "second"}, received)
+
+	state := requester.stashState.Load()
+	require.NotNil(t, state)
+	assert.True(t, state.box.IsEmpty(), "the stash is empty after the replay")
+}
+
+// TestRestartKeepsExplicitStash pins the other side of the restart replay:
+// the stash box is shared with WithStashing, and a stash the actor made on
+// its own, with no blocking request in flight, is not replayed by a restart.
+// It stays for the new incarnation to unstash when it decides to.
+func TestRestartKeepsExplicitStash(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+
+	events := make(chan string, 10)
+
+	stasher := spawnReentrancyActor(t, sys, ctx, "explicit-stasher", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *PostStart:
+			events <- "poststart"
+		case *testpb.TestLog:
+			events <- msg.GetText()
+			rctx.Stash()
+		}
+	}, WithStashing())
+
+	require.Equal(t, "poststart", <-events, "the first incarnation starts")
+
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "first"}.Build()))
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "second"}.Build()))
+	require.Equal(t, "first", <-events)
+	require.Equal(t, "second", <-events)
+
+	require.Eventually(t, func() bool {
+		state := stasher.stashState.Load()
+		return state != nil && state.box.Len() == 2
+	}, 2*time.Second, 10*time.Millisecond, "both messages must be stashed")
+
+	require.NoError(t, stasher.Restart(ctx))
+	require.Equal(t, "poststart", <-events, "the new incarnation starts")
+
+	// nothing is replayed: the stash keeps both messages and the actor
+	// handles none of them
+	pause.For(200 * time.Millisecond)
+
+	select {
+	case event := <-events:
+		t.Fatalf("a restart must not replay an explicit stash, handled %q", event)
+	default:
+	}
+
+	state := stasher.stashState.Load()
+	require.NotNil(t, state)
+	assert.EqualValues(t, 2, state.box.Len())
+}
+
+// TestRestartReplayKeepsOrderUnderRePause pins the order of the replay when
+// the replayed messages themselves pause the actor again, which is the normal
+// case for a StashNonReentrant actor: each replayed message issues a request,
+// and the ones behind it are stashed again until the reply. The new
+// incarnation must still handle every message in its original order.
+func TestRestartReplayKeepsOrderUnderRePause(t *testing.T) {
+	const messages = 300
+
+	sys, ctx := newReentrancySystem(t)
+
+	// the target answers only once the gate opens, so the first request
+	// keeps the requester paused until the restart
+	gate := make(chan struct{})
+	target := spawnReentrancyActor(t, sys, ctx, "order-target", func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestWait); ok {
+			<-gate
+			rctx.Response(new(testpb.Reply))
+		}
+	})
+
+	events := make(chan uint64, messages+8)
+
+	requester := spawnReentrancyActor(t, sys, ctx, "order-requester", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *PostStart:
+			events <- 0
+		case *testpb.TestWait:
+			events <- msg.GetDuration()
+			rctx.Request(target, msg, WithRequestTimeout(30*time.Second))
+		}
+	}, WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+
+	require.EqualValues(t, 0, <-events, "the first incarnation starts")
+
+	for seq := uint64(1); seq <= messages; seq++ {
+		require.NoError(t, Tell(ctx, requester, testpb.TestWait_builder{Duration: seq}.Build()))
+	}
+
+	require.EqualValues(t, 1, <-events, "the first message pauses the requester")
+	require.Eventually(t, func() bool {
+		state := requester.stashState.Load()
+		return state != nil && state.box.Len() == messages-1
+	}, 5*time.Second, 10*time.Millisecond, "every other message must be stashed behind the pause")
+
+	require.NoError(t, requester.Restart(ctx))
+	close(gate)
+
+	require.EqualValues(t, 0, <-events, "the new incarnation starts")
+
+	for want := uint64(2); want <= messages; want++ {
+		select {
+		case got := <-events:
+			require.Equal(t, want, got, "the replayed messages must keep their order")
+		case <-time.After(10 * time.Second):
+			t.Fatalf("message %d was never handled by the new incarnation", want)
+		}
+	}
+}
+
+// TestRestartReplaysExplicitStashWithBlockingRequest pins the decision taken
+// for the shared stash box: when a blocking request was in flight at the
+// restart, the whole box is replayed, a message the actor stashed on its own
+// included, as the completion of the last blocking request replays it too.
+func TestRestartReplaysExplicitStashWithBlockingRequest(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+
+	target := spawnReentrancyActor(t, sys, ctx, "mixed-target", func(*ReceiveContext) {})
+
+	events := make(chan string, 10)
+	var stashedExplicitly atomic.Bool
+
+	stasher := spawnReentrancyActor(t, sys, ctx, "mixed-stasher", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *PostStart:
+			events <- "poststart"
+		case *testpb.TestWait:
+			rctx.Request(target, msg, WithRequestTimeout(10*time.Second))
+		case *testpb.TestLog:
+			// the first incarnation sets the explicit message aside on its own
+			if msg.GetText() == "explicit" && stashedExplicitly.CompareAndSwap(false, true) {
+				rctx.Stash()
+				return
+			}
+			events <- msg.GetText()
+		}
+	}, WithStashing(), WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+
+	require.Equal(t, "poststart", <-events)
+
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "explicit"}.Build()))
+	require.Eventually(t, func() bool { return stashedExplicitly.Load() }, 2*time.Second, 10*time.Millisecond)
+	require.NoError(t, Tell(ctx, stasher, testpb.TestWait_builder{Duration: 1}.Build()))
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "paused"}.Build()))
+
+	require.Eventually(t, func() bool {
+		state := stasher.stashState.Load()
+		return state != nil && state.box.Len() == 2
+	}, 2*time.Second, 10*time.Millisecond, "the explicit message and the paused one must both be stashed")
+
+	require.NoError(t, stasher.Restart(ctx))
+
+	var received []string
+
+	require.Eventually(t, func() bool {
+		for {
+			select {
+			case event := <-events:
+				received = append(received, event)
+			default:
+				return len(received) == 3
+			}
+		}
+	}, 2*time.Second, 10*time.Millisecond, "got %v", received)
+
+	assert.Equal(t, []string{"poststart", "explicit", "paused"}, received)
+}
+
+// TestStopAbandonsStash pins that a terminal stop drops the stash as it drops
+// the mailbox: an actor restarted later under the same name must not meet
+// the messages its dead incarnation had set aside, while its stash buffer
+// stays usable.
+func TestStopAbandonsStash(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+
+	events := make(chan string, 10)
+
+	stasher := spawnReentrancyActor(t, sys, ctx, "stop-stasher", func(rctx *ReceiveContext) {
+		switch msg := rctx.Message().(type) {
+		case *PostStart:
+			events <- "poststart"
+		case *testpb.TestLog:
+			events <- msg.GetText()
+			rctx.Stash()
+		}
+	}, WithStashing())
+
+	require.Equal(t, "poststart", <-events)
+
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "first"}.Build()))
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "second"}.Build()))
+	require.Equal(t, "first", <-events)
+	require.Equal(t, "second", <-events)
+
+	require.Eventually(t, func() bool {
+		state := stasher.stashState.Load()
+		return state != nil && state.box.Len() == 2
+	}, 2*time.Second, 10*time.Millisecond, "both messages must be stashed")
+
+	require.NoError(t, stasher.Shutdown(ctx))
+
+	state := stasher.stashState.Load()
+	require.NotNil(t, state, "the stash buffer survives the stop")
+	assert.True(t, state.box.IsEmpty(), "a terminal stop abandons the stashed messages")
+
+	// a restart of the stopped actor starts a fresh incarnation that meets
+	// none of the abandoned messages, and can stash again
+	require.NoError(t, stasher.Restart(ctx))
+	require.Equal(t, "poststart", <-events)
+
+	require.NoError(t, Tell(ctx, stasher, testpb.TestLog_builder{Text: "third"}.Build()))
+	require.Equal(t, "third", <-events)
+
+	require.Eventually(t, func() bool {
+		return stasher.stashState.Load().box.Len() == 1
+	}, 2*time.Second, 10*time.Millisecond, "the new incarnation stashes into a buffer that holds only its own message")
+
+	select {
+	case event := <-events:
+		t.Fatalf("the new incarnation must not meet an abandoned message, handled %q", event)
+	default:
+	}
+}

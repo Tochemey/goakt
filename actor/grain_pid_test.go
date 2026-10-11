@@ -2429,3 +2429,106 @@ func TestGrainLateAskKeepsItsDeadline(t *testing.T) {
 		require.LessOrEqual(t, timeout, time.Minute)
 	})
 }
+
+// TestGrainRegisterRequestStateRefusedWhileStopping pins the shutdown
+// admission rule: once the system is stopping, a grain admits no new request,
+// so a StashNonReentrant request issued after the shutdown's single
+// cancellation pass can no longer pause the grain past its PoisonPill. The
+// refusal counts nothing: no in-flight, no blocking, no pause.
+func TestGrainRegisterRequestStateRefusedWhileStopping(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	identity, err := system.GrainIdentity(ctx, "stopping-admission", func(context.Context) (Grain, error) {
+		return &MockScriptedGrain{receive: func(*GrainContext) {}}, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+	require.NoError(t, err)
+
+	pid, ok := system.grains.Get(identity.String())
+	require.True(t, ok)
+
+	// admission works while the system runs
+	running := newRequestState("running", reentrancy.StashNonReentrant, pid)
+	require.NoError(t, pid.registerRequestState(running))
+	require.True(t, pid.paused())
+	pid.deregisterRequestState(running)
+	require.False(t, pid.paused())
+
+	system.shuttingDown.Store(true)
+	t.Cleanup(func() { system.shuttingDown.Store(false) })
+
+	stopping := newRequestState("stopping", reentrancy.StashNonReentrant, pid)
+	err = pid.registerRequestState(stopping)
+	require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+
+	reentrant := pid.reentrancy.Load()
+	require.NotNil(t, reentrant)
+	require.Zero(t, reentrant.inFlightCount.Load(), "a refused request is not counted in flight")
+	require.Zero(t, reentrant.blockingCount.Load(), "a refused request does not pause the grain")
+	require.False(t, pid.paused())
+	_, registered := reentrant.requestStates.Get(stopping.id)
+	require.False(t, registered, "a refused request is not registered")
+}
+
+// TestGrainShutdownRefusesRequestFromCancelledContinuation pins the shutdown
+// end to end: the continuation of a request the shutdown cancelled issues a
+// new StashNonReentrant request with no timeout. It is refused, so the
+// PoisonPill behind the pause runs, OnDeactivate runs, and Stop returns
+// within its deadline instead of waiting on a pause nothing would lift. A
+// RequestGrain is refused at delivery already; the admission check itself is
+// pinned by TestGrainRegisterRequestStateRefusedWhileStopping.
+func TestGrainShutdownRefusesRequestFromCancelledContinuation(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	silent := &MockScriptedGrain{receive: func(*GrainContext) {}}
+	silentID, err := system.GrainIdentity(ctx, "cancelled-silent", func(context.Context) (Grain, error) {
+		return silent, nil
+	})
+	require.NoError(t, err)
+
+	requested := make(chan struct{})
+	retried := make(chan error, 1)
+
+	requester := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		if _, ok := gctx.Message().(*testpb.TestPing); !ok {
+			return
+		}
+
+		// a request the shutdown will cancel; its continuation retries with
+		// a request that would pause the grain for good
+		gctx.RequestGrain(silentID, new(testpb.TestSend), WithRequestTimeout(0)).Then(func(_ any, err error) {
+			if !errors.Is(err, gerrors.ErrRequestCanceled) {
+				retried <- err
+				return
+			}
+
+			gctx.RequestGrain(silentID, new(testpb.TestSend), WithRequestTimeout(0)).Then(func(_ any, err error) {
+				retried <- err
+			})
+		})
+		gctx.NoErr()
+		close(requested)
+	}}
+
+	identity, err := system.GrainIdentity(ctx, "cancelled-requester", func(context.Context) (Grain, error) {
+		return requester, nil
+	}, WithGrainReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.StashNonReentrant))))
+	require.NoError(t, err)
+
+	require.NoError(t, system.TellGrain(ctx, identity, new(testpb.TestPing)))
+	<-requested
+
+	stopCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	require.NoError(t, system.Stop(stopCtx), "shutdown must not wait on a pause that nothing lifts")
+
+	select {
+	case err := <-retried:
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted, "the retry must be refused at admission")
+	case <-time.After(time.Second):
+		t.Fatal("the retried request never completed")
+	}
+
+	require.EqualValues(t, 1, requester.deactivations.Load(), "OnDeactivate must run")
+}

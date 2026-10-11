@@ -2611,14 +2611,16 @@ func (pid *PID) enqueueAsyncError(ctx context.Context, correlationID string, err
 	return nil
 }
 
-// cancelInFlightRequests completes all in-flight async calls with the given reason.
+// cancelInFlightRequests completes all in-flight async calls with the given
+// reason. It reports whether one of them was a StashNonReentrant request, so a
+// restart knows the stash holds messages that request set aside.
 //
 // Design decision: cancellations are local-only to keep shutdown fast and avoid
 // cross-node coordination.
-func (pid *PID) cancelInFlightRequests(reason error) {
+func (pid *PID) cancelInFlightRequests(reason error) (hadBlockingRequest bool) {
 	reentrant := pid.reentrancy.Load()
 	if reentrant == nil {
-		return
+		return false
 	}
 
 	keys := reentrant.requestStates.Keys()
@@ -2634,12 +2636,15 @@ func (pid *PID) cancelInFlightRequests(reason error) {
 		reentrant.inFlightCount.Dec()
 		if state.mode == reentrancy.StashNonReentrant {
 			reentrant.blockingCount.Dec()
+			hadBlockingRequest = true
 		}
 		state.stopTimeoutIfSet()
 	}
 
 	reentrant.inFlightCount.Store(0)
 	reentrant.blockingCount.Store(0)
+
+	return hadBlockingRequest
 }
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
@@ -2848,6 +2853,16 @@ func (pid *PID) reset() {
 	if !restarting {
 		pid.restartCount.Store(0)
 		pid.failureCount.Store(0)
+	}
+
+	// A terminal stop abandons the stash as it abandons the mailbox: an actor
+	// restarted later under the same name must not meet the messages a dead
+	// incarnation had set aside. The buffer itself stays, since WithStashing
+	// is spawn-time configuration that a later Restart does not re-apply. A
+	// restart keeps the stash: restartSubtree replays it when a stash-mode
+	// request was in flight.
+	if !restarting {
+		pid.abandonStash()
 	}
 
 	pid.startedAt.Store(0)
@@ -4281,7 +4296,14 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.setState(restartingState, true)
 	defer pid.setState(restartingState, false)
 
-	pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
+	// The cancellation lifts the pause of a StashNonReentrant request without
+	// replaying the messages it stashed; they are replayed below, once the old
+	// incarnation is gone. The stash box is shared with WithStashing, so the
+	// replay happens only when such a request was in flight. It then replays
+	// the whole box, as the completion of the last blocking request does; a
+	// stash the actor made on its own with no request in flight stays for the
+	// new incarnation to unstash.
+	hadBlockingRequest := pid.cancelInFlightRequests(gerrors.ErrRequestCanceled)
 	_, wasInTree := tree.node(pid.ID())
 
 	// A running or suspended actor is stopped before it is started again, so
@@ -4323,6 +4345,17 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	// would hand the actor to a second worker while that turn still runs.
 	pid.schedState.reset()
 	pid.resetBehavior()
+
+	// Messages stashed by a StashNonReentrant request before the restart are
+	// queued messages too, and a restart keeps queued messages. Replay them
+	// into the kept mailbox now, while no worker holds the actor and the new
+	// incarnation cannot take a turn or stash: they keep their order, ahead
+	// of anything sent to the new incarnation, and PostStart, armed by init
+	// and run from its own slot, still goes first.
+	if hadBlockingRequest {
+		pid.replayStash()
+	}
+
 	if err := pid.init(ctx); err != nil {
 		return err
 	}

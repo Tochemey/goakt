@@ -88,7 +88,7 @@ The old sentinel is reset with an atomic store to its `next` field, because a wo
 | `UnboundedFairMailbox` | unbounded | n/a | FIFO per sender, round-robin across senders | map lookup per message | no-op |
 | `UnboundedPriorityMailBox` | unbounded | n/a | priority; ties unspecified | mutex and heap push | no-op |
 | `UnboundedStablePriorityMailbox` | unbounded | n/a | priority; ties in arrival order | lock-free push | no-op |
-| `BoundedMailbox` | rounded up to a power of two | **blocks the sender** | FIFO | spin until a slot frees | disposes the ring |
+| `BoundedMailbox` | rounded up to a power of two | **blocks a local sender**; a remote message gets `ErrMailboxFull` and is dead-lettered | FIFO | spin until a slot frees (local); retry a lost slot race, refuse a full ring (remote) | disposes the ring |
 | `NonBlockingBoundedMailbox` | rounded up to a power of two, at least 2 | `ErrMailboxFull`, message dead-lettered | FIFO | lock-free | no-op |
 | `BoundedPriorityMailbox` | exactly `capacity` | `ErrMailboxFull`, message dead-lettered | priority; ties unspecified | lock-free | no-op |
 | `BoundedStablePriorityMailbox` | exactly `capacity` | `ErrMailboxFull`, message dead-lettered | priority; ties in arrival order | lock-free | no-op |
@@ -102,7 +102,8 @@ Every mailbox is passed as a value to `WithMailbox` (or `WithFuncMailbox` for fu
 `BoundedMailbox` wraps the ring buffer from `github.com/Workiva/go-datastructures/queue` (`NewBoundedMailbox` in `actor/bounded_mailbox.go`). Three properties come from that library rather than from GoAkt:
 
 - **The capacity is rounded up to a power of two.** `NewBoundedMailbox(10)` holds 16 messages.
-- **A full mailbox blocks the sender.** `Put` loops with `runtime.Gosched()` until a slot frees (`BoundedMailbox.Enqueue` in `actor/bounded_mailbox.go`). The sender's goroutine stays busy for that whole time. When the sender is another actor, that goroutine is a dispatcher worker, and it is not available to run any actor, including, possibly, the one it is waiting for.
+- **A full mailbox blocks a local sender.** `Put` loops with `runtime.Gosched()` until a slot frees (`BoundedMailbox.Enqueue` in `actor/bounded_mailbox.go`). The sender's goroutine stays busy for that whole time. When the sender is another actor, that goroutine is a dispatcher worker, and it is not available to run any actor, including, possibly, the one it is waiting for.
+- **A full mailbox refuses a remote message.** A message that arrived over remoting, by tell or by ask, carries the `remote` mark of its `ReceiveContext`, set by `actorSystem.handleRemoteTellHeld` and `actorSystem.handleRemoteAsk` in `actor/actor_system.go` and cleared by `ReceiveContext.reset`; `cloneContext` does not copy it, since a clone is enqueued by the actor's own turn. For such a message `Enqueue` loops on the ring's `Offer` instead of `Put`. `Offer` reports false both for a full ring and for a slot race lost to another producer, so the loop retries until it claims a slot or sees the ring full (`Len` at `Cap`), and returns `ErrMailboxFull` only then; `PID.doReceive` then dead-letters the message and repays its credit share ([Chapter 15](chap-15.md)). A refused ask is answered by its own timeout, as on a `NonBlockingBoundedMailbox`. The producer of a remote message is the connection's inbound dispatcher, the read goroutine or its drainer, and a `Put` that spun there stopped the lane for every receiver sharing it, asks and keepalives included, until the slow actor's mailbox drained. `remoteHold` is not the mark: a chunked message or a lease-less path delivers without a hold.
 - **`Dispose` is final.** After it, every `Put` fails with `ErrDisposed`.
 
 `Dequeue` does not block: it calls the ring's blocking `Get` only after checking that the length is positive, and returns nil otherwise (`actor/bounded_mailbox.go`). That is what contract point 2 requires.
@@ -204,7 +205,8 @@ A custom mailbox is passed to `WithMailbox` like the built-in ones. From [§6.1]
 | Behaviour | Source |
 |---|---|
 | A message refused by a full bounded mailbox becomes a dead letter; `Tell` still returns nil | `PID.doReceive` in `actor/pid.go` |
-| `BoundedMailbox` blocks the sender, and a sending actor's worker with it | `BoundedMailbox.Enqueue` in `actor/bounded_mailbox.go` |
+| `BoundedMailbox` blocks a local sender, and a sending actor's worker with it | `BoundedMailbox.Enqueue` in `actor/bounded_mailbox.go` |
+| A full `BoundedMailbox` refuses a remote message with `ErrMailboxFull` instead of blocking the connection's inbound dispatcher; the overflow is dead-lettered, its credit repaid, and an ask to a sibling on the same lane still answers; a remote message is never refused while the mailbox has room, whatever the contention; a local sender still blocks | `TestBoundedMailboxEnqueueRemoteMessage`, `TestBoundedMailboxEnqueueRemoteUnderContention` and `TestBoundedMailboxEnqueueBlocksLocalSender` in `actor/bounded_mailbox_test.go`; `TestDoReceiveRefusesRemoteOverflowOnBoundedMailbox` in `actor/pid_test.go`; `TestHandleRemoteAskRefusesOverflowOnBoundedMailbox` in `actor/actor_system_test.go`; `TestRemoteTellFullBoundedMailboxKeepsLaneAlive` in `actor/remote_server_test.go`; `playground/issue-1453` |
 | `BoundedMailbox` and `NonBlockingBoundedMailbox` round the capacity up to a power of two | `NewBoundedMailbox` in `actor/bounded_mailbox.go`; `nextPowerOfTwo` in `actor/non_blocking_bounded_mailbox.go` |
 | Messages queued when an actor stops are abandoned, not dead-lettered; a restart keeps them | `PID.runTurn` and `PID.reset` in `actor/pid.go` |
 | `WithMailbox` has no effect on an actor placed on another node or relocated | `actorSystem.SpawnOn` in `actor/spawn.go` |

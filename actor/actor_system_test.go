@@ -10388,3 +10388,55 @@ func TestAttachSystemActor(t *testing.T) {
 
 	require.NoError(t, sys.Stop(ctx))
 }
+
+// TestHandleRemoteAskRefusesOverflowOnBoundedMailbox pins that a remote ask
+// toward an actor whose blocking BoundedMailbox is full is refused like a
+// remote tell: the ask returns at its own timeout with the mailbox unchanged
+// instead of blocking the goroutine that serves it until the actor drains.
+func TestHandleRemoteAskRefusesOverflowOnBoundedMailbox(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	impl := sys.(*actorSystem)
+
+	const capacity = 2
+
+	blocking := NewMockMailboxBlockingActor()
+	pid, err := sys.Spawn(ctx, "blocking", blocking, WithLongLived(), WithMailbox(NewBoundedMailbox(capacity)))
+	require.NoError(t, err)
+
+	// park the actor on its first message, then fill the mailbox
+	require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+	<-blocking.entered
+
+	for range capacity {
+		require.NoError(t, impl.handleRemoteTellHeld(ctx, nil, pid, new(testpb.TestSend), nil))
+	}
+
+	require.EqualValues(t, capacity, pid.mailbox.Len())
+
+	const timeout = 200 * time.Millisecond
+
+	start := time.Now()
+	_, err = impl.handleRemoteAsk(ctx, pid, new(testpb.TestSend), timeout)
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	assert.Less(t, elapsed, time.Second, "the ask must return at its timeout, not when the actor drains")
+	assert.EqualValues(t, capacity, pid.mailbox.Len(), "the refused ask must not enter the mailbox")
+
+	// one dead letter for the refusal and one for the timeout, as for any
+	// ask that is not answered in time
+	var deadletters int64
+
+	require.Eventually(t, func() bool {
+		deadletters = sys.Metric(ctx).DeadlettersCount()
+		return deadletters == 2
+	}, time.Second, 10*time.Millisecond, "expected 2 dead letters, got %d", deadletters)
+
+	close(blocking.release)
+}

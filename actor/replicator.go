@@ -275,6 +275,17 @@ func (r *replicatorActor) PreStart(ctx *Context) error {
 	r.gapStart = time.Time{}
 	r.heardWhileStale = nil
 
+	// The topic actors remember the message IDs delivered recently, by
+	// sender and ID, and the sender is this Replicator's path, which is the
+	// same in every incarnation of the node. The sequence therefore starts
+	// at the current time rather than at zero, so the IDs of a restarted
+	// node are above every ID its previous incarnation published, and the
+	// first deltas and tombstones after the restart are not dropped as
+	// duplicates. The seed is the wall clock: a clock stepped back by more
+	// than the previous incarnation's lifetime, within the filter's
+	// retention, would reuse IDs.
+	r.msgSeq.Store(uint64(time.Now().UnixNano()))
+
 	// what is still owed to the remote datacenters survives a restart
 	if r.pendingDeltas == nil {
 		r.pendingDeltas = make(map[string]*pendingDelta)
@@ -320,7 +331,7 @@ func (r *replicatorActor) PostStop(ctx *Context) error {
 		}
 
 		lastContact, since := r.snapshotContact()
-		if err := r.snapshotStore.Save(entries, lastContact, since); err != nil {
+		if err := r.snapshotStore.Save(entries, r.liveTombstones(), lastContact, since); err != nil {
 			return fmt.Errorf("failed to save final CRDT snapshot: %w", err)
 		}
 
@@ -367,7 +378,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 		}
 	}
 
-	// start prune schedule for tombstone and departed node cleanup
+	// start prune schedule for tombstone expiry and CRDT compaction
 	if r.config.PruneInterval() > 0 {
 		if err := actorSystem.Schedule(
 			scheduleCtx,
@@ -1124,8 +1135,9 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 	}
 }
 
-// handlePrune cleans up expired tombstones, prunes departed node slots,
-// and compacts CRDTs that implement Compactable.
+// handlePrune cleans up expired tombstones and compacts CRDTs that implement
+// Compactable. It does not consult cluster membership: the counter slots and
+// clock entries of departed nodes are kept.
 func (r *replicatorActor) handlePrune() {
 	now := time.Now()
 	ttl := r.config.TombstoneTTL()
@@ -1134,6 +1146,7 @@ func (r *replicatorActor) handlePrune() {
 	for keyID, ts := range r.tombstones {
 		if now.Sub(ts.deletedAt) > ttl {
 			delete(r.tombstones, keyID)
+			r.forgetKey(keyID)
 		}
 	}
 
@@ -1173,17 +1186,9 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 		entries = append(entries, &entryBuf[i])
 		i++
 	}
-	var tombstones []*internalpb.CRDTTombstone
-
-	for _, ts := range r.tombstones {
-		if pb, live := r.encodeLiveTombstone(ts); live {
-			tombstones = append(tombstones, pb)
-		}
-	}
-
 	crdtd := &internalpb.CRDTDigest{}
 	crdtd.SetEntries(entries)
-	crdtd.SetTombstones(tombstones)
+	crdtd.SetTombstones(r.liveTombstones())
 
 	if !r.since.IsZero() {
 		crdtd.SetSinceNanos(r.since.UnixNano())
@@ -1196,6 +1201,35 @@ func (r *replicatorActor) buildDigest() *internalpb.CRDTDigest {
 func (r *replicatorActor) trackKey(keyID string, dataType crdt.DataType) {
 	r.subscriptions[keyID] = types.Unit{}
 	r.keyTypes[keyID] = dataType
+}
+
+// forgetKey drops the record trackKey made of a deleted key once its
+// tombstone has expired, unless a coordinated read has stored the key again
+// meanwhile. A key created again later is tracked anew. The key's watchers
+// stay subscribed, and a tombstone still waiting for the remote datacenters
+// stays in its buffer: it deletes the key where it arrives even past the
+// TTL, ahead of the delta of a new incarnation of the key.
+func (r *replicatorActor) forgetKey(keyID string) {
+	if _, held := r.store[keyID]; held {
+		return
+	}
+
+	delete(r.keyTypes, keyID)
+	delete(r.subscriptions, keyID)
+}
+
+// liveTombstones returns the wire form of every tombstone this node retains
+// that is within the tombstone TTL, for a digest or a snapshot.
+func (r *replicatorActor) liveTombstones() []*internalpb.CRDTTombstone {
+	var tombstones []*internalpb.CRDTTombstone
+
+	for _, ts := range r.tombstones {
+		if pb, live := r.encodeLiveTombstone(ts); live {
+			tombstones = append(tombstones, pb)
+		}
+	}
+
+	return tombstones
 }
 
 // setValue stores the value of a key. Every write to the store goes through
@@ -1376,8 +1410,8 @@ func (r *replicatorActor) removeWatcher(keyID string, pid *PID) {
 	}
 }
 
-// handleSnapshot saves the current CRDT store to BoltDB, with the contact
-// times returned by snapshotContact.
+// handleSnapshot saves the current CRDT store and the tombstones within
+// their TTL to BoltDB, with the contact times returned by snapshotContact.
 func (r *replicatorActor) handleSnapshot() {
 	if r.snapshotStore == nil {
 		return
@@ -1388,7 +1422,7 @@ func (r *replicatorActor) handleSnapshot() {
 		return
 	}
 	lastContact, since := r.snapshotContact()
-	if err := r.snapshotStore.Save(entries, lastContact, since); err != nil {
+	if err := r.snapshotStore.Save(entries, r.liveTombstones(), lastContact, since); err != nil {
 		r.logger.Errorf("failed to save CRDT snapshot: %v", err)
 	}
 }
@@ -1896,8 +1930,8 @@ func (x *actorSystem) registerReplicatorMetrics(replActor *replicatorActor) erro
 	return x.keepMetricRegistration(registration, err)
 }
 
-// restoreFromSnapshot opens the snapshot store and restores persisted CRDT state,
-// then the contact times saved with it (see restoreContact).
+// restoreFromSnapshot opens the snapshot store and restores persisted CRDT state
+// and tombstones, then the contact times saved with it (see restoreContact).
 // This is a no-op when snapshot persistence is not configured.
 // Note: the serializer is not yet available during PreStart (it is set in
 // handlePostStart), so restoreFromSnapshot decodes with its own
@@ -1952,9 +1986,41 @@ func (r *replicatorActor) restoreFromSnapshot() error {
 		}
 	}
 
+	tombstones, tsErr := store.Tombstones()
+	if tsErr != nil {
+		r.logger.Warnf("failed to load CRDT snapshot tombstones: %v", tsErr)
+	}
+
+	for _, pb := range tombstones {
+		r.restoreTombstone(pb)
+	}
+
 	r.restoreContact(lastContact, since)
-	r.logger.Debugf("restored %d CRDT keys from snapshot", len(entries))
+	r.logger.Debugf("restored %d CRDT keys and %d tombstones from snapshot", len(entries), len(r.tombstones))
 	return nil
+}
+
+// restoreTombstone keeps a tombstone saved with the snapshot, unless the
+// deletion is older than the tombstone TTL: as in applyTombstone, such a
+// tombstone rejects nothing and would be pruned on the next tick.
+func (r *replicatorActor) restoreTombstone(pb *internalpb.CRDTTombstone) {
+	keyID, dataType, err := codec.DecodeCRDTKey(pb.GetKey())
+	if err != nil {
+		r.logger.Warnf("failed to decode snapshot tombstone key: %v", err)
+		return
+	}
+
+	deletedAt := time.Unix(0, pb.GetDeletedAtNanos())
+	if time.Since(deletedAt) > r.config.TombstoneTTL() {
+		return
+	}
+
+	r.tombstones[keyID] = &tombstone{
+		keyID:     keyID,
+		dataType:  dataType,
+		deletedAt: deletedAt,
+		deletedBy: pb.GetDeletedByNode(),
+	}
 }
 
 // restoreContact applies the contact times saved with the snapshot, once its

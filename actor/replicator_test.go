@@ -628,6 +628,55 @@ func TestReplicatorPrune(t *testing.T) {
 		_, newExists := r.tombstones["new-key"]
 		assert.True(t, newExists)
 	})
+
+	t.Run("an expired tombstone frees the record of the key and keeps its pending tombstone", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(time.Millisecond))
+		r.tombstones["old-key"] = &tombstone{keyID: "old-key", deletedAt: time.Now().Add(-time.Hour), deletedBy: "node-1"}
+		r.keyTypes["old-key"] = crdt.GCounterType
+		r.subscriptions["old-key"] = types.Unit{}
+		r.pendingTombstones["old-key"] = &pendingTombstone{}
+
+		r.handlePrune()
+
+		assert.NotContains(t, r.tombstones, "old-key")
+		assert.NotContains(t, r.keyTypes, "old-key")
+		assert.NotContains(t, r.subscriptions, "old-key")
+		assert.Contains(t, r.pendingTombstones, "old-key")
+	})
+
+	t.Run("a live tombstone keeps what was kept of the key", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(time.Hour))
+		r.tombstones["new-key"] = &tombstone{keyID: "new-key", deletedAt: time.Now(), deletedBy: "node-1"}
+		r.keyTypes["new-key"] = crdt.GCounterType
+		r.subscriptions["new-key"] = types.Unit{}
+		r.pendingTombstones["new-key"] = &pendingTombstone{}
+
+		r.handlePrune()
+
+		assert.Contains(t, r.tombstones, "new-key")
+		assert.Contains(t, r.keyTypes, "new-key")
+		assert.Contains(t, r.subscriptions, "new-key")
+		assert.Contains(t, r.pendingTombstones, "new-key")
+	})
+
+	t.Run("an expired tombstone keeps the type of a key stored again", func(t *testing.T) {
+		r := newTestReplicator()
+		r.config = crdt.NewConfig(crdt.WithTombstoneTTL(time.Millisecond))
+		r.tombstones["read-back"] = &tombstone{keyID: "read-back", deletedAt: time.Now().Add(-time.Hour), deletedBy: "node-1"}
+		r.store["read-back"] = crdt.NewGCounter().Increment("node-1", 1)
+		r.keyTypes["read-back"] = crdt.GCounterType
+		r.subscriptions["read-back"] = types.Unit{}
+		r.pendingTombstones["read-back"] = &pendingTombstone{}
+
+		r.handlePrune()
+
+		assert.NotContains(t, r.tombstones, "read-back")
+		assert.Contains(t, r.keyTypes, "read-back")
+		assert.Contains(t, r.subscriptions, "read-back")
+		assert.Contains(t, r.pendingTombstones, "read-back")
+	})
 }
 
 func TestReplicatorDigest(t *testing.T) {
@@ -1695,6 +1744,27 @@ func TestReplicatorHandleSnapshot(t *testing.T) {
 		assert.Equal(t, uint64(2), loaded["gc-1"].GetVersion())
 		assert.Equal(t, uint64(7), loaded["gc-1"].GetData().GetGCounter().GetState()["node-1"])
 	})
+
+	t.Run("saves the tombstones within their TTL", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.snapshotStore = store
+		r.tombstones["live"] = &tombstone{keyID: "live", dataType: crdt.GCounterType, deletedAt: time.Now(), deletedBy: "node-1"}
+		r.tombstones["expired"] = &tombstone{keyID: "expired", dataType: crdt.GCounterType, deletedAt: time.Now().Add(-25 * time.Hour), deletedBy: "node-1"}
+
+		r.handleSnapshot()
+
+		saved, err := store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, saved, 1)
+		assert.Equal(t, "live", saved[0].GetKey().GetId())
+		assert.Equal(t, "node-1", saved[0].GetDeletedByNode())
+	})
 }
 
 func TestReplicatorRestoreFromSnapshot(t *testing.T) {
@@ -1719,7 +1789,7 @@ func TestReplicatorRestoreFromSnapshot(t *testing.T) {
 				Version: 5,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
+		require.NoError(t, store.Save(entries, nil, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -1762,6 +1832,48 @@ func TestReplicatorRestoreFromSnapshot(t *testing.T) {
 		defer r.snapshotStore.Close()
 
 		assert.Empty(t, r.store)
+	})
+
+	t.Run("restores the tombstones within the TTL", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := ddata.NewStore(dir)
+		require.NoError(t, err)
+
+		deletedAt := time.Now().Add(-time.Minute)
+		live := internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey("live", crdt.GCounterType),
+			DeletedAtNanos: deletedAt.UnixNano(),
+			DeletedByNode:  "node-2",
+		}.Build()
+		expired := internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey("expired", crdt.GCounterType),
+			DeletedAtNanos: time.Now().Add(-25 * time.Hour).UnixNano(),
+			DeletedByNode:  "node-2",
+		}.Build()
+		undecodable := internalpb.CRDTTombstone_builder{
+			Key:            internalpb.CRDTKey_builder{Id: "untyped"}.Build(),
+			DeletedAtNanos: deletedAt.UnixNano(),
+			DeletedByNode:  "node-2",
+		}.Build()
+		require.NoError(t, store.Save(nil, []*internalpb.CRDTTombstone{live, expired, undecodable}, time.Time{}, time.Time{}))
+		require.NoError(t, store.Close())
+
+		r := newTestReplicator()
+		r.logger = log.DiscardLogger
+		r.config = crdt.NewConfig(
+			crdt.WithSnapshotInterval(time.Second),
+			crdt.WithSnapshotDir(dir),
+		)
+
+		require.NoError(t, r.restoreFromSnapshot())
+		defer r.snapshotStore.Close()
+
+		require.Len(t, r.tombstones, 1)
+		restored := r.tombstones["live"]
+		require.NotNil(t, restored)
+		assert.Equal(t, crdt.GCounterType, restored.dataType)
+		assert.Equal(t, "node-2", restored.deletedBy)
+		assert.True(t, restored.deletedAt.Equal(deletedAt))
 	})
 }
 
@@ -2307,6 +2419,9 @@ func TestReplicatorPostStopWithSnapshot(t *testing.T) {
 	}, time.Second)
 	require.NoError(t, err)
 
+	_, err = Ask(ctx, repl, &crdt.Delete{Key: crdt.GCounterKey("snap-deleted")}, time.Second)
+	require.NoError(t, err)
+
 	err = sys.Stop(ctx)
 	require.NoError(t, err)
 
@@ -2318,7 +2433,40 @@ func TestReplicatorPostStopWithSnapshot(t *testing.T) {
 	require.NotNil(t, loaded["snap-counter"])
 	assert.NotNil(t, loaded["snap-counter"].GetData().GetPnCounter())
 	assert.True(t, loaded["snap-counter"].GetVersion() > 0)
+
+	tombstones, err := store.Tombstones()
+	require.NoError(t, err)
+	require.Len(t, tombstones, 1)
+	assert.Equal(t, "snap-deleted", tombstones[0].GetKey().GetId())
 	require.NoError(t, store.Close())
+}
+
+func TestReplicatorMessageSequenceAfterRestart(t *testing.T) {
+	ctx := context.TODO()
+	sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, sys.Start(ctx))
+	pause.For(time.Second)
+
+	impl := sys.(*actorSystem)
+	impl.extensions.Set(crdtConfigExtensionID, &crdtConfigExtension{config: crdt.NewConfig()})
+
+	start := time.Now().UnixNano()
+	first := newReplicatorActor()
+	pid, err := sys.Spawn(ctx, "replicator", first, WithLongLived())
+	require.NoError(t, err)
+
+	// the message IDs of an incarnation start at its start time
+	assert.GreaterOrEqual(t, first.msgSeq.Load(), uint64(start))
+	last := first.msgSeq.Add(3)
+	require.NoError(t, pid.Shutdown(ctx))
+
+	second := newReplicatorActor()
+	_, err = sys.Spawn(ctx, "replicator", second, WithLongLived())
+	require.NoError(t, err)
+
+	// the next incarnation never reuses a message ID of the previous one
+	assert.Greater(t, second.msgSeq.Load(), last)
+	require.NoError(t, sys.Stop(ctx))
 }
 
 func TestReplicatorDataCenterExtension(t *testing.T) {
@@ -3349,7 +3497,7 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
+		require.NoError(t, store.Save(entries, nil, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -3381,7 +3529,7 @@ func TestReplicatorRestoreFromSnapshotBadData(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		require.NoError(t, store.Save(entries, time.Time{}, time.Time{}))
+		require.NoError(t, store.Save(entries, nil, time.Time{}, time.Time{}))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -7156,7 +7304,7 @@ func TestReplicatorStaleKeys(t *testing.T) {
 
 		store, err := ddata.NewStore(dir)
 		require.NoError(t, err)
-		require.NoError(t, store.Save(entries, lastContact, since))
+		require.NoError(t, store.Save(entries, nil, lastContact, since))
 		require.NoError(t, store.Close())
 
 		r := newTestReplicator()
@@ -7272,7 +7420,7 @@ func TestReplicatorStaleKeys(t *testing.T) {
 		dir := t.TempDir()
 		store, err := ddata.NewStore(dir)
 		require.NoError(t, err)
-		require.NoError(t, store.Save(nil, time.Now(), time.Time{}))
+		require.NoError(t, store.Save(nil, nil, time.Now(), time.Time{}))
 		require.NoError(t, store.Close())
 
 		// a last contact of the wrong size

@@ -142,6 +142,47 @@ func TestLWWRegister(t *testing.T) {
 	})
 }
 
+func TestLWWRegisterSetClock(t *testing.T) {
+	now := time.Unix(100, 0)
+
+	t.Run("a later timestamp is kept", func(t *testing.T) {
+		r := NewLWWRegister().Set("v1", now, "node-1").Set("v2", now.Add(time.Second), "node-1")
+		assert.Equal(t, now.Add(time.Second).UnixNano(), r.Timestamp())
+	})
+
+	t.Run("the same timestamp is raised past the current one", func(t *testing.T) {
+		r := NewLWWRegister().Set("v1", now, "node-1").Set("v2", now, "node-1")
+		assert.Equal(t, now.UnixNano()+1, r.Timestamp())
+	})
+
+	t.Run("an earlier timestamp is raised past the current one", func(t *testing.T) {
+		r := NewLWWRegister().Set("v1", now, "node-1").Set("v2", now.Add(-time.Minute), "node-2")
+		assert.Equal(t, now.UnixNano()+1, r.Timestamp())
+		assert.Equal(t, "node-2", r.NodeID())
+	})
+
+	t.Run("two writes with one clock reading converge on the second", func(t *testing.T) {
+		base := NewLWWRegister().Set("v1", now, "node-1")
+		second := base.Set("v2", now, "node-1")
+
+		assert.Equal(t, "v2", base.Merge(second).(*LWWRegister).Value())
+		assert.Equal(t, "v2", second.Merge(base).(*LWWRegister).Value())
+	})
+}
+
+func TestLWWRegisterMergeAssociative(t *testing.T) {
+	now := time.Unix(100, 0)
+	a := NewLWWRegister().Set("a", now, "node-a")
+	b := NewLWWRegister().Set("b", now, "node-b")
+	c := NewLWWRegister().Set("c", now.Add(time.Second), "node-c")
+
+	left := a.Merge(b).Merge(c).(*LWWRegister)
+	right := a.Merge(b.Merge(c)).(*LWWRegister)
+
+	assert.Equal(t, left.Value(), right.Value())
+	assert.Equal(t, left.StateHash(), right.StateHash())
+}
+
 func TestLWWRegisterStateHash(t *testing.T) {
 	early := time.Unix(100, 0)
 	late := time.Unix(200, 0)

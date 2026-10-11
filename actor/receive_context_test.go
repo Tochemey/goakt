@@ -3515,3 +3515,12 @@ func TestActorSkipsAnExpiredAskAtDispatch(t *testing.T) {
 	received := &ReceiveContext{ctx: ctx, self: worker, sender: sys.NoSender(), message: new(testpb.Reply), deadline: askDeadline(ctx, -time.Second)}
 	worker.dispatchOne(received, time.Now())
 }
+
+// TestReceiveContextResetClearsRemoteOrigin pins that a pooled context never
+// carries the remote origin of a previous message: a recycled context would
+// otherwise make a BoundedMailbox refuse a local sender instead of blocking it.
+func TestReceiveContextResetClearsRemoteOrigin(t *testing.T) {
+	rctx := &ReceiveContext{remote: true}
+	rctx.reset()
+	assert.False(t, rctx.remote)
+}
