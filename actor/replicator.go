@@ -367,7 +367,7 @@ func (r *replicatorActor) handlePostStart(ctx *ReceiveContext) {
 		}
 	}
 
-	// start prune schedule for tombstone and departed node cleanup
+	// start prune schedule for tombstone expiry and CRDT compaction
 	if r.config.PruneInterval() > 0 {
 		if err := actorSystem.Schedule(
 			scheduleCtx,
@@ -1124,8 +1124,9 @@ func (r *replicatorActor) handleFullState(ctx *ReceiveContext, msg *internalpb.C
 	}
 }
 
-// handlePrune cleans up expired tombstones, prunes departed node slots,
-// and compacts CRDTs that implement Compactable.
+// handlePrune cleans up expired tombstones and compacts CRDTs that implement
+// Compactable. It does not consult cluster membership: the counter slots and
+// clock entries of departed nodes are kept.
 func (r *replicatorActor) handlePrune() {
 	now := time.Now()
 	ttl := r.config.TombstoneTTL()

@@ -122,8 +122,14 @@ consistency, and memory footprint.
 - **WithWriteQuorum**: Replicas that must acknowledge a registry write. Must be `>= 1` and `<= replicaCount`.
   Default: 1.
 - **WithReadQuorum**: Replicas consulted per registry read. Must be `>= 1` and `<= replicaCount`. Default: 1.
-- **WithMinimumPeersQuorum**: Members required before the cluster serves operations. Also the quorum the grain
-  activation barrier waits for. Keep it `<= replicaCount`. Default: 1.
+- **WithMinimumPeersQuorum**: Members a node must see in its own membership view before the registry serves it: at
+  startup, when the registry map is created, before every registry request received from another node, and before the
+  leader recomputes the routing table. Also the quorum the grain activation barrier waits for. GoAkt has no split-brain
+  resolver, so this setting is the only partition safeguard. With the default of 1, each side of a network split keeps
+  serving, takes its own oldest member as leader, sees the other side's nodes as departed and relocates their actors, so
+  an actor or a singleton can run on both sides until the split heals. A value above half the cluster size keeps the
+  minority side from recomputing its routing table and from serving registry requests to its peers, so it cannot
+  relocate; it does not stop the minority's already-running actors. Keep it `<= replicaCount`. Default: 1.
 - **WithTableSize**: In-memory size of the registry key/value store on this node. Default: 4 MB.
 - **WithStoreDir**: Directory for the node's cluster store, the BoltDB file that holds peer state while the node runs.
   The file is created on start and deleted on stop, so an ephemeral writable volume (for example an `emptyDir`) is

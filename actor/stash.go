@@ -80,3 +80,53 @@ func (pid *PID) unstashAll() error {
 	state.locker.Unlock()
 	return nil
 }
+
+// replayStash moves every stashed message into the mailbox, oldest first,
+// without scheduling a turn. A restart calls it between the stop of the old
+// incarnation and the init of the new one: no worker holds the actor and no
+// turn can run, so nothing stashes again mid-replay and the messages keep
+// their order, ahead of anything sent to the new incarnation. Going through
+// the mailbox directly rather than doReceive leaves the scheduling to
+// firePostStart, once PostStart is armed. A message the mailbox refuses is
+// dead-lettered, as doReceive does.
+func (pid *PID) replayStash() {
+	state := pid.stashState.Load()
+	if state == nil || state.box == nil {
+		return
+	}
+
+	state.locker.Lock()
+	defer state.locker.Unlock()
+
+	for received := state.box.Dequeue(); received != nil; received = state.box.Dequeue() {
+		replayed := cloneContext(received)
+		if err := pid.mailbox.Enqueue(replayed); err != nil {
+			pid.getLogger().Warn(err)
+			pid.handleReceivedError(replayed, err)
+			continue
+		}
+
+		if pid.metricsEnabled {
+			pid.mailboxEnqueued.Add(1)
+		}
+	}
+}
+
+// abandonStash drops every stashed message. A terminal stop calls it so the
+// messages a dead incarnation set aside do not reach an actor restarted
+// later under the same name. The buffer stays usable: Stash works again once
+// the actor runs. Nothing is dead-lettered, as nothing is for the messages a
+// terminal stop leaves in the mailbox.
+func (pid *PID) abandonStash() {
+	state := pid.stashState.Load()
+	if state == nil || state.box == nil {
+		return
+	}
+
+	state.locker.Lock()
+	defer state.locker.Unlock()
+
+	for received := state.box.Dequeue(); received != nil; received = state.box.Dequeue() {
+		continue
+	}
+}

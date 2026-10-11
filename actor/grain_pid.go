@@ -721,6 +721,17 @@ func (pid *grainPID) registerRequestState(state *requestState) error {
 		return gerrors.ErrInvalidMessage
 	}
 
+	// A stopping system admits no new request. The shutdown cancels the
+	// requests in flight once, before it poisons the grain, so a request
+	// admitted after that pass would pause a StashNonReentrant grain past
+	// the pill with nothing left to lift the pause: the pill never runs and
+	// OnDeactivate is skipped. RequestGrain already fails at delivery while
+	// the system stops; this covers a request whose delivery still succeeds,
+	// such as RequestActor toward an actor on another node.
+	if pid.actorSystem != nil && pid.actorSystem.isStopping() {
+		return gerrors.ErrActorSystemNotStarted
+	}
+
 	var first bool
 
 	if maxInFlight := reentrant.maxInFlight.Load(); maxInFlight > 0 {

@@ -2701,6 +2701,7 @@ func (x *actorSystem) handleRemoteAsk(ctx context.Context, to *PID, message any,
 
 	receiveContext := toReceiveContext(ctx, from, to, message, false)
 	receiveContext.deadline = askDeadline(ctx, timeout)
+	receiveContext.remote = true
 
 	responseCh := receiveContext.response
 
@@ -2757,6 +2758,7 @@ func (x *actorSystem) handleRemoteTellHeld(ctx context.Context, from *PID, to *P
 	}
 
 	receiveCtx := toReceiveContext(ctx, resolvedFrom, to, decoded, true)
+	receiveCtx.remote = true
 
 	if hold != nil {
 		receiveCtx.remoteHold = hold

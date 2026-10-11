@@ -240,3 +240,190 @@ func TestRemoteHoldRegistryConcurrentCompactAndReleaseAll(t *testing.T) {
 	assert.Zero(t, registryLen(registry))
 	assert.EqualValues(t, producers*perProducer, tracked.Load())
 }
+
+// TestRemoteHoldRegistryCompactUnlinksBehindParkedEntry pins the in-place
+// unlink: released entries that sit behind a still-parked one are retired
+// within the budget instead of accumulating until the parked share is
+// released, as happens when a priority mailbox leaves one message waiting
+// behind a steady flow of newer ones. The tail is left alone, and the parked
+// entry stays until its own share is released.
+func TestRemoteHoldRegistryCompactUnlinksBehindParkedEntry(t *testing.T) {
+	t.Run("With released entries behind a parked front", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		parked := inet.DetachedCreditShare(64)
+		registry.track(parked)
+
+		for range 5 {
+			registry.track(new(inet.CreditShare))
+		}
+
+		tail := inet.DetachedCreditShare(64)
+		registry.track(tail)
+
+		registry.compact()
+		assert.Equal(t, 2, registryLen(registry), "the released entries behind the parked front must be unlinked")
+		assert.False(t, parked.Released(), "compact must never release a parked share")
+		assert.False(t, tail.Released())
+
+		parked.Release()
+		registry.compact()
+		assert.Equal(t, 1, registryLen(registry), "the front retires once its share is released")
+
+		tail.Release()
+		registry.compact()
+		assert.Zero(t, registryLen(registry))
+	})
+
+	t.Run("With a released tail behind a parked front", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		parked := inet.DetachedCreditShare(64)
+		registry.track(parked)
+		registry.track(new(inet.CreditShare))
+
+		registry.compact()
+		assert.Equal(t, 2, registryLen(registry), "the tail is never unlinked in place")
+
+		// a later entry makes the released one a middle node
+		registry.track(inet.DetachedCreditShare(64))
+		registry.compact()
+		assert.Equal(t, 2, registryLen(registry), "the released middle entry is unlinked once it is published")
+	})
+
+	t.Run("With the budget spent on parked entries", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		for range remoteHoldCompactBudget {
+			registry.track(inet.DetachedCreditShare(1))
+		}
+
+		registry.track(new(inet.CreditShare))
+		registry.track(inet.DetachedCreditShare(1))
+
+		registry.compact()
+		assert.Equal(t, remoteHoldCompactBudget+2, registryLen(registry), "one pass examines at most the compact budget")
+
+		registry.compact()
+		assert.Equal(t, remoteHoldCompactBudget+1, registryLen(registry), "the next pass reaches the released entry")
+	})
+
+	t.Run("With the cursor on a parked entry that is later retired", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		// a parked front, enough released entries behind it to spend the
+		// budget, then a parked tail: the pass ends with the cursor on the
+		// front entry
+		front := inet.DetachedCreditShare(64)
+		registry.track(front)
+
+		for range remoteHoldCompactBudget - 1 {
+			registry.track(new(inet.CreditShare))
+		}
+
+		second := inet.DetachedCreditShare(64)
+		registry.track(second)
+
+		registry.compact()
+		require.Equal(t, 2, registryLen(registry))
+		head := (*remoteHoldNode)(atomic.LoadPointer(&registry.head))
+		require.Same(t, (*remoteHoldNode)(atomic.LoadPointer(&head.next)), registry.cursor, "the pass must stop on the front entry")
+
+		// both parked entries release, so the next pass retires the front
+		// entry the cursor names and recycles it; the pass must then walk the
+		// live list from the head, not from the recycled node
+		front.Release()
+		second.Release()
+
+		parked := inet.DetachedCreditShare(64)
+		registry.track(parked)
+		registry.track(new(inet.CreditShare))
+		registry.track(inet.DetachedCreditShare(64))
+
+		registry.compact()
+		assert.Equal(t, 2, registryLen(registry), "the released entry behind the parked one must be unlinked in the same pass")
+		assert.False(t, parked.Released())
+	})
+
+	t.Run("With entries released behind the cursor and a released tail", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		front := inet.DetachedCreditShare(64)
+		registry.track(front)
+
+		middle := inet.DetachedCreditShare(64)
+		registry.track(middle)
+		registry.track(new(inet.CreditShare))
+
+		// the pass walks past both parked entries and stops at the released
+		// tail, which it cannot unlink
+		registry.compact()
+		require.Equal(t, 3, registryLen(registry))
+
+		// with no new arrival the tail stays the tail; the middle entry
+		// releases behind where the pass stopped and must still be reached
+		middle.Release()
+		registry.compact()
+		assert.Equal(t, 2, registryLen(registry), "a pass that stopped at a released tail must restart from the head")
+		assert.False(t, front.Released())
+	})
+
+	t.Run("With releases concurrent to compaction", func(t *testing.T) {
+		registry := newRemoteHoldRegistry()
+
+		front := inet.DetachedCreditShare(64)
+		registry.track(front)
+
+		shares := make([]*inet.CreditShare, 0, 2000)
+		for range cap(shares) {
+			share := inet.DetachedCreditShare(1)
+			shares = append(shares, share)
+			registry.track(share)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for _, share := range shares {
+				share.Release()
+			}
+		}()
+
+		for range 4000 {
+			registry.compact()
+		}
+
+		wg.Wait()
+
+		for range len(shares) {
+			registry.compact()
+		}
+
+		assert.Equal(t, 2, registryLen(registry), "every released middle entry is unlinked; the front and the tail stay")
+		assert.False(t, front.Released())
+
+		// releaseAll spins until the tail comes home, so a broken list would
+		// hang it: bound the wait and report a failure instead
+		drained := make(chan struct{})
+
+		go func() {
+			registry.releaseAll()
+			close(drained)
+		}()
+
+		require.Eventually(t, func() bool {
+			select {
+			case <-drained:
+				return true
+			default:
+				return false
+			}
+		}, 5*time.Second, 10*time.Millisecond, "releaseAll must drain a compacted registry")
+
+		assert.True(t, front.Released())
+		assert.Zero(t, registryLen(registry))
+	})
+}

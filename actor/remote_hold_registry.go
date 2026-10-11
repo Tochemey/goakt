@@ -64,10 +64,11 @@ var remoteHoldNodePool = sync.Pool{New: func() any { return new(remoteHoldNode) 
 // dispatcher ownership, because the shutdown path does not wait out an
 // in-flight turn: Shutdown must complete even when the actor is wedged
 // inside Receive, and a wedged Receive never holds consumerMu (compact
-// finishes before user code runs). Its size is bounded by the credit
-// windows feeding the actor: admission stops once a window's worth of
-// shares is outstanding, so the registry can never outgrow the in-flight
-// residency it protects, plus a small retirement lag.
+// finishes before user code runs). Its size is bounded by the number of
+// messages still parked in the actor plus a small retirement lag: compact
+// unlinks released entries wherever they sit, so a message that a priority
+// mailbox leaves waiting behind newer ones pins one entry, not one per
+// message dispatched after it.
 type remoteHoldRegistry struct {
 	// head and tail follow the sentinel scheme of UnboundedMailbox: head
 	// points at the last consumed node, tail at the newest.
@@ -79,6 +80,14 @@ type remoteHoldRegistry struct {
 	// consumerMu serializes the consumer side: a dispatcher turn's compact
 	// against a concurrent shutdown releaseAll. Producers never take it.
 	consumerMu sync.Mutex
+
+	// cursor is the parked entry the previous compact pass stopped behind
+	// when its budget ran out, or nil when that pass reached the end of the
+	// registry. The next pass resumes behind it, so a run of parked entries
+	// longer than the budget cannot hide released entries behind it. It is
+	// consumer-owned, guarded by consumerMu, and only ever points at a node
+	// the consumer has not recycled: a parked entry or the head sentinel.
+	cursor *remoteHoldNode
 }
 
 // newRemoteHoldRegistry returns an initialized registry.
@@ -104,26 +113,57 @@ func (x *remoteHoldRegistry) track(share *inet.CreditShare) {
 	atomic.StorePointer(&prev.next, unsafe.Pointer(node))
 }
 
-// compact retires up to remoteHoldCompactBudget already-released entries
-// from the front of the registry. Dispatch order tracks attach order closely
-// enough that the front is almost always spent by the time the consumer
-// looks; an unreleased front entry (a still-parked message) stops the pass,
-// and everything behind it stays bounded by the credit window because
-// admission has stopped granting new work.
+// compact examines up to remoteHoldCompactBudget entries and retires the
+// released ones. It first retires the released prefix, the common case since
+// dispatch order follows attach order closely, then resumes behind the cursor
+// of the previous pass and unlinks in place every released entry it finds
+// behind a still-parked one. The parked entry stays until its own share is
+// released, so a message that waits a long time in a priority mailbox,
+// behind a steady flow of higher-priority messages, pins one entry and not
+// one per message delivered after it. The tail entry is never unlinked: a
+// producer may be about to publish its link, and only the head walk is safe
+// against that. A pass that reaches the end, or a released tail, clears the
+// cursor so the next pass starts from the head again and reaches the entries
+// released since it walked past them.
 func (x *remoteHoldRegistry) compact() {
 	x.consumerMu.Lock()
 	defer x.consumerMu.Unlock()
 
-	for range remoteHoldCompactBudget {
-		head := (*remoteHoldNode)(atomic.LoadPointer(&x.head))
-		next := (*remoteHoldNode)(atomic.LoadPointer(&head.next))
+	budget := x.retireReleasedPrefix(remoteHoldCompactBudget)
+	if budget == 0 {
+		return
+	}
 
-		if next == nil || !next.share.Released() {
+	// the prefix walk stopped on a parked or missing entry after the head,
+	// so this walk only skips parked entries and unlinks released ones
+	// behind them
+	prev := x.cursor
+	if prev == nil {
+		prev = (*remoteHoldNode)(atomic.LoadPointer(&x.head))
+	}
+
+	for ; budget > 0; budget-- {
+		node := (*remoteHoldNode)(atomic.LoadPointer(&prev.next))
+		if node == nil {
+			x.cursor = nil
 			return
 		}
 
-		x.retireHead(head, next)
+		if !node.share.Released() {
+			prev = node
+			continue
+		}
+
+		next := (*remoteHoldNode)(atomic.LoadPointer(&node.next))
+		if next == nil {
+			x.cursor = nil
+			return
+		}
+
+		x.unlink(prev, node, next)
 	}
+
+	x.cursor = prev
 }
 
 // releaseAll walks the registry, releases every outstanding share, and
@@ -147,6 +187,9 @@ func (x *remoteHoldRegistry) releaseAll() {
 			// strand its share in a registry a terminal stop never walks
 			// again. The publish is a single store away, so wait it out.
 			if (*remoteHoldNode)(atomic.LoadPointer(&x.tail)) == head {
+				// every node has been recycled: the next compact starts
+				// from the head
+				x.cursor = nil
 				return
 			}
 
@@ -159,6 +202,30 @@ func (x *remoteHoldRegistry) releaseAll() {
 	}
 }
 
+// retireReleasedPrefix retires released entries from the front of the
+// registry, at most budget of them, and returns the budget left. It stops at
+// the first parked entry or at the end. A retired entry that the cursor
+// pointed at, a parked entry whose release made it the head sentinel, drops
+// the cursor so it never names a recycled node. Callers must hold consumerMu.
+func (x *remoteHoldRegistry) retireReleasedPrefix(budget int) int {
+	for ; budget > 0; budget-- {
+		head := (*remoteHoldNode)(atomic.LoadPointer(&x.head))
+		next := (*remoteHoldNode)(atomic.LoadPointer(&head.next))
+
+		if next == nil || !next.share.Released() {
+			break
+		}
+
+		if x.cursor == head {
+			x.cursor = nil
+		}
+
+		x.retireHead(head, next)
+	}
+
+	return budget
+}
+
 // retireHead advances the head past next and recycles the outgoing sentinel.
 // Callers must hold consumerMu.
 func (x *remoteHoldRegistry) retireHead(head, next *remoteHoldNode) {
@@ -167,4 +234,15 @@ func (x *remoteHoldRegistry) retireHead(head, next *remoteHoldNode) {
 	head.share = nil
 	atomic.StorePointer(&head.next, nil)
 	remoteHoldNodePool.Put(head)
+}
+
+// unlink removes node, which sits between prev and next, and recycles it.
+// node must not be the tail: next is its published successor, so no producer
+// will touch node again, and prev.next is written by the consumer alone.
+// Callers must hold consumerMu.
+func (x *remoteHoldRegistry) unlink(prev, node, next *remoteHoldNode) {
+	atomic.StorePointer(&prev.next, unsafe.Pointer(next))
+	node.share = nil
+	atomic.StorePointer(&node.next, nil)
+	remoteHoldNodePool.Put(node)
 }

@@ -162,7 +162,9 @@ All request failures surface through the returned call's `Then` continuation.
 - A deferred reply obligation alone does not keep the grain alive; only in-flight requests do. Complete deferred replies
   from the request continuation, not from a detached goroutine.
 - On system shutdown, in-flight requests are canceled first: continuations run with `ErrRequestCanceled`, deferred
-  callers receive the error, and the grain then deactivates normally.
+  callers receive the error, and the grain then deactivates normally. No new request is admitted once the system is
+  stopping: `RequestGrain` and `RequestActor` complete at once with `ErrActorSystemNotStarted`, so a request issued
+  after the cancellation cannot pause the grain past its deactivation.
 
 ## Example: a request cycle
 
@@ -294,7 +296,7 @@ func main() {
 ## Limitations
 
 - In-flight requests do not survive requester relocation or a node crash; late replies arriving at a fresh activation
-  are logged and dropped.
+  are dropped and logged at debug level.
 - Requests that cross nodes carry their payload as protobuf: the message must be a `proto.Message`, like every other
   remote send. Local requests accept any Go value.
 - `TellGrain` keeps its acknowledgement semantics by default; deferred replies apply to Ask and Request flows.
@@ -303,9 +305,10 @@ func main() {
   with `WithOneWay()` when no acknowledgement is needed: the message then waits in the mailbox until the grain resumes.
 - `StashNonReentrant` with `WithRequestTimeout(d)` where `d <= 0` pauses the grain until the reply arrives; if the reply
   is lost (target node crash), only shutdown unblocks it. Keep the default timeout in stash mode.
-- Interval and cron timer ticks accumulate in the mailbox during a long pause and replay on resume; with a bounded
-  mailbox, a pause-filled mailbox can also reject the shutdown `PoisonPill`. Use an unbounded mailbox (the default) with
-  `StashNonReentrant`.
+- Interval and cron timer ticks accumulate in the mailbox during a long pause and replay on resume. With a bounded
+  mailbox, once a pause fills it, new user messages are refused with `ErrMailboxFull` and timer ticks are dropped with a
+  warning; the shutdown `PoisonPill` is a system message and is always accepted. Use an unbounded mailbox (the default)
+  with `StashNonReentrant`.
 
 ## See also
 

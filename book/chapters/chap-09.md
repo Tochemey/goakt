@@ -136,6 +136,8 @@ The system and user guardians and the death watch escalate any error. The root g
 6. Restart its children concurrently.
 7. Clear the suspended bit, restart passivation, count the restart, schedule `PostStart`, and publish `ActorRestarted` (`restartSubtree` in `actor/pid.go`).
 
+Between steps 3 and 4, once no worker holds the actor and before `init`, a restart whose step 1 cancelled a stash-mode request replays the reentrancy stash into the kept mailbox with `PID.replayStash` (`actor/stash.go`): the messages keep their order, nothing can stash again meanwhile, and `PostStart` still runs first from its own slot. An explicit `WithStashing` stash with no such request in flight is left alone ([Chapter 8, §8.5](chap-08.md#85-reentrancy-requests-that-do-not-block)).
+
 Whether a supervisor decided it or `Restart` was called, a restart keeps and resets the same things, decided in `reset` by the `restartingState` bit (`actor/pid.go`):
 
 | State | Across a restart |

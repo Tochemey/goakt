@@ -54,8 +54,10 @@ Without `WithMailbox`, the actor uses `UnboundedMailbox`, a lock-free FIFO queue
 
 ### Bounded FIFO
 
-- **`BoundedMailbox`** has a fixed capacity and applies blocking backpressure: when full, `Enqueue` blocks the producer
-  until space frees.
+- **`BoundedMailbox`** has a fixed capacity and applies blocking backpressure to local senders: when full, `Enqueue`
+  blocks the producer until space frees. A message that arrives over remoting is never blocked: when the mailbox is
+  full it is refused with `ErrMailboxFull` and routed to the dead-letter stream, because its producer is the
+  connection's inbound dispatcher and blocking it would stall every receiver sharing the connection.
 - **`NonBlockingBoundedMailbox`** has a fixed capacity and never blocks. Its capacity is rounded up to the next power of
   two. When full, `Enqueue` returns `ErrMailboxFull` and the runtime routes the excess message to the dead-letter
   stream.
@@ -66,7 +68,7 @@ pid, err := system.Spawn(ctx, "ingest", actor,
 ```
 
 <Warning>
-  `BoundedMailbox` blocks the producer goroutine, which is often another actor's dispatcher worker. Prefer
+  `BoundedMailbox` blocks a local producer goroutine, which is often another actor's dispatcher worker. Prefer
   `NonBlockingBoundedMailbox` when you want bounded memory without the risk of stalling a producer.
 </Warning>
 

@@ -101,3 +101,10 @@ func main() {
 ## Stash size
 
 `pid.StashSize()` returns the number of messages currently in the stash. Useful for metrics or backpressure.
+
+## Stash and lifecycle
+
+A restart keeps the stash. Messages the actor stashed on its own stay stashed for the new incarnation to unstash when
+it decides to; messages a `StashNonReentrant` request had stashed are replayed to the new incarnation after
+`PostStart` (see [Reentrancy](/actor/reentrancy)). A stop drops the stashed messages with the mailbox: an actor
+restarted later under the same name starts with an empty stash and can stash again.

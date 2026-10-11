@@ -162,8 +162,8 @@ system, _ := actor.NewActorSystem("my-system",
 ### Configuration options
 
 - **WithAntiEntropyInterval**: Interval between anti-entropy digest exchanges with a random peer. Default: 30s.
-- **WithMaxDeltaSize**: Maximum serialized delta size per publish; larger deltas trigger full-state transfer. Default:
-  64KB.
+- **WithMaxDeltaSize**: Maximum serialized delta size per publish. The value is stored for a planned full-state
+  fallback; nothing reads it today, so it has no effect. Default: 64KB.
 - **WithPruneInterval**: Interval for pruning expired tombstones and compacting CRDTs. Default: 5m.
 - **WithTombstoneTTL**: How long deletion tombstones are retained to prevent key resurrection. Default: 24h.
 - **WithCoordinationTimeout**: Timeout for coordinated `WriteTo`/`ReadFrom` operations. Default: 5s.
@@ -324,8 +324,9 @@ ctx.Tell(replicator, &crdt.Delete{
 ```
 
 Deletion removes the key from the local store and publishes a tombstone to all peers. Tombstones are retained for the
-configured TTL and pruned periodically. While a tombstone is active, updates for that key are rejected to prevent
-resurrection.
+configured TTL and pruned periodically. While a tombstone is active, an update for that key is dropped to prevent
+resurrection: the Replicator does not apply it and still answers with a normal `UpdateResponse`, so the caller cannot
+tell the update from one that was applied.
 
 Each node sends `Deleted` to its watchers of the key when it removes its copy: at once on the node that deleted it, when
 the tombstone arrives on its peers, and after the cross-DC flush or anti-entropy round that brings the deletion in
@@ -348,13 +349,16 @@ healthy cluster).
 When stronger guarantees are needed, set `WriteTo` or `ReadFrom` on the message:
 
 - **_(not set)_**: `WriteTo` behavior: Apply locally + publish via TopicActor. `ReadFrom` behavior: Return local value.
-- **Majority**: `WriteTo` behavior: Apply locally + send delta to N/2+1 peers + wait for acks. `ReadFrom` behavior:
-  Query N/2+1 peers, merge results with local value.
-- **All**: `WriteTo` behavior: Apply locally + send delta to all peers + wait for acks. `ReadFrom` behavior: Query all
-  peers, merge results with local value.
+- **Majority**: `WriteTo` behavior: Apply locally + send the delta directly to N/2+1 peers + publish via TopicActor.
+  `ReadFrom` behavior: Query N/2+1 peers, merge results with local value.
+- **All**: `WriteTo` behavior: Apply locally + send the delta directly to all peers + publish via TopicActor. `ReadFrom`
+  behavior: Query all peers, merge results with local value.
 
-When `ReadFrom: Majority` and `WriteTo: Majority` are used together, the system provides **strong eventual consistency
-with read-your-writes** guarantees.
+Coordination is best effort. The direct sends of a coordinated write are not acknowledged: the Replicator does not wait
+for the peers, and a peer whose lookup or send fails is skipped. A coordinated read waits for each queried peer up to
+`WithCoordinationTimeout` and merges the answers it gets. Using `ReadFrom: Majority` with `WriteTo: Majority` narrows
+the window in which a read on another node misses a recent write; it does not guarantee read-your-writes, because the
+read can run before the direct send has arrived.
 
 `crdt.DCMajority` and `crdt.DCAll` are reserved for future cross-DC coordinated operations; today they do not add remote
 DC fan-out beyond normal local apply + TopicActor publish.
@@ -566,14 +570,39 @@ The CRDT subsystem is designed for moderate working sets, not billions of entrie
 ### Full-state transfer for large values
 
 When a data entry is changed, the Replicator publishes a **delta** (incremental change) to peers. However, the full
-state of the entry is replicated in several situations:
+state of the entry is replicated in two situations:
 
-- The serialized delta exceeds `MaxDeltaSize` (default 64KB): the Replicator falls back to full-state transfer.
 - During anti-entropy, when a peer's value of a key differs from the local one.
 - When new nodes join and need to catch up from scratch.
 
 This means you should avoid very large individual CRDT values (e.g., an ORSet with millions of elements), because
-full-state replication of those values will produce large messages on the wire.
+full-state replication of those values will produce large messages on the wire. A delta is published whole whatever its
+size: `WithMaxDeltaSize` has no effect today.
+
+### Node ID reuse after a restart
+
+The node ID you pass to `Increment`, `Add` and `Set` names a slot in counters and a causal clock in sets and registers.
+The examples on this page use `PeersAddress()`, which is the same string before and after a restart of the node. A
+restarted node whose store is empty, or restored from a snapshot older than the cluster's state, starts its slot or
+clock again from a value the cluster has already seen:
+
+- A counter increment yields a slot value lower than the one the peers hold. Peers keep the higher value, so the
+  increment is lost, and the local value is overwritten on the node's next anti-entropy round.
+- An ORSet add or an MVRegister set mints a dot the peers' clock already covers. Peers drop it as already removed, and
+  the node drops it too once it merges a peer's state.
+
+In both cases the caller receives a normal `UpdateResponse`. The window closes when the restarted node pulls the key's
+full state in its own anti-entropy round, up to `WithAntiEntropyInterval` after it starts. Until then, do not write
+from a restarted node to a key it has not read back from a peer, or make the node ID unique per process, for example
+by appending the start time to the peers address.
+
+### ORMap remove then set
+
+`ORMap.Remove` deletes the value locally without a causal record of the removal, and a merge keeps a value held on
+either side. Removing a key and setting it again to a fresh value does not reset it: a peer that still holds the old
+value merges the new one into it, and anti-entropy brings the merged value back to the node that reset it. Treat
+values in an ORMap as merge-only. To reset a counter, replace it with one keyed under a new name, or delete the whole
+map key with `Delete`.
 
 ### CRDT garbage accumulation
 
@@ -611,6 +640,12 @@ Deleted keys are protected by a tombstone for the configured TTL (default 24 hou
 anti-entropy carries the deletion to every peer it exchanges with, in both directions of a round: a node that missed the
 tombstone itself drops the key on its next round with a node that has it. This also holds across datacenters when
 cross-DC anti-entropy is on.
+
+Tombstones live in memory only: a snapshot saves the store, not the tombstones, so a restarted node holds none of its
+own deletions until a peer's digest carries them back. A key can therefore come back within the TTL when every node
+that held its tombstone restarts while a node that still holds the key is away: the returning node offers the key, no
+node holds the key or a tombstone for it, and the key is taken as new. Avoid a rolling restart of every node while one
+is down, or delete the key again once the cluster is whole.
 
 A node that comes back after a longer absence, restored from its snapshot or kept running through a partition, can still
 hold a key deleted while it was away, whose tombstone no node retains any more. Each Replicator records the last time it

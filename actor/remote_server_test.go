@@ -3602,3 +3602,79 @@ func TestRemoteServerNegotiatesDuplexCompression(t *testing.T) {
 		})
 	}
 }
+
+// TestRemoteTellFullBoundedMailboxKeepsLaneAlive is the end-to-end gate for
+// the remote refusal on a blocking BoundedMailbox: the overflow of a flood
+// toward a stalled remote actor must go to dead letters instead of blocking
+// the connection's inbound dispatcher, so an ask to another actor on the same
+// lane still answers, and the parked messages still drain once the consumer
+// resumes.
+func TestRemoteTellFullBoundedMailboxKeepsLaneAlive(t *testing.T) {
+	ctx := context.Background()
+	host := "127.0.0.1"
+	ports := inet.Get(2)
+
+	newSystem := func(name string, port int) ActorSystem {
+		sys, err := NewActorSystem(name,
+			WithLogger(log.DiscardLogger),
+			WithRemote(remote.NewConfig(host, port)),
+		)
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { _ = sys.Stop(ctx) })
+		return sys
+	}
+
+	senderSys := newSystem("senderSys", ports[0])
+	receiverSys := newSystem("receiverSys", ports[1])
+	pause.For(500 * time.Millisecond)
+
+	const (
+		capacity = 2
+		flood    = 20
+	)
+
+	gate := make(chan struct{})
+	received := new(atomic.Int64)
+	blocker, err := receiverSys.Spawn(ctx, "blocker", &MockBlockerActor{gate: gate, received: received}, WithMailbox(NewBoundedMailbox(capacity)))
+	require.NoError(t, err)
+
+	echo, err := receiverSys.Spawn(ctx, "echo", NewMockActor())
+	require.NoError(t, err)
+	pause.For(100 * time.Millisecond)
+
+	remoting := senderSys.(*actorSystem).remoting
+	from := address.New("driver", senderSys.Name(), host, ports[0])
+
+	// the first message parks in Receive, the next capacity fill the mailbox,
+	// and every further one is an overflow
+	for range flood {
+		callCtx, cancel := context.WithTimeout(ctx, time.Second)
+		err := remoting.RemoteTell(callCtx, from, blocker.getAddress(), structpb.NewStringValue("x"))
+		cancel()
+		require.NoError(t, err)
+	}
+
+	// the lane still dispatches: an ask to the sibling answers
+	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	reply, err := remoting.RemoteAsk(callCtx, from, echo.getAddress(), new(testpb.TestReply), 3*time.Second)
+	cancel()
+	require.NoError(t, err, "an ask to a sibling on the lane must answer while the blocker's mailbox is full")
+	require.NotNil(t, reply)
+
+	// the overflow was refused into dead letters
+	overflow := int64(flood - capacity - 1)
+
+	var deadletters int64
+
+	require.Eventually(t, func() bool {
+		deadletters = receiverSys.Metric(ctx).DeadlettersCount()
+		return deadletters >= overflow
+	}, 3*time.Second, 20*time.Millisecond, "the overflow must be dead-lettered (dead letters %d, expected at least %d)", deadletters, overflow)
+
+	// the parked messages drain once the consumer resumes
+	close(gate)
+
+	require.Eventually(t, func() bool { return received.Load() == capacity+1 }, 5*time.Second, 20*time.Millisecond,
+		"the parked messages must drain once the consumer resumes")
+}
