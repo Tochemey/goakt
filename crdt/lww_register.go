@@ -51,10 +51,16 @@ func NewLWWRegister() *LWWRegister {
 
 // Set updates the register value with the given timestamp and node ID.
 // Returns a new LWWRegister with the updated state.
+//
+// The new state is always later than this one: a timestamp that is not after
+// the register's current timestamp is raised to one nanosecond past it. Two
+// writes from one node with the same clock reading, or a write from a node
+// whose clock is behind the last writer's, therefore never tie with or lose
+// to the value they replace, and every replica settles on the same winner.
 func (r *LWWRegister) Set(value any, timestamp time.Time, nodeID string) *LWWRegister {
 	return &LWWRegister{
 		value:     value,
-		timestamp: timestamp.UnixNano(),
+		timestamp: max(timestamp.UnixNano(), r.timestamp+1),
 		nodeID:    nodeID,
 		dirty:     true,
 	}

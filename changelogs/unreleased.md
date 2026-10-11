@@ -25,6 +25,19 @@
   - A restart keeps queued messages, and these are queued messages: the new incarnation now handles them, in order, after `PostStart`.
   - A stash the actor made on its own with `WithStashing`, with no request in flight, is left alone, as before.
   - A terminal stop now drops the stashed messages with the mailbox, so an actor restarted later under the same name does not meet the messages its dead incarnation had set aside. The stash buffer stays usable.
+- **A CRDT snapshot saves the tombstones.**
+  - A snapshot saved the store but not the deletions, so a node restored from it held none of its own tombstones. A key deleted while one node was away, then a rolling restart of the holders inside the tombstone TTL, left no node with the tombstone and the returning node brought the key back.
+  - The tombstones within the TTL are now saved with the snapshot and restored with it, as Akka's durable storage keeps deleted keys. A snapshot file of an earlier version loads with no tombstones.
+- **A restarted node's first CRDT deltas are no longer dropped as duplicates.**
+  - The topic actors deduplicate by sender and message ID for the retention window, and the Replicator's message sequence restarted at one with the same sender path. A node that published n messages and restarted within the window had its next n deltas and tombstones dropped by every peer until anti-entropy repaired them.
+  - The sequence now starts at the node's start time, so a new incarnation never reuses an ID of the previous one.
+- **The Replicator forgets a deleted key once its tombstone expires.**
+  - The key's type and its subscription entry were kept forever, one entry per key ever deleted.
+  - Pruning now drops them with the expired tombstone. A key stored again by a coordinated read keeps its type. A tombstone still buffered for a remote datacenter is kept until that datacenter accepts it, as before.
+- **`LWWRegister.Set` never ties with or loses to the value it replaces.**
+  - Two writes from one node with the same clock reading, or a write from a node whose clock was behind the last writer's, produced a register whose merge depended on the order, which anti-entropy could not repair.
+  - `Set` now stamps the write one nanosecond past the register's current timestamp when the given time is not later, as Akka's default clock does. A later timestamp is used as given.
+  - This is a semantic change for a caller that passes an earlier timestamp on purpose so the write loses on merge: the write now wins. Replicated and decoded state is untouched.
 
 ## Documentation
 
@@ -38,7 +51,6 @@
   - An update to a tombstoned key is dropped and still answered with a normal `UpdateResponse`.
   - New limitation: a node that restarts with the same node ID and an empty or stale store loses its first writes to a key until anti-entropy pulls the key back.
   - New limitation: `ORMap.Remove` followed by `Set` does not reset the value; peers merge the new value into the old one.
-  - New limitation: tombstones are not saved with a snapshot, so a key deleted while a node is away can come back within the TTL after a rolling restart.
 - **[Remoting](https://docs.goakt.dev/advanced/remoting) names the right mailbox for a slow remote receiver.**
   - Any bounded mailbox is the mitigation for a slow remote receiver: when full it refuses the remote overflow and returns the credit.
   - The ask worker pool has no upper bound: each ask to a stalled actor holds a goroutine until its deadline.

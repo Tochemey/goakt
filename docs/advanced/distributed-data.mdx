@@ -116,8 +116,9 @@ of the box; custom struct types require CBOR registration via `remote.WithSerial
   Primary use cases: Monotonic metrics, event counts.
 - **PNCounter**: Description: Positive-negative counter. Two GCounters: one for increments, one for decrements. Primary
   use cases: Rate limiters, gauges, inventory.
-- **LWWRegister**: Description: Last-writer-wins register. Stores a single value (`any`) with a timestamp. Primary use
-  cases: Configuration, feature flags.
+- **LWWRegister**: Description: Last-writer-wins register. Stores a single value (`any`) with a timestamp. A `Set` is
+  always stamped after the value it replaces, so two writes with one clock reading do not tie. Primary use cases:
+  Configuration, feature flags.
 - **ORSet**: Description: Observed-remove set. Supports add and remove without conflict (add-wins semantics). Elements
   are `any`. Primary use cases: Session tracking, subscriptions.
 - **ORMap**: Description: Map where keys (`any`) are an OR-Set and values are themselves CRDTs. Primary use cases:
@@ -375,9 +376,11 @@ crdt.WithSnapshotDir("/var/data/goakt/crdt-snapshots"),
 
 When enabled:
 
-- The Replicator saves the full store to BoltDB at the configured interval.
-- On startup (or supervisor restart), the Replicator restores from the latest snapshot before participating in
-  anti-entropy.
+- The Replicator saves the full store, and the tombstones of its deletions that are within the tombstone TTL, to
+  BoltDB at the configured interval.
+- On startup (or supervisor restart), the Replicator restores the keys and the tombstones from the latest snapshot
+  before participating in anti-entropy, so a key deleted before the restart is not taken back from a peer that still
+  holds it.
 - A final snapshot is persisted during graceful shutdown. The snapshot file is retained on disk so the Replicator can
   restore quickly on the next startup.
 
@@ -594,7 +597,10 @@ clock again from a value the cluster has already seen:
 In both cases the caller receives a normal `UpdateResponse`. The window closes when the restarted node pulls the key's
 full state in its own anti-entropy round, up to `WithAntiEntropyInterval` after it starts. Until then, do not write
 from a restarted node to a key it has not read back from a peer, or make the node ID unique per process, for example
-by appending the start time to the peers address.
+by appending the start time to the peers address. A shorter `WithAntiEntropyInterval` narrows the window, at the cost
+of more digest exchanges. A node ID that changes per process leaves a counter slot or a clock entry behind in every
+key the node wrote, on every restart: there is no pruning of the slots of a node that is gone (see
+[CRDT garbage accumulation](#crdt-garbage-accumulation)).
 
 ### ORMap remove then set
 
@@ -616,9 +622,9 @@ Some CRDT types accumulate metadata that grows over the lifetime of the system:
   reduces redundant dots by keeping only the highest counter per node, but the number of distinct node entries still
   grows with cluster membership history.
 
-The Replicator runs a **prune cycle** (default every 5 minutes) that handles tombstone expiry and CRDT compaction, but
-does not yet implement full removed-node pruning (reassigning departed node state to a surviving node). This is a known
-gap and is planned for a future release.
+The Replicator runs a **prune cycle** (default every 5 minutes) that handles tombstone expiry and CRDT compaction, and
+forgets what it kept of a deleted key once its tombstone expires. It does not yet implement full removed-node pruning
+(reassigning departed node state to a surviving node). This is a known gap and is planned for a future release.
 
 ### Single-topic dissemination
 
@@ -641,11 +647,12 @@ anti-entropy carries the deletion to every peer it exchanges with, in both direc
 tombstone itself drops the key on its next round with a node that has it. This also holds across datacenters when
 cross-DC anti-entropy is on.
 
-Tombstones live in memory only: a snapshot saves the store, not the tombstones, so a restarted node holds none of its
-own deletions until a peer's digest carries them back. A key can therefore come back within the TTL when every node
-that held its tombstone restarts while a node that still holds the key is away: the returning node offers the key, no
-node holds the key or a tombstone for it, and the key is taken as new. Avoid a rolling restart of every node while one
-is down, or delete the key again once the cluster is whole.
+A node restored from a snapshot holds the tombstones saved with it that are within the TTL. A node that restarts
+without a snapshot holds none of its own deletions until a peer's digest carries them back. Without snapshots, a key can
+therefore come back within the TTL when every node that held its tombstone restarts while a node that still holds the
+key is away: the returning node offers the key, no node holds the key or a tombstone for it, and the key is taken as
+new. Enable snapshots, avoid a rolling restart of every node while one is down, or delete the key again once the cluster
+is whole.
 
 A node that comes back after a longer absence, restored from its snapshot or kept running through a partition, can still
 hold a key deleted while it was away, whose tombstone no node retains any more. Each Replicator records the last time it

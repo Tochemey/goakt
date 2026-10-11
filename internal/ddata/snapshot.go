@@ -39,12 +39,13 @@ import (
 )
 
 const (
-	bucketName                 = "crdt_snapshots"
-	metaBucketName             = "crdt_snapshot_meta"
-	lastContactKey             = "last_contact"
-	sinceKey                   = "since"
-	fileMode       os.FileMode = 0o600
-	fileName                   = "crdt-snapshot.db"
+	bucketName                      = "crdt_snapshots"
+	tombstoneBucketName             = "crdt_snapshot_tombstones"
+	metaBucketName                  = "crdt_snapshot_meta"
+	lastContactKey                  = "last_contact"
+	sinceKey                        = "since"
+	fileMode            os.FileMode = 0o600
+	fileName                        = "crdt-snapshot.db"
 )
 
 var (
@@ -86,6 +87,10 @@ func NewStore(dir string) (*Store, error) {
 			return e
 		}
 
+		if _, e := tx.CreateBucketIfNotExists([]byte(tombstoneBucketName)); e != nil {
+			return e
+		}
+
 		_, e := tx.CreateBucketIfNotExists([]byte(metaBucketName))
 		return e
 	}); err != nil {
@@ -96,13 +101,17 @@ func NewStore(dir string) (*Store, error) {
 	return &Store{db: db, bucket: bucket, path: path}, nil
 }
 
-// Save persists the pre-encoded CRDT snapshot entries to BoltDB in one
-// transaction with two times of the node: the last time it heard from a peer
-// Replicator, and the time from which it knows every deletion. Each entry is
-// keyed by its CRDT key ID. A node restored from the snapshot compares the
-// last contact with the tombstone TTL to know whether the deletions made
-// while it was away may have expired. A zero time is saved as none.
-func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry, lastContact, since time.Time) error {
+// Save persists the pre-encoded CRDT snapshot entries and tombstones to
+// BoltDB in one transaction with two times of the node: the last time it
+// heard from a peer Replicator, and the time from which it knows every
+// deletion. Each entry is keyed by its CRDT key ID, and so is each tombstone.
+// A node restored from the snapshot holds its deletions again, so a key
+// deleted before a restart is not taken back from a peer that still has it,
+// and compares the last contact with the tombstone TTL to know whether the
+// deletions made while it was away may have expired. A zero time is saved as
+// none. An entry or a tombstone whose key ID is empty cannot be stored and
+// is skipped, so it does not fail the snapshot of every other key.
+func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry, tombstones []*internalpb.CRDTTombstone, lastContact, since time.Time) error {
 	if s.closed.Load() {
 		return ErrStoreClosed
 	}
@@ -111,6 +120,11 @@ func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry, lastConta
 		bucket := tx.Bucket(s.bucket)
 		if bucket == nil {
 			return fmt.Errorf("crdt: snapshot bucket %q missing", bucketName)
+		}
+
+		tombstoneBucket := tx.Bucket([]byte(tombstoneBucketName))
+		if tombstoneBucket == nil {
+			return fmt.Errorf("crdt: snapshot bucket %q missing", tombstoneBucketName)
 		}
 
 		meta := tx.Bucket([]byte(metaBucketName))
@@ -126,22 +140,42 @@ func (s *Store) Save(entries map[string]*internalpb.CRDTSnapshotEntry, lastConta
 			return err
 		}
 
-		// clear existing entries
-		cursor := bucket.Cursor()
-		for k, _ := cursor.First(); k != nil; k, _ = cursor.Next() {
-			if err := cursor.Delete(); err != nil {
-				return err
-			}
+		if err := clearBucket(bucket); err != nil {
+			return err
+		}
+
+		if err := clearBucket(tombstoneBucket); err != nil {
+			return err
 		}
 
 		// write current state
 		for keyID, entry := range entries {
+			if keyID == "" {
+				continue
+			}
+
 			raw, err := proto.Marshal(entry)
 			if err != nil {
 				return fmt.Errorf("crdt: marshal snapshot entry for key=%s: %w", keyID, err)
 			}
 
 			if err := bucket.Put([]byte(keyID), raw); err != nil {
+				return err
+			}
+		}
+
+		for _, ts := range tombstones {
+			keyID := ts.GetKey().GetId()
+			if keyID == "" {
+				continue
+			}
+
+			raw, err := proto.Marshal(ts)
+			if err != nil {
+				return fmt.Errorf("crdt: marshal snapshot tombstone for key=%s: %w", keyID, err)
+			}
+
+			if err := tombstoneBucket.Put([]byte(keyID), raw); err != nil {
 				return err
 			}
 		}
@@ -180,6 +214,38 @@ func (s *Store) Load() (map[string]*internalpb.CRDTSnapshotEntry, error) {
 	}
 
 	return entries, nil
+}
+
+// Tombstones returns the tombstones saved by Save. A file written by a
+// version that predates them holds none.
+func (s *Store) Tombstones() ([]*internalpb.CRDTTombstone, error) {
+	if s.closed.Load() {
+		return nil, ErrStoreClosed
+	}
+
+	var tombstones []*internalpb.CRDTTombstone
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tombstoneBucketName))
+		if bucket == nil {
+			return nil
+		}
+
+		return bucket.ForEach(func(_, v []byte) error {
+			ts := new(internalpb.CRDTTombstone)
+			if err := proto.Unmarshal(v, ts); err != nil {
+				return fmt.Errorf("crdt: unmarshal snapshot tombstone: %w", err)
+			}
+
+			tombstones = append(tombstones, ts)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return tombstones, nil
 }
 
 // Contact returns the last contact and the since saved by Save. A time that
@@ -236,6 +302,18 @@ func (s *Store) EnsureOpen() error {
 	if s.closed.Load() {
 		return ErrStoreClosed
 	}
+	return nil
+}
+
+// clearBucket deletes every key of the bucket.
+func clearBucket(bucket *bbolt.Bucket) error {
+	cursor := bucket.Cursor()
+	for k, _ := cursor.First(); k != nil; k, _ = cursor.Next() {
+		if err := cursor.Delete(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

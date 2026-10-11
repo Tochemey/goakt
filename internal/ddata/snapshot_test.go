@@ -52,7 +52,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"counter-1": entry}
 
-		err = store.Save(entries, time.Time{}, time.Time{})
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -79,7 +79,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"pn-1": entry}
 
-		err = store.Save(entries, time.Time{}, time.Time{})
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -103,7 +103,7 @@ func TestStore(t *testing.T) {
 		}.Build()
 		entries := map[string]*internalpb.CRDTSnapshotEntry{"flag-1": entry}
 
-		err = store.Save(entries, time.Time{}, time.Time{})
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -142,7 +142,7 @@ func TestStore(t *testing.T) {
 				Version: 1,
 			}.Build(),
 		}
-		err = store.Save(entries1, time.Time{}, time.Time{})
+		err = store.Save(entries1, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		// second save with different keys
@@ -153,7 +153,7 @@ func TestStore(t *testing.T) {
 				Version: 2,
 			}.Build(),
 		}
-		err = store.Save(entries2, time.Time{}, time.Time{})
+		err = store.Save(entries2, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		// load should only have "c"
@@ -185,7 +185,7 @@ func TestStore(t *testing.T) {
 		err = store.Close()
 		require.NoError(t, err)
 
-		err = store.Save(nil, time.Time{}, time.Time{})
+		err = store.Save(nil, nil, time.Time{}, time.Time{})
 		assert.ErrorIs(t, err, ErrStoreClosed)
 	})
 
@@ -228,7 +228,7 @@ func TestStore(t *testing.T) {
 			}.Build(),
 		}
 
-		err = store.Save(entries, time.Time{}, time.Time{})
+		err = store.Save(entries, nil, time.Time{}, time.Time{})
 		require.NoError(t, err)
 
 		loaded, err := store.Load()
@@ -321,7 +321,7 @@ func TestStore(t *testing.T) {
 
 		lastContact := time.Unix(0, time.Now().UnixNano())
 		since := lastContact.Add(-time.Hour)
-		require.NoError(t, store.Save(nil, lastContact, since))
+		require.NoError(t, store.Save(nil, nil, lastContact, since))
 
 		loadedContact, loadedSince, err := store.Contact()
 		require.NoError(t, err)
@@ -335,7 +335,7 @@ func TestStore(t *testing.T) {
 		require.NoError(t, err)
 
 		lastContact := time.Unix(0, time.Now().UnixNano())
-		require.NoError(t, store.Save(nil, lastContact, lastContact))
+		require.NoError(t, store.Save(nil, nil, lastContact, lastContact))
 		require.NoError(t, store.Close())
 
 		reopened, err := NewStore(dir)
@@ -360,11 +360,154 @@ func TestStore(t *testing.T) {
 		assert.True(t, since.IsZero())
 
 		// saved by a node that has never heard from a peer and has stale keys
-		require.NoError(t, store.Save(nil, time.Time{}, time.Time{}))
+		require.NoError(t, store.Save(nil, nil, time.Time{}, time.Time{}))
 		lastContact, since, err = store.Contact()
 		require.NoError(t, err)
 		assert.True(t, lastContact.IsZero())
 		assert.True(t, since.IsZero())
+	})
+
+	t.Run("tombstones round trip and survive reopening the store", func(t *testing.T) {
+		dir := t.TempDir()
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+
+		deleted := internalpb.CRDTTombstone_builder{
+			Key:            codec.EncodeCRDTKey("gone", crdt.GCounterType),
+			DeletedAtNanos: 42,
+			DeletedByNode:  "node-1",
+		}.Build()
+		require.NoError(t, store.Save(nil, []*internalpb.CRDTTombstone{deleted}, time.Time{}, time.Time{}))
+
+		tombstones, err := store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, tombstones, 1)
+		assert.Equal(t, "gone", tombstones[0].GetKey().GetId())
+		assert.Equal(t, int64(42), tombstones[0].GetDeletedAtNanos())
+		assert.Equal(t, "node-1", tombstones[0].GetDeletedByNode())
+		require.NoError(t, store.Close())
+
+		store, err = NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		tombstones, err = store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, tombstones, 1)
+		assert.Equal(t, "gone", tombstones[0].GetKey().GetId())
+	})
+
+	t.Run("save replaces the tombstones of the previous snapshot", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		first := internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("first", crdt.GCounterType)}.Build()
+		second := internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("second", crdt.GCounterType)}.Build()
+		require.NoError(t, store.Save(nil, []*internalpb.CRDTTombstone{first}, time.Time{}, time.Time{}))
+		require.NoError(t, store.Save(nil, []*internalpb.CRDTTombstone{second}, time.Time{}, time.Time{}))
+
+		tombstones, err := store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, tombstones, 1)
+		assert.Equal(t, "second", tombstones[0].GetKey().GetId())
+	})
+
+	t.Run("an entry or a tombstone with an empty key ID is skipped", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		entries := map[string]*internalpb.CRDTSnapshotEntry{
+			"":       internalpb.CRDTSnapshotEntry_builder{Key: codec.EncodeCRDTKey("", crdt.GCounterType)}.Build(),
+			"kept-1": internalpb.CRDTSnapshotEntry_builder{Key: codec.EncodeCRDTKey("kept-1", crdt.GCounterType)}.Build(),
+		}
+		tombstones := []*internalpb.CRDTTombstone{
+			internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("", crdt.GCounterType)}.Build(),
+			internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("kept-2", crdt.GCounterType)}.Build(),
+		}
+		require.NoError(t, store.Save(entries, tombstones, time.Time{}, time.Time{}))
+
+		loaded, err := store.Load()
+		require.NoError(t, err)
+		require.Len(t, loaded, 1)
+		assert.Contains(t, loaded, "kept-1")
+
+		saved, err := store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, saved, 1)
+		assert.Equal(t, "kept-2", saved[0].GetKey().GetId())
+	})
+
+	t.Run("a snapshot file of a version without tombstones loads none and saves", func(t *testing.T) {
+		dir := t.TempDir()
+		optionsCopy := *defaultOptions
+		db, err := bbolt.Open(filepath.Join(dir, fileName), fileMode, &optionsCopy)
+		require.NoError(t, err)
+		require.NoError(t, db.Update(func(tx *bbolt.Tx) error {
+			if _, err := tx.CreateBucket([]byte(bucketName)); err != nil {
+				return err
+			}
+
+			_, err := tx.CreateBucket([]byte(metaBucketName))
+			return err
+		}))
+		require.NoError(t, db.Close())
+
+		store, err := NewStore(dir)
+		require.NoError(t, err)
+		defer store.Close()
+
+		tombstones, err := store.Tombstones()
+		require.NoError(t, err)
+		assert.Empty(t, tombstones)
+
+		deleted := internalpb.CRDTTombstone_builder{Key: codec.EncodeCRDTKey("gone", crdt.GCounterType)}.Build()
+		require.NoError(t, store.Save(nil, []*internalpb.CRDTTombstone{deleted}, time.Time{}, time.Time{}))
+
+		tombstones, err = store.Tombstones()
+		require.NoError(t, err)
+		require.Len(t, tombstones, 1)
+	})
+
+	t.Run("a snapshot file without the tombstone bucket reads no tombstones and cannot be saved", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		require.NoError(t, store.db.Update(func(tx *bbolt.Tx) error {
+			return tx.DeleteBucket([]byte(tombstoneBucketName))
+		}))
+
+		tombstones, err := store.Tombstones()
+		require.NoError(t, err)
+		assert.Empty(t, tombstones)
+
+		err = store.Save(nil, nil, time.Time{}, time.Time{})
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), tombstoneBucketName)
+	})
+
+	t.Run("a corrupted tombstone returns error", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		defer store.Close()
+
+		require.NoError(t, store.db.Update(func(tx *bbolt.Tx) error {
+			return tx.Bucket([]byte(tombstoneBucketName)).Put([]byte("bad"), []byte{0xff, 0xff})
+		}))
+
+		_, err = store.Tombstones()
+		require.Error(t, err)
+	})
+
+	t.Run("tombstones after close return error", func(t *testing.T) {
+		store, err := NewStore(t.TempDir())
+		require.NoError(t, err)
+		require.NoError(t, store.Close())
+
+		_, err = store.Tombstones()
+		require.ErrorIs(t, err, ErrStoreClosed)
 	})
 
 	t.Run("a snapshot file without the metadata bucket reads no contact and cannot be saved", func(t *testing.T) {
@@ -381,7 +524,7 @@ func TestStore(t *testing.T) {
 		assert.True(t, lastContact.IsZero())
 		assert.True(t, since.IsZero())
 
-		err = store.Save(nil, time.Now(), time.Time{})
+		err = store.Save(nil, nil, time.Now(), time.Time{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), metaBucketName)
 	})
