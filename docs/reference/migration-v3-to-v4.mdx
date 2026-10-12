@@ -235,7 +235,7 @@ func scheduleTick(ctx context.Context, system actor.ActorSystem) error {
 
 ### 8. `GetPartition` is now `Partition`
 
-Replace `system.GetPartition(name)` with `system.Partition(name)`. It returns the partition as a `uint64`.
+Replace `system.GetPartition(name)` with `system.Partition(ctx, name)`. It returns the registry partition that holds the actor's record as a `uint64`, or an error: `ErrActorNotFound` when no actor is registered under the name, `ErrClusterDisabled` outside cluster mode and `ErrActorSystemNotStarted` on a stopped actor system.
 
 ### 9. Addresses became paths
 

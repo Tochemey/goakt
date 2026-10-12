@@ -366,11 +366,25 @@ type ActorSystem interface {
 	ActorExists(ctx context.Context, actorName string) (exists bool, err error)
 	// InCluster states whether the actor system has started within a cluster of nodes
 	InCluster() bool
-	// Partition returns the partition where a given actor is located. The name
-	// is the actor's name for a top-level actor and its qualified name, its
-	// ancestors' names and its own joined by '/' (e.g. "parent/child"), for a
-	// child.
-	Partition(actorName string) uint64
+	// Partition returns the cluster registry partition that holds the record
+	// of the given actor.
+	//
+	// actorName is the actor's qualified name: the names of its ancestors from
+	// the root down and its own name, joined by '/' (e.g. "parent/child"). A
+	// top-level actor's qualified name is its name. [QualifiedName] builds it
+	// from the names, and [Path.QualifiedName] reports it for a running actor
+	// through pid.Path().
+	//
+	// The partition is the one the registry reports for the actor's record, so
+	// every node of the cluster returns the same value for a registered actor.
+	//
+	// Possible Errors:
+	//   - ErrActorSystemNotStarted: The actor system has not been started.
+	//   - ErrClusterDisabled: Clustering is not enabled for this node.
+	//   - ErrActorNotFound: No actor is registered under the name.
+	//   - ErrClusterRegistryTimeout: The registry read ran out of its timeout.
+	//   - Other transient errors from the cluster registry read.
+	Partition(ctx context.Context, actorName string) (uint64, error)
 	// Subscribe creates an event subscriber to consume events from the actor system.
 	// Remember to use the Unsubscribe method to avoid resource leakage.
 	Subscribe() (eventstream.Subscriber, error)
@@ -2104,13 +2118,28 @@ func (x *actorSystem) Unsubscribe(subscriber eventstream.Subscriber) error {
 	return nil
 }
 
-// Partition returns the partition where a given actor is located. See the
-// ActorSystem interface for how actorName names a child.
-func (x *actorSystem) Partition(actorName string) uint64 {
-	if x.InCluster() {
-		return x.cluster.GetPartition(actorName)
+// Partition returns the cluster registry partition that holds the record of
+// the given actor. See the ActorSystem interface for what actorName is and
+// for the errors it returns.
+func (x *actorSystem) Partition(ctx context.Context, actorName string) (uint64, error) {
+	if !x.Running() {
+		return 0, gerrors.ErrActorSystemNotStarted
 	}
-	return uint64(0)
+
+	if !x.clusterEnabled.Load() {
+		return 0, gerrors.ErrClusterDisabled
+	}
+
+	partition, err := x.getCluster().GetPartition(ctx, actorName)
+	if err != nil {
+		if errors.Is(err, cluster.ErrActorNotFound) {
+			return 0, gerrors.NewErrActorNotFound(actorName)
+		}
+
+		return 0, err
+	}
+
+	return partition, nil
 }
 
 // InCluster states whether the actor system is started within a cluster of nodesMap

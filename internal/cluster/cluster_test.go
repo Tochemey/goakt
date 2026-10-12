@@ -124,7 +124,9 @@ func TestNotRunningReturnsErrEngineNotRunning(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 	require.Nil(t, peers)
 
-	require.Zero(t, cluster.GetPartition("actor"))
+	partition, err := cluster.GetPartition(ctx, "actor")
+	require.ErrorIs(t, err, ErrEngineNotRunning)
+	require.Zero(t, partition)
 
 	next, err := cluster.NextRoundRobinValue(ctx, ActorsRoundRobinKey)
 	require.ErrorIs(t, err, ErrEngineNotRunning)
@@ -722,8 +724,8 @@ func TestSingleNode(t *testing.T) {
 		assert.True(t, proto.Equal(actor, actual))
 
 		// fetch the partition
-		partition := cluster.GetPartition(actorName)
-		require.NotZero(t, partition)
+		_, err = cluster.GetPartition(ctx, actorName)
+		require.NoError(t, err)
 
 		// let us remove the actor
 		reowned, err := cluster.RemoveActor(ctx, actorName, actor.GetIncarnationId())
@@ -734,9 +736,9 @@ func TestSingleNode(t *testing.T) {
 		require.Nil(t, actual)
 		assert.EqualError(t, err, ErrActorNotFound.Error())
 
-		// fetch the partition
-		partition = cluster.GetPartition(actorName)
-		require.Zero(t, partition)
+		// the removed actor has no partition
+		_, err = cluster.GetPartition(ctx, actorName)
+		require.ErrorIs(t, err, ErrActorNotFound)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -787,8 +789,8 @@ func TestSingleNode(t *testing.T) {
 		require.Error(t, err)
 		require.EqualError(t, err, ErrEngineNotRunning.Error())
 
-		partition := cluster.GetPartition("actorName")
-		require.Zero(t, partition)
+		_, err = cluster.GetPartition(ctx, "actorName")
+		require.ErrorIs(t, err, ErrEngineNotRunning)
 
 		// stop the node
 		require.NoError(t, cluster.Stop(ctx))
@@ -5215,5 +5217,114 @@ func TestGetActorRegistryReadTimeout(t *testing.T) {
 		require.False(t, exists)
 		require.ErrorIs(t, err, assert.AnError)
 		require.NotErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+	})
+}
+
+func TestGetPartition(t *testing.T) {
+	t.Run("a stopped engine returns ErrEngineNotRunning", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false)}
+
+		partition, err := cl.GetPartition(context.Background(), "worker")
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.Zero(t, partition)
+	})
+
+	t.Run("an actor without a registry record returns ErrActorNotFound", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: time.Second,
+			dmap: &MockDMap{getFn: func(_ context.Context, key string) (*olric.GetResponse, error) {
+				require.Equal(t, composeKey(namespaceActors, "parent/worker"), key)
+				return nil, olric.ErrKeyNotFound
+			}},
+		}
+
+		partition, err := cl.GetPartition(context.Background(), "parent/worker")
+		require.ErrorIs(t, err, ErrActorNotFound)
+		require.Zero(t, partition)
+	})
+
+	t.Run("an engine read timeout under a live caller context is a registry timeout", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: 10 * time.Millisecond,
+			dmap: &MockDMap{getFn: func(ctx context.Context, _ string) (*olric.GetResponse, error) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}},
+		}
+
+		partition, err := cl.GetPartition(context.Background(), "worker")
+		require.ErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Zero(t, partition)
+	})
+
+	t.Run("any other read failure is returned as it is", func(t *testing.T) {
+		cl := &cluster{
+			running:     atomic.NewBool(true),
+			readTimeout: time.Second,
+			dmap: &MockDMap{getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				return nil, assert.AnError
+			}},
+		}
+
+		partition, err := cl.GetPartition(context.Background(), "worker")
+		require.ErrorIs(t, err, assert.AnError)
+		require.NotErrorIs(t, err, ErrActorNotFound)
+		require.NotErrorIs(t, err, gerrors.ErrClusterRegistryTimeout)
+		require.Zero(t, partition)
+	})
+
+	t.Run("the partition is the one the registry stores the record in", func(t *testing.T) {
+		ctx := context.TODO()
+		nodePorts := dynaport.Get(3)
+		gossipPort := nodePorts[0]
+		peersPort := nodePorts[1]
+		remotingPort := nodePorts[2]
+
+		provider := new(mocksdiscovery.Provider)
+		provider.EXPECT().ID().Return("testDisco")
+		provider.EXPECT().Initialize().Return(nil)
+		provider.EXPECT().Register().Return(nil)
+		provider.EXPECT().Deregister().Return(nil)
+		provider.EXPECT().DiscoverPeers().Return([]string{fmt.Sprintf("127.0.0.1:%d", gossipPort)}, nil)
+		provider.EXPECT().Close().Return(nil)
+
+		host := "127.0.0.1"
+		hostNode := discovery.Node{
+			Name:          host,
+			Host:          host,
+			DiscoveryPort: gossipPort,
+			PeersPort:     peersPort,
+			RemotingPort:  remotingPort,
+		}
+
+		engine := New("test", provider, &hostNode, WithLogger(log.DiscardLogger))
+		require.NoError(t, engine.Start(ctx))
+
+		// the names are fixed, so the partitions they map to are the same on every run
+		partitions := make(map[uint64]types.Unit)
+
+		for i := range 20 {
+			name := fmt.Sprintf("actor-%d", i)
+			addr := address.New(name, "system", host, remotingPort)
+			record := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString()}.Build()
+			require.NoError(t, engine.PutActor(ctx, record))
+
+			partition, err := engine.GetPartition(ctx, name)
+			require.NoError(t, err)
+
+			resp, err := engine.(*cluster).dmap.Get(ctx, composeKey(namespaceActors, name))
+			require.NoError(t, err)
+			require.Equalf(t, resp.Partition(), partition, "actor %s: the partition is not the one the registry reports", name)
+			partitions[partition] = types.Unit{}
+		}
+
+		// a value that does not come from the registry cannot spread over several partitions
+		require.Greater(t, len(partitions), 1)
+
+		require.NoError(t, engine.Stop(ctx))
+		provider.AssertExpectations(t)
 	})
 }

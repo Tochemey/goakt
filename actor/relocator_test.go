@@ -681,7 +681,10 @@ func TestRelocationWithReplicasReReplicatesSurvivorRegistry(t *testing.T) {
 			exists, err := node1.ActorExists(ctx, name)
 			return err == nil && exists
 		}, 30*time.Second, 200*time.Millisecond, "survivor %s should be registered before node2 departs", name)
-		partitions[cl.GetPartition(name)] = struct{}{}
+
+		partition, err := cl.GetPartition(ctx, name)
+		require.NoError(t, err)
+		partitions[partition] = struct{}{}
 	}
 	require.Len(t, partitions, partitionCount,
 		"survivor entries must cover every partition so that some are provably primaried on node2")

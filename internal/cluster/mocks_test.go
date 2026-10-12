@@ -368,7 +368,7 @@ func (x *MockCluster) Peers(context.Context) ([]*Peer, error) { panic("unexpecte
 func (x *MockCluster) IsLeader(context.Context) bool { panic("unexpected call") }
 
 // GetPartition panics because no test exercises it.
-func (x *MockCluster) GetPartition(string) uint64 { panic("unexpected call") }
+func (x *MockCluster) GetPartition(context.Context, string) (uint64, error) { panic("unexpected call") }
 
 // IsRunning panics because no test exercises it.
 func (x *MockCluster) IsRunning() bool { panic("unexpected call") }
