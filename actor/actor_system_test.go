@@ -1364,84 +1364,98 @@ func TestActorSystem(t *testing.T) {
 		err = sys.Stop(ctx)
 		assert.NoError(t, err)
 	})
-	t.Run("With GetPartition returning zero in non cluster env", func(t *testing.T) {
+	t.Run("With Partition when the actor system is not started or not clustered", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem(
 			"test",
 			WithLogger(log.DiscardLogger),
 		)
 
-		// start the actor system
-		err := sys.Start(ctx)
-		assert.NoError(t, err)
+		partition, err := sys.Partition(ctx, "some-actor")
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		require.Zero(t, partition)
 
-		// wait for the system to properly start
-		pause.For(time.Second)
+		require.NoError(t, sys.Start(ctx))
 
-		partition := sys.Partition("some-actor")
-		assert.Zero(t, partition)
+		partition, err = sys.Partition(ctx, "some-actor")
+		require.ErrorIs(t, err, gerrors.ErrClusterDisabled)
+		require.Zero(t, partition)
 
-		err = sys.Stop(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, sys.Stop(ctx))
 	})
-	t.Run("With GetPartition when cluster mode is enabled", func(t *testing.T) {
-		// create a context
+	t.Run("With Partition when cluster mode is enabled", func(t *testing.T) {
 		ctx := context.TODO()
-		// start the NATS server
 		srv := startNatsServer(t)
+		nodes, providers := startNATsSystems(t, srv.Addr().String(), 3)
 
-		// create and start a system cluster
-		node1, sd1 := startNATsSystem(t, srv.Addr().String())
-		require.NotNil(t, node1)
-		require.NotNil(t, sd1)
-
-		// create and start a system cluster
-		node2, sd2 := startNATsSystem(t, srv.Addr().String())
-		require.NotNil(t, node2)
-		require.NotNil(t, sd2)
-
-		// create and start a system cluster
-		node3, sd3 := startNATsSystem(t, srv.Addr().String())
-		require.NotNil(t, node3)
-		require.NotNil(t, sd3)
-
-		pid, err := node1.Spawn(ctx, "actor11", NewMockActor())
+		// every node spawns a top-level actor, and the first one a child as well
+		parent, err := nodes[0].Spawn(ctx, "actor11", NewMockActor())
 		require.NoError(t, err)
-		require.NotNil(t, pid)
-		pause.For(time.Second)
-		part1 := node1.Partition("actor11")
 
-		pid, err = node2.Spawn(ctx, "actor21", NewMockActor())
+		_, err = parent.SpawnChild(ctx, "child", NewMockActor())
 		require.NoError(t, err)
-		require.NotNil(t, pid)
-		pause.For(time.Second)
-		part2 := node2.Partition("actor21")
 
-		pid, err = node3.Spawn(ctx, "actor31", NewMockActor())
+		_, err = nodes[1].Spawn(ctx, "actor21", NewMockActor())
 		require.NoError(t, err)
-		require.NotNil(t, pid)
-		pause.For(time.Second)
-		part3 := node3.Partition("actor31")
 
-		// get the partition of the actor actor11
-		partition := node2.Partition("actor11")
-		require.Exactly(t, part1, partition)
+		_, err = nodes[2].Spawn(ctx, "actor31", NewMockActor())
+		require.NoError(t, err)
 
-		// get the partition of the actor21
-		partition = node3.Partition("actor21")
-		require.Exactly(t, part2, partition)
+		// every node reads the same partition for every registered actor
+		for _, name := range []string{"actor11", "actor11/child", "actor21", "actor31"} {
+			expected, err := nodes[0].Partition(ctx, name)
+			require.NoErrorf(t, err, "node 1 has no partition for %s", name)
 
-		// get the partition of the actor31
-		partition = node1.Partition("actor31")
-		require.Exactly(t, part3, partition)
+			for i, node := range nodes[1:] {
+				partition, err := node.Partition(ctx, name)
+				require.NoErrorf(t, err, "node %d has no partition for %s", i+2, name)
+				require.Equalf(t, expected, partition, "node %d reads another partition for %s", i+2, name)
+			}
+		}
 
-		assert.NoError(t, node1.Stop(ctx))
-		assert.NoError(t, node3.Stop(ctx))
-		assert.NoError(t, sd1.Close())
-		assert.NoError(t, sd3.Close())
+		// a name without a registry record has no partition on any node
+		for _, node := range nodes {
+			partition, err := node.Partition(ctx, "never-spawned")
+			require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+			require.Zero(t, partition)
+		}
+
+		// a stopped node reports it is not running
+		require.NoError(t, nodes[2].Stop(ctx))
+
+		partition, err := nodes[2].Partition(ctx, "actor11")
+		require.ErrorIs(t, err, gerrors.ErrActorSystemNotStarted)
+		require.Zero(t, partition)
+
+		require.NoError(t, nodes[1].Stop(ctx))
+		require.NoError(t, nodes[0].Stop(ctx))
+
+		for _, provider := range providers {
+			require.NoError(t, provider.Close())
+		}
+
 		srv.Shutdown()
 	})
 
+	t.Run("With Partition returning the registry read error", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := new(mockscluster.Cluster)
+		system := newReplicationSystem(clusterMock)
+
+		clusterMock.EXPECT().GetPartition(mock.Anything, "worker").Return(0, assert.AnError).Once()
+		clusterMock.EXPECT().GetPartition(mock.Anything, "missing").Return(0, cluster.ErrActorNotFound).Once()
+		t.Cleanup(func() { clusterMock.AssertExpectations(t) })
+
+		// a read failure is returned as it is
+		partition, err := system.Partition(ctx, "worker")
+		require.ErrorIs(t, err, assert.AnError)
+		require.Zero(t, partition)
+
+		// a missing record is the public ErrActorNotFound
+		partition, err = system.Partition(ctx, "missing")
+		require.ErrorIs(t, err, gerrors.ErrActorNotFound)
+		require.Zero(t, partition)
+	})
 	t.Run("With actor PostStop error", func(t *testing.T) {
 		ctx := context.TODO()
 		sys, _ := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
@@ -10314,7 +10328,7 @@ func TestPostStartSeesTheRegistryRecord(t *testing.T) {
 
 	require.Eventually(t, func() bool {
 		for _, probe := range probes {
-			if _, done, _, _ := probe.snapshot(); !done {
+			if _, _, done, _, _ := probe.snapshot(); !done {
 				return false
 			}
 		}
@@ -10322,24 +10336,19 @@ func TestPostStartSeesTheRegistryRecord(t *testing.T) {
 		return true
 	}, 10*time.Second, 50*time.Millisecond, "every probe must handle PostStart")
 
-	nonZero := 0
-
 	for _, probe := range probes {
-		partition, _, recordErr, peerErrs := probe.snapshot()
+		partition, partitionErr, _, recordErr, peerErrs := probe.snapshot()
 		require.NoErrorf(t, recordErr, "actor %s found no registry record from PostStart", probe.registryName)
-		require.Equalf(t, node.Partition(probe.registryName), partition, "actor %s read a different partition from PostStart", probe.registryName)
+		require.NoErrorf(t, partitionErr, "actor %s read no partition from PostStart", probe.registryName)
+
+		expected, err := node.Partition(ctx, probe.registryName)
+		require.NoError(t, err)
+		require.Equalf(t, expected, partition, "actor %s read a different partition from PostStart", probe.registryName)
 
 		for i, err := range peerErrs {
 			require.NoErrorf(t, err, "node %d did not find actor %s during its PostStart", i+1, probe.registryName)
 		}
-
-		if partition != 0 {
-			nonZero++
-		}
 	}
-
-	// with the default 271 partitions, 20 names cannot all land on partition 0
-	require.NotZero(t, nonZero)
 
 	for i := range nodes {
 		require.NoError(t, nodes[i].Stop(ctx))

@@ -634,20 +634,29 @@ func (_c *Cluster_GetGrain_Call) RunAndReturn(run func(ctx context.Context, iden
 }
 
 // GetPartition provides a mock function for the type Cluster
-func (_mock *Cluster) GetPartition(actorName string) uint64 {
-	ret := _mock.Called(actorName)
+func (_mock *Cluster) GetPartition(ctx context.Context, actorName string) (uint64, error) {
+	ret := _mock.Called(ctx, actorName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPartition")
 	}
 
 	var r0 uint64
-	if returnFunc, ok := ret.Get(0).(func(string) uint64); ok {
-		r0 = returnFunc(actorName)
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (uint64, error)); ok {
+		return returnFunc(ctx, actorName)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) uint64); ok {
+		r0 = returnFunc(ctx, actorName)
 	} else {
 		r0 = ret.Get(0).(uint64)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, actorName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
 }
 
 // Cluster_GetPartition_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartition'
@@ -656,30 +665,36 @@ type Cluster_GetPartition_Call struct {
 }
 
 // GetPartition is a helper method to define mock.On call
+//   - ctx context.Context
 //   - actorName string
-func (_e *Cluster_Expecter) GetPartition(actorName any) *Cluster_GetPartition_Call {
-	return &Cluster_GetPartition_Call{Call: _e.mock.On("GetPartition", actorName)}
+func (_e *Cluster_Expecter) GetPartition(ctx any, actorName any) *Cluster_GetPartition_Call {
+	return &Cluster_GetPartition_Call{Call: _e.mock.On("GetPartition", ctx, actorName)}
 }
 
-func (_c *Cluster_GetPartition_Call) Run(run func(actorName string)) *Cluster_GetPartition_Call {
+func (_c *Cluster_GetPartition_Call) Run(run func(ctx context.Context, actorName string)) *Cluster_GetPartition_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		var arg0 string
+		var arg0 context.Context
 		if args[0] != nil {
-			arg0 = args[0].(string)
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
 		}
 		run(
 			arg0,
+			arg1,
 		)
 	})
 	return _c
 }
 
-func (_c *Cluster_GetPartition_Call) Return(v uint64) *Cluster_GetPartition_Call {
-	_c.Call.Return(v)
+func (_c *Cluster_GetPartition_Call) Return(v uint64, err error) *Cluster_GetPartition_Call {
+	_c.Call.Return(v, err)
 	return _c
 }
 
-func (_c *Cluster_GetPartition_Call) RunAndReturn(run func(actorName string) uint64) *Cluster_GetPartition_Call {
+func (_c *Cluster_GetPartition_Call) RunAndReturn(run func(ctx context.Context, actorName string) (uint64, error)) *Cluster_GetPartition_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -4797,10 +4797,10 @@ func clearPIDSlot(t *testing.T, system ActorSystem, pid *PID) {
 }
 
 // registryProbe records, from its own PostStart, what the cluster registry
-// says about the actor: the partition the actor system reports for its name,
-// whether the local registry handle already holds its record and whether each
-// peer node already finds the actor. With a child name set it also spawns a
-// child probe from PostStart.
+// says about the actor: the partition the actor system reports for its name
+// and the error of that read, whether the local registry handle already holds
+// its record and whether each peer node already finds the actor. With a child
+// name set it also spawns a child probe from PostStart.
 type registryProbe struct {
 	mu           sync.Mutex
 	registryName string
@@ -4808,6 +4808,7 @@ type registryProbe struct {
 	child        *registryProbe
 	peers        []ActorSystem
 	partition    uint64
+	partitionErr error
 	recordErr    error
 	peerErrs     []error
 	done         bool
@@ -4836,7 +4837,7 @@ func (p *registryProbe) Receive(ctx *ReceiveContext) {
 	}
 
 	p.mu.Lock()
-	p.partition = system.Partition(p.registryName)
+	p.partition, p.partitionErr = system.Partition(ctx.Context(), p.registryName)
 	p.recordErr = recordErr
 	p.peerErrs = peerErrs
 	p.done = true
@@ -4848,8 +4849,8 @@ func (p *registryProbe) Receive(ctx *ReceiveContext) {
 }
 
 // snapshot returns what the probe recorded from PostStart and whether it ran.
-func (p *registryProbe) snapshot() (partition uint64, done bool, recordErr error, peerErrs []error) {
+func (p *registryProbe) snapshot() (partition uint64, partitionErr error, done bool, recordErr error, peerErrs []error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.partition, p.done, p.recordErr, p.peerErrs
+	return p.partition, p.partitionErr, p.done, p.recordErr, p.peerErrs
 }

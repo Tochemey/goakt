@@ -252,9 +252,9 @@ type Cluster interface {
 	Peers(ctx context.Context) ([]*Peer, error)
 	// IsLeader reports whether the local node acts as the cluster coordinator.
 	IsLeader(ctx context.Context) bool
-	// GetPartition determines the partition assigned to the actor's qualified
-	// name.
-	GetPartition(actorName string) uint64
+	// GetPartition returns the registry partition that holds the record of the
+	// actor's qualified name, or ErrActorNotFound when no record exists.
+	GetPartition(ctx context.Context, actorName string) (uint64, error)
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
 	// LastRebalanceEvent returns the time of the most recent olric partition
@@ -1152,24 +1152,29 @@ func (x *cluster) coordinatorAddress(ctx context.Context) string {
 	return ""
 }
 
-// GetPartition returns the partition identifier used to distribute the actor
-// key, the actor's qualified name, in the unified map.
-func (x *cluster) GetPartition(actorName string) uint64 {
+// GetPartition returns the partition of the unified map that holds the record
+// of the actor key, the actor's qualified name, as the registry reports it. It
+// returns ErrEngineNotRunning on a stopped engine and ErrActorNotFound when no
+// record exists. The read is the one every registry read runs (getEntry), so
+// it is bounded and reported the same way.
+func (x *cluster) GetPartition(ctx context.Context, actorName string) (uint64, error) {
 	if !x.running.Load() {
-		return 0
+		return 0, ErrEngineNotRunning
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), x.readTimeout)
-	defer cancel()
 
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	resp, err := x.dmap.Get(ctx, composeKey(namespaceActors, actorName))
+	resp, err := x.getEntry(ctx, namespaceActors, actorName)
 	if err != nil {
-		return 0
+		if errors.Is(err, olric.ErrKeyNotFound) {
+			return 0, ErrActorNotFound
+		}
+
+		return 0, err
 	}
-	return resp.Partition()
+
+	return resp.Partition(), nil
 }
 
 // NextRoundRobinValue returns the next value in a round-robin sequence for the given key.
@@ -2044,11 +2049,21 @@ func (x *cluster) putRecordIfAbsent(ctx context.Context, namespace recordNamespa
 	return x.dmap.Put(ctx, composeKey(namespace, key), value, append([]olric.PutOption{olric.NX()}, options...)...)
 }
 
-// getRecord fetches a namespaced record from the unified map. The read runs
+// getRecord fetches a namespaced record from the unified map through getEntry
+// and returns its value.
+func (x *cluster) getRecord(callerCtx context.Context, namespace recordNamespace, key string) ([]byte, error) {
+	resp, err := x.getEntry(callerCtx, namespace, key)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Byte()
+}
+
+// getEntry fetches a namespaced entry from the unified map. The read runs
 // under the engine read timeout, detached from the caller's cancellation, so a
 // read that runs out of that timeout while callerCtx is still alive is reported
 // as ErrClusterRegistryTimeout (see registryReadError).
-func (x *cluster) getRecord(callerCtx context.Context, namespace recordNamespace, key string) ([]byte, error) {
+func (x *cluster) getEntry(callerCtx context.Context, namespace recordNamespace, key string) (*olric.GetResponse, error) {
 	ctx := context.WithoutCancel(callerCtx)
 	ctx, cancel := context.WithTimeout(ctx, x.readTimeout)
 	defer cancel()
@@ -2057,7 +2072,8 @@ func (x *cluster) getRecord(callerCtx context.Context, namespace recordNamespace
 	if err != nil {
 		return nil, registryReadError(callerCtx, err)
 	}
-	return resp.Byte()
+
+	return resp, nil
 }
 
 // deleteRecord removes a namespaced record from the unified map, tolerating
