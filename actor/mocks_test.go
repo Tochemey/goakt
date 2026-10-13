@@ -4796,6 +4796,43 @@ func clearPIDSlot(t *testing.T, system ActorSystem, pid *PID) {
 	t.Cleanup(func() { node.pid.Store(pid) })
 }
 
+// awaitPartitionOwners waits until every system sees all the systems as cluster
+// members and every system's partition table names the same owner for each
+// name, then returns the peers address of each name's owner. Partitions move
+// while the members join, so a check made before that would race the rebalance.
+func awaitPartitionOwners(t *testing.T, systems []ActorSystem, names []string) map[string]string {
+	t.Helper()
+	ctx := context.Background()
+	owners := make(map[string]string, len(names))
+
+	require.Eventually(t, func() bool {
+		for _, system := range systems {
+			members, err := system.(*actorSystem).getCluster().Members(ctx)
+			if err != nil || len(members) != len(systems) {
+				return false
+			}
+		}
+
+		for _, name := range names {
+			var expected string
+			for _, system := range systems {
+				owner, err := system.(*actorSystem).getCluster().PartitionOwner(ctx, name)
+				if err != nil || (expected != "" && owner.PeerAddress() != expected) {
+					return false
+				}
+
+				expected = owner.PeerAddress()
+			}
+
+			owners[name] = expected
+		}
+
+		return true
+	}, 30*time.Second, 100*time.Millisecond)
+
+	return owners
+}
+
 // registryProbe records, from its own PostStart, what the cluster registry
 // says about the actor: the partition the actor system reports for its name
 // and the error of that read, whether the local registry handle already holds

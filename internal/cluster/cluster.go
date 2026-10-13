@@ -255,6 +255,10 @@ type Cluster interface {
 	// GetPartition returns the registry partition that holds the record of the
 	// actor's qualified name, or ErrActorNotFound when no record exists.
 	GetPartition(ctx context.Context, actorName string) (uint64, error)
+	// PartitionOwner returns the member that currently owns the registry
+	// partition of the actor's qualified name, whether or not a record exists.
+	// It reads this node's partition table and makes no network call.
+	PartitionOwner(ctx context.Context, actorName string) (*Peer, error)
 	// IsRunning reports whether the cluster engine is currently running.
 	IsRunning() bool
 	// LastRebalanceEvent returns the time of the most recent olric partition
@@ -1047,18 +1051,7 @@ func (x *cluster) Members(ctx context.Context) ([]*Peer, error) {
 
 	peers := make([]*Peer, 0, len(members))
 	for _, member := range members {
-		node := new(discovery.Node)
-		_ = json.Unmarshal([]byte(member.Meta), node)
-		slices.Sort(node.Roles)
-		peers = append(peers, &Peer{
-			Host:          node.Host,
-			DiscoveryPort: node.DiscoveryPort,
-			PeersPort:     node.PeersPort,
-			Coordinator:   member.Coordinator,
-			RemotingPort:  node.RemotingPort,
-			Roles:         slices.Compact(node.Roles),
-			CreatedAt:     member.Birthdate,
-		})
+		peers = append(peers, toPeer(member))
 	}
 	return peers, nil
 }
@@ -1175,6 +1168,36 @@ func (x *cluster) GetPartition(ctx context.Context, actorName string) (uint64, e
 	}
 
 	return resp.Partition(), nil
+}
+
+// PartitionOwner returns the member that currently owns the partition of the
+// unified map that holds, or would hold, the record of the actor key, the
+// actor's qualified name. The owner is read from this node's partition table
+// with the hasher the registry writes use, so it makes no network call. The
+// result is a snapshot: during a rebalance the table can still name the
+// previous owner. It returns ErrEngineNotRunning on a stopped engine and
+// olric.ErrNotBootstrapped before this node has received a routing table.
+func (x *cluster) PartitionOwner(_ context.Context, actorName string) (*Peer, error) {
+	if !x.running.Load() {
+		return nil, ErrEngineNotRunning
+	}
+
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+
+	// the unified map is always created from the embedded client, whose map
+	// resolves owners from this member's own partition table
+	dmap, ok := x.dmap.(*olric.EmbeddedDMap)
+	if !ok {
+		return nil, errors.New("cluster map does not resolve partition owners")
+	}
+
+	member, err := dmap.Owner(composeKey(namespaceActors, actorName))
+	if err != nil {
+		return nil, err
+	}
+
+	return toPeer(member), nil
 }
 
 // NextRoundRobinValue returns the next value in a round-robin sequence for the given key.
@@ -2256,4 +2279,23 @@ func registryReadError(callerCtx context.Context, err error) error {
 	}
 
 	return fmt.Errorf("%w: %w", gerrors.ErrClusterRegistryTimeout, err)
+}
+
+// toPeer converts an olric member into a Peer from the discovery.Node the
+// member advertises in its metadata, with its roles sorted and deduplicated.
+// Metadata that does not decode yields a Peer with only the member's
+// coordinator flag and birthdate set.
+func toPeer(member olric.Member) *Peer {
+	node := new(discovery.Node)
+	_ = json.Unmarshal([]byte(member.Meta), node)
+	slices.Sort(node.Roles)
+	return &Peer{
+		Host:          node.Host,
+		DiscoveryPort: node.DiscoveryPort,
+		PeersPort:     node.PeersPort,
+		Coordinator:   member.Coordinator,
+		RemotingPort:  node.RemotingPort,
+		Roles:         slices.Compact(node.Roles),
+		CreatedAt:     member.Birthdate,
+	}
 }

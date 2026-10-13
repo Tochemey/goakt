@@ -29,6 +29,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/tochemey/goakt/v4/datacenter"
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -50,7 +52,6 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/supervisor"
-	"google.golang.org/protobuf/proto"
 )
 
 // Spawn creates and starts a new actor in the local actor system.
@@ -237,7 +238,7 @@ func (x *actorSystem) SpawnNamedFromFunc(ctx context.Context, name string, recei
 //
 //   - In cluster mode, the actor may be placed on any node in the local cluster according to
 //     the placement strategy and role filter. Supported strategies:
-//     RoundRobin, Random, Local, LeastLoad. Placement uses cluster.Members and thus stays
+//     RoundRobin, Random, Local, LeastLoad, HashBased. Placement uses cluster.Members and thus stays
 //     within the current data center when the architecture is one-cluster-per-DC.
 //   - In non-cluster mode, the actor is created on the local actor system, like Spawn.
 //
@@ -328,7 +329,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		return nil, err
 	}
 
-	peer, err := x.selectPlacementPeer(ctx, peers, config.placement)
+	peer, err := x.selectPlacementPeer(ctx, name, peers, config)
 	if err != nil {
 		return nil, err
 	}
@@ -1015,17 +1016,52 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 	return newRemotePID(address, x.remoting), nil
 }
 
-func (x *actorSystem) selectPlacementPeer(ctx context.Context, peers []*cluster.Peer, placement SpawnPlacement) (*cluster.Peer, error) {
-	switch placement {
+// selectPlacementPeer picks, among the candidate peers, the node SpawnOn places
+// the actor named name on with the placement strategy of config. A nil peer
+// means this node.
+func (x *actorSystem) selectPlacementPeer(ctx context.Context, name string, peers []*cluster.Peer, config *spawnConfig) (*cluster.Peer, error) {
+	switch config.placement {
 	case Random:
 		return peers[rand.IntN(len(peers))], nil //nolint:gosec
 	case RoundRobin:
 		return x.actorsRoundRobinPlacementPeer(ctx, peers)
 	case LeastLoad:
 		return x.leastLoadedPeer(ctx, peers)
+	case HashBased:
+		return x.hashBasedPlacementPeer(ctx, name, peers, config.role)
 	default:
 		return nil, nil
 	}
+}
+
+// hashBasedPlacementPeer returns the node that owns the registry partition of
+// name, or nil when this node owns it, so the actor is spawned where its
+// registry record is written. An owner that does not advertise the required
+// role, or that is no longer among the cluster members peers, is an error: the
+// actor is never placed elsewhere, so a name always resolves to its owner. The
+// partition table can still name a departed node until the routing table that
+// follows its departure arrives, and the spawn then fails fast instead of
+// sending a remote spawn to a node that is gone.
+func (x *actorSystem) hashBasedPlacementPeer(ctx context.Context, name string, peers []*cluster.Peer, role *string) (*cluster.Peer, error) {
+	owner, err := x.cluster.PartitionOwner(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve the partition owner of actor %s: %w", name, err)
+	}
+
+	ownerAddress := owner.PeerAddress()
+	if role != nil && !owner.HasRole(*role) {
+		return nil, fmt.Errorf("partition owner %s of actor %s does not advertise role %s", ownerAddress, name, *role)
+	}
+
+	if !slices.ContainsFunc(peers, func(peer *cluster.Peer) bool { return peer.PeerAddress() == ownerAddress }) {
+		return nil, fmt.Errorf("partition owner %s of actor %s is no longer a cluster member", ownerAddress, name)
+	}
+
+	if ownerAddress == x.PeersAddress() {
+		return nil, nil
+	}
+
+	return owner, nil
 }
 
 func (x *actorSystem) actorsRoundRobinPlacementPeer(ctx context.Context, peers []*cluster.Peer) (*cluster.Peer, error) {
