@@ -3331,6 +3331,224 @@ func TestSpawnRemotePlacementAddressHandling(t *testing.T) {
 	})
 }
 
+func TestSpawnOnHashBased(t *testing.T) {
+	self := &cluster.Peer{Host: "127.0.0.1", PeersPort: 9000, RemotingPort: 8080, Roles: []string{"payments"}}
+	owner := &cluster.Peer{Host: "10.0.0.7", PeersPort: 9500, RemotingPort: 9000}
+
+	t.Run("With the partition owner on another node", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		remotingMock := mocksremote.NewClient(t)
+		system.remoting = remotingMock
+
+		confirmed := address.New("placed", system.Name(), owner.Host, owner.RemotingPort).String()
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{self, owner}, nil).Once()
+		clusterMock.EXPECT().PartitionOwner(mock.Anything, "placed").Return(owner, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, owner.Host, owner.RemotingPort, mock.Anything).Return(&confirmed, nil).Once()
+
+		pid, err := system.SpawnOn(context.Background(), "placed", NewMockActor(), WithPlacement(HashBased))
+		require.NoError(t, err)
+		require.Equal(t, owner.Host, pid.Path().Host())
+		require.Equal(t, owner.RemotingPort, pid.Path().Port())
+	})
+
+	t.Run("With the partition owner on this node", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		// no remoting expectation: a remote spawn fails the test
+		system.remoting = mocksremote.NewClient(t)
+
+		clusterMock.EXPECT().PartitionOwner(mock.Anything, "placed").Return(self, nil).Once()
+
+		peer, err := system.selectPlacementPeer(context.Background(), "placed", []*cluster.Peer{owner, self}, newSpawnConfig(WithPlacement(HashBased)))
+		require.NoError(t, err)
+		require.Nil(t, peer)
+	})
+
+	t.Run("With a partition owner that does not advertise the role", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.remoting = mocksremote.NewClient(t)
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{self, owner}, nil).Once()
+		clusterMock.EXPECT().PartitionOwner(mock.Anything, "placed").Return(owner, nil).Once()
+
+		pid, err := system.SpawnOn(context.Background(), "placed", NewMockActor(), WithPlacement(HashBased), WithRole("payments"))
+		require.ErrorContains(t, err, fmt.Sprintf("partition owner %s of actor placed does not advertise role payments", owner.PeerAddress()))
+		require.Nil(t, pid)
+	})
+
+	t.Run("With a partition owner that is no longer a member", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		// no remoting expectation: a remote spawn to the departed owner fails the test
+		system.remoting = mocksremote.NewClient(t)
+
+		departed := &cluster.Peer{Host: "10.0.0.9", PeersPort: 9500, RemotingPort: 9000}
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{self, owner}, nil).Once()
+		clusterMock.EXPECT().PartitionOwner(mock.Anything, "placed").Return(departed, nil).Once()
+
+		pid, err := system.SpawnOn(context.Background(), "placed", NewMockActor(), WithPlacement(HashBased))
+		require.ErrorContains(t, err, fmt.Sprintf("partition owner %s of actor placed is no longer a cluster member", departed.PeerAddress()))
+		require.Nil(t, pid)
+	})
+
+	t.Run("With a partition owner lookup failure", func(t *testing.T) {
+		clusterMock := mockcluster.NewCluster(t)
+		system := newReplicationSystem(clusterMock)
+		system.remoting = mocksremote.NewClient(t)
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, "placed").Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{self, owner}, nil).Once()
+		clusterMock.EXPECT().PartitionOwner(mock.Anything, "placed").Return(nil, assert.AnError).Once()
+
+		pid, err := system.SpawnOn(context.Background(), "placed", NewMockActor(), WithPlacement(HashBased))
+		require.ErrorIs(t, err, assert.AnError)
+		require.Nil(t, pid)
+	})
+
+	t.Run("In non-cluster mode the actor is spawned locally", func(t *testing.T) {
+		ctx := context.TODO()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+
+		pid, err := system.SpawnOn(ctx, "placed", NewMockActor(), WithPlacement(HashBased))
+		require.NoError(t, err)
+		require.True(t, pid.IsLocal())
+
+		local, ok := system.(*actorSystem).localActor("placed")
+		require.True(t, ok)
+		require.Equal(t, pid.ID(), local.ID())
+
+		require.NoError(t, system.Stop(ctx))
+	})
+
+	t.Run("With a three-node cluster every actor runs on its partition owner", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+		systems, providers := startNATsSystems(t, srv.Addr().String(), 3)
+
+		nodes := make(map[string]ActorSystem, len(systems))
+		for _, system := range systems {
+			nodes[system.PeersAddress()] = system
+		}
+
+		names := make([]string, 30)
+		for i := range names {
+			names[i] = fmt.Sprintf("hashed-%d", i)
+		}
+
+		owners := awaitPartitionOwners(t, systems, names)
+
+		// the callers rotate, so every caller places names it owns and names
+		// other nodes own, and the actor always lands on the owner
+		covered := make(map[string]types.Unit, len(systems))
+		for index, name := range names {
+			caller := systems[index%len(systems)]
+			_, err := caller.SpawnOn(ctx, name, NewMockActor(), WithPlacement(HashBased))
+			require.NoError(t, err)
+
+			ownerNode, ok := nodes[owners[name]]
+			require.Truef(t, ok, "actor %s: owner %s is not a cluster node", name, owners[name])
+			covered[owners[name]] = types.Unit{}
+
+			pid, ok := ownerNode.(*actorSystem).localActor(name)
+			require.Truef(t, ok, "actor %s is not on its partition owner %s", name, owners[name])
+			require.True(t, pid.IsRunning())
+		}
+
+		// thirty names spread over every node
+		require.Len(t, covered, len(systems))
+
+		for index, system := range systems {
+			require.NoError(t, system.Stop(ctx))
+			require.NoError(t, providers[index].Close())
+		}
+
+		srv.Shutdown()
+	})
+
+	t.Run("With concurrent spawns of one name exactly one actor runs, on the owner", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+		systems, providers := startNATsSystems(t, srv.Addr().String(), 3)
+
+		const name = "contended"
+		owners := awaitPartitionOwners(t, systems, []string{name})
+
+		// every node spawns the name several times at once, and every call
+		// targets the owner: the owner's own concurrent spawns coalesce onto one
+		// activation and share its PID (see runSpawnActivation), the others are
+		// refused because the name is taken
+		type outcome struct {
+			pid *PID
+			err error
+		}
+
+		const spawnsPerNode = 4
+		start := make(chan types.Unit)
+		outcomes := make(chan outcome, spawnsPerNode*len(systems))
+
+		var wg sync.WaitGroup
+		for _, system := range systems {
+			for range spawnsPerNode {
+				wg.Go(func() {
+					<-start
+					pid, err := system.SpawnOn(ctx, name, NewMockActor(), WithPlacement(HashBased))
+					outcomes <- outcome{pid: pid, err: err}
+				})
+			}
+		}
+
+		close(start)
+		wg.Wait()
+		close(outcomes)
+
+		var ownerNode ActorSystem
+		for _, system := range systems {
+			if system.PeersAddress() == owners[name] {
+				ownerNode = system
+			}
+		}
+
+		require.NotNil(t, ownerNode)
+		actors := make(map[string]types.Unit)
+		for result := range outcomes {
+			if result.err != nil {
+				require.ErrorIs(t, result.err, gerrors.ErrActorAlreadyExists)
+				continue
+			}
+
+			require.Equal(t, ownerNode.Port(), result.pid.Path().Port())
+			actors[result.pid.ID()] = types.Unit{}
+		}
+
+		require.Len(t, actors, 1)
+
+		for _, system := range systems {
+			pid, ok := system.(*actorSystem).localActor(name)
+			if system.PeersAddress() == owners[name] {
+				require.True(t, ok)
+				require.True(t, pid.IsRunning())
+				continue
+			}
+
+			require.False(t, ok)
+		}
+
+		for index, system := range systems {
+			require.NoError(t, system.Stop(ctx))
+			require.NoError(t, providers[index].Close())
+		}
+
+		srv.Shutdown()
+	})
+}
+
 func TestSpawnSingletonWithRoleOnRemoteLeader(t *testing.T) {
 	leader := &cluster.Peer{Host: "10.0.0.7", PeersPort: 9500, RemotingPort: 9000, Roles: []string{"billing"}, CreatedAt: 1}
 

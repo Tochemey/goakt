@@ -231,6 +231,24 @@ func (x *MockDMap) LockWithTimeout(ctx context.Context, key string, timeout, dea
 	panic("unexpected call to LockWithTimeout")
 }
 
+// MockLockHookDMap wraps a real distributed map and runs onLock once a lock is
+// taken, so a test can change the registry between the read before a lock and
+// the read under it.
+type MockLockHookDMap struct {
+	olric.DMap
+	onLock func() // hook run after LockWithTimeout succeeds
+}
+
+// LockWithTimeout takes the lock on the wrapped map and runs onLock when it succeeds.
+func (x *MockLockHookDMap) LockWithTimeout(ctx context.Context, key string, timeout, deadline time.Duration) (olric.LockContext, error) {
+	lock, err := x.DMap.LockWithTimeout(ctx, key, timeout, deadline)
+	if err == nil && x.onLock != nil {
+		x.onLock()
+	}
+
+	return lock, err
+}
+
 // MockLockContext is a LockContext double whose Unlock returns the injected error.
 type MockLockContext struct {
 	unlockErr error // error returned by Unlock
@@ -369,6 +387,11 @@ func (x *MockCluster) IsLeader(context.Context) bool { panic("unexpected call") 
 
 // GetPartition panics because no test exercises it.
 func (x *MockCluster) GetPartition(context.Context, string) (uint64, error) { panic("unexpected call") }
+
+// PartitionOwner panics because no test exercises it.
+func (x *MockCluster) PartitionOwner(context.Context, string) (*Peer, error) {
+	panic("unexpected call")
+}
 
 // IsRunning panics because no test exercises it.
 func (x *MockCluster) IsRunning() bool { panic("unexpected call") }

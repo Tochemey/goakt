@@ -67,6 +67,19 @@ const (
 	// Note: This strategy may require additional overhead when placing actors,
 	// as it needs to get nodes load metrics depending on the cluster size.
 	LeastLoad
+
+	// HashBased places the actor on the node that owns the cluster registry
+	// partition of its name, so the actor runs where its registry record is
+	// written. The owner is read from the local partition table, without a
+	// network call, so a given name resolves to the same node from every caller,
+	// and concurrent spawns of one name all target that node.
+	// When the owner does not advertise the role set with WithRole, the spawn
+	// fails instead of placing the actor elsewhere.
+	// ⚠️ Note: The actor and its record are co-located at spawn time only. When a
+	// node joins, some partitions move to it, but actors stay where they are. Load
+	// is not considered: the spread follows the hash distribution of names over
+	// partitions and of partitions over nodes. Use LeastLoad for load-aware placement.
+	HashBased
 )
 
 type singletonSpec struct {
@@ -466,7 +479,7 @@ func WithStashing() SpawnOption {
 // in cluster mode via the SpawnOn function.
 //
 // This option determines how the actor system selects a target node for spawning
-// the actor across the cluster. Valid strategies include RoundRobin, Random, and Local.
+// the actor across the cluster. Valid strategies are RoundRobin, Random, Local, LeastLoad and HashBased.
 //
 // ⚠️ Note: This option only has an effect when used with SpawnOn in a cluster-enabled
 // actor system. If cluster mode is disabled, the placement strategy is ignored
@@ -514,7 +527,9 @@ func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 // In cluster mode, peers advertise roles via ClusterConfig.WithRoles (e.g. "projection",
 // "payments", "api"). When used with SpawnOn in a cluster-enabled system, the actor will
 // only be placed on nodes that advertise the same role. If multiple nodes match, the
-// placement strategy (RoundRobin, Random, etc.) is applied among those nodes.
+// placement strategy (RoundRobin, Random, etc.) is applied among those nodes. With HashBased,
+// the node that owns the actor's registry partition must advertise the role; otherwise
+// spawning returns an error.
 // If clustering is disabled, this option is ignored and the actor is spawned locally.
 //
 // If no node with the required role exists, spawning returns an error. This prevents
