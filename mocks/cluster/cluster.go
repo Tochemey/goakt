@@ -1314,6 +1314,74 @@ func (_c *Cluster_NextRoundRobinValue_Call) RunAndReturn(run func(ctx context.Co
 	return _c
 }
 
+// PartitionOwner provides a mock function for the type Cluster
+func (_mock *Cluster) PartitionOwner(ctx context.Context, actorName string) (*cluster.Peer, error) {
+	ret := _mock.Called(ctx, actorName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for PartitionOwner")
+	}
+
+	var r0 *cluster.Peer
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) (*cluster.Peer, error)); ok {
+		return returnFunc(ctx, actorName)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, string) *cluster.Peer); ok {
+		r0 = returnFunc(ctx, actorName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*cluster.Peer)
+		}
+	}
+	if returnFunc, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = returnFunc(ctx, actorName)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// Cluster_PartitionOwner_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PartitionOwner'
+type Cluster_PartitionOwner_Call struct {
+	*mock.Call
+}
+
+// PartitionOwner is a helper method to define mock.On call
+//   - ctx context.Context
+//   - actorName string
+func (_e *Cluster_Expecter) PartitionOwner(ctx any, actorName any) *Cluster_PartitionOwner_Call {
+	return &Cluster_PartitionOwner_Call{Call: _e.mock.On("PartitionOwner", ctx, actorName)}
+}
+
+func (_c *Cluster_PartitionOwner_Call) Run(run func(ctx context.Context, actorName string)) *Cluster_PartitionOwner_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		var arg0 context.Context
+		if args[0] != nil {
+			arg0 = args[0].(context.Context)
+		}
+		var arg1 string
+		if args[1] != nil {
+			arg1 = args[1].(string)
+		}
+		run(
+			arg0,
+			arg1,
+		)
+	})
+	return _c
+}
+
+func (_c *Cluster_PartitionOwner_Call) Return(peer *cluster.Peer, err error) *Cluster_PartitionOwner_Call {
+	_c.Call.Return(peer, err)
+	return _c
+}
+
+func (_c *Cluster_PartitionOwner_Call) RunAndReturn(run func(ctx context.Context, actorName string) (*cluster.Peer, error)) *Cluster_PartitionOwner_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Peers provides a mock function for the type Cluster
 func (_mock *Cluster) Peers(ctx context.Context) ([]*cluster.Peer, error) {
 	ret := _mock.Called(ctx)

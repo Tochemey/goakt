@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/olric"
 	oconfig "github.com/tochemey/olric/config"
 	"github.com/tochemey/olric/events"
+	"github.com/tochemey/olric/stats"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
 
@@ -2351,6 +2352,31 @@ func TestPutGrainIfAbsentReturnsErrorWhenNotRunning(t *testing.T) {
 	require.ErrorIs(t, err, ErrEngineNotRunning)
 }
 
+func TestPutGrainIfAbsentMethodRejectsEmptyIDValue(t *testing.T) {
+	cl := &cluster{running: atomic.NewBool(true)}
+
+	grain := internalpb.Grain_builder{GrainId: internalpb.GrainId_builder{Value: ""}.Build()}.Build()
+	err := cl.putGrainIfAbsent(context.Background(), grain)
+	require.EqualError(t, err, "grain id value is empty")
+}
+
+func TestSendEventLockedDropsEventWhenChannelFull(t *testing.T) {
+	var logs bytes.Buffer
+	cl := &cluster{
+		logger: log.NewSlog(log.WarningLevel, &logs),
+		events: make(chan *Event, 1),
+	}
+
+	cl.events <- &Event{Type: NodeJoined}
+
+	// the send does not block on the full channel: the event is dropped and logged
+	cl.sendEventLocked(&Event{Type: NodeLeft})
+
+	require.Len(t, cl.events, 1)
+	require.Equal(t, NodeJoined, (<-cl.events).Type)
+	require.Contains(t, logs.String(), "cluster event channel full, dropping event type=NodeLeft")
+}
+
 func TestPutGrainIfAbsentReturnsAlreadyExists(t *testing.T) {
 	cl := &cluster{
 		running:      atomic.NewBool(true),
@@ -2733,6 +2759,62 @@ func TestReplaceActor(t *testing.T) {
 		})
 
 		require.ErrorIs(t, cl.ReplaceActor(context.Background(), record, uuid.NewString()), readErr)
+	})
+
+	t.Run("With a read failure under the lock", func(t *testing.T) {
+		// the name is free before the lock, and the read that decides the
+		// write under the lock fails: nothing is written and the lock is released
+		readErr := errors.New("get failure")
+		reads := 0
+		lock := &MockLockContext{}
+		cl := newMockEngine(log.DiscardLogger, &MockDMap{
+			lockFn: func(context.Context, string, time.Duration, time.Duration) (olric.LockContext, error) {
+				return lock, nil
+			},
+			getFn: func(context.Context, string) (*olric.GetResponse, error) {
+				reads++
+				if reads == 1 {
+					return nil, olric.ErrKeyNotFound
+				}
+
+				return nil, readErr
+			},
+		})
+
+		require.ErrorIs(t, cl.ReplaceActor(context.Background(), record, uuid.NewString()), readErr)
+		require.Equal(t, 2, reads)
+		require.Equal(t, 1, lock.unlocks)
+	})
+
+	t.Run("With another incarnation claiming the name while the lock is taken", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+		node, provider := startEngine(t, srv.Addr().String())
+		engine := node.(*cluster)
+
+		addr := address.New(actorName, "testSystem", "127.0.0.1", 9000).String()
+		owner := internalpb.Actor_builder{Address: addr, IncarnationId: uuid.NewString()}.Build()
+		require.NoError(t, engine.PutActor(ctx, owner))
+
+		// the read before the lock finds the incarnation the caller may write
+		// over; a rival claims the name before the read under the lock
+		rival := internalpb.Actor_builder{Address: addr, IncarnationId: uuid.NewString()}.Build()
+		engine.dmap = &MockLockHookDMap{DMap: engine.dmap, onLock: func() {
+			encoded, err := encode(rival)
+			require.NoError(t, err)
+			require.NoError(t, engine.putRecord(ctx, namespaceActors, actorName, encoded))
+		}}
+
+		replacement := internalpb.Actor_builder{Address: addr, IncarnationId: uuid.NewString()}.Build()
+		require.ErrorIs(t, engine.ReplaceActor(ctx, replacement, owner.GetIncarnationId()), ErrActorAlreadyExists)
+
+		current, err := engine.GetActor(ctx, actorName)
+		require.NoError(t, err)
+		require.Equal(t, rival.GetIncarnationId(), current.GetIncarnationId())
+
+		require.NoError(t, node.Stop(ctx))
+		require.NoError(t, provider.Close())
+		srv.Shutdown()
 	})
 
 	t.Run("With the engine not running", func(t *testing.T) {
@@ -5326,5 +5408,108 @@ func TestGetPartition(t *testing.T) {
 
 		require.NoError(t, engine.Stop(ctx))
 		provider.AssertExpectations(t)
+	})
+}
+
+func TestPartitionOwner(t *testing.T) {
+	t.Run("a stopped engine returns ErrEngineNotRunning", func(t *testing.T) {
+		cl := &cluster{running: atomic.NewBool(false)}
+
+		owner, err := cl.PartitionOwner(context.Background(), "worker")
+		require.ErrorIs(t, err, ErrEngineNotRunning)
+		require.Nil(t, owner)
+	})
+
+	t.Run("a map other than the embedded one returns an error", func(t *testing.T) {
+		cl := &cluster{
+			running: atomic.NewBool(true),
+			dmap:    &MockDMap{},
+		}
+
+		owner, err := cl.PartitionOwner(context.Background(), "worker")
+		require.ErrorContains(t, err, "does not resolve partition owners")
+		require.Nil(t, owner)
+	})
+
+	t.Run("every node names the same owner, the member that stores the record", func(t *testing.T) {
+		ctx := context.TODO()
+		srv := startNatsServer(t)
+
+		node1, provider1 := startEngine(t, srv.Addr().String())
+		node2, provider2 := startEngine(t, srv.Addr().String())
+		node3, provider3 := startEngine(t, srv.Addr().String())
+		nodes := []Cluster{node1, node2, node3}
+
+		engines := make(map[string]*cluster, len(nodes))
+		for _, node := range nodes {
+			engine := node.(*cluster)
+			engines[engine.node.PeersAddress()] = engine
+		}
+
+		names := make([]string, 60)
+		for i := range names {
+			names[i] = fmt.Sprintf("actor-%d", i)
+		}
+
+		// partitions move while the members join, so wait until every node
+		// sees the three members and every node's table names the same owner
+		owners := make(map[string]string, len(names))
+		require.Eventually(t, func() bool {
+			for _, node := range nodes {
+				members, err := node.Members(ctx)
+				if err != nil || len(members) != len(nodes) {
+					return false
+				}
+			}
+
+			for _, name := range names {
+				var expected string
+				for _, node := range nodes {
+					owner, err := node.PartitionOwner(ctx, name)
+					if err != nil || (expected != "" && owner.PeerAddress() != expected) {
+						return false
+					}
+
+					expected = owner.PeerAddress()
+				}
+
+				owners[name] = expected
+			}
+
+			return true
+		}, 30*time.Second, 100*time.Millisecond)
+
+		// the record is written from one node for every name, and lands in a
+		// partition the named owner holds
+		covered := make(map[string]types.Unit, len(nodes))
+		for _, name := range names {
+			ownerAddress := owners[name]
+			owner, ok := engines[ownerAddress]
+			require.Truef(t, ok, "actor %s: owner %s is not a cluster node", name, ownerAddress)
+			covered[ownerAddress] = types.Unit{}
+
+			addr := address.New(name, "testSystem", owner.node.Host, owner.node.RemotingPort)
+			record := internalpb.Actor_builder{Address: addr.String(), IncarnationId: uuid.NewString()}.Build()
+			require.NoError(t, node1.PutActor(ctx, record))
+
+			partition, err := node1.GetPartition(ctx, name)
+			require.NoError(t, err)
+
+			ownerStats, err := owner.client.Stats(ctx, ownerAddress)
+			require.NoError(t, err)
+			require.Containsf(t, ownerStats.Partitions, stats.PartitionID(partition), "actor %s: owner %s does not hold partition %d", name, ownerAddress, partition)
+			require.Positive(t, ownerStats.Partitions[stats.PartitionID(partition)].Length)
+		}
+
+		// sixty names spread over every node
+		require.Len(t, covered, len(nodes))
+
+		require.NoError(t, node3.Stop(ctx))
+		require.NoError(t, node2.Stop(ctx))
+		require.NoError(t, node1.Stop(ctx))
+		require.NoError(t, provider3.Close())
+		require.NoError(t, provider2.Close())
+		require.NoError(t, provider1.Close())
+		srv.Shutdown()
 	})
 }

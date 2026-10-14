@@ -78,7 +78,7 @@ The `Cluster` interface groups its methods as follows:
 | Grain records | `PutGrain`, `GetGrain`, `ReleaseGrain`, `GrainExists`, `Grains`, `GrainsByHost`; the package function `PutGrainIfAbsent` |
 | Other records | `ClaimScheduleFire`, `NextRoundRobinValue`, `PutJobKey`, `JobKey`, `DeleteJobKey` |
 | Membership | `Peers`, `Members`, `IsMember`, `IsLeader`, `Events`, `LastRebalanceEvent` |
-| Partitioning | `GetPartition` |
+| Partitioning | `GetPartition`, `PartitionOwner` |
 
 Every registry and membership method except `Events` and `LastRebalanceEvent` first checks the running flag and returns `ErrEngineNotRunning` (`internal/cluster/errors.go`) on a stopped engine; `IsLeader` returns `false` and `NextRoundRobinValue` returns -1 with the error.
 
@@ -216,6 +216,7 @@ The engine calls the embedded client's map with the composed key. In Olric:
 | release a record lock | detached | write timeout |
 | `NextRoundRobinValue` | detached | read timeout |
 | `GetPartition` | detached from the caller | read timeout |
+| `PartitionOwner` | not used | none: no network call |
 | scans ([§20.6](#206-claims-fences-and-scans)) | the caller's context | the timeout argument |
 
 **A registry read or write ignores the caller's deadline and cancellation:** every single-key operation runs under `context.WithoutCancel` and the engine's own timeout. The lock's lease covers the longest critical section, at most two reads and two writes or deletes, so a holder that dies mid-operation frees the key when the lease expires (comment on `lockRecord`).
@@ -306,6 +307,8 @@ flowchart TD
 ### Partition lookup
 
 `GetPartition(ctx, name)` reads the actor record through `getEntry`, the read `getRecord` also runs, and returns the partition Olric reports for it, so the value is always the partition that holds the record. A missing record returns `ErrActorNotFound`; any other read failure is returned the way `getEntry` returns it, an engine timeout under a live caller context as `ErrClusterRegistryTimeout` (`registryReadError`). `ActorSystem.Partition` exposes it in cluster mode and turns the missing record into the public `ErrActorNotFound`; it returns `ErrActorSystemNotStarted` on a stopped actor system and `ErrClusterDisabled` outside cluster mode, never a partition that a failure could be mistaken for (`actorSystem.Partition` in `actor/actor_system.go`).
+
+`PartitionOwner(ctx, name)` returns the member that owns the partition of the actor key, whether or not a record exists. It asks the unified map, always an `olric.EmbeddedDMap`, for the owner of `composeKey(namespaceActors, name)` (`EmbeddedDMap.Owner` in `github.com/tochemey/olric/embedded_client.go`), which hashes the key with the member's own hasher and reads the member's own partition table, so the answer comes from the same key and hasher the registry writes use and costs no network call. The member becomes a `Peer` through `toPeer`. The answer is a snapshot: during a rebalance the table can still name the previous owner. Before the node has received a routing table, Olric returns `ErrNotBootstrapped`; a map other than the embedded one is an error. `SpawnOn` with `HashBased` placement uses it ([Chapter 21, §21.1](chap-21.md#211-placement-with-spawnon)).
 
 ## 20.7 Partition hashing
 
@@ -491,6 +494,7 @@ Olric and memberlist write plain log lines to an `io.Writer`. `logWriter` in `in
 |---|---|
 | On a stopped engine the actor, grain, job-key, partition and peer calls return `ErrEngineNotRunning`; `IsLeader` is false and `NextRoundRobinValue` -1 | `TestNotRunningReturnsErrEngineNotRunning` in `internal/cluster/cluster_test.go` |
 | A partition lookup returns the partition of the actor's record, `ErrActorNotFound` without a record, and a registry timeout or other read failure as such, never 0 for a failure | `TestGetPartition` in `internal/cluster/cluster_test.go` |
+| Every node names the same partition owner for an actor name, the owners of sixty names cover three nodes, and each record lands in a partition its named owner holds; a stopped engine returns `ErrEngineNotRunning` | `TestPartitionOwner` in `internal/cluster/cluster_test.go` |
 | Bootstrap stops retrying on the first success, heals a transient failure within the budget, wraps the last error with the attempt count, and stops when the context ends | `TestRetryBootstrap` in `internal/cluster/cluster_test.go` |
 | A bootstrap that cannot complete uses the whole attempt budget and leaves the discovery and peers ports free; a failed initial sync shuts the server down | `TestBootstrapFailureRetriesAndReleasesPorts` and `TestWaitForInitialSync` in `internal/cluster/cluster_test.go` |
 | `Stop` finishes the teardown when the consume goroutine outlives the shutdown timeout | `TestStopWarnsWhenConsumeExceedsShutdownTimeout` in `internal/cluster/cluster_test.go` |

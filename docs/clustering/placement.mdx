@@ -67,6 +67,9 @@ set is the current cluster membership, including the calling node. Outside clust
 - **Local**: Selection: Always the calling node. Notes: Use when locality matters (node-local caches, files, devices).
 - **LeastLoad**: Selection: Candidate reporting the smallest load. Notes: Queries every candidate's load metric over
   remoting before spawning; placement cost grows with cluster size.
+- **HashBased**: Selection: The node that owns the registry partition of the actor's name. Notes: Read from the local
+  partition table with no network call. A name always maps to the same node from every caller, and the actor runs where
+  its registry record is written. Load is not considered; see [Partition Hashing](/clustering/partition-hashing).
 
 ```go Strategy-based placement with SpawnOn
 pid, err := system.SpawnOn(ctx, "analytics-worker", NewWorkerActor(),
@@ -87,7 +90,8 @@ return `ErrActorAlreadyExists` and leave nothing behind. Stopping an actor never
 <Note>
   Strategies see the topology at spawn time. `RoundRobin` gives an even spread over a stable membership, but actors do
   not move when nodes join later; redistribution only happens through [relocation](/actor/relocation) when a node
-  leaves.
+  leaves. The same holds for `HashBased`: when a node joins, some partitions move to it, but the actors placed on their
+  previous owners stay where they are, so an actor and its registry record are co-located at spawn time only.
 </Note>
 
 ### What travels with a remote spawn
@@ -123,12 +127,15 @@ if err != nil {
 
 - If no node in the cluster advertises the role, `SpawnOn` fails with an error instead of falling back to an unsuitable
   node.
+- With `HashBased`, the node that owns the actor's partition must advertise the role. If it does not, `SpawnOn` fails
+  with an error instead of placing the actor elsewhere, so a name always resolves to the same node.
 - Omit `WithRole` to allow placement on any node.
 - Without clustering, the role option is ignored and the actor spawns locally.
 
 <Warning>
   `WithPlacement(actor.Local)` always resolves to the calling node, even when combined with `WithRole` and the calling
-  node does not advertise the role. Use `RoundRobin`, `Random`, or `LeastLoad` with role-constrained spawns.
+  node does not advertise the role. Use `RoundRobin`, `Random`, `LeastLoad`, or `HashBased` with role-constrained
+  spawns.
 </Warning>
 
 ### Singletons
@@ -248,6 +255,8 @@ Grain placement after a node departure follows the virtual actor model:
 - Use `LeastLoad` / `LeastLoadActivation` for heavyweight, long-lived workloads where one extra round of metric queries
   at placement time is cheap compared to running on a busy node.
 - Use `Random` when you want spreading without the shared counter round-trip and can tolerate short-term imbalance.
+- Use `HashBased` when a name should always land on the same node, and lookups from that node should find the actor's
+  registry record locally. Prefer `LeastLoad` when load matters more than determinism.
 - Use roles to fence workload classes onto dedicated node pools; combine them with any non-local strategy.
 
 ## See also

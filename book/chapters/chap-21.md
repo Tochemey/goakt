@@ -42,7 +42,7 @@
 6. Reject a reliable endpoint that names an explicit peer address (`spawnConfig.rejectReliableRemotePlacement` in `actor/spawn_option.go`).
 7. Read the members, the local node included (`cluster.Members` in `internal/cluster/cluster.go`). With no member, call `Spawn`.
 8. With `WithRole`, keep only the members that advertise the role; none left is an error, "no nodes with role … found in the cluster" (`actorSystem.filterPeersByRole` in `actor/grain_engine.go`).
-9. Pick a member with the placement strategy (`actorSystem.selectPlacementPeer` in `actor/spawn.go`). No member picked means `Spawn` on this node.
+9. Pick a member with the placement strategy (`actorSystem.selectPlacementPeer` in `actor/spawn.go`). No member picked means `Spawn` on this node. `HashBased` picks none when this node owns the name's partition.
 10. Otherwise send a `RemoteSpawn` request to the member's remoting port and return a remote PID for the address it answers with.
 
 The strategies (`SpawnPlacement` in `actor/spawn_option.go`; `RoundRobin` is the default set by `newSpawnConfig`):
@@ -53,6 +53,7 @@ The strategies (`SpawnPlacement` in `actor/spawn_option.go`; `RoundRobin` is the
 | `Random` | uniform over the candidates | none | `actorSystem.selectPlacementPeer` in `actor/spawn.go` |
 | `LeastLoad` | asks every candidate for its load in parallel and takes the smallest; the first one wins a tie | one `GetNodeMetric` round trip per candidate; any failure fails the spawn | `actorSystem.leastLoadedPeer` in `actor/grain_engine.go` |
 | `Local` | this node, through `Spawn` | none | `actorSystem.selectPlacementPeer` in `actor/spawn.go` |
+| `HashBased` | the member that owns the registry partition of the name, read from this node's partition table (`cluster.PartitionOwner` in `internal/cluster/cluster.go`); this node, through `Spawn`, when it owns it; an owner that does not advertise the `WithRole` role, or that is no longer a member because the partition table has not yet caught up with its departure, fails the spawn | none: no network call | `actorSystem.hashBasedPlacementPeer` in `actor/spawn.go` |
 
 A node's load is its count of live non-system actors plus its active grains (`actorSystem.getNodeMetricHandler` in `actor/remote_server.go`).
 
@@ -414,6 +415,7 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 | Two nodes spawning one name at once, both past the registry check: exactly one succeeds, the other gets `ErrActorAlreadyExists` and leaves no actor, a third node resolves the winner, and every node reports the name as existing | `TestSpawn` in `actor/spawn_test.go` |
 | `SpawnOn` with `LeastLoad` places the actor on the least-loaded node; with a role no member advertises it fails; a failed round-robin increment fails it | `TestSpawn` in `actor/spawn_test.go` |
 | An actor placed by `SpawnOn` with `Local` placement is resolvable and reachable from another node as soon as `SpawnOn` returns | `TestSpawnOnImmediateCrossNodeVisibility` in `actor/spawn_test.go` |
+| `SpawnOn` with `HashBased` places every actor on its partition owner from any caller, spawns here without a remote call when this node is the owner, fails when the owner lacks the role, and leaves exactly one actor, on the owner, when three nodes spawn one name at once | `TestSpawnOnHashBased` in `actor/spawn_test.go` |
 | Fifteen concurrent `SpawnSingleton` calls from three nodes all succeed, return one address, and leave exactly one live instance | `TestConcurrentSpawnSingletonSingleInstance` in `actor/cluster_singleton_test.go` |
 | Spawning an existing singleton again succeeds; two singletons of one kind under different names both resolve | `TestSingletonActor` in `actor/cluster_singleton_test.go` |
 | A singleton name held by another actor or another singleton fails with `ErrActorAlreadyExists`; a record not yet visible is retried; transient errors are retried within the budget; no role member is an error after the retries | `TestSpawnSingletonRetryBehavior` in `actor/cluster_singleton_test.go` |
@@ -463,6 +465,8 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 |---|---|
 | `RoundRobin`, `Random` and `LeastLoad` can choose the calling node; it then receives a `RemoteSpawn` from itself and the caller gets a remote PID | `actorSystem.SpawnOn` in `actor/spawn.go` |
 | `Local` with `WithRole` spawns here even when this node lacks the role, as long as some member has it | `actorSystem.SpawnOn` in `actor/spawn.go` |
+| `HashBased` co-locates an actor with its registry record at spawn time only: a node that joins later takes over some partitions, and the actors placed on their previous owners stay where they are | `actorSystem.hashBasedPlacementPeer` in `actor/spawn.go` |
+| Concurrent `HashBased` spawns of one name all reach the owner; the owner's own calls coalesce onto one activation and share its PID, the other nodes' calls get `ErrActorAlreadyExists` | `actorSystem.runSpawnActivation` in `actor/spawn.go` |
 | `LeastLoad` fails the whole spawn if one candidate does not answer | `actorSystem.leastLoadedPeer` in `actor/grain_engine.go` |
 | A custom mailbox is lost by remote placement and by relocation | `WithMailbox` in `actor/spawn_option.go` |
 | Children, function actors and routers never relocate, whatever their options | `PID.buildChildOptions` in `actor/pid.go`; `actorSystem.SpawnNamedFromFunc` and `actorSystem.SpawnRouter` in `actor/spawn.go` |

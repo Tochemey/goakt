@@ -38,6 +38,8 @@ center of this machinery, in two places:
    partitions move.
 
 Because every node runs the same hash function, any node can compute where a record lives from the key alone.
+`SpawnOn` with `WithPlacement(actor.HashBased)` relies on this to place an actor on the node that owns its name's
+partition; see [Placement](/clustering/placement#strategy-based-placement-with-spawnon).
 
 ### Correlation with WithPartitionCount
 
