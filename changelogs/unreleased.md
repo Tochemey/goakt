@@ -6,7 +6,7 @@
   - Actor-to-actor messaging (`BenchmarkTellPingPong`, new): 63–72 million messages/sec, from 30–46 million, with no allocation per message.
   - Many senders to many actors (`BenchmarkTellPairwise`): 51–55 million messages/sec, from 23–25 million.
   - One sender to one actor (`BenchmarkTellSinglePair`): 21–22 million messages/sec, from 9–12 million.
-  - `Ask` is unchanged.
+- **A local `Ask` round trip is about 10% faster.** `Ask` no longer waits on a timer channel: its timeout is delivered into its own reply channel. One asker (`BenchmarkAsk`) completes 1.41 million round trips/sec, from 1.27 million (709–711 ns from 784–785 ns per round trip). Many concurrent askers (`BenchmarkAskPairwise`) are unchanged.
 
 ## 🔧 Fixes
 

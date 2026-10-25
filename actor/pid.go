@@ -1312,22 +1312,26 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 	// per-request response channel captured above may be touched from here
 	// on. A reply arriving after this Ask gives up lands in that
 	// unreachable channel and is dropped with it.
+	//
+	// The timeout is armed before the handoff so that nothing runs between the
+	// handoff and the wait: the worker woken by the handoff runs as soon as this
+	// goroutine blocks. It is delivered into responseCh (see askTimer).
+	timeoutTimer := startAskTimer(responseCh, timeout)
 	to.doReceive(receiveContext)
-	timer := timers.Get(timeout)
 
 	select {
 	case result := <-responseCh:
-		timers.Put(timer)
+		timeoutTimer.stop()
+		if _, timedOut := result.(askTimedOut); timedOut {
+			err = gerrors.ErrRequestTimeout
+			pid.handleReceivedErrorWithMessage(pid, message, err)
+			return nil, err
+		}
 		return result, nil
 	case <-ctx.Done():
+		timeoutTimer.stop()
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		pid.handleReceivedErrorWithMessage(pid, message, err)
-		timers.Put(timer)
-		return nil, err
-	case <-timer.C:
-		err = gerrors.ErrRequestTimeout
-		pid.handleReceivedErrorWithMessage(pid, message, err)
-		timers.Put(timer)
 		return nil, err
 	}
 }
