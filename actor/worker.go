@@ -51,6 +51,21 @@ func (w *worker) run() {
 // reschedule re-enqueues s onto this worker's local queue, spilling to
 // the global queue when the local ring is full. Called by schedulable
 // implementations after a yield on throughput exhaustion.
+//
+// An idle sibling is woken to steal it if none is already looking for work:
+// this worker may spend its next turn on an actor that blocks, and a parked
+// sibling never looks at another worker's queue on its own.
 func (w *worker) reschedule(s schedulable) {
-	w.dispatcher.readyQueue.pushLocal(w.id, s)
+	w.scheduleLocal(s)
+}
+
+// scheduleLocal queues s, an actor that a turn on this worker has made ready,
+// on this worker's local queue, and wakes an idle sibling to steal it if none
+// is already looking for work (see readyQueue.wakeSearcher). It is meant for
+// code running on this worker's goroutine; the local queue's mutex keeps any
+// other caller safe, only less local.
+func (w *worker) scheduleLocal(s schedulable) {
+	rq := w.dispatcher.readyQueue
+	rq.pushLocal(w.id, s)
+	rq.wakeSearcher()
 }

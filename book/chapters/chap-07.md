@@ -99,11 +99,11 @@ stateDiagram-v2
 
 Only `Processing` lets anyone run the actor's handler, and only one party can hold it, so an actor's messages are handled one at a time. `TrySchedule` reads before it tries the swap: when many producers send at once, all but one see `Scheduled` or `Processing` and return without touching the cache line in exclusive mode (`actor/dispatch_state.go`).
 
-A send therefore costs one atomic read, at most one compare-and-swap and one mailbox operation; only the producer that wins `Idle → Scheduled` also pays for a push onto the ready queue.
+A send therefore costs one atomic read, at most one compare-and-swap and one mailbox operation; only the producer that wins `Idle → Scheduled` also pays for a push onto the ready queue, and where that push goes depends on who sent ([§7.5](#where-an-actor-goes)).
 
 ### Not losing a wake-up
 
-A producer enqueues and then calls `TrySchedule` (`PID.doReceive` in `actor/pid.go`). If the actor is `Processing` at that moment, the producer does nothing, and relies on the running turn to see its message. The turn honours that in `finishOrReclaim`:
+A producer enqueues and then calls `TrySchedule` (`PID.doReceive` and `PID.putValue` in `actor/pid.go`). If the actor is `Processing` at that moment, the producer does nothing, and relies on the running turn to see its message. The turn honours that in `finishOrReclaim`:
 
 1. Reset the state to `Idle` first.
 2. Then check the mailbox, the system queue and the `PostStart` slot.
@@ -121,12 +121,14 @@ Because the reset comes before the check, every message falls into one of two ca
 4. **Otherwise take one user message** from the mailbox. If there is none, call `finishOrReclaim`, which either ends the turn or reclaims the actor and goes round again.
 5. **Dispatch it** with `dispatchOne`, which skips an `Ask` whose sender has given up, stashes it if reentrancy requires, and otherwise calls the handler on top of the behaviour stack (Chapters [5](chap-05.md) and [8](chap-08.md)).
 
+While the turn owns the actor, it publishes its worker in `turnWorker`, and it clears it before every release of the actor: when it gives the actor up as withheld, when it finds nothing left, and when it yields (`PID.runTurn` in `actor/pid.go`). A send made from the turn reads it to schedule its recipient locally ([§7.5](#where-an-actor-goes)).
+
 When the loop runs out of budget, the turn moves the actor back to `Scheduled` and pushes it onto **its own worker's local queue** (`PID.runTurn` in `actor/pid.go`; `worker.reschedule` in `actor/worker.go`). It does so without looking whether work remains: an actor whose queues emptied on its last message is simply taken again, finds nothing, and goes to `Idle` through `finishOrReclaim`. The actor is appended at the **tail** of the ring, behind every actor already waiting there, so a busy actor cannot keep its worker from the others on that ring.
 
 Two consequences follow from the loop:
 
 - **Control messages win, but only between messages.** A `PoisonPill` sent while a handler runs is handled after that handler returns, ahead of the user messages still queued.
-- **`time.Now()` is read once per turn**, and the same instant is used for every message the turn dispatches (`PID.runTurn` in `actor/pid.go`), for example as the actor's last-activity time for passivation.
+- **`time.Now()` is read once per turn**, and the same instant is used for every message the turn dispatches (`PID.runTurn` in `actor/pid.go`), for example as the actor's last-activity time for passivation, which is therefore stored once per turn (`PID.markActivity` in `actor/pid.go`).
 
 ## 7.4 The system queue
 
@@ -158,8 +160,11 @@ Both rings exist to keep locks off the common path. The global queue is a ring r
 
 ### Where an actor goes
 
-- **A producer** that schedules an actor calls `push`. It first tries to hand the actor straight to a parked worker; only if none is parked does it append to the global queue (`actor/ready_queue.go`).
-- **A turn that yields** calls `pushLocal`, which appends to the worker's own local ring and spills to the global queue only when that ring is full (`actor/ready_queue.go`).
+- **A send made from a turn** (`ReceiveContext.Tell` or `ReceiveContext.BatchTell`) to an idle actor on the default mailbox puts the recipient on **the sending worker's own local ring**, through `worker.scheduleLocal` (`PID.scheduleFrom` in `actor/pid.go`; `actor/worker.go`). This is what Akka's default dispatcher does, a task forked by a ForkJoinPool worker going on that worker's deque, and what the Go scheduler does with a goroutine readied by the running one: the recipient runs on the core that just wrote its message, and the send takes no shared lock. An actor of another actor system has another dispatcher, so it is scheduled on its own (`PID.scheduleFrom` in `actor/pid.go`).
+- **Any other producer**, a goroutine outside the actor system or a send through a path that builds a pooled context, calls `push`. It first tries to hand the actor straight to a parked worker; only if none is parked does it append to the global queue (`actor/ready_queue.go`).
+- **A turn that yields** calls `pushLocal`, which appends to the worker's own local ring and spills to the global queue only when that ring is full (`worker.reschedule` in `actor/worker.go`; `actor/ready_queue.go`).
+
+A parked worker reads only its handoff channel, so it never sees what lands on another worker's ring. Both local pushes are therefore followed by `wakeSearcher`, which wakes one parked worker to steal, unless a worker woken that way is still looking (`readyQueue.wakeSearcher` in `actor/ready_queue.go`). The `searching` flag keeps it to one wake at a time, the rule the Go scheduler applies to its spinning threads. The woken worker clears the flag when it takes work or parks again, and passes the wake on when it took the work by stealing, since the ring it stole from may hold more (`readyQueue.take` and `readyQueue.endSearch` in `actor/ready_queue.go`). Without the wake, an actor left on the ring of a worker that is busy, or blocked in a handler, waits for that worker even while every other worker sleeps.
 
 ### Where a worker looks
 
@@ -176,6 +181,8 @@ A worker can be about to park just as a producer appends to the global queue. Tw
 
 - The parking worker stores its flag, then reads the global count. If the count is not zero, it un-parks and goes round the take loop (`readyQueue.parkAndTake` in `actor/ready_queue.go`).
 - The producer stores the global count, then reads the number of parked workers. If it is not zero, it claims one and sends it `nil`, which means "look again" (`readyQueue.push` in `actor/ready_queue.go`).
+
+The same protocol covers the local rings. A worker that pushes to its own ring stores the ring's atomic size, then reads the number of parked workers in `wakeSearcher`; the parking worker, after storing its flag, also reads every ring's size, and un-parks if any is non-zero (`readyQueue.hasLocalWork` in `actor/ready_queue.go`). Without that second check, a worker that was about to park when a sibling pushed to its ring would sleep, and the pushed actor would wait for its ring's owner, which may be blocked in a handler.
 
 The atomics are sequentially consistent, so at least one side sees the other. If a producer claims the flag in the instant before the worker un-parks, the worker reads the handoff anyway, so the channel is empty for the next claim (`readyQueue.parkAndTake` in `actor/ready_queue.go`).
 
@@ -209,8 +216,12 @@ The turn does not wait for supervision, but it does not carry on as if nothing h
 | The dispatch state allows exactly one owner, and the reclaim after a reset either wins or leaves the actor to the producer that scheduled it | `TestDispatchStateHappyPath`, `TestDispatchStateReclaimAfterReset` and `TestDispatchStateReclaimLosesRace` in `actor/dispatch_state_test.go` |
 | A restart never hands the actor to a second worker while a turn is running | `TestRestartNeverRunsTwoTurns` in `actor/pid_test.go` |
 | A schedulable that its worker reschedules is run again | `TestWorkerRescheduleUsesLocalQueue` in `actor/dispatcher_test.go` |
+| A send from a turn schedules its recipient on the turn's worker, and on the recipient's own dispatcher otherwise | `TestPIDScheduleFrom` in `actor/pid_test.go`; `TestReceiveContextTellSchedulesOnTheTurnWorker` in `actor/receive_context_test.go`; `TestWorkerScheduleLocalQueuesOnItsOwnRing` in `actor/worker_test.go` |
+| An actor left on a worker's ring runs on a sibling while that worker blocks in a handler | `TestWorkerLocalWorkIsStolenWhileTheOwnerBlocks` in `actor/worker_test.go` |
+| One parked worker at a time is woken for local work, and it ends its search when it finds work or parks again | `TestReadyQueueWakeSearcher` and `TestReadyQueueEndSearch` in `actor/ready_queue_test.go` |
+| A handler sees its turn's worker, which is cleared when the turn goes idle and before it yields | `TestPIDTurnPublishesItsWorker` and `TestPIDYieldClearsTurnWorker` in `actor/pid_test.go` |
 | A parked worker is woken by a push, and by `close` | `TestReadyQueueParkAndWake` and `TestReadyQueueCloseWakesParkedWorkers` in `actor/ready_queue_test.go` |
-| A worker that parks finds work pushed while it was publishing its flag | `TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing` and `TestReadyQueueNilHandoffRescans` in `actor/ready_queue_test.go` |
+| A worker that parks finds work pushed while it was publishing its flag, to the global queue or to a local ring | `TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing`, `TestReadyQueueParkAndTakeFindsLocalWorkAfterPublishing`, `TestReadyQueueHasLocalWork` and `TestReadyQueueNilHandoffRescans` in `actor/ready_queue_test.go` |
 | A worker with nothing local or global steals from a sibling | `TestReadyQueueStealWhenLocalAndGlobalEmpty` in `actor/ready_queue_test.go` |
 | Many producers and workers lose no schedulable | `TestReadyQueueMultiProducerConsumer` in `actor/ready_queue_test.go`; `TestDispatcherHighFanout` in `actor/dispatcher_test.go` |
 | The system queue delivers in send order, under concurrent pushes | `TestSystemQueueSendOrder` and `TestSystemQueueConcurrentPushes` in `actor/system_queue_test.go` |
@@ -222,6 +233,7 @@ The turn does not wait for supervision, but it does not carry on as if nothing h
 
 - The 32-message budget, the 256-slot local rings, the global ring's starting size of 64, and checking the global queue every 61 takes.
 - Stealing half, in rotated order, and the claim scan starting at worker 0.
+- Scheduling a recipient on the sending turn's worker, and one woken searcher at a time.
 - One shared supervision goroutine with a 1,024-signal buffer.
 - Reading the clock once per turn.
 

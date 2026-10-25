@@ -9985,3 +9985,211 @@ func TestStopAbandonsStash(t *testing.T) {
 	default:
 	}
 }
+
+// TestPIDPutValue verifies the path that stores a Tell in the default mailbox
+// as values: what it stores, when it schedules the actor, and the messages it
+// leaves to the general path.
+func TestPIDPutValue(t *testing.T) {
+	sender := &PID{}
+
+	t.Run("stores the message and schedules the idle actor", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+		message := new(testpb.TestSend)
+
+		require.True(t, pid.putValue(context.Background(), sender, message, nil))
+		require.Equal(t, dispatchScheduled, pid.schedState.v.Load())
+		require.Equal(t, 1, d.readyQueue.globalLen())
+
+		received := pid.mailbox.Dequeue()
+		require.Same(t, &pid.embedded.context, received, "a value message is handed over in the turn context")
+		require.Same(t, message, received.Message())
+		require.Same(t, sender, received.Sender())
+		require.Same(t, pid, received.Self())
+	})
+
+	t.Run("does not schedule an actor already scheduled", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+		require.True(t, pid.schedState.TrySchedule())
+
+		require.True(t, pid.putValue(context.Background(), sender, new(testpb.TestSend), nil))
+		require.Zero(t, d.readyQueue.globalLen())
+		require.False(t, pid.mailbox.IsEmpty())
+	})
+
+	t.Run("detaches a cancelable context", func(t *testing.T) {
+		pid := newDispatchTestPID(newDispatcher(2, dispatcherThroughput))
+		ctx, cancel := context.WithCancel(context.WithValue(context.Background(), mailboxTestCtxKey{}, "v"))
+		require.True(t, pid.putValue(ctx, sender, new(testpb.TestSend), nil))
+		cancel()
+
+		received := pid.mailbox.Dequeue()
+		require.NoError(t, received.Context().Err())
+		require.Nil(t, received.Context().Done())
+		require.Equal(t, "v", received.Context().Value(mailboxTestCtxKey{}))
+	})
+
+	t.Run("counts the message for the mailbox size metric", func(t *testing.T) {
+		pid := newDispatchTestPID(newDispatcher(2, dispatcherThroughput))
+		pid.metricsEnabled = true
+
+		require.True(t, pid.putValue(context.Background(), sender, new(testpb.TestSend), nil))
+		require.Equal(t, int64(1), pid.mailboxEnqueued.Load())
+	})
+
+	t.Run("leaves a control message to the general path", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		require.False(t, pid.putValue(context.Background(), sender, new(PoisonPill), nil))
+		require.True(t, pid.mailbox.IsEmpty())
+		require.Equal(t, dispatchIdle, pid.schedState.v.Load())
+	})
+
+	t.Run("leaves every message to the general path while the system stops", func(t *testing.T) {
+		pid := newDispatchTestPID(newDispatcher(2, dispatcherThroughput))
+		system := &actorSystem{}
+		system.shuttingDown.Store(true)
+		pid.actorSystem = system
+
+		require.False(t, pid.putValue(context.Background(), sender, new(testpb.TestSend), nil))
+		require.True(t, pid.mailbox.IsEmpty())
+	})
+}
+
+// TestPIDScheduleFrom verifies where an actor made ready by a send is
+// scheduled: on the sending turn's worker when it belongs to the actor's own
+// dispatcher, and on the dispatcher's shared queue otherwise.
+func TestPIDScheduleFrom(t *testing.T) {
+	t.Run("on the worker of the sending turn", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		pid.scheduleFrom(d.workers[1])
+		require.Equal(t, 1, d.readyQueue.locals[1].length())
+		require.Zero(t, d.readyQueue.globalLen())
+	})
+
+	t.Run("on its own dispatcher for a worker of another one", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		other := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		pid.scheduleFrom(other.workers[0])
+		require.Zero(t, other.readyQueue.locals[0].length())
+		require.Equal(t, 1, d.readyQueue.globalLen())
+	})
+
+	t.Run("on its own dispatcher without a sending turn", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		pid.scheduleFrom(nil)
+		require.Equal(t, 1, d.readyQueue.globalLen())
+	})
+}
+
+// TestPIDCurrentWorker verifies that the turn's worker reads as nil for a nil
+// PID and between turns.
+func TestPIDCurrentWorker(t *testing.T) {
+	var nilPID *PID
+	require.Nil(t, nilPID.currentWorker())
+
+	pid := &PID{}
+	require.Nil(t, pid.currentWorker())
+
+	w := &worker{}
+	pid.turnWorker.Store(w)
+	require.Same(t, w, pid.currentWorker())
+}
+
+// TestPIDTurnPublishesItsWorker verifies that a handler runs with its turn's
+// worker published, that the worker is cleared once the turn gives the actor
+// up, and that a Tell to a default-mailbox actor reaches the handler in the
+// actor's turn context rather than in a pooled one.
+func TestPIDTurnPublishesItsWorker(t *testing.T) {
+	sys, ctx := newReentrancySystem(t)
+
+	type observation struct {
+		worker      *worker
+		turnContext bool
+	}
+
+	seen := make(chan observation, 1)
+	pid := spawnReentrancyActor(t, sys, ctx, "turn-worker", func(rctx *ReceiveContext) {
+		if _, ok := rctx.Message().(*testpb.TestSend); ok {
+			seen <- observation{worker: rctx.Self().currentWorker(), turnContext: rctx == &rctx.Self().embedded.context}
+		}
+	})
+
+	require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+
+	select {
+	case got := <-seen:
+		require.NotNil(t, got.worker, "a handler must see its turn's worker")
+		require.Same(t, pid.dispatcher, got.worker.dispatcher)
+		require.True(t, got.turnContext, "a Tell must arrive in the turn context")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the message was never handled")
+	}
+
+	require.Eventually(t, func() bool {
+		return pid.schedState.v.Load() == dispatchIdle && pid.currentWorker() == nil
+	}, 5*time.Second, time.Millisecond, "the worker must be cleared when the turn ends")
+}
+
+// TestPIDYieldClearsTurnWorker verifies that a turn that spends its budget
+// clears its worker before it yields the actor, so a send made by the next
+// owner's turn never schedules on this worker, and that the yielded actor goes
+// back on this worker's own ring.
+func TestPIDYieldClearsTurnWorker(t *testing.T) {
+	d := newDispatcher(2, 1)
+	pid := newDispatchTestPID(d)
+	pid.behaviorStack = newBehaviorStack()
+
+	var during *worker
+	handled := 0
+	pid.behaviorStack.Push(func(rctx *ReceiveContext) {
+		during = rctx.Self().currentWorker()
+		handled++
+	})
+
+	mailbox := (*embeddedMailbox)(pid)
+	mailbox.put(context.Background(), nil, new(testpb.TestSend))
+	mailbox.put(context.Background(), nil, new(testpb.TestSend))
+	require.True(t, pid.schedState.TrySchedule())
+
+	pid.runTurn(d.workers[0])
+
+	require.Equal(t, 1, handled, "a budget of one handles one message")
+	require.Same(t, d.workers[0], during, "the handler must see its turn's worker")
+	require.Nil(t, pid.currentWorker(), "the worker must be cleared before the yield")
+	require.Equal(t, dispatchScheduled, pid.schedState.v.Load())
+	require.Equal(t, 1, d.readyQueue.locals[0].length())
+	require.False(t, pid.mailbox.IsEmpty())
+}
+
+// TestPIDMarkActivitySkipsRepeatedInstant verifies that markActivity records a
+// new instant, and skips one already recorded, which a turn passes for each of
+// its messages, without touching the passivation manager again.
+func TestPIDMarkActivitySkipsRepeatedInstant(t *testing.T) {
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+	pid := &PID{passivationManager: manager}
+
+	at := time.Now()
+	pid.markActivity(at)
+	require.Equal(t, at.UnixNano(), pid.latestReceiveTimeNano.Load())
+	require.Equal(t, at.UnixNano(), pid.lastPassivationTouch.Load())
+
+	// clear the coalescing window: a store of the same instant would touch again
+	pid.lastPassivationTouch.Store(0)
+	pid.markActivity(at)
+	require.Zero(t, pid.lastPassivationTouch.Load(), "a repeated instant must not touch the manager")
+
+	later := at.Add(time.Duration(passivationTouchInterval))
+	pid.markActivity(later)
+	require.Equal(t, later.UnixNano(), pid.latestReceiveTimeNano.Load())
+	require.Equal(t, later.UnixNano(), pid.lastPassivationTouch.Load())
+}

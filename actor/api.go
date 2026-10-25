@@ -117,6 +117,11 @@ func Tell(ctx context.Context, to *PID, message any) error {
 	if err != nil {
 		return err
 	}
+
+	if to.embedded != nil && to.putValue(ctx, from, decoded, nil) {
+		return nil
+	}
+
 	to.doReceive(toReceiveContext(ctx, from, to, decoded, true))
 	return nil
 }

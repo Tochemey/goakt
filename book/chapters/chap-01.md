@@ -80,16 +80,16 @@ sequenceDiagram
     participant D as Dispatcher (worker pool)
     participant A as Actor.Receive
     C->>P: Tell / Ask
-    P->>P: build ReceiveContext (pooled)
-    P->>M: control message? system queue : mailbox.Enqueue
+    P->>P: Ask builds a ReceiveContext (pooled)
+    P->>M: control message? system queue : mailbox (Tell stores values)
     P->>D: schedule if actor was idle
     D->>A: worker runs a turn: up to N messages
     A-->>C: ctx.Response(...) (Ask only)
 ```
 
-1. `Tell` and `Ask` build a `ReceiveContext` taken from a pool (`toReceiveContext` in `actor/api.go`). It carries the message, the sender, and for `Ask` a reply channel.
-2. `PID.doReceive` refuses ordinary messages if the system is stopping. Otherwise it routes control messages to a separate system queue and everything else to the mailbox (`actor/pid.go`).
-3. If the actor was idle, `doReceive` hands it to the dispatcher (`actor/pid.go`).
+1. A local `Tell` to an actor on the default mailbox stores the message, its sender and its context straight into a mailbox slot, with no `ReceiveContext` of its own (`PID.putValue` in `actor/pid.go`; [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)). Every other send, an `Ask` among them, builds a `ReceiveContext` taken from a pool (`toReceiveContext` in `actor/api.go`). It carries the message, the sender, and for `Ask` a reply channel.
+2. `PID.doReceive` refuses ordinary messages if the system is stopping. Otherwise it routes control messages to a separate system queue and everything else to the mailbox (`actor/pid.go`). `putValue` leaves both cases to it.
+3. If the actor was idle, the send hands it to the dispatcher (`PID.doReceive` and `PID.scheduleFrom` in `actor/pid.go`).
 4. A dispatcher worker runs one **turn**: it processes up to a throughput budget of messages (32 by default, `dispatcherThroughput` in `actor/dispatcher.go`), with system messages taking priority, then yields to other actors.
 
 One detail in `Ask` matters when you debug it. After the context is handed to the mailbox it can be recycled for an unrelated message, so `Ask` keeps only its own reply channel. A reply that arrives after the `Ask` gave up goes into that orphaned channel and is dropped (`actor/api.go`).
@@ -172,4 +172,4 @@ Users cannot import anything under `internal/`, and the generated protobuf code 
 ## Implementation details (may change)
 
 - The default throughput budget of 32 messages per turn.
-- The `ReceiveContext` pool, and the fact that a late `Ask` reply is silently dropped rather than dead-lettered.
+- The `ReceiveContext` pool, the `Tell` that bypasses it, and the fact that a late `Ask` reply is silently dropped rather than dead-lettered.

@@ -293,6 +293,52 @@ func TestReadyQueueParkAndTakeFindsGlobalWorkAfterPublishing(t *testing.T) {
 	require.Same(t, item, rq.popGlobal().(*MockSchedulable))
 }
 
+// TestReadyQueueParkAndTakeFindsLocalWorkAfterPublishing verifies that a
+// worker publishing its park re-checks the local rings: an item a sibling
+// pushed to its own ring while no worker was parked, and so woke nobody,
+// sends the parking worker back to its take loop instead of to sleep.
+func TestReadyQueueParkAndTakeFindsLocalWorkAfterPublishing(t *testing.T) {
+	rq := newReadyQueue(2)
+	item := NewMockSchedulable(1)
+	require.True(t, rq.locals[1].pushBack(item))
+	rq.wakeSearcher()
+	require.False(t, rq.searching.Load(), "no worker was parked to wake")
+
+	type result struct {
+		s  schedulable
+		ok bool
+	}
+
+	got := make(chan result, 1)
+	go func() {
+		s, ok := rq.parkAndTake(0)
+		got <- result{s, ok}
+	}()
+
+	select {
+	case r := <-got:
+		require.True(t, r.ok)
+		require.Nil(t, r.s)
+	case <-time.After(2 * time.Second):
+		t.Fatal("the parking worker slept with work on a local ring")
+	}
+
+	require.Zero(t, rq.parkedCount())
+	require.Same(t, item, rq.trySteal(0))
+}
+
+// TestReadyQueueHasLocalWork verifies that local work is seen on any ring.
+func TestReadyQueueHasLocalWork(t *testing.T) {
+	rq := newReadyQueue(3)
+	require.False(t, rq.hasLocalWork())
+
+	require.True(t, rq.locals[2].pushBack(NewMockSchedulable(1)))
+	require.True(t, rq.hasLocalWork())
+
+	require.NotNil(t, rq.locals[2].popFront())
+	require.False(t, rq.hasLocalWork())
+}
+
 func TestReadyQueueCloseIsIdempotent(t *testing.T) {
 	rq := newReadyQueue(1)
 	rq.close()
@@ -402,4 +448,109 @@ func TestGlobalQueueGrowFromEmpty(t *testing.T) {
 	var q globalQueue
 	q.grow()
 	require.Equal(t, globalQueueInitialCap, len(q.buf))
+}
+
+// TestReadyQueueWakeSearcher verifies the wake rule for work left on a local
+// ring: one parked worker is woken to steal it, and no second one while the
+// first is still looking.
+func TestReadyQueueWakeSearcher(t *testing.T) {
+	t.Run("does nothing without a parked worker", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		rq.wakeSearcher()
+		require.False(t, rq.searching.Load())
+	})
+
+	t.Run("a woken worker steals the local work and ends its search", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		got := make(chan schedulable, 1)
+		go func() {
+			s, ok := rq.take(1)
+			if ok {
+				got <- s
+			}
+		}()
+		waitParked(t, rq, 1)
+
+		item := NewMockSchedulable(1)
+		require.True(t, rq.locals[0].pushBack(item))
+		rq.wakeSearcher()
+
+		select {
+		case s := <-got:
+			require.Same(t, item, s)
+		case <-time.After(2 * time.Second):
+			t.Fatal("the parked worker never stole the local work")
+		}
+
+		require.False(t, rq.searching.Load(), "the woken worker must end its search")
+		rq.close()
+	})
+
+	t.Run("one searcher at a time", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		go func() { _, _ = rq.take(1) }()
+		waitParked(t, rq, 1)
+
+		rq.searching.Store(true)
+		rq.wakeSearcher()
+		require.Equal(t, 1, rq.parkedCount(), "no worker must be woken while one searches")
+		rq.close()
+	})
+
+	t.Run("a failed claim lets the next wake go out", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		// a worker counted as idle that is not claimable yet
+		rq.idleCount.Store(1)
+		rq.wakeSearcher()
+		require.False(t, rq.searching.Load())
+	})
+
+	t.Run("a woken worker that finds nothing ends its search and parks again", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		go func() { _, _ = rq.take(1) }()
+		waitParked(t, rq, 1)
+
+		rq.wakeSearcher()
+		require.Eventually(t, func() bool {
+			return !rq.searching.Load() && rq.parkedCount() == 1
+		}, 2*time.Second, time.Millisecond)
+		rq.close()
+	})
+}
+
+// TestReadyQueueEndSearch verifies that a worker woken to search clears the
+// search when it takes work and passes the wake on only after stealing, and
+// that a worker that was not woken leaves the search alone.
+func TestReadyQueueEndSearch(t *testing.T) {
+	item := NewMockSchedulable(1)
+
+	t.Run("after stealing", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		go func() { _, _ = rq.take(1) }()
+		waitParked(t, rq, 1)
+
+		rq.searching.Store(true)
+		s, ok := rq.endSearch(item, true, true)
+		require.True(t, ok)
+		require.Same(t, item, s)
+		require.Eventually(t, func() bool { return rq.parkedCount() == 1 && !rq.searching.Load() }, 2*time.Second, time.Millisecond,
+			"the next searcher must be woken, find nothing and park again")
+		rq.close()
+	})
+
+	t.Run("without stealing", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		rq.searching.Store(true)
+		_, ok := rq.endSearch(item, true, false)
+		require.True(t, ok)
+		require.False(t, rq.searching.Load())
+	})
+
+	t.Run("when not woken", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		rq.searching.Store(true)
+		_, ok := rq.endSearch(item, false, true)
+		require.True(t, ok)
+		require.True(t, rq.searching.Load())
+	})
 }

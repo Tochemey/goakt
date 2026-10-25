@@ -26,6 +26,14 @@ Every producer goroutine tells its own private receiver; the reported messages/s
 go test -run=^$ -bench=^BenchmarkTellPairwise$ -count=10 ./benchmark/
 ```
 
+### TellPingPong — actor-to-actor async send with a bounded number of messages in flight
+
+Each client actor keeps a fixed number of messages in flight to its own echo actor and sends the next batch once every reply of the current one is back; every request and every reply counts as one message. This is the shape actor frameworks commonly use to report messaging throughput. The in-flight bound keeps every mailbox short, so the number reflects delivery and dispatch rather than the cost of buffering a backlog, which the goroutine-driven Tell benchmarks build up. The sweep runs GOMAXPROCS pairs and eight times as many, with 100 and 1,000 messages in flight per pair. Cite this as the actor-to-actor throughput number.
+
+```
+go test -run=^$ -bench=^BenchmarkTellPingPong$ -count=10 -benchmem ./benchmark/
+```
+
 ### TellPayload — async send swept by payload size (0 B … 64 KiB)
 
 ```

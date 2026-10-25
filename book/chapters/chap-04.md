@@ -131,7 +131,7 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 
 1. Validates the address and allocates the struct, with a context-pool shard chosen round-robin so that concurrently busy actors take contexts from different pool shards (`newPID` in `actor/pid.go`).
 2. Sets the `relocationState` bit (relocatable unless an option clears it), then applies the options.
-3. **Embeds the default mailbox in the PID.** Without a custom mailbox, the PID's own `mailboxHead`/`mailboxTail` words become a lock-free MPSC list seeded with one sentinel, and `pid.mailbox` is the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). An ordinary actor allocates no separate mailbox object. [Chapter 6](chap-06.md) covers this.
+3. **Embeds the default mailbox in the PID.** Without a custom mailbox, `newPID` allocates the mailbox's small `embeddedMailboxState`, which holds the actor's turn context, and `pid.mailbox` becomes the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). The PID's own `mailboxHead`/`mailboxTail` pointers stay nil until the first message brings the first segment. [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox) covers this.
 4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
@@ -147,8 +147,9 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 
 The `PID` struct (`actor/pid.go`) is ordered by *which goroutine writes each field* rather than by topic, and its comments explain why:
 
-- The mailbox head and `mailboxDequeued`, written by the consumer on every message, sit next to `processedCount`, which the consumer also writes (`PID` in `actor/pid.go`).
-- The mailbox tail and `mailboxEnqueued`, written by producers, are parked among cold configuration fields, away from everything the turn touches (`PID` in `actor/pid.go`).
+- The mailbox head, `mailboxDequeued` and `turnWorker`, written by the consumer, sit next to `processedCount`, which the consumer writes on every message (`PID` in `actor/pid.go`).
+- The mailbox tail and `mailboxEnqueued`, written by producers, are parked among cold configuration fields, away from everything the turn touches (`PID` in `actor/pid.go`). A send reads the tail on every message but writes it only when it links a new segment ([Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)).
+- `latestReceiveTimeNano` is stored once per turn, not once per message: `markActivity` skips a store of the instant already recorded, since a turn passes the same instant for all its messages (`PID.markActivity` in `actor/pid.go`).
 - Counting the mailbox size with two counters, one per side, instead of one shared counter avoids a cache line bouncing between producer and consumer on every message (`PID` in `actor/pid.go`).
 - Rarely used settings (reliable delivery, durable queues, singleton spec, role) live in an optional `companion` pointer that stays `nil` for an ordinary actor (`PID` in `actor/pid.go`).
 

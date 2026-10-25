@@ -34,6 +34,7 @@ import (
 
 	"github.com/tochemey/goakt/v4/errors"
 	"github.com/tochemey/goakt/v4/internal/address"
+	"github.com/tochemey/goakt/v4/internal/commands"
 	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/log"
@@ -3523,4 +3524,104 @@ func TestReceiveContextResetClearsRemoteOrigin(t *testing.T) {
 	rctx := &ReceiveContext{remote: true}
 	rctx.reset()
 	assert.False(t, rctx.remote)
+}
+
+// TestReceiveContextReuse verifies that the default mailbox's turn context is
+// refilled for each message without leaking what handling the previous one
+// left on it.
+func TestReceiveContextReuse(t *testing.T) {
+	self := &PID{}
+	sender := &PID{}
+	ctx := context.WithValue(context.Background(), mailboxTestCtxKey{}, "v")
+
+	// each case leaves exactly one field behind, so every condition of the
+	// reset check is exercised on its own
+	leftBehind := map[string]func(rctx *ReceiveContext){
+		"an error":                 func(rctx *ReceiveContext) { rctx.err = assert.AnError },
+		"a reply channel":          func(rctx *ReceiveContext) { rctx.response = make(chan any, 1) },
+		"a request id":             func(rctx *ReceiveContext) { rctx.requestID = "request" },
+		"a reply route":            func(rctx *ReceiveContext) { rctx.requestReplyTo = new(commands.AsyncReplyTo) },
+		"a deadline":               func(rctx *ReceiveContext) { rctx.deadline = 1 },
+		"a deadline scope":         func(rctx *ReceiveContext) { rctx.deadlineScope = new(askScope) },
+		"a remote credit share":    func(rctx *ReceiveContext) { rctx.remoteHold = new(dynaport.CreditShare) },
+		"the remote origin marker": func(rctx *ReceiveContext) { rctx.remote = true },
+	}
+
+	for name, leave := range leftBehind {
+		t.Run("clears "+name+" left behind", func(t *testing.T) {
+			rctx := &ReceiveContext{self: self}
+			leave(rctx)
+
+			rctx.reuse(ctx, sender, self, "next")
+			require.NoError(t, rctx.getError())
+			require.Nil(t, rctx.response)
+			require.Empty(t, rctx.requestID)
+			require.Nil(t, rctx.requestReplyTo)
+			require.Zero(t, rctx.deadline)
+			require.Nil(t, rctx.deadlineScope)
+			require.Nil(t, rctx.remoteHold)
+			require.False(t, rctx.remote)
+			require.Same(t, self, rctx.Self(), "a reset must not lose the actor")
+			require.Same(t, sender, rctx.Sender())
+			require.Equal(t, "next", rctx.Message())
+			require.Equal(t, "v", rctx.Context().Value(mailboxTestCtxKey{}))
+		})
+	}
+
+	t.Run("fills a clean context", func(t *testing.T) {
+		rctx := &ReceiveContext{}
+		rctx.reuse(context.Background(), nil, self, "first")
+		require.Same(t, self, rctx.Self())
+		require.Nil(t, rctx.sender)
+		require.Equal(t, "first", rctx.Message())
+
+		rctx.reuse(ctx, sender, self, "second")
+		require.Same(t, sender, rctx.Sender())
+		require.Equal(t, "second", rctx.Message())
+	})
+}
+
+// TestReceiveContextTellSchedulesOnTheTurnWorker verifies that Tell and
+// BatchTell made from a turn schedule an idle recipient on the worker running
+// the turn, and on the dispatcher's shared queue when there is no turn.
+func TestReceiveContextTellSchedulesOnTheTurnWorker(t *testing.T) {
+	newSender := func() *PID {
+		sender := &PID{}
+		sender.setState(runningState, true)
+		return sender
+	}
+
+	t.Run("Tell from a turn", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		sender := newSender()
+		sender.turnWorker.Store(d.workers[1])
+		recipient := newDispatchTestPID(d)
+
+		(&ReceiveContext{self: sender}).Tell(recipient, new(testpb.TestSend))
+		require.Equal(t, 1, d.readyQueue.locals[1].length())
+		require.Zero(t, d.readyQueue.globalLen())
+		require.Equal(t, dispatchScheduled, recipient.schedState.v.Load())
+	})
+
+	t.Run("BatchTell from a turn", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		sender := newSender()
+		sender.turnWorker.Store(d.workers[0])
+		recipient := newDispatchTestPID(d)
+
+		(&ReceiveContext{self: sender}).BatchTell(recipient, new(testpb.TestSend), new(testpb.TestSend))
+		require.Equal(t, 1, d.readyQueue.locals[0].length())
+		require.Zero(t, d.readyQueue.globalLen())
+		require.Equal(t, int64(2), recipient.mailbox.Len())
+	})
+
+	t.Run("Tell outside a turn", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		recipient := newDispatchTestPID(d)
+
+		(&ReceiveContext{self: newSender()}).Tell(recipient, new(testpb.TestSend))
+		require.Zero(t, d.readyQueue.locals[0].length())
+		require.Zero(t, d.readyQueue.locals[1].length())
+		require.Equal(t, 1, d.readyQueue.globalLen())
+	})
 }

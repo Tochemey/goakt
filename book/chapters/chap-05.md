@@ -54,7 +54,7 @@ The two `BatchAsk`s also take their arguments in a different order: `actor.Batch
 
 ## 5.2 What a message carries
 
-Every local `Tell`, `Ask` and `Forward` takes a `ReceiveContext` from a pool and fills it in `build` (`actor/receive_context.go`). `PipeTo` is the exception: it delivers its result in a context allocated by `newReceiveContext`.
+Every local `Ask` and `Forward` takes a `ReceiveContext` from a pool and fills it in `build` (`actor/receive_context.go`), and so does a local `Tell` to an actor with a custom mailbox. A local `Tell` to an actor on the default mailbox carries the same three values, `sender`, `message` and `ctx`, but in a mailbox slot instead of a context of its own; the receiving turn hands them to the handler in the actor's turn context (`PID.putValue` in `actor/pid.go`; [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)). `PipeTo` is the other exception: it delivers its result in a context allocated by `newReceiveContext`.
 
 | Field | `Tell` | `Ask` |
 |---|---|---|
@@ -176,7 +176,7 @@ They differ in one way, explained in Part V. While a departed node's actors are 
 
 ## Implementation details (may change)
 
-- Pooled `ReceiveContext`s, and a new reply channel for every `Ask` (`getResponseChannel` in `actor/pools.go`).
+- Pooled `ReceiveContext`s, a `Tell` to the default mailbox that takes none, and a new reply channel for every `Ask` (`getResponseChannel` in `actor/pools.go`).
 - The process-local monotonic clock used for ask deadlines.
 - The dead-letter registry's two maps and its prune threshold.
 
