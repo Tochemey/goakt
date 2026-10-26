@@ -406,6 +406,155 @@ func TestNewRemoteSenderPID(t *testing.T) {
 	})
 }
 
+// TestDuplexRemoteTellBatch drives revision-5 coalesced tell batches over a
+// real duplex session into an actor system.
+func TestDuplexRemoteTellBatch(t *testing.T) {
+	const host = "127.0.0.1"
+
+	// start runs an actor system with remoting, spawns a counting actor
+	// named alice and opens a revision-5 session to the system.
+	start := func(t *testing.T, opts ...remote.Option) (*actorSystem, *MockCountingActor, inet.DuplexSession) {
+		t.Helper()
+
+		ctx := context.Background()
+		port := inet.Get(1)[0]
+
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithRemote(remote.NewConfig(host, port, opts...)))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(ctx))
+		t.Cleanup(func() { assert.NoError(t, system.Stop(ctx)) })
+
+		alice := &MockCountingActor{}
+		_, err = system.Spawn(ctx, "alice", alice)
+		require.NoError(t, err)
+
+		hello := internalpb.Hello_builder{
+			Revision:                    inet.CapabilityRevisionTellBatch,
+			SystemName:                  "client",
+			Host:                        host,
+			Port:                        uint32(port),
+			MaxFrameSize:                1 << 20,
+			MaxMessageSize:              1 << 20,
+			InitialCredits:              1 << 20,
+			MaxConcurrentLargeTransfers: 4,
+		}.Build()
+
+		session, result, err := inet.OpenDuplex(ctx, inet.NewTCPTransport(), fmt.Sprintf("%s:%d", host, port), hello, inet.LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL}, time.Second, 0, 0)
+		require.NoError(t, err)
+		require.Equal(t, inet.CapabilityRevisionTellBatch, result.Effective.GetRevision())
+		t.Cleanup(func() { _ = session.Close() })
+
+		return system.(*actorSystem), alice, session
+	}
+
+	// tell sends msgs as one batch frame, with frame metadata when md is set.
+	tell := func(t *testing.T, session inet.DuplexSession, md *inet.Metadata, msgs ...inet.TellBatchMessage) {
+		t.Helper()
+
+		body := make([]byte, inet.TellBatchCountSize)
+		for i := range msgs {
+			body = inet.AppendTellBatchMessage(body, &msgs[i])
+		}
+		inet.PutTellBatchCount(body, uint32(len(msgs)))
+
+		env := inet.DataEnvelope{TypeName: inet.TellBatchTypeName, SerializerID: inet.SerializerIDInternalProto, Payload: body}
+
+		var flags byte
+		if md != nil {
+			env.Metadata = md.MarshalBinary()
+			flags = inet.FrameFlagHasMetadata
+		}
+
+		payload, err := inet.EncodeDataEnvelope(env)
+		require.NoError(t, err)
+		require.NoError(t, session.Tell(context.Background(), inet.Frame{Type: inet.FrameTypeData, Flags: flags, Lane: session.Lane(), Payload: payload}))
+	}
+
+	// testSend returns a serialized TestSend.
+	testSend := func(t *testing.T, sys *actorSystem) []byte {
+		t.Helper()
+
+		payload, err := sys.remoting.Serializer(new(testpb.TestSend)).Serialize(new(testpb.TestSend))
+		require.NoError(t, err)
+		return payload
+	}
+
+	t.Run("delivers each message and dead-letters an unknown receiver", func(t *testing.T) {
+		sys, alice, session := start(t)
+
+		consumer, err := sys.Subscribe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
+
+		sender := address.New("client", "remoteSys", host, 1).String()
+		senderID, err := session.PrepareRef(inet.TableKindActorPath, sender)
+		require.NoError(t, err)
+
+		alicePath := sys.actorAddress("alice").String()
+		payload := testSend(t, sys)
+
+		tell(t, session, nil,
+			inet.TellBatchMessage{SenderID: senderID, Sender: sender, Receiver: alicePath, Payload: payload},
+			inet.TellBatchMessage{Sender: sender, Receiver: sys.actorAddress("ghost").String(), Payload: payload},
+			inet.TellBatchMessage{Sender: sender, Receiver: alicePath, Payload: []byte("not a serialized message")},
+			inet.TellBatchMessage{SenderID: senderID, Sender: sender, Receiver: alicePath, Payload: payload},
+		)
+
+		require.Eventually(t, func() bool { return alice.Count() == 2 }, 5*time.Second, 10*time.Millisecond)
+		require.Eventually(t, func() bool { return len(deadlettersFor(consumer, "ghost")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("bad message metadata dead-letters only that message", func(t *testing.T) {
+		sys, alice, session := start(t, remote.WithContextPropagator(&MockFailingContextPropagator{err: errors.New("extract boom")}))
+
+		consumer, err := sys.Subscribe()
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = sys.Unsubscribe(consumer) })
+
+		alicePath := sys.actorAddress("alice").String()
+		payload := testSend(t, sys)
+
+		tell(t, session, nil,
+			inet.TellBatchMessage{Receiver: alicePath, Metadata: map[string]string{"trace": "x"}, Payload: payload},
+			inet.TellBatchMessage{Receiver: alicePath, Payload: payload},
+		)
+
+		require.Eventually(t, func() bool { return alice.Count() == 1 }, 5*time.Second, 10*time.Millisecond)
+		require.Eventually(t, func() bool { return len(deadlettersFor(consumer, "alice")) == 1 }, 5*time.Second, 10*time.Millisecond)
+	})
+
+	t.Run("a frame whose metadata fails propagation is dropped", func(t *testing.T) {
+		sys, alice, session := start(t, remote.WithContextPropagator(&MockFailingContextPropagator{err: errors.New("extract boom")}))
+
+		bob := &MockCountingActor{}
+		_, err := sys.Spawn(context.Background(), "bob", bob)
+		require.NoError(t, err)
+
+		md := inet.NewMetadata()
+		md.Set("trace", "x")
+		tell(t, session, md, inet.TellBatchMessage{Receiver: sys.actorAddress("alice").String(), Payload: testSend(t, sys)})
+		tell(t, session, nil, inet.TellBatchMessage{Receiver: sys.actorAddress("bob").String(), Payload: testSend(t, sys)})
+
+		// Frames on one connection are handled in order: once bob has the
+		// second frame's message, the first frame has been handled.
+		require.Eventually(t, func() bool { return bob.Count() == 1 }, 5*time.Second, 10*time.Millisecond)
+		assert.Zero(t, alice.Count(), "the frame whose metadata failed propagation is dropped")
+	})
+
+	t.Run("a batch is dropped once remoting is disabled", func(t *testing.T) {
+		sys, alice, session := start(t)
+
+		sys.remotingEnabled.Store(false)
+		t.Cleanup(func() { sys.remotingEnabled.Store(true) })
+
+		tell(t, session, nil, inet.TellBatchMessage{Receiver: sys.actorAddress("alice").String(), Payload: testSend(t, sys)})
+
+		// Checked while remoting is still off, so a late delivery cannot
+		// slip past the assertion.
+		assert.Never(t, func() bool { return alice.Count() > 0 }, 300*time.Millisecond, 10*time.Millisecond)
+	})
+}
+
 func TestDuplexRemoteTellSenderHandle(t *testing.T) {
 	const host = "127.0.0.1"
 	const port = 9010

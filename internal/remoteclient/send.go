@@ -1047,9 +1047,11 @@ func (x *client) flushTellBatch(ctx context.Context, host string, port int, lane
 	return undelivered, err
 }
 
-// flushTellBatchDuplex encodes req as internal-proto DATA envelopes on the
-// given ordinary lane. A batch whose marshaled size would exceed the
-// session's negotiated max message size is split into size-bounded
+// flushTellBatchDuplex sends req on the given ordinary lane: in the
+// revision-5 batch layout when the session negotiated it
+// ([client.sendTellBatchFrames]), otherwise as internal-proto
+// RemoteTellRequest DATA envelopes. A batch whose encoded size would exceed
+// the session's negotiated max message size is split into size-bounded
 // sub-batches sent in order, so individually valid tells are never
 // dead-lettered for sharing a batch with others. Terminal transport failures
 // retire the lane so the next flush redials; the undelivered suffix is
@@ -1061,6 +1063,10 @@ func (x *client) flushTellBatchDuplex(ctx context.Context, peer *peer, laneIndex
 	session, err := peer.ensureLane(ctx, key.role, key.index)
 	if err != nil {
 		return req.GetRemoteMessages(), err
+	}
+
+	if session.Revision() >= inet.CapabilityRevisionTellBatch {
+		return x.sendTellBatchFrames(ctx, peer, key, session, req.GetRemoteMessages())
 	}
 
 	// Pooled marshal (same pattern as sendControlDuplex): the envelope encode
@@ -1156,16 +1162,143 @@ func (x *client) sendMarshaledTellBatch(ctx context.Context, peer *peer, key lan
 		return err
 	}
 
-	err = session.Tell(ctx, inet.Frame{
+	return tellBatchFrame(ctx, peer, key, session, encoded)
+}
+
+// sendTellBatchFrames sends msgs in the revision-5 [inet.TellBatchTypeName]
+// layout: each sender and receiver travels as an actor-path table ref
+// instead of an address string, and the body is written straight into the
+// frame. Messages are packed in order into frames that stay under the
+// session's split limit; a single message above it ships alone. On error it
+// returns the messages not yet handed to the session.
+func (x *client) sendTellBatchFrames(ctx context.Context, peer *peer, key laneKey, session inet.DuplexSession, msgs []*internalpb.RemoteMessage) ([]*internalpb.RemoteMessage, error) {
+	header, err := encodeControlDataEnvelope(session, inet.DataEnvelope{
+		TypeName:     inet.TellBatchTypeName,
+		SerializerID: inet.SerializerIDInternalProto,
+	})
+	if err != nil {
+		return msgs, err
+	}
+
+	limit := tellBatchSplitLimit(session)
+	countAt := len(header)
+
+	var (
+		frame []byte
+		count uint32
+		start int
+	)
+
+	for i, msg := range msgs {
+		entry, err := tellBatchMessage(session, msg)
+		if err != nil {
+			return msgs[start:], err
+		}
+
+		if frame == nil {
+			frame = newTellBatchFrame(header, msgs[i:], limit)
+		}
+
+		end := len(frame)
+		frame = inet.AppendTellBatchMessage(frame, &entry)
+
+		if count > 0 && limit > 0 && uint64(len(frame)) > limit {
+			// The message overflows the frame: it moves to a fresh frame,
+			// and the frame goes out without it.
+			next := append(newTellBatchFrame(header, msgs[i:], limit), frame[end:]...)
+
+			inet.PutTellBatchCount(frame[countAt:], count)
+
+			if err := tellBatchFrame(ctx, peer, key, session, frame[:end]); err != nil {
+				return msgs[start:], err
+			}
+
+			frame, count, start = next, 0, i
+		}
+
+		count++
+	}
+
+	if count == 0 {
+		return nil, nil
+	}
+
+	inet.PutTellBatchCount(frame[countAt:], count)
+
+	if err := tellBatchFrame(ctx, peer, key, session, frame); err != nil {
+		return msgs[start:], err
+	}
+
+	return nil, nil
+}
+
+// newTellBatchFrame returns an empty batch frame: header, then a reserved
+// count, with room estimated for msgs.
+func newTellBatchFrame(header []byte, msgs []*internalpb.RemoteMessage, limit uint64) []byte {
+	frame := make([]byte, 0, len(header)+inet.TellBatchCountSize+tellBatchFrameEstimate(msgs, limit))
+	frame = append(frame, header...)
+	return append(frame, make([]byte, inet.TellBatchCountSize)...)
+}
+
+// tellBatchFrame submits an encoded batch DATA payload on session. Terminal
+// transport failures retire the lane so the next flush redials.
+func tellBatchFrame(ctx context.Context, peer *peer, key laneKey, session inet.DuplexSession, payload []byte) error {
+	err := session.Tell(ctx, inet.Frame{
 		Type:    inet.FrameTypeData,
 		Lane:    session.Lane(),
-		Payload: encoded,
+		Payload: payload,
 	})
 	if err != nil && shouldRetireDuplexSession(err, inet.Frame{}) {
 		peer.retireLane(key, session)
 	}
 
 	return mapDuplexErr(err)
+}
+
+// tellBatchMessage registers msg's sender and receiver on the session's
+// path table and returns its batch entry. A literal the table cannot hold
+// (full, or empty) travels inline.
+func tellBatchMessage(session inet.DuplexSession, msg *internalpb.RemoteMessage) (inet.TellBatchMessage, error) {
+	senderID, err := session.PrepareRef(inet.TableKindActorPath, msg.GetSender())
+	if err != nil {
+		return inet.TellBatchMessage{}, err
+	}
+
+	receiverID, err := session.PrepareRef(inet.TableKindActorPath, msg.GetReceiver())
+	if err != nil {
+		return inet.TellBatchMessage{}, err
+	}
+
+	return inet.TellBatchMessage{
+		Sender:     msg.GetSender(),
+		SenderID:   senderID,
+		Receiver:   msg.GetReceiver(),
+		ReceiverID: receiverID,
+		Metadata:   msg.GetMetadata(),
+		Payload:    msg.GetMessage(),
+	}, nil
+}
+
+// tellBatchFrameEstimate sizes a batch frame buffer for msgs: payloads and
+// metadata plus a few bytes of refs and lengths each, capped at limit when
+// the session has one. It only avoids regrowing the buffer; the encoder
+// appends whatever the messages actually need.
+func tellBatchFrameEstimate(msgs []*internalpb.RemoteMessage, limit uint64) int {
+	const perMessage = 16
+
+	estimate := 0
+	for _, msg := range msgs {
+		estimate += len(msg.GetMessage()) + perMessage
+		for key, value := range msg.GetMetadata() {
+			estimate += len(key) + len(value) + 2
+		}
+
+		if limit > 0 && uint64(estimate) >= limit {
+			return int(limit)
+		}
+	}
+
+	return estimate
 }
 
 // flushTellBatchLegacy sends req through the pooled legacy unary client,

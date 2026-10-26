@@ -6,6 +6,8 @@
   - Actor-to-actor messaging (`BenchmarkTellPingPong`, new): 63–72 million messages/sec, from 30–46 million, with no allocation per message.
   - Many senders to many actors (`BenchmarkTellPairwise`): 51–55 million messages/sec, from 23–25 million.
   - One sender to one actor (`BenchmarkTellSinglePair`): 21–22 million messages/sec, from 9–12 million.
+- **Remote `Tell` with send coalescing is about 45% faster.** A sender whose message fits the coalescer's budget now enqueues it under one lock instead of a channel `select` that every sender sharing a context contended on, and the writer takes a whole batch at a time. Many senders to many remote actors (`BenchmarkRemoteTellThroughput`) deliver 2.11–2.15 million messages/sec, from 1.39–1.45 million, on an 8-core arm64 machine.
+- **A coalesced remote `Tell` batch costs about half the memory.** When both peers negotiate capability revision 5, a batch carries each sender and receiver as a per-connection table reference instead of an address string, and the server reads it without a protobuf unmarshal: 280 B and 4.2 allocations per message, from 513 B and 6.2. Peers on an older release negotiate the earlier batch encoding, so mixed-version clusters keep working.
 - **A local `Ask` round trip is about 10% faster.** `Ask` no longer waits on a timer channel: its timeout is delivered into its own reply channel. One asker (`BenchmarkAsk`) completes 1.41 million round trips/sec, from 1.27 million (709–711 ns from 784–785 ns per round trip). Many concurrent askers (`BenchmarkAskPairwise`) are unchanged.
 
 ## Fixes

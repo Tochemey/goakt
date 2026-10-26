@@ -195,7 +195,9 @@ alone.
 ## Transport
 
 - Dual-protocol listener: duplex and legacy on the same remoting port
-- Duplex: persistent control / ordinary / large lanes, credit window, chunking
+- Duplex: persistent control / ordinary / large lanes, credit window, chunking. When both peers negotiate capability
+  revision ≥ 5, coalesced tells carry sender and receiver addresses as per-connection table references; older peers
+  keep the earlier batch encoding
 - Legacy: length-prefixed unary frames and the send coalescer (legacy peers only)
 - Optional TLS (see [TLS](#tls))
 - Compression as above

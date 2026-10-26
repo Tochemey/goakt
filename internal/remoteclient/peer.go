@@ -583,7 +583,7 @@ func (x *peer) dialLane(ctx context.Context, role internalpb.LaneRole, index uin
 	}
 
 	localHello := &internalpb.Hello{}
-	localHello.SetRevision(inet.CapabilityRevisionCredits)
+	localHello.SetRevision(inet.CapabilityRevisionTellBatch)
 	localHello.SetLaneRole(role)
 	localHello.SetLaneIndex(index)
 	localHello.SetCompression(compressionCodec(x.client.compression))

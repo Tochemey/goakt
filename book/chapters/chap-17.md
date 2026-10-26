@@ -266,23 +266,27 @@ The handlers share one shape. Each runs the subset of these steps that [§17.5](
 ```mermaid
 flowchart TD
     A["legacy RemoteTellRequest"] --> H["remoteTellHandler: one batch"]
-    B["duplex internal-proto tell: coalesced batch"] --> H
+    B["duplex internal-proto tell: coalesced batch below revision 5"] --> H
+    T["duplex tell batch: revision 5"] --> TB["duplexRemoteTellBatch: one batch"]
     C["duplex user tell: one message"] --> D["duplexRemoteTell"]
     H --> M["deliverRemoteTellMessage, per message"]
-    M --> P["deliverRemoteTellPayload"]
+    M --> P["deliverRemoteTellBytes"]
+    TB --> P
     P --> F["deliverRemoteTellFrom"]
     D --> F
     F --> R["handleRemoteTellHeld: into the mailbox"]
     F -->|"failure"| DL["deadLetterRemoteMessage"]
 ```
 
-**A batch.** `actorSystem.remoteTellHandler` in `actor/remote_server.go` receives a `RemoteTellRequest`: a list of `RemoteMessage` values, each with a sender, a receiver, the serialised message and a per-message metadata map (`protos/internal/remoting.proto`). After steps 1 to 3 of [§17.4](#174-the-server) it splits the frame's credit lease into one share per message (`CreditLease.Split` in `internal/net/duplex_lease.go`; on the legacy path there is no lease and every share is `nil`, which releases as a no-op). Then, for each message, it skips a `nil` entry, releasing its share, and calls `actorSystem.deliverRemoteTellMessage`, which:
+**A batch.** `actorSystem.remoteTellHandler` in `actor/remote_server.go` receives a `RemoteTellRequest`: a list of `RemoteMessage` values, each with a sender, a receiver, the serialised message and a per-message metadata map (`protos/internal/remoting.proto`). After steps 1 to 3 of [§17.4](#174-the-server) it splits the frame's credit lease into one share per message (`CreditLease.Split` in `internal/net/duplex_lease.go`; on the legacy path there is no lease and every share is `nil`, which releases as a no-op). Then, for each message, it skips a `nil` entry, releasing its share, and calls `actorSystem.deliverRemoteTellMessage`, which passes the message's fields to `actorSystem.deliverRemoteTellBytes`. That function:
 
 1. Decodes the payload once with the composite of [§17.3](#173-choosing-a-serializer). A decode failure is logged, the share released, and the message dropped.
 2. Applies the message's own metadata on top of the request's context, through the propagator (`actorSystem.messageMetadata`). With no metadata or no propagator, the request's context is kept. An `Extract` failure releases the share and dead-letters the message, or only logs it when the receiver does not parse.
-3. Builds the sender PID and calls `actorSystem.deliverRemoteTellFrom`.
+3. Uses the sender PID it was given, or builds one from the sender string, and calls `actorSystem.deliverRemoteTellFrom`.
 
 The handler always answers `RemoteTellResponse` once it gets past step 3 of [§17.4](#174-the-server). **One bad message never fails its siblings**: the code comment explains that the client's coalescer packs independent tells from many senders into one batch.
+
+**A revision-5 batch.** `actorSystem.duplexRemoteTellBatch` handles the table-reference batch of [Chapter 15, §15.4](chap-15.md#154-the-wire-protocol) on the read loop. The transport has already checked the whole body (`duplexConn.decodeTellBatch`), including a cap of 65,535 metadata entries per message, so every message it hands out is well formed. The handler mirrors `remoteTellHandler`: it returns at once when remoting is off or context extraction fails, splits the lease into one share per message, and passes each message to `deliverRemoteTellBytes`. The sender is the table entry's cached handle when it is a `*PID`, so a repeated sender reuses one PID. The payload aliases the pooled frame, which is reused once the handler returns, so each message decodes from its own copy, as a `RemoteTellRequest` message decodes from its unmarshalled bytes.
 
 **A single duplex tell.** `actorSystem.duplexRemoteTell` handles a user message on the read loop. It returns at once when remoting is off or context extraction fails; it then takes the lease as a single share, decodes the payload with `actorSystem.deserializeDuplexPayload`, and calls `deliverRemoteTellFrom`. The sender is the cached table handle when it is a `*PID`, else it is built from the sender string. A decode failure is logged and dropped, with the share released.
 
@@ -548,7 +552,8 @@ The consumer side is serialised by `consumerMu`, not by the dispatcher. The type
 | CBOR and JSON return a pointer for a serialised value; only built-in primitives come back as values | `CBORSerializer.Deserialize` in `remote/cbor_serializer.go` |
 | The receive path tries each serializer in turn; one that accepts foreign bytes can take another's frame | `serializerDispatch.Deserialize` in `internal/remoteclient/serializer_dispatch.go` |
 | A request addressed to this node under another host or port spelling is refused with `ErrInvalidHost` | `actorSystem.validateRemoteHost` in `actor/remote_server.go` |
-| One bad message in a tell batch never fails the others; an undecodable payload or unparseable receiver is dropped with a log, not dead-lettered | `actorSystem.deliverRemoteTellMessage` and `actorSystem.deliverRemoteTellFrom` in `actor/remote_server.go` |
+| One bad message in a tell batch never fails the others; an undecodable payload or unparseable receiver is dropped with a log, not dead-lettered | `actorSystem.deliverRemoteTellBytes` and `actorSystem.deliverRemoteTellFrom` in `actor/remote_server.go` |
+| A revision-5 batch delivers each message, dead-letters an unknown receiver or bad message metadata without failing its siblings, and is dropped whole when its context extraction fails or remoting is off | `TestDuplexRemoteTellBatch` in `actor/remote_server_test.go` |
 | A legacy ask batch stops at its first failure and discards the replies already computed | `actorSystem.remoteAskHandler` in `actor/remote_server.go` |
 | An ask to an actor that is not running is `CODE_INTERNAL_ERROR`, not `CODE_NOT_FOUND` | `actorSystem.remoteAskHandler` and `actorSystem.duplexRemoteAsk` in `actor/remote_server.go` |
 | An undecodable ask payload is `CODE_INVALID_ARGUMENT` on duplex, decoded before the lookup, and `CODE_INTERNAL_ERROR` on legacy, decoded by the ask itself | `actorSystem.duplexRemoteAsk` and `actorSystem.remoteAskHandler` in `actor/remote_server.go` |

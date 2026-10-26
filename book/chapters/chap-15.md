@@ -62,7 +62,7 @@ Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node k
 - Cluster membership and the distributed registry use their own transports. They are not remoting traffic.
 - User payload formats are unchanged. The envelope is not a public serialization format.
 
-**Capability revisions.** The protocol grew in four cumulative steps, and a connection runs at the lower of the two peers' revisions (`negotiateHello` in `internal/net/handshake.go`):
+**Capability revisions.** The protocol grew in five cumulative steps, and a connection runs at the lower of the two peers' revisions (`negotiateHello` in `internal/net/handshake.go`):
 
 | Revision | Constant | Adds |
 |---|---|---|
@@ -70,8 +70,9 @@ Remoting is a persistent, duplex, correlation-driven protocol over TCP. A node k
 | 2 | `CapabilityRevisionChunking` | `CHUNK` frames, messages larger than a frame |
 | 3 | `CapabilityRevisionTables` | `TABLE` frames, table references in envelopes |
 | 4 | `CapabilityRevisionCredits` | `CREDIT` frames, receiver-granted send window |
+| 5 | `CapabilityRevisionTellBatch` | Coalesced tell batches with table references (`TellBatchTypeName`) |
 
-Both the dialer (`peer.dialLane` in `internal/remoteclient/peer.go`) and the acceptor (`RemotingServer.handleDuplexConn` in `internal/net/remoting_server.go`) advertise revision 4. There is no QUIC transport; TCP is the only implementation.
+The dialer (`peer.dialLane` in `internal/remoteclient/peer.go`) advertises revision 5. The acceptor (`RemotingServer.handleDuplexConn` in `internal/net/remoting_server.go`) advertises revision 5 when a batch handler is registered (`WithRemotingServerDuplexTellBatchHandler`, which the actor system always sets) and revision 4 otherwise, so a peer never sends a batch the server cannot deliver (`RemotingServer.revision`). There is no QUIC transport; TCP is the only implementation.
 
 Two packages named in the remoting area are not part of the transport: `internal/chunk` splits a slice into batches for the relocation worker, and `internal/codec` converts spawn options, supervisors and similar values to and from protobuf. Neither touches frames.
 
@@ -90,7 +91,7 @@ The legacy engine was a length-prefixed, unary protobuf-over-TCP protocol. A cal
 | A full queue dropped batches silently | Byte-bounded admission plus receiver-granted credits |
 | Write and read-idle settings had no effect | Write deadlines and per-lane PING/PONG liveness |
 
-The revisions build on one another. Revision 1 carries the frame header, the negotiated session, the correlation table, the dispatch split and the fallback to the legacy protocol; lanes, which isolate system traffic, are declared in every `HELLO` whatever the revision. Revision 2 adds chunking, which separates message size from frame size, revision 3 adds tables, which remove repeated identities from the envelopes, and revision 4 adds credits. Buffer ownership does not depend on the revision. The maintainer keeps these two apart on purpose: ownership controls how long a buffer lives; credits control what the network may deliver and how much memory a peer must hold.
+The revisions build on one another. Revision 1 carries the frame header, the negotiated session, the correlation table, the dispatch split and the fallback to the legacy protocol; lanes, which isolate system traffic, are declared in every `HELLO` whatever the revision. Revision 2 adds chunking, which separates message size from frame size, revision 3 adds tables, which remove repeated identities from the envelopes, revision 4 adds credits, and revision 5 extends the tables to the messages of a coalesced tell batch. Buffer ownership does not depend on the revision. The maintainer keeps these two apart on purpose: ownership controls how long a buffer lives; credits control what the network may deliver and how much memory a peer must hold.
 
 ## 15.3 Architecture
 
@@ -193,7 +194,8 @@ Every frame starts with a fixed 16-byte, big-endian header (`Frame` in `internal
 | Bad version, unknown type, reserved bits, length over the limit, missing correlation | `decodeFrameHeader` inside `ReadFrame` | The read fails and the connection closes. No `ERROR` is sent, except for a version mismatch during the handshake (`writeProtocolVersionError`) |
 | Lane byte differs from the negotiated lane | `duplexConn.readLoop` | Connection-scoped `ERROR`, then close (`duplexConn.rejectWrongLane`) |
 | `CHUNK` below revision 2, `TABLE` below revision 3, malformed chunk index or table entry | `handleInboundChunk`, `handleInboundTable` | Connection-scoped `ERROR`, then close (`duplexConn.rejectProtocol`) |
-| Table reference that is unknown or not negotiated, in a `DATA` envelope | `RemotingServer.handleDuplexData` | Connection-scoped `ERROR`, then close |
+| Table reference that is unknown or not negotiated, in a `DATA` envelope or in a message of a revision-5 tell batch | `RemotingServer.handleDuplexData` (`duplexConn.decodeTellBatch` for a batch) | Connection-scoped `ERROR`, then close |
+| Revision-5 tell batch that is otherwise malformed | `duplexConn.decodeTellBatch` | The whole batch is dropped and the connection stays up, as for an unmarshallable `RemoteTellRequest` |
 | `CREDIT` below revision 4 | `duplexConn.handleInboundCredit` | Ignored, so a buggy peer is tolerated |
 
 The close after an `ERROR` first lets the writer flush, so the frame can reach the peer (`duplexConn.drainAndCloseFramed`).
@@ -247,6 +249,14 @@ IDs 0 to 3 require a type name; any other ID is rejected (`validateSerializerID`
 | `TABLE` | kind (1 byte: 0 actor path, 1 type name) \| uvarint id \| uvarint length \| literal |
 | `PING`, `PONG` | empty; a `PONG` echoes the correlation of its `PING` |
 
+At revision 5 a coalesced tell batch is a `DATA` envelope with serializer ID 0 and the type name `goakt.duplex.TellBatch` (`TellBatchTypeName` in `internal/net/tell_batch.go`). It is not a protobuf message; its payload is:
+
+| Part | Layout |
+|---|---|
+| Body | count (4 bytes, big-endian) \| message × count |
+| Message | `senderRef` \| `receiverRef` \| uvarint metadata count \| (uvarint length, key, uvarint length, value) × count \| uvarint payload length \| payload |
+
+The refs are actor-path table references encoded as in the `DATA` envelope. The count has a fixed width so the client can write it after packing the messages (`PutTellBatchCount`).
 ## 15.5 Correlation and dispatch
 
 **Asks.** `duplexConn.Ask` takes the next correlation ID from a per-connection counter, registers a waiter in the pending table, and submits the frame with `expectsReply`. The read loop hands a `REPLY` or a request-scoped `ERROR` to the waiter with that ID (`pendingTable.complete`). A timeout or a cancelled context removes the waiter, and a reply that arrives later is dropped and its buffer released. One slow ask never blocks the lane.
@@ -507,6 +517,8 @@ The type name is the full protobuf name, resolved through the protobuf registry.
 | A full sender table falls back to inline; a conflicting or overflowing install on the receiver is a hard error | `TestSenderTableRegisterAndOverflow` and `TestReceiverTableInstallRules` in `internal/net/table_test.go` |
 | A revision-2 connection rejects an inbound `TABLE` | `TestRevisionTwoRejectsInboundTable` in `internal/net/duplex_table_test.go` |
 | The sender handle is resolved once per table entry | `TestSenderHandleLazyResolve` in `internal/net/duplex_table_test.go` |
+| A revision-5 tell batch round-trips table refs, inline literals and metadata; it is checked whole before any message is handed out | `TestTellBatch` in `internal/net/tell_batch_test.go` |
+| The acceptor offers revision 5 only with a batch handler; a malformed batch is dropped on a live connection and an unknown ref closes it | `TestRemotingServerTellBatch` in `internal/net/remoting_server_test.go` |
 | An exhausted window parks the writer and a `CREDIT` resumes it; a `PING` passes a parked writer | `TestCreditWindowExhaustionParksAndCreditResumes` and `TestCreditExemptFramesBypassParkedWriter` in `internal/net/duplex_credit_test.go` |
 | One frame larger than the window is sent at a full window and drives the counter negative | `TestCreditOversizedFrameAtFullWindow` in `internal/net/duplex_credit_test.go` |
 | Grants are flushed at a quarter window; a revision-3 connection ignores `CREDIT` | `TestCreditGrantBatchingQuarterWindow` and `TestCreditRevisionThreeIgnoresCredit` in `internal/net/duplex_credit_test.go` |

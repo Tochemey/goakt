@@ -1841,3 +1841,165 @@ func awaitShutdownTestSessionClosed(t *testing.T, closed <-chan types.Unit) {
 func isShutdownTestTransportError(err error) bool {
 	return errors.Is(err, ErrDuplexClosed) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
+
+// TestRemotingServerTellBatch covers the revision-5 coalesced tell batch end
+// to end over a real duplex connection.
+func TestRemotingServerTellBatch(t *testing.T) {
+	const receiver = "goakt://server@127.0.0.1:1/user/receiver"
+
+	// serve starts a server with the given batch handler (nil for none) and
+	// opens a revision-5 duplex session to it.
+	serve := func(t *testing.T, handler DuplexTellBatchHandler) (DuplexSession, *HandshakeResult) {
+		t.Helper()
+
+		opts := []RemotingServerOption{WithRemotingServerLoops(1)}
+		if handler != nil {
+			opts = append(opts, WithRemotingServerDuplexTellBatchHandler(handler))
+		}
+
+		ps, err := NewRemotingServer("127.0.0.1:0", opts...)
+		require.NoError(t, err)
+		require.NoError(t, ps.Listen())
+
+		serveDone := make(chan error, 1)
+		go func() { serveDone <- ps.Serve() }()
+
+		hello := testHello(internalpb.CompressionCodec_COMPRESSION_CODEC_NONE, 1<<20)
+		hello.SetRevision(CapabilityRevisionTellBatch)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		session, result, err := OpenDuplex(ctx, NewTCPTransport(), ps.ListenAddr().String(), hello, LaneSpec{Role: internalpb.LaneRole_LANE_ROLE_CONTROL}, time.Second, 0, 0)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = session.Close()
+			require.NoError(t, ps.Shutdown(time.Second))
+			<-serveDone
+		})
+
+		return session, result
+	}
+
+	// tell sends body as a batch DATA frame on session.
+	tell := func(t *testing.T, session DuplexSession, body []byte) {
+		t.Helper()
+
+		typeID, err := session.PrepareRef(TableKindTypeName, TellBatchTypeName)
+		require.NoError(t, err)
+
+		payload, err := EncodeDataEnvelopeWithTables(DataEnvelope{
+			TypeName:     TellBatchTypeName,
+			SerializerID: SerializerIDInternalProto,
+			Payload:      body,
+		}, 0, 0, typeID)
+		require.NoError(t, err)
+
+		require.NoError(t, session.Tell(context.Background(), Frame{Type: FrameTypeData, Lane: session.Lane(), Payload: payload}))
+	}
+
+	// collect returns a batch handler that forwards each message's receiver
+	// and payload.
+	collect := func(received chan<- string) DuplexTellBatchHandler {
+		return func(_ context.Context, batch *TellBatch) {
+			var msg TellBatchMessage
+			for batch.Next(&msg) {
+				received <- msg.Receiver + "|" + string(msg.Payload)
+			}
+		}
+	}
+
+	// next returns the next delivered message, failing after a bound.
+	next := func(t *testing.T, received <-chan string) string {
+		t.Helper()
+
+		select {
+		case got := <-received:
+			return got
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for a batch message")
+			return ""
+		}
+	}
+
+	t.Run("negotiates revision 5 and delivers every message in order", func(t *testing.T) {
+		received := make(chan string, 4)
+		session, result := serve(t, collect(received))
+		require.Equal(t, CapabilityRevisionTellBatch, result.Effective.GetRevision())
+
+		receiverID, err := session.PrepareRef(TableKindActorPath, receiver)
+		require.NoError(t, err)
+		require.NotZero(t, receiverID)
+
+		tell(t, session, encodeTellBatch(
+			TellBatchMessage{ReceiverID: receiverID, Receiver: receiver, Payload: []byte("one")},
+			TellBatchMessage{Receiver: "goakt://server@127.0.0.1:1/user/inline", Payload: []byte("two")},
+		))
+
+		assert.Equal(t, receiver+"|one", next(t, received))
+		assert.Equal(t, "goakt://server@127.0.0.1:1/user/inline|two", next(t, received))
+	})
+
+	t.Run("a server without a batch handler offers revision 4", func(t *testing.T) {
+		_, result := serve(t, nil)
+		assert.Equal(t, CapabilityRevisionCredits, result.Effective.GetRevision())
+	})
+
+	t.Run("a malformed batch is dropped and the connection stays up", func(t *testing.T) {
+		received := make(chan string, 4)
+		session, _ := serve(t, collect(received))
+
+		tell(t, session, []byte{0, 0, 0, 1, 0})
+		tell(t, session, encodeTellBatch(TellBatchMessage{Receiver: receiver, Payload: []byte("after")}))
+
+		assert.Equal(t, receiver+"|after", next(t, received), "only the well-formed batch is delivered")
+		assert.False(t, session.IsClosed())
+	})
+
+	t.Run("an unknown table ref closes the connection", func(t *testing.T) {
+		var calls atomic.Int32
+		session, _ := serve(t, func(context.Context, *TellBatch) { calls.Add(1) })
+
+		tell(t, session, encodeTellBatch(TellBatchMessage{ReceiverID: 999, Receiver: receiver}))
+
+		require.Eventually(t, session.IsClosed, 5*time.Second, 10*time.Millisecond)
+		assert.Zero(t, calls.Load(), "a batch that fails validation never reaches the handler")
+	})
+}
+
+// TestInvokeDuplexTellBatchReportsPanic verifies a recovered batch-handler
+// panic is reported, so the credit the handler claimed is repaid.
+func TestInvokeDuplexTellBatchReportsPanic(t *testing.T) {
+	t.Run("a recovered panic is reported", func(t *testing.T) {
+		var recovered atomic.Value
+
+		panicky, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerDuplexTellBatchHandler(func(context.Context, *TellBatch) { panic("boom") }),
+			WithRemotingServerPanicHandler(func(name protoreflect.FullName, _ any) { recovered.Store(name) }),
+		)
+		require.NoError(t, err)
+		assert.True(t, panicky.invokeDuplexTellBatch(context.Background(), &TellBatch{}))
+		assert.Equal(t, protoreflect.FullName(TellBatchTypeName), recovered.Load())
+	})
+
+	t.Run("a clean handler reports no panic", func(t *testing.T) {
+		calm, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerDuplexTellBatchHandler(func(context.Context, *TellBatch) {}),
+			WithRemotingServerPanicHandler(func(protoreflect.FullName, any) {}),
+		)
+		require.NoError(t, err)
+		assert.False(t, calm.invokeDuplexTellBatch(context.Background(), &TellBatch{}))
+	})
+
+	t.Run("a server without a panic handler runs the handler directly", func(t *testing.T) {
+		var calls atomic.Int32
+
+		unguarded, err := NewRemotingServer("127.0.0.1:0",
+			WithRemotingServerDuplexTellBatchHandler(func(context.Context, *TellBatch) { calls.Add(1) }),
+		)
+		require.NoError(t, err)
+		assert.False(t, unguarded.invokeDuplexTellBatch(context.Background(), &TellBatch{}))
+		assert.EqualValues(t, 1, calls.Load())
+	})
+}

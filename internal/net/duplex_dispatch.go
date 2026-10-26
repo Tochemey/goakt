@@ -51,6 +51,11 @@ const remoteTellRequestName protoreflect.FullName = "internalpb.RemoteTellReques
 // the read loop cannot make progress until the handler returns.
 type DuplexTellHandler func(ctx context.Context, env DataEnvelope)
 
+// DuplexTellBatchHandler handles a revision-5 coalesced tell batch on the
+// acceptor read loop. The same rules as [DuplexTellHandler] apply, and the
+// batch's payloads are valid only until the handler returns.
+type DuplexTellBatchHandler func(ctx context.Context, batch *TellBatch)
+
 // DuplexAskHandler handles a DATA envelope that expects a reply. The returned
 // [ReplyEnvelope] is written as a REPLY frame. A non-nil error becomes a
 // request-scoped ERROR frame. Application-level failures that should keep
