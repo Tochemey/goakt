@@ -28,6 +28,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/require"
 
@@ -395,7 +396,8 @@ func TestEmbeddedMailboxClaimRefusesSegmentNoLongerTail(t *testing.T) {
 }
 
 // TestEmbeddedMailboxStaleClaimPastTheEnd verifies that a stale claim past the
-// end of a reused segment marks nothing, since the slot does not exist.
+// end of a reused segment marks nothing, since the slot does not exist, and
+// links nothing, since the segment it read is gone.
 func TestEmbeddedMailboxStaleClaimPastTheEnd(t *testing.T) {
 	mailbox := newEmbeddedMailbox()
 	segment := new(mailboxSegment)
@@ -406,6 +408,209 @@ func TestEmbeddedMailboxStaleClaimPastTheEnd(t *testing.T) {
 	for i := range segment.slots {
 		require.Equal(t, uint32(slotEmpty), segment.slots[i].state.Load())
 	}
+
+	require.Nil(t, segment.next.Load(), "a stale claim must not link")
+	require.Same(t, segment, mailbox.mailboxTail.Load())
+}
+
+// TestEmbeddedMailboxStaleClaimOnTheLinkingIndex verifies the schedule that
+// wedged the mailbox: a producer reads the generation, stalls while the
+// segment is drained, rewound and filled again, and then claims the first
+// index past the end under the new generation. Its claim is stale, so it only
+// retries; the next producer must link the segment instead of waiting for
+// that claim to do it.
+func TestEmbeddedMailboxStaleClaimOnTheLinkingIndex(t *testing.T) {
+	mailbox := newEmbeddedMailbox()
+	mailbox.put(context.Background(), nil, "first")
+
+	segment := mailbox.mailboxTail.Load()
+	stale := embeddedMailboxGeneration(segment)
+
+	require.Equal(t, "first", mailbox.Dequeue().Message())
+	require.Nil(t, mailbox.Dequeue())
+	require.Equal(t, stale+1, embeddedMailboxGeneration(segment), "the drained segment must be rewound")
+
+	for i := range mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	require.Nil(t, mailbox.claimIn(segment, stale))
+	require.EqualValues(t, mailboxSegmentSlots+1, cursorClaims(segment.cursor.Load()), "the stale claim must take the first index past the end")
+	require.Nil(t, segment.next.Load(), "a stale claim must not link")
+
+	requirePutReturns(t, mailbox, "after")
+	require.NotSame(t, segment, mailbox.mailboxTail.Load(), "the next producer must link the segment")
+
+	for i := range mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Equal(t, "after", mailbox.Dequeue().Message())
+	require.Nil(t, mailbox.Dequeue())
+}
+
+// TestEmbeddedMailboxLinksPastADelayedLinker verifies that the first producer
+// to claim past the end does not have to be the one that links: a producer
+// that claimed the first index past the end and has not linked yet does not
+// hold up the next one, which links, and the delayed producer then only
+// retries.
+func TestEmbeddedMailboxLinksPastADelayedLinker(t *testing.T) {
+	mailbox := newEmbeddedMailbox()
+	for i := range mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	segment := mailbox.mailboxTail.Load()
+	generation := embeddedMailboxGeneration(segment)
+
+	// the delayed producer has claimed the first index past the end
+	segment.cursor.Add(1)
+
+	requirePutReturns(t, mailbox, "after")
+	require.False(t, mailbox.claimLink(segment, generation), "the delayed producer must not link a second time")
+
+	for i := range mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Equal(t, "after", mailbox.Dequeue().Message())
+}
+
+// TestEmbeddedMailboxLinksPastASpareFullOfStaleClaims verifies that a spare
+// segment linked in with every slot already claimed by stale producers, which
+// stalled across its recycling and abandoned their slots, is linked past by
+// the first producer that claims in it, and that the consumer skips it.
+func TestEmbeddedMailboxLinksPastASpareFullOfStaleClaims(t *testing.T) {
+	mailbox := newEmbeddedMailbox()
+	for i := range mailboxSegmentSlots + 1 {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	for i := range mailboxSegmentSlots + 1 {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	spare := mailbox.embedded.spare.Load()
+	require.NotNil(t, spare, "the finished segment must be the spare")
+
+	// stale producers claimed every slot of the spare and one past its end
+	spare.cursor.Add(mailboxSegmentSlots + 1)
+	for i := range spare.slots {
+		spare.slots[i].state.Store(uint32(slotAbandoned))
+	}
+
+	// fill the tail, so the next message links the spare and then claims in it
+	for i := range mailboxSegmentSlots - 1 {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	requirePutReturns(t, mailbox, "after")
+	require.Same(t, spare, mailbox.mailboxHead.Load().next.Load(), "the spare must be linked first")
+	require.NotSame(t, spare, mailbox.mailboxTail.Load(), "the spare must be linked past")
+
+	for i := range mailboxSegmentSlots - 1 {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Equal(t, "after", mailbox.Dequeue().Message(), "the consumer must skip the abandoned spare")
+	require.Nil(t, mailbox.Dequeue())
+}
+
+// TestEmbeddedMailboxClaimLink verifies that one producer per generation takes
+// on linking, that a producer of an older generation, whose segment was linked
+// and reused since, never does, and that the generation after the last one,
+// which wraps to zero, links again.
+func TestEmbeddedMailboxClaimLink(t *testing.T) {
+	const lastGeneration = 1<<mailboxGenerationShift - 1
+
+	mailbox := newEmbeddedMailbox()
+	segment := new(mailboxSegment)
+
+	require.True(t, mailbox.claimLink(segment, 0))
+	require.False(t, mailbox.claimLink(segment, 0), "a second producer of the generation must wait")
+
+	require.True(t, mailbox.claimLink(segment, 3), "a later generation links again")
+	require.False(t, mailbox.claimLink(segment, 1), "an older generation must not link")
+	require.False(t, mailbox.claimLink(segment, 3))
+
+	wrapping := new(mailboxSegment)
+	require.True(t, mailbox.claimLink(wrapping, lastGeneration), "the last generation links")
+	require.True(t, mailbox.claimLink(wrapping, 0), "the generation after the last one, which wraps to zero, links")
+	require.False(t, mailbox.claimLink(wrapping, lastGeneration), "the last generation is older than the wrapped one")
+	require.False(t, mailbox.claimLink(wrapping, 0))
+}
+
+// TestEmbeddedMailboxLinkedInGeneration verifies the modular comparison of the
+// link marker with a generation, at the wrap in particular.
+func TestEmbeddedMailboxLinkedInGeneration(t *testing.T) {
+	const lastGeneration = 1<<mailboxGenerationShift - 1
+
+	require.False(t, linkedInGeneration(0, 0), "a segment never linked has no link in any generation")
+	require.False(t, linkedInGeneration(0, lastGeneration))
+	require.True(t, linkedInGeneration(1, 0), "a link in the generation itself")
+	require.True(t, linkedInGeneration(6, 2), "a link in a later generation")
+	require.False(t, linkedInGeneration(6, 7), "no link in a later generation yet")
+	require.False(t, linkedInGeneration(lastGeneration+1, 0), "the wrapped generation is newer than the last one")
+	require.True(t, linkedInGeneration(1, lastGeneration), "the last generation is older than the wrapped one")
+	require.False(t, linkedInGeneration(1, 1<<31), "up to half the range ahead is newer")
+	require.True(t, linkedInGeneration(1, 1<<31+1), "further ahead reads as just under half the range behind, which no producer is")
+}
+
+// TestEmbeddedMailboxLinksAfterGenerationWrap verifies that a segment whose
+// generation wraps from the last one to zero is still linked when it fills:
+// the link marker of the last generation must not read as a link in every
+// generation after the wrap.
+func TestEmbeddedMailboxLinksAfterGenerationWrap(t *testing.T) {
+	mailbox := newEmbeddedMailbox()
+	mailbox.put(context.Background(), nil, 0)
+	segment := mailbox.mailboxTail.Load()
+	require.Equal(t, 0, mailbox.Dequeue().Message())
+	require.Nil(t, mailbox.Dequeue())
+
+	// the segment has been reused into the last generation
+	segment.cursor.Store((1<<mailboxGenerationShift - 1) << mailboxGenerationShift)
+	for i := range mailboxSegmentSlots + 1 {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	require.NotSame(t, segment, mailbox.mailboxTail.Load(), "the segment must be linked in the last generation")
+	for i := range mailboxSegmentSlots + 1 {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Same(t, segment, mailbox.embedded.spare.Load(), "the finished segment must be the spare")
+	require.Zero(t, embeddedMailboxGeneration(segment), "recycling must wrap the generation to zero")
+
+	// fill the tail, so the spare is linked back in, then fill the spare
+	for i := range mailboxSegmentSlots - 1 {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	for i := range mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	require.Same(t, segment, mailbox.mailboxTail.Load())
+	requirePutReturns(t, mailbox, "after the wrap")
+	require.NotSame(t, segment, mailbox.mailboxTail.Load(), "the segment must be linked in the wrapped generation")
+
+	for i := range mailboxSegmentSlots - 1 {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	for i := range mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Equal(t, "after the wrap", mailbox.Dequeue().Message())
+	require.Nil(t, mailbox.Dequeue())
+}
+
+// TestEmbeddedMailboxSegmentFitsTheSizeClass verifies that a segment still fits
+// the 2 KiB allocation size class mailboxSegmentSlots is chosen for.
+func TestEmbeddedMailboxSegmentFitsTheSizeClass(t *testing.T) {
+	var segment mailboxSegment
+	require.LessOrEqual(t, unsafe.Sizeof(segment), uintptr(2048))
 }
 
 // TestEmbeddedMailboxAwaitLinkReturns verifies that a producer waiting for the

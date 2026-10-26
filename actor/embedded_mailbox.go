@@ -96,9 +96,15 @@ type mailboxSegment struct {
 	// the pad keeps the producers' fetch-and-add off the line that holds next
 	// and the first slots.
 	_ cpu.CacheLinePad
-	// next is the segment that follows this one once it is full. The producer
-	// that claims the first slot past the end links it.
+	// next is the segment that follows this one once it is full. The first
+	// producer whose claim past the end matches the generation links it.
 	next atomic.Pointer[mailboxSegment]
+	// linked is one more than the last generation in which a producer took on
+	// linking next, zero before any. It makes that producer unique per
+	// generation without tying the duty to one index, which a claim made
+	// under an older generation may have consumed. Generations wrap, so it is
+	// compared with linkedInGeneration, not with the ordering of its values.
+	linked atomic.Uint64
 	// slots holds the messages in claim order.
 	slots [mailboxSegmentSlots]mailboxSlot
 }
@@ -326,7 +332,7 @@ func (x *embeddedMailbox) claimIn(segment *mailboxSegment, generation uint64) *m
 	switch {
 	case index < mailboxSegmentSlots:
 		return &segment.slots[index]
-	case index == mailboxSegmentSlots:
+	case x.claimLink(segment, generation):
 		x.link(segment)
 	default:
 		x.awaitLink(segment, generation)
@@ -359,9 +365,35 @@ func (x *embeddedMailbox) firstSegment() *mailboxSegment {
 	}
 }
 
+// claimLink reports whether the caller links the segment after full: it must
+// be the first producer of generation to claim past the end of full. The
+// caller's claim matched generation, so full holds more claims than slots in
+// it. A segment in that state can be neither rewound, which needs every claim
+// read, nor recycled, which needs it linked, so the winner links the tail of
+// generation.
+//
+// The duty is not tied to the first index past the end. A producer that read
+// an older generation and claimed after full was rewound into a new one takes
+// any index, that one included, and only retries; a segment taken as the spare
+// may also come back with such claims past its end. Either way the producers
+// whose claims match the generation would otherwise wait for a link nobody
+// makes.
+func (x *embeddedMailbox) claimLink(full *mailboxSegment, generation uint64) bool {
+	for {
+		linked := full.linked.Load()
+		if linkedInGeneration(linked, generation) {
+			return false
+		}
+
+		if full.linked.CompareAndSwap(linked, generation+1) {
+			return true
+		}
+	}
+}
+
 // link appends a segment after full, the spare when there is one, and makes it
-// the tail. Only the producer that claimed the first slot past the end of full
-// calls it, so no two producers link the same segment.
+// the tail. Only the producer that won claimLink for the generation calls it,
+// so no two producers link the same segment.
 func (x *embeddedMailbox) link(full *mailboxSegment) {
 	next := x.embedded.spare.Swap(nil)
 	if next == nil {
@@ -372,7 +404,8 @@ func (x *embeddedMailbox) link(full *mailboxSegment) {
 	x.mailboxTail.Store(next)
 }
 
-// awaitLink waits while another producer links the segment after full. It
+// awaitLink waits while the producer that won claimLink links the segment
+// after full. It
 // returns once the tail has moved on, or once full has been reused under a new
 // generation, which makes the caller's view of it stale.
 func (x *embeddedMailbox) awaitLink(full *mailboxSegment, generation uint64) {
@@ -431,6 +464,25 @@ func (x *embeddedMailbox) recycle(segment *mailboxSegment) {
 	segment.next.Store(nil)
 	segment.cursor.Store(nextGenerationCursor(segment.cursor.Load()))
 	x.embedded.spare.CompareAndSwap(nil, segment)
+}
+
+// linkedInGeneration reports whether linked, a segment's link marker, records
+// a link made in generation or in a later one, so that a producer of
+// generation must not link. The marker is one more than the generation last
+// linked and zero before any link.
+//
+// A generation is 32 bits and wraps, so the two are compared by their modular
+// distance, as sequence numbers are: a generation less than 2^31 behind the
+// marker's is older, one less than 2^31 ahead is newer. The producer's
+// generation is at most a few behind the marker's, since a producer that
+// stalled through 2^31 reuses of one segment is no more plausible than one
+// that stalled through the 2^32 it takes to fool the generation check.
+func linkedInGeneration(linked, generation uint64) bool {
+	if linked == 0 {
+		return false
+	}
+
+	return int32(uint32(linked-1)-uint32(generation)) >= 0
 }
 
 // cursorGeneration returns the reuse generation a segment cursor holds.

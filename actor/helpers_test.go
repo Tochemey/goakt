@@ -1544,6 +1544,28 @@ func embeddedMailboxGeneration(segment *mailboxSegment) uint64 {
 	return cursorGeneration(segment.cursor.Load())
 }
 
+// requirePutReturns puts message on its own goroutine and fails the test when
+// the put has not returned within a second: a producer left waiting for a
+// segment link that nobody makes spins for ever.
+func requirePutReturns(t *testing.T, mailbox *embeddedMailbox, message any) {
+	t.Helper()
+
+	done := make(chan struct{})
+	go func() {
+		mailbox.put(context.Background(), nil, message)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond, "the put is waiting for a segment link")
+}
+
 // newEmbeddedGrainMailbox builds a standalone embedded grain mailbox seeded
 // exactly as attachMailbox seeds an unbounded grain's: one shared sentinel node
 // on both ends of an otherwise blank process, reinterpreted through
