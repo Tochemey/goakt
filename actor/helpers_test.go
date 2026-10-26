@@ -38,7 +38,6 @@ import (
 	syncatomic "sync/atomic"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	natsserver "github.com/nats-io/nats-server/v2/server"
@@ -979,6 +978,9 @@ type remoteTestCtxKey struct{}
 // grainTestCtxKey is a custom type for context keys in grain tests (avoids SA1029 empty struct key).
 type grainTestCtxKey struct{}
 
+// mailboxTestCtxKey is a custom type for context keys in mailbox tests (avoids SA1029).
+type mailboxTestCtxKey struct{}
+
 // grainTimerFixture bundles everything the grain timer end-to-end tests interact with.
 type grainTimerFixture struct {
 	system   ActorSystem
@@ -1513,14 +1515,12 @@ func deadlettersFor(consumer eventstream.Subscriber, receiverName string) []*Dea
 	return out
 }
 
-// newEmbeddedMailbox builds a standalone embedded mailbox seeded exactly as
-// newPID seeds a default actor's: one shared sentinel node on both ends of an
-// otherwise blank PID, reinterpreted through (*embeddedMailbox).
+// newEmbeddedMailbox builds a standalone embedded mailbox wired exactly as
+// newPID wires a default actor's: an otherwise blank PID with its default
+// mailbox state, reinterpreted through (*embeddedMailbox).
 func newEmbeddedMailbox() *embeddedMailbox {
 	pid := &PID{}
-	sentinel := new(ReceiveContext)
-	pid.mailboxHead = unsafe.Pointer(sentinel)
-	pid.mailboxTail = unsafe.Pointer(sentinel)
+	pid.embedded = newEmbeddedMailboxState(pid)
 	return (*embeddedMailbox)(pid)
 }
 
@@ -1529,10 +1529,19 @@ func embeddedMailboxMessage(message any) *ReceiveContext {
 	return &ReceiveContext{message: message}
 }
 
-// embeddedMailboxHead atomically reads the mailbox's current head, the node the
-// release protocol keeps as the sentinel.
-func embeddedMailboxHead(mailbox *embeddedMailbox) *ReceiveContext {
-	return (*ReceiveContext)(syncatomic.LoadPointer(&mailbox.mailboxHead))
+// newDispatchTestPID builds a running PID on the default mailbox, scheduled by
+// d, with no actor system: enough for a Tell to deliver into it and schedule it.
+func newDispatchTestPID(d *dispatcher) *PID {
+	pid := (*PID)(newEmbeddedMailbox())
+	pid.mailbox = (*embeddedMailbox)(pid)
+	pid.dispatcher = d
+	pid.setState(runningState, true)
+	return pid
+}
+
+// embeddedMailboxGeneration returns the reuse generation of segment.
+func embeddedMailboxGeneration(segment *mailboxSegment) uint64 {
+	return cursorGeneration(segment.cursor.Load())
 }
 
 // newEmbeddedGrainMailbox builds a standalone embedded grain mailbox seeded

@@ -64,15 +64,17 @@ Grouped by subsystem.
 See [the book's chapter on dispatch](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md) for the full design.
 
 - **dispatcher.go**: Fixed worker pool; `start` / `stop` / `signalStop` / `schedule`.
-- **worker.go**: Worker goroutine loop; local-queue reschedule helper.
-- **ready_queue.go**: Per-worker local rings, shared global ring, work stealing, condvar parking.
+- **worker.go**: Worker goroutine loop; puts actors that its own turns make ready, or that yield, on its local queue.
+- **ready_queue.go**: Per-worker local rings, shared global ring, work stealing, parking with direct handoff, and one
+  woken searcher at a time for work left on local rings.
 - **dispatch_state.go**: Three-state atomic machine (`Idle` / `Scheduled` / `Processing`) per actor.
 
 ### Mailboxes
 
 - **mailbox.go**: `Mailbox` interface.
-- **unbounded_mailbox.go**: Default MPSC FIFO mailbox.
-- **embedded_mailbox.go**: Default user mailbox run on two words inside `PID` with no separate object.
+- **unbounded_mailbox.go**: Standalone MPSC FIFO mailbox.
+- **embedded_mailbox.go**: Default user mailbox, built into `PID`: messages stored as values in reusable fixed-size
+  segments.
 - **bounded_mailbox.go**: Capacity-capped mailbox; backpressure when full.
 - **unbounded_priority_mailbox.go**: Priority-ordered mailbox.
 - **unbounded_fair_mailbox.go**: Fair-scheduled mailbox; prevents producer starvation.

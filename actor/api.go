@@ -72,25 +72,28 @@ func Ask(ctx context.Context, to *PID, message any, timeout time.Duration) (resp
 	// per-request response channel captured above may be touched from here
 	// on. A reply arriving after this Ask gives up lands in that
 	// unreachable channel and is dropped with it.
+	//
+	// The timeout is armed before the handoff and delivered into responseCh,
+	// as in PID.Ask (see askTimer).
+	timeoutTimer := startAskTimer(responseCh, timeout)
 	to.doReceive(receiveContext)
-	timer := timers.Get(timeout)
 
 	// await patiently to receive the response from the actor
 	// or wait for the context to be done
 	select {
 	case response = <-responseCh:
-		timers.Put(timer)
+		timeoutTimer.stop()
+		if _, timedOut := response.(askTimedOut); timedOut {
+			err = gerrors.ErrRequestTimeout
+			to.handleReceivedErrorWithMessage(noSender, message, err)
+			return nil, err
+		}
 		return
 	case <-ctx.Done():
+		timeoutTimer.stop()
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		to.handleReceivedErrorWithMessage(noSender, message, err)
-		timers.Put(timer)
 		return nil, err
-	case <-timer.C:
-		err = gerrors.ErrRequestTimeout
-		to.handleReceivedErrorWithMessage(noSender, message, err)
-		timers.Put(timer)
-		return
 	}
 }
 
@@ -117,6 +120,11 @@ func Tell(ctx context.Context, to *PID, message any) error {
 	if err != nil {
 		return err
 	}
+
+	if to.embedded != nil && to.putValue(ctx, from, decoded, nil) {
+		return nil
+	}
+
 	to.doReceive(toReceiveContext(ctx, from, to, decoded, true))
 	return nil
 }

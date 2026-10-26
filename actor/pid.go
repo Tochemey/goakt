@@ -33,7 +33,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	"go.opentelemetry.io/otel/attribute"
@@ -163,6 +162,12 @@ type PID struct {
 	// to the dispatcher's per-turn throughput budget.
 	mailbox Mailbox
 
+	// embedded is the state of the default mailbox, nil when a spawn option
+	// supplied a custom one. It is set once in newPID and never changes, so
+	// Tell reads it without synchronization to choose the path that stores a
+	// message as values instead of in a pooled ReceiveContext.
+	embedded *embeddedMailboxState
+
 	// remoteHolds tracks the flow-control credit shares of resident remote
 	// messages independently of the mailbox implementation, so teardown can
 	// repay peers whatever the mailbox abandons. Lazily created on the first
@@ -205,20 +210,22 @@ type PID struct {
 	// flips the state's default mode to Off instead.
 	reentrancy atomic.Pointer[reentrancyState]
 
-	// mailboxHead and mailboxTail are the two ends of the default user
-	// mailbox's lock-free MPSC list, embedded in the PID so an ordinary actor
-	// holds no separate UnboundedMailbox object. Both are *ReceiveContext held
-	// as unsafe.Pointer so the same sync/atomic pointer operations the standalone
-	// mailbox uses apply unchanged; see embedded_mailbox.go.
+	// mailboxHead and mailboxTail are the first and last segments of the
+	// default user mailbox, embedded in the PID so an ordinary actor holds no
+	// separate mailbox object; see embedded_mailbox.go. Both stay nil until the
+	// first message, and for good when a custom mailbox is used.
 	//
-	// The consumer, the processing turn, advances mailboxHead on every dequeue
-	// and no producer ever reads it, so it sits here at the head of the
+	// The consumer, the processing turn, moves mailboxHead when it finishes a
+	// segment and no producer ever reads it, so it sits here at the head of the
 	// consumer-written line beside processedCount and mailboxDequeued, a line no
-	// producer reads per message. The mailbox interface field above points at
-	// (*embeddedMailbox)(pid), so the hot path stays an ordinary interface call
-	// into these words. A PID given a custom mailbox leaves mailboxHead and
-	// mailboxTail nil and never touches them.
-	mailboxHead unsafe.Pointer // *ReceiveContext
+	// producer reads per message.
+	mailboxHead atomic.Pointer[mailboxSegment]
+
+	// turnWorker is the worker running the actor's current turn, nil between
+	// turns. A Tell made from the turn schedules an idle recipient on that
+	// worker's own queue (see PID.scheduleFrom). Written twice per turn by the
+	// consumer, so it shares the consumer's line.
+	turnWorker atomic.Pointer[worker]
 
 	// set the metrics settings
 	restartCount   atomic.Int64
@@ -297,13 +304,12 @@ type PID struct {
 	// the list of dependencies
 	dependencies *xsync.Map[string, extension.Dependency]
 
-	// mailboxTail is the producer end of the embedded user mailbox's MPSC list;
-	// see mailboxHead. Producers swap it in on every enqueue and the consumer
-	// never reads it, so it is parked here beside mailboxEnqueued on the
+	// mailboxTail is the segment producers claim slots in; see mailboxHead.
+	// Producers read it on every enqueue and replace it when they link a new
+	// segment, so it is parked here beside mailboxEnqueued on the
 	// producer-written line, away from every field the processing turn touches
-	// per message, exactly as the standalone mailbox padded its tail onto its
-	// own cache line. It is a *ReceiveContext, and nil for a custom mailbox.
-	mailboxTail unsafe.Pointer // *ReceiveContext
+	// per message.
+	mailboxTail atomic.Pointer[mailboxSegment]
 
 	// mailboxEnqueued counts the user messages producers have put into the
 	// mailbox. It is the producer half of actor.mailbox.size, the counterpart of
@@ -375,14 +381,11 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	}
 
 	// Install the default user mailbox unless a spawn option supplied a custom
-	// one. The default runs on the PID's own mailboxHead and mailboxTail words
-	// through (*embeddedMailbox)(pid), so no separate mailbox object is
-	// allocated; one shared sentinel node seeds both ends exactly as
-	// NewUnboundedMailbox does. A custom mailbox leaves the two words nil.
+	// one. The default runs on the PID's own segment pointers through
+	// (*embeddedMailbox)(pid), and its first segment is allocated on the first
+	// message. A custom mailbox leaves embedded and the segment pointers nil.
 	if pid.mailbox == nil {
-		sentinel := new(ReceiveContext)
-		pid.mailboxHead = unsafe.Pointer(sentinel)
-		pid.mailboxTail = unsafe.Pointer(sentinel)
+		pid.embedded = newEmbeddedMailboxState(pid)
 		pid.mailbox = (*embeddedMailbox)(pid)
 	}
 
@@ -1309,22 +1312,26 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 	// per-request response channel captured above may be touched from here
 	// on. A reply arriving after this Ask gives up lands in that
 	// unreachable channel and is dropped with it.
+	//
+	// The timeout is armed before the handoff so that nothing runs between the
+	// handoff and the wait: the worker woken by the handoff runs as soon as this
+	// goroutine blocks. It is delivered into responseCh (see askTimer).
+	timeoutTimer := startAskTimer(responseCh, timeout)
 	to.doReceive(receiveContext)
-	timer := timers.Get(timeout)
 
 	select {
 	case result := <-responseCh:
-		timers.Put(timer)
+		timeoutTimer.stop()
+		if _, timedOut := result.(askTimedOut); timedOut {
+			err = gerrors.ErrRequestTimeout
+			pid.handleReceivedErrorWithMessage(pid, message, err)
+			return nil, err
+		}
 		return result, nil
 	case <-ctx.Done():
+		timeoutTimer.stop()
 		err = errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 		pid.handleReceivedErrorWithMessage(pid, message, err)
-		timers.Put(timer)
-		return nil, err
-	case <-timer.C:
-		err = gerrors.ErrRequestTimeout
-		pid.handleReceivedErrorWithMessage(pid, message, err)
-		timers.Put(timer)
 		return nil, err
 	}
 }
@@ -1332,21 +1339,7 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 // Tell sends a message asynchronously to the target PID.
 // Routing is location-transparent: remote PIDs are handled via the remoting layer.
 func (pid *PID) Tell(ctx context.Context, to *PID, message any) error {
-	state := to.state.Load()
-	if state&uint32(remoteState) != 0 {
-		return pid.remoteTell(ctx, to.getAddress(), message)
-	}
-
-	if state&uint32(runningState) == 0 ||
-		state&uint32(stoppingState|passivatingState|suspendedState) != 0 {
-		return gerrors.ErrDead
-	}
-
-	receiveContext := getContext(to.ctxShard)
-	receiveContext.build(ctx, pid, to, message, true)
-
-	to.doReceive(receiveContext)
-	return nil
+	return pid.tell(ctx, to, message, nil)
 }
 
 // SendAsync sends a message asynchronously to the named actor.
@@ -1569,27 +1562,7 @@ func (pid *PID) DiscoverActor(ctx context.Context, actorName string, timeout tim
 // When to is remote, a single RemoteBatchTell RPC is used for efficiency.
 // When to is local, each message is delivered via Tell; processing order is guaranteed.
 func (pid *PID) BatchTell(ctx context.Context, to *PID, messages ...any) error {
-	if !pid.IsRunning() {
-		return gerrors.ErrDead
-	}
-
-	if len(messages) == 0 {
-		return nil
-	}
-
-	if to.IsRemote() {
-		if !pid.remotingEnabled() {
-			return gerrors.ErrRemotingDisabled
-		}
-		return pid.remoting.RemoteBatchTell(ctx, pid.getAddress(), to.getAddress(), messages)
-	}
-
-	for _, message := range messages {
-		if err := pid.Tell(ctx, to, message); err != nil {
-			return err
-		}
-	}
-	return nil
+	return pid.batchTell(ctx, to, messages, nil)
 }
 
 // BatchAsk sends multiple messages synchronously to the given PID and returns responses in the same order.
@@ -2144,6 +2117,118 @@ func (pid *PID) trackRemoteHold(share *inet.CreditShare) {
 	}
 }
 
+// tell is Tell for a sender that may be running a turn. w is the worker running
+// that turn, or nil when the send does not come from a turn; it only decides
+// where an idle recipient is scheduled (see scheduleFrom).
+func (pid *PID) tell(ctx context.Context, to *PID, message any, w *worker) error {
+	state := to.state.Load()
+	if state&uint32(remoteState) != 0 {
+		return pid.remoteTell(ctx, to.getAddress(), message)
+	}
+
+	if state&uint32(runningState) == 0 ||
+		state&uint32(stoppingState|passivatingState|suspendedState) != 0 {
+		return gerrors.ErrDead
+	}
+
+	if to.embedded != nil && to.putValue(ctx, pid, message, w) {
+		return nil
+	}
+
+	receiveContext := getContext(to.ctxShard)
+	receiveContext.build(ctx, pid, to, message, true)
+
+	to.doReceive(receiveContext)
+	return nil
+}
+
+// batchTell is BatchTell for a sender that may be running a turn; w is as in
+// tell.
+func (pid *PID) batchTell(ctx context.Context, to *PID, messages []any, w *worker) error {
+	if !pid.IsRunning() {
+		return gerrors.ErrDead
+	}
+
+	if len(messages) == 0 {
+		return nil
+	}
+
+	if to.IsRemote() {
+		if !pid.remotingEnabled() {
+			return gerrors.ErrRemotingDisabled
+		}
+		return pid.remoting.RemoteBatchTell(ctx, pid.getAddress(), to.getAddress(), messages)
+	}
+
+	for _, message := range messages {
+		if err := pid.tell(ctx, to, message, w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// putValue delivers a Tell into the default mailbox as values, without a
+// pooled ReceiveContext, and schedules the actor if it was idle. It reports
+// false, delivering nothing, for a message the general path must handle: a
+// control message, which goes to the system queue, or any message while the
+// actor system is stopping, which doReceive refuses.
+//
+// Like build for an asynchronous send, it detaches a cancelable context from
+// its cancellation, since the message outlives the send.
+func (pid *PID) putValue(ctx context.Context, from *PID, message any, w *worker) bool {
+	if isControlMessage(message) {
+		return false
+	}
+
+	if system := pid.actorSystem; system != nil && system.isStopping() {
+		return false
+	}
+
+	if ctx.Done() != nil {
+		ctx = context.WithoutCancel(ctx)
+	}
+
+	(*embeddedMailbox)(pid).put(ctx, from, message)
+	if pid.metricsEnabled {
+		// the message is queued and waiting: count it for actor.mailbox.size.
+		pid.mailboxEnqueued.Add(1)
+	}
+
+	if pid.schedState.TrySchedule() {
+		pid.scheduleFrom(w)
+	}
+
+	return true
+}
+
+// currentWorker returns the worker running the actor's turn, or nil between
+// turns and for a nil PID.
+func (pid *PID) currentWorker() *worker {
+	if pid == nil {
+		return nil
+	}
+
+	return pid.turnWorker.Load()
+}
+
+// scheduleFrom puts the actor, which the caller has just moved to Scheduled,
+// on the ready queue. When the message that woke it was sent from a turn on w,
+// the actor goes on w's own local queue, as a task forked by a ForkJoinPool
+// worker (Akka's default dispatcher) goes on that worker's deque and a goroutine
+// readied by the running one goes to its P's run queue: the recipient then runs
+// on the core that just wrote its message, and the send takes no shared lock.
+// An actor of another actor system has another dispatcher, so it is always
+// scheduled on its own.
+func (pid *PID) scheduleFrom(w *worker) {
+	if w != nil && w.dispatcher == pid.dispatcher {
+		w.scheduleLocal(pid)
+		return
+	}
+
+	pid.dispatcher.schedule(pid)
+}
+
 // doReceive enqueues a message onto the actor's user mailbox or system queue
 // and schedules the actor onto the dispatcher if it is not already in
 // flight. This is the entry point for internal message delivery that
@@ -2194,11 +2279,16 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 // back to Scheduled (and re-pushes onto the worker's local queue) or
 // transitions to Idle with a race-safe reclaim if a concurrent enqueue
 // slipped in.
+//
+// turnWorker names w while the turn owns the actor and is cleared before every
+// release of ownership, so a send made by the next owner's turn never sees this
+// worker.
 func (pid *PID) runTurn(w *worker) {
 	if !pid.schedState.TakeForProcessing() {
 		return
 	}
 
+	pid.turnWorker.Store(w)
 	now := time.Now()
 	budget := w.dispatcher.throughput
 	for range budget {
@@ -2217,18 +2307,23 @@ func (pid *PID) runTurn(w *worker) {
 		// decision. They stay queued for the incarnation that resumes, as in
 		// any actor model, instead of running on a failed or torn-down actor.
 		if !pid.handlesUserMessages() {
+			pid.turnWorker.Store(nil)
 			if pid.releaseWithheldTurn() {
 				return
 			}
 
+			pid.turnWorker.Store(w)
 			continue
 		}
 
 		received := pid.mailbox.Dequeue()
 		if received == nil {
+			pid.turnWorker.Store(nil)
 			if pid.finishOrReclaim() {
 				return
 			}
+
+			pid.turnWorker.Store(w)
 			continue
 		}
 
@@ -2240,6 +2335,8 @@ func (pid *PID) runTurn(w *worker) {
 
 		pid.dispatchOne(received, now)
 	}
+
+	pid.turnWorker.Store(nil)
 	pid.schedState.YieldToScheduled()
 	w.reschedule(pid)
 }
@@ -2334,9 +2431,10 @@ func (pid *PID) resumeAfterSupervision() {
 }
 
 // dispatchOne routes a single message to its handler. Release is owned by
-// the queues: UnboundedMailbox.Dequeue reclaims the previous sentinel and
-// systemQueue.pop the previously popped message. dispatchOne must not return
-// the context here or the mailbox would hand out an in-use head.
+// the queues: UnboundedMailbox.Dequeue reclaims the previous sentinel, the
+// embedded mailbox the previously returned pooled context (its turn context is
+// never pooled), and systemQueue.pop the previously popped message. dispatchOne
+// must not return the context here or the mailbox would hand out an in-use head.
 func (pid *PID) dispatchOne(received *ReceiveContext, now time.Time) {
 	// The message has left the mailbox: grant back any remote credit share
 	// now, so flow control tracks mailbox residency rather than processing
@@ -2648,8 +2746,16 @@ func (pid *PID) cancelInFlightRequests(reason error) (hadBlockingRequest bool) {
 }
 
 // markActivity updates the last receive timestamp and notifies the shared passivation manager.
+//
+// A turn reads the clock once and passes the same instant for each of its
+// messages, so only the first store of an instant changes anything. The others
+// are skipped, which keeps a store per message off the PID's first cache line.
 func (pid *PID) markActivity(at time.Time) {
 	nanos := at.UnixNano()
+	if pid.latestReceiveTimeNano.Load() == nanos {
+		return
+	}
+
 	pid.latestReceiveTimeNano.Store(nanos)
 	if pid.passivationManager != nil {
 		// Coalesce Touch calls: only acquire the passivation manager's mutex

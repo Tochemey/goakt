@@ -54,7 +54,7 @@ The two `BatchAsk`s also take their arguments in a different order: `actor.Batch
 
 ## 5.2 What a message carries
 
-Every local `Tell`, `Ask` and `Forward` takes a `ReceiveContext` from a pool and fills it in `build` (`actor/receive_context.go`). `PipeTo` is the exception: it delivers its result in a context allocated by `newReceiveContext`.
+Every local `Ask` and `Forward` takes a `ReceiveContext` from a pool and fills it in `build` (`actor/receive_context.go`), and so does a local `Tell` to an actor with a custom mailbox. A local `Tell` to an actor on the default mailbox carries the same three values, `sender`, `message` and `ctx`, but in a mailbox slot instead of a context of its own; the receiving turn hands them to the handler in the actor's turn context (`PID.putValue` in `actor/pid.go`; [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox)). `PipeTo` is the other exception: it delivers its result in a context allocated by `newReceiveContext`.
 
 | Field | `Tell` | `Ask` |
 |---|---|---|
@@ -82,7 +82,7 @@ The deadline is used twice on the receiving side:
 2. **A request ID** (`ctx.Request`, [Chapter 8](chap-08.md)). The reply is routed as an asynchronous response message. `nil` is rejected with `ErrInvalidMessage`.
 3. **A reply channel** (an `Ask`). A compare-and-swap on `responseClosed` lets only the first `Response` through, and the send on the channel is non-blocking. A second `Response`, or a reply to an asker who has gone, is dropped.
 
-On the asking side, `Ask` captures the reply channel *before* handing the context to the mailbox, because after that the pooled context may be recycled for another message (`actor/api.go`). It then waits on the channel, the timer and `ctx.Done()`. A timeout is also reported as a dead letter with the reason `request timed out`.
+On the asking side, `Ask` captures the reply channel *before* handing the context to the mailbox, because after that the pooled context may be recycled for another message (`actor/api.go`). It also arms the timeout before the handoff, so that nothing runs between the handoff and the wait. It then waits on the channel and `ctx.Done()` only: the timeout is a `time.AfterFunc` that delivers a private `askTimedOut` value into the same reply channel (`askTimer` in `actor/ask_timer.go`). The type's comment records why: blocking in a `select` that includes a timer channel makes the runtime arm and disarm that timer around every park of the asker, which measured about a fifth of an Ask's round trip. The reply channel can take the timeout because it is created for one Ask, never reused, and written only with non-blocking sends, so whichever of the reply and the timeout comes first is what `Ask` reads. A timer stopped before it fired is pooled for the next Ask; one that fired is dropped, since its function may still be running (`askTimer.stop` in `actor/ask_timer.go`). `PID.Ask` and the remote ask handler wait the same way (`PID.Ask` in `actor/pid.go`; `actorSystem.handleRemoteAsk` in `actor/actor_system.go`). A timeout is also reported as a dead letter with the reason `request timed out`.
 
 ## 5.4 Dead letters
 
@@ -168,6 +168,7 @@ They differ in one way, explained in Part V. While a departed node's actors are 
 | Statement | Enforced by |
 |---|---|
 | An `Ask` that expired in the queue is not handled | `TestActorSkipsAnExpiredAskAtDispatch` in `actor/receive_context_test.go` |
+| An `Ask` timeout is delivered into the reply channel, never in place of a reply already there, and a stopped timer delivers nothing, also when it is reused for the next `Ask` | `TestAskTimer` in `actor/ask_timer_test.go` |
 | An `Ask` handler's context ends at the ask deadline | `TestReceiveContextCarriesTheAskDeadline` in `actor/receive_context_test.go` |
 | `Response` delivers at most once | `ReceiveContext.Response` in `actor/receive_context.go` |
 | A message marked unhandled becomes a dead letter | `TestDeadletter` in `actor/dead_letter_test.go` |
@@ -176,7 +177,7 @@ They differ in one way, explained in Part V. While a departed node's actors are 
 
 ## Implementation details (may change)
 
-- Pooled `ReceiveContext`s, and a new reply channel for every `Ask` (`getResponseChannel` in `actor/pools.go`).
+- Pooled `ReceiveContext`s, a `Tell` to the default mailbox that takes none, and a new reply channel for every `Ask` (`getResponseChannel` in `actor/pools.go`).
 - The process-local monotonic clock used for ask deadlines.
 - The dead-letter registry's two maps and its prune threshold.
 

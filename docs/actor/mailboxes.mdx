@@ -20,11 +20,13 @@ pid, err := system.Spawn(ctx, "worker", actor,
     actor.WithMailbox(actor.NewBoundedMailbox(1024)))
 ```
 
-Without `WithMailbox`, the actor uses `UnboundedMailbox`, a lock-free FIFO queue.
+Without `WithMailbox`, the actor uses the default mailbox, a lock-free FIFO queue built into the actor itself (see
+[Unbounded FIFO](#unbounded-fifo)).
 
 ## Built-in mailboxes
 
-- **UnboundedMailbox** (default): Capacity: Unbounded. Ordering: FIFO. On overflow: Grows.
+- **Default** (no `WithMailbox`): Capacity: Unbounded. Ordering: FIFO. On overflow: Grows.
+- **UnboundedMailbox**: Capacity: Unbounded. Ordering: FIFO. On overflow: Grows.
 - **UnboundedSegmentedMailbox**: Capacity: Unbounded. Ordering: FIFO. On overflow: Grows.
 - **UnboundedFairMailbox**: Capacity: Unbounded. Ordering: FIFO per sender, round-robin across senders. On overflow:
   Grows.
@@ -38,8 +40,13 @@ Without `WithMailbox`, the actor uses `UnboundedMailbox`, a lock-free FIFO queue
 
 ### Unbounded FIFO
 
-- **`UnboundedMailbox`** is the default: a lock-free multi-producer, single-consumer queue with no capacity limit. It
-  never blocks and never drops. Use it unless you have a reason not to.
+- **The default mailbox** is a lock-free multi-producer, single-consumer queue with no capacity limit, built into the
+  actor. It never blocks and never drops. It stores each message in a slot of a fixed-size segment and reuses segments
+  once they are drained, so a `Tell` between local actors allocates nothing, and an actor that never receives a message
+  holds no segment. An actor that has received messages keeps its segment, about 2 KiB, while it lives, and one more
+  after a backlog of more than 32 messages. Use it unless you have a reason not to.
+- **`UnboundedMailbox`** is the same kind of queue as a separate object: a lock-free multi-producer, single-consumer
+  linked list with no capacity limit. It never blocks and never drops.
 - **`UnboundedSegmentedMailbox`** stores messages in pooled, fixed-size array segments. It keeps the unbounded,
   never-drop behavior but improves cache locality and holds steady-state allocations near zero, which helps actors under
   sustained high throughput.

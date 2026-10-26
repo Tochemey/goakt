@@ -366,7 +366,7 @@ func (rctx *ReceiveContext) UnstashAll() {
 func (rctx *ReceiveContext) Tell(to *PID, message any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
-	if err := recipient.Tell(ctx, to, message); err != nil {
+	if err := recipient.tell(ctx, to, message, recipient.currentWorker()); err != nil {
 		rctx.Err(err)
 	}
 }
@@ -379,7 +379,7 @@ func (rctx *ReceiveContext) Tell(to *PID, message any) {
 func (rctx *ReceiveContext) BatchTell(to *PID, messages ...any) {
 	recipient := rctx.self
 	ctx := rctx.withoutCancel()
-	if err := recipient.BatchTell(ctx, to, messages...); err != nil {
+	if err := recipient.batchTell(ctx, to, messages, recipient.currentWorker()); err != nil {
 		rctx.Err(err)
 	}
 }
@@ -936,6 +936,26 @@ func (rctx *ReceiveContext) reset() {
 	// path, cloneContext() clears it for clones, and async (Tell) never
 	// reads it. Skipping the atomic store saves a handful of ns on the
 	// hot path.
+}
+
+// reuse readies the default mailbox's turn context for the next message a Tell
+// stored as values (see embeddedMailbox). Handling a message can set fields a
+// Tell never carries: an error, or the request metadata of an AsyncRequest.
+// Those are cleared only when set, because each pointer store costs a write
+// barrier while the garbage collector runs and the common case has none.
+func (rctx *ReceiveContext) reuse(ctx context.Context, from, self *PID, message any) {
+	if rctx.err != nil || rctx.response != nil || rctx.requestID != "" || rctx.requestReplyTo != nil ||
+		rctx.deadline != 0 || rctx.deadlineScope != nil || rctx.remoteHold != nil || rctx.remote {
+		rctx.reset()
+	}
+
+	if rctx.self != self {
+		rctx.self = self
+	}
+
+	rctx.ctx = ctx
+	rctx.sender = from
+	rctx.message = message
 }
 
 // withoutCancel safely derives a non-cancelable context from the current context.

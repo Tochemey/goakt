@@ -22,7 +22,7 @@
 ## What you will learn
 
 - What the `Mailbox` interface promises, and the stronger contract the dispatcher silently relies on.
-- How the default mailbox works: a lock-free multi-producer, single-consumer list embedded in the PID.
+- How the default mailbox works: a lock-free multi-producer, single-consumer queue of reusable segments built into the PID, which a local send fills without a pooled context.
 - How each of the nine mailboxes is built, and what it costs: bounded or not, blocking or dropping, FIFO, priority or fair.
 - Who owns a `ReceiveContext` once it has been dequeued, and when it goes back to the pool.
 - What happens to a mailbox when its actor stops, restarts, or is placed on another node.
@@ -48,7 +48,7 @@ Reading those call sites gives the contract a mailbox really has to meet. The in
 
 Together with the single consumer, a FIFO mailbox gives the ordering guarantee users rely on: **messages from one sender to one receiver are handled in the order they were sent**. Nothing is promised across senders. The guarantee is the mailbox's, so it holds for the FIFO mailboxes only; the priority, fair and segmented mailboxes define their own order ([§6.5](#65-priority-mailboxes) to [§6.7](#67-the-segmented-mailbox)), and control messages overtake user messages ([Chapter 7, §7.4](chap-07.md#74-the-system-queue)).
 
-`Len` is not part of the hot path. The `actor.mailbox.size` metric is computed from two counters the actor keeps, one written by producers and one by the turn, on separate cache lines (`PID.observedMailboxSize` in `actor/pid.go`). The interface comment warns that `Len` on the default mailbox walks the whole list (`Mailbox` in `actor/mailbox.go`).
+`Len` is not part of the hot path. The `actor.mailbox.size` metric is computed from two counters the actor keeps, one written by producers and one by the turn, on separate cache lines (`PID.observedMailboxSize` in `actor/pid.go`). The interface comment warns that `Len` walks the queue, every node of an `UnboundedMailbox` and every segment of the default mailbox, and is longest when the mailbox is saturated (`Mailbox` in `actor/mailbox.go`).
 
 ### Who owns a dequeued context
 
@@ -56,7 +56,8 @@ A `ReceiveContext` taken from a mailbox is still in use while the handler runs, 
 
 | Mailbox | When a dequeued context goes back to the pool |
 |---|---|
-| Default, `UnboundedMailbox` | it stays as the list's sentinel and is recycled on the next `Dequeue` |
+| Default | a context that came in through `Enqueue` is held and recycled on the next `Dequeue`; a message a `Tell` stored as values comes out in the actor's own turn context, which is never pooled ([§6.2](#62-the-default-mailbox)) |
+| `UnboundedMailbox` | it stays as the list's sentinel and is recycled on the next `Dequeue` |
 | `NonBlockingBoundedMailbox`, the two bounded priority mailboxes, `UnboundedStablePriorityMailbox` | kept in `prev` and recycled on the next `Dequeue` |
 | `BoundedMailbox`, `UnboundedPriorityMailBox`, `UnboundedSegmentedMailbox` | never; it is left to the garbage collector |
 | `UnboundedFairMailbox` | by the sender's own sub-queue, an `UnboundedMailbox`, on that sender's next message |
@@ -65,19 +66,31 @@ A context can be linked into only one mailbox at a time, because the linked mail
 
 ## 6.2 The default mailbox
 
-An actor spawned without `WithMailbox` gets the **embedded mailbox**: the same algorithm as `UnboundedMailbox`, run on two pointers stored in the PID itself, `mailboxHead` and `mailboxTail`. `newPID` seeds both with one sentinel context and installs `(*embeddedMailbox)(pid)`, a pointer conversion that allocates nothing (`actor/pid.go`, `actor/embedded_mailbox.go`). The two pointers sit on the cache lines the PID layout already reserves for the consumer and the producers, which is why they need no padding of their own.
+An actor spawned without `WithMailbox` gets the **embedded mailbox**, built into the PID: two segment pointers, `mailboxHead` and `mailboxTail`, and a small `embeddedMailboxState` that `newPID` allocates, with `(*embeddedMailbox)(pid)` installed as the mailbox, a pointer conversion that allocates nothing (`newPID` in `actor/pid.go`; `embeddedMailbox` in `actor/embedded_mailbox.go`). It is a multi-producer, single-consumer FIFO queue, but not a linked list of contexts: it stores messages in the slots of fixed-size **segments** of 32 (`mailboxSegmentSlots` in `actor/embedded_mailbox.go`), in the manner of the segmented array queues of JCTools and .NET's `ConcurrentQueue`.
 
-The algorithm is a multi-producer, single-consumer linked list with a sentinel node:
+Storing messages in slots is what lets a local send skip the context pool. `Tell` writes the message, its sender and its context into a slot as values (`PID.putValue` in `actor/pid.go`; `embeddedMailbox.put` in `actor/embedded_mailbox.go`). When the turn dequeues it, the mailbox fills the actor's one **turn context** with those values and hands that over, refilled for every such message (`embeddedMailbox.take` in `actor/embedded_mailbox.go`; `ReceiveContext.reuse` in `actor/receive_context.go`). A message that needs a full `ReceiveContext`, such as an `Ask`, a message that arrived over remoting, or a stash replay, comes in through `Enqueue` and travels in the slot as its context, in the same queue, so the two kinds keep their order. The reason is recorded in the slot's comment: a pooled context per message meant, under a backlog, one heap allocation per message once the pool ran dry (`mailboxSlot` in `actor/embedded_mailbox.go`).
 
-- **`Enqueue`** clears the new context's `next`, atomically swaps it in as the tail, and then links the previous tail to it (`actor/embedded_mailbox.go`). There is no lock and no retry loop: a swap always succeeds.
-- **`Dequeue`** reads the head's `next`. If it is nil, the mailbox is empty. Otherwise `next` becomes the new head, and the old head is reset and returned to the pool (`actor/embedded_mailbox.go`). The context it returns is now the sentinel, which is why the caller must not release it.
-- **`IsEmpty`** is one load of the head's `next` (`actor/embedded_mailbox.go`).
+The algorithm:
 
-Between the swap and the link, a producer has made its context the tail but not yet reachable from the head. During that window `Dequeue` and `IsEmpty` see an empty mailbox. Contract point 3 still holds, because the window closes before `Enqueue` returns, and the producer schedules the actor only after that.
+- **Claiming a slot.** A producer claims the next slot of the tail segment with a fetch-and-add on the segment's `cursor`, which always succeeds, so many senders to one actor never retry each other's claims. It writes the slot and then publishes it by storing `slotReady` (`embeddedMailbox.claim` and `embeddedMailbox.claimIn` in `actor/embedded_mailbox.go`).
+- **Growing.** The producer whose claim lands just past the end of a full segment links the next one, the spare if there is one, and makes it the tail; producers that land further past wait for that link (`embeddedMailbox.link` and `embeddedMailbox.awaitLink` in `actor/embedded_mailbox.go`). The first segment is allocated with the first message, as both head and tail, so an actor that never receives a message holds no segment, and messages that arrive before its first turn are all found from the first segment on (`embeddedMailbox.firstSegment` in `actor/embedded_mailbox.go`).
+- **Dequeue.** The consumer reads the slot at its read index. An empty slot means the mailbox is empty; a ready one is emptied and returned. At the end of a segment it moves to the next one (`embeddedMailbox.Dequeue` in `actor/embedded_mailbox.go`).
+- **IsEmpty** loads the slot states from the read index on, and nothing else, so a worker that has just given the actor up may call it while the next owner dequeues (`embeddedMailbox.IsEmpty` in `actor/embedded_mailbox.go`).
 
-The old sentinel is reset with an atomic store to its `next` field, because a worker that read the head just before it moved may still be loading that field through `IsEmpty` (`embeddedMailbox.Dequeue` in `actor/embedded_mailbox.go`).
+Segments are reused rather than left to the garbage collector, in two ways:
 
-`UnboundedMailbox` (`actor/unbounded_mailbox.go`) is the same list in a standalone object with padded head and tail. You get it by asking for it with `WithMailbox(NewUnboundedMailbox())`, and the stash uses one as its buffer (`withStash` in `actor/pid_option.go`).
+- **Rewinding.** When the consumer has read every slot claimed in its segment, it restarts the segment at slot 0 with a compare-and-swap on the cursor, which succeeds only if no producer has claimed a slot since. An actor whose backlog never exceeds one segment therefore keeps reusing it (`embeddedMailbox.rewind` in `actor/embedded_mailbox.go`).
+- **The spare.** A segment the consumer has finished becomes the spare that the next link takes (`embeddedMailbox.recycle` in `actor/embedded_mailbox.go`). A segment that is still the tail is left alone: its successor is linked but not yet published as the tail, and producers that land past its end are still waiting on it.
+
+Reuse is made safe by a **generation** in the high 32 bits of the cursor, which both kinds of reuse increment. A producer reads the generation before it claims. If the claim comes back with another generation, the segment was reused in between: the producer marks the slot it claimed in the new generation `slotAbandoned`, so the consumer skips it instead of waiting for it, and tries again (`embeddedMailbox.claimIn` in `actor/embedded_mailbox.go`). A producer waiting for the link of a full segment also stops waiting when the generation changes, since the segment may have become the tail again (`embeddedMailbox.awaitLink` in `actor/embedded_mailbox.go`).
+
+The generation alone is not enough. A producer may load the tail, stall while the consumer finishes that segment and keeps it as the spare, and only then read the generation, which is the spare's new one: its claim would match, and its message would land in a segment that is not linked into the queue, to be delivered after later messages if the spare is linked again, and never otherwise. So after reading the generation, a producer checks that the segment is still the tail, and loads the tail again if not (`embeddedMailbox.claimIn` in `actor/embedded_mailbox.go`). A segment that passes the check is either the tail of the generation read, or is reused before the claim, which the generation check catches; one that is linked past before the claim is full, so the claim lands past its end.
+
+Together these keep the mailbox FIFO, which is what lets the actor handle its messages one at a time in the order they were sent. A claim succeeds only in the current tail, slots are claimed in increasing order within a segment, and segments are read in the order they were linked, so the claim order is the delivery order: a producer's messages come out in the order it sent them, and a message whose send returned comes out before any message sent after that. The consumer never reads past a claimed slot whose message is not yet written; it stops there, and skips only abandoned slots, which hold no message.
+
+Between a claim and its publication, the slot is claimed but empty. During that window `Dequeue` and `IsEmpty` see an empty mailbox, and a rewind is refused. Contract point 3 still holds, because the window closes before the send returns, and the producer schedules the actor only after that.
+
+`UnboundedMailbox` (`actor/unbounded_mailbox.go`) is the linked-list alternative, a multi-producer, single-consumer list with a sentinel node in a standalone object with padded head and tail: `Enqueue` swaps the new context in as the tail and links the previous tail to it, and `Dequeue` makes the head's successor the new sentinel and recycles the old one. You get it by asking for it with `WithMailbox(NewUnboundedMailbox())`, and the stash uses one as its buffer (`withStash` in `actor/pid_option.go`).
 
 ## 6.3 Choosing a mailbox
 
@@ -183,8 +196,12 @@ A custom mailbox is passed to `WithMailbox` like the built-in ones. From [§6.1]
 | Statement | Enforced by |
 |---|---|
 | The default spawn uses the embedded mailbox; `WithMailbox` replaces it | `TestEmbeddedMailboxDefaultSpawnUsesIt` in `actor/embedded_mailbox_test.go` |
-| The default mailbox is FIFO, with many concurrent producers | `TestEmbeddedMailboxFIFOOrder` and `TestEmbeddedMailboxConcurrentProducers` in `actor/embedded_mailbox_test.go` |
-| The embedded mailbox keeps a dequeued context as its head, the sentinel, until the next `Dequeue` | `TestEmbeddedMailboxReleaseProtocol` in `actor/embedded_mailbox_test.go` |
+| The default mailbox is FIFO across segments, with many concurrent producers, and messages stored as values keep their order with enqueued contexts | `TestEmbeddedMailboxFIFOOrder`, `TestEmbeddedMailboxConcurrentProducers` and `TestEmbeddedMailboxValuesAndContextsKeepOrder` in `actor/embedded_mailbox_test.go` |
+| The default mailbox holds an enqueued context until the next `Dequeue` and then recycles it; a value message leaves no context behind, and a read slot keeps no reference to its message | `TestEmbeddedMailboxRecyclesHeldContext` and `TestEmbeddedMailboxTakeClearsTheSlot` in `actor/embedded_mailbox_test.go` |
+| The first segment appears with the first message, and messages that fill several segments before the first turn all come out | `TestEmbeddedMailboxAllocatesFirstSegmentOnFirstMessage`, `TestEmbeddedMailboxBacklogBeforeFirstTurn` and `TestEmbeddedMailboxFirstSegmentRaceKeepsWinner` in `actor/embedded_mailbox_test.go` |
+| A drained segment is rewound, never past a claimed slot; a finished one becomes the spare the next link takes, unless it is still the tail | `TestEmbeddedMailboxRewindsDrainedSegment`, `TestEmbeddedMailboxDoesNotRewindPastAClaim`, `TestEmbeddedMailboxReusesSpareSegment` and `TestEmbeddedMailboxRecycleSkipsSegmentStillTail` in `actor/embedded_mailbox_test.go` |
+| A claim under a stale generation is abandoned and skipped, and a producer waiting on a reused segment stops waiting | `TestEmbeddedMailboxStaleClaimIsAbandoned`, `TestEmbeddedMailboxStaleClaimPastTheEnd` and `TestEmbeddedMailboxAwaitLinkReturns` in `actor/embedded_mailbox_test.go` |
+| A producer claims nothing in a segment that is no longer the tail, such as the spare, even when it read the spare's current generation | `TestEmbeddedMailboxClaimRefusesSegmentNoLongerTail` in `actor/embedded_mailbox_test.go` |
 | `NonBlockingBoundedMailbox` rounds its capacity to a power of two and returns `ErrMailboxFull` when full | `TestNonBlockingBoundedMailbox` in `actor/non_blocking_bounded_mailbox_test.go` |
 | The bounded priority mailboxes return `ErrMailboxFull` when full | `TestBoundedPriorityMailbox` in `actor/bounded_priority_mailbox_test.go` |
 | The stable priority mailboxes keep arrival order among equal priorities | `TestUnboundedStablePriorityMailbox` in `actor/unbounded_stable_priority_mailbox_test.go`; `TestBoundedStablePriorityMailbox` in `actor/bounded_stable_priority_mailbox_test.go` |
@@ -195,7 +212,7 @@ A custom mailbox is passed to `WithMailbox` like the built-in ones. From [§6.1]
 
 ## Implementation details (may change)
 
-- The embedded mailbox and the placement of its two pointers in the PID.
+- The embedded mailbox, its segments of 32 slots, rewinding and the single spare, and the placement of its two pointers in the PID.
 - The segment size of 256, and allocating a new segment instead of reusing one.
 - The lock-free intake in front of the priority heaps.
 - Which mailboxes recycle contexts.
@@ -204,6 +221,7 @@ A custom mailbox is passed to `WithMailbox` like the built-in ones. From [§6.1]
 
 | Behaviour | Source |
 |---|---|
+| An actor on the default mailbox holds no segment until its first message, then keeps its segment, about 2 KiB, for as long as it lives, plus at most one spare after a backlog of more than 32 messages. Measured on an 8-core arm64 machine: 1,436 B of heap per idle actor that was never sent a message, about 3.5 KB after one message and about 5.6 KB after a burst of 100, against 1.46 KB for the linked list the default mailbox replaced. Segments of 32 slots were chosen for throughput: 16 halve the extra memory but cost about a fifth of the actor-to-actor throughput | `mailboxSegmentSlots` and `embeddedMailbox.firstSegment` in `actor/embedded_mailbox.go` |
 | A message refused by a full bounded mailbox becomes a dead letter; `Tell` still returns nil | `PID.doReceive` in `actor/pid.go` |
 | `BoundedMailbox` blocks a local sender, and a sending actor's worker with it | `BoundedMailbox.Enqueue` in `actor/bounded_mailbox.go` |
 | A full `BoundedMailbox` refuses a remote message with `ErrMailboxFull` instead of blocking the connection's inbound dispatcher; the overflow is dead-lettered, its credit repaid, and an ask to a sibling on the same lane still answers; a remote message is never refused while the mailbox has room, whatever the contention; a local sender still blocks | `TestBoundedMailboxEnqueueRemoteMessage`, `TestBoundedMailboxEnqueueRemoteUnderContention` and `TestBoundedMailboxEnqueueBlocksLocalSender` in `actor/bounded_mailbox_test.go`; `TestDoReceiveRefusesRemoteOverflowOnBoundedMailbox` in `actor/pid_test.go`; `TestHandleRemoteAskRefusesOverflowOnBoundedMailbox` in `actor/actor_system_test.go`; `TestRemoteTellFullBoundedMailboxKeepsLaneAlive` in `actor/remote_server_test.go`; `playground/issue-1453` |

@@ -157,6 +157,11 @@ type readyQueue struct {
 	// closed reports that close has been called; parking workers exit
 	// instead of waiting.
 	closed atomic.Bool
+	// searching is set while a worker woken by wakeSearcher has not yet
+	// found work or parked again. It allows one such wake at a time, the
+	// rule the Go scheduler applies to its spinning threads: work pushed to
+	// local rings then wakes one thief rather than every parked worker.
+	searching atomic.Bool
 }
 
 // newReadyQueue constructs a readyQueue with workerCount per-worker
@@ -231,14 +236,29 @@ func (rq *readyQueue) claimIdleWorker(s schedulable) bool {
 }
 
 // pushLocal appends s to worker workerID's local ring, spilling to the
-// global queue when the local ring is full. The owner is the only
-// consumer of its own local ring, so a successful local push needs no
-// wake-up.
+// global queue when the local ring is full. It wakes nobody: a parked
+// sibling learns of the item only through wakeSearcher, which the
+// worker calls after it (see worker.scheduleLocal).
 func (rq *readyQueue) pushLocal(workerID int, s schedulable) {
 	if rq.locals[workerID].pushBack(s) {
 		return
 	}
 	rq.push(s)
+}
+
+// wakeSearcher wakes one parked worker to look for work, typically to
+// steal an item just pushed to a local ring, unless a worker woken that
+// way is still looking. A parked worker reads only its handoff channel,
+// so without a wake an item left on the ring of a worker that is busy, or
+// blocked in a handler, waits for that worker even while others sleep.
+func (rq *readyQueue) wakeSearcher() {
+	if rq.idleCount.Load() == 0 || !rq.searching.CompareAndSwap(false, true) {
+		return
+	}
+
+	if !rq.claimIdleWorker(nil) {
+		rq.searching.Store(false)
+	}
 }
 
 // take returns the next schedulable for workerID, blocking until one is
@@ -250,26 +270,36 @@ func (rq *readyQueue) pushLocal(workerID int, s schedulable) {
 // from stealing, and every globalQueueCheckInterval takes the global ring
 // is read first, so a worker kept busy by its local ring still serves the
 // actors waiting there.
+//
+// A worker that comes back from parking without an item may be the one
+// wakeSearcher woke. It ends that search when it finds work or parks
+// again, so the next wake can go out (see endSearch).
 func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 	local := rq.locals[workerID]
+	woken := false
 	for {
 		local.takes++
 		if local.takes%globalQueueCheckInterval == 0 {
 			if s := rq.popGlobal(); s != nil {
-				return s, true
+				return rq.endSearch(s, woken, false)
 			}
 		}
 
 		if s := local.popFront(); s != nil {
-			return s, true
+			return rq.endSearch(s, woken, false)
 		}
 
 		if s := rq.popGlobal(); s != nil {
-			return s, true
+			return rq.endSearch(s, woken, false)
 		}
 
 		if s := rq.trySteal(workerID); s != nil {
-			return s, true
+			return rq.endSearch(s, woken, true)
+		}
+
+		if woken {
+			rq.searching.Store(false)
+			woken = false
 		}
 
 		s, ok := rq.parkAndTake(workerID)
@@ -280,7 +310,24 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		if s != nil {
 			return s, true
 		}
+
+		woken = true
 	}
+}
+
+// endSearch returns s from take. When the taking worker was woken to
+// search, it clears searching, and if it stole s it wakes the next
+// searcher, since the ring it stole from may hold more: the Go scheduler
+// passes the wake on the same way when a spinning thread finds work.
+func (rq *readyQueue) endSearch(s schedulable, woken, stolen bool) (schedulable, bool) {
+	if woken {
+		rq.searching.Store(false)
+		if stolen {
+			rq.wakeSearcher()
+		}
+	}
+
+	return s, true
 }
 
 // popGlobal returns the head of the global queue, or nil if the queue
@@ -332,8 +379,8 @@ func (rq *readyQueue) trySteal(workerID int) schedulable {
 }
 
 // parkAndTake parks workerID until a producer hands it work, the
-// global queue turns out to be non-empty after the park was published,
-// or the queue is closed.
+// global queue or a local ring turns out to be non-empty after the park
+// was published, or the queue is closed.
 //
 // Returns (nil, false) when the queue is closed and the worker should
 // exit. Returns (s, true) with a non-nil item on a direct handoff, or
@@ -349,8 +396,12 @@ func (rq *readyQueue) parkAndTake(workerID int) (schedulable, bool) {
 
 	// Publish-then-check: the flag store above is ordered before these
 	// loads, so a producer that pushed to the global queue without
-	// seeing this worker's flag is observed here, and vice versa.
-	if rq.globalCount.Load() > 0 || rq.closed.Load() {
+	// seeing this worker's flag is observed here, and vice versa. The
+	// same holds for a local ring: a worker that pushed to its own ring
+	// and found no parked worker to wake (see wakeSearcher) is observed
+	// through the ring's size, so its item is stolen instead of waiting
+	// for its owner, which may be blocked in a handler.
+	if rq.globalCount.Load() > 0 || rq.hasLocalWork() || rq.closed.Load() {
 		if flag.CompareAndSwap(1, 0) {
 			rq.idleCount.Add(-1)
 			return nil, !rq.closed.Load()
@@ -369,6 +420,18 @@ func (rq *readyQueue) parkAndTake(workerID int) (schedulable, bool) {
 	// closed state is observed.
 	s := <-rq.handoff[workerID]
 	return s, true
+}
+
+// hasLocalWork reports whether any worker's local ring holds an item,
+// from the rings' atomic sizes, without taking a lock.
+func (rq *readyQueue) hasLocalWork() bool {
+	for _, local := range rq.locals {
+		if local.sizeAtomic.Load() > 0 {
+			return true
+		}
+	}
+
+	return false
 }
 
 // close marks the queue closed, then claims and wakes every parked
