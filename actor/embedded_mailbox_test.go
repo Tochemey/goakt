@@ -317,6 +317,29 @@ func TestEmbeddedMailboxRecycleSkipsSegmentStillTail(t *testing.T) {
 	require.Nil(t, full.next.Load())
 }
 
+// TestEmbeddedMailboxIsEmptyAfterReadingAFullSegment verifies that a mailbox
+// whose consumer has read every slot of its only segment reports empty before
+// the next Dequeue rewinds that segment, and not empty once a message links
+// the next segment.
+func TestEmbeddedMailboxIsEmptyAfterReadingAFullSegment(t *testing.T) {
+	mailbox := newEmbeddedMailbox()
+	for i := range mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	for i := range mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.EqualValues(t, mailboxSegmentSlots, mailbox.embedded.read.Load())
+	require.True(t, mailbox.IsEmpty(), "a fully read segment holds no message")
+
+	mailbox.put(context.Background(), nil, "next")
+	require.NotNil(t, mailbox.mailboxHead.Load().next.Load(), "the message must link the next segment")
+	require.False(t, mailbox.IsEmpty())
+	require.Equal(t, "next", mailbox.Dequeue().Message())
+}
+
 // TestEmbeddedMailboxStaleClaimIsAbandoned verifies the generation check: a
 // producer whose claim lands after the segment was reused marks the slot it
 // claimed abandoned and retries, and the consumer skips that slot.

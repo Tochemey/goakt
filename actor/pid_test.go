@@ -4733,6 +4733,15 @@ func TestBatchTell(t *testing.T) {
 		require.Error(t, pid.BatchTell(ctx, pid, new(testpb.TestSend)))
 		assert.NoError(t, actorSystem.Stop(ctx))
 	})
+	t.Run("With no messages", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		sender := newDispatchTestPID(d)
+		receiver := newDispatchTestPID(d)
+
+		require.NoError(t, sender.BatchTell(context.Background(), receiver))
+		require.True(t, receiver.mailbox.IsEmpty())
+		require.Equal(t, dispatchIdle, receiver.schedState.v.Load(), "an empty batch must not schedule the actor")
+	})
 }
 
 func TestBatchAsk(t *testing.T) {
@@ -10168,6 +10177,44 @@ func TestPIDYieldClearsTurnWorker(t *testing.T) {
 	require.Equal(t, dispatchScheduled, pid.schedState.v.Load())
 	require.Equal(t, 1, d.readyQueue.locals[0].length())
 	require.False(t, pid.mailbox.IsEmpty())
+}
+
+// TestPIDWithheldTurnTakenBackRepublishesItsWorker verifies that a turn that
+// gives up an actor whose user messages wait, and takes it straight back for a
+// PostStart armed meanwhile, publishes its worker again before it runs that
+// PostStart, and clears it once it gives the actor up for good.
+func TestPIDWithheldTurnTakenBackRepublishesItsWorker(t *testing.T) {
+	d := newDispatcher(2, dispatcherThroughput)
+	pid := newDispatchTestPID(d)
+	pid.behaviorStack = newBehaviorStack()
+
+	postStart := func() *ReceiveContext {
+		received := getContext(pid.ctxShard)
+		received.build(context.Background(), nil, pid, new(PostStart), true)
+		return received
+	}
+
+	var seen []*worker
+	pid.behaviorStack.Push(func(rctx *ReceiveContext) {
+		seen = append(seen, rctx.Self().currentWorker())
+		if len(seen) == 1 {
+			// withhold the user messages and arm another PostStart, so the turn
+			// gives the actor up and takes it back for that PostStart
+			pid.setState(suspendedState, true)
+			pid.postStart.Store(postStart())
+		}
+	})
+
+	pid.postStart.Store(postStart())
+	require.True(t, pid.schedState.TrySchedule())
+
+	pid.runTurn(d.workers[0])
+
+	require.Len(t, seen, 2, "both PostStarts must run in the turn")
+	require.Same(t, d.workers[0], seen[0])
+	require.Same(t, d.workers[0], seen[1], "the turn that took the actor back must publish its worker again")
+	require.Nil(t, pid.currentWorker(), "the worker must be cleared once the turn gives the actor up")
+	require.Equal(t, dispatchIdle, pid.schedState.v.Load())
 }
 
 // TestPIDMarkActivitySkipsRepeatedInstant verifies that markActivity records a

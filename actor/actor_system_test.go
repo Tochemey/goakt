@@ -10398,6 +10398,34 @@ func TestAttachSystemActor(t *testing.T) {
 	require.NoError(t, sys.Stop(ctx))
 }
 
+// TestHandleRemoteAskReturnsWhenContextIsDone verifies that a remote ask whose
+// context ends before the actor replies returns then, with the context's error
+// joined to ErrRequestTimeout, instead of waiting for its own timeout.
+func TestHandleRemoteAskReturnsWhenContextIsDone(t *testing.T) {
+	ctx := context.TODO()
+
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	// MockActor does not reply to TestSend
+	pid, err := sys.Spawn(ctx, "silent", NewMockActor(), WithLongLived())
+	require.NoError(t, err)
+
+	askCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	t.Cleanup(cancel)
+
+	start := time.Now()
+	response, err := sys.(*actorSystem).handleRemoteAsk(askCtx, pid, new(testpb.TestSend), time.Minute)
+	elapsed := time.Since(start)
+
+	require.Nil(t, response)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	assert.Less(t, elapsed, 10*time.Second, "the ask must return when its context ends, not at its timeout")
+}
+
 // TestHandleRemoteAskRefusesOverflowOnBoundedMailbox pins that a remote ask
 // toward an actor whose blocking BoundedMailbox is full is refused like a
 // remote tell: the ask returns at its own timeout with the mailbox unchanged
