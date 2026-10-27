@@ -131,8 +131,10 @@ func TestTellBatch(t *testing.T) {
 		cases := map[string][]byte{
 			"metadata count over the limit": emptyPairs(maxTellBatchMetadataEntries + 1),
 			"metadata count that overflows": emptyPairs(1 << 63),
+			"truncated metadata key":        {0, 0, 0, 1, 0, 0, 0, 0, 1, 5, 0},
 			"missing count":                 {0, 0, 1},
 			"truncated sender":              {0, 0, 0, 1},
+			"truncated inline sender":       {0, 0, 0, 1, 0},
 			"truncated receiver":            {0, 0, 0, 1, 0, 0},
 			"truncated metadata count":      {0, 0, 0, 1, 0, 0, 0, 0},
 			"count beyond the messages":     moreThanSent,
@@ -155,15 +157,16 @@ func TestTellBatch(t *testing.T) {
 		valid := AppendTellBatchMessage(nil, &TellBatchMessage{Metadata: map[string]string{"k": "v"}, Payload: []byte("p")})
 
 		cases := map[string][]byte{
-			"truncated sender":              {},
-			"unknown receiver ref":          {0, 0, 9},
-			"truncated metadata count":      {0, 0, 0, 0},
-			"hostile metadata count":        binary.AppendUvarint([]byte{0, 0, 0, 0}, 1<<40),
-			"metadata count over the limit": append(binary.AppendUvarint([]byte{0, 0, 0, 0}, maxTellBatchMetadataEntries+1), make([]byte, 2*maxTellBatchMetadataEntries+3)...),
-			"truncated metadata key":        {0, 0, 0, 0, 1, 5},
-			"truncated metadata value":      {0, 0, 0, 0, 1, 1, 'k', 5},
-			"truncated payload length":      {0, 0, 0, 0, 0},
-			"truncated payload":             valid[:len(valid)-1],
+			"truncated sender":                {},
+			"unknown receiver ref":            {0, 0, 9},
+			"truncated metadata count":        {0, 0, 0, 0},
+			"hostile metadata count":          binary.AppendUvarint([]byte{0, 0, 0, 0}, 1<<40),
+			"metadata count over the limit":   append(binary.AppendUvarint([]byte{0, 0, 0, 0}, maxTellBatchMetadataEntries+1), make([]byte, 2*maxTellBatchMetadataEntries+3)...),
+			"truncated metadata key":          {0, 0, 0, 0, 1, 5, 0},
+			"metadata count beyond the bytes": {0, 0, 0, 0, 2, 0, 0},
+			"truncated metadata value":        {0, 0, 0, 0, 1, 1, 'k', 5},
+			"truncated payload length":        {0, 0, 0, 0, 0},
+			"truncated payload":               valid[:len(valid)-1],
 		}
 
 		for name, src := range cases {

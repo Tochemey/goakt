@@ -250,12 +250,14 @@ var _ extension.Dependency = (*mockDependencyForRemote)(nil)
 // tellBatchSession is a revision-5 stub session for the batch encoder. It
 // records each told payload, reports maxMessage as its negotiated ceiling,
 // fails every Tell after the first acceptTells (a negative value never
-// fails), and fails actor-path registration with pathErr.
+// fails), and fails actor-path registration with pathErr: of every path, or
+// of failPath alone when it is set.
 type tellBatchSession struct {
 	*stubDuplexSession
 	maxMessage  uint64
 	acceptTells int
 	pathErr     error
+	failPath    string
 	payloads    [][]byte
 }
 
@@ -273,10 +275,10 @@ func (x *tellBatchSession) Tell(_ context.Context, frame inet.Frame) error {
 // MaxMessageSize returns the configured negotiated ceiling.
 func (x *tellBatchSession) MaxMessageSize() uint64 { return x.maxMessage }
 
-// PrepareRef fails actor-path registration with pathErr when set and
-// otherwise defers to the embedded stub.
+// PrepareRef fails actor-path registration with pathErr when set (only for
+// failPath when that is set) and otherwise defers to the embedded stub.
 func (x *tellBatchSession) PrepareRef(kind byte, literal string) (uint64, error) {
-	if kind == inet.TableKindActorPath && x.pathErr != nil {
+	if kind == inet.TableKindActorPath && x.pathErr != nil && (x.failPath == "" || x.failPath == literal) {
 		return 0, x.pathErr
 	}
 

@@ -1299,6 +1299,37 @@ func TestCoalescing_SubmitWakesLingeringWriter(t *testing.T) {
 	assert.EqualValues(t, 2, flushes.Load())
 }
 
+// TestCoalescing_SubmitWithWakePending verifies that a submit reaching a
+// lingering writer whose wake token is still pending (left by a submit that
+// raced the linger timeout) clears the linger without blocking on the full
+// ready channel.
+func TestCoalescing_SubmitWithWakePending(t *testing.T) {
+	flush := func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		return nil, nil
+	}
+
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, flush)
+	t.Cleanup(c.close)
+
+	// A lingering writer is simulated: no goroutine runs, so the queued
+	// message and the token stay where submit leaves them.
+	c.mu.Lock()
+	c.running = true
+	c.lingering = true
+	c.mu.Unlock()
+	c.ready <- types.Unit{}
+
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+
+	c.mu.Lock()
+	lingering, queued := c.lingering, c.queued
+	c.mu.Unlock()
+
+	assert.False(t, lingering, "the submit clears the linger")
+	assert.Equal(t, 1, queued)
+	assert.Len(t, c.ready, 1, "the pending token is kept, not doubled")
+}
+
 // TestCoalescing_ReleaseAdmitsEveryWaiter verifies that one wakeup reaches
 // every parked submit that fits: each admitted waiter relays the token to the
 // next instead of leaving the others parked until another flush completes.

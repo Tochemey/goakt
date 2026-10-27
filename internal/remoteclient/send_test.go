@@ -791,6 +791,16 @@ func TestSendTellBatchFrames(t *testing.T) {
 		assert.Equal(t, msgs[3:], undelivered)
 	})
 
+	t.Run("a refused frame before the last returns every message from it on", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, maxMessage: 64*1024 + tellBatchSplitMargin, acceptTells: 0}
+		msgs := newMessages(5, 20*1024)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.Error(t, err)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
 	t.Run("a refused last frame returns its messages", func(t *testing.T) {
 		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: 0}
 		msgs := newMessages(2, 8)
@@ -802,6 +812,16 @@ func TestSendTellBatchFrames(t *testing.T) {
 
 	t.Run("a path that cannot be registered returns the unsent messages", func(t *testing.T) {
 		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: -1, pathErr: inet.ErrDuplexClosed}
+		msgs := newMessages(2, 8)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.ErrorIs(t, err, inet.ErrDuplexClosed)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
+	t.Run("a receiver that cannot be registered returns the unsent messages", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: -1, pathErr: inet.ErrDuplexClosed, failPath: receiver}
 		msgs := newMessages(2, 8)
 
 		undelivered, err := sendWith(t, session, msgs)
