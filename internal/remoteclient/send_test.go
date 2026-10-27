@@ -633,3 +633,234 @@ func TestRemoteBatchTellSplitsOversizedFlush(t *testing.T) {
 		len(recorder.snapshot()), messages, deadLettered.Load())
 	assert.Zero(t, deadLettered.Load(), "no individually valid message may be dead-lettered")
 }
+
+func TestSendTellBatchFrames(t *testing.T) {
+	const (
+		sender   = "goakt://client@127.0.0.1:1/user/sender"
+		receiver = "goakt://server@127.0.0.1:2/user/receiver"
+	)
+
+	// newMessages builds n RemoteMessages carrying size-byte payloads.
+	newMessages := func(n, size int) []*internalpb.RemoteMessage {
+		msgs := make([]*internalpb.RemoteMessage, n)
+		for i := range msgs {
+			msgs[i] = internalpb.RemoteMessage_builder{
+				Sender:   sender,
+				Receiver: receiver,
+				Message:  make([]byte, size),
+			}.Build()
+		}
+
+		return msgs
+	}
+
+	t.Run("a revision-5 peer receives the batch layout", func(t *testing.T) {
+		collector := &tellBatchCollector{}
+		ps := startRemotingServer(t, inet.WithRemotingServerDuplexTellBatchHandler(collector.handle))
+		host, port := serverHostPort(t, ps)
+
+		r := NewClient(WithClientCompression(remote.NoCompression), WithClientProtocolPin(remote.ProtocolPinDuplex)).(*client)
+		defer r.Close()
+
+		req := &internalpb.RemoteTellRequest{}
+		req.SetRemoteMessages([]*internalpb.RemoteMessage{
+			internalpb.RemoteMessage_builder{Sender: sender, Receiver: receiver, Message: []byte("one"), Metadata: map[string]string{"trace": "abc"}}.Build(),
+			internalpb.RemoteMessage_builder{Receiver: receiver, Message: []byte("two")}.Build(),
+		})
+
+		undelivered, err := r.flushTellBatch(context.Background(), host, port, 0, req)
+		require.NoError(t, err)
+		require.Empty(t, undelivered)
+
+		require.Eventually(t, func() bool {
+			_, got := collector.snapshot()
+			return len(got) == 2
+		}, 5*time.Second, 10*time.Millisecond)
+
+		frames, got := collector.snapshot()
+		assert.Equal(t, 1, frames)
+		assert.Equal(t, sender, got[0].Sender)
+		assert.Equal(t, receiver, got[0].Receiver)
+		assert.Equal(t, map[string]string{"trace": "abc"}, got[0].Metadata)
+		assert.Equal(t, []byte("one"), got[0].Payload)
+		assert.Empty(t, got[1].Sender)
+		assert.Equal(t, receiver, got[1].Receiver)
+		assert.Equal(t, []byte("two"), got[1].Payload)
+	})
+
+	t.Run("an aggregate over the message size is split and fully delivered", func(t *testing.T) {
+		const maxMessage = 256 * 1024
+
+		collector := &tellBatchCollector{}
+		ps := startRemotingServer(t,
+			inet.WithRemotingServerMaxMessageSize(maxMessage),
+			inet.WithRemotingServerDuplexTellBatchHandler(collector.handle),
+		)
+		host, port := serverHostPort(t, ps)
+
+		r := NewClient(
+			WithClientCompression(remote.NoCompression),
+			WithClientProtocolPin(remote.ProtocolPinDuplex),
+			WithClientMaxMessageSize(maxMessage),
+		).(*client)
+		defer r.Close()
+
+		req := &internalpb.RemoteTellRequest{}
+		req.SetRemoteMessages(newMessages(40, 32*1024))
+
+		undelivered, err := r.flushTellBatch(context.Background(), host, port, 0, req)
+		require.NoError(t, err)
+		require.Empty(t, undelivered)
+
+		require.Eventually(t, func() bool {
+			_, got := collector.snapshot()
+			return len(got) == 40
+		}, 5*time.Second, 10*time.Millisecond)
+
+		frames, _ := collector.snapshot()
+		assert.Greater(t, frames, 4, "40 x 32KiB must span several 256KiB frames")
+	})
+
+	t.Run("a batch above the chunk size is chunked and reassembled", func(t *testing.T) {
+		collector := &tellBatchCollector{}
+		ps := startRemotingServer(t, inet.WithRemotingServerDuplexTellBatchHandler(collector.handle))
+		host, port := serverHostPort(t, ps)
+
+		r := NewClient(
+			WithClientCompression(remote.NoCompression),
+			WithClientProtocolPin(remote.ProtocolPinDuplex),
+			WithClientChunkSize(16*1024),
+		).(*client)
+		defer r.Close()
+
+		req := &internalpb.RemoteTellRequest{}
+		req.SetRemoteMessages(newMessages(8, 8*1024))
+
+		undelivered, err := r.flushTellBatch(context.Background(), host, port, 0, req)
+		require.NoError(t, err)
+		require.Empty(t, undelivered)
+
+		require.Eventually(t, func() bool {
+			_, got := collector.snapshot()
+			return len(got) == 8
+		}, 5*time.Second, 10*time.Millisecond)
+
+		frames, got := collector.snapshot()
+		assert.Equal(t, 1, frames, "the 64KiB batch is one logical frame")
+		for _, msg := range got {
+			assert.Len(t, msg.Payload, 8*1024)
+			assert.Equal(t, receiver, msg.Receiver)
+		}
+	})
+
+	// sendWith runs sendTellBatchFrames against session.
+	sendWith := func(t *testing.T, session inet.DuplexSession, msgs []*internalpb.RemoteMessage) ([]*internalpb.RemoteMessage, error) {
+		t.Helper()
+
+		r := NewClient(WithClientCompression(remote.NoCompression)).(*client)
+		t.Cleanup(r.Close)
+
+		key := laneKey{role: internalpb.LaneRole_LANE_ROLE_ORDINARY}
+		return r.sendTellBatchFrames(context.Background(), r.peerFor("127.0.0.1", 65002), key, session, msgs)
+	}
+
+	t.Run("each frame counts its own messages", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, maxMessage: 64*1024 + tellBatchSplitMargin, acceptTells: -1}
+
+		undelivered, err := sendWith(t, session, newMessages(5, 20*1024))
+		require.NoError(t, err)
+		require.Empty(t, undelivered)
+
+		counts := make([]uint32, 0, len(session.payloads))
+		for _, payload := range session.payloads {
+			env, err := inet.DecodeDataEnvelope(payload, false)
+			require.NoError(t, err)
+			require.Equal(t, inet.TellBatchTypeName, env.TypeName)
+			counts = append(counts, binary.BigEndian.Uint32(env.Payload))
+		}
+
+		assert.Equal(t, []uint32{3, 2}, counts, "three 20KiB messages fit under a 64KiB limit, the rest follow")
+	})
+
+	t.Run("a refused frame returns the messages it carried and every later one", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, maxMessage: 64*1024 + tellBatchSplitMargin, acceptTells: 1}
+		msgs := newMessages(5, 20*1024)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.Error(t, err)
+		assert.Equal(t, msgs[3:], undelivered)
+	})
+
+	t.Run("a refused frame before the last returns every message from it on", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, maxMessage: 64*1024 + tellBatchSplitMargin, acceptTells: 0}
+		msgs := newMessages(5, 20*1024)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.Error(t, err)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
+	t.Run("a refused last frame returns its messages", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: 0}
+		msgs := newMessages(2, 8)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.Error(t, err)
+		assert.Equal(t, msgs, undelivered)
+	})
+
+	t.Run("a path that cannot be registered returns the unsent messages", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: -1, pathErr: inet.ErrDuplexClosed}
+		msgs := newMessages(2, 8)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.ErrorIs(t, err, inet.ErrDuplexClosed)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
+	t.Run("a receiver that cannot be registered returns the unsent messages", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: -1, pathErr: inet.ErrDuplexClosed, failPath: receiver}
+		msgs := newMessages(2, 8)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.ErrorIs(t, err, inet.ErrDuplexClosed)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
+	t.Run("a type name that cannot be registered sends nothing", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch, prepareRefErr: inet.ErrDuplexClosed}, acceptTells: -1}
+		msgs := newMessages(2, 8)
+
+		undelivered, err := sendWith(t, session, msgs)
+		require.ErrorIs(t, err, inet.ErrDuplexClosed)
+		assert.Equal(t, msgs, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+
+	t.Run("an empty batch sends nothing", func(t *testing.T) {
+		session := &tellBatchSession{stubDuplexSession: &stubDuplexSession{revision: inet.CapabilityRevisionTellBatch}, acceptTells: -1}
+
+		undelivered, err := sendWith(t, session, nil)
+		require.NoError(t, err)
+		assert.Empty(t, undelivered)
+		assert.Empty(t, session.payloads)
+	})
+}
+
+func TestTellBatchFrameEstimate(t *testing.T) {
+	msgs := []*internalpb.RemoteMessage{
+		internalpb.RemoteMessage_builder{Message: make([]byte, 100), Metadata: map[string]string{"k": "v"}}.Build(),
+		internalpb.RemoteMessage_builder{Message: make([]byte, 50)}.Build(),
+	}
+
+	t.Run("sums payloads, metadata and per-message overhead", func(t *testing.T) {
+		assert.Equal(t, 100+16+1+1+2+50+16, tellBatchFrameEstimate(msgs, 0))
+	})
+
+	t.Run("caps at the limit", func(t *testing.T) {
+		assert.Equal(t, 120, tellBatchFrameEstimate(msgs, 120))
+	})
+}

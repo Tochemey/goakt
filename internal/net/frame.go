@@ -107,6 +107,12 @@ const (
 	// window is unlimited (pre-credit behavior).
 	CapabilityRevisionCredits uint32 = 4
 
+	// CapabilityRevisionTellBatch is the revision that enables coalesced tell
+	// batches in the [TellBatchTypeName] layout, whose sender and receiver
+	// addresses travel as actor-path table refs. Below this revision a batch
+	// travels as a RemoteTellRequest protobuf.
+	CapabilityRevisionTellBatch uint32 = 5
+
 	// DefaultChunkSize is the default logical-frame threshold above which a
 	// sender splits into CHUNK frames (256 KiB).
 	DefaultChunkSize uint32 = 256 * size.KB

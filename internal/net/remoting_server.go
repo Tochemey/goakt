@@ -158,6 +158,11 @@ type RemotingServer struct {
 	senderResolver              func(path string) any
 	askPool                     *WorkerPool[duplexAskTask]
 
+	// duplexTellBatch handles revision-5 coalesced tell batches. The server
+	// offers revision 5 in HELLO only when it is set, so a peer never sends
+	// a batch layout this server cannot deliver.
+	duplexTellBatch DuplexTellBatchHandler
+
 	// compression is the codec this acceptor advertises in its duplex HELLO.
 	// A duplex connection is compressed only when the dialer proposes this
 	// same codec; the legacy path ignores it and uses the [ConnWrapper]s.
@@ -446,6 +451,15 @@ func WithRemotingServerDuplexTellHandler(h DuplexTellHandler) RemotingServerOpti
 	}
 }
 
+// WithRemotingServerDuplexTellBatchHandler registers the handler for
+// coalesced tell batches in the [TellBatchTypeName] layout and lets the
+// server negotiate [CapabilityRevisionTellBatch].
+func WithRemotingServerDuplexTellBatchHandler(h DuplexTellBatchHandler) RemotingServerOption {
+	return func(x *RemotingServer) {
+		x.duplexTellBatch = h
+	}
+}
+
 // WithRemotingServerDuplexAskHandler registers the expectsReply user-message
 // handler for the duplex acceptor. Control RPCs continue to use registered
 // ProtoHandlers.
@@ -623,7 +637,7 @@ func (x *RemotingServer) handleDuplexConn(raw net.Conn, release func()) {
 	framed := newTCPFramedConn(raw, x.maxFrameSize)
 
 	hello := &internalpb.Hello{}
-	hello.SetRevision(CapabilityRevisionCredits)
+	hello.SetRevision(x.revision())
 	hello.SetSystemName(x.systemName)
 	hello.SetLaneRole(internalpb.LaneRole_LANE_ROLE_CONTROL)
 	hello.SetCompression(x.compression)
@@ -785,6 +799,45 @@ func (x *RemotingServer) invokeDuplexTell(ctx context.Context, env DataEnvelope)
 	return panicked
 }
 
+// isTellBatch reports whether env is a revision-5 coalesced tell batch this
+// server delivers through its batch handler.
+func (x *RemotingServer) isTellBatch(env DataEnvelope) bool {
+	return x.duplexTellBatch != nil &&
+		env.SerializerID == SerializerIDInternalProto &&
+		env.TypeName == TellBatchTypeName
+}
+
+// invokeDuplexTellBatch runs the batch handler, recovering a panic when a
+// panic handler is configured. It reports whether the handler panicked, so
+// the caller can repay credit the handler claimed but never released.
+func (x *RemotingServer) invokeDuplexTellBatch(ctx context.Context, batch *TellBatch) (panicked bool) {
+	if x.panicHandler == nil {
+		x.duplexTellBatch(ctx, batch)
+		return false
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			panicked = true
+			x.panicHandler(TellBatchTypeName, r)
+		}
+	}()
+
+	x.duplexTellBatch(ctx, batch)
+	return false
+}
+
+// revision returns the capability revision this server offers in HELLO:
+// [CapabilityRevisionTellBatch] when a batch handler is registered,
+// [CapabilityRevisionCredits] otherwise.
+func (x *RemotingServer) revision() uint32 {
+	if x.duplexTellBatch != nil {
+		return CapabilityRevisionTellBatch
+	}
+
+	return CapabilityRevisionCredits
+}
+
 // dispatchDuplexInternalTell routes an internal-proto DATA frame without
 // expectsReply through the registered [ProtoHandler] for its wire type name,
 // mirroring the ask-side dispatch in dispatchDuplexControl: internal-proto
@@ -861,13 +914,38 @@ func (x *RemotingServer) handleDuplexData(ctx context.Context, conn *duplexConn,
 	}
 
 	if !frame.ExpectsReply() {
+		var batch *TellBatch
+		if x.isTellBatch(env) {
+			batch, err = conn.decodeTellBatch(env.Payload)
+			if err != nil {
+				if errors.Is(err, ErrTableRefUnsupported) || errors.Is(err, ErrUnknownTableRef) {
+					_ = submitErrorFrame(ctx, conn, 0, internalpb.Code_CODE_FAILED_PRECONDITION, err.Error())
+					conn.ReleasePayload(frame)
+					return err
+				}
+
+				// A malformed body is dropped like an unmarshalable
+				// RemoteTellRequest batch: a tell has no reply channel.
+				conn.ReleasePayload(frame)
+				conn.noteOwnedFrame(frame)
+				return nil
+			}
+		}
+
 		// The tell's credit grant rides a lease instead of being settled
 		// here: the actor-side handler claims it and repays the sender as
 		// the frame's messages are consumed, extending flow control across
 		// mailbox residency. A handler that does not claim the lease falls
 		// back to the full grant below, so the window can never leak.
 		lease := conn.newTellLease(frame)
-		panicked := x.invokeDuplexTell(WithCreditLease(handlerCtx, lease), env)
+
+		var panicked bool
+		if batch != nil {
+			panicked = x.invokeDuplexTellBatch(WithCreditLease(handlerCtx, lease), batch)
+		} else {
+			panicked = x.invokeDuplexTell(WithCreditLease(handlerCtx, lease), env)
+		}
+
 		conn.ReleasePayload(frame)
 
 		if panicked {

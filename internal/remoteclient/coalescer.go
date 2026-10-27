@@ -114,17 +114,30 @@ type coalescer struct {
 	// handler; it carries no shard information so operators see one stable
 	// endpoint format across every fan-out path.
 	dest      string
-	in        chan *internalpb.RemoteMessage
 	done      chan types.Unit
 	closeOnce sync.Once
 	wg        sync.WaitGroup
 
-	// mu guards running and closed so a writer spawn can never race close's
-	// final Wait: every wg.Add happens under mu before closed is observed
-	// true, and close only Waits after setting closed under mu.
-	mu      sync.Mutex
+	// mu guards the queue, the writer state and the byte budget, so a submit
+	// admits, enqueues and spawns or wakes the writer under one acquisition.
+	// It also keeps a writer spawn from racing close's final Wait: every
+	// wg.Add happens under mu before closed is observed true, and close only
+	// Waits after setting closed under mu.
+	mu sync.Mutex
+	// queue holds the messages submitted and not yet taken by the writer, in
+	// submission order, as a ring of maxBatch*4 slots: head is the oldest
+	// message and queued the number held. A ring under mu instead of a
+	// channel costs a submit one lock and lets the writer take a whole batch
+	// under one more, where a channel takes its lock once per send and once
+	// per receive.
+	queue   []*internalpb.RemoteMessage
+	head    int
+	queued  int
 	running bool
-	closed  bool
+	// lingering is set while a dry writer waits for the next message; the
+	// submit that clears it sends the writer a ready signal.
+	lingering bool
+	closed    bool
 	// bufferedBytes counts payloads owned by this coalescer, including the
 	// batch currently being flushed. Keeping in-flight bytes charged prevents
 	// a blocked transport from freeing the admission budget merely because
@@ -134,10 +147,18 @@ type coalescer struct {
 	maxBatch         int
 	maxBufferedBytes uint64
 	flushTimeout     time.Duration
-	// space is a coalesced wakeup, not a fair semaphore. A waiter may consume
-	// its one token and still find insufficient budget while a smaller waiter
-	// could fit; it intentionally does not relay the token. The next completed
-	// flush emits another wakeup, and once retained bytes reach zero whichever
+	// linger is how long a dry writer parks for the next message
+	// (coalescerLinger); tests lengthen it to hold the writer lingering.
+	linger time.Duration
+	// ready wakes a lingering writer. A token left behind by a submit that
+	// raced the writer's linger timeout costs the next linger one empty pass.
+	ready chan types.Unit
+	// space is a coalesced wakeup, not a fair semaphore. It is signalled when
+	// a flush returns bytes to the budget and when the writer takes from a
+	// full queue. A waiter that wakes and is admitted relays the token, so
+	// waiters are admitted one after another while room remains; a waiter
+	// that wakes and still does not fit drops it. The next completed flush
+	// emits another wakeup, and once retained bytes reach zero whichever
 	// waiter wakes can always reserve, avoiding both deadlock and wake storms.
 	space      chan types.Unit
 	errHandler TellFailureHandler
@@ -170,43 +191,17 @@ func newCoalescer(dest string, cfg coalescingConfig, failureHandler TellFailureH
 
 	return &coalescer{
 		dest:             dest,
-		in:               make(chan *internalpb.RemoteMessage, maxBatch*4),
+		queue:            make([]*internalpb.RemoteMessage, maxBatch*4),
 		done:             make(chan types.Unit),
 		maxBatch:         maxBatch,
 		maxBufferedBytes: maxBufferedBytes,
 		flushTimeout:     flushTimeout,
+		linger:           coalescerLinger,
+		ready:            make(chan types.Unit, 1),
 		space:            make(chan types.Unit, 1),
 		errHandler:       failureHandler,
 		flushBatch:       flushBatch,
 	}
-}
-
-// wake ensures the message just enqueued will be drained. Before close it
-// spawns the transient writer when none is running. After close no writer may
-// join the WaitGroup (close could already be past its final Wait), so when no
-// writer is running the submitter drains the buffer inline instead: a message
-// whose enqueue raced close's drain decision is flushed or failure-fanned on
-// the submitting goroutine, never stranded in the buffer.
-func (c *coalescer) wake() {
-	c.mu.Lock()
-
-	if c.running {
-		c.mu.Unlock()
-		return
-	}
-
-	if !c.closed {
-		c.running = true
-		c.wg.Add(1)
-		c.mu.Unlock()
-
-		go c.run()
-		return
-	}
-
-	c.running = true
-	c.mu.Unlock()
-	c.drainUntilDry()
 }
 
 // submit enqueues a pre-built RemoteMessage, blocking until the per-destination
@@ -216,6 +211,11 @@ func (c *coalescer) wake() {
 // gRPC streaming all converge on it. Unbounded buffering risks OOM under
 // sustained overload; silent drop hides overload from operators; unconditional
 // block deadlocks the sender.
+//
+// A submit that finds room takes only c.mu and touches neither its context
+// nor the space channel (it sends on ready only to wake a lingering writer):
+// waiting on ctx.Done() costs a lock on that channel, and a context shared
+// by many senders turns it into one lock every sender contends on.
 //
 // Returns:
 //   - nil once the message has been handed to the writer.
@@ -227,24 +227,27 @@ func (c *coalescer) wake() {
 //     waiting (or before the call began).
 func (c *coalescer) submit(ctx context.Context, msg *internalpb.RemoteMessage) error {
 	cost := coalescedMessageBytes(msg)
+	waited := false
 
 	for {
-		if c.reserveBytes(cost) {
-			select {
-			case c.in <- msg:
-				c.wake()
-				return nil
-			case <-ctx.Done():
-				c.releaseBytes(cost)
-				return ctx.Err()
-			case <-c.done:
-				c.releaseBytes(cost)
-				return errCoalescerClosed
+		accepted, err := c.enqueue(msg, cost)
+		if err != nil {
+			return err
+		}
+
+		if accepted {
+			// Relay the wakeup this submit consumed so the next waiter
+			// checks for the room that may remain.
+			if waited {
+				c.signalSpace()
 			}
+
+			return nil
 		}
 
 		select {
 		case <-c.space:
+			waited = true
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-c.done:
@@ -253,25 +256,65 @@ func (c *coalescer) submit(ctx context.Context, msg *internalpb.RemoteMessage) e
 	}
 }
 
-// reserveBytes charges msg against the coalescer's retained-memory budget.
-// One message larger than the window is admitted only when the coalescer owns
-// no other bytes, so valid large messages still make progress without allowing
-// an unbounded train of oversized payloads to accumulate.
-func (c *coalescer) reserveBytes(cost uint64) bool {
+// enqueue appends msg to the queue when a slot is free and the byte budget
+// admits cost, then makes sure a writer drains it: it spawns the writer when
+// none runs and wakes it when it lingers. It reports false when the caller
+// must wait for space, and errCoalescerClosed once close has begun. Admission,
+// the append and the writer check share one critical section, so a message
+// accepted before close always has a running writer to flush it.
+func (c *coalescer) enqueue(msg *internalpb.RemoteMessage, cost uint64) (bool, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 
 	if c.closed {
-		return false
+		c.mu.Unlock()
+		return false, errCoalescerClosed
 	}
 
-	if c.bufferedBytes == 0 ||
-		(c.bufferedBytes <= c.maxBufferedBytes && cost <= c.maxBufferedBytes-c.bufferedBytes) {
-		c.bufferedBytes += cost
-		return true
+	if c.queued == len(c.queue) || !c.admits(cost) {
+		c.mu.Unlock()
+		return false, nil
 	}
 
-	return false
+	c.push(msg)
+	c.bufferedBytes += cost
+
+	switch {
+	case !c.running:
+		c.running = true
+		c.wg.Add(1)
+		c.mu.Unlock()
+
+		go c.run()
+	case c.lingering:
+		c.lingering = false
+		c.mu.Unlock()
+
+		select {
+		case c.ready <- types.Unit{}:
+		default:
+		}
+	default:
+		c.mu.Unlock()
+	}
+
+	return true, nil
+}
+
+// push appends msg at the tail of the queue. The caller holds c.mu and has
+// checked that a slot is free.
+func (c *coalescer) push(msg *internalpb.RemoteMessage) {
+	c.queue[(c.head+c.queued)%len(c.queue)] = msg
+	c.queued++
+}
+
+// admits reports whether cost fits the coalescer's retained-memory budget.
+// One message larger than the window is admitted only when the coalescer owns
+// no other bytes, so valid large messages still make progress without allowing
+// an unbounded train of oversized payloads to accumulate. The caller holds
+// c.mu.
+func (c *coalescer) admits(cost uint64) bool {
+	return c.bufferedBytes == 0 ||
+		(c.bufferedBytes <= c.maxBufferedBytes && cost <= c.maxBufferedBytes-c.bufferedBytes)
 }
 
 // releaseBytes returns retained-memory budget and wakes one blocked submitter.
@@ -284,6 +327,12 @@ func (c *coalescer) releaseBytes(cost uint64) {
 	}
 	c.mu.Unlock()
 
+	c.signalSpace()
+}
+
+// signalSpace wakes one submitter waiting for room, if any. The token is
+// coalesced: with no waiter it stays until the next submit that has to wait.
+func (c *coalescer) signalSpace() {
 	select {
 	case c.space <- types.Unit{}:
 	default:
@@ -298,18 +347,18 @@ func coalescedMessageBytes(msg *internalpb.RemoteMessage) uint64 {
 
 // close prevents new submissions, ensures a writer drains whatever is still
 // buffered, and blocks until the writer exits. Safe to call multiple times.
-// A message whose enqueue lands after close's drain decision is not covered
-// by the Wait here; its submitter's wake detects the dead writer and drains
-// it inline before submit returns, so it is flushed or failure-fanned either
-// way.
+// A submit admits its message under the same lock that sets closed, so every
+// message accepted before close has a running writer covered by the Wait here.
 func (c *coalescer) close() {
 	c.closeOnce.Do(func() {
 		c.mu.Lock()
 		c.closed = true
 
 		// A live writer drains until the buffer is dry on its own. Only when
-		// none is running does close spawn the final drain itself.
-		needDrain := !c.running && len(c.in) > 0
+		// none is running does close spawn the final drain itself. submit
+		// never leaves messages queued without a writer; messages placed
+		// with push alone (test fixtures) are still flushed here.
+		needDrain := !c.running && c.queued > 0
 		if needDrain {
 			c.running = true
 			c.wg.Add(1)
@@ -366,16 +415,27 @@ func (c *coalescer) sendBatch(batch []*internalpb.RemoteMessage) []*internalpb.R
 	return batch[:0]
 }
 
-// takeReady pulls messages already sitting in the channel buffer into batch
-// without waiting. Stops at maxBatch.
-func (c *coalescer) takeReady(batch []*internalpb.RemoteMessage) []*internalpb.RemoteMessage {
-	for len(batch) < c.maxBatch {
-		select {
-		case m := <-c.in:
-			batch = append(batch, m)
-		default:
-			return batch
-		}
+// take moves up to maxBatch of the oldest queued messages into batch without
+// waiting. When it frees slots in a full queue it signals a submitter waiting
+// for room.
+func (c *coalescer) take(batch []*internalpb.RemoteMessage) []*internalpb.RemoteMessage {
+	c.mu.Lock()
+
+	wasFull := c.queued == len(c.queue)
+	n := min(c.queued, c.maxBatch-len(batch))
+	first := min(n, len(c.queue)-c.head)
+
+	batch = append(batch, c.queue[c.head:c.head+first]...)
+	batch = append(batch, c.queue[:n-first]...)
+	clear(c.queue[c.head : c.head+first])
+	clear(c.queue[:n-first])
+	c.head = (c.head + n) % len(c.queue)
+	c.queued -= n
+
+	c.mu.Unlock()
+
+	if wasFull && n > 0 {
+		c.signalSpace()
 	}
 
 	return batch
@@ -384,19 +444,17 @@ func (c *coalescer) takeReady(batch []*internalpb.RemoteMessage) []*internalpb.R
 // drainUntilDry flushes buffered messages until the buffer is observably
 // empty under mu, then hands the writer role back. The caller must own the
 // role (running set true under mu) so at most one drainer touches the buffer
-// and submission order is preserved. Clearing running under the same lock is
-// what lets a submit that races close detect a dead writer and rescue its
-// own message via wake.
+// and submission order is preserved.
 func (c *coalescer) drainUntilDry() {
 	batch := make([]*internalpb.RemoteMessage, 0, c.maxBatch)
 
 	for {
-		batch = c.takeReady(batch)
+		batch = c.take(batch)
 		batch = c.sendBatch(batch)
 
 		c.mu.Lock()
 
-		if len(c.in) == 0 {
+		if c.queued == 0 {
 			c.running = false
 			c.mu.Unlock()
 			return
@@ -406,25 +464,40 @@ func (c *coalescer) drainUntilDry() {
 	}
 }
 
-// run is the transient writer loop. It drains messages already buffered in
-// the channel (up to maxBatch per batch), sends each batch, and exits once
-// the buffer runs dry. While a send RPC is in flight, new submits accumulate
-// in the channel and are picked up as the next batch. No timer is used: a
-// single message against an idle destination is sent immediately, and an
-// idle destination holds no goroutine at all.
+// lingerWhenDry reports whether the queue is empty and, when it is, marks the
+// writer as lingering under the same lock, so the next submit sees the mark
+// and wakes it.
+func (c *coalescer) lingerWhenDry() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.queued > 0 {
+		return false
+	}
+
+	c.lingering = true
+	return true
+}
+
+// run is the transient writer loop. It drains queued messages (up to maxBatch
+// per batch), sends each batch, and exits once the queue runs dry. While a
+// send RPC is in flight, new submits accumulate in the queue and are picked
+// up as the next batch. No timer delays a send: a single message against an
+// idle destination is sent immediately, and an idle destination holds no
+// goroutine at all.
 func (c *coalescer) run() {
 	defer c.wg.Done()
 
 	batch := make([]*internalpb.RemoteMessage, 0, c.maxBatch)
 
-	linger := time.NewTimer(coalescerLinger)
+	linger := time.NewTimer(c.linger)
 	defer linger.Stop()
 
 	for {
-		batch = c.takeReady(batch)
+		batch = c.take(batch)
 		batch = c.sendBatch(batch)
 
-		if len(c.in) > 0 {
+		if !c.lingerWhenDry() {
 			continue
 		}
 
@@ -438,31 +511,29 @@ func (c *coalescer) run() {
 			}
 		}
 
-		linger.Reset(coalescerLinger)
+		linger.Reset(c.linger)
 
 		select {
-		case m := <-c.in:
-			batch = append(batch, m)
+		case <-c.ready:
 			continue
 		case <-c.done:
-			// Drain fully before exiting: the channel can hold several
+			// Drain fully before exiting: the queue can hold several
 			// batches worth of messages when close races a burst of
 			// submits, and close promises everything buffered is flushed.
-			// The drain clears running under mu on exit so a submit whose
-			// enqueue lands after this writer is gone can rescue itself.
 			c.drainUntilDry()
 			return
 		case <-linger.C:
 		}
 
-		// Exit only via the running flag under mu: either the buffer is dry
+		// Exit only via the running flag under mu: either the queue is dry
 		// and the writer hands its role back (a later submit re-spawns), or
-		// a message raced in and this writer keeps draining. Submit enqueues
-		// before it calls wake, so a message never lands unseen: it is
-		// either visible to this check or wake finds running == false.
+		// a message raced in and this writer keeps draining. Submit appends
+		// and checks running under the same lock, so a message never lands
+		// unseen.
 		c.mu.Lock()
+		c.lingering = false
 
-		if len(c.in) == 0 {
+		if c.queued == 0 {
 			c.running = false
 			c.mu.Unlock()
 			return

@@ -43,6 +43,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	inet "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/internal/pause"
+	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/xsync"
 	"github.com/tochemey/goakt/v4/remote"
 )
@@ -775,7 +776,7 @@ func TestCoalescing_SubmitBlocksUntilDrained(t *testing.T) {
 
 	// Fill the channel. With a stuck writer we can enqueue exactly
 	// channel-depth messages before submit must block.
-	for range cap(c.in) + 1 { // +1: one message gets pulled into the in-flight batch
+	for range len(c.queue) + 1 { // +1: one message gets pulled into the in-flight batch
 		require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}),
 			"submits up to capacity must succeed immediately")
 	}
@@ -814,7 +815,7 @@ func TestCoalescing_SubmitReturnsContextDeadline(t *testing.T) {
 	defer stop()
 
 	// Saturate the channel.
-	for range cap(c.in) + 1 {
+	for range len(c.queue) + 1 {
 		require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
 	}
 
@@ -981,7 +982,7 @@ func TestCoalescing_SubmitReturnsContextCanceled(t *testing.T) {
 	c, _, stop := newStuckCoalescer(t, 1)
 	defer stop()
 
-	for range cap(c.in) + 1 {
+	for range len(c.queue) + 1 {
 		require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
 	}
 
@@ -1010,7 +1011,7 @@ func TestCoalescing_SubmitUnblocksOnClose(t *testing.T) {
 	// the underlying server and netClient get cleaned up.
 	defer stop()
 
-	for range cap(c.in) + 1 {
+	for range len(c.queue) + 1 {
 		require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
 	}
 
@@ -1217,9 +1218,9 @@ func TestCoalescerFansOutUndeliveredOnly(t *testing.T) {
 
 	// Stuff the buffer directly so close()'s final drain flushes all three
 	// as one deterministic batch.
-	c.in <- first
-	c.in <- second
-	c.in <- third
+	c.push(first)
+	c.push(second)
+	c.push(third)
 	c.close()
 
 	require.Len(t, handed, 2, "only the undelivered suffix may be fanned out")
@@ -1242,34 +1243,206 @@ func TestCoalescerCloseDrainsBacklog(t *testing.T) {
 	// Seven messages against maxBatch 2: more than three batches must flush
 	// during close.
 	for range 7 {
-		c.in <- &internalpb.RemoteMessage{}
+		c.push(&internalpb.RemoteMessage{})
 	}
 
 	c.close()
 	assert.EqualValues(t, 7, flushed.Load(), "close must drain the whole backlog")
 }
 
-// TestCoalescing_WakeAfterCloseDrainsInline pins the shutdown rescue path: a
-// message whose enqueue lands after close's drain decision (no writer
-// running, done already closed) must be drained inline by the submitter's
-// wake instead of being stranded in the buffer with the caller told nil.
-func TestCoalescing_WakeAfterCloseDrainsInline(t *testing.T) {
-	var flushed atomic.Int64
-	flush := func(_ context.Context, req *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
-		flushed.Add(int64(len(req.GetRemoteMessages())))
+// TestCoalescing_SubmitWakesLingeringWriter verifies that a submit reaching a
+// dry, lingering writer wakes it instead of spawning a second one, and that
+// the woken writer flushes the message.
+func TestCoalescing_SubmitWakesLingeringWriter(t *testing.T) {
+	// The second flush blocks until released, holding the woken writer at a
+	// known point so its state can be read without racing a new linger.
+	var flushes atomic.Int32
+	inSecondFlush := make(chan types.Unit)
+	release := make(chan types.Unit)
+	flush := func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		if flushes.Add(1) == 2 {
+			close(inSecondFlush)
+			<-release
+		}
+
 		return nil, nil
 	}
 
 	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, flush)
-	c.close()
+	// A linger far longer than the test keeps the dry writer parked: only a
+	// wake can get the second message flushed in time.
+	c.linger = time.Hour
+	t.Cleanup(c.close)
 
-	// Simulate the racing submit: the enqueue won the channel send before
-	// observing shutdown, so the message is buffered with no writer alive.
-	c.in <- &internalpb.RemoteMessage{}
-	c.wake()
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+	require.Eventually(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.lingering
+	}, 5*time.Second, time.Millisecond, "the dry writer must linger")
 
-	assert.EqualValues(t, 1, flushed.Load(), "wake after close must drain the raced message inline")
-	assert.Empty(t, c.in, "the buffer must be empty after the inline rescue")
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+
+	select {
+	case <-inSecondFlush:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the lingering writer must be woken to flush the message")
+	}
+
+	c.mu.Lock()
+	lingering, running := c.lingering, c.running
+	c.mu.Unlock()
+	close(release)
+
+	assert.False(t, lingering, "the submit must take the writer out of its linger")
+	assert.True(t, running, "the woken writer keeps the writer role")
+	assert.EqualValues(t, 2, flushes.Load())
+}
+
+// TestCoalescing_SubmitWithWakePending verifies that a submit reaching a
+// lingering writer whose wake token is still pending (left by a submit that
+// raced the linger timeout) clears the linger without blocking on the full
+// ready channel.
+func TestCoalescing_SubmitWithWakePending(t *testing.T) {
+	flush := func(context.Context, *internalpb.RemoteTellRequest) ([]*internalpb.RemoteMessage, error) {
+		return nil, nil
+	}
+
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, flush)
+	t.Cleanup(c.close)
+
+	// A lingering writer is simulated: no goroutine runs, so the queued
+	// message and the token stay where submit leaves them.
+	c.mu.Lock()
+	c.running = true
+	c.lingering = true
+	c.mu.Unlock()
+	c.ready <- types.Unit{}
+
+	require.NoError(t, c.submit(context.Background(), &internalpb.RemoteMessage{}))
+
+	c.mu.Lock()
+	lingering, queued := c.lingering, c.queued
+	c.mu.Unlock()
+
+	assert.False(t, lingering, "the submit clears the linger")
+	assert.Equal(t, 1, queued)
+	assert.Len(t, c.ready, 1, "the pending token is kept, not doubled")
+}
+
+// TestCoalescing_ReleaseAdmitsEveryWaiter verifies that one wakeup reaches
+// every parked submit that fits: each admitted waiter relays the token to the
+// next instead of leaving the others parked until another flush completes.
+func TestCoalescing_ReleaseAdmitsEveryWaiter(t *testing.T) {
+	c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4, maxBufferedBytes: 1 << 20}, nil, discardFlush)
+
+	// A busy writer and an exhausted budget: every submit parks, and none
+	// spawns a writer that would drain the queue under the assertions.
+	c.mu.Lock()
+	c.running = true
+	c.bufferedBytes = c.maxBufferedBytes
+	c.mu.Unlock()
+
+	const waiters = 3
+	results := make(chan error, waiters)
+
+	for range waiters {
+		go func() { results <- c.submit(context.Background(), &internalpb.RemoteMessage{}) }()
+	}
+
+	pause.For(20 * time.Millisecond)
+	assert.Empty(t, results, "no submit may pass an exhausted budget")
+
+	c.releaseBytes(c.maxBufferedBytes)
+
+	for range waiters {
+		select {
+		case err := <-results:
+			require.NoError(t, err)
+		case <-time.After(time.Second):
+			t.Fatal("a parked submit was not admitted after one release")
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	assert.Equal(t, waiters, c.queued)
+}
+
+// TestCoalescing_TakeAcrossTheRingEnd verifies that take returns messages in
+// submission order when the queue wraps past the end of the ring, and clears
+// the slots it takes.
+func TestCoalescing_TakeAcrossTheRingEnd(t *testing.T) {
+	t.Run("in one take", func(t *testing.T) {
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 4}, nil, discardFlush)
+		c.head = len(c.queue) - 2
+
+		messages := make([]*internalpb.RemoteMessage, 4)
+		for i := range messages {
+			messages[i] = &internalpb.RemoteMessage{}
+			c.push(messages[i])
+		}
+
+		batch := c.take(nil)
+
+		require.Len(t, batch, 4)
+		for i := range messages {
+			assert.Same(t, messages[i], batch[i])
+		}
+
+		assert.Zero(t, c.queued)
+		assert.Equal(t, 2, c.head)
+		assert.Equal(t, make([]*internalpb.RemoteMessage, len(c.queue)), c.queue, "taken slots must not pin messages")
+	})
+
+	t.Run("one batch at a time", func(t *testing.T) {
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 2}, nil, discardFlush)
+		c.head = len(c.queue) - 1
+
+		messages := make([]*internalpb.RemoteMessage, 3)
+		for i := range messages {
+			messages[i] = &internalpb.RemoteMessage{}
+			c.push(messages[i])
+		}
+
+		first := c.take(nil)
+		require.Len(t, first, 2, "a take stops at maxBatch")
+		assert.Same(t, messages[0], first[0])
+		assert.Same(t, messages[1], first[1])
+
+		second := c.take(nil)
+		require.Len(t, second, 1)
+		assert.Same(t, messages[2], second[0])
+		assert.Zero(t, c.queued)
+	})
+
+	t.Run("from an empty queue", func(t *testing.T) {
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 2}, nil, discardFlush)
+		assert.Empty(t, c.take(nil))
+	})
+}
+
+// TestCoalescing_TakeFromFullQueueSignalsSpace verifies that taking from a
+// full queue wakes a submit waiting for a slot, and that taking from a queue
+// with room left does not.
+func TestCoalescing_TakeFromFullQueueSignalsSpace(t *testing.T) {
+	t.Run("full queue", func(t *testing.T) {
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 1}, nil, discardFlush)
+		for range len(c.queue) {
+			c.push(&internalpb.RemoteMessage{})
+		}
+
+		c.take(nil)
+		assert.Len(t, c.space, 1)
+	})
+
+	t.Run("queue with room", func(t *testing.T) {
+		c := newCoalescer("127.0.0.1:1", coalescingConfig{maxBatch: 1}, nil, discardFlush)
+		c.push(&internalpb.RemoteMessage{})
+
+		c.take(nil)
+		assert.Empty(t, c.space)
+	})
 }
 
 // TestCoalescing_SubmitCloseRaceNeverStrands hammers the submit/close race:
@@ -1315,8 +1488,8 @@ func TestCoalescing_SubmitCloseRaceNeverStrands(t *testing.T) {
 		close(start)
 		wg.Wait()
 
-		// The inline rescue completes before submit returns, and close waits
-		// out any writer, so the counters are final here.
+		// Submit admits under the lock close sets closed under, and close waits
+		// out the writer of every admitted message, so the counters are final here.
 		require.EqualValues(t, accepted.Load(), flushed.Load()+fanned.Load(), "an accepted message must be flushed or fanned out, never stranded")
 	}
 }
