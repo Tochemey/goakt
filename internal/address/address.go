@@ -493,8 +493,8 @@ func (x *Address) Validate() error {
 		AddValidator(validation.NewEmptyStringValidator("system", x.System())).
 		AddValidator(validation.NewEmptyStringValidator("name", x.Name())).
 		AddAssertion(len(x.Name()) <= maxNameLength, msgNameTooLong).
-		AddValidator(validation.NewPatternValidator(namePattern, x.System(), errInvalidNamePattern)).
-		AddValidator(validation.NewPatternValidator(namePattern, strings.TrimSpace(x.Name()), errInvalidNamePattern)).
+		AddValidator(validation.NewRegexpValidator(nameRegexp, x.System(), errInvalidNamePattern)).
+		AddValidator(validation.NewRegexpValidator(nameRegexp, strings.TrimSpace(x.Name()), errInvalidNamePattern)).
 		AddAssertion(uuid.Validate(x.IncarnationID()) == nil, "actor incarnation ID is invalid").
 		Validate()
 

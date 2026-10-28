@@ -3556,3 +3556,28 @@ func nextHandled(t *testing.T, actor *MockLifecycleOrderActor) string {
 		return ""
 	}
 }
+
+// spareSegments returns the drained segments mailbox keeps for reuse, oldest
+// first: the ones the next links take, in that order.
+func spareSegments(mailbox *embeddedMailbox) []*mailboxSegment {
+	ring := mailbox.embedded.spares.Load()
+	if ring == nil {
+		return nil
+	}
+
+	var spares []*mailboxSegment
+	for i := ring.pop.Load(); i != ring.push.Load(); i++ {
+		spares = append(spares, ring.segments[i%mailboxSpareSegments].Load())
+	}
+
+	return spares
+}
+
+// firstSpare returns the spare the next link takes, or nil when there is none.
+func firstSpare(mailbox *embeddedMailbox) *mailboxSegment {
+	if spares := spareSegments(mailbox); len(spares) > 0 {
+		return spares[0]
+	}
+
+	return nil
+}

@@ -276,7 +276,7 @@ func TestEmbeddedMailboxReusesSpareSegment(t *testing.T) {
 	}
 
 	require.Same(t, second, mailbox.mailboxHead.Load())
-	require.Same(t, first, mailbox.embedded.spare.Load(), "the finished segment must become the spare")
+	require.Same(t, first, firstSpare(mailbox), "the finished segment must become the spare")
 	require.Nil(t, first.next.Load())
 
 	// one message is in the second segment's first slot: fill it and overflow
@@ -286,7 +286,7 @@ func TestEmbeddedMailboxReusesSpareSegment(t *testing.T) {
 
 	require.Same(t, first, second.next.Load(), "the link must take the spare")
 	require.Same(t, first, mailbox.mailboxTail.Load())
-	require.Nil(t, mailbox.embedded.spare.Load())
+	require.Nil(t, firstSpare(mailbox))
 
 	for i := range mailboxSegmentSlots {
 		require.Equal(t, i, mailbox.Dequeue().Message())
@@ -306,13 +306,13 @@ func TestEmbeddedMailboxRecycleSkipsSegmentStillTail(t *testing.T) {
 	mailbox.mailboxTail.Store(full)
 
 	mailbox.recycle(full)
-	require.Nil(t, mailbox.embedded.spare.Load())
+	require.Nil(t, firstSpare(mailbox))
 	require.Zero(t, embeddedMailboxGeneration(full))
 	require.NotNil(t, full.next.Load())
 
 	mailbox.mailboxTail.Store(full.next.Load())
 	mailbox.recycle(full)
-	require.Same(t, full, mailbox.embedded.spare.Load())
+	require.Same(t, full, firstSpare(mailbox))
 	require.Equal(t, uint64(1), embeddedMailboxGeneration(full))
 	require.Zero(t, cursorClaims(full.cursor.Load()))
 	require.Nil(t, full.next.Load())
@@ -382,7 +382,7 @@ func TestEmbeddedMailboxClaimRefusesSegmentNoLongerTail(t *testing.T) {
 		require.Equal(t, i, mailbox.Dequeue().Message())
 	}
 
-	require.Same(t, stale, mailbox.embedded.spare.Load(), "the finished segment must be the spare")
+	require.Same(t, stale, firstSpare(mailbox), "the finished segment must be the spare")
 	cursor := stale.cursor.Load()
 
 	require.Nil(t, mailbox.claimIn(stale, embeddedMailboxGeneration(stale)), "a claim in a segment that is no longer the tail must be retried")
@@ -490,7 +490,7 @@ func TestEmbeddedMailboxLinksPastASpareFullOfStaleClaims(t *testing.T) {
 		require.Equal(t, i, mailbox.Dequeue().Message())
 	}
 
-	spare := mailbox.embedded.spare.Load()
+	spare := firstSpare(mailbox)
 	require.NotNil(t, spare, "the finished segment must be the spare")
 
 	// stale producers claimed every slot of the spare and one past its end
@@ -578,7 +578,7 @@ func TestEmbeddedMailboxLinksAfterGenerationWrap(t *testing.T) {
 		require.Equal(t, i, mailbox.Dequeue().Message())
 	}
 
-	require.Same(t, segment, mailbox.embedded.spare.Load(), "the finished segment must be the spare")
+	require.Same(t, segment, firstSpare(mailbox), "the finished segment must be the spare")
 	require.Zero(t, embeddedMailboxGeneration(segment), "recycling must wrap the generation to zero")
 
 	// fill the tail, so the spare is linked back in, then fill the spare
@@ -752,4 +752,95 @@ func TestEmbeddedMailboxDefaultSpawnUsesIt(t *testing.T) {
 	require.Nil(t, customPID.embedded)
 	require.Nil(t, customPID.mailboxHead.Load())
 	require.Nil(t, customPID.mailboxTail.Load())
+}
+
+// TestEmbeddedMailboxKeepsSeveralSpares verifies that every segment a backlog
+// deeper than two segments drains is kept, in link order, and that the links
+// that follow reuse them oldest first instead of allocating.
+func TestEmbeddedMailboxKeepsSeveralSpares(t *testing.T) {
+	const segments = 4
+	mailbox := newEmbeddedMailbox()
+	for i := range segments * mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	var linked []*mailboxSegment
+	for segment := mailbox.mailboxHead.Load(); segment != nil; segment = segment.next.Load() {
+		linked = append(linked, segment)
+	}
+	require.Len(t, linked, segments)
+
+	for i := range segments * mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	last := linked[segments-1]
+	require.Same(t, last, mailbox.mailboxHead.Load(), "the last segment stays, rewound")
+	require.Same(t, last, mailbox.mailboxTail.Load())
+	require.Equal(t, linked[:segments-1], spareSegments(mailbox), "every drained segment must be kept")
+
+	for i := range segments * mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	require.Same(t, linked[0], last.next.Load(), "the first link must take the oldest spare")
+	require.Same(t, linked[1], linked[0].next.Load())
+	require.Same(t, linked[2], linked[1].next.Load())
+	require.Empty(t, spareSegments(mailbox))
+
+	for i := range segments * mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	require.Nil(t, mailbox.Dequeue())
+}
+
+// TestEmbeddedMailboxDropsSparesBeyondTheCap verifies that the spares keep at
+// most mailboxSpareSegments drained segments and leave the rest to the garbage
+// collector.
+func TestEmbeddedMailboxDropsSparesBeyondTheCap(t *testing.T) {
+	const segments = mailboxSpareSegments + 3
+	mailbox := newEmbeddedMailbox()
+	for i := range segments * mailboxSegmentSlots {
+		mailbox.put(context.Background(), nil, i)
+	}
+
+	var linked []*mailboxSegment
+	for segment := mailbox.mailboxHead.Load(); segment != nil; segment = segment.next.Load() {
+		linked = append(linked, segment)
+	}
+	require.Len(t, linked, segments)
+
+	for i := range segments * mailboxSegmentSlots {
+		require.Equal(t, i, mailbox.Dequeue().Message())
+	}
+
+	// the last segment stays as the tail; of the others, the first
+	// mailboxSpareSegments are kept and the rest dropped
+	require.Equal(t, linked[:mailboxSpareSegments], spareSegments(mailbox))
+	require.False(t, mailbox.embedded.offerSpare(new(mailboxSegment)), "a full ring must refuse")
+
+	require.NotNil(t, mailbox.embedded.takeSpare())
+	require.True(t, mailbox.embedded.offerSpare(linked[0]), "a pop must make room")
+}
+
+// TestEmbeddedMailboxSteadyBacklogAllocatesNothing verifies that an actor whose
+// backlog repeatedly spans several segments allocates no segment once the
+// spares hold them, which is what keeps a busy actor off the garbage
+// collector.
+func TestEmbeddedMailboxSteadyBacklogAllocatesNothing(t *testing.T) {
+	const backlog = 100 // what a client keeps in flight in BenchmarkTellPingPong
+	mailbox := newEmbeddedMailbox()
+	cycle := func() {
+		for i := range backlog {
+			mailbox.put(context.Background(), nil, i)
+		}
+
+		for range backlog {
+			mailbox.Dequeue()
+		}
+	}
+
+	cycle() // links the segments the backlog needs
+	require.Zero(t, testing.AllocsPerRun(20, cycle))
 }

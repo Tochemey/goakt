@@ -1,1 +1,6 @@
 # Unreleased
+
+## Performance
+
+- **An actor under steady load no longer allocates mailbox segments.** The default mailbox kept one drained segment for reuse, so a backlog deeper than two segments dropped all but one of the segments it drained and the next burst allocated 2 KiB segments again: a `BenchmarkTellPingPong` client with 100 messages in flight allocated 20 B per message, which kept the garbage collector running about 250 times a second. The mailbox now keeps up to 32 drained segments and reuses them oldest first, so that benchmark allocates nothing per message at 100 and at 1,000 messages in flight. The ring of spares is allocated the first time an actor drains a segment it cannot rewind, so an actor whose backlog never exceeds one segment keeps paying nothing for it, and one whose backlog once exceeded two segments retains at most 64 KiB of spare segments.
+- **Spawning an actor is about 2.5× faster.** Validating an actor address compiled its name pattern on every call, four times per spawn and twice more per ancestor of a child, which was two thirds of the allocations of a spawn. The pattern is now compiled once. On an 8-core arm64 machine a top-level `Spawn` takes 7 µs, 4.6 KB and 75 allocations, from 17–19 µs, 16.2 KB and 239; a child of a parent twenty levels deep takes 22 µs, from 102 µs.
