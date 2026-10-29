@@ -4709,10 +4709,8 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		}
 	}
 
+	// newPID validates the address
 	addr := x.actorAddress(name)
-	if err := addr.Validate(); err != nil {
-		return nil, err
-	}
 
 	// define the pid options
 	// pid inherit the actor system settings defined during instantiation

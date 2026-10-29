@@ -52,6 +52,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -116,6 +117,14 @@ type Address struct {
 	// construction, before cachedStr, which is built from it.
 	cachedQualifiedName string
 	cachedStr           string // eagerly computed at construction; String() is a pure read
+
+	// validateOnce memoises Validate's result. Every field is set at
+	// construction and never changes, so the outcome is fixed for the
+	// lifetime of the address. Validate recurses into the parent, so without
+	// the memo a child spawn re-validated every ancestor already validated
+	// at its own spawn.
+	validateOnce sync.Once
+	validateErr  error
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -487,6 +496,15 @@ func (x *Address) Validate() error {
 	if x == nil || x.Equals(NoSender()) {
 		return nil
 	}
+
+	x.validateOnce.Do(func() { x.validateErr = x.validate() })
+	return x.validateErr
+}
+
+// validate runs the validation chain over the address and, when it has a
+// parent, over the parent and the relation between the two. Validate memoises
+// its result, so it runs once per address.
+func (x *Address) validate() error {
 	verr := validation.
 		New(validation.FailFast()).
 		AddValidator(validation.NewTCPAddressValidator(net.JoinHostPort(x.Host(), strconv.Itoa(x.Port())))).

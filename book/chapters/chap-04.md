@@ -106,7 +106,7 @@ In cluster mode step 3 runs first, and it finds this node's own live record and 
 **Step 5. Build the PID.** `configPID` (`actor/actor_system.go`) turns the spawn config into PID options and calls `newPID`. In order:
 
 1. Reject a reserved name.
-2. Mint the address with a fresh incarnation ID (`actorAddress`, `actor/actor_system.go`) and validate it.
+2. Mint the address with a fresh incarnation ID (`actorAddress`, `actor/actor_system.go`); `newPID` validates it.
 3. Inherit system settings: init retries, init timeout, remoting, passivation manager, metrics.
 4. Fall back to the system's default supervisor when none was given (`actorSystem.configPID` in `actor/actor_system.go`).
 5. Fall back to the system's default passivation strategy (two minutes idle), or to long-lived for reliable-delivery endpoints (`actorSystem.configPID` in `actor/actor_system.go`).
@@ -253,6 +253,8 @@ The incarnation ID tells two lives of the same name apart: it fences registry wr
 - A name of at most 255 characters (`maxNameLength` in `internal/address/address.go`) matching `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$` (`namePattern` in `internal/address/address.go`). Dots are allowed, though the error message does not mention them (`errInvalidNamePattern` in `internal/address/address.go`).
 - A valid incarnation UUID.
 - For a child: the same system, host and port as its parent, and a name different from its parent's own name (`Address.Validate` in `internal/address/address.go`). A grandchild may reuse its grandparent's name.
+
+An address is validated once. `Validate` memoises its result (`validateOnce` in `internal/address/address.go`), and a child's validation, which recurses into its parent, reads the parent's memoised result rather than re-validating every ancestor; that is what keeps the cost of a child spawn from growing with its depth. `configPID` does not validate the address itself, `newPID` does (`actor/actor_system.go`, `actor/pid.go`).
 
 The pattern is matched against `strings.TrimSpace(name)` but the name is kept as given (`Address.Validate` in `internal/address/address.go`). A name with a trailing space is accepted, becomes part of the address, and cannot be found by its trimmed form. `Spawn`'s comment documents it and tells callers to trim names that come from input (`actor/spawn.go`).
 

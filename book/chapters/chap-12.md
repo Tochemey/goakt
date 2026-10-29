@@ -35,7 +35,7 @@ An extension is anything with an `ID() string` (`Extension` in `extension/extens
 trimmed := strings.TrimSpace(v.id)
 return New(FailFast()).
 	AddAssertion(len(trimmed) > 1 && len(trimmed) <= 255, "invalid id").
-	AddValidator(NewPatternValidator("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", trimmed, ...)).
+	AddValidator(NewRegexpValidator(idRegexp, trimmed, ...)).
 ```
 
 Two consequences, which the interface's comment states (`Extension` in `extension/extension.go`):

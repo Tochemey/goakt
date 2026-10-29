@@ -28,6 +28,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
 )
@@ -41,6 +42,21 @@ func TestAddressValidate(t *testing.T) {
 	t.Run("Valid address passes", func(t *testing.T) {
 		addr := New("name", "system", "host", 1234)
 		assert.NoError(t, addr.Validate())
+	})
+
+	t.Run("Validate returns the same result on every call", func(t *testing.T) {
+		addr := New("$omeN@me", "system", "host", 1234)
+		first := addr.Validate()
+		require.Error(t, first)
+		require.Same(t, first, addr.Validate())
+	})
+
+	t.Run("Validate allocates nothing after the first call", func(t *testing.T) {
+		parent := New("parent", "system", "host", 1234)
+		child := NewWithParent("child", "system", "host", 1234, parent)
+		require.NoError(t, child.Validate())
+		assert.Zero(t, testing.AllocsPerRun(100, func() { _ = child.Validate() }))
+		assert.Zero(t, testing.AllocsPerRun(100, func() { _ = parent.Validate() }))
 	})
 
 	t.Run("Invalid TCP endpoint", func(t *testing.T) {
