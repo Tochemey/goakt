@@ -2928,8 +2928,11 @@ func (pid *PID) init(ctx context.Context) error {
 	pid.setState(runningState, true)
 	pid.getLogger().Debugf("actor=%s initialization successful", pid.Name())
 
-	if pid.getEventsStream() != nil {
-		pid.getEventsStream().Publish(eventsTopic, NewActorStarted(pid.Path()))
+	// The event is built only when someone is subscribed: the stream drops a
+	// message published to a topic without subscribers, so building one for
+	// it would be an allocation per spawn for nothing.
+	if stream := pid.getEventsStream(); stream != nil && stream.SubscribersCount(eventsTopic) > 0 {
+		stream.Publish(eventsTopic, NewActorStarted(pid.Path()))
 	}
 
 	return nil

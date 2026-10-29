@@ -10341,3 +10341,38 @@ func TestInitRetriesPreStart(t *testing.T) {
 		assert.Less(t, actor.attempts.Load(), int32(50))
 	})
 }
+
+func TestInitPublishesActorStarted(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// started before anyone listens: no event is built for it
+	unobserved, err := actorSystem.Spawn(ctx, "unobserved", NewMockActor())
+	require.NoError(t, err)
+
+	consumer, err := actorSystem.Subscribe()
+	require.NoError(t, err)
+
+	observed, err := actorSystem.Spawn(ctx, "observed", NewMockActor())
+	require.NoError(t, err)
+
+	var started []string
+	require.Eventually(t, func() bool {
+		select {
+		case message := <-consumer.Iterator():
+			if event, ok := message.Payload().(*ActorStarted); ok {
+				started = append(started, event.ActorPath().String())
+			}
+		default:
+		}
+
+		return len(started) > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.NoError(t, actorSystem.Unsubscribe(consumer))
+	assert.Contains(t, started, observed.Path().String())
+	assert.NotContains(t, started, unobserved.Path().String())
+}
