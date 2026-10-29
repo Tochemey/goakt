@@ -79,7 +79,7 @@ The function body is short (`actorSystem.Spawn` in `actor/spawn.go`), and each l
 
 **Step 1. Preconditions.** The system must be running (`ErrActorSystemNotStarted`), and the spawn options must validate (`actorSystem.Spawn` in `actor/spawn.go`). Options are defined in `newSpawnConfig`; relocatable is the only one on by default (`actor/spawn_option.go`).
 
-**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `singleflight.Group`: concurrent spawns of the same name join one execution and share its result. The key comes from `actorReference`, which builds the address without minting an incarnation ID, so it is the same for every caller (`actor/actor_system.go`).
+**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `singleflight.Group`: concurrent spawns of the same name join one execution and share its result. The key is the string of the address `Spawn` mints for the actor (`actorAddress` in `actor/actor_system.go`); the string carries no incarnation ID, so it is the same for every caller, and the call that spawns hands that same address to `configPIDAt` instead of minting a second one.
 
 The function's comment (`actorSystem.runSpawnActivation` in `actor/spawn.go`) spells out three subtleties:
 
@@ -237,7 +237,7 @@ An address has five parts plus an incarnation ID (`Address` in `internal/address
 goakt://<system>@<host>:<port>/<ancestor>/.../<name>
 ```
 
-(`Address.String` in `internal/address/address.go`). The part after `host:port` is the **qualified name**: every ancestor's name from the top-level actor down, joined by `/` (`Address.buildQualifiedName` in `internal/address/address.go`). The qualified name is the key the cluster registry uses (`Address.QualifiedName` in `internal/address/address.go`). The address tests check the qualified name of top-level, child and nested actors (`TestAddress` in `internal/address/address_test.go`).
+(`Address.String` in `internal/address/address.go`). The part after `host:port` is the **qualified name**: every ancestor's name from the top-level actor down, joined by `/`, built by extending the parent's own qualified name, which every constructor computes before a child can be built on it (`Address.buildQualifiedName` in `internal/address/address.go`). The qualified name is the key the cluster registry uses (`Address.QualifiedName` in `internal/address/address.go`). The address tests check the qualified name of top-level, child and nested actors (`TestAddress` in `internal/address/address_test.go`).
 
 Two kinds of constructor exist on purpose:
 

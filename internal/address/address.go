@@ -332,15 +332,13 @@ func (x *Address) String() string {
 // ancestor name from the root down and the actor name, joined by '/'. Called
 // once at construction time so that QualifiedName() is a pure read.
 func (x *Address) buildQualifiedName() string {
-	// the chain is walked from the parent up, so the names are collected
-	// nearest first and reversed to read from the root down
-	names := []string{x.Name()}
-	for parent := x.Parent(); parent != nil && !parent.Equals(NoSender()); parent = parent.Parent() {
-		names = append(names, parent.Name())
+	parent := x.Parent()
+	if parent == nil || parent.Equals(NoSender()) {
+		return x.Name()
 	}
 
-	slices.Reverse(names)
-	return JoinNames(names...)
+	// the parent's qualified name already reads from the root down to it
+	return parent.QualifiedName() + qualifiedNameSeparator + x.Name()
 }
 
 // JoinNames returns the qualified name formed by names: the names of an actor's

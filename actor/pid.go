@@ -2901,7 +2901,10 @@ func (pid *PID) effectiveInitTimeout() time.Duration {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.getLogger().Debugf("initialization process started for actor %s", pid.Name())
+	logger := pid.getLogger()
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("initialization process started for actor %s", pid.Name())
+	}
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
@@ -2912,7 +2915,7 @@ func (pid *PID) init(ctx context.Context) error {
 	if err := pid.actor.PreStart(initContext); err != nil {
 		if err = pid.retryPreStart(ctx, initContext, started, err); err != nil {
 			e := gerrors.NewErrInitFailure(err)
-			pid.getLogger().Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
+			logger.Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
 			return e
 		}
 	}
@@ -2926,7 +2929,9 @@ func (pid *PID) init(ctx context.Context) error {
 	// PostStart first.
 	pid.armPostStart(ctx)
 	pid.setState(runningState, true)
-	pid.getLogger().Debugf("actor=%s initialization successful", pid.Name())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s initialization successful", pid.Name())
+	}
 
 	// The event is built only when someone is subscribed: the stream drops a
 	// message published to a topic without subscribers, so building one for

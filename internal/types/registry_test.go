@@ -23,9 +23,11 @@
 package types
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type testStruct struct {
@@ -79,4 +81,15 @@ func TestNameOf(t *testing.T) {
 		var typed *testStruct
 		assert.Equal(t, "types.teststruct", NameOf(typed))
 	})
+}
+
+func TestNameIsCachedPerType(t *testing.T) {
+	// The type name has upper-case letters, so lower-casing it allocates
+	// unless the name comes from the cache.
+	type CachedKind struct{}
+
+	first := Name(&CachedKind{})
+	require.Equal(t, "types.cachedkind", first)
+	require.Equal(t, first, Name(reflect.TypeOf(CachedKind{})))
+	assert.Zero(t, testing.AllocsPerRun(100, func() { _ = Name(&CachedKind{}) }))
 }

@@ -29,6 +29,11 @@ import (
 	"github.com/tochemey/goakt/v4/internal/xsync"
 )
 
+// typeNames caches the registry name of every type Name has been asked for.
+// Deriving the name lower-cases the reflected type name, which allocates on
+// every call, and a type's name never changes, so each type pays for it once.
+var typeNames = xsync.NewMap[reflect.Type, string]()
+
 // UnknownName is the type name reported for a value whose runtime type cannot
 // be determined, which in practice means a nil value.
 const UnknownName = "unknown"
@@ -113,7 +118,14 @@ func reflectType(v any) reflect.Type {
 
 // Name returns the type name of a given object
 func Name(v any) string {
-	return lowTrim(reflectType(v).String())
+	rtype := reflectType(v)
+	if name, ok := typeNames.Get(rtype); ok {
+		return name
+	}
+
+	name := lowTrim(rtype.String())
+	typeNames.Set(rtype, name)
+	return name
 }
 
 // NameOf returns the type name of a given value the way Name does, but accepts

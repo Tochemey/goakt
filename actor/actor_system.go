@@ -4689,6 +4689,12 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
 func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	return x.configPIDAt(ctx, x.actorAddress(name), actor, opts...)
+}
+
+// configPIDAt constructs a PID at addr, an address this system minted for the
+// actor, from the actor kind and the spawn options.
+func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, actor Actor, opts ...SpawnOption) (*PID, error) {
 	spawnConfig := newSpawnConfig(opts...)
 	if err := spawnConfig.Validate(); err != nil {
 		return nil, err
@@ -4704,14 +4710,12 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	if !spawnConfig.isSystem {
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
-		if isSystemName(name) {
+		if isSystemName(addr.Name()) {
 			return nil, gerrors.ErrReservedName
 		}
 	}
 
 	// newPID validates the address
-	addr := x.actorAddress(name)
-
 	supervisor := spawnConfig.supervisor
 	if supervisor == nil {
 		supervisor = x.defaultSupervisor
