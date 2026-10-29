@@ -2,6 +2,10 @@
 
 Run from the repository root.
 
+### Reading the numbers on Apple silicon
+
+Run every benchmark with `-count=10` and read the median, not the best or the last round. On an M1 the rounds of a steady-state benchmark differ by 20 to 30 percent with no change in the code: the chip has four performance and four efficiency cores, Go runs one worker thread per processor, and macOS places some of those threads on efficiency cores, which run this code two to three times slower. A round where a busy worker landed on an efficiency core is the low one. With tracing on, the garbage collector runs the same four or five times in a low round as in a high one, all during setup, and the measured loops below are at 0 B/op, so the collector is not the cause. The signature is visible with `GOMAXPROCS=4`: the 1,000 in-flight ping-pong then runs at either 94 to 96M or 81 to 85M messages/sec, two levels and nothing between, and beats the eight-processor median of 86M because the efficiency cores add cross-core traffic faster than compute. For a stable single number on such a machine, pin `GOMAXPROCS` to the performance-core count.
+
 ### Tell — async send, parallel
 
 All producers race on a single receiver, so the reported rate is bounded by that one consumer's drain rate. Use the pair benchmarks below for send-path contention and aggregate scaling.
