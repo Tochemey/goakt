@@ -51,6 +51,17 @@ func TestAddressValidate(t *testing.T) {
 		require.Same(t, first, addr.Validate())
 	})
 
+	t.Run("the first validation allocates only the host:port string", func(t *testing.T) {
+		allocs := testing.AllocsPerRun(100, func() {
+			require.NoError(t, New("name", "system", "host", 1234).Validate())
+		})
+		// New itself makes four allocations: the address, its incarnation ID
+		// and its two cached strings. The validation adds two, the port and
+		// the host:port strings the TCP check parses; it was fourteen when the
+		// rules were chained through validator objects.
+		assert.LessOrEqual(t, allocs, 6.0)
+	})
+
 	t.Run("Validate allocates nothing after the first call", func(t *testing.T) {
 		parent := New("parent", "system", "host", 1234)
 		child := NewWithParent("child", "system", "host", 1234, parent)
