@@ -103,7 +103,7 @@ The first row means a repeated `Spawn` of a running name is a lookup. The actor 
 
 In cluster mode step 3 runs first, and it finds this node's own live record and reports the name as taken. The same call therefore returns `ErrActorAlreadyExists` instead of the PID. This is deliberate: in a cluster a name identifies one actor across all nodes, the test suite expects the error for a same-node re-spawn (`TestSpawn` in `actor/spawn_test.go`), and the `Spawn` comment says to use `ActorOf` to get the running actor (`actor/spawn.go`).
 
-**Step 5. Build the PID.** `configPID` (`actor/actor_system.go`) turns the spawn config into PID options and calls `newPID`. In order:
+**Step 5. Build the PID.** `configPID` (`actor/actor_system.go`) turns the spawn config into one `pidSettings` value, the settings every actor inherits from its system, plus a `pidOption` for each thing this spawn adds, and calls `newPID` (`actor/pid_option.go`, `actor/pid.go`). The settings travel as one value so that a spawn allocates no closure per setting. In order:
 
 1. Reject a reserved name.
 2. Mint the address with a fresh incarnation ID (`actorAddress`, `actor/actor_system.go`); `newPID` validates it.
@@ -130,9 +130,9 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 `newPID` (`actor/pid.go`):
 
 1. Validates the address and allocates the struct, with a context-pool shard chosen round-robin so that concurrently busy actors take contexts from different pool shards (`newPID` in `actor/pid.go`).
-2. Sets the `relocationState` bit (relocatable unless an option clears it), then applies the options.
+2. Sets the `relocationState` bit (relocatable unless the settings clear it), then applies the settings and the options in that order (`pidSettings.apply` in `actor/pid_option.go`).
 3. **Embeds the default mailbox in the PID.** Without a custom mailbox, `newPID` allocates the mailbox's small `embeddedMailboxState`, which holds the actor's turn context, and `pid.mailbox` becomes the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). The PID's own `mailboxHead`/`mailboxTail` pointers stay nil until the first message brings the first segment. [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox) covers this.
-4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
+4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildSettings` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
 7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry (`PID.firePostStart` in `actor/pid.go`), and `attachSystemActor` does the same for system actors.
@@ -280,17 +280,17 @@ Two properties of `PID.Equals`:
 3. Resolves an existing child the same way `nameResolver` does.
 4. Runs the same `singleflight` serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, watched by the death watch, and in cluster mode **published to the registry under its qualified name**.
 
-The difference is the option list. `buildChildOptions` (`actor/pid.go`) passes the parent's runtime wiring, then the child's spawn options:
+The difference is what the child inherits. `buildChildSettings` (`actor/pid.go`) passes the parent's runtime wiring as the child's `pidSettings`, then the child's spawn options:
 
 | Option | Top-level spawn | Child spawn |
 |---|---|---|
 | `WithMailbox`, `WithSupervisor`, `WithStashing`, `WithReentrancy`, `WithDependencies`, passivation strategy, `WithInitTimeout` | applied | applied |
-| Supervisor when none given | the system's `WithDefaultSupervisor` | the same (`PID.buildChildOptions` in `actor/pid.go`) |
-| Relocation | relocatable by default | **always disabled** (`PID.buildChildOptions` in `actor/pid.go`) |
+| Supervisor when none given | the system's `WithDefaultSupervisor` | the same (`PID.buildChildSettings` in `actor/pid.go`) |
+| Relocation | relocatable by default | **always disabled** (`PID.buildChildSettings` in `actor/pid.go`) |
 | `WithRole` | applied | **no effect**: a role only constrains placement, and a child is always placed on its parent's node |
 | `AsReliableProducer`, `AsReliableConsumer` | applied | **rejected** with `ErrReliableChildSpawnUnsupported` (`PID.SpawnChild` in `actor/pid.go`) |
 
-`SpawnChild`'s comment states the supervisor, `WithRole` and reliable-delivery rows (`actor/pid.go`). The relocation row comes from `withRelocationDisabled` in `PID.buildChildOptions`. A reliable-delivery endpoint needs a controller that only a top-level spawn creates, and the remote child spawn request cannot carry its settings, so the option is refused rather than accepted without effect.
+`SpawnChild`'s comment states the supervisor, `WithRole` and reliable-delivery rows (`actor/pid.go`). The relocation row comes from the `relocationDisabled` setting in `PID.buildChildSettings`. A reliable-delivery endpoint needs a controller that only a top-level spawn creates, and the remote child spawn request cannot carry its settings, so the option is refused rather than accepted without effect.
 
 The test suite checks the supervisor and reentrancy rows (`TestSpawnChildInheritsSpawnOptions` in `actor/pid_test.go`) and the rejection of a reliable child (`TestReliableEndpointLocalChildSpawnRejected` in `actor/reliable_delivery_companion_test.go`).
 

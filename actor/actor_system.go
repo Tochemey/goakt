@@ -4712,33 +4712,30 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	// newPID validates the address
 	addr := x.actorAddress(name)
 
-	// define the pid options
-	// pid inherit the actor system settings defined during instantiation
-	pidOpts := []pidOption{
-		withInitMaxRetries(x.actorInitMaxRetries),
-		withActorSystem(x),
-		withInitTimeout(spawnConfig.initTimeout),
-		withRemoting(x.remoting),
-		withPassivationManager(x.passivator),
-		withMetricProvider(x.metricProvider),
-	}
-
-	// set the actor as a system actor when necessary
-	if spawnConfig.isSystem {
-		pidOpts = append(pidOpts, asSystemActor())
-	}
-
-	// set the mailbox option
-	if spawnConfig.mailbox != nil {
-		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
-	}
-
 	supervisor := spawnConfig.supervisor
 	if supervisor == nil {
 		supervisor = x.defaultSupervisor
 	}
-	if supervisor != nil {
-		pidOpts = append(pidOpts, withSupervisor(supervisor))
+
+	// the settings every actor inherits from the system travel as one value;
+	// the options below carry what this spawn config adds
+	settings := pidSettings{
+		actorSystem:        x,
+		initMaxRetries:     x.actorInitMaxRetries,
+		initTimeout:        spawnConfig.initTimeout,
+		remoting:           x.remoting,
+		passivationManager: x.passivator,
+		metricProvider:     x.metricProvider,
+		supervisor:         supervisor,
+		mailbox:            spawnConfig.mailbox,
+		relocationDisabled: !spawnConfig.relocatable,
+	}
+
+	var pidOpts []pidOption
+
+	// set the actor as a system actor when necessary
+	if spawnConfig.isSystem {
+		pidOpts = append(pidOpts, asSystemActor())
 	}
 
 	// define the actor as singleton when necessary
@@ -4748,10 +4745,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		// no need to check for nil because it is always set when the actor is a singleton
 		// and it is not possible to spawn a singleton actor without a singleton spec
 		pidOpts = append(pidOpts, withSingletonSpec(spawnConfig.singletonSpec))
-	}
-
-	if !spawnConfig.relocatable {
-		pidOpts = append(pidOpts, withRelocationDisabled())
 	}
 
 	// enable stash
@@ -4810,19 +4803,9 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 			strategy = x.defaultPassivationStrategy
 		}
 	}
-	pidOpts = append(pidOpts, withPassivationStrategy(strategy))
+	settings.passivationStrategy = strategy
 
-	pid, err := newPID(
-		ctx,
-		addr,
-		actor,
-		pidOpts...,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-	return pid, nil
+	return newPID(ctx, addr, actor, &settings, pidOpts...)
 }
 
 // tree returns the actors tree

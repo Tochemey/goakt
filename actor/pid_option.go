@@ -37,6 +37,33 @@ import (
 // pidOption represents the pid
 type pidOption func(pid *PID)
 
+// pidSettings are the settings every spawn hands to a PID: the ones a
+// top-level actor inherits from its system and a child from its parent. They
+// travel as one value and newPID applies them before the pidOptions, so a
+// spawn does not allocate one closure per setting. A field left nil or zero
+// is applied as the matching pidOption would apply it, except where the
+// comment says the field is skipped when unset.
+type pidSettings struct {
+	actorSystem    ActorSystem
+	initMaxRetries int
+	// initTimeout is the explicit init timeout override, nil to inherit the
+	// system default at initialization (see withInitTimeout).
+	initTimeout        *time.Duration
+	remoting           remoteclient.Client
+	passivationManager *passivationManager
+	// metricProvider is skipped when nil (see withMetricProvider).
+	metricProvider *metric.Provider
+	// supervisor is skipped when nil; newPID then installs the default.
+	supervisor *supervisor.Supervisor
+	// mailbox is the custom mailbox, skipped when nil so that newPID
+	// embeds the default one.
+	mailbox             Mailbox
+	passivationStrategy passivation.Strategy
+	// relocationDisabled clears the relocation bit that newPID sets by
+	// default (see withRelocationDisabled).
+	relocationDisabled bool
+}
+
 // withReliableDelivery records immutable reliable-delivery settings.
 func withReliableDelivery(config *reliableDeliveryConfig) pidOption {
 	return func(pid *PID) {
@@ -70,67 +97,10 @@ func withDurableWorkQueue(queue DurableWorkQueue) pidOption {
 	}
 }
 
-// withInitMaxRetries sets the number of times to retry an actor init process
-func withInitMaxRetries(value int) pidOption {
-	return func(pid *PID) {
-		pid.initMaxRetries.Store(int32(value))
-	}
-}
-
-// withActorSystem set the actor system of the pid and caches the
-// concrete *actorSystem's dispatcher on the PID for the hot-path
-// enqueue. Remote PIDs pass a nil dispatcher because remoting has its
-// own delivery path that never calls the local dispatcher.
-func withActorSystem(sys ActorSystem) pidOption {
-	return func(pid *PID) {
-		pid.actorSystem = sys
-		if as, ok := sys.(*actorSystem); ok {
-			pid.dispatcher = as.dispatcher
-		}
-	}
-}
-
-// withSupervisor defines the supervisor
-func withSupervisor(supervisor *supervisor.Supervisor) pidOption {
-	return func(pid *PID) {
-		pid.supervisor = supervisor
-	}
-}
-
 // withStash sets the actor's stash buffer
 func withStash() pidOption {
 	return func(pid *PID) {
 		pid.stashState.Store(&stashState{box: NewUnboundedMailbox()})
-	}
-}
-
-// withMailbox sets the custom actor mailbox
-func withMailbox(box Mailbox) pidOption {
-	return func(pid *PID) {
-		pid.mailbox = box
-	}
-}
-
-// withInitTimeout sets an explicit init timeout override on the actor. A nil
-// override leaves the actor inheriting the actor system's default, resolved at
-// initialization; a non-nil override is carried through relocation.
-func withInitTimeout(override *time.Duration) pidOption {
-	return func(pid *PID) {
-		pid.initTimeout.Store(override)
-	}
-}
-
-// withRemoting set the remoting feature
-func withRemoting(remoting remoteclient.Client) pidOption {
-	return func(pid *PID) {
-		pid.remoting = remoting
-	}
-}
-
-// withPassivationManager sets the passivation manager responsible for scheduling inactivity checks.
-func withPassivationManager(manager *passivationManager) pidOption {
-	return func(pid *PID) {
-		pid.passivationManager = manager
 	}
 }
 
@@ -150,13 +120,6 @@ func withSingletonSpec(spec *singletonSpec) pidOption {
 	}
 }
 
-// withRelocationDisabled disables the actor relocation
-func withRelocationDisabled() pidOption {
-	return func(pid *PID) {
-		pid.setState(relocationState, false)
-	}
-}
-
 // withDependencies configures an actor's PID with specified external dependencies.
 // It takes a variadic list of Dependency interfaces to associate with the actor.
 func withDependencies(dependencies ...extension.Dependency) pidOption {
@@ -167,15 +130,6 @@ func withDependencies(dependencies ...extension.Dependency) pidOption {
 		for _, dependency := range dependencies {
 			pid.dependencies.Set(dependency.ID(), dependency)
 		}
-	}
-}
-
-// withPassivationStrategy sets the PID passivation strategy
-func withPassivationStrategy(strategy passivation.Strategy) pidOption {
-	return func(pid *PID) {
-		pid.passivationStrategy = strategy
-		_, isMsgCount := strategy.(*passivation.MessagesCountBasedStrategy)
-		pid.msgCountPassivation.Store(isMsgCount)
 	}
 }
 
@@ -203,11 +157,49 @@ func withRole(role string) pidOption {
 	}
 }
 
-// withMetricProvider sets the metric provider for the PID
-func withMetricProvider(metricProvider *metric.Provider) pidOption {
-	return func(pid *PID) {
-		if metricProvider != nil {
-			pid.attachCompanion().metricProvider = metricProvider
-		}
+// apply sets the settings on pid, each exactly as its pidOption would.
+func (s *pidSettings) apply(pid *PID) {
+	pid.initMaxRetries.Store(int32(s.initMaxRetries))
+	pid.setActorSystem(s.actorSystem)
+	pid.initTimeout.Store(s.initTimeout)
+	pid.remoting = s.remoting
+	pid.passivationManager = s.passivationManager
+
+	if s.metricProvider != nil {
+		pid.attachCompanion().metricProvider = s.metricProvider
 	}
+
+	if s.supervisor != nil {
+		pid.supervisor = s.supervisor
+	}
+
+	if s.mailbox != nil {
+		pid.mailbox = s.mailbox
+	}
+
+	if s.relocationDisabled {
+		pid.setState(relocationState, false)
+	}
+
+	pid.setPassivationStrategy(s.passivationStrategy)
+}
+
+// setActorSystem sets the actor system of the pid and caches the concrete
+// *actorSystem's dispatcher on the PID for the hot-path enqueue. Remote PIDs
+// pass a nil dispatcher because remoting has its own delivery path that never
+// calls the local dispatcher.
+func (pid *PID) setActorSystem(sys ActorSystem) {
+	pid.actorSystem = sys
+	if as, ok := sys.(*actorSystem); ok {
+		pid.dispatcher = as.dispatcher
+	}
+}
+
+// setPassivationStrategy sets the PID passivation strategy and records
+// whether it is message-count based, which the message path reads instead of
+// a type switch.
+func (pid *PID) setPassivationStrategy(strategy passivation.Strategy) {
+	pid.passivationStrategy = strategy
+	_, isMsgCount := strategy.(*passivation.MessagesCountBasedStrategy)
+	pid.msgCountPassivation.Store(isMsgCount)
 }

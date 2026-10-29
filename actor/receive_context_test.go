@@ -1046,12 +1046,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		childPath := address.New("child", "sys", "127.0.0.1", ports[0])
-		child, err := newPID(
-			ctx, childPath,
-			NewMockSupervisor(),
-			withInitMaxRetries(1),
-			withActorSystem(actorSystem),
-		)
+		child, err := newPID(ctx, childPath, NewMockSupervisor(), &pidSettings{actorSystem: actorSystem, initMaxRetries: 1})
 
 		require.NoError(t, err)
 

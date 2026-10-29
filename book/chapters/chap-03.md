@@ -132,7 +132,7 @@ Fifteen steps run through `internal/chain` in fail-fast mode: the first error st
 
 The order encodes real dependencies:
 
-- The remoting client (step 1) is built before any actor because every PID is constructed with it (`withRemoting(x.remoting)`, `actorSystem.configPID` in `actor/actor_system.go`).
+- The remoting client (step 1) is built before any actor because every PID is constructed with it (the `remoting` field of `pidSettings` in `actor/pid_option.go`, filled by `actorSystem.configPID` in `actor/actor_system.go`).
 - Every system actor exists (steps 3 to 11) before the remote server starts accepting requests (step 12), and the remote server runs before the node joins the cluster (step 13). Nothing can reach this node before it can answer.
 - `startCluster` seeds the peer-port cache before starting the events loop, so a member that later crashes can still be resolved (`actor/actor_system.go`).
 

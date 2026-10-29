@@ -344,8 +344,10 @@ var (
 	_ schedulable            = (*PID)(nil)
 )
 
-// newPID creates a new pid
-func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...pidOption) (*PID, error) {
+// newPID creates a new pid. settings, when not nil, are applied first, then
+// opts in order; a spawn passes the settings every actor gets as one value
+// and keeps opts for what its spawn config adds.
+func newPID(ctx context.Context, address *address.Address, actor Actor, settings *pidSettings, opts ...pidOption) (*PID, error) {
 	// actor address is required
 	if address == nil {
 		return nil, errors.New("address is required")
@@ -375,6 +377,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.mailboxEnqueued.Store(0)
 	pid.mailboxDequeued.Store(0)
 	pid.setState(relocationState, true)
+
+	if settings != nil {
+		settings.apply(pid)
+	}
 
 	for _, opt := range opts {
 		opt(pid)
@@ -3011,8 +3017,8 @@ func (pid *PID) reset() {
 
 	// Note: singletonState and relocationState are deliberately left untouched as
 	// well: both are spawn-time configuration applied once by newPID through
-	// asSingleton and withRelocationDisabled. The restart path re-runs init()
-	// on the same PID without re-applying options, so flipping them back to
+	// asSingleton and the relocationDisabled setting. The restart path re-runs
+	// init() on the same PID without re-applying them, so flipping them back to
 	// their defaults here turned a WithRelocationDisabled actor into a
 	// relocatable one after Restart, and a stopped PID awaiting DeathWatch
 	// cleanup reported the wrong configuration to IsRelocatable, IsSingleton,
@@ -4198,12 +4204,8 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 			_ = pid.ActorSystem().Inject(config.dependencies...)
 		}
 
-		cid, err := newPID(
-			ctx,
-			childAddress,
-			actor,
-			pid.buildChildOptions(config)...,
-		)
+		settings, options := pid.buildChildSettings(config)
+		cid, err := newPID(ctx, childAddress, actor, &settings, options...)
 		if err != nil {
 			return nil, err
 		}
@@ -4244,50 +4246,44 @@ func (pid *PID) childNameResolver(tree *tree, childAddress, name string) (*PID, 
 	return nameResolver(child, name)
 }
 
-// buildChildOptions translates a spawn config into the pidOption list used
-// when materializing a child PID. The parent's runtime wiring (logger, actor
-// system, remoting, passivation manager, etc.) is always inherited; child-specific
-// overrides from config are appended only when set.
-func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
-	pidOptions := []pidOption{
-		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withActorSystem(pid.actorSystem),
-		withInitTimeout(config.initTimeout),
-		withRemoting(pid.remoting),
-		withPassivationManager(pid.passivationManager),
-		withMetricProvider(pid.metricProvider()),
-		withRelocationDisabled(), // by default child is not relocatable
-	}
-
-	if config.mailbox != nil {
-		pidOptions = append(pidOptions, withMailbox(config.mailbox))
-	}
-
-	// a child without a supervisor of its own gets the system's default, as a
-	// top-level actor does
+// buildChildSettings translates a spawn config into the settings a child of
+// pid inherits and the options its spawn config adds. The child inherits the
+// parent's system, remoting, passivation manager, metric provider and init
+// retries, is not relocatable, and gets the system's default supervisor when
+// the config names none, as a top-level actor does.
+func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOption) {
 	supervisor := config.supervisor
 	if supervisor == nil {
 		supervisor = pid.actorSystem.getDefaultSupervisor()
 	}
 
-	if supervisor != nil {
-		pidOptions = append(pidOptions, withSupervisor(supervisor))
+	settings := pidSettings{
+		actorSystem:         pid.actorSystem,
+		initMaxRetries:      int(pid.initMaxRetries.Load()),
+		initTimeout:         config.initTimeout,
+		remoting:            pid.remoting,
+		passivationManager:  pid.passivationManager,
+		metricProvider:      pid.metricProvider(),
+		supervisor:          supervisor,
+		mailbox:             config.mailbox,
+		passivationStrategy: config.passivationStrategy,
+		relocationDisabled:  true, // by default child is not relocatable
 	}
 
+	var options []pidOption
 	if config.enableStash {
-		pidOptions = append(pidOptions, withStash())
+		options = append(options, withStash())
 	}
 
 	if config.reentrancy != nil {
-		pidOptions = append(pidOptions, withReentrancy(config.reentrancy))
+		options = append(options, withReentrancy(config.reentrancy))
 	}
 
 	if config.dependencies != nil {
-		pidOptions = append(pidOptions, withDependencies(config.dependencies...))
+		options = append(options, withDependencies(config.dependencies...))
 	}
 
-	pidOptions = append(pidOptions, withPassivationStrategy(config.passivationStrategy))
-	return pidOptions
+	return settings, options
 }
 
 func (pid *PID) incarnationID() string {

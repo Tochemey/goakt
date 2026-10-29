@@ -45,7 +45,6 @@ func TestPIDCompanionAbsentByDefault(t *testing.T) {
 	pid := &PID{}
 	withSingletonSpec(nil)(pid)
 	withRole("")(pid)
-	withMetricProvider(nil)(pid)
 
 	require.Nil(t, pid.companion)
 	require.Nil(t, pid.reliableDelivery())
@@ -86,7 +85,7 @@ func TestPIDCompanionAccessors(t *testing.T) {
 	withDurableWorkQueue(workQueue)(pid)
 	withSingletonSpec(singleton)(pid)
 	withRole("payments")(pid)
-	withMetricProvider(provider)(pid)
+	pid.attachCompanion().metricProvider = provider
 
 	require.Same(t, companion, pid.companion)
 	require.Equal(t, config, pid.reliableDelivery())

@@ -89,7 +89,7 @@ An actor relocates when it is relocatable, the system has relocation enabled, an
 | Actor | Relocatable | Source |
 |---|---|---|
 | top-level actor from `Spawn` or `SpawnOn` | yes, unless `WithRelocationDisabled` | `newSpawnConfig` and `WithRelocationDisabled` in `actor/spawn_option.go` |
-| child | never: the option is ignored | `PID.buildChildOptions` in `actor/pid.go` |
+| child | never: the option is ignored | `PID.buildChildSettings` in `actor/pid.go` |
 | function actor | never | `actorSystem.SpawnNamedFromFunc` in `actor/spawn.go` |
 | router and its routees | never | `actorSystem.SpawnRouter` in `actor/spawn.go`; `router.spawnRoutees` in `actor/router.go` |
 | system actor | never: reserved names are skipped everywhere | `actorSystem.localActors` in `actor/actor_system.go` |
@@ -469,7 +469,7 @@ The scan reads the actor's relocatable bit from its record and does not consult 
 | Concurrent `HashBased` spawns of one name all reach the owner; the owner's own calls coalesce onto one activation and share its PID, the other nodes' calls get `ErrActorAlreadyExists` | `actorSystem.runSpawnActivation` in `actor/spawn.go` |
 | `LeastLoad` fails the whole spawn if one candidate does not answer | `actorSystem.leastLoadedPeer` in `actor/grain_engine.go` |
 | A custom mailbox is lost by remote placement and by relocation | `WithMailbox` in `actor/spawn_option.go` |
-| Children, function actors and routers never relocate, whatever their options | `PID.buildChildOptions` in `actor/pid.go`; `actorSystem.SpawnNamedFromFunc` and `actorSystem.SpawnRouter` in `actor/spawn.go` |
+| Children, function actors and routers never relocate, whatever their options | `PID.buildChildSettings` in `actor/pid.go`; `actorSystem.SpawnNamedFromFunc` and `actorSystem.SpawnRouter` in `actor/spawn.go` |
 | A relocated actor starts from scratch: `PreStart` again, empty state, empty mailbox, new incarnation | `actorSystem.recreateActorFromWire` in `actor/spawn.go` |
 | A singleton that stops while its host stays in the cluster is not re-created; a coordinator change does not move it | `defaultSingletonSupervisor` in `actor/spawn.go`; `actorSystem.handleClusterEvent` in `actor/actor_system.go` |
 | A singleton claim is never written over by a spawn, even when its node is gone | `actorSystem.departedClaim` in `actor/actor_system.go` |
