@@ -1219,3 +1219,113 @@ func TestWatchersSliceLifecycle(t *testing.T) {
 	require.Empty(t, tree.watchers(watched))
 	require.Nil(t, node.watchers)
 }
+
+func TestNodeByNameOrder(t *testing.T) {
+	newTreeWithRoot := func(t *testing.T) (*tree, *PID) {
+		t.Helper()
+		system, _ := NewActorSystem("TestSys")
+		tree := newTree()
+		root := newPIDAt(system, "root", 1)
+		require.NoError(t, tree.addRootNode(root))
+		t.Cleanup(tree.reset)
+		return tree, root
+	}
+
+	// three children share one name; distinct ports give them distinct IDs
+	addThree := func(t *testing.T, tree *tree, root *PID) (first, second, third *PID) {
+		t.Helper()
+		first = newPIDAt(root.ActorSystem(), "twin", 2)
+		second = newPIDAt(root.ActorSystem(), "twin", 3)
+		third = newPIDAt(root.ActorSystem(), "twin", 4)
+		require.NoError(t, tree.addNode(root, first))
+		require.NoError(t, tree.addNode(root, second))
+		require.NoError(t, tree.addNode(root, third))
+		return first, second, third
+	}
+
+	t.Run("newest wins", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		_, _, third := addThree(t, tree, root)
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the oldest keeps the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, _, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(first))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the middle keeps the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		_, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(second))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the newest falls back to the previous", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(third))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, second.ID(), node.id)
+
+		require.True(t, tree.deleteNode(second))
+		node, ok = tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+
+		require.True(t, tree.deleteNode(first))
+		_, ok = tree.nodeByName("twin")
+		require.False(t, ok)
+	})
+
+	t.Run("re-adding a name after removal becomes the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(third))
+		again := newPIDAt(root.ActorSystem(), "twin", 5)
+		require.NoError(t, tree.addNode(root, again))
+
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, again.ID(), node.id)
+		require.Equal(t, second.ID(), node.namePrev.id)
+		require.Equal(t, first.ID(), node.namePrev.namePrev.id)
+	})
+
+	t.Run("deleting the middle then the newest falls back to the oldest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(second))
+		require.True(t, tree.deleteNode(third))
+
+		// the list must have been relinked around the middle node: a stale link
+		// would make the index fall back to the deleted middle node, and report
+		// the surviving oldest actor as not found
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+		pid, ok := tree.pidByName("twin")
+		require.True(t, ok)
+		require.Same(t, first, pid)
+	})
+
+	t.Run("deleting a node twice is a no-op", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, _, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(first))
+		require.False(t, tree.deleteNode(first))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+		require.EqualValues(t, 3, tree.count())
+	})
+}

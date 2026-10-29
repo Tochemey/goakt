@@ -7000,7 +7000,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 		addPIDNode := func(pid *PID) {
 			node := newPidNode(pid)
 			system.actors.pids[node.id] = node
-			system.actors.names[node.name] = []*pidNode{node}
+			system.actors.names[node.name] = node
 		}
 
 		localAddr := address.New("local", system.name, "127.0.0.1", 8080)
@@ -9559,7 +9559,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 
 		node := newPidNode(companion)
 		system.actors.pids[node.id] = node
-		system.actors.names[node.name] = []*pidNode{node}
+		system.actors.names[node.name] = node
 
 		record := internalpb.Actor_builder{
 			Address: companionAddr.String(),

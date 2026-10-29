@@ -24,7 +24,6 @@ package actor
 
 import (
 	"errors"
-	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -47,9 +46,15 @@ type pidNode struct {
 	// qualifiedName caches pid.qualifiedName(), the node's key in the tree's
 	// qualifiedNames index, so removing the node never reads the PID.
 	qualifiedName string
-	watchers      []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
-	watchees      map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
-	descendants   map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
+	// namePrev and nameNext link the nodes that share this node's name, in
+	// insertion order, so that unlinking a node on removal costs O(1)
+	// whatever the number of actors with the same name. The tree's names
+	// index points at the newest node of each name. Protected by the tree
+	// mutex; use linkNameLocked/removeNameLocked.
+	namePrev, nameNext *pidNode
+	watchers           []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
+	watchees           map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
+	descendants        map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
 }
 
 // value returns the PID stored in the node, or nil if cleared by deleteNode.
@@ -151,9 +156,10 @@ type tree struct {
 	rootNode *pidNode            // Logical root node (its pid may be nil if cleared).
 	pids     map[string]*pidNode // Index: PID.ID() -> pidNode.
 	// names indexes nodes by PID.Name(). A name is unique among siblings only,
-	// so several nodes can share one; they are kept in insertion order and a
-	// lookup by name returns the most recently added node still in the tree.
-	names map[string][]*pidNode
+	// so several nodes can share one; each entry points at the most recently
+	// added node still in the tree, and the nodes of a name form a linked
+	// list in insertion order through pidNode.namePrev/nameNext.
+	names map[string]*pidNode
 	// qualifiedNames indexes nodes by the qualified name of their actor, its
 	// ancestors' names and its own joined by '/'. Every node shares this
 	// system's host and port, so the qualified name identifies a node as
@@ -169,7 +175,7 @@ type tree struct {
 func newTree() *tree {
 	return &tree{
 		pids:           make(map[string]*pidNode),
-		names:          make(map[string][]*pidNode),
+		names:          make(map[string]*pidNode),
 		qualifiedNames: make(map[string]*pidNode),
 		rootNode:       newPidNode(nil),
 	}
@@ -206,7 +212,7 @@ func (x *tree) addRootNode(pid *PID) error {
 	x.rootNode.name = name
 	x.rootNode.qualifiedName = pid.qualifiedName()
 	x.pids[id] = x.rootNode
-	x.names[name] = append(x.names[name], x.rootNode)
+	x.linkNameLocked(x.rootNode)
 	x.qualifiedNames[x.rootNode.qualifiedName] = x.rootNode
 	x.counter.Add(1)
 	return nil
@@ -268,7 +274,7 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 	putWatcher(&childNode.watchers, parent)
 
 	x.pids[id] = childNode
-	x.names[name] = append(x.names[name], childNode)
+	x.linkNameLocked(childNode)
 	x.qualifiedNames[childNode.qualifiedName] = childNode
 	x.counter.Add(1)
 	return nil
@@ -532,17 +538,11 @@ func (x *tree) nodeByName(name string) (*pidNode, bool) {
 		return nil, false
 	}
 
-	// the element is read under the lock: removeNameLocked compacts the
-	// backing array in place
 	x.mu.RLock()
 	defer x.mu.RUnlock()
 
-	nodes := x.names[name]
-	if len(nodes) == 0 {
-		return nil, false
-	}
-
-	return nodes[len(nodes)-1], true
+	node, ok := x.names[name]
+	return node, ok
 }
 
 // nodeByQualifiedName returns the internal pidNode by the qualified name of its
@@ -606,13 +606,40 @@ func (x *tree) pidList() []*PID {
 // share its name in place, and deletes the entry once no node carries the name.
 // The caller MUST hold x.mu (write).
 func (x *tree) removeNameLocked(n *pidNode) {
-	nodes := slices.DeleteFunc(x.names[n.name], func(node *pidNode) bool { return node == n })
-	if len(nodes) == 0 {
-		delete(x.names, n.name)
-		return
+	newest, indexed := x.names[n.name]
+	if n.namePrev == nil && n.nameNext == nil && newest != n {
+		return // not linked
 	}
 
-	x.names[n.name] = nodes
+	if n.namePrev != nil {
+		n.namePrev.nameNext = n.nameNext
+	}
+
+	if n.nameNext != nil {
+		n.nameNext.namePrev = n.namePrev
+	}
+
+	if indexed && newest == n {
+		if n.namePrev == nil {
+			delete(x.names, n.name)
+		} else {
+			x.names[n.name] = n.namePrev
+		}
+	}
+
+	n.namePrev, n.nameNext = nil, nil
+}
+
+// linkNameLocked appends n to the list of nodes that share its name and makes
+// it the node a lookup by that name returns.
+// The caller MUST hold x.mu (write).
+func (x *tree) linkNameLocked(n *pidNode) {
+	if newest, ok := x.names[n.name]; ok {
+		newest.nameNext = n
+		n.namePrev = newest
+	}
+
+	x.names[n.name] = n
 }
 
 // siblings returns all sibling PIDs of pid (excluding pid itself).

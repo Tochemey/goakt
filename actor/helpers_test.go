@@ -2980,7 +2980,7 @@ func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int
 	n.name = name
 	sys.actors.mu.Lock()
 	sys.actors.pids[addrStr] = n
-	sys.actors.names[name] = []*pidNode{n}
+	sys.actors.names[name] = n
 	sys.actors.mu.Unlock()
 	return sys
 }

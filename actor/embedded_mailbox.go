@@ -42,7 +42,8 @@ const mailboxSegmentSlots = 32
 // an actor under steady load allocated a segment every few dozen messages. 32
 // spares cover a backlog of a thousand messages, and bound the memory an actor
 // keeps after its backlog has passed: 32 segments of 2 KiB. Must be a power
-// of two: the ring indexes its slots with a mask.
+// of two: the ring's counters wrap at 2^32, and the slot index they are
+// reduced to stays consistent across the wrap only when the length divides it.
 const mailboxSpareSegments = 32
 
 // mailboxGenerationShift splits a segment cursor: the bits above it hold the
