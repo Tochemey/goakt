@@ -6999,8 +6999,7 @@ func TestCleanupStaleLocalActors(t *testing.T) {
 
 		addPIDNode := func(pid *PID) {
 			node := newPidNode(pid)
-			system.actors.pids[node.id] = node
-			system.actors.names[node.name] = node
+			indexNode(system.actors, node)
 		}
 
 		localAddr := address.New("local", system.name, "127.0.0.1", 8080)
@@ -7179,7 +7178,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender = system.noSender
+	system.actors.noSender.Store(system.noSender)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7196,7 +7195,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 	pid.setState(runningState, true)
 
 	node := newPidNode(pid)
-	system.actors.pids[node.id] = node
+	indexNode(system.actors, node)
 	system.actors.counter.Add(1)
 
 	err := system.resyncActors()
@@ -7211,7 +7210,7 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender = system.noSender
+	system.actors.noSender.Store(system.noSender)
 	system.locker.Unlock()
 
 	ids := map[string]string{}
@@ -7228,7 +7227,7 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 		pid.setState(runningState, true)
 
 		node := newPidNode(pid)
-		system.actors.pids[node.id] = node
+		indexNode(system.actors, node)
 		system.actors.counter.Add(1)
 		ids[name] = pid.ID()
 	}
@@ -7301,7 +7300,7 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender = system.noSender
+	system.actors.noSender.Store(system.noSender)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7314,7 +7313,7 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 	pid.setState(runningState, true)
 
 	node := newPidNode(pid)
-	system.actors.pids[node.id] = node
+	indexNode(system.actors, node)
 	system.actors.counter.Add(1)
 
 	system.resyncAfterClusterEvent(cluster.NodeLeft, "127.0.0.1:9000")
@@ -7331,7 +7330,7 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender = system.noSender
+	system.actors.noSender.Store(system.noSender)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7344,7 +7343,7 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 	pid.setState(runningState, true)
 
 	node := newPidNode(pid)
-	system.actors.pids[node.id] = node
+	indexNode(system.actors, node)
 	system.actors.counter.Add(1)
 
 	// Without replicas the surviving actor's registry entry may have been lost
@@ -7365,7 +7364,7 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender = system.noSender
+	system.actors.noSender.Store(system.noSender)
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7378,7 +7377,7 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 	pid.setState(runningState, true)
 
 	node := newPidNode(pid)
-	system.actors.pids[node.id] = node
+	indexNode(system.actors, node)
 	system.actors.counter.Add(1)
 
 	// First departure alone stays within olric's tolerance (replicaCount-1=1),
@@ -7471,7 +7470,7 @@ func TestStopSucceedsWhenRegistryCleanupFails(t *testing.T) {
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors = newTree()
-	system.actors.noSender = nil
+	system.actors.noSender.Store(nil)
 	system.noSender = nil
 	system.topicActor = nil
 	system.rootGuardian = nil
@@ -7494,7 +7493,7 @@ func TestStopSucceedsWhenRegistryCleanupFails(t *testing.T) {
 	}
 	pid.setState(runningState, true)
 	node := newPidNode(pid)
-	system.actors.pids[node.id] = node
+	indexNode(system.actors, node)
 	system.actors.counter.Add(1)
 
 	// Peers is not called: relocation is disabled (MockReplicationTestSystem default), so preShutdown returns nil
@@ -7526,7 +7525,7 @@ func TestStopSucceedsWhenListedPeersAreLeaving(t *testing.T) {
 	clusterMock := mockscluster.NewCluster(t)
 	system := newReplicationSystem(clusterMock)
 	system.extensions = xsync.NewMap[string, extension.Extension]()
-	system.actors.noSender = nil
+	system.actors.noSender.Store(nil)
 	system.noSender = nil
 	system.topicActor = nil
 	system.remotingEnabled.Store(false)
@@ -9558,8 +9557,7 @@ func TestCleanupStaleLocalActorsReliableCompanion(t *testing.T) {
 		companion := &PID{address: companionAddr, path: newPath(companionAddr), actorSystem: system}
 
 		node := newPidNode(companion)
-		system.actors.pids[node.id] = node
-		system.actors.names[node.name] = node
+		indexNode(system.actors, node)
 
 		record := internalpb.Actor_builder{
 			Address: companionAddr.String(),

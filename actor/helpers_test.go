@@ -2953,7 +2953,7 @@ func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port i
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
 	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
+	sys.actors.noSender.Store(sys.noSender)
 	addr := address.New(name, sys.Name(), host, port)
 	stoppedPID := &PID{
 		address:     addr,
@@ -2972,16 +2972,13 @@ func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
 	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
+	sys.actors.noSender.Store(sys.noSender)
 	addr := address.New(name, sys.Name(), host, port)
 	addrStr := addr.String()
 	n := newPidNode(nil)
 	n.id = addrStr
 	n.name = name
-	sys.actors.mu.Lock()
-	sys.actors.pids[addrStr] = n
-	sys.actors.names[name] = n
-	sys.actors.mu.Unlock()
+	indexNode(sys.actors, n)
 	return sys
 }
 
@@ -3580,4 +3577,12 @@ func firstSpare(mailbox *embeddedMailbox) *mailboxSegment {
 	}
 
 	return nil
+}
+
+// indexNode registers node in every index of the tree without linking it under
+// a parent, for fixtures that need an actor the tree knows about.
+func indexNode(x *tree, node *pidNode) {
+	x.pids.put(node.id, node)
+	x.linkName(node)
+	x.qualifiedNames.put(node.qualifiedName, node)
 }
