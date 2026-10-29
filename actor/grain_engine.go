@@ -1008,13 +1008,23 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 
 	responseCh := grainContext.response
 	shard := grainContext.poolShard
-	timer := timers.Get(timeout)
 
+	// The timeout is delivered into responseCh (see askTimer), so the caller
+	// parks on that channel and its context only.
+	timeoutTimer := startAskTimer(responseCh, timeout)
 	pid.receive(grainContext)
 	select {
 	case res := <-responseCh:
-		timers.Put(timer)
-		putGrainReplyChannel(shard, responseCh)
+		stopped := timeoutTimer.stop()
+		if _, timedOut := res.(askTimedOut); timedOut {
+			return nil, gerrors.ErrRequestTimeout
+		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// reply is in hand and the timeout was stopped before it fired.
+		if stopped {
+			putGrainReplyChannel(shard, responseCh)
+		}
 
 		// Failures reported by the handler ride the same reply channel,
 		// wrapped so an error-typed response payload is not mistaken
@@ -1024,11 +1034,8 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 		}
 		return res, nil
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-	case <-timer.C:
-		timers.Put(timer)
-		return nil, gerrors.ErrRequestTimeout
 	}
 }
 
@@ -1045,19 +1052,28 @@ func (x *actorSystem) localTellGrain(ctx context.Context, pid *grainPID, id *Gra
 
 	errCh := grainContext.err
 	shard := grainContext.poolShard
-	timer := timers.Get(timeout)
 
+	// The timeout is delivered into errCh (see ackTimer), so the caller
+	// parks on that channel and its context only.
+	timeoutTimer := startAckTimer(errCh, timeout)
 	pid.receive(grainContext)
 	select {
 	case err := <-errCh:
-		timers.Put(timer)
-		putGrainErrorChannel(shard, errCh)
+		stopped := timeoutTimer.stop()
+		if errors.Is(err, errAckTimedOut) {
+			return gerrors.ErrRequestTimeout
+		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// acknowledgment is in hand and the timeout was stopped before it
+		// fired.
+		if stopped {
+			putGrainErrorChannel(shard, errCh)
+		}
+
 		return err
-	case <-timer.C:
-		timers.Put(timer)
-		return gerrors.ErrRequestTimeout
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		return errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }

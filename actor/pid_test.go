@@ -10376,3 +10376,73 @@ func TestInitPublishesActorStarted(t *testing.T) {
 	assert.Contains(t, started, observed.Path().String())
 	assert.NotContains(t, started, unobserved.Path().String())
 }
+
+func TestAskReusesReplyChannels(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	asker, err := actorSystem.Spawn(ctx, "asker", NewMockActor())
+	require.NoError(t, err)
+	responder, err := actorSystem.Spawn(ctx, "responder", NewMockActor())
+	require.NoError(t, err)
+
+	t.Run("a steady stream of asks allocates no reply channel", func(t *testing.T) {
+		// the first asks fill the pool shard; the measured ones reuse it
+		for range 10 {
+			_, err := asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+		}
+
+		// AllocsPerRun counts the whole process, so the responder's reply
+		// object is the one allocation left and the reply channel is none.
+		// Other goroutines of a large test run allocate in the same window,
+		// so the measurement is repeated and one clean sample is enough.
+		message := new(testpb.TestReply)
+		var allocs float64
+		for range 10 {
+			allocs = testing.AllocsPerRun(200, func() {
+				_, err := asker.Ask(ctx, responder, message, time.Second)
+				require.NoError(t, err)
+			})
+
+			if allocs <= 1 {
+				break
+			}
+		}
+
+		assert.LessOrEqual(t, allocs, 1.0)
+	})
+
+	t.Run("a reply followed by a forward answers the asker once and poisons no later ask", func(t *testing.T) {
+		forwarder, err := actorSystem.Spawn(ctx, "forwarder", &MockReplyThenForwardActor{target: responder})
+		require.NoError(t, err)
+
+		for range 50 {
+			reply, err := asker.Ask(ctx, forwarder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "forwarder", reply.(*testpb.Reply).GetContent())
+
+			// the forwarded reply must never surface on a channel reused here
+			reply, err = asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		}
+	})
+
+	t.Run("a timed-out ask abandons its channel and the late reply reaches no later ask", func(t *testing.T) {
+		slow, err := actorSystem.Spawn(ctx, "slow", NewMockActor())
+		require.NoError(t, err)
+
+		for range 20 {
+			_, err := asker.Ask(ctx, slow, new(testpb.TestTimeout), 20*time.Millisecond)
+			require.ErrorIs(t, err, errors.ErrRequestTimeout)
+
+			reply, err := asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		}
+	})
+}

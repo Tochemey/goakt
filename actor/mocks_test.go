@@ -436,6 +436,27 @@ func (x *MockFlakyPreStartActor) Receive(*ReceiveContext) {}
 // PostStop does nothing.
 func (x *MockFlakyPreStartActor) PostStop(*Context) error { return nil }
 
+// MockReplyThenForwardActor answers an ask itself and then forwards the same
+// message to target, which answers it too; the asker must see the first
+// reply only, whatever the pooling of reply channels.
+type MockReplyThenForwardActor struct {
+	target *PID
+}
+
+// PreStart does nothing.
+func (x *MockReplyThenForwardActor) PreStart(*Context) error { return nil }
+
+// Receive replies "forwarder" and forwards the message to target.
+func (x *MockReplyThenForwardActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestReply); ok {
+		ctx.Response(testpb.Reply_builder{Content: "forwarder"}.Build())
+		ctx.Forward(x.target)
+	}
+}
+
+// PostStop does nothing.
+func (x *MockReplyThenForwardActor) PostStop(*Context) error { return nil }
+
 // MockPreStartFailingActor is an actor that never starts.
 type MockPreStartFailingActor struct {
 	MockNoopActor

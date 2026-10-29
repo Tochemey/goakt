@@ -264,11 +264,7 @@ func (gctx *GrainContext) Err(err error) {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
-
-	gctx.err <- err
+	gctx.sendAck(err)
 }
 
 // NoErr marks the successful completion of a message handler without any error.
@@ -304,11 +300,8 @@ func (gctx *GrainContext) NoErr() {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
 	// Asynchronous (Tell) path: only the error channel is used.
-	gctx.err <- nil
+	gctx.sendAck(nil)
 }
 
 // Response sets the message response
@@ -319,6 +312,21 @@ func (gctx *GrainContext) Response(resp any) {
 	}
 
 	gctx.sendReply(resp)
+}
+
+// sendAck delivers the processed acknowledgment of a Tell on the context's
+// error channel, when it has one, without blocking: the channel has room for
+// one value and may already hold the Tell's timeout (see ackTimer), in which
+// case the caller is gone and the acknowledgment is dropped with the channel.
+func (gctx *GrainContext) sendAck(err error) {
+	if gctx.err == nil {
+		return
+	}
+
+	select {
+	case gctx.err <- err:
+	default:
+	}
 }
 
 // sendReply delivers value on the ask reply channel exactly once. The
@@ -381,10 +389,7 @@ func (gctx *GrainContext) Unhandled() {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
-	gctx.err <- failure
+	gctx.sendAck(failure)
 }
 
 // toDeadletter records a one-way message the grain failed to handle with the

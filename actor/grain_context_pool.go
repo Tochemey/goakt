@@ -208,7 +208,7 @@ func nextGrainContextShard() uint32 {
 // remaining cost once contexts were sharded. Channels do not carry a home
 // shard of their own: callers index the pool with the context's poolShard,
 // so get and put stay on the same ring.
-var grainErrorChannelPool = newGrainChannelPool[error]()
+var grainErrorChannelPool = newChannelPool[error]()
 
 // grainReplyChannelPool is the reply instantiation of the same ring:
 // buffered capacity-1 any channels for the grain Ask path. Every Ask
@@ -216,24 +216,24 @@ var grainErrorChannelPool = newGrainChannelPool[error]()
 // received, which keeps a steady-state AskGrain free of the 128 bytes and
 // two allocations a fresh make(chan any, 1) costs. It is indexed with the
 // context's poolShard exactly like the ack pool.
-var grainReplyChannelPool = newGrainChannelPool[any]()
+var grainReplyChannelPool = newChannelPool[any]()
 
-// grainChannelCell is one slot of a grainChannelShard ring. seq is the
+// channelCell is one slot of a channelShard ring. seq is the
 // sequence number that tells an arriving cursor whether the cell is empty
 // or full; ch is the pooled channel and is valid only while seq marks the
 // cell full. ch is written before the seq store that publishes it and read
 // after the seq load that observes it, so the plain field is ordered by the
 // atomic.
-type grainChannelCell[T any] struct {
+type channelCell[T any] struct {
 	seq atomic.Uint64
 	ch  chan T
 }
 
-// grainChannelShard is a bounded multi-producer multi-consumer ring of
+// channelShard is a bounded multi-producer multi-consumer ring of
 // spare channels, using the same Vyukov geometry as grainContextShard. T is
 // the channel element type: error for the Tell acks, any for the Ask
 // replies.
-type grainChannelShard[T any] struct {
+type channelShard[T any] struct {
 	// enqueuePos is the position of the next put; cells[enqueuePos&mask]
 	// is where the next spare channel is stored.
 	enqueuePos atomic.Uint64
@@ -245,25 +245,25 @@ type grainChannelShard[T any] struct {
 	_          CacheLinePadding
 
 	// cells is the ring storage. Length is a power of two.
-	cells [contextShardCapacity]grainChannelCell[T]
+	cells [contextShardCapacity]channelCell[T]
 }
 
-// grainChannelPoolShards aggregates the shards with the bitmask used to
+// channelPoolShards aggregates the shards with the bitmask used to
 // fold arbitrary shard hints into range. One instantiation serves the Tell
 // acks and another the Ask replies; the two are independent structures.
-type grainChannelPoolShards[T any] struct {
+type channelPoolShards[T any] struct {
 	// shards holds contextShardCount independent rings.
-	shards []grainChannelShard[T]
+	shards []channelShard[T]
 	// mask is len(shards)-1, applied to every incoming shard index.
 	mask uint32
 }
 
-// newGrainChannelPool constructs a sharded channel pool with every cell
+// newChannelPool constructs a sharded channel pool with every cell
 // marked empty. No channels are pre-allocated: shards fill naturally as
 // requests recycle, and a cold get is a plain make.
-func newGrainChannelPool[T any]() *grainChannelPoolShards[T] {
-	pool := &grainChannelPoolShards[T]{
-		shards: make([]grainChannelShard[T], contextShardCount),
+func newChannelPool[T any]() *channelPoolShards[T] {
+	pool := &channelPoolShards[T]{
+		shards: make([]channelShard[T], contextShardCount),
 		mask:   contextShardCount - 1,
 	}
 
@@ -279,7 +279,7 @@ func newGrainChannelPool[T any]() *grainChannelPoolShards[T] {
 
 // get returns a buffered capacity-1 channel from the shard identified by
 // shard, allocating a fresh one when that shard is empty or contended.
-func (x *grainChannelPoolShards[T]) get(shard uint32) chan T {
+func (x *channelPoolShards[T]) get(shard uint32) chan T {
 	if ch := x.shards[shard&x.mask].pop(); ch != nil {
 		return ch
 	}
@@ -291,7 +291,7 @@ func (x *grainChannelPoolShards[T]) get(shard uint32) chan T {
 // context's poolShard) and must not return a channel a late send could
 // still reach: timeout paths abandon their channel to the GC exactly like
 // the process-wide errorCh pool.
-func (x *grainChannelPoolShards[T]) put(shard uint32, ch chan T) {
+func (x *channelPoolShards[T]) put(shard uint32, ch chan T) {
 	drainChannel(ch)
 	x.shards[shard&x.mask].push(ch)
 }
@@ -299,7 +299,7 @@ func (x *grainChannelPoolShards[T]) put(shard uint32, ch chan T) {
 // pop removes and returns one channel, or nil when the shard is empty or
 // the spin budget is exhausted under contention. Safe for concurrent
 // callers.
-func (x *grainChannelShard[T]) pop() chan T {
+func (x *channelShard[T]) pop() chan T {
 	pos := x.dequeuePos.Load()
 
 	for range poolSpinLimit {
@@ -330,7 +330,7 @@ func (x *grainChannelShard[T]) pop() chan T {
 // push stores ch into the ring, silently dropping it when the ring is full
 // or the spin budget is exhausted under contention. Safe for concurrent
 // callers.
-func (x *grainChannelShard[T]) push(ch chan T) {
+func (x *channelShard[T]) push(ch chan T) {
 	pos := x.enqueuePos.Load()
 
 	for range poolSpinLimit {

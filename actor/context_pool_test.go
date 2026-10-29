@@ -205,7 +205,7 @@ func TestCloneContext_ClearsResponseClosed(t *testing.T) {
 	src := getContext(shard)
 	src.ctx = context.Background()
 	src.message = "stashed-ask"
-	src.response = getResponseChannel()
+	src.response = getResponseChannel(0)
 	src.requestID = "corr"
 	src.responseClosed.Store(true)
 

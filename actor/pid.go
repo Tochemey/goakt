@@ -1327,12 +1327,20 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 
 	select {
 	case result := <-responseCh:
-		timeoutTimer.stop()
+		stopped := timeoutTimer.stop()
 		if _, timedOut := result.(askTimedOut); timedOut {
 			err = gerrors.ErrRequestTimeout
 			pid.handleReceivedErrorWithMessage(pid, message, err)
 			return nil, err
 		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// reply is in hand, the one reply guard is spent, and the timeout
+		// was stopped before it fired. Otherwise it is left to the GC.
+		if stopped {
+			putResponseChannel(to.ctxShard, responseCh)
+		}
+
 		return result, nil
 	case <-ctx.Done():
 		timeoutTimer.stop()

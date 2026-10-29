@@ -853,7 +853,7 @@ func newReceiveContext(ctx context.Context, from, to *PID, message any) *Receive
 		ctx:      ctx,
 		message:  message,
 		sender:   from,
-		response: getResponseChannel(),
+		response: getResponseChannel(replyShard(to)),
 		self:     to,
 	}
 	rc.responseClosed.Store(false)
@@ -882,8 +882,18 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message an
 
 	rctx.responseClosed.Store(false)
 	rctx.ctx = ctx
-	rctx.response = getResponseChannel()
+	rctx.response = getResponseChannel(to.ctxShard)
 	return rctx
+}
+
+// replyShard returns the reply-channel pool shard of an ask to pid: the
+// actor's context-pool shard, or shard 0 when there is no actor.
+func replyShard(pid *PID) uint32 {
+	if pid == nil {
+		return 0
+	}
+
+	return pid.ctxShard
 }
 
 // inheritReplyRoute gives a forwarded message the reply route of the message
@@ -894,8 +904,11 @@ func (rctx *ReceiveContext) build(ctx context.Context, from, to *PID, message an
 func (rctx *ReceiveContext) inheritReplyRoute(from *ReceiveContext) {
 	if from.response != nil {
 		rctx.response = from.response
-		// a pooled context may still carry the guard of an earlier Ask
-		rctx.responseClosed.Store(false)
+		// The reply guard moves with the channel: the forwarding context can
+		// no longer reply, and this one can only if nobody has yet. At most
+		// one reply is ever written to a channel, which is what lets Ask
+		// return the channel to its pool once that reply is in hand.
+		rctx.responseClosed.Store(from.responseClosed.Swap(true))
 	}
 
 	rctx.requestID = from.requestID
