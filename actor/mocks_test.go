@@ -47,6 +47,7 @@ import (
 	"github.com/tochemey/goakt/v4/internal/internalpb"
 	"github.com/tochemey/goakt/v4/internal/pause"
 	"github.com/tochemey/goakt/v4/internal/remoteclient"
+	"github.com/tochemey/goakt/v4/internal/retry"
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/log"
 	mockcluster "github.com/tochemey/goakt/v4/mocks/cluster"
@@ -404,6 +405,36 @@ func (x *MockStashAskAllActor) Receive(ctx *ReceiveContext) {
 		ctx.UnstashAll()
 	}
 }
+
+// MockFlakyPreStartActor is an actor whose PreStart fails a set number of
+// times before it succeeds, counting every attempt. With stopAfterFirst the
+// first failure is marked with retry.Stop.
+type MockFlakyPreStartActor struct {
+	failures       int
+	stopAfterFirst bool
+	attempts       atomic.Int32
+}
+
+// PreStart fails while failures is positive, then succeeds.
+func (x *MockFlakyPreStartActor) PreStart(*Context) error {
+	attempt := x.attempts.Add(1)
+	if int(attempt) > x.failures {
+		return nil
+	}
+
+	err := fmt.Errorf("pre-start attempt %d failed", attempt)
+	if x.stopAfterFirst {
+		return retry.Stop(err)
+	}
+
+	return err
+}
+
+// Receive handles no message.
+func (x *MockFlakyPreStartActor) Receive(*ReceiveContext) {}
+
+// PostStop does nothing.
+func (x *MockFlakyPreStartActor) PostStop(*Context) error { return nil }
 
 // MockPreStartFailingActor is an actor that never starts.
 type MockPreStartFailingActor struct {

@@ -2905,17 +2905,16 @@ func (pid *PID) init(ctx context.Context) error {
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
-	initTimeout := pid.effectiveInitTimeout()
-	cctx, cancel := context.WithTimeout(ctx, initTimeout)
-	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
-
-	if err := retrier.RunContext(cctx, func(_ context.Context) error {
-		return pid.actor.PreStart(initContext)
-	}); err != nil {
-		e := gerrors.NewErrInitFailure(err)
-		cancel()
-		pid.getLogger().Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
-		return e
+	// The first attempt runs on its own: most PreStarts succeed at once, and
+	// the retry machinery, a deadline context, its timer and a backoff policy,
+	// is built only when one fails.
+	started := time.Now()
+	if err := pid.actor.PreStart(initContext); err != nil {
+		if err = pid.retryPreStart(ctx, initContext, started, err); err != nil {
+			e := gerrors.NewErrInitFailure(err)
+			pid.getLogger().Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
+			return e
+		}
 	}
 
 	// Reopen remote hold tracking before the actor is announced as running:
@@ -2933,8 +2932,30 @@ func (pid *PID) init(ctx context.Context) error {
 		pid.getEventsStream().Publish(eventsTopic, NewActorStarted(pid.Path()))
 	}
 
-	cancel()
 	return nil
+}
+
+// retryPreStart runs the remaining PreStart attempts after a first attempt
+// failed with first at started. The retrier is given the first failure as the
+// outcome of its own first attempt, so the attempts, the delays between them
+// and the init timeout, which runs from started, are those of one retried run:
+// a failure marked with retry.Stop ends it at once, and the last error is
+// returned when the attempts or the timeout are exhausted.
+func (pid *PID) retryPreStart(ctx context.Context, initContext *Context, started time.Time, first error) error {
+	initTimeout := pid.effectiveInitTimeout()
+	cctx, cancel := context.WithDeadline(ctx, started.Add(initTimeout))
+	defer cancel()
+
+	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
+	replayed := false
+	return retrier.RunContext(cctx, func(context.Context) error {
+		if !replayed {
+			replayed = true
+			return first
+		}
+
+		return pid.actor.PreStart(initContext)
+	})
 }
 
 // reset re-initializes the actor PID

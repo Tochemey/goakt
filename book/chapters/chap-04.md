@@ -204,24 +204,24 @@ A remote PID is the same struct with only `address`, `path` and `remoting` set, 
 
 ## 4.4 `PreStart`: retries and the timeout that is not one
 
-`init` (`actor/pid.go`) runs `PreStart` through `internal/retry`:
+`init` (`actor/pid.go`) calls `PreStart` once directly, and only when that attempt fails does it build the retry machinery and run the remaining attempts through `internal/retry`:
 
 ```go
 initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
-initTimeout := pid.effectiveInitTimeout()
-cctx, cancel := context.WithTimeout(ctx, initTimeout)
-retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
-if err := retrier.RunContext(cctx, func(_ context.Context) error {
-	return pid.actor.PreStart(initContext)
-}); err != nil { ... }
+started := time.Now()
+if err := pid.actor.PreStart(initContext); err != nil {
+	if err = pid.retryPreStart(ctx, initContext, started, err); err != nil { ... }
+}
 ```
+
+`retryPreStart` (`actor/pid.go`) creates the deadline context, measured from `started`, and the retrier, and hands the retrier the first failure as the outcome of its own first attempt, so the attempts, the delays and the timeout are those of one retried run. A `PreStart` that succeeds, which is nearly all of them, therefore pays nothing for the deadline context, its timer or the backoff policy (`TestInitRetriesPreStart` in `actor/pid_test.go`).
 
 **Attempts.** The retry count is the total number of attempts, the first included (`NewRetrier` in `internal/retry/retry.go`). With the default of 5 (`DefaultInitMaxRetries` in `actor/defaults.go`), a failing `PreStart` runs five times, with exponential backoff starting at 1 ms. The spawn then fails with `ErrInitFailure` and leaves nothing behind (`TestFailedPreStart` in `actor/pid_test.go`). `PreStart` must therefore be safe to run more than once.
 
 **Timeout.** The init timeout (1 s by default) bounds only the retry loop:
 
 - `PreStart` receives `initContext`, which is built from the caller's `ctx` and not from `cctx` (`PID.init` in `actor/pid.go`). Even a `PreStart` that honours its context sees no deadline from the init timeout. It sees only the deadline the caller's `ctx` carries, if there is one.
-- The retrier checks `cctx` only between attempts.
+- The retrier checks its deadline context only between attempts.
 
 A `PreStart` that takes 2 s succeeds, and `Spawn` blocks for 2 s. `WithInitTimeout`'s comment says so: the timeout bounds the retries, not an attempt in progress (`actor/spawn_option.go`). If you need a bound, impose it inside `PreStart` with your own context. Passing the timeout context to `PreStart`, as grains do with `OnActivate`, would make running code fail where it succeeds today, and would cancel any work `PreStart` starts on its context as soon as the actor starts.
 

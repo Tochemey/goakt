@@ -10275,3 +10275,69 @@ func TestBuildChildSettings(t *testing.T) {
 		assert.Equal(t, dependency, child.Dependency("id"))
 	})
 }
+
+func TestInitRetriesPreStart(t *testing.T) {
+	newSystem := func(t *testing.T, retries int) ActorSystem {
+		t.Helper()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithActorInitMaxRetries(retries))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(context.Background()))
+		t.Cleanup(func() { _ = system.Stop(context.Background()) })
+		return system
+	}
+
+	t.Run("a PreStart that succeeds runs once", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{}
+		pid, err := system.Spawn(context.Background(), "once", actor)
+		require.NoError(t, err)
+		require.True(t, pid.IsRunning())
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("a failing PreStart is retried until it succeeds", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{failures: 2}
+		pid, err := system.Spawn(context.Background(), "flaky", actor)
+		require.NoError(t, err)
+		require.True(t, pid.IsRunning())
+		assert.EqualValues(t, 3, actor.attempts.Load())
+	})
+
+	t.Run("the attempts are bounded by the init retries and the last error is reported", func(t *testing.T) {
+		system := newSystem(t, 3)
+		actor := &MockFlakyPreStartActor{failures: 10}
+		_, err := system.Spawn(context.Background(), "exhausted", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 3 failed")
+		assert.EqualValues(t, 3, actor.attempts.Load())
+	})
+
+	t.Run("one init retry means one attempt", func(t *testing.T) {
+		system := newSystem(t, 1)
+		actor := &MockFlakyPreStartActor{failures: 10}
+		_, err := system.Spawn(context.Background(), "single", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 1 failed")
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("a failure marked with retry.Stop is not retried", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{failures: 10, stopAfterFirst: true}
+		_, err := system.Spawn(context.Background(), "stopped", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 1 failed")
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("the init timeout bounds the retries", func(t *testing.T) {
+		system := newSystem(t, 50)
+		actor := &MockFlakyPreStartActor{failures: 1000}
+		started := time.Now()
+		_, err := system.Spawn(context.Background(), "timed-out", actor, WithInitTimeout(50*time.Millisecond))
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.Less(t, time.Since(started), 2*time.Second)
+		assert.Less(t, actor.attempts.Load(), int32(50))
+	})
+}
