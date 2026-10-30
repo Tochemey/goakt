@@ -71,7 +71,10 @@ func (t *Table) Register(correlationID string) chan *commands.AsyncResponse {
 // reports whether a waiting caller was found.
 //
 // A false return means the caller already abandoned the ask, which is a normal
-// outcome of a reply racing a timeout rather than an error.
+// outcome of a reply racing a timeout rather than an error. A true return
+// means the slot was still registered; when it already held the caller's
+// timeout, the caller is about to abandon the ask and the response is
+// dropped, which is the same race decided a moment earlier.
 func (t *Table) Complete(response *commands.AsyncResponse) bool {
 	if response == nil || response.CorrelationID == "" {
 		return false

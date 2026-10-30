@@ -5646,3 +5646,28 @@ func TestGrainRegistryReadRetry(t *testing.T) {
 		assert.Same(t, owner, got)
 	})
 }
+
+func TestAskGrainWithReentrancyTimesOutThroughItsSlot(t *testing.T) {
+	system := newRequestTestSystem(t)
+	ctx := context.Background()
+
+	// the grain defers its reply and never completes it, so the ask can
+	// only end through its timeout
+	silent := &MockScriptedGrain{receive: func(gctx *GrainContext) { gctx.DeferResponse() }}
+	silentID := activateReentrantGrain(t, system, silent, "silent")
+
+	_, err := system.AskGrain(ctx, silentID, new(testpb.TestReply), 50*time.Millisecond)
+	require.ErrorIs(t, err, gerrors.ErrRequestTimeout)
+	require.Zero(t, system.pendingAsks.Len(), "a timed-out ask abandons its slot")
+
+	// a later ask against a reentrant grain that replies is unaffected
+	replying := &MockScriptedGrain{receive: func(gctx *GrainContext) {
+		gctx.Response(testpb.TestCount_builder{Value: 7}.Build())
+	}}
+	replyingID := activateReentrantGrain(t, system, replying, "replying")
+
+	response, err := system.AskGrain(ctx, replyingID, new(testpb.TestReply), time.Second)
+	require.NoError(t, err)
+	require.EqualValues(t, 7, response.(*testpb.TestCount).GetValue())
+	require.Zero(t, system.pendingAsks.Len())
+}
