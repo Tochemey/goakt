@@ -969,12 +969,18 @@ func (x *actorSystem) localSendGrain(ctx context.Context, id *GrainIdentity, mes
 // PID.Tell. The caller's cancellation is detached because it returns before
 // the message is processed; values such as trace metadata are kept. A context
 // that can never be cancelled reports a nil Done channel and needs no wrapper,
-// which spares the allocation on that path. The context carries no reply
-// channel, so the enqueue failure is taken from the return value of receive
-// and the context is recycled on that path.
+// which spares the allocation on that path. On the embedded mailbox the
+// message is stored as values and takes no pooled context. On a bounded
+// mailbox it travels in a context that carries no reply channel, so the
+// enqueue failure is taken from the return value of receive and the context
+// is recycled on that path.
 func (x *actorSystem) localOneWayTellGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any) error {
 	if ctx.Done() != nil {
 		ctx = context.WithoutCancel(ctx)
+	}
+
+	if pid.boundedMailbox == nil {
+		return pid.receiveOneWay(ctx, id, message)
 	}
 
 	grainContext := getGrainContext(pid.ctxShard)

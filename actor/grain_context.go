@@ -1039,6 +1039,32 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	return gctx
 }
 
+// reuseOneWay readies the default mailbox's turn context for the next one-way
+// message stored as values (see embeddedGrainMailbox). The context was seeded
+// once with its process, actor system and one-way flag, and build would set
+// nothing else for a one-way message, so only the message, its identity and
+// its context change from one message to the next. Handling a message can
+// still set fields a one-way message never carries, the request metadata of
+// an AsyncRequest payload for instance; those are cleared only when set,
+// through a full build, because each store costs a write barrier while the
+// garbage collector runs and the common case has none.
+func (gctx *GrainContext) reuseOneWay(ctx context.Context, self *GrainIdentity, message any) {
+	if gctx.requestID != "" || gctx.requestReplyTo != nil || gctx.replyDeferred || gctx.replySent ||
+		gctx.response != nil || gctx.err != nil || gctx.synchronous || !gctx.oneWay ||
+		gctx.timeout != 0 || gctx.deadline != 0 || gctx.deadlineCtx != nil || gctx.cancelDeadline != nil {
+		gctx.build(ctx, gctx.pid, gctx.actorSystem, self, message, grainOneWay)
+		return
+	}
+
+	if gctx.responseClosed.Load() {
+		gctx.responseClosed.Store(false)
+	}
+
+	gctx.ctx = ctx
+	gctx.self = self
+	gctx.message = message
+}
+
 // reset clears all fields so the GrainContext can be returned to the pool.
 // Nil-ing pointer / interface fields breaks reference chains and lets the GC
 // collect the objects they pointed to while the context sits idle in the pool.
