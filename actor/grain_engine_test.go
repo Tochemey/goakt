@@ -1392,8 +1392,8 @@ func TestRecreateGrainRestoresActivationRole(t *testing.T) {
 
 	process, ok := as.grains.Get(identity.String())
 	require.True(t, ok)
-	require.NotNil(t, process.config.role)
-	require.Equal(t, "game-worker", *process.config.role)
+	require.NotNil(t, process.config.role())
+	require.Equal(t, "game-worker", *process.config.role())
 	require.True(t, process.config.eagerRelocation)
 
 	// the role must survive the config -> wire round trip
@@ -1401,6 +1401,52 @@ func TestRecreateGrainRestoresActivationRole(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, republished.HasRole())
 	require.Equal(t, "game-worker", republished.GetRole())
+}
+
+// TestRecreateGrainRestoresDispatcher verifies that a grain recreated from its
+// wire record runs on the same-named dispatcher of this node and advertises it
+// again on the next departure, and that a record naming a dispatcher this node
+// did not declare is refused.
+func TestRecreateGrainRestoresDispatcher(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("db", 2))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	as := sys.(*actorSystem)
+	as.registry.Register(&MockGrain{})
+
+	t.Run("a declared dispatcher is restored", func(t *testing.T) {
+		identity := newGrainIdentity(&MockGrain{}, "dispatcher-restore")
+		pid := newGrainPID(identity, &MockGrain{}, sys, newGrainConfig(WithGrainDispatcher("db"), WithGrainEagerRelocation()))
+		wire, err := pid.toWireGrain()
+		require.NoError(t, err)
+		require.Equal(t, "db", wire.GetDispatcher())
+
+		require.NoError(t, as.recreateGrain(ctx, wire))
+
+		process, ok := as.grains.Get(identity.String())
+		require.True(t, ok)
+		require.Equal(t, "db", process.config.dispatcherName())
+		require.Same(t, as.dispatchers["db"], process.dispatcher)
+
+		// the name must survive the config -> wire round trip
+		republished, err := process.toWireGrain()
+		require.NoError(t, err)
+		require.True(t, republished.HasDispatcher())
+		require.Equal(t, "db", republished.GetDispatcher())
+	})
+
+	t.Run("an undeclared dispatcher refuses the record", func(t *testing.T) {
+		identity := newGrainIdentity(&MockGrain{}, "dispatcher-unknown")
+		wire, err := wireGrain(identity, newGrainConfig(WithGrainDispatcher("missing")), "127.0.0.1", 0)
+		require.NoError(t, err)
+
+		require.ErrorIs(t, as.recreateGrain(ctx, wire), gerrors.ErrDispatcherNotFound)
+		_, ok := as.grains.Get(identity.String())
+		require.False(t, ok)
+	})
 }
 
 func TestRecreateGrain_SingleflightActivation(t *testing.T) {

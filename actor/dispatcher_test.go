@@ -48,6 +48,32 @@ func TestDispatcherStartSignalStopIdempotent(t *testing.T) {
 	d.signalStop() // idempotent
 }
 
+func TestDispatcherRenewed(t *testing.T) {
+	t.Run("a dispatcher that was not stopped is kept", func(t *testing.T) {
+		d := newDispatcher(3, 7)
+		require.Same(t, d, d.renewed())
+
+		d.start()
+		t.Cleanup(d.signalStop)
+		require.Same(t, d, d.renewed())
+	})
+
+	t.Run("a stopped dispatcher is replaced by a fresh one of the same name, size and budget", func(t *testing.T) {
+		d := newDispatcher(3, 7)
+		d.name = "db"
+		d.start()
+		d.signalStop()
+
+		renewed := d.renewed()
+		require.NotSame(t, d, renewed)
+		require.Equal(t, "db", renewed.name)
+		require.Len(t, renewed.workers, 3)
+		require.Equal(t, 7, renewed.throughput)
+		require.False(t, renewed.stopping.Load())
+		require.False(t, renewed.started.Load())
+	})
+}
+
 func TestDispatcherScheduleProcessesItem(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
 	d.start()

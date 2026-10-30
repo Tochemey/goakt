@@ -201,7 +201,7 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 		grain:                 grain,
 		identity:              identity,
 		actorSystem:           actorSystem,
-		dispatcher:            actorSystem.getDispatcher(),
+		dispatcher:            actorSystem.dispatcherNamed(config.dispatcherName()),
 		latestReceiveTimeNano: atomic.Int64{},
 		config:                config,
 		passivationManager:    actorSystem.passivationManager(),
@@ -1486,8 +1486,12 @@ func wireGrain(identity *GrainIdentity, config *grainConfig, host string, port i
 	grain.SetDisableRelocation(config.disableRelocation)
 	grain.SetEagerRelocation(config.eagerRelocation)
 	grain.SetReentrancy(codec.EncodeReentrancy(config.reentrancy))
-	if config.role != nil {
-		grain.SetRole(*config.role)
+	if role := config.role(); role != nil {
+		grain.SetRole(*role)
+	}
+
+	if dispatcher := config.dispatcherName(); dispatcher != "" {
+		grain.SetDispatcher(dispatcher)
 	}
 	return grain, nil
 }

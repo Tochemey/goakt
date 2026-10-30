@@ -120,6 +120,7 @@ type Grain struct {
 	xxx_hidden_EagerRelocation   bool                   `protobuf:"varint,9,opt,name=eager_relocation,json=eagerRelocation,proto3"`
 	xxx_hidden_Reentrancy        *ReentrancyConfig      `protobuf:"bytes,10,opt,name=reentrancy,proto3"`
 	xxx_hidden_Role              *string                `protobuf:"bytes,11,opt,name=role,proto3,oneof"`
+	xxx_hidden_Dispatcher        *string                `protobuf:"bytes,12,opt,name=dispatcher,proto3,oneof"`
 	XXX_raceDetectHookData       protoimpl.RaceDetectHookData
 	XXX_presence                 [1]uint32
 	unknownFields                protoimpl.UnknownFields
@@ -233,6 +234,16 @@ func (x *Grain) GetRole() string {
 	return ""
 }
 
+func (x *Grain) GetDispatcher() string {
+	if x != nil {
+		if x.xxx_hidden_Dispatcher != nil {
+			return *x.xxx_hidden_Dispatcher
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *Grain) SetGrainId(v *GrainId) {
 	x.xxx_hidden_GrainId = v
 }
@@ -259,7 +270,7 @@ func (x *Grain) SetActivationRetries(v int32) {
 
 func (x *Grain) SetMailboxCapacity(v int64) {
 	x.xxx_hidden_MailboxCapacity = v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 6, 12)
 }
 
 func (x *Grain) SetDisableRelocation(v bool) {
@@ -276,7 +287,12 @@ func (x *Grain) SetReentrancy(v *ReentrancyConfig) {
 
 func (x *Grain) SetRole(v string) {
 	x.xxx_hidden_Role = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 10, 11)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 10, 12)
+}
+
+func (x *Grain) SetDispatcher(v string) {
+	x.xxx_hidden_Dispatcher = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 11, 12)
 }
 
 func (x *Grain) HasGrainId() bool {
@@ -314,6 +330,13 @@ func (x *Grain) HasRole() bool {
 	return protoimpl.X.Present(&(x.XXX_presence[0]), 10)
 }
 
+func (x *Grain) HasDispatcher() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 11)
+}
+
 func (x *Grain) ClearGrainId() {
 	x.xxx_hidden_GrainId = nil
 }
@@ -334,6 +357,11 @@ func (x *Grain) ClearReentrancy() {
 func (x *Grain) ClearRole() {
 	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 10)
 	x.xxx_hidden_Role = nil
+}
+
+func (x *Grain) ClearDispatcher() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 11)
+	x.xxx_hidden_Dispatcher = nil
 }
 
 type Grain_builder struct {
@@ -360,6 +388,11 @@ type Grain_builder struct {
 	// preserve role-constrained placement. Absent when the grain has no role
 	// constraint.
 	Role *string
+	// dispatcher carries the dispatcher the grain is assigned to
+	// (WithGrainDispatcher) so that eager relocation and remote activation
+	// reactivate it on the same-named dispatcher. Absent when the grain runs
+	// on the default dispatcher.
+	Dispatcher *string
 }
 
 func (b0 Grain_builder) Build() *Grain {
@@ -373,15 +406,19 @@ func (b0 Grain_builder) Build() *Grain {
 	x.xxx_hidden_ActivationTimeout = b.ActivationTimeout
 	x.xxx_hidden_ActivationRetries = b.ActivationRetries
 	if b.MailboxCapacity != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 6, 12)
 		x.xxx_hidden_MailboxCapacity = *b.MailboxCapacity
 	}
 	x.xxx_hidden_DisableRelocation = b.DisableRelocation
 	x.xxx_hidden_EagerRelocation = b.EagerRelocation
 	x.xxx_hidden_Reentrancy = b.Reentrancy
 	if b.Role != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 10, 11)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 10, 12)
 		x.xxx_hidden_Role = b.Role
+	}
+	if b.Dispatcher != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 11, 12)
+		x.xxx_hidden_Dispatcher = b.Dispatcher
 	}
 	return m0
 }
@@ -395,7 +432,7 @@ const file_internal_grain_proto_rawDesc = "" +
 	"\aGrainId\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
-	"\x05value\x18\x03 \x01(\tR\x05value\"\x93\x04\n" +
+	"\x05value\x18\x03 \x01(\tR\x05value\"\xc7\x04\n" +
 	"\x05Grain\x12.\n" +
 	"\bgrain_id\x18\x01 \x01(\v2\x13.internalpb.GrainIdR\agrainId\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
@@ -410,9 +447,13 @@ const file_internal_grain_proto_rawDesc = "" +
 	"reentrancy\x18\n" +
 	" \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
 	"reentrancy\x12\x17\n" +
-	"\x04role\x18\v \x01(\tH\x01R\x04role\x88\x01\x01B\x13\n" +
+	"\x04role\x18\v \x01(\tH\x01R\x04role\x88\x01\x01\x12#\n" +
+	"\n" +
+	"dispatcher\x18\f \x01(\tH\x02R\n" +
+	"dispatcher\x88\x01\x01B\x13\n" +
 	"\x11_mailbox_capacityB\a\n" +
-	"\x05_roleB\xa3\x01\n" +
+	"\x05_roleB\r\n" +
+	"\v_dispatcherB\xa3\x01\n" +
 	"\x0ecom.internalpbB\n" +
 	"GrainProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
 	"Internalpb\xca\x02\n" +

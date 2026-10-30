@@ -1041,7 +1041,7 @@ type ActorSystem interface {
 	decreaseActorsCounter()
 	increaseActorsCounter()
 	passivationManager() *passivationManager
-	getDispatcher() *dispatcher
+	dispatcherNamed(name string) *dispatcher
 	getClusterStore() cluster.Store
 	getDataCenterController() *datacentercontroller.Controller
 	getDataCenterConfig() *datacenter.Config
@@ -1166,6 +1166,16 @@ type actorSystem struct {
 	// at construction time. Zero means dispatcherWorkerCount. Set via
 	// WithDispatcherPoolSize.
 	dispatcherWorkers int
+
+	// dispatcherPools holds the size of every named worker pool declared with
+	// WithDispatcherPool, by name, until NewActorSystem has built the pools
+	// from it. Nil when none was declared, and again once they are built.
+	dispatcherPools map[string]int
+
+	// dispatchers holds the named worker pools built from dispatcherPools, the
+	// dispatchers of the actors and grains spawned with WithDispatcher and
+	// WithGrainDispatcher. They start and stop with the default dispatcher.
+	dispatchers map[string]*dispatcher
 
 	// grainDefaultOptions holds the grain options declared per kind with
 	// WithGrainDefaultOptions, keyed by the kind's name. They apply wherever a
@@ -1436,6 +1446,17 @@ func NewActorSystem(name string, opts ...Option) (ActorSystem, error) {
 	workers = max(workers, 2)
 	system.dispatcher = newDispatcher(workers, system.dispatcherThroughput)
 
+	// the named pools share the throughput budget and the floor of two; the
+	// sizes have served their purpose once the pools exist
+	system.dispatchers = make(map[string]*dispatcher, len(system.dispatcherPools))
+	for name, size := range system.dispatcherPools {
+		pool := newDispatcher(max(size, 2), system.dispatcherThroughput)
+		pool.name = name
+		system.dispatchers[name] = pool
+	}
+
+	system.dispatcherPools = nil
+
 	if err := system.validate(); err != nil {
 		return nil, err
 	}
@@ -1516,15 +1537,7 @@ func (x *actorSystem) Start(ctx context.Context) error {
 
 	x.scheduler = newScheduler(x.logger, x.shutdownTimeout, x)
 
-	// A stopped dispatcher cannot run again: signalStop closed its ready queue
-	// and its supervision consumer for good, and workers of the previous run may
-	// still be finishing their last turn on it. A Start that follows a Stop or a
-	// failed Start therefore gets a fresh pool of the same size.
-	if x.dispatcher.stopping.Load() {
-		x.dispatcher = newDispatcher(len(x.dispatcher.workers), x.dispatcher.throughput)
-	}
-
-	x.dispatcher.start()
+	x.startDispatchers()
 
 	if err := chain.
 		New(chain.WithFailFast(), chain.WithContext(ctx)).
@@ -3630,7 +3643,7 @@ func (x *actorSystem) startupCleanup(ctx context.Context) {
 		x.eventsStream.Close()
 	}
 
-	x.dispatcher.signalStop()
+	x.stopDispatchers()
 	x.reset()
 }
 
@@ -3679,7 +3692,7 @@ func (x *actorSystem) shutdown(ctx context.Context) (err error) {
 		// shutdown path may be running on one of the worker goroutines
 		// (e.g. triggered from an actor receive handler). Workers exit
 		// autonomously once their current turn completes.
-		x.dispatcher.signalStop()
+		x.stopDispatchers()
 		err = multierr.Combine(err, x.logger.Flush())
 	}()
 
@@ -4721,6 +4734,12 @@ func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, ac
 		supervisor = x.defaultSupervisor
 	}
 
+	// nil for the default dispatcher only on a system built by hand in a test
+	dispatcher := x.dispatcherNamed(spawnConfig.dispatcher)
+	if dispatcher == nil && spawnConfig.dispatcher != "" {
+		return nil, gerrors.NewErrDispatcherNotFound(spawnConfig.dispatcher)
+	}
+
 	// the settings every actor inherits from the system travel as one value;
 	// the options below carry what this spawn config adds
 	settings := pidSettings{
@@ -4732,6 +4751,7 @@ func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, ac
 		metricProvider:     x.metricProvider,
 		supervisor:         supervisor,
 		mailbox:            spawnConfig.mailbox,
+		dispatcher:         dispatcher,
 		relocationDisabled: !spawnConfig.relocatable,
 	}
 
@@ -5530,12 +5550,48 @@ func (x *actorSystem) passivationManager() *passivationManager {
 	return passivator
 }
 
-// getDispatcher returns the shared worker pool that drives mailbox
-// processing for both actors and grains. The dispatcher is created in
-// NewActorSystem and started in Start; callers must not assume it is
-// running outside of that lifecycle window.
-func (x *actorSystem) getDispatcher() *dispatcher {
-	return x.dispatcher
+// dispatcherNamed returns the worker pool called name: the default pool for
+// the empty name, the pool declared with WithDispatcherPool otherwise, and nil
+// when no pool of that name was declared. The dispatchers are created in
+// NewActorSystem and started in Start; callers must not assume one is running
+// outside of that lifecycle window.
+func (x *actorSystem) dispatcherNamed(name string) *dispatcher {
+	if name == "" {
+		return x.dispatcher
+	}
+
+	return x.dispatchers[name]
+}
+
+// startDispatchers starts the default pool and every named pool. A stopped
+// dispatcher cannot run again: signalStop closed its ready queue and its
+// supervision consumer for good, and workers of the previous run may still be
+// finishing their last turn on it. A Start that follows a Stop or a failed
+// Start therefore gets fresh pools of the same sizes.
+func (x *actorSystem) startDispatchers() {
+	x.dispatcher = x.dispatcher.renewed()
+	x.dispatcher.start()
+
+	// a fresh map, published with one write, as the default dispatcher is: a
+	// spawn that reads the map while a restart replaces it must never see a
+	// map being written
+	renewed := make(map[string]*dispatcher, len(x.dispatchers))
+	for name, pool := range x.dispatchers {
+		pool = pool.renewed()
+		renewed[name] = pool
+		pool.start()
+	}
+
+	x.dispatchers = renewed
+}
+
+// stopDispatchers signals the default pool and every named pool to stop,
+// without waiting for their workers: see signalStop.
+func (x *actorSystem) stopDispatchers() {
+	x.dispatcher.signalStop()
+	for _, pool := range x.dispatchers {
+		pool.signalStop()
+	}
 }
 
 // registerMetrics registers the OTel callbacks reporting system-level and

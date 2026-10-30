@@ -44,6 +44,12 @@ func TestSpawnOption(t *testing.T) {
 		option.Apply(config)
 		require.Equal(t, &spawnConfig{mailbox: mailbox}, config)
 	})
+	t.Run("spawn option with dispatcher", func(t *testing.T) {
+		config := &spawnConfig{}
+		option := WithDispatcher(" blocking ")
+		option.Apply(config)
+		require.Equal(t, &spawnConfig{dispatcher: "blocking"}, config)
+	})
 	t.Run("spawn option with supervisor strategy", func(t *testing.T) {
 		config := &spawnConfig{}
 		supervisor := supervisor.NewSupervisor(supervisor.WithStrategy(supervisor.OneForOneStrategy))
@@ -191,6 +197,7 @@ func TestSpawnConfigClone(t *testing.T) {
 
 		original := newSpawnConfig(
 			WithMailbox(mailbox),
+			WithDispatcher("blocking"),
 			WithSupervisor(sup),
 			WithDependencies(dep),
 			WithStashing(),

@@ -177,6 +177,9 @@ message RemoteSpawnRequest {
   // restores them as spawn options so remote placement behaves exactly like
   // a local spawn, including controller companion creation.
   ReliableDeliveryConfig reliable_delivery = 14;
+  // Specifies the dispatcher the actor is assigned to (WithDispatcher).
+  // Absent when the actor runs on the default dispatcher.
+  optional string dispatcher = 15;
 }
 
 message RemoteSpawnResponse {
@@ -406,6 +409,9 @@ message RemoteSpawnChildRequest {
   // Specifies the init timeout override when explicitly set.
   // When unset, the hosting node's system-wide init timeout is used.
   google.protobuf.Duration init_timeout = 12;
+  // Specifies the dispatcher the child is assigned to (WithDispatcher).
+  // Absent when the child runs on the default dispatcher.
+  optional string dispatcher = 13;
 }
 
 message RemoteSpawnChildResponse {

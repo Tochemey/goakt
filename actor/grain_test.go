@@ -1631,8 +1631,8 @@ func TestEnsureGrainProcessCluster(t *testing.T) {
 		require.True(t, got.isActive())
 		require.EqualValues(t, 7, got.config.capacity)
 		require.True(t, got.config.disableRelocation)
-		require.NotNil(t, got.config.role)
-		require.Equal(t, "billing", *got.config.role)
+		require.NotNil(t, got.config.role())
+		require.Equal(t, "billing", *got.config.role())
 	})
 
 	t.Run("missing process rejects a recorded claim with an unregistered dependency", func(t *testing.T) {

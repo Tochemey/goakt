@@ -192,6 +192,12 @@ type SpawnRequest struct {
 	// node; the standalone cluster client rejects spawn requests carrying it.
 	// It cannot be combined with Singleton.
 	ReliableDelivery *ReliableDeliverySpec
+
+	// Dispatcher names the dispatcher, declared on the hosting node with
+	// WithDispatcherPool, that runs the actor's turns. Empty means the
+	// hosting node's default dispatcher; a name the hosting node did not
+	// declare fails the spawn.
+	Dispatcher string
 }
 
 // _ ensures that SpawnRequest implements the validation.Validator interface at compile time.
@@ -329,6 +335,12 @@ type SpawnChildRequest struct {
 	//
 	// A zero value means the hosting node's system-wide init timeout is used.
 	InitTimeout time.Duration
+
+	// Dispatcher names the dispatcher, declared on the hosting node with
+	// WithDispatcherPool, that runs the child's turns. Empty means the
+	// hosting node's default dispatcher; a name the hosting node did not
+	// declare fails the spawn.
+	Dispatcher string
 }
 
 func (s *SpawnChildRequest) Validate() error {

@@ -57,7 +57,10 @@ type pidSettings struct {
 	supervisor *supervisor.Supervisor
 	// mailbox is the custom mailbox, skipped when nil so that newPID
 	// embeds the default one.
-	mailbox             Mailbox
+	mailbox Mailbox
+	// dispatcher is the worker pool that runs the actor's turns, skipped when
+	// nil so that the PID keeps the system's default pool.
+	dispatcher          *dispatcher
 	passivationStrategy passivation.Strategy
 	// relocationDisabled clears the relocation bit that newPID sets by
 	// default (see withRelocationDisabled).
@@ -161,6 +164,10 @@ func withRole(role string) pidOption {
 func (s *pidSettings) apply(pid *PID) {
 	pid.initMaxRetries.Store(int32(s.initMaxRetries))
 	pid.setActorSystem(s.actorSystem)
+	if s.dispatcher != nil {
+		pid.dispatcher = s.dispatcher
+	}
+
 	pid.initTimeout.Store(s.initTimeout)
 	pid.remoting = s.remoting
 	pid.passivationManager = s.passivationManager

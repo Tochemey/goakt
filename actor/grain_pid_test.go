@@ -837,6 +837,30 @@ func TestToWireGrainActivationRole(t *testing.T) {
 	require.Equal(t, "game-worker", wire.GetRole())
 }
 
+func TestToWireGrainDispatcher(t *testing.T) {
+	ctx := t.Context()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("db", 2))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+
+	// a grain on the default dispatcher carries none on the wire
+	identity := newGrainIdentity(&MockGrain{}, "wire-default-dispatcher")
+	pid := newGrainPID(identity, &MockGrain{}, sys, newGrainConfig())
+	wire, err := pid.toWireGrain()
+	require.NoError(t, err)
+	require.False(t, wire.HasDispatcher())
+
+	// the dispatcher name survives serialization so relocation and remote
+	// activation assign the grain to the same-named dispatcher
+	identity = newGrainIdentity(&MockGrain{}, "wire-dispatcher")
+	pid = newGrainPID(identity, &MockGrain{}, sys, newGrainConfig(WithGrainDispatcher("db")))
+	wire, err = pid.toWireGrain()
+	require.NoError(t, err)
+	require.True(t, wire.HasDispatcher())
+	require.Equal(t, "db", wire.GetDispatcher())
+}
+
 func TestGrainAsyncResponseCompletesRequest(t *testing.T) {
 	_, pid, _, _ := startReentrantGrainFixture(t, reentrancy.AllowAll)
 

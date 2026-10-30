@@ -69,7 +69,7 @@ response, err := system.AskGrain(ctx, identity, request, time.Second)
 
 ### Options per kind
 
-Grain options such as `WithGrainMailboxCapacity` and `WithGrainDeactivateAfter` can be given to `GrainOf`, but they
+Grain options such as `WithGrainMailboxCapacity`, `WithGrainDeactivateAfter` and `WithGrainDispatcher` can be given to `GrainOf`, but they
 then belong to that call: a bare `AskGrain` or `TellGrain` that finds the grain passivated reactivates it with the
 package defaults, and a grain activated on another node gets the default idle timeout. Declare them once per kind with
 `WithGrainDefaultOptions` on the actor system instead; a `GrainOf` call can still override them for one grain. Each

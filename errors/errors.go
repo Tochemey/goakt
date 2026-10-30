@@ -99,6 +99,11 @@ var (
 	// ErrActorNotFound indicates that the specified actor could not be found in the system.
 	ErrActorNotFound = errors.New("actor not found")
 
+	// ErrDispatcherNotFound is returned when an actor or a grain names a
+	// dispatcher pool that the actor system did not declare with
+	// WithDispatcherPool.
+	ErrDispatcherNotFound = errors.New("dispatcher not found")
+
 	// ErrRelocationInProgress is returned when a message is routed to an actor
 	// whose host has left the cluster and whose relocation onto a surviving
 	// node did not complete within the bounded handoff window. It is a
@@ -407,6 +412,12 @@ func NewErrInvalidActorName(name string, err error) error {
 // NewErrActorNotFound formats an ErrActorNotFound with the given actor path.
 func NewErrActorNotFound(actorPath string) error {
 	return fmt.Errorf("(actor=%s) %w", actorPath, ErrActorNotFound)
+}
+
+// NewErrDispatcherNotFound formats an ErrDispatcherNotFound with the name of
+// the pool that was asked for.
+func NewErrDispatcherNotFound(name string) error {
+	return fmt.Errorf("(dispatcher=%q) %w", name, ErrDispatcherNotFound)
 }
 
 // NewErrAddressNotFound formats an ErrAddressNotFound with the given actor address.

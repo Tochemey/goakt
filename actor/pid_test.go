@@ -3266,7 +3266,8 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(500 * time.Millisecond) // let the waiter join the flight
 
 		// materialize the child out-of-band while the activation is still held
-		childSettings, childOptions := parent.buildChildSettings(newSpawnConfig())
+		childSettings, childOptions, err := parent.buildChildSettings(newSpawnConfig())
+		require.NoError(t, err)
 		existing, err := newPID(ctx, childAddress, NewMockSupervised(), &childSettings, childOptions...)
 		require.NoError(t, err)
 		_, err = sys.completeSpawn(ctx, parent, existing)
@@ -8078,6 +8079,54 @@ func TestToWireActorIncludesSingletonSpecWhenSingleton(t *testing.T) {
 	assert.Equal(t, spec.WaitInterval, wire.GetSingleton().GetWaitInterval().AsDuration())
 }
 
+func TestToWireActorDispatcher(t *testing.T) {
+	t.Run("carries the name of a declared dispatcher", func(t *testing.T) {
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      address.New("actor-dispatcher", "testSys", "127.0.0.1", 0),
+			fieldsLocker: sync.RWMutex{},
+			dispatcher:   &dispatcher{name: "db"},
+		}
+
+		wire, err := pid.toSerialize()
+		require.NoError(t, err)
+		require.True(t, wire.HasDispatcher())
+		require.Equal(t, "db", wire.GetDispatcher())
+	})
+
+	t.Run("omits the name on the default dispatcher", func(t *testing.T) {
+		pid := &PID{
+			actor:        NewMockActor(),
+			address:      address.New("actor-default-dispatcher", "testSys", "127.0.0.1", 0),
+			fieldsLocker: sync.RWMutex{},
+			dispatcher:   &dispatcher{},
+		}
+
+		wire, err := pid.toSerialize()
+		require.NoError(t, err)
+		require.False(t, wire.HasDispatcher())
+	})
+}
+
+// TestSpawnChildRemoteCarriesDispatcher verifies that a child spawned through
+// a remote parent asks the hosting node for the dispatcher the config names.
+func TestSpawnChildRemoteCarriesDispatcher(t *testing.T) {
+	ctx := context.Background()
+	addr := address.New("remote-parent", "remoteSystem", "10.0.0.1", 8080)
+	remotingMock := mocksremote.NewClient(t)
+	remotingMock.EXPECT().
+		RemoteSpawnChild(mock.Anything, "10.0.0.1", 8080, mock.MatchedBy(func(req *remote.SpawnChildRequest) bool {
+			return req.Parent == "remote-parent" && req.Dispatcher == "db" && !req.Relocatable
+		})).
+		Return(address.New("child", "remoteSystem", "10.0.0.1", 8080), nil).
+		Once()
+	parent := newRemotePID(addr, remotingMock)
+
+	child, err := parent.spawnChildRemote(ctx, "child", NewMockActor(), newSpawnConfig(WithDispatcher("db")))
+	require.NoError(t, err)
+	require.True(t, child.IsRemote())
+}
+
 func TestToWireActorInitTimeout(t *testing.T) {
 	t.Run("carries the timeout when overridden", func(t *testing.T) {
 		pid := &PID{
@@ -10232,9 +10281,11 @@ func TestBuildChildSettings(t *testing.T) {
 
 	t.Run("a child inherits the parent's wiring and the system's default supervisor", func(t *testing.T) {
 		config := newSpawnConfig(WithInitTimeout(timeout))
-		settings, options := parent.buildChildSettings(config)
+		settings, options, err := parent.buildChildSettings(config)
+		require.NoError(t, err)
 
 		assert.Same(t, system, settings.actorSystem)
+		assert.Same(t, system.(*actorSystem).dispatcher, settings.dispatcher)
 		assert.Equal(t, 4, settings.initMaxRetries)
 		assert.Equal(t, &timeout, settings.initTimeout)
 		assert.Equal(t, parent.remoting, settings.remoting)
@@ -10258,7 +10309,8 @@ func TestBuildChildSettings(t *testing.T) {
 			WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
 			WithDependencies(dependency),
 		)
-		settings, options := parent.buildChildSettings(config)
+		settings, options, err := parent.buildChildSettings(config)
+		require.NoError(t, err)
 
 		assert.Same(t, sup, settings.supervisor)
 		assert.Same(t, mailbox, settings.mailbox)

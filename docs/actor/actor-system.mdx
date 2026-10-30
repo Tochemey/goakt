@@ -148,6 +148,8 @@ concern.
   - **WithDispatcherPoolSize**: Size of the worker pool that runs actor and grain turns (default:
     `max(GOMAXPROCS, 2)`), for handlers that block in their turn. See
     [Worker pool size](#worker-pool-size) for the trade-off.
+  - **WithDispatcherPool**: A named dispatcher, a worker pool of its own for the actors and grains assigned to it with
+    `WithDispatcher` and `WithGrainDispatcher`. See [Dedicated dispatchers](#dedicated-dispatchers).
   - **WithPartitionHasher**: Deprecated: use `ClusterConfig.WithPartitionHasher`. See
     [Partition Hashing](/clustering/partition-hashing).
 
@@ -227,6 +229,39 @@ cold one. Plain tells to a busy actor are unaffected: the worker never parks.
 The gain on the other side is what the option exists for. With 200 grains that each wait 10 ms in their turn, five
 messages each and all 1000 asks in flight, a node with `GOMAXPROCS=2` takes 5.5 s with the default pool and 53 ms with
 256 workers, because the 200 grains wait at the same time instead of two at a time.
+
+### Dedicated dispatchers
+
+Enlarging the default pool makes every actor pay for the few that block. The alternative, and Akka's recommendation
+for blocking actors, is a dispatcher of their own: `WithDispatcherPool` declares a named worker pool next to the
+default one, and the spawn option `WithDispatcher` or the grain option `WithGrainDispatcher` assigns an actor or a
+grain to it. The group a dispatcher serves is exactly the set of actors and grains spawned with its name. Everything
+else stays on the default pool, which keeps one worker per core and its full speed.
+
+```go A dispatcher for the actors and grains that wait on the database
+system, err := actor.NewActorSystem("orders",
+    actor.WithLogger(logger),
+    actor.WithDispatcherPool("db", 64),
+    actor.WithGrainDefaultOptions(&Account{}, actor.WithGrainDispatcher("db")),
+)
+
+pid, err := system.Spawn(ctx, "ledger", &ledger{}, actor.WithDispatcher("db"))
+```
+
+A handler that blocks on the `db` dispatcher holds one of its 64 workers and nothing else. When all 64 are held, the
+other actors of the `db` group wait, and the rest of the system does not notice. A spawn or an activation that names
+a dispatcher the system did not declare fails with `ErrDispatcherNotFound`. A child does not inherit its parent's
+dispatcher.
+
+Dispatchers are isolated from each other, which is the point and also the cost. A message between two actors on the
+same dispatcher puts the recipient on the sending worker's local queue; a message across dispatchers goes through
+the other pool's shared queue and wakes one of its parked workers, which is slower. Workers are not stolen across
+dispatchers, so an idle pool cannot help a busy one. Keep the number of dispatchers small, as Akka advises: the
+default for everything that computes and returns, and one per group that blocks.
+
+The dispatcher's name travels with the actor's or grain's wire record. An actor or grain relocated, activated or spawned
+on another node is assigned to the dispatcher of that name there, and fails with `ErrDispatcherNotFound` when that node
+did not declare it, so declare the same dispatchers on every node.
 
 How the dispatcher is built (its ready queue, work stealing and the state machine that keeps one actor on one worker) is
 covered in [chapter 7 of the maintainers' book](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-07.md).

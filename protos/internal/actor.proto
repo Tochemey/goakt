@@ -85,6 +85,10 @@ message Actor {
   ReliableDeliveryConfig reliable_delivery = 13;
   // Marks an endpoint-owned reliable-delivery controller record
   ReliableCompanionSpec reliable_companion = 14;
+  // Specifies the dispatcher the actor is assigned to (WithDispatcher), so a
+  // relocated actor spawns on the same-named dispatcher of its new node.
+  // Absent when the actor runs on the default dispatcher.
+  optional string dispatcher = 15;
 }
 
 message SingletonSpec {

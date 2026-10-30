@@ -3827,3 +3827,75 @@ func TestRemoteTellFullBoundedMailboxKeepsLaneAlive(t *testing.T) {
 	require.Eventually(t, func() bool { return received.Load() == capacity+1 }, 5*time.Second, 20*time.Millisecond,
 		"the parked messages must drain once the consumer resumes")
 }
+
+// TestRemoteSpawnHandlerDispatcher verifies that a remote spawn request names
+// the dispatcher the actor runs on, and is refused when this node did not
+// declare it.
+func TestRemoteSpawnHandlerDispatcher(t *testing.T) {
+	const host = "127.0.0.1"
+	ctx := context.Background()
+	p := inet.Get(1)[0]
+	sys, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, p)), WithLogger(log.DiscardLogger), WithDispatcherPool("db", 2))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+	require.NoError(t, impl.Register(ctx, NewMockActor()))
+	kind := types.Name(NewMockActor())
+
+	t.Run("a declared dispatcher runs the actor", func(t *testing.T) {
+		req := internalpb.RemoteSpawnRequest_builder{Host: host, Port: int32(p), ActorName: "pooled", ActorType: kind, Dispatcher: new("db")}.Build()
+		resp, err := impl.remoteSpawnHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		spawnResp, ok := resp.(*internalpb.RemoteSpawnResponse)
+		require.True(t, ok, "unexpected response %T", resp)
+
+		pid, err := impl.ActorOf(ctx, "pooled")
+		require.NoError(t, err)
+		require.Equal(t, spawnResp.GetAddress(), pid.ID())
+		require.Same(t, impl.dispatchers["db"], pid.dispatcher)
+	})
+
+	t.Run("an undeclared dispatcher refuses the spawn", func(t *testing.T) {
+		req := internalpb.RemoteSpawnRequest_builder{Host: host, Port: int32(p), ActorName: "unpooled", ActorType: kind, Dispatcher: new("missing")}.Build()
+		resp, err := impl.remoteSpawnHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
+	})
+}
+
+// TestRemoteSpawnChildHandlerDispatcher verifies that a remote child spawn
+// request names the dispatcher the child runs on, and is refused when this
+// node did not declare it.
+func TestRemoteSpawnChildHandlerDispatcher(t *testing.T) {
+	const host = "127.0.0.1"
+	ctx := context.Background()
+	p := inet.Get(1)[0]
+	sys, err := NewActorSystem("testSys", WithRemote(remote.NewConfig(host, p)), WithLogger(log.DiscardLogger), WithDispatcherPool("db", 2))
+	require.NoError(t, err)
+	impl := sys.(*actorSystem)
+	require.NoError(t, impl.Start(ctx))
+	t.Cleanup(func() { _ = impl.Stop(ctx) })
+
+	parent, err := impl.Spawn(ctx, "parent", NewMockActor())
+	require.NoError(t, err)
+
+	t.Run("a declared dispatcher runs the child", func(t *testing.T) {
+		req := internalpb.RemoteSpawnChildRequest_builder{Host: host, Port: int32(p), ActorName: "pooled-child", ActorType: parent.Kind(), Parent: "parent", Dispatcher: new("db")}.Build()
+		resp, err := impl.remoteSpawnChildHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		_, ok := resp.(*internalpb.RemoteSpawnChildResponse)
+		require.True(t, ok, "unexpected response %T", resp)
+
+		child, err := parent.Child("pooled-child")
+		require.NoError(t, err)
+		require.Same(t, impl.dispatchers["db"], child.dispatcher)
+	})
+
+	t.Run("an undeclared dispatcher refuses the child", func(t *testing.T) {
+		req := internalpb.RemoteSpawnChildRequest_builder{Host: host, Port: int32(p), ActorName: "unpooled-child", ActorType: parent.Kind(), Parent: "parent", Dispatcher: new("missing")}.Build()
+		resp, err := impl.remoteSpawnChildHandler(ctx, nullConn, req)
+		require.NoError(t, err)
+		requireProtoError(t, resp, internalpb.Code_CODE_INTERNAL_ERROR)
+	})
+}

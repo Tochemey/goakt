@@ -4113,6 +4113,10 @@ func (pid *PID) toSerialize() (*internalpb.Actor, error) {
 	if x := pid.Role(); x != nil {
 		actor.SetRole(*x)
 	}
+
+	if pid.dispatcher != nil && pid.dispatcher.name != "" {
+		actor.SetDispatcher(pid.dispatcher.name)
+	}
 	actor.SetSupervisor(supervisorSpec)
 	actor.SetReentrancy(reentrancy)
 	actor.SetInitTimeout(initTimeout)
@@ -4200,6 +4204,7 @@ func (pid *PID) spawnChildRemote(ctx context.Context, name string, actor Actor, 
 		EnableStashing:      clone.enableStash,
 		Reentrancy:          clone.reentrancy,
 		InitTimeout:         pointer.Deref(clone.initTimeout, 0),
+		Dispatcher:          clone.dispatcher,
 	})
 	if err != nil {
 		return nil, err
@@ -4241,7 +4246,11 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 			_ = pid.ActorSystem().Inject(config.dependencies...)
 		}
 
-		settings, options := pid.buildChildSettings(config)
+		settings, options, err := pid.buildChildSettings(config)
+		if err != nil {
+			return nil, err
+		}
+
 		cid, err := newPID(ctx, childAddress, actor, &settings, options...)
 		if err != nil {
 			return nil, err
@@ -4287,11 +4296,19 @@ func (pid *PID) childNameResolver(tree *tree, childAddress, name string) (*PID, 
 // pid inherits and the options its spawn config adds. The child inherits the
 // parent's system, remoting, passivation manager, metric provider and init
 // retries, is not relocatable, and gets the system's default supervisor when
-// the config names none, as a top-level actor does.
-func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOption) {
+// the config names none, as a top-level actor does. It fails with
+// ErrDispatcherNotFound when the config names a worker pool the system did
+// not declare.
+func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOption, error) {
 	supervisor := config.supervisor
 	if supervisor == nil {
 		supervisor = pid.actorSystem.getDefaultSupervisor()
+	}
+
+	// nil for the default dispatcher only on a system built by hand in a test
+	dispatcher := pid.actorSystem.dispatcherNamed(config.dispatcher)
+	if dispatcher == nil && config.dispatcher != "" {
+		return pidSettings{}, nil, gerrors.NewErrDispatcherNotFound(config.dispatcher)
 	}
 
 	settings := pidSettings{
@@ -4303,6 +4320,7 @@ func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOptio
 		metricProvider:      pid.metricProvider(),
 		supervisor:          supervisor,
 		mailbox:             config.mailbox,
+		dispatcher:          dispatcher,
 		passivationStrategy: config.passivationStrategy,
 		relocationDisabled:  true, // by default child is not relocatable
 	}
@@ -4320,7 +4338,7 @@ func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOptio
 		options = append(options, withDependencies(config.dependencies...))
 	}
 
-	return settings, options
+	return settings, options, nil
 }
 
 func (pid *PID) incarnationID() string {

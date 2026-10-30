@@ -742,6 +742,10 @@ func (x *actorSystem) remoteSpawnHandler(ctx context.Context, conn inet.Connecti
 		opts = append(opts, WithRole(request.GetRole()))
 	}
 
+	if request.GetDispatcher() != "" {
+		opts = append(opts, WithDispatcher(request.GetDispatcher()))
+	}
+
 	if request.GetSupervisor() != nil {
 		if decoded := codec.DecodeSupervisor(request.GetSupervisor()); decoded != nil {
 			opts = append(opts, WithSupervisor(decoded))
@@ -865,6 +869,10 @@ func (x *actorSystem) remoteSpawnChildHandler(ctx context.Context, conn inet.Con
 		if decoded := codec.DecodeSupervisor(sup); decoded != nil {
 			opts = append(opts, WithSupervisor(decoded))
 		}
+	}
+
+	if request.GetDispatcher() != "" {
+		opts = append(opts, WithDispatcher(request.GetDispatcher()))
 	}
 
 	if deps := request.GetDependencies(); len(deps) > 0 {

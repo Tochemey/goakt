@@ -38,6 +38,10 @@ const dispatcherThroughput = 32
 // by GOMAXPROCS independent of the actor population, replacing the
 // per-actor drainer-goroutine model with cooperative scheduling.
 type dispatcher struct {
+	// name is the name the dispatcher was declared under with
+	// WithDispatcherPool, empty for the default dispatcher. It travels with
+	// the wire record of every actor and grain assigned to the dispatcher.
+	name string
 	// readyQueue holds actors with pending work. Workers consume from it.
 	readyQueue *readyQueue
 	// workers is the fixed pool of goroutines created by start.
@@ -73,6 +77,7 @@ func newDispatcher(workerCount, throughput int) *dispatcher {
 		throughput: throughput,
 		supervisor: newSupervision(),
 	}
+
 	for i := range d.workers {
 		d.workers[i] = &worker{id: i, dispatcher: d}
 	}
@@ -120,4 +125,17 @@ func (d *dispatcher) schedule(s schedulable) {
 // supervision consumer, and reports whether the consumer took it.
 func (d *dispatcher) submitSupervision(pid *PID, signal *supervisionSignal) bool {
 	return d.supervisor.Submit(pid, signal)
+}
+
+// renewed returns d when it can still run, and a fresh, unstarted dispatcher
+// of the same size and budget when d was stopped: a closed ready queue does
+// not reopen, so a Start that follows a Stop needs a new pool.
+func (d *dispatcher) renewed() *dispatcher {
+	if d.stopping.Load() {
+		fresh := newDispatcher(len(d.workers), d.throughput)
+		fresh.name = d.name
+		return fresh
+	}
+
+	return d
 }

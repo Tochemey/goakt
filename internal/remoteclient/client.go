@@ -1511,6 +1511,9 @@ func (r *client) RemoteSpawnChild(ctx context.Context, host string, port int, ch
 	request.SetReentrancy(reentrancy)
 	request.SetSupervisor(codec.EncodeSupervisor(childRequest.Supervisor))
 	request.SetInitTimeout(initTimeout)
+	if childRequest.Dispatcher != "" {
+		request.SetDispatcher(childRequest.Dispatcher)
+	}
 
 	resp, err := r.sendControl(ctx, host, port, request)
 	if err != nil {
@@ -2359,6 +2362,7 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	if spawnRequest.InitTimeout > 0 {
 		initTimeout = durationpb.New(spawnRequest.InitTimeout)
 	}
+
 	request := &internalpb.RemoteSpawnRequest{}
 	request.SetHost(host)
 	request.SetPort(port32)
@@ -2376,6 +2380,9 @@ func (r *client) RemoteSpawn(ctx context.Context, host string, port int, spawnRe
 	request.SetReentrancy(reentrancy)
 	request.SetInitTimeout(initTimeout)
 	request.SetReliableDelivery(encodeReliableDelivery(spawnRequest.ReliableDelivery))
+	if spawnRequest.Dispatcher != "" {
+		request.SetDispatcher(spawnRequest.Dispatcher)
+	}
 
 	// Send request
 	resp, err := r.sendControl(ctx, host, port, request)
@@ -2952,6 +2959,10 @@ func getGrainFromRequest(host string, port int, grainRequest *remote.GrainReques
 	grain.SetReentrancy(codec.EncodeReentrancy(grainRequest.Reentrancy))
 	if grainRequest.Role != "" {
 		grain.SetRole(grainRequest.Role)
+	}
+
+	if grainRequest.Dispatcher != "" {
+		grain.SetDispatcher(grainRequest.Dispatcher)
 	}
 
 	return grain, nil

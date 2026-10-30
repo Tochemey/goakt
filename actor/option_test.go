@@ -325,6 +325,69 @@ func TestWithDispatcherPoolSize(t *testing.T) {
 	})
 }
 
+func TestWithDispatcherPool(t *testing.T) {
+	t.Run("declares a named pool", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPool("blocking", 64).Apply(system)
+
+		assert.Equal(t, map[string]int{"blocking": 64}, system.dispatcherPools)
+	})
+
+	t.Run("trims the name and keeps the last size declared for it", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPool(" blocking ", 8).Apply(system)
+		WithDispatcherPool("blocking", 16).Apply(system)
+		WithDispatcherPool("io", 4).Apply(system)
+
+		assert.Equal(t, map[string]int{"blocking": 16, "io": 4}, system.dispatcherPools)
+	})
+
+	t.Run("ignores a blank name", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPool("  ", 8).Apply(system)
+
+		assert.Nil(t, system.dispatcherPools)
+	})
+
+	t.Run("ignores a size that is not positive", func(t *testing.T) {
+		system := new(actorSystem)
+
+		WithDispatcherPool("blocking", 0).Apply(system)
+		WithDispatcherPool("blocking", -1).Apply(system)
+
+		assert.Nil(t, system.dispatcherPools)
+	})
+
+	t.Run("the actor system builds every pool with the floor of two and the shared budget", func(t *testing.T) {
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithThroughputBudget(7), WithDispatcherPool("io", 5), WithDispatcherPool("one", 1))
+		require.NoError(t, err)
+
+		sys := system.(*actorSystem)
+		require.Len(t, sys.dispatchers, 2)
+		assert.Len(t, sys.dispatchers["io"].workers, 5)
+		assert.Len(t, sys.dispatchers["one"].workers, 2)
+		assert.Equal(t, 7, sys.dispatchers["io"].throughput)
+		assert.Len(t, sys.dispatcher.workers, max(runtime.GOMAXPROCS(0), 2), "the default pool is not affected")
+
+		assert.Same(t, sys.dispatchers["io"], sys.dispatcherNamed("io"))
+		assert.Same(t, sys.dispatcher, sys.dispatcherNamed(""), "the empty name is the default pool")
+		assert.Nil(t, sys.dispatcherNamed("unknown"))
+	})
+
+	t.Run("an actor system declared without pools has none", func(t *testing.T) {
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+
+		sys := system.(*actorSystem)
+		assert.Empty(t, sys.dispatchers)
+		assert.Same(t, sys.dispatcher, sys.dispatcherNamed(""))
+		assert.Nil(t, sys.dispatcherNamed("blocking"))
+	})
+}
+
 func TestWithGrainDefaultOptions(t *testing.T) {
 	t.Run("declares the options of a kind", func(t *testing.T) {
 		system := new(actorSystem)
