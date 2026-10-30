@@ -132,7 +132,7 @@ Fifteen steps run through `internal/chain` in fail-fast mode: the first error st
 
 The order encodes real dependencies:
 
-- The remoting client (step 1) is built before any actor because every PID is constructed with it (`withRemoting(x.remoting)`, `actorSystem.configPID` in `actor/actor_system.go`).
+- The remoting client (step 1) is built before any actor because every PID is constructed with it (the `remoting` field of `pidSettings` in `actor/pid_option.go`, filled by `actorSystem.configPID` in `actor/actor_system.go`).
 - Every system actor exists (steps 3 to 11) before the remote server starts accepting requests (step 12), and the remote server runs before the node joins the cluster (step 13). Nothing can reach this node before it can answer.
 - `startCluster` seeds the peer-port cache before starting the events loop, so a member that later crashes can still be resolved (`actor/actor_system.go`).
 
@@ -201,17 +201,19 @@ A guardian's termination does not stop the system: the root guardian's `Terminat
 
 ### How the tree stores it
 
-The tree (`actor/pid_tree.go`) is one `sync.RWMutex` protecting three indexes over `pidNode` values:
+The tree (`actor/pid_tree.go`) has no lock of its own. It is three indexes over `pidNode` values, each split into 64 shards with a lock apiece (`treeIndex` and `treeShardCount` in `actor/pid_tree.go`), and the relationships kept on the nodes, each under that node's own mutex:
 
 - `pids`: PID ID to node.
 - `names`: name to a list of nodes, because a name is unique only among siblings (`tree` in `actor/pid_tree.go`).
 - `qualifiedNames`: the `/`-joined ancestor names to node.
 
-Each node caches its ID and names, and holds its PID in an `atomic.Pointer` so it can be read without the lock (`pidNode` and `pidNode.value` in `actor/pid_tree.go`).
+A key always hashes to the same shard, so a check and an insert of one ID under that shard's lock are atomic, which is what keeps a duplicate spawn out. A spawn under one parent and a spawn under another take different locks and never wait on each other; before the shards and node locks, one tree-wide `RWMutex` serialised every spawn, stop and watch of the system, and a million actors created as a binary tree spent most of their time waiting for it. The lock order that keeps this free of deadlocks is written on `pidNode`: a shard lock is a leaf, a node lock may be held while a shard lock is taken, and two node locks are held together in two cases only, while a new node is added, the new node's first and then its parent's (`tree.addNodeUnder` in `actor/pid_tree.go`), and while a watch edge is added or removed, the two nodes in the order of their IDs so that a `Watch` and an `UnWatch` of the same pair can never deadlock or leave a one-sided edge (`lockPair` in `actor/pid_tree.go`). Readers that walk several nodes, `descendants` and `pidList`, therefore see each node or shard consistently but not the whole tree at one instant.
 
-Adding a child does more than link it. The child goes into the parent's `descendants`, **and the parent is recorded as the child's watcher and the child as the parent's watchee** (`tree.addNodeLocked` in `actor/pid_tree.go`). Parenthood is a death-watch relationship: when a child stops, its parent receives `Terminated` through the same mechanism any watcher uses ([Chapter 9](chap-09.md)).
+Each node caches its ID and names, and holds its PID in an `atomic.Pointer` so it can be read without any lock (`pidNode` and `pidNode.value` in `actor/pid_tree.go`). Removing a node clears that pointer and takes the node out of the three indexes under the node's lock, so every later lookup misses it and every later attempt to link a child or a watcher to it, which checks the pointer under the same lock, does nothing (`tree.deleteSubtree`, `tree.addWatcher` in `actor/pid_tree.go`). A watch edge is written on its two nodes under both their locks, so a concurrent unwatch or stop sees it whole or not at all.
 
-One ordering subtlety: `addRootNode` caches `ActorSystem().NoSender()` so that later inserts can refuse NoSender as a parent (`actor/pid_tree.go`). The root guardian is spawned before NoSender exists, so the cached value is `nil` at first. `addNodeLocked` re-reads it while it is still `nil`, and it is filled in by the time NoSender itself is inserted. The design works only because of that re-read.
+Adding a child does more than link it. The child goes into the parent's `descendants`, **and the parent is recorded as the child's watcher and the child as the parent's watchee** (`tree.addNodeUnder` in `actor/pid_tree.go`). Parenthood is a death-watch relationship: when a child stops, its parent receives `Terminated` through the same mechanism any watcher uses ([Chapter 9](chap-09.md)).
+
+One ordering subtlety: `addRootNode` caches `ActorSystem().NoSender()` so that later inserts can refuse NoSender as a parent (`actor/pid_tree.go`). The root guardian is spawned before NoSender exists, so the cached value is `nil` at first. `addNode` re-reads it while it is still `nil`, and it is filled in by the time NoSender itself is inserted. The design works only because of that re-read.
 
 The guardians are inserted with errors from `configPID` discarded (`x.rootGuardian, _ = x.configPID(...)`, `actorSystem.spawnRootGuardian` in `actor/actor_system.go`). If construction ever failed, `addRootNode(nil)` would return "pid is nil" and fail the chain, so the error is not lost, only replaced.
 

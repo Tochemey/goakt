@@ -1046,12 +1046,7 @@ func TestReceiveContext(t *testing.T) {
 
 		// create the child actor
 		childPath := address.New("child", "sys", "127.0.0.1", ports[0])
-		child, err := newPID(
-			ctx, childPath,
-			NewMockSupervisor(),
-			withInitMaxRetries(1),
-			withActorSystem(actorSystem),
-		)
+		child, err := newPID(ctx, childPath, NewMockSupervisor(), &pidSettings{actorSystem: actorSystem, initMaxRetries: 1})
 
 		require.NoError(t, err)
 
@@ -3623,5 +3618,35 @@ func TestReceiveContextTellSchedulesOnTheTurnWorker(t *testing.T) {
 		require.Zero(t, d.readyQueue.locals[0].length())
 		require.Zero(t, d.readyQueue.locals[1].length())
 		require.Equal(t, 1, d.readyQueue.globalLen())
+	})
+}
+
+func TestInheritReplyRouteMovesTheReplyGuard(t *testing.T) {
+	t.Run("the forwarding context can no longer reply and the receiver can", func(t *testing.T) {
+		from := &ReceiveContext{response: make(chan any, 1)}
+		to := &ReceiveContext{}
+		to.inheritReplyRoute(from)
+
+		require.True(t, from.responseClosed.Load())
+		require.False(t, to.responseClosed.Load())
+		require.Equal(t, from.response, to.response)
+	})
+
+	t.Run("a reply already sent closes the receiver too", func(t *testing.T) {
+		from := &ReceiveContext{response: make(chan any, 1)}
+		from.responseClosed.Store(true)
+		to := &ReceiveContext{}
+		to.inheritReplyRoute(from)
+
+		require.True(t, to.responseClosed.Load())
+	})
+
+	t.Run("a context without a reply channel passes no guard", func(t *testing.T) {
+		from := &ReceiveContext{}
+		to := &ReceiveContext{}
+		to.inheritReplyRoute(from)
+
+		require.Nil(t, to.response)
+		require.False(t, to.responseClosed.Load())
 	})
 }

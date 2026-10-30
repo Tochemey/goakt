@@ -85,9 +85,9 @@ The string form is `kind/name`, with `/` as the separator (`GrainIdentitySeparat
 
 1. not empty;
 2. at most 255 characters;
-3. its trimmed form matches `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$`.
+3. its trimmed form matches `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$` (`grainNameRegexp` in `actor/grain_identity.go`, compiled once).
 
-The error text for rule 3 mentions letters, digits, `-` and `_` but not the dot the pattern allows. The kind is never validated. The result is memoised with a `sync.Once`; the method comment says the regex compile and validation chain otherwise dominated the allocations of every `TellGrain` and `AskGrain`.
+The error text for rule 3 mentions letters, digits, `-` and `_` but not the dot the pattern allows (`errInvalidGrainName` in `actor/grain_identity.go`). The kind is never validated. The result is memoised with a `sync.Once`; the method comment says the validation chain otherwise dominated the allocations of every `TellGrain` and `AskGrain`.
 
 **Parsing.** `toIdentity` splits a string at the first `/` with `strings.Cut`, fails with `ErrInvalidGrainIdentity` when there is no separator, validates the result, and keeps the input as the cached string form so that the registry lookup that usually follows costs nothing (`toIdentity` in `actor/grain_identity.go`). The remote handlers and relocation rebuild identities this way. `toWireGrainID` goes the other way, to the protobuf `GrainId` with kind, name and value (`actor/grain_identity.go`).
 

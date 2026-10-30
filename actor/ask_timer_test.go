@@ -27,6 +27,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tochemey/goakt/v4/internal/commands"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 // TestAskTimer verifies the Ask timeout: it delivers askTimedOut into the
@@ -44,14 +47,15 @@ func TestAskTimer(t *testing.T) {
 			t.Fatal("the timeout was never delivered")
 		}
 
-		// stopping a timer that already fired is allowed and does nothing
-		timer.stop()
+		// stopping a timer that already fired is allowed, does nothing and
+		// reports that it came too late
+		require.False(t, timer.stop())
 	})
 
 	t.Run("delivers nothing once stopped", func(t *testing.T) {
 		reply := make(chan any, 1)
 		timer := startAskTimer(reply, 20*time.Millisecond)
-		timer.stop()
+		require.True(t, timer.stop(), "a timer stopped before it fired reports so")
 
 		select {
 		case value := <-reply:
@@ -88,5 +92,70 @@ func TestAskTimer(t *testing.T) {
 
 		require.Equal(t, "answer", <-reply)
 		require.Empty(t, reply)
+	})
+}
+
+func TestAckTimer(t *testing.T) {
+	t.Run("delivers the timeout into the acknowledgment channel", func(t *testing.T) {
+		ack := make(chan error, 1)
+		timer := startAckTimer(ack, time.Millisecond)
+
+		select {
+		case err := <-ack:
+			require.ErrorIs(t, err, errAckTimedOut)
+		case <-time.After(time.Second):
+			t.Fatal("the timeout was never delivered")
+		}
+
+		require.False(t, timer.stop())
+	})
+
+	t.Run("delivers nothing once stopped", func(t *testing.T) {
+		ack := make(chan error, 1)
+		timer := startAckTimer(ack, 20*time.Millisecond)
+		require.True(t, timer.stop())
+
+		select {
+		case err := <-ack:
+			t.Fatalf("a stopped timer delivered %v", err)
+		case <-time.After(60 * time.Millisecond):
+		}
+	})
+
+	t.Run("does not overwrite an acknowledgment already there", func(t *testing.T) {
+		ack := make(chan error, 1)
+		ack <- nil
+		timer := startAckTimer(ack, time.Millisecond)
+		pause.For(20 * time.Millisecond)
+		require.NoError(t, <-ack)
+		require.False(t, timer.stop())
+	})
+}
+
+func TestEnvelopeTimer(t *testing.T) {
+	t.Run("delivers the timeout into the slot", func(t *testing.T) {
+		slot := make(chan *commands.AsyncResponse, 1)
+		timer := startEnvelopeTimer(slot, time.Millisecond)
+
+		select {
+		case response := <-slot:
+			require.Same(t, envelopeTimedOut, response)
+		case <-time.After(time.Second):
+			t.Fatal("the timeout was never delivered")
+		}
+
+		require.False(t, timer.stop())
+	})
+
+	t.Run("delivers nothing once stopped", func(t *testing.T) {
+		slot := make(chan *commands.AsyncResponse, 1)
+		timer := startEnvelopeTimer(slot, 20*time.Millisecond)
+		require.True(t, timer.stop())
+
+		select {
+		case response := <-slot:
+			t.Fatalf("a stopped timer delivered %v", response)
+		case <-time.After(60 * time.Millisecond):
+		}
 	})
 }

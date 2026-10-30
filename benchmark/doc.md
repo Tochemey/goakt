@@ -2,6 +2,10 @@
 
 Run from the repository root.
 
+### Reading the numbers on Apple silicon
+
+Run every benchmark with `-count=10` and read the median, not the best or the last round. On an M1 the rounds of a steady-state benchmark differ by 20 to 30 percent with no change in the code: the chip has four performance and four efficiency cores, Go runs one worker thread per processor, and macOS places some of those threads on efficiency cores, which run this code two to three times slower. A round where a busy worker landed on an efficiency core is the low one. With tracing on, the garbage collector runs the same four or five times in a low round as in a high one, all during setup, and the measured loops below are at 0 B/op, so the collector is not the cause. The signature is visible with `GOMAXPROCS=4`: the 1,000 in-flight ping-pong then runs at either 94 to 96M or 81 to 85M messages/sec, two levels and nothing between, and beats the eight-processor median of 86M because the efficiency cores add cross-core traffic faster than compute. For a stable single number on such a machine, pin `GOMAXPROCS` to the performance-core count.
+
 ### Tell — async send, parallel
 
 All producers race on a single receiver, so the reported rate is bounded by that one consumer's drain rate. Use the pair benchmarks below for send-path contention and aggregate scaling.
@@ -177,6 +181,30 @@ go test -run=^$ -bench=^BenchmarkGrainMemoryFootprint$ -benchtime=1x ./benchmark
 go test -run=^$ -bench=^BenchmarkRemoteTellThroughput$ -benchtime=1x ./benchmark/
 ```
 
+### SpawnTopLevel: local spawn, sequential
+
+One goroutine spawns empty actors under names no earlier spawn used, into a started system; the reported latency is the framework's own cost of creating an actor (address validation, PID construction, tree and passivation registration, the first dispatch). Every iteration leaves an actor alive, so the cost is averaged over a growing population; run a fixed number of iterations to compare runs. Cite this as the cost of a local spawn.
+
+```
+go test -run=^$ -bench=^BenchmarkSpawnTopLevel$ -benchtime=100000x -count=5 -benchmem ./benchmark/
+```
+
+### SpawnChild: child spawn under a parent 1, 10 and 20 levels deep
+
+Same shape as SpawnTopLevel through `PID.SpawnChild`, under a parent with 1, 10 or 20 ancestors. A child spawn validates its address once per ancestor, so the slope across the depths is what a deep hierarchy adds to a spawn.
+
+```
+go test -run=^$ -bench=^BenchmarkSpawnChild$ -benchtime=100000x -count=5 -benchmem ./benchmark/
+```
+
+### SpawnTopLevelParallel: local spawn from GOMAXPROCS goroutines
+
+GOMAXPROCS goroutines spawn distinct names at once. The aggregate spawns/sec against SpawnTopLevel shows how far spawns overlap; anything the spawn path serialises across actors, such as the actor tree's lock, shows up as an aggregate below GOMAXPROCS times the sequential rate.
+
+```
+go test -run=^$ -bench=^BenchmarkSpawnTopLevelParallel$ -benchtime=100000x -count=5 -benchmem ./benchmark/
+```
+
 ### ClusterSpawn: named spawn in a three-node cluster, sequential and parallel
 
 A spawn in cluster mode claims the actor name in the registry before it returns, so on top of the local activation it pays registry round trips over the network. Three nodes run in one process on loopback; one of them spawns actors under names no earlier spawn used, so every spawn is a first claim. The sequential variant is the latency of one spawn; cite it as the cost of a spawn in a cluster. The parallel variant spawns from GOMAXPROCS goroutines at once, and its aggregate rate shows how far spawns of distinct names overlap in the registry. Both variants and every repeat share one cluster, so the registry holds every actor spawned so far; run a fixed number of iterations to keep that population bounded.
@@ -199,4 +227,12 @@ The grain counterpart of MillionActorsSustainedLoad, so the two populations are 
 
 ```
 go test -tags=scale -run TestMillionGrainsSustainedLoad -v -timeout 30m ./benchmark/
+```
+
+### ActorCreationTree — 2²⁰−1 actors created as a binary tree
+
+A single-node scale test (not a benchmark) in which every actor spawns its two children, so creation is concurrent across subtrees and hierarchical in depth, the actor-creation workload actor frameworks compare on. It reports the wall time of the whole build and the creation rate. The sequential Spawn benchmarks measure one spawn's latency; this measures what the spawn path serialises across actors. Build-tagged behind `scale`; budget about 2 GB of RAM for the million long-lived actors.
+
+```
+go test -tags=scale -run TestActorCreationTree -v -timeout 30m ./benchmark/
 ```

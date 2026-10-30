@@ -24,45 +24,117 @@ package actor
 
 import (
 	"errors"
-	"slices"
+	"hash/maphash"
 	"sync"
 	"sync/atomic"
 )
+
+// treeShardCount is the number of shards of each tree index. It is a power of
+// two so that a key's hash picks its shard with a mask.
+const treeShardCount = 64
 
 // errNodeAlreadyExists reports that a PID with the same ID is already
 // registered in the tree. completeSpawn relies on this sentinel to detect a
 // duplicate insertion and return the canonical instance instead.
 var errNodeAlreadyExists = errors.New("pid already exists")
 
+// treeHashSeed seeds the hash that picks the shard of an index key.
+var treeHashSeed = maphash.MakeSeed()
+
 // pidNode represents a node in the PID tree.
-// Most fields are protected by the owning tree's mutex.
-// The pid field uses an atomic pointer because pidNode references may be
-// returned to callers outside the tree lock (e.g. via node()/nodeByName()),
-// and concurrent deleteNode() calls can set pid to nil.
+//
+// Locking. The tree has no lock of its own. Each index shard has one, and each
+// node has mu, which protects the node's relationships: parentNode, watchers,
+// watchees and descendants. The rules that keep the locks free of cycles are:
+//
+//   - A shard lock is a leaf: nothing else is taken while it is held.
+//   - A node lock may be held while a shard lock is taken.
+//   - Two node locks are held at once in two cases. Adding a new node locks the
+//     new node, then its parent: the new node is not yet in any index, so
+//     nothing else can hold its lock. Adding or removing a watch edge locks its
+//     two nodes in the order of their IDs (lockPair), so two edge operations
+//     on the same pair never wait on each other in a cycle. Nothing else takes
+//     a second node lock.
+//
+// The pid field is an atomic pointer because nodes are handed out without any
+// lock (node, nodeByName) and deleteNode clears it when the actor leaves the
+// tree. A node whose pid is nil has left the tree, or never joined it, and
+// every mutation of a relationship checks that under the node's lock, so no
+// edge is ever added to a node that is being removed.
 type pidNode struct {
-	pid        atomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
-	parentNode *pidNode            // Parent node; nil if root.
-	id         string              // Cached pid.ID() — avoids repeated string building.
-	name       string              // Cached pid.Name().
-	// qualifiedName caches pid.qualifiedName(), the node's key in the tree's
-	// qualifiedNames index, so removing the node never reads the PID.
-	qualifiedName string
-	watchers      []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most). Protected by the tree mutex like the rest of pidNode; use putWatcher/deleteWatcher.
-	watchees      map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
-	descendants   map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
+	pid atomic.Pointer[PID] // PID associated with this node (atomic for safe lock-free reads).
+	// id, name and qualifiedName cache the PID's identifiers. They are set
+	// before the node is published in an index and never change afterwards,
+	// so removing the node never reads the PID.
+	id            string // Cached pid.ID().
+	name          string // Cached pid.Name().
+	qualifiedName string // Cached pid.qualifiedName(), the node's key in the qualifiedNames index.
+	// namePrev and nameNext link the nodes that share this node's name, in
+	// insertion order, so that unlinking a node on removal costs O(1)
+	// whatever the number of actors with the same name. The names index
+	// points at the newest node of each name. All nodes of one name hash to
+	// the same names shard, whose lock protects these links; use linkName and
+	// removeName.
+	namePrev, nameNext *pidNode
+	// mu protects parentNode, watchers, watchees and descendants, and makes
+	// clearing pid atomic with the removal of the node from the indexes.
+	mu          sync.Mutex
+	parentNode  *pidNode            // Parent node; nil if root or removed.
+	watchers    []*PID              // Actors watching this node. A small slice, nil until the first watcher, scanned linearly (a handful of entries at most); use putWatcher/deleteWatcher.
+	watchees    map[string]*PID     // Actors this node is watching (key = watchee ID). Nil until the first watchee; use putLazy to insert.
+	descendants map[string]*pidNode // Direct children (key = child ID). Nil until the first child; use putLazy to insert.
+}
+
+// treeIndexShard is one shard of a treeIndex: a map under its own lock.
+type treeIndexShard struct {
+	mu    sync.RWMutex
+	nodes map[string]*pidNode
+}
+
+// treeIndex maps a key to a node. It is split into treeShardCount shards that
+// each carry their own lock, so lookups and updates of different keys do not
+// wait on each other; a key always lands in the same shard, so a check and an
+// insert of one key under that shard's lock are atomic.
+type treeIndex struct {
+	shards [treeShardCount]treeIndexShard
+}
+
+// removedNode is a node deleteSubtree took out of the tree, with the
+// relationships it held at that moment, which are cleaned once the whole
+// subtree is out.
+type removedNode struct {
+	node     *pidNode
+	parent   *pidNode
+	watchers []*PID
+	watchees map[string]*PID
+}
+
+// tree maintains actor relationships in a concurrency-safe structure: three
+// sharded indexes over pidNode values, by ID, by name and by qualified name,
+// and the relationships kept on the nodes themselves. There is no tree-wide
+// lock: a spawn, a stop or a watch takes the locks of the nodes and index
+// shards it touches, so actors in different parts of the tree are created and
+// stopped in parallel. See pidNode for the lock order.
+type tree struct {
+	pids           treeIndex               // Index: PID.ID() -> pidNode.
+	names          treeIndex               // Index: PID.Name() -> the most recently added node still in the tree with that name; see pidNode.namePrev.
+	qualifiedNames treeIndex               // Index: the qualified name of an actor, its ancestors' names and its own joined by '/', -> pidNode. Every node shares this system's host and port, so the qualified name identifies a node as uniquely as its ID, and lookups by it build no address.
+	rootNode       atomic.Pointer[pidNode] // Logical root node (its pid may be nil if cleared).
+	counter        atomic.Int64            // Number of nodes currently registered.
+	noSender       atomic.Pointer[PID]     // Cached NoSender (set on first root add).
 }
 
 // value returns the PID stored in the node, or nil if cleared by deleteNode.
-// Safe to call without holding the tree lock.
+// Safe to call without holding any lock.
 func (n *pidNode) value() *PID {
 	return n.pid.Load()
 }
 
 // pidInTree returns the PID a node lookup resolved. A node is handed out without
-// the tree lock and deleteNode clears its PID when the actor leaves the tree,
-// so a node found a moment ago may hold no PID any more: that is reported as
-// not found. Callers that need the PID go through the tree's pid lookups
-// rather than reading value() themselves.
+// a lock and deleteNode clears its PID when the actor leaves the tree, so a
+// node found a moment ago may hold no PID any more: that is reported as not
+// found. Callers that need the PID go through the tree's pid lookups rather
+// than reading value() themselves.
 func pidInTree(node *pidNode, found bool) (*PID, bool) {
 	if !found {
 		return nil, false
@@ -143,36 +215,97 @@ func deleteWatcher(list *[]*PID, id string) {
 	}
 }
 
-// tree maintains actor relationships in a concurrency-safe structure.
-// A single RWMutex protects all internal state, eliminating the need for
-// per-map locking and reducing lock contention.
-type tree struct {
-	mu       sync.RWMutex
-	rootNode *pidNode            // Logical root node (its pid may be nil if cleared).
-	pids     map[string]*pidNode // Index: PID.ID() -> pidNode.
-	// names indexes nodes by PID.Name(). A name is unique among siblings only,
-	// so several nodes can share one; they are kept in insertion order and a
-	// lookup by name returns the most recently added node still in the tree.
-	names map[string][]*pidNode
-	// qualifiedNames indexes nodes by the qualified name of their actor, its
-	// ancestors' names and its own joined by '/'. Every node shares this
-	// system's host and port, so the qualified name identifies a node as
-	// uniquely as its ID, and lookups by it build no address.
-	qualifiedNames map[string]*pidNode
-	counter        atomic.Int64 // Number of nodes currently registered.
-	noSender       *PID         // Cached NoSender (set on first root add).
+// init allocates the map of every shard.
+func (x *treeIndex) init() {
+	for i := range x.shards {
+		x.shards[i].nodes = make(map[string]*pidNode)
+	}
+}
+
+// shard returns the shard that holds key.
+func (x *treeIndex) shard(key string) *treeIndexShard {
+	return &x.shards[maphash.String(treeHashSeed, key)&(treeShardCount-1)]
+}
+
+// get returns the node registered under key.
+func (x *treeIndex) get(key string) (*pidNode, bool) {
+	s := x.shard(key)
+	s.mu.RLock()
+	n, ok := s.nodes[key]
+	s.mu.RUnlock()
+	return n, ok
+}
+
+// put registers n under key, replacing any node registered there.
+func (x *treeIndex) put(key string, n *pidNode) {
+	s := x.shard(key)
+	s.mu.Lock()
+	s.nodes[key] = n
+	s.mu.Unlock()
+}
+
+// putIfAbsent registers n under key unless a node is already registered there,
+// and reports whether it did.
+func (x *treeIndex) putIfAbsent(key string, n *pidNode) bool {
+	s := x.shard(key)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.nodes[key]; exists {
+		return false
+	}
+
+	s.nodes[key] = n
+	return true
+}
+
+// remove drops the entry of key when it is n. An entry that another node took
+// over since n was registered belongs to that node and is left in place.
+func (x *treeIndex) remove(key string, n *pidNode) {
+	s := x.shard(key)
+	s.mu.Lock()
+	if current, ok := s.nodes[key]; ok && current == n {
+		delete(s.nodes, key)
+	}
+	s.mu.Unlock()
+}
+
+// each calls fn with every registered node, one shard at a time under that
+// shard's read lock. Nodes added or removed while another shard is visited may
+// or may not be seen.
+func (x *treeIndex) each(fn func(*pidNode)) {
+	for i := range x.shards {
+		s := &x.shards[i]
+		s.mu.RLock()
+
+		for _, n := range s.nodes {
+			fn(n)
+		}
+
+		s.mu.RUnlock()
+	}
+}
+
+// clear drops every entry of every shard.
+func (x *treeIndex) clear() {
+	for i := range x.shards {
+		s := &x.shards[i]
+		s.mu.Lock()
+		clear(s.nodes)
+		s.mu.Unlock()
+	}
 }
 
 // newTree creates and returns a new PID tree.
 // Time Complexity: O(1).
 // Space Complexity: O(1) (excluding the internal empty maps allocated).
 func newTree() *tree {
-	return &tree{
-		pids:           make(map[string]*pidNode),
-		names:          make(map[string][]*pidNode),
-		qualifiedNames: make(map[string]*pidNode),
-		rootNode:       newPidNode(nil),
-	}
+	x := &tree{}
+	x.pids.init()
+	x.names.init()
+	x.qualifiedNames.init()
+	x.rootNode.Store(newPidNode(nil))
+	return x
 }
 
 // addRootNode registers the root PID in the tree.
@@ -180,52 +313,41 @@ func newTree() *tree {
 // Time Complexity: O(1) (amortized for map operations).
 // Space Complexity: O(1) additional.
 func (x *tree) addRootNode(pid *PID) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
 	if pid == nil {
 		return errors.New("pid is nil")
 	}
 
 	// Cache NoSender once.
-	if x.noSender == nil {
-		x.noSender = pid.ActorSystem().NoSender()
-	}
-	if pid.Equals(x.noSender) {
+	x.noSender.CompareAndSwap(nil, pid.ActorSystem().NoSender())
+	if pid.Equals(x.noSender.Load()) {
 		return errors.New("pid cannot be NoSender")
 	}
 
 	id := pid.ID()
-	if _, exists := x.pids[id]; exists {
+	if _, exists := x.pids.get(id); exists {
 		return errors.New("pid already exists")
 	}
 
-	name := pid.Name()
-	x.rootNode.pid.Store(pid)
-	x.rootNode.id = id
-	x.rootNode.name = name
-	x.rootNode.qualifiedName = pid.qualifiedName()
-	x.pids[id] = x.rootNode
-	x.names[name] = append(x.names[name], x.rootNode)
-	x.qualifiedNames[x.rootNode.qualifiedName] = x.rootNode
+	root := x.rootNode.Load()
+	root.mu.Lock()
+	defer root.mu.Unlock()
+
+	root.id = id
+	root.name = pid.Name()
+	root.qualifiedName = pid.qualifiedName()
+	root.pid.Store(pid)
+	x.pids.put(id, root)
+	x.linkName(root)
+	x.qualifiedNames.put(root.qualifiedName, root)
 	x.counter.Add(1)
 	return nil
 }
 
 // addNode inserts a child PID under the given parent PID.
 // Fails if inputs are invalid, parent does not exist, or pid already exists.
-// Establishes watcher/watchee links between parent and child.
 // Time Complexity: O(1) (amortized).
-// Space Complexity: O(1) additional (one node plus map entries).
+// Space Complexity: O(1) additional.
 func (x *tree) addNode(parent, pid *PID) error {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	return x.addNodeLocked(parent, pid)
-}
-
-// addNodeLocked is the lock-free core of addNode.
-// The caller MUST hold x.mu (write).
-func (x *tree) addNodeLocked(parent, pid *PID) error {
 	if pid == nil {
 		return errors.New("pid is nil")
 	}
@@ -235,83 +357,27 @@ func (x *tree) addNodeLocked(parent, pid *PID) error {
 	}
 
 	// Ensure NoSender cached (in case addRootNode was not yet called—defensive).
-	if x.noSender == nil {
-		x.noSender = pid.ActorSystem().NoSender()
-	}
-
-	if parent.Equals(x.noSender) {
+	x.noSender.CompareAndSwap(nil, pid.ActorSystem().NoSender())
+	if parent.Equals(x.noSender.Load()) {
 		return errors.New("parent pid cannot be NoSender")
 	}
 
-	id := pid.ID()
-	if _, exists := x.pids[id]; exists {
+	if _, exists := x.pids.get(pid.ID()); exists {
 		return errNodeAlreadyExists
 	}
 
-	parentID := parent.ID()
-	parentNode, ok := x.pids[parentID]
+	parentNode, ok := x.pids.get(parent.ID())
 	if !ok {
 		return errors.New("parent pid does not exist")
 	}
 
-	name := pid.Name()
-	childNode := &pidNode{
-		parentNode:    parentNode,
-		id:            id,
-		name:          name,
-		qualifiedName: pid.qualifiedName(),
-	}
-	childNode.pid.Store(pid)
-
-	putLazy(&parentNode.descendants, id, childNode)
-	putLazy(&parentNode.watchees, id, pid)
-	putWatcher(&childNode.watchers, parent)
-
-	x.pids[id] = childNode
-	x.names[name] = append(x.names[name], childNode)
-	x.qualifiedNames[childNode.qualifiedName] = childNode
-	x.counter.Add(1)
-	return nil
-}
-
-// attachNodeLocked links an existing pid under the given parent.
-// It reestablishes parent/child and watcher/watchee relationships without
-// creating a new node or changing the tree size.
-// The caller MUST hold x.mu (write).
-func (x *tree) attachNodeLocked(parent, pid *PID) error {
-	if pid == nil {
-		return errors.New("pid is nil")
-	}
-
-	if parent == nil {
-		return errors.New("parent pid is nil")
-	}
-
-	if parent.Equals(pid.ActorSystem().NoSender()) {
-		return errors.New("parent pid cannot be NoSender")
-	}
-
-	parentID := parent.ID()
-	parentNode, ok := x.pids[parentID]
-	if !ok {
-		return errors.New("parent pid does not exist")
-	}
-
-	childID := pid.ID()
-	childNode, ok := x.pids[childID]
-	if !ok {
-		return errors.New("pid does not exist")
-	}
-
-	childNode.parentNode = parentNode
-	putLazy(&parentNode.descendants, childID, childNode)
-	putLazy(&parentNode.watchees, childID, pid)
-	putWatcher(&childNode.watchers, parent)
-	return nil
+	return x.addNodeUnder(parentNode, parent, pid, false)
 }
 
 // addOrAttachNode ensures pid is linked under parent, adding it when missing.
-// Acquires the write lock once to avoid TOCTOU races.
+// A parent that is stopping is refused under the parent's lock, the lock its
+// freeChildren reads the children under, so there is no window between the
+// check and the insert.
 // ref: https://en.wikipedia.org/wiki/Time-of-check_to_time-of-use (TOCTOU)
 func (x *tree) addOrAttachNode(parent, pid *PID) error {
 	if pid == nil || parent == nil {
@@ -322,23 +388,20 @@ func (x *tree) addOrAttachNode(parent, pid *PID) error {
 		return nil
 	}
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	// A parent that is stopping frees its children under this lock (see
-	// PID.freeChildren), so a child attached once the stop has begun would
-	// outlive it unsupervised. The stopping bits are raised before the parent
-	// reads its children, so a child attached before them is seen by the stop.
-	if parent.isStateSet(stoppingState) || parent.isStateSet(passivatingState) {
+	if parentStopping(parent) {
 		return errors.New("parent pid is stopping")
 	}
 
-	id := pid.ID()
-	if _, ok := x.pids[id]; ok {
-		return x.attachNodeLocked(parent, pid)
+	parentNode, ok := x.pids.get(parent.ID())
+	if !ok {
+		return errors.New("parent pid does not exist")
 	}
 
-	return x.addNodeLocked(parent, pid)
+	if existing, ok := x.pids.get(pid.ID()); ok {
+		return x.attachNode(parentNode, existing, parent, pid)
+	}
+
+	return x.addNodeUnder(parentNode, parent, pid, true)
 }
 
 // removeWatcher removes the watch relationship: watcher stops watching watchee.
@@ -350,19 +413,25 @@ func (x *tree) removeWatcher(watchee, watcher *PID) {
 		return
 	}
 
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
 	watcheeID := watchee.ID()
 	watcherID := watcher.ID()
+	watcherNode, _ := x.pids.get(watcherID)
+	watcheeNode, _ := x.pids.get(watcheeID)
 
-	// Remove watchee from watcher's watchees list.
-	if watcherNode, ok := x.pids[watcherID]; ok {
+	switch {
+	case watcherNode != nil && watcheeNode != nil:
+		lockPair(watcherNode, watcheeNode)
 		delete(watcherNode.watchees, watcheeID)
-	}
-	// Remove watcher from watchee's watchers list.
-	if watcheeNode, ok := x.pids[watcheeID]; ok {
 		deleteWatcher(&watcheeNode.watchers, watcherID)
+		unlockPair(watcherNode, watcheeNode)
+	case watcherNode != nil:
+		watcherNode.mu.Lock()
+		delete(watcherNode.watchees, watcheeID)
+		watcherNode.mu.Unlock()
+	case watcheeNode != nil:
+		watcheeNode.mu.Lock()
+		deleteWatcher(&watcheeNode.watchers, watcherID)
+		watcheeNode.mu.Unlock()
 	}
 }
 
@@ -371,46 +440,45 @@ func (x *tree) removeWatcher(watchee, watcher *PID) {
 // Time Complexity: O(1).
 // Space Complexity: O(1).
 func (x *tree) removeDescendant(parentID, childID string) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-	if node, ok := x.pids[parentID]; ok {
+	if node, ok := x.pids.get(parentID); ok {
+		node.mu.Lock()
 		delete(node.descendants, childID)
+		node.mu.Unlock()
 	}
 }
 
 // addWatcher registers watcher to watch pid.
-// Silently no-ops if any PID is nil, NoSender, or not found.
+// Silently no-ops if any PID is nil, NoSender, not found, or no longer in the
+// tree. The two ends of the relationship are written under the locks of both
+// nodes, so a concurrent removal of the edge or of either actor sees the edge
+// whole or not at all.
 // Time Complexity: O(1) (amortized).
 // Space Complexity: O(1) additional per watcher relationship.
 func (x *tree) addWatcher(pid, watcher *PID) {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
 	if pid == nil || watcher == nil {
 		return
 	}
 
-	if x.noSender != nil {
-		if pid.Equals(x.noSender) || watcher.Equals(x.noSender) {
-			return
-		}
-	} else {
-		// Fallback (should be rare).
-		noSender := pid.ActorSystem().NoSender()
-		if pid.Equals(noSender) || watcher.Equals(noSender) {
-			return
-		}
+	if x.isNoSender(pid) || x.isNoSender(watcher) {
+		return
 	}
 
 	pidID := pid.ID()
-	pidNode, ok := x.pids[pidID]
+	pidNode, ok := x.pids.get(pidID)
 	if !ok {
 		return
 	}
 
 	watcherID := watcher.ID()
-	watcherNode, ok := x.pids[watcherID]
+	watcherNode, ok := x.pids.get(watcherID)
 	if !ok {
+		return
+	}
+
+	lockPair(pidNode, watcherNode)
+	defer unlockPair(pidNode, watcherNode)
+
+	if pidNode.pid.Load() == nil || watcherNode.pid.Load() == nil {
 		return
 	}
 
@@ -422,104 +490,29 @@ func (x *tree) addWatcher(pid, watcher *PID) {
 // Also cleans all watcher/watchee relationships involving those nodes.
 // Time Complexity: O(k + e) where k is number of nodes in the subtree,
 // and e is the total number of watcher/watchee edges touching them.
-// Space Complexity: O(k) for traversal stacks plus O(1) auxiliary.
+// Space Complexity: O(k) for the snapshots of the subtree's relationships.
 // No-ops if pid is nil, NoSender, unknown, or no longer the PID its node
 // holds: a node that a later incarnation of the same name took over belongs to
 // that incarnation and is left in place.
 // It reports whether the node was removed.
 func (x *tree) deleteNode(pid *PID) bool {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	if pid == nil {
+	if pid == nil || x.isNoSender(pid) {
 		return false
 	}
 
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return false
-	} else if x.noSender == nil { // Defensive fallback.
-		noSender := pid.ActorSystem().NoSender()
-		if pid.Equals(noSender) {
-			return false
-		}
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.pids.get(pid.ID())
 	if !ok || node.pid.Load() != pid {
 		return false
 	}
 
-	// Iterative stack for subtree traversal (post-order style via two slices).
-	stack := make([]*pidNode, 0, 8)
-	post := make([]*pidNode, 0, 8)
-	stack = append(stack, node)
-
-	for len(stack) > 0 {
-		n := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if n == nil {
-			continue
-		}
-		post = append(post, n)
-		for _, child := range n.descendants {
-			stack = append(stack, child)
-		}
-	}
-
-	// Process nodes in reverse order so children handled before parents.
-	for i := len(post) - 1; i >= 0; i-- {
-		n := post[i]
-		if n.pid.Load() == nil {
-			continue
-		}
-
-		// Clean watchers: remove this node from each watcher's watchees.
-		// w.ID() is cached, so the scan allocates nothing.
-		for _, w := range n.watchers {
-			if watcherNode, exists := x.pids[w.ID()]; exists {
-				delete(watcherNode.watchees, n.id)
-			}
-		}
-		n.watchers = nil
-
-		// Clean watchees: remove this node from each watchee's watchers.
-		for watcheeID := range n.watchees {
-			if watcheeNode, exists := x.pids[watcheeID]; exists {
-				deleteWatcher(&watcheeNode.watchers, n.id)
-			}
-		}
-		n.watchees = nil
-
-		// Unlink from parent using direct node reference (no ID lookup needed).
-		if pn := n.parentNode; pn != nil {
-			delete(pn.descendants, n.id)
-			delete(pn.watchees, n.id)
-		}
-
-		delete(x.pids, n.id)
-		x.removeNameLocked(n)
-
-		if current, ok := x.qualifiedNames[n.qualifiedName]; ok && current == n {
-			delete(x.qualifiedNames, n.qualifiedName)
-		}
-
-		n.parentNode = nil
-		n.pid.Store(nil)
-		x.counter.Add(-1)
-	}
-
-	return true
+	return x.deleteSubtree(node, pid)
 }
 
 // node returns the internal pidNode by ID.
 // Time Complexity: O(1) (amortized).
 // Space Complexity: O(1).
 func (x *tree) node(id string) (*pidNode, bool) {
-	x.mu.RLock()
-	n, ok := x.pids[id]
-	x.mu.RUnlock()
-	return n, ok
+	return x.pids.get(id)
 }
 
 // nodeByName returns the internal pidNode by actor name. When several nodes
@@ -532,17 +525,7 @@ func (x *tree) nodeByName(name string) (*pidNode, bool) {
 		return nil, false
 	}
 
-	// the element is read under the lock: removeNameLocked compacts the
-	// backing array in place
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	nodes := x.names[name]
-	if len(nodes) == 0 {
-		return nil, false
-	}
-
-	return nodes[len(nodes)-1], true
+	return x.names.get(name)
 }
 
 // nodeByQualifiedName returns the internal pidNode by the qualified name of its
@@ -551,10 +534,7 @@ func (x *tree) nodeByName(name string) (*pidNode, bool) {
 // Time Complexity: O(1) (amortized).
 // Space Complexity: O(1).
 func (x *tree) nodeByQualifiedName(qualifiedName string) (*pidNode, bool) {
-	x.mu.RLock()
-	node, ok := x.qualifiedNames[qualifiedName]
-	x.mu.RUnlock()
-	return node, ok
+	return x.qualifiedNames.get(qualifiedName)
 }
 
 // pidOf returns the PID of the actor registered under id. It reports false
@@ -584,35 +564,21 @@ func (x *tree) pidByQualifiedName(qualifiedName string) (*PID, bool) {
 	return pidInTree(x.nodeByQualifiedName(qualifiedName))
 }
 
-// pidList returns the PID of every actor in the tree. A node whose actor left
-// the tree while the nodes were collected is skipped.
+// pidList returns the PID of every actor in the tree. The list is collected
+// one index shard at a time, so an actor that joins or leaves the tree while
+// another shard is read may or may not be in it; a node whose actor left the
+// tree while the nodes were collected is skipped.
 // Time Complexity: O(n) where n is the number of nodes.
 // Space Complexity: O(n) for the returned slice.
 func (x *tree) pidList() []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	result := make([]*PID, 0, len(x.pids))
-	for _, n := range x.pids {
+	result := make([]*PID, 0, x.counter.Load())
+	x.pids.each(func(n *pidNode) {
 		if pid := n.value(); pid != nil {
 			result = append(result, pid)
 		}
-	}
+	})
 
 	return result
-}
-
-// removeNameLocked drops n from the name index, leaving the other nodes that
-// share its name in place, and deletes the entry once no node carries the name.
-// The caller MUST hold x.mu (write).
-func (x *tree) removeNameLocked(n *pidNode) {
-	nodes := slices.DeleteFunc(x.names[n.name], func(node *pidNode) bool { return node == n })
-	if len(nodes) == 0 {
-		delete(x.names, n.name)
-		return
-	}
-
-	x.names[n.name] = nodes
 }
 
 // siblings returns all sibling PIDs of pid (excluding pid itself).
@@ -620,33 +586,34 @@ func (x *tree) removeNameLocked(n *pidNode) {
 // Time Complexity: O(d) where d is the number of children of the parent.
 // Space Complexity: O(d) for the result slice (worst case).
 func (x *tree) siblings(pid *PID) []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil
-	}
-	if x.noSender != nil && pid.Equals(x.noSender) {
+	node, ok := x.lookup(pid)
+	if !ok {
 		return nil
 	}
 
-	id := pid.ID()
-	node, ok := x.pids[id]
-	if !ok || node.parentNode == nil {
-		return nil
-	}
-
+	node.mu.Lock()
 	parentNode := node.parentNode
+	node.mu.Unlock()
+
+	if parentNode == nil {
+		return nil
+	}
+
+	parentNode.mu.Lock()
+	defer parentNode.mu.Unlock()
+
 	size := len(parentNode.descendants)
 	if size <= 1 {
 		return []*PID{}
 	}
+
 	sibs := make([]*PID, 0, size-1)
 	for _, s := range parentNode.descendants {
 		if sp := s.pid.Load(); sp != nil && !sp.Equals(pid) {
 			sibs = append(sibs, sp)
 		}
 	}
+
 	return sibs
 }
 
@@ -655,21 +622,13 @@ func (x *tree) siblings(pid *PID) []*PID {
 // Time Complexity: O(c) where c is the number of direct children.
 // Space Complexity: O(c) for the result slice.
 func (x *tree) children(pid *PID) []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil
-	}
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return nil
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.lookup(pid)
 	if !ok {
 		return nil
 	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
 
 	result := make([]*PID, 0, len(node.descendants))
 	for _, child := range node.descendants {
@@ -677,38 +636,25 @@ func (x *tree) children(pid *PID) []*PID {
 			result = append(result, cp)
 		}
 	}
+
 	return result
 }
 
 // descendants returns all descendant PIDs of pid (depth-first, no order guarantee).
 // Returns nil if pid is nil/NoSender/unknown; empty slice if no descendants.
+// Each node's children are read under that node's lock, so the result is a
+// consistent view of every node but not of the subtree as a whole.
 // Time Complexity: O(k) where k is number of descendants.
 // Space Complexity: O(k) for traversal stack + result slice.
 func (x *tree) descendants(pid *PID) []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil
-	}
-
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return nil
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.lookup(pid)
 	if !ok {
 		return nil
 	}
 
-	if len(node.descendants) == 0 {
+	stack := childNodes(node)
+	if len(stack) == 0 {
 		return []*PID{}
-	}
-
-	stack := make([]*pidNode, 0, len(node.descendants))
-	for _, child := range node.descendants {
-		stack = append(stack, child)
 	}
 
 	result := make([]*PID, 0, len(stack))
@@ -718,13 +664,14 @@ func (x *tree) descendants(pid *PID) []*PID {
 		if n == nil {
 			continue
 		}
+
 		if p := n.pid.Load(); p != nil {
 			result = append(result, p)
 		}
-		for _, c := range n.descendants {
-			stack = append(stack, c)
-		}
+
+		stack = append(stack, childNodes(n)...)
 	}
+
 	return result
 }
 
@@ -732,13 +679,10 @@ func (x *tree) descendants(pid *PID) []*PID {
 // Time Complexity: O(n) in effect (map reset may drop references over n nodes).
 // Space Complexity: O(1) additional (old structures become GC candidates).
 func (x *tree) reset() {
-	x.mu.Lock()
-	defer x.mu.Unlock()
-
-	x.rootNode = newPidNode(nil)
-	clear(x.pids)
-	clear(x.names)
-	clear(x.qualifiedNames)
+	x.rootNode.Store(newPidNode(nil))
+	x.pids.clear()
+	x.names.clear()
+	x.qualifiedNames.clear()
 	x.counter.Store(0)
 	// Keep cached noSender (still valid for same ActorSystem instances).
 }
@@ -754,15 +698,16 @@ func (x *tree) count() int64 {
 // Time Complexity: O(1).
 // Space Complexity: O(1).
 func (x *tree) root() (*PID, bool) {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-	if x.rootNode == nil {
+	root := x.rootNode.Load()
+	if root == nil {
 		return nil, false
 	}
-	p := x.rootNode.pid.Load()
+
+	p := root.pid.Load()
 	if p == nil {
 		return nil, false
 	}
+
 	return p, true
 }
 
@@ -771,28 +716,24 @@ func (x *tree) root() (*PID, bool) {
 // Time Complexity: O(1).
 // Space Complexity: O(1).
 func (x *tree) parent(pid *PID) (*PID, bool) {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil, false
-	}
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return nil, false
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.lookup(pid)
 	if !ok {
 		return nil, false
 	}
-	if node.parentNode == nil {
+
+	node.mu.Lock()
+	parentNode := node.parentNode
+	node.mu.Unlock()
+
+	if parentNode == nil {
 		return nil, false
 	}
-	pp := node.parentNode.pid.Load()
+
+	pp := parentNode.pid.Load()
 	if pp == nil {
 		return nil, false
 	}
+
 	return pp, true
 }
 
@@ -801,22 +742,13 @@ func (x *tree) parent(pid *PID) (*PID, bool) {
 // Time Complexity: O(w) where w is the number of watchers.
 // Space Complexity: O(w) for the result slice.
 func (x *tree) watchers(pid *PID) []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil
-	}
-
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return nil
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.lookup(pid)
 	if !ok {
 		return nil
 	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
 
 	list := make([]*PID, len(node.watchers))
 	copy(list, node.watchers)
@@ -828,26 +760,306 @@ func (x *tree) watchers(pid *PID) []*PID {
 // Time Complexity: O(w) where w is the number of watchees.
 // Space Complexity: O(w) for the result slice.
 func (x *tree) watchees(pid *PID) []*PID {
-	x.mu.RLock()
-	defer x.mu.RUnlock()
-
-	if pid == nil {
-		return nil
-	}
-
-	if x.noSender != nil && pid.Equals(x.noSender) {
-		return nil
-	}
-
-	id := pid.ID()
-	node, ok := x.pids[id]
+	node, ok := x.lookup(pid)
 	if !ok {
 		return nil
 	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
 
 	list := make([]*PID, 0, len(node.watchees))
 	for _, w := range node.watchees {
 		list = append(list, w)
 	}
+
 	return list
+}
+
+// addNodeUnder creates the node of pid and links it under parentNode. The new
+// node's lock is held until it is in every index and in its parent's maps, so
+// a stop of the new actor that races its spawn waits for the spawn to finish
+// linking rather than removing a half-linked node. The parent's lock is taken
+// inside it, which is the one place two node locks nest (see pidNode).
+// With refuseStopping, a parent that is stopping or passivating is refused
+// under the parent's lock, the lock its freeChildren reads the children under.
+func (x *tree) addNodeUnder(parentNode *pidNode, parent, pid *PID, refuseStopping bool) error {
+	id := pid.ID()
+	child := &pidNode{
+		parentNode:    parentNode,
+		id:            id,
+		name:          pid.Name(),
+		qualifiedName: pid.qualifiedName(),
+		watchers:      []*PID{parent},
+	}
+	child.pid.Store(pid)
+
+	child.mu.Lock()
+	defer child.mu.Unlock()
+
+	parentNode.mu.Lock()
+	if refuseStopping && parentStopping(parent) {
+		parentNode.mu.Unlock()
+		return errors.New("parent pid is stopping")
+	}
+
+	if parentNode.pid.Load() == nil {
+		parentNode.mu.Unlock()
+		return errors.New("parent pid does not exist")
+	}
+
+	if !x.pids.putIfAbsent(id, child) {
+		parentNode.mu.Unlock()
+		return errNodeAlreadyExists
+	}
+
+	putLazy(&parentNode.descendants, id, child)
+	putLazy(&parentNode.watchees, id, pid)
+	parentNode.mu.Unlock()
+
+	x.linkName(child)
+	x.qualifiedNames.put(child.qualifiedName, child)
+	x.counter.Add(1)
+	return nil
+}
+
+// attachNode links the existing node of pid under parentNode again, which a
+// restart does. It reestablishes parent/child and watcher/watchee relationships
+// without creating a new node or changing the tree size. The parent is written
+// first and the child second, each under its own lock; a child that left the
+// tree in between is taken out of the parent again, and a parent that leaves
+// the tree in between removes the child with the rest of its subtree.
+func (x *tree) attachNode(parentNode, childNode *pidNode, parent, pid *PID) error {
+	childID := pid.ID()
+
+	parentNode.mu.Lock()
+	if parentStopping(parent) {
+		parentNode.mu.Unlock()
+		return errors.New("parent pid is stopping")
+	}
+
+	if parentNode.pid.Load() == nil {
+		parentNode.mu.Unlock()
+		return errors.New("parent pid does not exist")
+	}
+
+	putLazy(&parentNode.descendants, childID, childNode)
+	putLazy(&parentNode.watchees, childID, pid)
+	parentNode.mu.Unlock()
+
+	childNode.mu.Lock()
+	if childNode.pid.Load() == nil {
+		childNode.mu.Unlock()
+		parentNode.mu.Lock()
+		delete(parentNode.descendants, childID)
+		delete(parentNode.watchees, childID)
+		parentNode.mu.Unlock()
+		return errors.New("pid does not exist")
+	}
+
+	childNode.parentNode = parentNode
+	putWatcher(&childNode.watchers, parent)
+	childNode.mu.Unlock()
+	return nil
+}
+
+// deleteSubtree removes root and its subtree. owner is the PID root must still
+// hold; a descendant is removed whatever PID it holds. Under each node's lock
+// it takes the node out of every index and clears its PID, so from then on no
+// lookup resolves the node and no relationship is added to it; a child being
+// linked under the node at that moment finishes first, because the link holds
+// the child's lock, and is then removed with the rest of the subtree. The
+// relationships the nodes held are cleaned afterwards without the node locks,
+// children before parents.
+func (x *tree) deleteSubtree(root *pidNode, owner *PID) bool {
+	removed := make([]removedNode, 0, 8)
+	stack := make([]*pidNode, 0, 8)
+	stack = append(stack, root)
+
+	for len(stack) > 0 {
+		n := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		n.mu.Lock()
+		current := n.pid.Load()
+		if current == nil || (n == root && current != owner) {
+			n.mu.Unlock()
+			if n == root {
+				return false
+			}
+
+			continue
+		}
+
+		x.pids.remove(n.id, n)
+		x.removeName(n)
+		x.qualifiedNames.remove(n.qualifiedName, n)
+		n.pid.Store(nil)
+
+		removed = append(removed, removedNode{node: n, parent: n.parentNode, watchers: n.watchers, watchees: n.watchees})
+		for _, child := range n.descendants {
+			stack = append(stack, child)
+		}
+
+		n.parentNode, n.watchers, n.watchees, n.descendants = nil, nil, nil, nil
+		n.mu.Unlock()
+	}
+
+	// Parents were taken out before their children, so the reverse order
+	// cleans children first.
+	for i := len(removed) - 1; i >= 0; i-- {
+		r := removed[i]
+
+		// Clean watchers: remove this node from each watcher's watchees.
+		// w.ID() is cached, so the scan allocates nothing.
+		for _, w := range r.watchers {
+			if watcherNode, exists := x.pids.get(w.ID()); exists {
+				watcherNode.mu.Lock()
+				delete(watcherNode.watchees, r.node.id)
+				watcherNode.mu.Unlock()
+			}
+		}
+
+		// Clean watchees: remove this node from each watchee's watchers.
+		for watcheeID := range r.watchees {
+			if watcheeNode, exists := x.pids.get(watcheeID); exists {
+				watcheeNode.mu.Lock()
+				deleteWatcher(&watcheeNode.watchers, r.node.id)
+				watcheeNode.mu.Unlock()
+			}
+		}
+
+		if r.parent != nil {
+			r.parent.mu.Lock()
+			delete(r.parent.descendants, r.node.id)
+			delete(r.parent.watchees, r.node.id)
+			r.parent.mu.Unlock()
+		}
+
+		x.counter.Add(-1)
+	}
+
+	return true
+}
+
+// removeName drops n from the name index, leaving the other nodes that share
+// its name in place, and deletes the entry once no node carries the name.
+func (x *tree) removeName(n *pidNode) {
+	s := x.names.shard(n.name)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	newest, indexed := s.nodes[n.name]
+	if n.namePrev == nil && n.nameNext == nil && newest != n {
+		return // not linked
+	}
+
+	if n.namePrev != nil {
+		n.namePrev.nameNext = n.nameNext
+	}
+
+	if n.nameNext != nil {
+		n.nameNext.namePrev = n.namePrev
+	}
+
+	if indexed && newest == n {
+		if n.namePrev == nil {
+			delete(s.nodes, n.name)
+		} else {
+			s.nodes[n.name] = n.namePrev
+		}
+	}
+
+	n.namePrev, n.nameNext = nil, nil
+}
+
+// linkName appends n to the list of nodes that share its name and makes it the
+// node a lookup by that name returns.
+func (x *tree) linkName(n *pidNode) {
+	s := x.names.shard(n.name)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if newest, ok := s.nodes[n.name]; ok {
+		newest.nameNext = n
+		n.namePrev = newest
+	}
+
+	s.nodes[n.name] = n
+}
+
+// isNoSender reports whether pid is the system's NoSender, from the cached
+// value or, before the root is added, from pid's own system.
+func (x *tree) isNoSender(pid *PID) bool {
+	noSender := x.noSender.Load()
+	if noSender == nil {
+		noSender = pid.ActorSystem().NoSender()
+	}
+
+	return pid.Equals(noSender)
+}
+
+// lookup returns the node of pid. It reports false for a nil pid, for the
+// cached NoSender and for a pid the tree does not know.
+func (x *tree) lookup(pid *PID) (*pidNode, bool) {
+	if pid == nil {
+		return nil, false
+	}
+
+	if noSender := x.noSender.Load(); noSender != nil && pid.Equals(noSender) {
+		return nil, false
+	}
+
+	return x.pids.get(pid.ID())
+}
+
+// childNodes returns the direct child nodes of n, read under n's lock.
+func childNodes(n *pidNode) []*pidNode {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if len(n.descendants) == 0 {
+		return nil
+	}
+
+	children := make([]*pidNode, 0, len(n.descendants))
+	for _, child := range n.descendants {
+		children = append(children, child)
+	}
+
+	return children
+}
+
+// lockPair locks a and b, two nodes of the tree, in the order of their IDs,
+// and locks a node passed twice once, so that two edge operations on the same
+// pair take the locks in the same order. Both must be in the tree: nodes the
+// tree knows have distinct IDs, which is what makes the order total.
+func lockPair(a, b *pidNode) {
+	if a == b {
+		a.mu.Lock()
+		return
+	}
+
+	if a.id > b.id {
+		a, b = b, a
+	}
+
+	a.mu.Lock()
+	b.mu.Lock()
+}
+
+// unlockPair releases the locks lockPair took on a and b.
+func unlockPair(a, b *pidNode) {
+	a.mu.Unlock()
+	if a != b {
+		b.mu.Unlock()
+	}
+}
+
+// parentStopping reports whether parent has begun to stop or passivate, in
+// which case no child may be linked under it: the parent frees the children
+// it reads under its node lock, and a child linked once the stop has begun
+// would outlive it unsupervised.
+func parentStopping(parent *PID) bool {
+	return parent.isStateSet(stoppingState) || parent.isStateSet(passivatingState)
 }

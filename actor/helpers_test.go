@@ -1566,9 +1566,9 @@ func requirePutReturns(t *testing.T, mailbox *embeddedMailbox, message any) {
 	}, time.Second, time.Millisecond, "the put is waiting for a segment link")
 }
 
-// newEmbeddedGrainMailbox builds a standalone embedded grain mailbox seeded
-// exactly as attachMailbox seeds an unbounded grain's: one shared sentinel node
-// on both ends of an otherwise blank process, reinterpreted through
+// newEmbeddedGrainMailbox builds a standalone embedded grain mailbox wired
+// exactly as attachMailbox wires an unbounded grain's: an otherwise blank
+// process with no segment and no state yet, reinterpreted through
 // (*embeddedGrainMailbox).
 func newEmbeddedGrainMailbox() *embeddedGrainMailbox {
 	pid := &grainPID{}
@@ -1582,10 +1582,61 @@ func embeddedGrainMailboxMessage(message any) *GrainContext {
 	return &GrainContext{message: message}
 }
 
-// embeddedGrainMailboxHead reads the mailbox's current head, the node the
-// release protocol keeps as the sentinel.
-func embeddedGrainMailboxHead(mailbox *embeddedGrainMailbox) *GrainContext {
-	return mailbox.mailboxHead.Load()
+// grainMailboxGeneration returns the reuse generation of segment.
+func grainMailboxGeneration(segment *grainMailboxSegment) uint64 {
+	return cursorGeneration(segment.cursor.Load())
+}
+
+// requireGrainPutReturns puts message on its own goroutine and fails the test
+// when the put has not returned within a second: a producer left waiting for a
+// segment link that nobody makes spins for ever.
+func requireGrainPutReturns(t *testing.T, mailbox *embeddedGrainMailbox, message any) {
+	t.Helper()
+
+	done := make(chan struct{})
+	go func() {
+		mailbox.put(context.Background(), nil, message)
+		close(done)
+	}()
+
+	require.Eventually(t, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	}, time.Second, time.Millisecond, "the put is waiting for a segment link")
+}
+
+// grainSpareSegments returns the spare segments of mailbox, oldest first.
+func grainSpareSegments(mailbox *embeddedGrainMailbox) []*grainMailboxSegment {
+	state := mailbox.embedded.Load()
+	if state == nil {
+		return nil
+	}
+
+	ring := state.spares.Load()
+	if ring == nil {
+		return nil
+	}
+
+	var spares []*grainMailboxSegment
+	for i := ring.pop.Load(); i != ring.push.Load(); i++ {
+		spares = append(spares, ring.segments[i%mailboxSpareSegments].Load())
+	}
+
+	return spares
+}
+
+// firstGrainSpare returns the spare the next link takes, or nil when there is
+// none.
+func firstGrainSpare(mailbox *embeddedGrainMailbox) *grainMailboxSegment {
+	if spares := grainSpareSegments(mailbox); len(spares) > 0 {
+		return spares[0]
+	}
+
+	return nil
 }
 
 // startTestActorSystem returns a started actor system named name and stops it through t.Cleanup.
@@ -2953,7 +3004,7 @@ func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port i
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
 	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
+	sys.actors.noSender.Store(sys.noSender)
 	addr := address.New(name, sys.Name(), host, port)
 	stoppedPID := &PID{
 		address:     addr,
@@ -2972,16 +3023,13 @@ func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
 	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender = sys.noSender
+	sys.actors.noSender.Store(sys.noSender)
 	addr := address.New(name, sys.Name(), host, port)
 	addrStr := addr.String()
 	n := newPidNode(nil)
 	n.id = addrStr
 	n.name = name
-	sys.actors.mu.Lock()
-	sys.actors.pids[addrStr] = n
-	sys.actors.names[name] = []*pidNode{n}
-	sys.actors.mu.Unlock()
+	indexNode(sys.actors, n)
 	return sys
 }
 
@@ -3555,4 +3603,37 @@ func nextHandled(t *testing.T, actor *MockLifecycleOrderActor) string {
 		require.FailNow(t, "the actor handled no message")
 		return ""
 	}
+}
+
+// spareSegments returns the drained segments mailbox keeps for reuse, oldest
+// first: the ones the next links take, in that order.
+func spareSegments(mailbox *embeddedMailbox) []*mailboxSegment {
+	ring := mailbox.embedded.spares.Load()
+	if ring == nil {
+		return nil
+	}
+
+	var spares []*mailboxSegment
+	for i := ring.pop.Load(); i != ring.push.Load(); i++ {
+		spares = append(spares, ring.segments[i%mailboxSpareSegments].Load())
+	}
+
+	return spares
+}
+
+// firstSpare returns the spare the next link takes, or nil when there is none.
+func firstSpare(mailbox *embeddedMailbox) *mailboxSegment {
+	if spares := spareSegments(mailbox); len(spares) > 0 {
+		return spares[0]
+	}
+
+	return nil
+}
+
+// indexNode registers node in every index of the tree without linking it under
+// a parent, for fixtures that need an actor the tree knows about.
+func indexNode(x *tree, node *pidNode) {
+	x.pids.put(node.id, node)
+	x.linkName(node)
+	x.qualifiedNames.put(node.qualifiedName, node)
 }

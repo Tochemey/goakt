@@ -27,33 +27,36 @@ import (
 	"regexp"
 )
 
-// patternValidator is used to perform a validation
-// provided a given pattern
-type patternValidator struct {
-	pattern    string
+var errInvalidExpression = errors.New("invalid expression")
+
+type regexpValidator struct {
+	re         *regexp.Regexp
 	expression string
 	customErr  error
 }
 
-var _ Validator = (*patternValidator)(nil)
+var _ Validator = (*regexpValidator)(nil)
 
-// NewPatternValidator creates an instance of the validator
-// The given pattern should be valid regular expression
-func NewPatternValidator(pattern, expression string, customErr error) Validator {
-	return &patternValidator{
-		pattern:    pattern,
+// NewRegexpValidator creates a validator that accepts expression when it
+// matches re, a pattern the caller compiled once, and otherwise returns
+// customErr, or errInvalidExpression when customErr is nil.
+func NewRegexpValidator(re *regexp.Regexp, expression string, customErr error) Validator {
+	return &regexpValidator{
+		re:         re,
 		expression: expression,
 		customErr:  customErr,
 	}
 }
 
 // Validate executes the validation
-func (x *patternValidator) Validate() error {
-	if match, _ := regexp.MatchString(x.pattern, x.expression); !match {
-		if x.customErr != nil {
-			return x.customErr
-		}
-		return errors.New("invalid expression")
+func (x *regexpValidator) Validate() error {
+	if x.re.MatchString(x.expression) {
+		return nil
 	}
-	return nil
+
+	if x.customErr != nil {
+		return x.customErr
+	}
+
+	return errInvalidExpression
 }

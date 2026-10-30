@@ -23,8 +23,12 @@
 package actor
 
 import (
+	"runtime"
+	"strconv"
+	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/internal/address"
@@ -401,7 +405,7 @@ func TestSiblings(t *testing.T) {
 		pid := &PID{address: addr, path: newPath(addr), actorSystem: actorSystem}
 		pidnode := newPidNode(pid)
 
-		tree.pids[pid.ID()] = pidnode
+		indexNode(tree, pidnode)
 		siblings := tree.siblings(pid)
 		require.Empty(t, siblings)
 	})
@@ -481,7 +485,7 @@ func TestAddRootNodeValidation(t *testing.T) {
 
 	t.Run("pid is NoSender", func(t *testing.T) {
 		tree := newTree()
-		tree.noSender = noSender
+		tree.noSender.Store(noSender)
 		err := tree.addRootNode(noSender)
 		require.Error(t, err)
 		require.EqualError(t, err, "pid cannot be NoSender")
@@ -509,7 +513,7 @@ func TestAddNodeParentValidation(t *testing.T) {
 		root := newPIDAt(system, "root", 1)
 		child := newPIDAt(system, "child", 2)
 		require.NoError(t, tree.addRootNode(root))
-		tree.noSender = noSender
+		tree.noSender.Store(noSender)
 		err := tree.addNode(noSender, child)
 		require.Error(t, err)
 		require.EqualError(t, err, "parent pid cannot be NoSender")
@@ -522,7 +526,7 @@ func TestAddNodeParentValidation(t *testing.T) {
 		err := tree.addNode(parent, child)
 		require.Error(t, err)
 		require.EqualError(t, err, "parent pid does not exist")
-		require.Equal(t, noSender, tree.noSender)
+		require.Same(t, noSender, tree.noSender.Load())
 	})
 }
 
@@ -601,7 +605,7 @@ func TestAddWatcherNoSenderFallback(t *testing.T) {
 	require.Len(t, watchers, 1)
 	require.Equal(t, root.Name(), watchers[0].Name())
 
-	tree.noSender = nil
+	tree.noSender.Store(nil)
 	tree.addWatcher(child, system.NoSender())
 
 	watchers = tree.watchers(child)
@@ -660,7 +664,7 @@ func TestDeleteNodeNoSender(t *testing.T) {
 	tree.deleteNode(noSender)
 	require.EqualValues(t, 1, tree.count())
 
-	tree.noSender = nil
+	tree.noSender.Store(nil)
 	tree.deleteNode(noSender)
 	require.EqualValues(t, 1, tree.count())
 }
@@ -957,13 +961,13 @@ func TestTreeResetPreservesNoSender(t *testing.T) {
 
 	require.NoError(t, tree.addRootNode(root))
 	require.NoError(t, tree.addNode(root, child))
-	require.NotNil(t, tree.noSender)
-	noSender := tree.noSender
+	require.NotNil(t, tree.noSender.Load())
+	noSender := tree.noSender.Load()
 
 	tree.reset()
 
 	require.EqualValues(t, 0, tree.count())
-	require.Equal(t, noSender, tree.noSender)
+	require.Same(t, noSender, tree.noSender.Load())
 	rootPID, ok := tree.root()
 	require.False(t, ok)
 	require.Nil(t, rootPID)
@@ -1093,7 +1097,7 @@ func TestLazyMapsDeleteMixedSubtree(t *testing.T) {
 	require.Len(t, tree.children(root), 2)
 }
 
-// TestLazyMapsReattachExistingNode covers attachNodeLocked through
+// TestLazyMapsReattachExistingNode covers attachNode through
 // addOrAttachNode: relinking an existing node must lazily materialize the new
 // parent's maps and the child's watchers map exactly as a fresh add does.
 func TestLazyMapsReattachExistingNode(t *testing.T) {
@@ -1218,4 +1222,478 @@ func TestWatchersSliceLifecycle(t *testing.T) {
 	tree.removeWatcher(watched, root)
 	require.Empty(t, tree.watchers(watched))
 	require.Nil(t, node.watchers)
+}
+
+func TestNodeByNameOrder(t *testing.T) {
+	newTreeWithRoot := func(t *testing.T) (*tree, *PID) {
+		t.Helper()
+		system, _ := NewActorSystem("TestSys")
+		tree := newTree()
+		root := newPIDAt(system, "root", 1)
+		require.NoError(t, tree.addRootNode(root))
+		t.Cleanup(tree.reset)
+		return tree, root
+	}
+
+	// three children share one name; distinct ports give them distinct IDs
+	addThree := func(t *testing.T, tree *tree, root *PID) (first, second, third *PID) {
+		t.Helper()
+		first = newPIDAt(root.ActorSystem(), "twin", 2)
+		second = newPIDAt(root.ActorSystem(), "twin", 3)
+		third = newPIDAt(root.ActorSystem(), "twin", 4)
+		require.NoError(t, tree.addNode(root, first))
+		require.NoError(t, tree.addNode(root, second))
+		require.NoError(t, tree.addNode(root, third))
+		return first, second, third
+	}
+
+	t.Run("newest wins", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		_, _, third := addThree(t, tree, root)
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the oldest keeps the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, _, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(first))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the middle keeps the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		_, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(second))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+	})
+
+	t.Run("deleting the newest falls back to the previous", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(third))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, second.ID(), node.id)
+
+		require.True(t, tree.deleteNode(second))
+		node, ok = tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+
+		require.True(t, tree.deleteNode(first))
+		_, ok = tree.nodeByName("twin")
+		require.False(t, ok)
+	})
+
+	t.Run("re-adding a name after removal becomes the newest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(third))
+		again := newPIDAt(root.ActorSystem(), "twin", 5)
+		require.NoError(t, tree.addNode(root, again))
+
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, again.ID(), node.id)
+		require.Equal(t, second.ID(), node.namePrev.id)
+		require.Equal(t, first.ID(), node.namePrev.namePrev.id)
+	})
+
+	t.Run("deleting the middle then the newest falls back to the oldest", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, second, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(second))
+		require.True(t, tree.deleteNode(third))
+
+		// the list must have been relinked around the middle node: a stale link
+		// would make the index fall back to the deleted middle node, and report
+		// the surviving oldest actor as not found
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, first.ID(), node.id)
+		pid, ok := tree.pidByName("twin")
+		require.True(t, ok)
+		require.Same(t, first, pid)
+	})
+
+	t.Run("deleting a node twice is a no-op", func(t *testing.T) {
+		tree, root := newTreeWithRoot(t)
+		first, _, third := addThree(t, tree, root)
+		require.True(t, tree.deleteNode(first))
+		require.False(t, tree.deleteNode(first))
+		node, ok := tree.nodeByName("twin")
+		require.True(t, ok)
+		require.Equal(t, third.ID(), node.id)
+		require.EqualValues(t, 3, tree.count())
+	})
+}
+
+func TestTreeIndex(t *testing.T) {
+	t.Run("putIfAbsent registers a key once", func(t *testing.T) {
+		var index treeIndex
+		index.init()
+
+		first, second := &pidNode{id: "a"}, &pidNode{id: "a"}
+		require.True(t, index.putIfAbsent("a", first))
+		require.False(t, index.putIfAbsent("a", second))
+
+		got, ok := index.get("a")
+		require.True(t, ok)
+		require.Same(t, first, got)
+	})
+
+	t.Run("remove leaves an entry another node took over", func(t *testing.T) {
+		var index treeIndex
+		index.init()
+
+		old, replacement := &pidNode{id: "a"}, &pidNode{id: "a"}
+		index.put("a", old)
+		index.put("a", replacement)
+		index.remove("a", old)
+
+		got, ok := index.get("a")
+		require.True(t, ok)
+		require.Same(t, replacement, got)
+
+		index.remove("a", replacement)
+		_, ok = index.get("a")
+		require.False(t, ok)
+	})
+
+	t.Run("each visits every shard and clear empties them", func(t *testing.T) {
+		var index treeIndex
+		index.init()
+
+		const keys = 4 * treeShardCount
+		for i := range keys {
+			index.put(strconv.Itoa(i), &pidNode{})
+		}
+
+		visited := 0
+		index.each(func(*pidNode) { visited++ })
+		require.Equal(t, keys, visited)
+
+		index.clear()
+		visited = 0
+		index.each(func(*pidNode) { visited++ })
+		require.Zero(t, visited)
+	})
+}
+
+func TestTreeRefusesRelationshipsToRemovedNodes(t *testing.T) {
+	// A node that is still indexed but holds no PID is one that deleteNode is
+	// taking out of the tree; the fixtures below build that state directly so
+	// the checks made under the node locks run without a race.
+	newTreeWithRoot := func(t *testing.T) (*tree, ActorSystem, *PID) {
+		t.Helper()
+		system, err := NewActorSystem("TestSys")
+		require.NoError(t, err)
+		tree := newTree()
+		root := newPIDAt(system, "root", 1)
+		require.NoError(t, tree.addRootNode(root))
+		return tree, system, root
+	}
+
+	leaving := func(tree *tree, pid *PID) *pidNode {
+		node := newPidNode(pid)
+		node.pid.Store(nil)
+		indexNode(tree, node)
+		return node
+	}
+
+	t.Run("addNode under a parent that is leaving the tree fails", func(t *testing.T) {
+		tree, system, _ := newTreeWithRoot(t)
+		parent := newPIDAt(system, "parent", 2)
+		leaving(tree, parent)
+
+		child := newPIDAt(system, "child", 3)
+		require.EqualError(t, tree.addNode(parent, child), "parent pid does not exist")
+		_, ok := tree.pidOf(child.ID())
+		require.False(t, ok)
+		require.EqualValues(t, 1, tree.count())
+	})
+
+	t.Run("addOrAttachNode under a parent that is leaving the tree fails", func(t *testing.T) {
+		tree, system, _ := newTreeWithRoot(t)
+		parent := newPIDAt(system, "parent", 2)
+		leaving(tree, parent)
+
+		child := newPIDAt(system, "child", 3)
+		require.EqualError(t, tree.addOrAttachNode(parent, child), "parent pid does not exist")
+		_, ok := tree.pidOf(child.ID())
+		require.False(t, ok)
+	})
+
+	t.Run("attaching a child that is leaving the tree leaves the parent untouched", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		child := newPIDAt(system, "child", 2)
+		leaving(tree, child)
+
+		require.EqualError(t, tree.addOrAttachNode(root, child), "pid does not exist")
+		require.Empty(t, tree.children(root))
+		require.Empty(t, tree.watchees(root))
+	})
+
+	t.Run("attaching under a parent that is leaving the tree fails", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		parent := newPIDAt(system, "parent", 2)
+		child := newPIDAt(system, "child", 3)
+		require.NoError(t, tree.addNode(root, child))
+		leaving(tree, parent)
+
+		require.EqualError(t, tree.addOrAttachNode(parent, child), "parent pid does not exist")
+		got, ok := tree.parent(child)
+		require.True(t, ok)
+		require.Same(t, root, got)
+	})
+
+	t.Run("watching an actor that is leaving the tree registers nothing", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		watchee := newPIDAt(system, "watchee", 2)
+		leaving(tree, watchee)
+
+		tree.addWatcher(watchee, root)
+		require.Empty(t, tree.watchers(watchee))
+		require.Empty(t, tree.watchees(root))
+	})
+
+	t.Run("a watcher that is leaving the tree is not recorded on the watchee", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		watcher := newPIDAt(system, "watcher", 2)
+		leaving(tree, watcher)
+
+		tree.addWatcher(root, watcher)
+		require.Empty(t, tree.watchers(root))
+		require.Empty(t, tree.watchees(watcher))
+	})
+
+	t.Run("an actor may watch itself", func(t *testing.T) {
+		tree, _, root := newTreeWithRoot(t)
+		tree.addWatcher(root, root)
+		require.ElementsMatch(t, []*PID{root}, tree.watchers(root))
+		require.ElementsMatch(t, []*PID{root}, tree.watchees(root))
+
+		tree.removeWatcher(root, root)
+		require.Empty(t, tree.watchers(root))
+		require.Empty(t, tree.watchees(root))
+	})
+
+	t.Run("unwatching cleans whichever end is still in the tree", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		watcher := newPIDAt(system, "watcher", 2)
+		watchee := newPIDAt(system, "watchee", 3)
+		require.NoError(t, tree.addNode(root, watcher))
+		require.NoError(t, tree.addNode(root, watchee))
+		tree.addWatcher(watchee, watcher)
+
+		watcheeNode, ok := tree.node(watchee.ID())
+		require.True(t, ok)
+		tree.pids.remove(watchee.ID(), watcheeNode)
+		tree.removeWatcher(watchee, watcher)
+		require.Empty(t, tree.watchees(watcher))
+
+		tree.pids.put(watchee.ID(), watcheeNode)
+		tree.addWatcher(watchee, watcher)
+		watcherNode, ok := tree.node(watcher.ID())
+		require.True(t, ok)
+		tree.pids.remove(watcher.ID(), watcherNode)
+		tree.removeWatcher(watchee, watcher)
+		// The parent stays a watcher of its child.
+		require.ElementsMatch(t, []*PID{root}, tree.watchers(watchee))
+	})
+
+	t.Run("deleteNode removes a node once", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		child := newPIDAt(system, "child", 2)
+		require.NoError(t, tree.addNode(root, child))
+
+		require.True(t, tree.deleteNode(child))
+		require.False(t, tree.deleteNode(child))
+		require.EqualValues(t, 1, tree.count())
+		require.Empty(t, tree.children(root))
+	})
+
+	t.Run("a descendant that already left the tree is skipped", func(t *testing.T) {
+		tree, system, root := newTreeWithRoot(t)
+		parent := newPIDAt(system, "parent", 2)
+		child := newPIDAt(system, "child", 3)
+		require.NoError(t, tree.addNode(root, parent))
+		require.NoError(t, tree.addNode(parent, child))
+
+		childNode, ok := tree.node(child.ID())
+		require.True(t, ok)
+		childNode.pid.Store(nil)
+
+		require.True(t, tree.deleteNode(parent))
+		require.Empty(t, tree.children(root))
+		_, ok = tree.pidOf(parent.ID())
+		require.False(t, ok)
+		// The root and the node whose removal was already under way: that
+		// removal, not this one, counts the node out.
+		require.EqualValues(t, 2, tree.count())
+	})
+}
+
+func TestTreeConcurrentSpawnStopAndWatch(t *testing.T) {
+	// Every goroutine owns one parent and spawns, watches, unwatches and stops
+	// children under it while the others do the same and readers walk the
+	// tree, so the per-node locks and the index shards are exercised together.
+	// Run with the race detector.
+	system, err := NewActorSystem("TestSys")
+	require.NoError(t, err)
+
+	tree := newTree()
+	root := newPIDAt(system, "root", 1)
+	require.NoError(t, tree.addRootNode(root))
+
+	const childrenPerParent = 200
+	parents := 2 * runtime.GOMAXPROCS(0)
+	parentPIDs := make([]*PID, parents)
+	for i := range parentPIDs {
+		parentPIDs[i] = newPIDAt(system, "parent-"+strconv.Itoa(i), 2+i)
+		require.NoError(t, tree.addNode(root, parentPIDs[i]))
+	}
+
+	// newChild returns an unstarted PID for a child of parent, with a child
+	// address so its qualified name is parent/name as in a real spawn.
+	newChild := func(parent *PID, name string, port int) *PID {
+		parentAddr := parent.getAddress()
+		addr := address.NewWithParent(name, parentAddr.System(), parentAddr.Host(), port, parentAddr)
+		return &PID{address: addr, path: newPath(addr), actorSystem: system}
+	}
+
+	survivors := make([][]*PID, parents)
+	stop := make(chan struct{})
+
+	var readers sync.WaitGroup
+	readers.Add(1)
+	go func() {
+		defer readers.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = tree.pidList()
+				_ = tree.descendants(root)
+				_ = tree.siblings(parentPIDs[0])
+				for _, parent := range parentPIDs {
+					_ = tree.children(parent)
+					_, _ = tree.pidByName(parent.Name())
+				}
+			}
+		}
+	}()
+
+	var writers sync.WaitGroup
+	for i, parent := range parentPIDs {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			var previous *PID
+			for j := range childrenPerParent {
+				child := newChild(parent, "child-"+strconv.Itoa(j), 1000+i*childrenPerParent+j)
+				if !assert.NoError(t, tree.addNode(parent, child)) {
+					return
+				}
+
+				if previous != nil {
+					tree.addWatcher(child, previous)
+					tree.removeWatcher(child, previous)
+					tree.addWatcher(previous, child)
+				}
+
+				if j%2 == 1 {
+					assert.True(t, tree.deleteNode(child))
+				} else {
+					survivors[i] = append(survivors[i], child)
+				}
+
+				previous = child
+			}
+		}()
+	}
+
+	writers.Wait()
+	close(stop)
+	readers.Wait()
+
+	expected := int64(1 + parents + parents*childrenPerParent/2)
+	require.Equal(t, expected, tree.count())
+	require.Len(t, tree.pidList(), int(expected))
+	require.Len(t, tree.descendants(root), int(expected-1))
+
+	for i, parent := range parentPIDs {
+		require.ElementsMatch(t, survivors[i], tree.children(parent))
+		for _, child := range survivors[i] {
+			got, ok := tree.pidOf(child.ID())
+			require.True(t, ok)
+			require.Same(t, child, got)
+			got, ok = tree.pidByQualifiedName(child.qualifiedName())
+			require.True(t, ok)
+			require.Same(t, child, got)
+			got, ok = tree.parent(child)
+			require.True(t, ok)
+			require.Same(t, parent, got)
+			for _, watcher := range tree.watchers(child) {
+				_, inTree := tree.pidOf(watcher.ID())
+				require.True(t, inTree, "a watcher that left the tree is still recorded")
+			}
+
+			for _, watchee := range tree.watchees(child) {
+				_, inTree := tree.pidOf(watchee.ID())
+				require.True(t, inTree, "a watchee that left the tree is still recorded")
+			}
+		}
+	}
+
+	// Every parent has a child of each surviving name, so a name lookup finds
+	// a live node and the list behind it holds one node per parent; the names
+	// of the stopped children are gone.
+	for j := range childrenPerParent {
+		name := "child-" + strconv.Itoa(j)
+		node, ok := tree.nodeByName(name)
+		if j%2 == 1 {
+			require.False(t, ok, name)
+			continue
+		}
+
+		require.True(t, ok, name)
+		named := 0
+		for n := node; n != nil; n = n.namePrev {
+			require.NotNil(t, n.value())
+			named++
+		}
+
+		require.Equal(t, parents, named, name)
+	}
+}
+
+func TestLockPair(t *testing.T) {
+	t.Run("locks two nodes in the order of their IDs whichever is passed first", func(t *testing.T) {
+		a, b := &pidNode{id: "a"}, &pidNode{id: "b"}
+		lockPair(b, a)
+		require.False(t, a.mu.TryLock())
+		require.False(t, b.mu.TryLock())
+		unlockPair(b, a)
+		require.True(t, a.mu.TryLock())
+		require.True(t, b.mu.TryLock())
+		a.mu.Unlock()
+		b.mu.Unlock()
+	})
+
+	t.Run("locks a node passed twice once", func(t *testing.T) {
+		a := &pidNode{id: "a"}
+		lockPair(a, a)
+		require.False(t, a.mu.TryLock())
+		unlockPair(a, a)
+		require.True(t, a.mu.TryLock())
+		a.mu.Unlock()
+	})
 }

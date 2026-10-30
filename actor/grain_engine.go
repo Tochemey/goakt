@@ -969,12 +969,18 @@ func (x *actorSystem) localSendGrain(ctx context.Context, id *GrainIdentity, mes
 // PID.Tell. The caller's cancellation is detached because it returns before
 // the message is processed; values such as trace metadata are kept. A context
 // that can never be cancelled reports a nil Done channel and needs no wrapper,
-// which spares the allocation on that path. The context carries no reply
-// channel, so the enqueue failure is taken from the return value of receive
-// and the context is recycled on that path.
+// which spares the allocation on that path. On the embedded mailbox the
+// message is stored as values and takes no pooled context. On a bounded
+// mailbox it travels in a context that carries no reply channel, so the
+// enqueue failure is taken from the return value of receive and the context
+// is recycled on that path.
 func (x *actorSystem) localOneWayTellGrain(ctx context.Context, pid *grainPID, id *GrainIdentity, message any) error {
 	if ctx.Done() != nil {
 		ctx = context.WithoutCancel(ctx)
+	}
+
+	if pid.boundedMailbox == nil {
+		return pid.receiveOneWay(ctx, id, message)
 	}
 
 	grainContext := getGrainContext(pid.ctxShard)
@@ -1008,13 +1014,23 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 
 	responseCh := grainContext.response
 	shard := grainContext.poolShard
-	timer := timers.Get(timeout)
 
+	// The timeout is delivered into responseCh (see askTimer), so the caller
+	// parks on that channel and its context only.
+	timeoutTimer := startAskTimer(responseCh, timeout)
 	pid.receive(grainContext)
 	select {
 	case res := <-responseCh:
-		timers.Put(timer)
-		putGrainReplyChannel(shard, responseCh)
+		stopped := timeoutTimer.stop()
+		if _, timedOut := res.(askTimedOut); timedOut {
+			return nil, gerrors.ErrRequestTimeout
+		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// reply is in hand and the timeout was stopped before it fired.
+		if stopped {
+			putGrainReplyChannel(shard, responseCh)
+		}
 
 		// Failures reported by the handler ride the same reply channel,
 		// wrapped so an error-typed response payload is not mistaken
@@ -1024,11 +1040,8 @@ func (x *actorSystem) localAskGrain(ctx context.Context, pid *grainPID, id *Grai
 		}
 		return res, nil
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-	case <-timer.C:
-		timers.Put(timer)
-		return nil, gerrors.ErrRequestTimeout
 	}
 }
 
@@ -1045,19 +1058,28 @@ func (x *actorSystem) localTellGrain(ctx context.Context, pid *grainPID, id *Gra
 
 	errCh := grainContext.err
 	shard := grainContext.poolShard
-	timer := timers.Get(timeout)
 
+	// The timeout is delivered into errCh (see ackTimer), so the caller
+	// parks on that channel and its context only.
+	timeoutTimer := startAckTimer(errCh, timeout)
 	pid.receive(grainContext)
 	select {
 	case err := <-errCh:
-		timers.Put(timer)
-		putGrainErrorChannel(shard, errCh)
+		stopped := timeoutTimer.stop()
+		if errors.Is(err, errAckTimedOut) {
+			return gerrors.ErrRequestTimeout
+		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// acknowledgment is in hand and the timeout was stopped before it
+		// fired.
+		if stopped {
+			putGrainErrorChannel(shard, errCh)
+		}
+
 		return err
-	case <-timer.C:
-		timers.Put(timer)
-		return gerrors.ErrRequestTimeout
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		return errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
 	}
 }
@@ -1083,11 +1105,18 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 		return nil, err
 	}
 
-	timer := timers.Get(timeout)
+	// The timeout is delivered into the slot (see envelopeTimer), so the
+	// caller parks on the slot and its context only.
+	timeoutTimer := startEnvelopeTimer(slot, timeout)
 
 	select {
 	case response := <-slot:
-		timers.Put(timer)
+		timeoutTimer.stop()
+		if response == envelopeTimedOut {
+			x.pendingAsks.Abandon(correlationID)
+			return nil, gerrors.ErrRequestTimeout
+		}
+
 		// Decode exactly like the on-turn response handler does: an empty
 		// response is a successful reply without a payload (NoErr).
 		if response.Error != "" {
@@ -1102,13 +1131,9 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 
 		return response.Message, nil
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		x.pendingAsks.Abandon(correlationID)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-	case <-timer.C:
-		timers.Put(timer)
-		x.pendingAsks.Abandon(correlationID)
-		return nil, gerrors.ErrRequestTimeout
 	}
 }
 

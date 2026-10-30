@@ -750,11 +750,11 @@ func TestRestart(t *testing.T) {
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
-		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system))
+		root, err := newPID(ctx, rootAddr, NewMockActor(), &pidSettings{actorSystem: system})
 		require.NoError(t, err)
 
 		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
-		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system))
+		child, err := newPID(ctx, childAddr, NewMockActor(), &pidSettings{actorSystem: system})
 		require.NoError(t, err)
 
 		tree := system.tree()
@@ -791,11 +791,11 @@ func TestRestart(t *testing.T) {
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
 		rootAddr := system.actorAddress("root")
-		root, err := newPID(ctx, rootAddr, NewMockActor(), withActorSystem(system))
+		root, err := newPID(ctx, rootAddr, NewMockActor(), &pidSettings{actorSystem: system})
 		require.NoError(t, err)
 
 		childAddr := address.NewWithParent("child", rootAddr.System(), rootAddr.Host(), rootAddr.Port(), rootAddr)
-		child, err := newPID(ctx, childAddr, NewMockActor(), withActorSystem(system))
+		child, err := newPID(ctx, childAddr, NewMockActor(), &pidSettings{actorSystem: system})
 		require.NoError(t, err)
 
 		tree := system.tree()
@@ -3266,7 +3266,8 @@ func TestSpawnChild(t *testing.T) {
 		pause.For(500 * time.Millisecond) // let the waiter join the flight
 
 		// materialize the child out-of-band while the activation is still held
-		existing, err := newPID(ctx, childAddress, NewMockSupervised(), parent.buildChildOptions(newSpawnConfig())...)
+		childSettings, childOptions := parent.buildChildSettings(newSpawnConfig())
+		existing, err := newPID(ctx, childAddress, NewMockSupervised(), &childSettings, childOptions...)
 		require.NoError(t, err)
 		_, err = sys.completeSpawn(ctx, parent, existing)
 		require.NoError(t, err)
@@ -6052,11 +6053,7 @@ func TestStopChild(t *testing.T) {
 func TestNewPID(t *testing.T) {
 	t.Run("With actor path not defined", func(t *testing.T) {
 		ctx := context.Background()
-		pid, err := newPID(
-			ctx,
-			nil,
-			NewMockActor(),
-			withInitMaxRetries(1))
+		pid, err := newPID(ctx, nil, NewMockActor(), &pidSettings{initMaxRetries: 1})
 
 		require.Error(t, err)
 		assert.Nil(t, pid)
@@ -6118,15 +6115,8 @@ func TestNewPID(t *testing.T) {
 		require.NoError(t, err)
 
 		addr := address.New("actor", actorSystem.Name(), "127.0.0.1", 0)
-		pid, err := newPID(
-			ctx,
-			addr,
-			NewMockActor(),
-			withActorSystem(actorSystem),
-			withMetricProvider(metric.NewProvider()),
-			asSystemActor(),
-			withInitMaxRetries(1),
-		)
+		settings := &pidSettings{actorSystem: actorSystem, metricProvider: metric.NewProvider(), initMaxRetries: 1}
+		pid, err := newPID(ctx, addr, NewMockActor(), settings, asSystemActor())
 
 		require.NoError(t, err)
 		require.NotNil(t, pid)
@@ -6648,12 +6638,7 @@ func TestUnWatchWithInexistentNode(t *testing.T) {
 	require.True(t, pid.IsRunning())
 
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
-	cid, err := newPID(
-		ctx, childPath,
-		NewMockSupervisor(),
-		withInitMaxRetries(1),
-		withActorSystem(actorSystem),
-	)
+	cid, err := newPID(ctx, childPath, NewMockSupervisor(), &pidSettings{actorSystem: actorSystem, initMaxRetries: 1})
 	require.NoError(t, err)
 	require.NotNil(t, cid)
 	// this node does not exist in the actors tree
@@ -6686,12 +6671,7 @@ func TestParentWithInexistenceNodeReturnsNil(t *testing.T) {
 	pause.For(time.Second)
 
 	childPath := address.New("child", "sys", "127.0.0.1", ports[0])
-	cid, err := newPID(
-		ctx, childPath,
-		NewMockSupervisor(),
-		withInitMaxRetries(1),
-		withActorSystem(actorSystem),
-	)
+	cid, err := newPID(ctx, childPath, NewMockSupervisor(), &pidSettings{actorSystem: actorSystem, initMaxRetries: 1})
 	require.NoError(t, err)
 	require.NotNil(t, cid)
 	parent := cid.Parent()
@@ -9006,11 +8986,11 @@ func TestNewPIDDefaultLogger(t *testing.T) {
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
-	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), &pidSettings{actorSystem: system})
 	require.NoError(t, err)
 	require.Equal(t, log.DiscardLogger, first.getLogger())
 
-	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), &pidSettings{actorSystem: system})
 	require.NoError(t, err)
 	require.Equal(t, first.getLogger(), second.getLogger())
 
@@ -9032,19 +9012,19 @@ func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
-	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), withActorSystem(system))
+	first, err := newPID(ctx, system.actorAddress("first"), NewMockActor(), &pidSettings{actorSystem: system})
 	require.NoError(t, err)
 	require.Same(t, defaultSupervisor, first.supervisor)
 	require.Same(t, defaultPassivationStrategy, first.passivationStrategy)
 
-	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), withActorSystem(system))
+	second, err := newPID(ctx, system.actorAddress("second"), NewMockActor(), &pidSettings{actorSystem: system})
 	require.NoError(t, err)
 	require.Same(t, first.supervisor, second.supervisor)
 	require.Same(t, first.passivationStrategy, second.passivationStrategy)
 
 	custom := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.StopDirective))
 	strategy := passivation.NewTimeBasedStrategy(time.Minute)
-	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), withActorSystem(system), withSupervisor(custom), withPassivationStrategy(strategy))
+	third, err := newPID(ctx, system.actorAddress("third"), NewMockActor(), &pidSettings{actorSystem: system, supervisor: custom, passivationStrategy: strategy})
 	require.NoError(t, err)
 	require.Same(t, custom, third.supervisor)
 	require.Same(t, strategy, third.passivationStrategy)
@@ -9126,11 +9106,11 @@ func TestBuildObserveOptions(t *testing.T) {
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
-	plain, err := newPID(ctx, system.actorAddress("plain"), NewMockActor(), withActorSystem(system))
+	plain, err := newPID(ctx, system.actorAddress("plain"), NewMockActor(), &pidSettings{actorSystem: system})
 	require.NoError(t, err)
 	require.Nil(t, plain.observeOptions())
 
-	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), withActorSystem(system), withMetricProvider(metric.NewProvider()))
+	metered, err := newPID(ctx, system.actorAddress("metered"), NewMockActor(), &pidSettings{actorSystem: system, metricProvider: metric.NewProvider()})
 	require.NoError(t, err)
 	require.Len(t, metered.observeOptions(), 4)
 
@@ -9150,7 +9130,7 @@ func TestBuildObserveOptions(t *testing.T) {
 	aggregating.dispatcher.start()
 	t.Cleanup(func() { aggregating.dispatcher.signalStop() })
 
-	aggregated, err := newPID(ctx, aggregating.actorAddress("aggregated"), NewMockActor(), withActorSystem(aggregating), withMetricProvider(metric.NewProvider()))
+	aggregated, err := newPID(ctx, aggregating.actorAddress("aggregated"), NewMockActor(), &pidSettings{actorSystem: aggregating, metricProvider: metric.NewProvider()})
 	require.NoError(t, err)
 	require.Nil(t, aggregated.observeOptions())
 	require.Equal(t, types.Name(NewMockActor()), aggregated.metricKind())
@@ -10239,4 +10219,230 @@ func TestPIDMarkActivitySkipsRepeatedInstant(t *testing.T) {
 	pid.markActivity(later)
 	require.Equal(t, later.UnixNano(), pid.latestReceiveTimeNano.Load())
 	require.Equal(t, later.UnixNano(), pid.lastPassivationTouch.Load())
+}
+
+func TestBuildChildSettings(t *testing.T) {
+	system, err := NewActorSystem("TestSys")
+	require.NoError(t, err)
+
+	timeout := 2 * time.Second
+	parent := newPIDAt(system, "parent", 1)
+	parent.initMaxRetries.Store(4)
+	parent.passivationManager = system.(*actorSystem).passivator
+
+	t.Run("a child inherits the parent's wiring and the system's default supervisor", func(t *testing.T) {
+		config := newSpawnConfig(WithInitTimeout(timeout))
+		settings, options := parent.buildChildSettings(config)
+
+		assert.Same(t, system, settings.actorSystem)
+		assert.Equal(t, 4, settings.initMaxRetries)
+		assert.Equal(t, &timeout, settings.initTimeout)
+		assert.Equal(t, parent.remoting, settings.remoting)
+		assert.Same(t, parent.passivationManager, settings.passivationManager)
+		assert.Same(t, system.(*actorSystem).getDefaultSupervisor(), settings.supervisor)
+		assert.Nil(t, settings.mailbox)
+		assert.True(t, settings.relocationDisabled)
+		assert.Nil(t, options, "a default config adds no option")
+	})
+
+	t.Run("the child's own spawn options are kept", func(t *testing.T) {
+		sup := supervisor.NewSupervisor()
+		mailbox := NewUnboundedMailbox()
+		strategy := passivation.NewLongLivedStrategy()
+		dependency := NewMockDependency("id", "user", "email")
+		config := newSpawnConfig(
+			WithSupervisor(sup),
+			WithMailbox(mailbox),
+			WithPassivationStrategy(strategy),
+			WithStashing(),
+			WithReentrancy(reentrancy.New(reentrancy.WithMode(reentrancy.AllowAll))),
+			WithDependencies(dependency),
+		)
+		settings, options := parent.buildChildSettings(config)
+
+		assert.Same(t, sup, settings.supervisor)
+		assert.Same(t, mailbox, settings.mailbox)
+		assert.Same(t, strategy, settings.passivationStrategy)
+		require.Len(t, options, 3, "stash, reentrancy and dependencies travel as options")
+
+		child := &PID{}
+		for _, option := range options {
+			option(child)
+		}
+
+		assert.NotNil(t, child.stashState.Load())
+		assert.NotNil(t, child.reentrancy.Load())
+		assert.Equal(t, dependency, child.Dependency("id"))
+	})
+}
+
+func TestInitRetriesPreStart(t *testing.T) {
+	newSystem := func(t *testing.T, retries int) ActorSystem {
+		t.Helper()
+		system, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithActorInitMaxRetries(retries))
+		require.NoError(t, err)
+		require.NoError(t, system.Start(context.Background()))
+		t.Cleanup(func() { _ = system.Stop(context.Background()) })
+		return system
+	}
+
+	t.Run("a PreStart that succeeds runs once", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{}
+		pid, err := system.Spawn(context.Background(), "once", actor)
+		require.NoError(t, err)
+		require.True(t, pid.IsRunning())
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("a failing PreStart is retried until it succeeds", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{failures: 2}
+		pid, err := system.Spawn(context.Background(), "flaky", actor)
+		require.NoError(t, err)
+		require.True(t, pid.IsRunning())
+		assert.EqualValues(t, 3, actor.attempts.Load())
+	})
+
+	t.Run("the attempts are bounded by the init retries and the last error is reported", func(t *testing.T) {
+		system := newSystem(t, 3)
+		actor := &MockFlakyPreStartActor{failures: 10}
+		_, err := system.Spawn(context.Background(), "exhausted", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 3 failed")
+		assert.EqualValues(t, 3, actor.attempts.Load())
+	})
+
+	t.Run("one init retry means one attempt", func(t *testing.T) {
+		system := newSystem(t, 1)
+		actor := &MockFlakyPreStartActor{failures: 10}
+		_, err := system.Spawn(context.Background(), "single", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 1 failed")
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("a failure marked with retry.Stop is not retried", func(t *testing.T) {
+		system := newSystem(t, 5)
+		actor := &MockFlakyPreStartActor{failures: 10, stopAfterFirst: true}
+		_, err := system.Spawn(context.Background(), "stopped", actor)
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.ErrorContains(t, err, "pre-start attempt 1 failed")
+		assert.EqualValues(t, 1, actor.attempts.Load())
+	})
+
+	t.Run("the init timeout bounds the retries", func(t *testing.T) {
+		system := newSystem(t, 50)
+		actor := &MockFlakyPreStartActor{failures: 1000}
+		started := time.Now()
+		_, err := system.Spawn(context.Background(), "timed-out", actor, WithInitTimeout(50*time.Millisecond))
+		require.ErrorIs(t, err, errors.ErrInitFailure)
+		assert.Less(t, time.Since(started), 2*time.Second)
+		assert.Less(t, actor.attempts.Load(), int32(50))
+	})
+}
+
+func TestInitPublishesActorStarted(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// started before anyone listens: no event is built for it
+	unobserved, err := actorSystem.Spawn(ctx, "unobserved", NewMockActor())
+	require.NoError(t, err)
+
+	consumer, err := actorSystem.Subscribe()
+	require.NoError(t, err)
+
+	observed, err := actorSystem.Spawn(ctx, "observed", NewMockActor())
+	require.NoError(t, err)
+
+	var started []string
+	require.Eventually(t, func() bool {
+		select {
+		case message := <-consumer.Iterator():
+			if event, ok := message.Payload().(*ActorStarted); ok {
+				started = append(started, event.ActorPath().String())
+			}
+		default:
+		}
+
+		return len(started) > 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	require.NoError(t, actorSystem.Unsubscribe(consumer))
+	assert.Contains(t, started, observed.Path().String())
+	assert.NotContains(t, started, unobserved.Path().String())
+}
+
+func TestAskReusesReplyChannels(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	asker, err := actorSystem.Spawn(ctx, "asker", NewMockActor())
+	require.NoError(t, err)
+	responder, err := actorSystem.Spawn(ctx, "responder", NewMockActor())
+	require.NoError(t, err)
+
+	t.Run("a steady stream of asks allocates no reply channel", func(t *testing.T) {
+		// the first asks fill the pool shard; the measured ones reuse it
+		for range 10 {
+			_, err := asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+		}
+
+		// AllocsPerRun counts the whole process, so the responder's reply
+		// object is the one allocation left and the reply channel is none.
+		// Other goroutines of a large test run allocate in the same window,
+		// so the measurement is repeated and one clean sample is enough.
+		message := new(testpb.TestReply)
+		var allocs float64
+		for range 10 {
+			allocs = testing.AllocsPerRun(200, func() {
+				_, err := asker.Ask(ctx, responder, message, time.Second)
+				require.NoError(t, err)
+			})
+
+			if allocs <= 1 {
+				break
+			}
+		}
+
+		assert.LessOrEqual(t, allocs, 1.0)
+	})
+
+	t.Run("a reply followed by a forward answers the asker once and poisons no later ask", func(t *testing.T) {
+		forwarder, err := actorSystem.Spawn(ctx, "forwarder", &MockReplyThenForwardActor{target: responder})
+		require.NoError(t, err)
+
+		for range 50 {
+			reply, err := asker.Ask(ctx, forwarder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "forwarder", reply.(*testpb.Reply).GetContent())
+
+			// the forwarded reply must never surface on a channel reused here
+			reply, err = asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		}
+	})
+
+	t.Run("a timed-out ask abandons its channel and the late reply reaches no later ask", func(t *testing.T) {
+		slow, err := actorSystem.Spawn(ctx, "slow", NewMockActor())
+		require.NoError(t, err)
+
+		for range 20 {
+			_, err := asker.Ask(ctx, slow, new(testpb.TestTimeout), 20*time.Millisecond)
+			require.ErrorIs(t, err, errors.ErrRequestTimeout)
+
+			reply, err := asker.Ask(ctx, responder, new(testpb.TestReply), time.Second)
+			require.NoError(t, err)
+			require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
+		}
+	})
 }

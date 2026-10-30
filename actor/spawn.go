@@ -146,7 +146,10 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 		return newRemotePID(address, x.remoting), nil
 	}
 
-	return x.runSpawnActivation(ctx, x.actorReference(name).String(), func() (*PID, error) {
+	// the address is minted once: its string keys the activation and, when
+	// this call is the one that spawns, the PID carries it
+	addr := x.actorAddress(name)
+	return x.runSpawnActivation(ctx, addr.String(), func() (*PID, error) {
 		// check some preconditions
 		if err := x.checkOrdinarySpawnPreconditions(ctx, name); err != nil {
 			return nil, err
@@ -157,7 +160,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nameResolver(holder, name)
 		}
 
-		pid, err := x.configPID(ctx, name, actor, opts...)
+		pid, err := x.configPIDAt(ctx, addr, actor, opts...)
 		if err != nil {
 			return nil, err
 		}

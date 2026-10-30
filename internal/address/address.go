@@ -52,6 +52,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -116,6 +117,14 @@ type Address struct {
 	// construction, before cachedStr, which is built from it.
 	cachedQualifiedName string
 	cachedStr           string // eagerly computed at construction; String() is a pure read
+
+	// validateOnce memoises Validate's result. Every field is set at
+	// construction and never changes, so the outcome is fixed for the
+	// lifetime of the address. Validate recurses into the parent, so without
+	// the memo a child spawn re-validated every ancestor already validated
+	// at its own spawn.
+	validateOnce sync.Once
+	validateErr  error
 }
 
 var _ validation.Validator = (*Address)(nil)
@@ -323,15 +332,13 @@ func (x *Address) String() string {
 // ancestor name from the root down and the actor name, joined by '/'. Called
 // once at construction time so that QualifiedName() is a pure read.
 func (x *Address) buildQualifiedName() string {
-	// the chain is walked from the parent up, so the names are collected
-	// nearest first and reversed to read from the root down
-	names := []string{x.Name()}
-	for parent := x.Parent(); parent != nil && !parent.Equals(NoSender()); parent = parent.Parent() {
-		names = append(names, parent.Name())
+	parent := x.Parent()
+	if parent == nil || parent.Equals(NoSender()) {
+		return x.Name()
 	}
 
-	slices.Reverse(names)
-	return JoinNames(names...)
+	// the parent's qualified name already reads from the root down to it
+	return parent.QualifiedName() + qualifiedNameSeparator + x.Name()
 }
 
 // JoinNames returns the qualified name formed by names: the names of an actor's
@@ -347,13 +354,12 @@ func JoinNames(names ...string) string {
 // function accepts is one Spawn accepts. The pattern is matched with the
 // precompiled nameRegexp, so the check is cheap enough for a send path.
 func ValidateName(name string) error {
-	err := validation.
-		New(validation.FailFast()).
-		AddValidator(validation.NewEmptyStringValidator("name", name)).
-		AddAssertion(len(name) <= maxNameLength, msgNameTooLong).
-		Validate()
-	if err != nil {
+	if err := validation.NewEmptyStringValidator("name", name).Validate(); err != nil {
 		return err
+	}
+
+	if len(name) > maxNameLength {
+		return errors.New(msgNameTooLong)
 	}
 
 	if !nameRegexp.MatchString(strings.TrimSpace(name)) {
@@ -487,17 +493,16 @@ func (x *Address) Validate() error {
 	if x == nil || x.Equals(NoSender()) {
 		return nil
 	}
-	verr := validation.
-		New(validation.FailFast()).
-		AddValidator(validation.NewTCPAddressValidator(net.JoinHostPort(x.Host(), strconv.Itoa(x.Port())))).
-		AddValidator(validation.NewEmptyStringValidator("system", x.System())).
-		AddValidator(validation.NewEmptyStringValidator("name", x.Name())).
-		AddAssertion(len(x.Name()) <= maxNameLength, msgNameTooLong).
-		AddValidator(validation.NewPatternValidator(namePattern, x.System(), errInvalidNamePattern)).
-		AddValidator(validation.NewPatternValidator(namePattern, strings.TrimSpace(x.Name()), errInvalidNamePattern)).
-		AddAssertion(uuid.Validate(x.IncarnationID()) == nil, "actor incarnation ID is invalid").
-		Validate()
 
+	x.validateOnce.Do(func() { x.validateErr = x.validate() })
+	return x.validateErr
+}
+
+// validate runs the validation chain over the address and, when it has a
+// parent, over the parent and the relation between the two. Validate memoises
+// its result, so it runs once per address.
+func (x *Address) validate() error {
+	verr := x.validateFields()
 	if x.Parent() != nil && !x.Parent().Equals(NoSender()) {
 		if err := x.Parent().Validate(); err != nil {
 			return errors.Join(verr, ErrInvalidParent, err)
@@ -517,6 +522,39 @@ func (x *Address) Validate() error {
 	}
 
 	return verr
+}
+
+// validateFields checks the address's own fields, in the order the rules are
+// listed on Validate, and returns the first violation. The checks are written
+// out rather than chained through validators so that a spawn, which validates
+// every new address once, allocates nothing for them beyond the port and
+// host:port strings the TCP check parses.
+func (x *Address) validateFields() error {
+	if err := validation.NewTCPAddressValidator(net.JoinHostPort(x.Host(), strconv.Itoa(x.Port()))).Validate(); err != nil {
+		return err
+	}
+
+	if err := validation.NewEmptyStringValidator("system", x.System()).Validate(); err != nil {
+		return err
+	}
+
+	if err := validation.NewEmptyStringValidator("name", x.Name()).Validate(); err != nil {
+		return err
+	}
+
+	if len(x.Name()) > maxNameLength {
+		return errors.New(msgNameTooLong)
+	}
+
+	if !nameRegexp.MatchString(x.System()) || !nameRegexp.MatchString(strings.TrimSpace(x.Name())) {
+		return errInvalidNamePattern
+	}
+
+	if uuid.Validate(x.IncarnationID()) != nil {
+		return errors.New("actor incarnation ID is invalid")
+	}
+
+	return nil
 }
 
 // ParseWithIncarnationID parses an actor address and restores its incarnation

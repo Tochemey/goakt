@@ -124,7 +124,7 @@ See [the book's chapter on dispatch](https://github.com/tochemey/goakt/blob/main
   [the book's chapter on the grain runtime](https://github.com/tochemey/goakt/blob/main/book/chapters/chap-14.md#145-the-context-pool).
 - **grain_identity.go**: `GrainIdentity` with memoised validation (hot-path allocation fix).
 - **grain_mailbox.go**: Standalone grain mailbox for bounded user mailboxes and the response queue.
-- **embedded_grain_mailbox.go**: Default unbounded grain mailbox, run on two words inside `grainPID` with no separate object.
+- **embedded_grain_mailbox.go**: Default unbounded grain mailbox, a segmented queue run on two segment pointers inside `grainPID`, storing one-way messages as values.
 - **grain_props.go**: `GrainProps` passed to `OnActivate` / `OnDeactivate`.
 - **grain_option.go**: Grain activation options.
 - **grain_activation_barrier.go**: Barrier for grain activation during cluster events.

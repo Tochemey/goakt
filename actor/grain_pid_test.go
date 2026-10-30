@@ -2083,18 +2083,22 @@ func TestGrainShutdownRePauseWindow(t *testing.T) {
 }
 
 // TestGrainAttachMailbox verifies the two mailbox shapes a grain can get: an
-// unbounded grain runs on the embedded queue, whose two words are seeded with a
-// single shared sentinel and which needs no standalone object, while a capacity
-// gives it a standalone bounded mailbox and leaves the embedded words nil.
+// unbounded grain runs on the embedded queue, which needs no standalone object
+// and whose segments and state appear with its first message, while a capacity
+// gives it a standalone bounded mailbox.
 func TestGrainAttachMailbox(t *testing.T) {
 	t.Run("unbounded runs embedded", func(t *testing.T) {
 		pid := &grainPID{}
 		pid.attachMailbox(0)
 
 		require.Nil(t, pid.boundedMailbox)
-		sentinel := pid.mailboxHead.Load()
-		require.NotNil(t, sentinel)
-		require.Same(t, sentinel, pid.mailboxTail.Load())
+		require.Nil(t, pid.mailboxHead.Load())
+		require.Nil(t, pid.mailboxTail.Load())
+		require.Nil(t, pid.embedded.Load())
+
+		require.NoError(t, pid.enqueueMessage(new(GrainContext)))
+		require.NotNil(t, pid.mailboxHead.Load())
+		require.Same(t, pid.mailboxHead.Load(), pid.mailboxTail.Load())
 	})
 
 	t.Run("capacity runs standalone", func(t *testing.T) {
@@ -2105,6 +2109,45 @@ func TestGrainAttachMailbox(t *testing.T) {
 		require.EqualValues(t, 1, pid.boundedMailbox.Capacity())
 		require.Nil(t, pid.mailboxHead.Load())
 		require.Nil(t, pid.mailboxTail.Load())
+	})
+}
+
+// TestGrainReceiveOneWay verifies the value path of a one-way message on the
+// embedded mailbox: an inactive grain refuses it with ErrDead and stores
+// nothing, and an active one stores it as values, so the turn dispatches it in
+// the grain's own context with no pooled context involved, and schedules the
+// grain once.
+func TestGrainReceiveOneWay(t *testing.T) {
+	t.Run("inactive grain refuses", func(t *testing.T) {
+		pid := &grainPID{}
+		pid.attachMailbox(0)
+
+		require.ErrorIs(t, pid.receiveOneWay(context.Background(), &GrainIdentity{}, "dropped"), gerrors.ErrDead)
+		require.Nil(t, pid.mailboxTail.Load(), "a refused message must not be stored")
+	})
+
+	t.Run("active grain stores values and schedules", func(t *testing.T) {
+		pid := &grainPID{actorSystem: &actorSystem{logger: log.DiscardLogger}}
+		pid.attachMailbox(0)
+		pid.activated.Store(true)
+
+		// hold the grain as processing, so the message stays queued and no
+		// dispatcher is needed
+		require.True(t, pid.schedState.TrySchedule())
+		require.True(t, pid.schedState.TakeForProcessing())
+
+		self := &GrainIdentity{kind: "kind", name: "name"}
+		require.NoError(t, pid.receiveOneWay(context.Background(), self, "queued"))
+		require.EqualValues(t, 1, (*embeddedGrainMailbox)(pid).Len())
+
+		gctx := pid.dequeueMessage()
+		require.Same(t, &pid.embedded.Load().context, gctx, "a value message comes back in the turn context")
+		require.Equal(t, "queued", gctx.Message())
+		require.Same(t, self, gctx.Self())
+		require.True(t, gctx.oneWay)
+		require.Nil(t, gctx.err)
+		require.Nil(t, gctx.response)
+		require.True(t, pid.mailboxEmpty())
 	})
 }
 

@@ -24,8 +24,12 @@ package validation
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+// idRegexp is the pattern an ID must match, compiled once for every validation.
+var idRegexp = regexp.MustCompile("^[a-zA-Z0-9][a-zA-Z0-9-_]*$")
 
 type idValidator struct {
 	// id is the id to validate
@@ -43,7 +47,6 @@ func (v idValidator) Validate() error {
 	trimmed := strings.TrimSpace(v.id)
 	return New(FailFast()).
 		AddAssertion(len(trimmed) > 1 && len(trimmed) <= 255, "invalid id").
-		AddValidator(NewPatternValidator("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", trimmed,
-			fmt.Errorf("invalid ID: %s", trimmed))).
+		AddValidator(NewRegexpValidator(idRegexp, trimmed, fmt.Errorf("invalid ID: %s", trimmed))).
 		Validate()
 }

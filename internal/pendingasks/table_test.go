@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -164,4 +165,26 @@ func TestConcurrentCorrelations(t *testing.T) {
 	for i := range callers {
 		require.Equal(t, ids[i], (<-slots[i]).CorrelationID)
 	}
+}
+
+func TestCompleteDoesNotBlockOnAFullSlot(t *testing.T) {
+	table := New()
+	slot := table.Register("full")
+	timedOut := new(commands.AsyncResponse)
+	slot <- timedOut
+
+	done := make(chan bool, 1)
+	go func() {
+		done <- table.Complete(&commands.AsyncResponse{CorrelationID: "full"})
+	}()
+
+	select {
+	case completed := <-done:
+		require.True(t, completed)
+	case <-time.After(time.Second):
+		t.Fatal("Complete blocked on a slot that already held the caller's timeout")
+	}
+
+	require.Same(t, timedOut, <-slot)
+	require.Zero(t, table.Len())
 }

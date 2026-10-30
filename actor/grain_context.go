@@ -264,11 +264,7 @@ func (gctx *GrainContext) Err(err error) {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
-
-	gctx.err <- err
+	gctx.sendAck(err)
 }
 
 // NoErr marks the successful completion of a message handler without any error.
@@ -304,11 +300,8 @@ func (gctx *GrainContext) NoErr() {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
 	// Asynchronous (Tell) path: only the error channel is used.
-	gctx.err <- nil
+	gctx.sendAck(nil)
 }
 
 // Response sets the message response
@@ -319,6 +312,21 @@ func (gctx *GrainContext) Response(resp any) {
 	}
 
 	gctx.sendReply(resp)
+}
+
+// sendAck delivers the processed acknowledgment of a Tell on the context's
+// error channel, when it has one, without blocking: the channel has room for
+// one value and may already hold the Tell's timeout (see ackTimer), in which
+// case the caller is gone and the acknowledgment is dropped with the channel.
+func (gctx *GrainContext) sendAck(err error) {
+	if gctx.err == nil {
+		return
+	}
+
+	select {
+	case gctx.err <- err:
+	default:
+	}
 }
 
 // sendReply delivers value on the ask reply channel exactly once. The
@@ -381,10 +389,7 @@ func (gctx *GrainContext) Unhandled() {
 		return
 	}
 
-	if gctx.err == nil {
-		return
-	}
-	gctx.err <- failure
+	gctx.sendAck(failure)
 }
 
 // toDeadletter records a one-way message the grain failed to handle with the
@@ -1032,6 +1037,32 @@ func (gctx *GrainContext) build(ctx context.Context, pid *grainPID, actorSystem 
 	}
 
 	return gctx
+}
+
+// reuseOneWay readies the default mailbox's turn context for the next one-way
+// message stored as values (see embeddedGrainMailbox). The context was seeded
+// once with its process, actor system and one-way flag, and build would set
+// nothing else for a one-way message, so only the message, its identity and
+// its context change from one message to the next. Handling a message can
+// still set fields a one-way message never carries, the request metadata of
+// an AsyncRequest payload for instance; those are cleared only when set,
+// through a full build, because each store costs a write barrier while the
+// garbage collector runs and the common case has none.
+func (gctx *GrainContext) reuseOneWay(ctx context.Context, self *GrainIdentity, message any) {
+	if gctx.requestID != "" || gctx.requestReplyTo != nil || gctx.replyDeferred || gctx.replySent ||
+		gctx.response != nil || gctx.err != nil || gctx.synchronous || !gctx.oneWay ||
+		gctx.timeout != 0 || gctx.deadline != 0 || gctx.deadlineCtx != nil || gctx.cancelDeadline != nil {
+		gctx.build(ctx, gctx.pid, gctx.actorSystem, self, message, grainOneWay)
+		return
+	}
+
+	if gctx.responseClosed.Load() {
+		gctx.responseClosed.Store(false)
+	}
+
+	gctx.ctx = ctx
+	gctx.self = self
+	gctx.message = message
 }
 
 // reset clears all fields so the GrainContext can be returned to the pool.

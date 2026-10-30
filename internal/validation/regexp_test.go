@@ -24,28 +24,25 @@ package validation
 
 import (
 	"errors"
+	"regexp"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func TestPatternValidator(t *testing.T) {
-	pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
-	expression := "discarder"
-	validator := NewPatternValidator(pattern, expression, nil)
-	assert.NoError(t, validator.Validate())
+func TestRegexpValidator(t *testing.T) {
+	re := regexp.MustCompile(`^[a-z]+$`)
 
-	// default error path with no custom error provided
-	invalid := NewPatternValidator(pattern, "$omeN@me", nil)
-	err := invalid.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, "invalid expression")
+	t.Run("match", func(t *testing.T) {
+		require.NoError(t, NewRegexpValidator(re, "abc", nil).Validate())
+	})
 
-	expression = "$omeN@me"
-	customError := errors.New("custom error")
-	validator = NewPatternValidator(pattern, expression, customError)
-	err = validator.Validate()
-	require.Error(t, err)
-	assert.EqualError(t, err, customError.Error())
+	t.Run("no match returns the custom error", func(t *testing.T) {
+		custom := errors.New("custom")
+		require.ErrorIs(t, NewRegexpValidator(re, "ABC", custom).Validate(), custom)
+	})
+
+	t.Run("no match without custom error", func(t *testing.T) {
+		require.ErrorIs(t, NewRegexpValidator(re, "123", nil).Validate(), errInvalidExpression)
+	})
 }

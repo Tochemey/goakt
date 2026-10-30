@@ -36,70 +36,16 @@ import (
 )
 
 func TestPIDOptions(t *testing.T) {
-	t.Run("WithPassivationStrategy", func(t *testing.T) {
-		strategy := passivation.NewLongLivedStrategy()
-		pid := &PID{}
-		withPassivationStrategy(strategy)(pid)
-		assert.Equal(t, strategy, pid.passivationStrategy)
-	})
-
-	t.Run("WithInitMaxRetries", func(t *testing.T) {
-		pid := &PID{}
-		withInitMaxRetries(5)(pid)
-		assert.Equal(t, int32(5), pid.initMaxRetries.Load())
-	})
-
-	t.Run("WithSupervisor", func(t *testing.T) {
-		supervisor := supervisor.NewSupervisor()
-		pid := &PID{}
-		withSupervisor(supervisor)(pid)
-		assert.Equal(t, supervisor, pid.supervisor)
-	})
-
-	t.Run("withInitTimeout stores no override when nil", func(t *testing.T) {
-		pid := &PID{}
-		withInitTimeout(nil)(pid)
-		assert.Nil(t, pid.initTimeout.Load())
-	})
-
-	t.Run("withInitTimeout stores the override", func(t *testing.T) {
-		pid := &PID{}
-		override := 5 * time.Second
-		withInitTimeout(&override)(pid)
-		require.NotNil(t, pid.initTimeout.Load())
-		assert.Equal(t, 5*time.Second, *pid.initTimeout.Load())
-	})
-
-	t.Run("WithMailbox", func(t *testing.T) {
-		box := NewUnboundedMailbox()
-		pid := &PID{}
-		withMailbox(box)(pid)
-		assert.Equal(t, box, pid.mailbox)
-	})
-
 	t.Run("AsSingleton", func(t *testing.T) {
 		pid := &PID{}
 		asSingleton()(pid)
 		assert.True(t, pid.isStateSet(singletonState))
 	})
 
-	t.Run("withRelocationDisabled", func(t *testing.T) {
-		pid := &PID{}
-		withRelocationDisabled()(pid)
-		assert.False(t, pid.isStateSet(relocationState))
-	})
-
 	t.Run("AsSystemActor", func(t *testing.T) {
 		pid := &PID{}
 		asSystemActor()(pid)
 		assert.True(t, pid.isStateSet(systemState))
-	})
-
-	t.Run("withMetricProvider", func(t *testing.T) {
-		pid := &PID{}
-		metricProvider := metric.NewProvider()
-		withMetricProvider(metricProvider)(pid)
-		assert.Equal(t, metricProvider, pid.metricProvider())
 	})
 }
 
@@ -132,4 +78,60 @@ func TestWithSingletonSpec(t *testing.T) {
 	option := withSingletonSpec(spec)
 	option(pid)
 	require.Equal(t, spec, pid.singletonSpec())
+}
+
+func TestPIDSettingsApply(t *testing.T) {
+	t.Run("applies every setting as its option would", func(t *testing.T) {
+		system, err := NewActorSystem("TestSys")
+		require.NoError(t, err)
+		manager := newPassivationManager(system.Logger())
+		timeout := 3 * time.Second
+		sup := supervisor.NewSupervisor()
+		mailbox := NewUnboundedMailbox()
+		provider := metric.NewProvider()
+		strategy := passivation.NewMessageCountBasedStrategy(10)
+
+		pid := &PID{}
+		pid.setState(relocationState, true)
+		settings := pidSettings{
+			actorSystem:         system,
+			initMaxRetries:      7,
+			initTimeout:         &timeout,
+			passivationManager:  manager,
+			metricProvider:      provider,
+			supervisor:          sup,
+			mailbox:             mailbox,
+			passivationStrategy: strategy,
+			relocationDisabled:  true,
+		}
+		settings.apply(pid)
+
+		assert.Same(t, system, pid.actorSystem)
+		assert.Same(t, system.(*actorSystem).dispatcher, pid.dispatcher)
+		assert.EqualValues(t, 7, pid.initMaxRetries.Load())
+		assert.Same(t, &timeout, pid.initTimeout.Load())
+		assert.Same(t, manager, pid.passivationManager)
+		assert.Same(t, provider, pid.metricProvider())
+		assert.Same(t, sup, pid.supervisor)
+		assert.Same(t, mailbox, pid.mailbox)
+		assert.Same(t, strategy, pid.passivationStrategy)
+		assert.True(t, pid.msgCountPassivation.Load())
+		assert.False(t, pid.isStateSet(relocationState))
+	})
+
+	t.Run("skips the settings that are unset", func(t *testing.T) {
+		strategy := passivation.NewLongLivedStrategy()
+		pid := &PID{}
+		pid.setState(relocationState, true)
+		settings := pidSettings{passivationStrategy: strategy}
+		settings.apply(pid)
+
+		assert.Nil(t, pid.supervisor, "a nil supervisor is left for newPID's default")
+		assert.Nil(t, pid.mailbox, "a nil mailbox is left for the embedded one")
+		assert.Nil(t, pid.companion, "a nil metric provider attaches no companion")
+		assert.Nil(t, pid.initTimeout.Load())
+		assert.Same(t, strategy, pid.passivationStrategy)
+		assert.False(t, pid.msgCountPassivation.Load())
+		assert.True(t, pid.isStateSet(relocationState), "relocation stays enabled unless disabled")
+	})
 }

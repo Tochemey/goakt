@@ -79,7 +79,7 @@ The function body is short (`actorSystem.Spawn` in `actor/spawn.go`), and each l
 
 **Step 1. Preconditions.** The system must be running (`ErrActorSystemNotStarted`), and the spawn options must validate (`actorSystem.Spawn` in `actor/spawn.go`). Options are defined in `newSpawnConfig`; relocatable is the only one on by default (`actor/spawn_option.go`).
 
-**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `singleflight.Group`: concurrent spawns of the same name join one execution and share its result. The key comes from `actorReference`, which builds the address without minting an incarnation ID, so it is the same for every caller (`actor/actor_system.go`).
+**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `singleflight.Group`: concurrent spawns of the same name join one execution and share its result. The key is the string of the address `Spawn` mints for the actor (`actorAddress` in `actor/actor_system.go`); the string carries no incarnation ID, so it is the same for every caller, and the call that spawns hands that same address to `configPIDAt` instead of minting a second one.
 
 The function's comment (`actorSystem.runSpawnActivation` in `actor/spawn.go`) spells out three subtleties:
 
@@ -103,10 +103,10 @@ The first row means a repeated `Spawn` of a running name is a lookup. The actor 
 
 In cluster mode step 3 runs first, and it finds this node's own live record and reports the name as taken. The same call therefore returns `ErrActorAlreadyExists` instead of the PID. This is deliberate: in a cluster a name identifies one actor across all nodes, the test suite expects the error for a same-node re-spawn (`TestSpawn` in `actor/spawn_test.go`), and the `Spawn` comment says to use `ActorOf` to get the running actor (`actor/spawn.go`).
 
-**Step 5. Build the PID.** `configPID` (`actor/actor_system.go`) turns the spawn config into PID options and calls `newPID`. In order:
+**Step 5. Build the PID.** `configPID` (`actor/actor_system.go`) turns the spawn config into one `pidSettings` value, the settings every actor inherits from its system, plus a `pidOption` for each thing this spawn adds, and calls `newPID` (`actor/pid_option.go`, `actor/pid.go`). The settings travel as one value so that a spawn allocates no closure per setting. In order:
 
 1. Reject a reserved name.
-2. Mint the address with a fresh incarnation ID (`actorAddress`, `actor/actor_system.go`) and validate it.
+2. Mint the address with a fresh incarnation ID (`actorAddress`, `actor/actor_system.go`); `newPID` validates it.
 3. Inherit system settings: init retries, init timeout, remoting, passivation manager, metrics.
 4. Fall back to the system's default supervisor when none was given (`actorSystem.configPID` in `actor/actor_system.go`).
 5. Fall back to the system's default passivation strategy (two minutes idle), or to long-lived for reliable-delivery endpoints (`actorSystem.configPID` in `actor/actor_system.go`).
@@ -130,9 +130,9 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 `newPID` (`actor/pid.go`):
 
 1. Validates the address and allocates the struct, with a context-pool shard chosen round-robin so that concurrently busy actors take contexts from different pool shards (`newPID` in `actor/pid.go`).
-2. Sets the `relocationState` bit (relocatable unless an option clears it), then applies the options.
+2. Sets the `relocationState` bit (relocatable unless the settings clear it), then applies the settings and the options in that order (`pidSettings.apply` in `actor/pid_option.go`).
 3. **Embeds the default mailbox in the PID.** Without a custom mailbox, `newPID` allocates the mailbox's small `embeddedMailboxState`, which holds the actor's turn context, and `pid.mailbox` becomes the PID itself viewed as `*embeddedMailbox` (`newPID` in `actor/pid.go`). The PID's own `mailboxHead`/`mailboxTail` pointers stay nil until the first message brings the first segment. [Chapter 6, §6.2](chap-06.md#62-the-default-mailbox) covers this.
-4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildOptions` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
+4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildSettings` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
 7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry (`PID.firePostStart` in `actor/pid.go`), and `attachSystemActor` does the same for system actors.
@@ -204,24 +204,24 @@ A remote PID is the same struct with only `address`, `path` and `remoting` set, 
 
 ## 4.4 `PreStart`: retries and the timeout that is not one
 
-`init` (`actor/pid.go`) runs `PreStart` through `internal/retry`:
+`init` (`actor/pid.go`) calls `PreStart` once directly, and only when that attempt fails does it build the retry machinery and run the remaining attempts through `internal/retry`:
 
 ```go
 initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
-initTimeout := pid.effectiveInitTimeout()
-cctx, cancel := context.WithTimeout(ctx, initTimeout)
-retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
-if err := retrier.RunContext(cctx, func(_ context.Context) error {
-	return pid.actor.PreStart(initContext)
-}); err != nil { ... }
+started := time.Now()
+if err := pid.actor.PreStart(initContext); err != nil {
+	if err = pid.retryPreStart(ctx, initContext, started, err); err != nil { ... }
+}
 ```
+
+`retryPreStart` (`actor/pid.go`) creates the deadline context, measured from `started`, and the retrier, and hands the retrier the first failure as the outcome of its own first attempt, so the attempts, the delays and the timeout are those of one retried run. A `PreStart` that succeeds, which is nearly all of them, therefore pays nothing for the deadline context, its timer or the backoff policy (`TestInitRetriesPreStart` in `actor/pid_test.go`).
 
 **Attempts.** The retry count is the total number of attempts, the first included (`NewRetrier` in `internal/retry/retry.go`). With the default of 5 (`DefaultInitMaxRetries` in `actor/defaults.go`), a failing `PreStart` runs five times, with exponential backoff starting at 1 ms. The spawn then fails with `ErrInitFailure` and leaves nothing behind (`TestFailedPreStart` in `actor/pid_test.go`). `PreStart` must therefore be safe to run more than once.
 
 **Timeout.** The init timeout (1 s by default) bounds only the retry loop:
 
 - `PreStart` receives `initContext`, which is built from the caller's `ctx` and not from `cctx` (`PID.init` in `actor/pid.go`). Even a `PreStart` that honours its context sees no deadline from the init timeout. It sees only the deadline the caller's `ctx` carries, if there is one.
-- The retrier checks `cctx` only between attempts.
+- The retrier checks its deadline context only between attempts.
 
 A `PreStart` that takes 2 s succeeds, and `Spawn` blocks for 2 s. `WithInitTimeout`'s comment says so: the timeout bounds the retries, not an attempt in progress (`actor/spawn_option.go`). If you need a bound, impose it inside `PreStart` with your own context. Passing the timeout context to `PreStart`, as grains do with `OnActivate`, would make running code fail where it succeeds today, and would cancel any work `PreStart` starts on its context as soon as the actor starts.
 
@@ -237,7 +237,7 @@ An address has five parts plus an incarnation ID (`Address` in `internal/address
 goakt://<system>@<host>:<port>/<ancestor>/.../<name>
 ```
 
-(`Address.String` in `internal/address/address.go`). The part after `host:port` is the **qualified name**: every ancestor's name from the top-level actor down, joined by `/` (`Address.buildQualifiedName` in `internal/address/address.go`). The qualified name is the key the cluster registry uses (`Address.QualifiedName` in `internal/address/address.go`). The address tests check the qualified name of top-level, child and nested actors (`TestAddress` in `internal/address/address_test.go`).
+(`Address.String` in `internal/address/address.go`). The part after `host:port` is the **qualified name**: every ancestor's name from the top-level actor down, joined by `/`, built by extending the parent's own qualified name, which every constructor computes before a child can be built on it (`Address.buildQualifiedName` in `internal/address/address.go`). The qualified name is the key the cluster registry uses (`Address.QualifiedName` in `internal/address/address.go`). The address tests check the qualified name of top-level, child and nested actors (`TestAddress` in `internal/address/address_test.go`).
 
 Two kinds of constructor exist on purpose:
 
@@ -253,6 +253,8 @@ The incarnation ID tells two lives of the same name apart: it fences registry wr
 - A name of at most 255 characters (`maxNameLength` in `internal/address/address.go`) matching `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$` (`namePattern` in `internal/address/address.go`). Dots are allowed, though the error message does not mention them (`errInvalidNamePattern` in `internal/address/address.go`).
 - A valid incarnation UUID.
 - For a child: the same system, host and port as its parent, and a name different from its parent's own name (`Address.Validate` in `internal/address/address.go`). A grandchild may reuse its grandparent's name.
+
+An address is validated once. `Validate` memoises its result (`validateOnce` in `internal/address/address.go`), and a child's validation, which recurses into its parent, reads the parent's memoised result rather than re-validating every ancestor; that is what keeps the cost of a child spawn from growing with its depth. `configPID` does not validate the address itself, `newPID` does (`actor/actor_system.go`, `actor/pid.go`).
 
 The pattern is matched against `strings.TrimSpace(name)` but the name is kept as given (`Address.Validate` in `internal/address/address.go`). A name with a trailing space is accepted, becomes part of the address, and cannot be found by its trimmed form. `Spawn`'s comment documents it and tells callers to trim names that come from input (`actor/spawn.go`).
 
@@ -278,17 +280,17 @@ Two properties of `PID.Equals`:
 3. Resolves an existing child the same way `nameResolver` does.
 4. Runs the same `singleflight` serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, watched by the death watch, and in cluster mode **published to the registry under its qualified name**.
 
-The difference is the option list. `buildChildOptions` (`actor/pid.go`) passes the parent's runtime wiring, then the child's spawn options:
+The difference is what the child inherits. `buildChildSettings` (`actor/pid.go`) passes the parent's runtime wiring as the child's `pidSettings`, then the child's spawn options:
 
 | Option | Top-level spawn | Child spawn |
 |---|---|---|
 | `WithMailbox`, `WithSupervisor`, `WithStashing`, `WithReentrancy`, `WithDependencies`, passivation strategy, `WithInitTimeout` | applied | applied |
-| Supervisor when none given | the system's `WithDefaultSupervisor` | the same (`PID.buildChildOptions` in `actor/pid.go`) |
-| Relocation | relocatable by default | **always disabled** (`PID.buildChildOptions` in `actor/pid.go`) |
+| Supervisor when none given | the system's `WithDefaultSupervisor` | the same (`PID.buildChildSettings` in `actor/pid.go`) |
+| Relocation | relocatable by default | **always disabled** (`PID.buildChildSettings` in `actor/pid.go`) |
 | `WithRole` | applied | **no effect**: a role only constrains placement, and a child is always placed on its parent's node |
 | `AsReliableProducer`, `AsReliableConsumer` | applied | **rejected** with `ErrReliableChildSpawnUnsupported` (`PID.SpawnChild` in `actor/pid.go`) |
 
-`SpawnChild`'s comment states the supervisor, `WithRole` and reliable-delivery rows (`actor/pid.go`). The relocation row comes from `withRelocationDisabled` in `PID.buildChildOptions`. A reliable-delivery endpoint needs a controller that only a top-level spawn creates, and the remote child spawn request cannot carry its settings, so the option is refused rather than accepted without effect.
+`SpawnChild`'s comment states the supervisor, `WithRole` and reliable-delivery rows (`actor/pid.go`). The relocation row comes from the `relocationDisabled` setting in `PID.buildChildSettings`. A reliable-delivery endpoint needs a controller that only a top-level spawn creates, and the remote child spawn request cannot carry its settings, so the option is refused rather than accepted without effect.
 
 The test suite checks the supervisor and reentrancy rows (`TestSpawnChildInheritsSpawnOptions` in `actor/pid_test.go`) and the rejection of a reliable child (`TestReliableEndpointLocalChildSpawnRejected` in `actor/reliable_delivery_companion_test.go`).
 
@@ -296,7 +298,7 @@ Without `WithDefaultSupervisor`, the system default is `supervisor.NewSupervisor
 
 ## 4.7 Looking up, killing and restarting by name
 
-`ActorOf` (`actor/actor_system.go`) resolves locally first, by qualified name and then by bare name (`actorSystem.localActor` in `actor/actor_system.go`). A bare child name that several parents share returns the most recently spawned child. The local lookup takes only the tree's lock. A node is handed out without that lock and `tree.deleteNode` clears its PID slot when the actor stops, so every caller that needs the PID goes through the tree's PID lookups (`pidOf`, `pidByName` and `pidByQualifiedName` in `actor/pid_tree.go`), which report an actor that has left the tree as not found. A stopping actor is reported as not found; a suspended one is returned. In cluster mode it then reads the registry and returns a remote PID. With remoting but no cluster, a name that is not local gives `ErrMethodCallNotAllowed`, not `ErrActorNotFound`.
+`ActorOf` (`actor/actor_system.go`) resolves locally first, by qualified name and then by bare name (`actorSystem.localActor` in `actor/actor_system.go`). A bare child name that several parents share returns the most recently spawned child. The local lookup takes only the lock of the index shard the name hashes to. A node is handed out without that lock and `tree.deleteNode` clears its PID slot when the actor stops, so every caller that needs the PID goes through the tree's PID lookups (`pidOf`, `pidByName` and `pidByQualifiedName` in `actor/pid_tree.go`), which report an actor that has left the tree as not found. A stopping actor is reported as not found; a suspended one is returned. In cluster mode it then reads the registry and returns a remote PID. With remoting but no cluster, a name that is not local gives `ErrMethodCallNotAllowed`, not `ErrActorNotFound`.
 
 `Kill` resolves the same way and calls `PID.Shutdown`, or `RemoteStop` for an actor on another node (`actor/actor_system.go`). It inherits everything [Chapter 3, §3.5](chap-03.md#35-stop) says about `Shutdown`: queued messages are dropped and `PostStop` may overlap a running `Receive`.
 

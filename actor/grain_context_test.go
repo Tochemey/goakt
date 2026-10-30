@@ -66,6 +66,76 @@ func TestReleaseGrainContextResetsFields(t *testing.T) {
 	releaseGrainContext(acquired)
 }
 
+// TestGrainContextReuseOneWay verifies how the default mailbox's turn context
+// is readied for the next one-way message: a context a handler left as a
+// one-way message gets only its message, identity and context replaced, with
+// a stale reply guard cleared; a context a handler turned into something else,
+// by setting request metadata for instance, is rebuilt as a one-way message.
+func TestGrainContextReuseOneWay(t *testing.T) {
+	pid := &grainPID{}
+	system := &actorSystem{logger: log.DiscardLogger}
+	first := &GrainIdentity{kind: "kind", name: "first"}
+	second := &GrainIdentity{kind: "kind", name: "second"}
+
+	t.Run("plain reuse replaces the message", func(t *testing.T) {
+		gctx := &GrainContext{pid: pid, actorSystem: system, oneWay: true}
+		gctx.reuseOneWay(context.Background(), first, "one")
+		require.Equal(t, "one", gctx.Message())
+		require.Same(t, first, gctx.Self())
+		require.True(t, gctx.oneWay)
+
+		ctx := context.WithValue(context.Background(), mailboxTestCtxKey{}, "v")
+		gctx.responseClosed.Store(true) // a handler called Response on the one-way message
+		gctx.reuseOneWay(ctx, second, "two")
+		require.Equal(t, "two", gctx.Message())
+		require.Same(t, second, gctx.Self())
+		require.Equal(t, "v", gctx.Context().Value(mailboxTestCtxKey{}))
+		require.False(t, gctx.responseClosed.Load(), "the reply guard must be cleared")
+		require.Same(t, pid, gctx.pid)
+		require.Same(t, system, gctx.actorSystem)
+	})
+
+	t.Run("a context left as a request is rebuilt", func(t *testing.T) {
+		for name, dirty := range map[string]func(*GrainContext){
+			"request id":     func(g *GrainContext) { g.requestID = "corr" },
+			"reply target":   func(g *GrainContext) { g.requestReplyTo = &commands.AsyncReplyTo{} },
+			"reply deferred": func(g *GrainContext) { g.replyDeferred = true },
+			"reply sent":     func(g *GrainContext) { g.replySent = true },
+			"response":       func(g *GrainContext) { g.response = make(chan any, 1) },
+			"error":          func(g *GrainContext) { g.err = make(chan error, 1) },
+			"synchronous":    func(g *GrainContext) { g.synchronous = true },
+			"not one-way":    func(g *GrainContext) { g.oneWay = false },
+			"timeout":        func(g *GrainContext) { g.timeout = time.Second },
+			"deadline":       func(g *GrainContext) { g.deadline = 1 },
+			"deadline ctx":   func(g *GrainContext) { g.deadlineCtx = context.Background() },
+			"cancel":         func(g *GrainContext) { g.cancelDeadline = func() {} },
+		} {
+			t.Run(name, func(t *testing.T) {
+				gctx := &GrainContext{pid: pid, actorSystem: system, oneWay: true}
+				dirty(gctx)
+				gctx.reuseOneWay(context.Background(), first, "rebuilt")
+
+				require.Equal(t, "rebuilt", gctx.Message())
+				require.Same(t, first, gctx.Self())
+				require.True(t, gctx.oneWay)
+				require.False(t, gctx.synchronous)
+				require.Empty(t, gctx.requestID)
+				require.Nil(t, gctx.requestReplyTo)
+				require.False(t, gctx.replyDeferred)
+				require.False(t, gctx.replySent)
+				require.Nil(t, gctx.response)
+				require.Nil(t, gctx.err)
+				require.Zero(t, gctx.timeout)
+				require.Zero(t, gctx.deadline)
+				require.Nil(t, gctx.deadlineCtx)
+				require.Nil(t, gctx.cancelDeadline)
+				require.Same(t, pid, gctx.pid)
+				require.Same(t, system, gctx.actorSystem)
+			})
+		}
+	})
+}
+
 func TestGrainContextAskReplyRouting(t *testing.T) {
 	identity := &GrainIdentity{kind: "TestKind", name: "id"}
 	newAskContext := func() *GrainContext {

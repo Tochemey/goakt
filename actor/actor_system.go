@@ -4689,6 +4689,12 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
 func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
+	return x.configPIDAt(ctx, x.actorAddress(name), actor, opts...)
+}
+
+// configPIDAt constructs a PID at addr, an address this system minted for the
+// actor, from the actor kind and the spawn options.
+func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, actor Actor, opts ...SpawnOption) (*PID, error) {
 	spawnConfig := newSpawnConfig(opts...)
 	if err := spawnConfig.Validate(); err != nil {
 		return nil, err
@@ -4704,43 +4710,36 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 	if !spawnConfig.isSystem {
 		// you should not create a system-based actor or
 		// use the system actor naming convention pattern
-		if isSystemName(name) {
+		if isSystemName(addr.Name()) {
 			return nil, gerrors.ErrReservedName
 		}
 	}
 
-	addr := x.actorAddress(name)
-	if err := addr.Validate(); err != nil {
-		return nil, err
-	}
-
-	// define the pid options
-	// pid inherit the actor system settings defined during instantiation
-	pidOpts := []pidOption{
-		withInitMaxRetries(x.actorInitMaxRetries),
-		withActorSystem(x),
-		withInitTimeout(spawnConfig.initTimeout),
-		withRemoting(x.remoting),
-		withPassivationManager(x.passivator),
-		withMetricProvider(x.metricProvider),
-	}
-
-	// set the actor as a system actor when necessary
-	if spawnConfig.isSystem {
-		pidOpts = append(pidOpts, asSystemActor())
-	}
-
-	// set the mailbox option
-	if spawnConfig.mailbox != nil {
-		pidOpts = append(pidOpts, withMailbox(spawnConfig.mailbox))
-	}
-
+	// newPID validates the address
 	supervisor := spawnConfig.supervisor
 	if supervisor == nil {
 		supervisor = x.defaultSupervisor
 	}
-	if supervisor != nil {
-		pidOpts = append(pidOpts, withSupervisor(supervisor))
+
+	// the settings every actor inherits from the system travel as one value;
+	// the options below carry what this spawn config adds
+	settings := pidSettings{
+		actorSystem:        x,
+		initMaxRetries:     x.actorInitMaxRetries,
+		initTimeout:        spawnConfig.initTimeout,
+		remoting:           x.remoting,
+		passivationManager: x.passivator,
+		metricProvider:     x.metricProvider,
+		supervisor:         supervisor,
+		mailbox:            spawnConfig.mailbox,
+		relocationDisabled: !spawnConfig.relocatable,
+	}
+
+	var pidOpts []pidOption
+
+	// set the actor as a system actor when necessary
+	if spawnConfig.isSystem {
+		pidOpts = append(pidOpts, asSystemActor())
 	}
 
 	// define the actor as singleton when necessary
@@ -4750,10 +4749,6 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 		// no need to check for nil because it is always set when the actor is a singleton
 		// and it is not possible to spawn a singleton actor without a singleton spec
 		pidOpts = append(pidOpts, withSingletonSpec(spawnConfig.singletonSpec))
-	}
-
-	if !spawnConfig.relocatable {
-		pidOpts = append(pidOpts, withRelocationDisabled())
 	}
 
 	// enable stash
@@ -4812,19 +4807,9 @@ func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, o
 			strategy = x.defaultPassivationStrategy
 		}
 	}
-	pidOpts = append(pidOpts, withPassivationStrategy(strategy))
+	settings.passivationStrategy = strategy
 
-	pid, err := newPID(
-		ctx,
-		addr,
-		actor,
-		pidOpts...,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-	return pid, nil
+	return newPID(ctx, addr, actor, &settings, pidOpts...)
 }
 
 // tree returns the actors tree

@@ -280,9 +280,9 @@ While `requestID` is set, `Response`, `Err`, `NoErr` and `Unhandled` route a rep
 
 1. Register the correlation ID in `pendingAsks`, the system-wide `pendingasks.Table`, and get a buffered channel of one slot.
 2. Enqueue an `AsyncRequest` with a nil `ReplyTo` and the ask's `Deadline`.
-3. Block the **caller**, not the grain, until the reply, the timeout or the end of the caller's context.
+3. Block the **caller**, not the grain, on the slot and the caller's context only. The timeout is an `envelopeTimer` that delivers a private response into the slot, for the reason the actor `Ask` gives in [Chapter 5](chap-05.md) (`startEnvelopeTimer` in `actor/ask_timer.go`).
 
-The reply arrives through the nil arm of the router. On timeout the caller calls `Abandon`. `Complete` and `Abandon` both go through one delete of the map entry, so exactly one of them wins, and a reply that comes after an abandonment finds nothing to write to (`internal/pendingasks/table.go`). The table is always on the node that runs the grain, even when the ask came over the network. A grain without reentrancy keeps the channel path and never touches the table. Tells use the channel path for every grain.
+The reply arrives through the nil arm of the router. On timeout the caller calls `Abandon`. `Complete` and `Abandon` both go through one delete of the map entry, so exactly one of them wins, and a reply that comes after an abandonment finds nothing to write to; a reply that finds the slot already holding the timeout is dropped with it, because `Complete` writes without blocking (`internal/pendingasks/table.go`). The table is always on the node that runs the grain, even when the ask came over the network. A grain without reentrancy keeps the channel path and never touches the table. Tells use the channel path for every grain.
 
 ### Across nodes
 

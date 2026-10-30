@@ -36,6 +36,16 @@ import (
 // lock that a larger segment would take on every allocation.
 const mailboxSegmentSlots = 32
 
+// mailboxSpareSegments is the number of drained segments the default mailbox
+// keeps for reuse. A backlog deeper than two segments drains several at once,
+// and a single spare let all but one of them go to the garbage collector, so
+// an actor under steady load allocated a segment every few dozen messages. 32
+// spares cover a backlog of a thousand messages, and bound the memory an actor
+// keeps after its backlog has passed: 32 segments of 2 KiB. Must be a power
+// of two: the ring's counters wrap at 2^32, and the slot index they are
+// reduced to stays consistent across the wrap only when the length divides it.
+const mailboxSpareSegments = 32
+
 // mailboxGenerationShift splits a segment cursor: the bits above it hold the
 // segment's reuse generation, the bits below it the slots claimed in that
 // generation.
@@ -109,6 +119,17 @@ type mailboxSegment struct {
 	slots [mailboxSegmentSlots]mailboxSlot
 }
 
+// mailboxSpareRing is a ring of drained segments. The consumer pushes at push,
+// the producer linking a segment pops at pop. Links are serialized, since each
+// one publishes the tail the next one fills, so the ring has one pusher and
+// one popper and needs no compare-and-swap. It is empty when the two counters
+// are equal and full when they are mailboxSpareSegments apart.
+type mailboxSpareRing struct {
+	segments [mailboxSpareSegments]atomic.Pointer[mailboxSegment]
+	push     atomic.Uint32
+	pop      atomic.Uint32
+}
+
 // embeddedMailboxState is the part of the default mailbox that does not fit in
 // the PID's two segment pointers. newPID allocates it for every actor that uses
 // the default mailbox; an actor with a custom mailbox has none.
@@ -119,9 +140,11 @@ type embeddedMailboxState struct {
 	// held is the pooled context the previous Dequeue returned. It is recycled
 	// on the next Dequeue, as a sentinel is in UnboundedMailbox.
 	held *ReceiveContext
-	// spare is a drained segment kept for the next producer that needs one.
-	// The consumer offers it, a producer takes it with a swap.
-	spare atomic.Pointer[mailboxSegment]
+	// spares holds the drained segments kept for the producers that link. The
+	// consumer allocates it the first time it drains a segment it cannot
+	// rewind, so an actor whose backlog never exceeds one segment pays only
+	// the pointer.
+	spares atomic.Pointer[mailboxSpareRing]
 	// read is the index of the next slot to read in the head segment. Only the
 	// consumer writes it; it is atomic because IsEmpty may run on a worker that
 	// has just given the actor up while the next owner reads.
@@ -391,11 +414,11 @@ func (x *embeddedMailbox) claimLink(full *mailboxSegment, generation uint64) boo
 	}
 }
 
-// link appends a segment after full, the spare when there is one, and makes it
+// link appends a segment after full, a spare when there is one, and makes it
 // the tail. Only the producer that won claimLink for the generation calls it,
 // so no two producers link the same segment.
 func (x *embeddedMailbox) link(full *mailboxSegment) {
-	next := x.embedded.spare.Swap(nil)
+	next := x.embedded.takeSpare()
 	if next == nil {
 		next = new(mailboxSegment)
 	}
@@ -453,9 +476,10 @@ func (x *embeddedMailbox) rewind(segment *mailboxSegment, read uint32) {
 	}
 }
 
-// recycle offers a segment the consumer has left as the spare. A segment that
+// recycle offers a segment the consumer has left as a spare. A segment that
 // is still the tail is left alone: the producer linking its successor has not
 // published the new tail yet, and producers still claim slots past its end.
+// A segment the spares have no room for is left to the garbage collector.
 func (x *embeddedMailbox) recycle(segment *mailboxSegment) {
 	if x.mailboxTail.Load() == segment {
 		return
@@ -463,7 +487,45 @@ func (x *embeddedMailbox) recycle(segment *mailboxSegment) {
 
 	segment.next.Store(nil)
 	segment.cursor.Store(nextGenerationCursor(segment.cursor.Load()))
-	x.embedded.spare.CompareAndSwap(nil, segment)
+	x.embedded.offerSpare(segment)
+}
+
+// takeSpare pops the oldest spare segment, or returns nil when there is none.
+// Only the producer that links calls it, one link at a time.
+func (s *embeddedMailboxState) takeSpare() *mailboxSegment {
+	ring := s.spares.Load()
+	if ring == nil {
+		return nil
+	}
+
+	pop := ring.pop.Load()
+	if pop == ring.push.Load() {
+		return nil
+	}
+
+	segment := ring.segments[pop%mailboxSpareSegments].Swap(nil)
+	ring.pop.Store(pop + 1)
+	return segment
+}
+
+// offerSpare pushes a drained segment onto the spares, allocating the ring on
+// the first push, and reports whether there was room for it. Only the consumer
+// calls it.
+func (s *embeddedMailboxState) offerSpare(segment *mailboxSegment) bool {
+	ring := s.spares.Load()
+	if ring == nil {
+		ring = new(mailboxSpareRing)
+		s.spares.Store(ring)
+	}
+
+	push := ring.push.Load()
+	if push-ring.pop.Load() == mailboxSpareSegments {
+		return false
+	}
+
+	ring.segments[push%mailboxSpareSegments].Store(segment)
+	ring.push.Store(push + 1)
+	return true
 }
 
 // linkedInGeneration reports whether linked, a segment's link marker, records

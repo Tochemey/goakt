@@ -24,6 +24,7 @@ package actor
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -33,6 +34,13 @@ import (
 	"github.com/tochemey/goakt/v4/internal/types"
 	"github.com/tochemey/goakt/v4/internal/validation"
 )
+
+// grainNameRegexp is the pattern a grain name must match, compiled once for
+// every identity validation.
+var grainNameRegexp = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$`)
+
+// errInvalidGrainName is returned when a grain name does not match grainNameRegexp.
+var errInvalidGrainName = errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 
 // GrainIdentity uniquely identifies a grain (virtual actor) instance within the actor system.
 //
@@ -53,9 +61,9 @@ type GrainIdentity struct {
 
 	// validateOnce memoises Validate()'s result. Because kind and name
 	// are immutable after construction, the validation outcome is fixed
-	// for the lifetime of the identity. Caching collapses the regex
-	// compile + validation chain allocation that otherwise dominates
-	// every Tell/Ask call profile to a single atomic load.
+	// for the lifetime of the identity. Caching collapses the validation
+	// chain allocation that otherwise dominates every Tell/Ask call profile
+	// to a single atomic load.
 	validateOnce sync.Once
 	validateErr  error
 }
@@ -139,19 +147,16 @@ func (g *GrainIdentity) Equal(other *GrainIdentity) bool {
 //
 // The identity's kind and name are immutable after construction, so the
 // result is memoised via validateOnce. The first caller runs the full
-// validation chain (regex compile + chain construction); subsequent
-// callers read the cached error with a single atomic load. This removes
-// the regex compile cost from the Tell/Ask hot path, where profiling
-// showed it accounted for ~98% of per-call allocations.
+// validation chain; subsequent callers read the cached error with a single
+// atomic load. This keeps the validation cost off the Tell/Ask hot path,
+// where profiling showed it accounted for ~98% of per-call allocations.
 func (g *GrainIdentity) Validate() error {
 	g.validateOnce.Do(func() {
-		pattern := "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
-		customErr := errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 		g.validateErr = validation.
 			New(validation.FailFast()).
 			AddValidator(validation.NewEmptyStringValidator("name", g.Name())).
 			AddAssertion(len(g.Name()) <= 255, "grain name is too long. Maximum length is 255").
-			AddValidator(validation.NewPatternValidator(pattern, strings.TrimSpace(g.Name()), customErr)).
+			AddValidator(validation.NewRegexpValidator(grainNameRegexp, strings.TrimSpace(g.Name()), errInvalidGrainName)).
 			Validate()
 	})
 	return g.validateErr

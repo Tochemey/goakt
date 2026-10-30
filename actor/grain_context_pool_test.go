@@ -203,7 +203,7 @@ func drainGrainContextShard(shard uint32) {
 // returns every grain's poison-pill ack channel to its shard, and every
 // successful Ask returns its reply channel), and the ring hands those out
 // first.
-func drainGrainChannelShard[T any](pool *grainChannelPoolShards[T], shard uint32) {
+func drainGrainChannelShard[T any](pool *channelPoolShards[T], shard uint32) {
 	i := shard & pool.mask
 	for {
 		if pool.shards[i].pop() == nil {
@@ -251,7 +251,7 @@ func TestGrainErrorChannelPool_ShardsAreIndependent(t *testing.T) {
 }
 
 func TestGrainErrorChannelPool_GetAllocatesOnEmptyShard(t *testing.T) {
-	pool := newGrainChannelPool[error]()
+	pool := newChannelPool[error]()
 
 	ch := pool.shards[0].pop()
 	assert.Nil(t, ch)
@@ -337,7 +337,7 @@ func TestGrainReplyChannelPool_ShardsAreIndependent(t *testing.T) {
 }
 
 func TestGrainReplyChannelPool_GetAllocatesOnEmptyShard(t *testing.T) {
-	pool := newGrainChannelPool[any]()
+	pool := newChannelPool[any]()
 
 	ch := pool.shards[0].pop()
 	assert.Nil(t, ch)

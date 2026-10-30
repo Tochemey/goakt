@@ -35,23 +35,36 @@ var errorCh = make(chan chan error, channelPoolSize)
 
 var timers = timer.NewPool()
 
+// askReplyChannelPool recycles the reply channels of actor asks, in the
+// sharded ring the grain ask path uses (see grainReplyChannelPool). A ring
+// per shard keeps concurrent asks off a shared lock, and a channel is
+// returned only once its ask holds the reply and has stopped its timeout
+// before it fired, so a late reply or timeout can never reach the next
+// borrower; a reply is written at most once per channel because forwarding
+// hands the reply guard over with the channel (see
+// ReceiveContext.inheritReplyRoute). Together these answer why the actor
+// ask did not pool its channels before, and spare every steady-state Ask
+// the 128 bytes of a fresh channel.
+var askReplyChannelPool = newChannelPool[any]()
+
 // emptyAnyCh is a pre-closed channel returned by BatchAsk for empty message slices.
 var emptyAnyCh = func() chan any { ch := make(chan any); close(ch); return ch }()
 
-// getResponseChannel returns a fresh buffered (capacity 1) reply
-// channel for one synchronous actor request. It serves the actor Ask
-// path only. Reply channels are deliberately not pooled here: a
-// process-wide pool serializes every concurrent Ask on one channel
-// lock, and a reply racing the asker's timeout could land in the
-// channel after the drain that precedes pooling, handing the next
-// borrower a stale response. A per-request channel scales with
-// concurrency and makes a late reply land in an unreachable channel
-// instead. Grain asks avoid both problems differently: they borrow
-// from a per-shard ring (grainReplyChannelPool in
-// grain_context_pool.go), which has no global lock, and their timeout
-// paths abandon the channel instead of returning it.
-func getResponseChannel() chan any {
-	return make(chan any, 1)
+// getResponseChannel returns a buffered (capacity 1) reply channel for one
+// synchronous actor request, from the shard of askReplyChannelPool that
+// shard names, the target actor's context-pool shard. An empty shard
+// allocates a fresh channel.
+func getResponseChannel(shard uint32) chan any {
+	return askReplyChannelPool.get(shard)
+}
+
+// putResponseChannel returns ch to the shard it was fetched from. Only an
+// Ask that has its reply in hand and has stopped its timeout before it fired
+// may return a channel (see PID.Ask): a channel a late reply or a late
+// timeout could still reach is abandoned to the garbage collector instead,
+// so no borrower ever reads a value meant for another request.
+func putResponseChannel(shard uint32, ch chan any) {
+	askReplyChannelPool.put(shard, ch)
 }
 
 // getErrorChannel returns a buffered (capacity 1) error channel from

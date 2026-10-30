@@ -70,10 +70,11 @@ type grainPID struct {
 	// off the message path by async response delivery. No producer touches
 	// this line per message.
 	//
-	// mailboxHead is the consumer end of the embedded user mailbox, the retained
-	// sentinel; the turn advances it on every dequeue and no producer reads it
-	// per message, so it heads the turn-written line. Nil for a bounded grain.
-	mailboxHead syncatomic.Pointer[GrainContext]
+	// mailboxHead is the consumer end of the embedded user mailbox, the segment
+	// the turn reads; the turn advances it when it finishes a segment and no
+	// producer reads it per message, so it heads the turn-written line. Nil
+	// for a bounded grain, and for an unbounded one until its first message.
+	mailboxHead syncatomic.Pointer[grainMailboxSegment]
 
 	// latestReceiveTimeNano holds the latest receive timestamp as
 	// UnixNano. Stored as int64 because atomic.Time boxes time.Time
@@ -140,15 +141,15 @@ type grainPID struct {
 	// timer scheduling, never on the message path.
 	mu sync.Mutex
 
-	// Line 2: the producer-written mailbox tail and the scheduling word both
-	// sides compare-and-swap, with fields touched only at activation,
-	// deactivation or wire snapshots; the turn writes here once per turn, never
-	// per message.
+	// Line 2: the mailbox tail producers read, the scheduling word both sides
+	// compare-and-swap, and fields touched only at activation, deactivation or
+	// wire snapshots; the turn writes here once per turn, never per message.
 	//
 	// mailboxTail is the producer end of the embedded user mailbox: every
-	// enqueue swaps it, the turn reads it only on an empty dequeue, so it heads
-	// the producer-written line. Nil for a bounded grain.
-	mailboxTail syncatomic.Pointer[GrainContext]
+	// enqueue loads it and claims a slot in it, a producer writes it only when
+	// it links a segment, and the turn reads it only when it finishes one. Nil
+	// for a bounded grain, and for an unbounded one until its first message.
+	mailboxTail syncatomic.Pointer[grainMailboxSegment]
 
 	// schedState drives the grain's membership on the dispatcher's ready
 	// queue. The Idle -> Scheduled -> Processing transitions enforce that
@@ -171,10 +172,17 @@ type grainPID struct {
 	// fails; nil otherwise. Guarded by mu.
 	timers *grainTimers
 
+	// embedded is the state of the embedded user mailbox beyond its two segment
+	// pointers: the turn context, the held context, the spare segments and the
+	// read index. The turn allocates it on its first dequeue of a message, so a
+	// grain that never receives one pays only the pointer. Nil for a bounded
+	// grain.
+	embedded syncatomic.Pointer[embeddedGrainMailboxState]
+
 	// Pads the process to 192 bytes, three whole cache lines, so the allocator
 	// places every process on a line boundary and the line comments above hold
-	// for all of them; at 176 bytes only one process in four was aligned.
-	_ [16]byte
+	// for all of them; at 184 bytes only one process in four was aligned.
+	_ [8]byte
 }
 
 var (
@@ -218,17 +226,12 @@ func newGrainPID(identity *GrainIdentity, grain Grain, actorSystem ActorSystem, 
 }
 
 // attachMailbox gives the process its user mailbox: a standalone bounded
-// mailbox for a positive capacity, otherwise the embedded unbounded queue
-// seeded with its sentinel.
+// mailbox for a positive capacity, otherwise the embedded unbounded queue,
+// whose first segment and state appear with its first message.
 func (pid *grainPID) attachMailbox(capacity int64) {
 	if capacity > 0 {
 		pid.boundedMailbox = newGrainMailbox(capacity)
-		return
 	}
-
-	sentinel := new(GrainContext)
-	pid.mailboxHead.Store(sentinel)
-	pid.mailboxTail.Store(sentinel)
 }
 
 // getLogger returns the actor system's logger. The system's logger is set at
@@ -446,6 +449,26 @@ func (pid *grainPID) receive(grainContext *GrainContext) error {
 	return nil
 }
 
+// receiveOneWay delivers a one-way message to a grain on the embedded mailbox,
+// stored as values rather than in a pooled context, which the turn refills its
+// own context from. A grain with a bounded mailbox is not sent here: a one-way
+// message to it travels in a context, so the mailbox can refuse it. As with
+// receive, a message to a grain that is no longer active is refused with
+// ErrDead.
+func (pid *grainPID) receiveOneWay(ctx context.Context, self *GrainIdentity, message any) error {
+	if !pid.isActive() {
+		return gerrors.ErrDead
+	}
+
+	(*embeddedGrainMailbox)(pid).put(ctx, self, message)
+
+	if pid.schedState.TrySchedule() {
+		pid.dispatcher.schedule(pid)
+	}
+
+	return nil
+}
+
 // enqueueMessage appends a user message to the grain's mailbox: the standalone
 // bounded one when the grain has a capacity, otherwise the embedded queue,
 // which never rejects.
@@ -573,9 +596,9 @@ func (pid *grainPID) hasPendingWork() bool {
 }
 
 // dispatchOne routes a single message through the appropriate handler.
-// Release is owned by the mailbox Dequeue, standalone or embedded,
-// which reclaims the previous sentinel; dispatchOne must not return
-// the context here or the mailbox would hand out an in-use head.
+// Release is owned by the mailbox Dequeue, standalone or embedded, which
+// recycles the context it returned last on its next call; dispatchOne must not
+// return the context here or the mailbox would hand out an in-use context.
 //
 // now is the turn's shared timestamp, computed once per turn by runTurn:
 // activity stamping does not need per-message precision, and time.Now on

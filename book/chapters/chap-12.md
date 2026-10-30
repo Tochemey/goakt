@@ -35,7 +35,7 @@ An extension is anything with an `ID() string` (`Extension` in `extension/extens
 trimmed := strings.TrimSpace(v.id)
 return New(FailFast()).
 	AddAssertion(len(trimmed) > 1 && len(trimmed) <= 255, "invalid id").
-	AddValidator(NewPatternValidator("^[a-zA-Z0-9][a-zA-Z0-9-_]*$", trimmed, ...)).
+	AddValidator(NewRegexpValidator(idRegexp, trimmed, ...)).
 ```
 
 Two consequences, which the interface's comment states (`Extension` in `extension/extension.go`):
@@ -57,7 +57,7 @@ A dependency is an extension that can be serialized: `ID()` plus `MarshalBinary`
 
 **Configuration.** `WithDependencies` replaces the spawn configuration's list rather than appending to it, so only the last `WithDependencies` option counts (`actor/spawn_option.go`). The IDs are checked by the validator of [§12.1](#121-extensions) (`spawnConfig.Validate` in `actor/spawn_option.go`); duplicates are not detected.
 
-**Type registration.** A dependency is rebuilt on another node from its type name, so its Go type must be in that node's type registry. A local `Spawn` registers it (`actorSystem.configPID` in `actor/actor_system.go`), as does `SpawnChild` through `Inject` (`PID.spawnChildLocal` in `actor/pid.go`). `ActorSystem.Inject` only registers types, and fails before `Start`. The registry key is the lower-cased `reflect.Type.String()` of the pointed-to type (`Name` and `lowTrim` in `internal/types/registry.go`), for example `db.client`: the package name and type name, without the import path. Two types with the same package and type name in different modules collide. `reflectType` calls `Elem()`, so a dependency must be a pointer.
+**Type registration.** A dependency is rebuilt on another node from its type name, so its Go type must be in that node's type registry. A local `Spawn` registers it (`actorSystem.configPID` in `actor/actor_system.go`), as does `SpawnChild` through `Inject` (`PID.spawnChildLocal` in `actor/pid.go`). `ActorSystem.Inject` only registers types, and fails before `Start`. The registry key is the lower-cased `reflect.Type.String()` of the pointed-to type, computed once per type and cached (`Name`, `lowTrim` and `typeNames` in `internal/types/registry.go`), for example `db.client`: the package name and type name, without the import path. Two types with the same package and type name in different modules collide. `reflectType` calls `Elem()`, so a dependency must be a pointer.
 
 **Storage.** The PID keeps its dependencies in a concurrent map keyed by ID (`withDependencies` in `actor/pid_option.go`; `actor/pid.go`). `PID.Dependency(id)` scans `PID.Dependencies()`; on a remote PID, each of these calls is a network round trip, and any error, including a type not registered locally, comes back as `nil`. `ReceiveContext` reads the PID's map (`actor/receive_context.go`). The `Context` given to `PreStart` and `PostStop` gets a copy taken when the context is built (`PID.init` in `actor/pid.go`; `actor/context.go`).
 

@@ -61,7 +61,7 @@ func New() *Table {
 //
 // The channel is buffered so that Complete never blocks, even when the caller
 // has already stopped waiting.
-func (t *Table) Register(correlationID string) <-chan *commands.AsyncResponse {
+func (t *Table) Register(correlationID string) chan *commands.AsyncResponse {
 	slot := make(chan *commands.AsyncResponse, 1)
 	t.slots.Set(correlationID, slot)
 	return slot
@@ -71,7 +71,10 @@ func (t *Table) Register(correlationID string) <-chan *commands.AsyncResponse {
 // reports whether a waiting caller was found.
 //
 // A false return means the caller already abandoned the ask, which is a normal
-// outcome of a reply racing a timeout rather than an error.
+// outcome of a reply racing a timeout rather than an error. A true return
+// means the slot was still registered; when it already held the caller's
+// timeout, the caller is about to abandon the ask and the response is
+// dropped, which is the same race decided a moment earlier.
 func (t *Table) Complete(response *commands.AsyncResponse) bool {
 	if response == nil || response.CorrelationID == "" {
 		return false
@@ -82,9 +85,15 @@ func (t *Table) Complete(response *commands.AsyncResponse) bool {
 		return false
 	}
 
-	// Sending cannot block: LoadAndDelete made this goroutine the only owner of
-	// the slot, and the slot is buffered.
-	slot <- response
+	// LoadAndDelete made this goroutine the only responder, but the slot may
+	// already hold the caller's timeout (the caller's timer writes it without
+	// taking the slot out of the table); the caller is then on its way out,
+	// and the response is dropped with the slot rather than blocking here.
+	select {
+	case slot <- response:
+	default:
+	}
+
 	return true
 }
 

@@ -344,8 +344,10 @@ var (
 	_ schedulable            = (*PID)(nil)
 )
 
-// newPID creates a new pid
-func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...pidOption) (*PID, error) {
+// newPID creates a new pid. settings, when not nil, are applied first, then
+// opts in order; a spawn passes the settings every actor gets as one value
+// and keeps opts for what its spawn config adds.
+func newPID(ctx context.Context, address *address.Address, actor Actor, settings *pidSettings, opts ...pidOption) (*PID, error) {
 	// actor address is required
 	if address == nil {
 		return nil, errors.New("address is required")
@@ -375,6 +377,10 @@ func newPID(ctx context.Context, address *address.Address, actor Actor, opts ...
 	pid.mailboxEnqueued.Store(0)
 	pid.mailboxDequeued.Store(0)
 	pid.setState(relocationState, true)
+
+	if settings != nil {
+		settings.apply(pid)
+	}
 
 	for _, opt := range opts {
 		opt(pid)
@@ -1321,12 +1327,20 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 
 	select {
 	case result := <-responseCh:
-		timeoutTimer.stop()
+		stopped := timeoutTimer.stop()
 		if _, timedOut := result.(askTimedOut); timedOut {
 			err = gerrors.ErrRequestTimeout
 			pid.handleReceivedErrorWithMessage(pid, message, err)
 			return nil, err
 		}
+
+		// The channel is reused only when nothing else can reach it: the
+		// reply is in hand, the one reply guard is spent, and the timeout
+		// was stopped before it fired. Otherwise it is left to the GC.
+		if stopped {
+			putResponseChannel(to.ctxShard, responseCh)
+		}
+
 		return result, nil
 	case <-ctx.Done():
 		timeoutTimer.stop()
@@ -2895,21 +2909,23 @@ func (pid *PID) effectiveInitTimeout() time.Duration {
 // init initializes the given actor and init processing messages
 // when the initialization failed the actor will not be started
 func (pid *PID) init(ctx context.Context) error {
-	pid.getLogger().Debugf("initialization process started for actor %s", pid.Name())
+	logger := pid.getLogger()
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("initialization process started for actor %s", pid.Name())
+	}
 
 	initContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
 
-	initTimeout := pid.effectiveInitTimeout()
-	cctx, cancel := context.WithTimeout(ctx, initTimeout)
-	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
-
-	if err := retrier.RunContext(cctx, func(_ context.Context) error {
-		return pid.actor.PreStart(initContext)
-	}); err != nil {
-		e := gerrors.NewErrInitFailure(err)
-		cancel()
-		pid.getLogger().Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
-		return e
+	// The first attempt runs on its own: most PreStarts succeed at once, and
+	// the retry machinery, a deadline context, its timer and a backoff policy,
+	// is built only when one fails.
+	started := time.Now()
+	if err := pid.actor.PreStart(initContext); err != nil {
+		if err = pid.retryPreStart(ctx, initContext, started, err); err != nil {
+			e := gerrors.NewErrInitFailure(err)
+			logger.Errorf("failed to initialize actor %s: %v (hint: check PreStart, verify dependencies)", pid.Name(), err)
+			return e
+		}
 	}
 
 	// Reopen remote hold tracking before the actor is announced as running:
@@ -2921,14 +2937,41 @@ func (pid *PID) init(ctx context.Context) error {
 	// PostStart first.
 	pid.armPostStart(ctx)
 	pid.setState(runningState, true)
-	pid.getLogger().Debugf("actor=%s initialization successful", pid.Name())
-
-	if pid.getEventsStream() != nil {
-		pid.getEventsStream().Publish(eventsTopic, NewActorStarted(pid.Path()))
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s initialization successful", pid.Name())
 	}
 
-	cancel()
+	// The event is built only when someone is subscribed: the stream drops a
+	// message published to a topic without subscribers, so building one for
+	// it would be an allocation per spawn for nothing.
+	if stream := pid.getEventsStream(); stream != nil && stream.SubscribersCount(eventsTopic) > 0 {
+		stream.Publish(eventsTopic, NewActorStarted(pid.Path()))
+	}
+
 	return nil
+}
+
+// retryPreStart runs the remaining PreStart attempts after a first attempt
+// failed with first at started. The retrier is given the first failure as the
+// outcome of its own first attempt, so the attempts, the delays between them
+// and the init timeout, which runs from started, are those of one retried run:
+// a failure marked with retry.Stop ends it at once, and the last error is
+// returned when the attempts or the timeout are exhausted.
+func (pid *PID) retryPreStart(ctx context.Context, initContext *Context, started time.Time, first error) error {
+	initTimeout := pid.effectiveInitTimeout()
+	cctx, cancel := context.WithDeadline(ctx, started.Add(initTimeout))
+	defer cancel()
+
+	retrier := retry.NewRetrier(int(pid.initMaxRetries.Load()), time.Millisecond, initTimeout)
+	replayed := false
+	return retrier.RunContext(cctx, func(context.Context) error {
+		if !replayed {
+			replayed = true
+			return first
+		}
+
+		return pid.actor.PreStart(initContext)
+	})
 }
 
 // reset re-initializes the actor PID
@@ -3011,8 +3054,8 @@ func (pid *PID) reset() {
 
 	// Note: singletonState and relocationState are deliberately left untouched as
 	// well: both are spawn-time configuration applied once by newPID through
-	// asSingleton and withRelocationDisabled. The restart path re-runs init()
-	// on the same PID without re-applying options, so flipping them back to
+	// asSingleton and the relocationDisabled setting. The restart path re-runs
+	// init() on the same PID without re-applying them, so flipping them back to
 	// their defaults here turned a WithRelocationDisabled actor into a
 	// relocatable one after Restart, and a stopped PID awaiting DeathWatch
 	// cleanup reported the wrong configuration to IsRelocatable, IsSingleton,
@@ -4198,12 +4241,8 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 			_ = pid.ActorSystem().Inject(config.dependencies...)
 		}
 
-		cid, err := newPID(
-			ctx,
-			childAddress,
-			actor,
-			pid.buildChildOptions(config)...,
-		)
+		settings, options := pid.buildChildSettings(config)
+		cid, err := newPID(ctx, childAddress, actor, &settings, options...)
 		if err != nil {
 			return nil, err
 		}
@@ -4244,50 +4283,44 @@ func (pid *PID) childNameResolver(tree *tree, childAddress, name string) (*PID, 
 	return nameResolver(child, name)
 }
 
-// buildChildOptions translates a spawn config into the pidOption list used
-// when materializing a child PID. The parent's runtime wiring (logger, actor
-// system, remoting, passivation manager, etc.) is always inherited; child-specific
-// overrides from config are appended only when set.
-func (pid *PID) buildChildOptions(config *spawnConfig) []pidOption {
-	pidOptions := []pidOption{
-		withInitMaxRetries(int(pid.initMaxRetries.Load())),
-		withActorSystem(pid.actorSystem),
-		withInitTimeout(config.initTimeout),
-		withRemoting(pid.remoting),
-		withPassivationManager(pid.passivationManager),
-		withMetricProvider(pid.metricProvider()),
-		withRelocationDisabled(), // by default child is not relocatable
-	}
-
-	if config.mailbox != nil {
-		pidOptions = append(pidOptions, withMailbox(config.mailbox))
-	}
-
-	// a child without a supervisor of its own gets the system's default, as a
-	// top-level actor does
+// buildChildSettings translates a spawn config into the settings a child of
+// pid inherits and the options its spawn config adds. The child inherits the
+// parent's system, remoting, passivation manager, metric provider and init
+// retries, is not relocatable, and gets the system's default supervisor when
+// the config names none, as a top-level actor does.
+func (pid *PID) buildChildSettings(config *spawnConfig) (pidSettings, []pidOption) {
 	supervisor := config.supervisor
 	if supervisor == nil {
 		supervisor = pid.actorSystem.getDefaultSupervisor()
 	}
 
-	if supervisor != nil {
-		pidOptions = append(pidOptions, withSupervisor(supervisor))
+	settings := pidSettings{
+		actorSystem:         pid.actorSystem,
+		initMaxRetries:      int(pid.initMaxRetries.Load()),
+		initTimeout:         config.initTimeout,
+		remoting:            pid.remoting,
+		passivationManager:  pid.passivationManager,
+		metricProvider:      pid.metricProvider(),
+		supervisor:          supervisor,
+		mailbox:             config.mailbox,
+		passivationStrategy: config.passivationStrategy,
+		relocationDisabled:  true, // by default child is not relocatable
 	}
 
+	var options []pidOption
 	if config.enableStash {
-		pidOptions = append(pidOptions, withStash())
+		options = append(options, withStash())
 	}
 
 	if config.reentrancy != nil {
-		pidOptions = append(pidOptions, withReentrancy(config.reentrancy))
+		options = append(options, withReentrancy(config.reentrancy))
 	}
 
 	if config.dependencies != nil {
-		pidOptions = append(pidOptions, withDependencies(config.dependencies...))
+		options = append(options, withDependencies(config.dependencies...))
 	}
 
-	pidOptions = append(pidOptions, withPassivationStrategy(config.passivationStrategy))
-	return pidOptions
+	return settings, options
 }
 
 func (pid *PID) incarnationID() string {
