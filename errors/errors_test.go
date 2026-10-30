@@ -130,6 +130,13 @@ func TestNewErrActorNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, ErrActorNotFound)
 }
 
+func TestNewErrDispatcherNotFound(t *testing.T) {
+	err := NewErrDispatcherNotFound("blocking")
+	require.Error(t, err)
+	require.EqualError(t, err, `(dispatcher="blocking") dispatcher not found`)
+	assert.ErrorIs(t, err, ErrDispatcherNotFound)
+}
+
 func TestNewErrAddressNotFound(t *testing.T) {
 	err := NewErrAddressNotFound("127.0.0.1:4000")
 	require.Error(t, err)

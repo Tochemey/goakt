@@ -1285,6 +1285,7 @@ type RemoteSpawnRequest struct {
 	xxx_hidden_Reentrancy          *ReentrancyConfig       `protobuf:"bytes,12,opt,name=reentrancy,proto3"`
 	xxx_hidden_InitTimeout         *durationpb.Duration    `protobuf:"bytes,13,opt,name=init_timeout,json=initTimeout,proto3"`
 	xxx_hidden_ReliableDelivery    *ReliableDeliveryConfig `protobuf:"bytes,14,opt,name=reliable_delivery,json=reliableDelivery,proto3"`
+	xxx_hidden_Dispatcher          *string                 `protobuf:"bytes,15,opt,name=dispatcher,proto3,oneof"`
 	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
 	XXX_presence                   [1]uint32
 	unknownFields                  protoimpl.UnknownFields
@@ -1419,6 +1420,16 @@ func (x *RemoteSpawnRequest) GetReliableDelivery() *ReliableDeliveryConfig {
 	return nil
 }
 
+func (x *RemoteSpawnRequest) GetDispatcher() string {
+	if x != nil {
+		if x.xxx_hidden_Dispatcher != nil {
+			return *x.xxx_hidden_Dispatcher
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RemoteSpawnRequest) SetHost(v string) {
 	x.xxx_hidden_Host = v
 }
@@ -1457,7 +1468,7 @@ func (x *RemoteSpawnRequest) SetEnableStash(v bool) {
 
 func (x *RemoteSpawnRequest) SetRole(v string) {
 	x.xxx_hidden_Role = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 14)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 9, 15)
 }
 
 func (x *RemoteSpawnRequest) SetSupervisor(v *SupervisorSpec) {
@@ -1474,6 +1485,11 @@ func (x *RemoteSpawnRequest) SetInitTimeout(v *durationpb.Duration) {
 
 func (x *RemoteSpawnRequest) SetReliableDelivery(v *ReliableDeliveryConfig) {
 	x.xxx_hidden_ReliableDelivery = v
+}
+
+func (x *RemoteSpawnRequest) SetDispatcher(v string) {
+	x.xxx_hidden_Dispatcher = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 15)
 }
 
 func (x *RemoteSpawnRequest) HasSingleton() bool {
@@ -1525,6 +1541,13 @@ func (x *RemoteSpawnRequest) HasReliableDelivery() bool {
 	return x.xxx_hidden_ReliableDelivery != nil
 }
 
+func (x *RemoteSpawnRequest) HasDispatcher() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 14)
+}
+
 func (x *RemoteSpawnRequest) ClearSingleton() {
 	x.xxx_hidden_Singleton = nil
 }
@@ -1552,6 +1575,11 @@ func (x *RemoteSpawnRequest) ClearInitTimeout() {
 
 func (x *RemoteSpawnRequest) ClearReliableDelivery() {
 	x.xxx_hidden_ReliableDelivery = nil
+}
+
+func (x *RemoteSpawnRequest) ClearDispatcher() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 14)
+	x.xxx_hidden_Dispatcher = nil
 }
 
 type RemoteSpawnRequest_builder struct {
@@ -1589,6 +1617,9 @@ type RemoteSpawnRequest_builder struct {
 	// restores them as spawn options so remote placement behaves exactly like
 	// a local spawn, including controller companion creation.
 	ReliableDelivery *ReliableDeliveryConfig
+	// Specifies the dispatcher the actor is assigned to (WithDispatcher).
+	// Absent when the actor runs on the default dispatcher.
+	Dispatcher *string
 }
 
 func (b0 RemoteSpawnRequest_builder) Build() *RemoteSpawnRequest {
@@ -1605,13 +1636,17 @@ func (b0 RemoteSpawnRequest_builder) Build() *RemoteSpawnRequest {
 	x.xxx_hidden_Dependencies = &b.Dependencies
 	x.xxx_hidden_EnableStash = b.EnableStash
 	if b.Role != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 14)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 9, 15)
 		x.xxx_hidden_Role = b.Role
 	}
 	x.xxx_hidden_Supervisor = b.Supervisor
 	x.xxx_hidden_Reentrancy = b.Reentrancy
 	x.xxx_hidden_InitTimeout = b.InitTimeout
 	x.xxx_hidden_ReliableDelivery = b.ReliableDelivery
+	if b.Dispatcher != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 15)
+		x.xxx_hidden_Dispatcher = b.Dispatcher
+	}
 	return m0
 }
 
@@ -3920,6 +3955,9 @@ type RemoteSpawnChildRequest struct {
 	xxx_hidden_Parent              string                 `protobuf:"bytes,10,opt,name=parent,proto3"`
 	xxx_hidden_Supervisor          *SupervisorSpec        `protobuf:"bytes,11,opt,name=supervisor,proto3"`
 	xxx_hidden_InitTimeout         *durationpb.Duration   `protobuf:"bytes,12,opt,name=init_timeout,json=initTimeout,proto3"`
+	xxx_hidden_Dispatcher          *string                `protobuf:"bytes,13,opt,name=dispatcher,proto3,oneof"`
+	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
+	XXX_presence                   [1]uint32
 	unknownFields                  protoimpl.UnknownFields
 	sizeCache                      protoimpl.SizeCache
 }
@@ -4035,6 +4073,16 @@ func (x *RemoteSpawnChildRequest) GetInitTimeout() *durationpb.Duration {
 	return nil
 }
 
+func (x *RemoteSpawnChildRequest) GetDispatcher() string {
+	if x != nil {
+		if x.xxx_hidden_Dispatcher != nil {
+			return *x.xxx_hidden_Dispatcher
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *RemoteSpawnChildRequest) SetHost(v string) {
 	x.xxx_hidden_Host = v
 }
@@ -4083,6 +4131,11 @@ func (x *RemoteSpawnChildRequest) SetInitTimeout(v *durationpb.Duration) {
 	x.xxx_hidden_InitTimeout = v
 }
 
+func (x *RemoteSpawnChildRequest) SetDispatcher(v string) {
+	x.xxx_hidden_Dispatcher = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 12, 13)
+}
+
 func (x *RemoteSpawnChildRequest) HasPassivationStrategy() bool {
 	if x == nil {
 		return false
@@ -4111,6 +4164,13 @@ func (x *RemoteSpawnChildRequest) HasInitTimeout() bool {
 	return x.xxx_hidden_InitTimeout != nil
 }
 
+func (x *RemoteSpawnChildRequest) HasDispatcher() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 12)
+}
+
 func (x *RemoteSpawnChildRequest) ClearPassivationStrategy() {
 	x.xxx_hidden_PassivationStrategy = nil
 }
@@ -4125,6 +4185,11 @@ func (x *RemoteSpawnChildRequest) ClearSupervisor() {
 
 func (x *RemoteSpawnChildRequest) ClearInitTimeout() {
 	x.xxx_hidden_InitTimeout = nil
+}
+
+func (x *RemoteSpawnChildRequest) ClearDispatcher() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 12)
+	x.xxx_hidden_Dispatcher = nil
 }
 
 type RemoteSpawnChildRequest_builder struct {
@@ -4155,6 +4220,9 @@ type RemoteSpawnChildRequest_builder struct {
 	// Specifies the init timeout override when explicitly set.
 	// When unset, the hosting node's system-wide init timeout is used.
 	InitTimeout *durationpb.Duration
+	// Specifies the dispatcher the child is assigned to (WithDispatcher).
+	// Absent when the child runs on the default dispatcher.
+	Dispatcher *string
 }
 
 func (b0 RemoteSpawnChildRequest_builder) Build() *RemoteSpawnChildRequest {
@@ -4173,6 +4241,10 @@ func (b0 RemoteSpawnChildRequest_builder) Build() *RemoteSpawnChildRequest {
 	x.xxx_hidden_Parent = b.Parent
 	x.xxx_hidden_Supervisor = b.Supervisor
 	x.xxx_hidden_InitTimeout = b.InitTimeout
+	if b.Dispatcher != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 12, 13)
+		x.xxx_hidden_Dispatcher = b.Dispatcher
+	}
 	return m0
 }
 
@@ -4291,7 +4363,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12'\n" +
 	"\x0fwatcher_address\x18\x04 \x01(\tR\x0ewatcherAddress\"\x17\n" +
-	"\x15RemoteUnWatchResponse\"\xb3\x05\n" +
+	"\x15RemoteUnWatchResponse\"\xe7\x05\n" +
 	"\x12RemoteSpawnRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -4313,8 +4385,12 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"reentrancy\x18\f \x01(\v2\x1c.internalpb.ReentrancyConfigR\n" +
 	"reentrancy\x12<\n" +
 	"\finit_timeout\x18\r \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12O\n" +
-	"\x11reliable_delivery\x18\x0e \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDeliveryB\a\n" +
-	"\x05_role\"/\n" +
+	"\x11reliable_delivery\x18\x0e \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDelivery\x12#\n" +
+	"\n" +
+	"dispatcher\x18\x0f \x01(\tH\x01R\n" +
+	"dispatcher\x88\x01\x01B\a\n" +
+	"\x05_roleB\r\n" +
+	"\v_dispatcher\"/\n" +
 	"\x13RemoteSpawnResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\"T\n" +
 	"\x16RemoteReinstateRequest\x12\x12\n" +
@@ -4402,7 +4478,7 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"w\n" +
 	"!RemotePassivationStrategyResponse\x12R\n" +
-	"\x14passivation_strategy\x18\x01 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\"\xa4\x04\n" +
+	"\x14passivation_strategy\x18\x01 \x01(\v2\x1f.internalpb.PassivationStrategyR\x13passivationStrategy\"\xd8\x04\n" +
 	"\x17RemoteSpawnChildRequest\x12\x12\n" +
 	"\x04host\x18\x01 \x01(\tR\x04host\x12\x12\n" +
 	"\x04port\x18\x02 \x01(\x05R\x04port\x12\x1d\n" +
@@ -4422,7 +4498,11 @@ const file_internal_remoting_proto_rawDesc = "" +
 	"\n" +
 	"supervisor\x18\v \x01(\v2\x1a.internalpb.SupervisorSpecR\n" +
 	"supervisor\x12<\n" +
-	"\finit_timeout\x18\f \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\"4\n" +
+	"\finit_timeout\x18\f \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12#\n" +
+	"\n" +
+	"dispatcher\x18\r \x01(\tH\x00R\n" +
+	"dispatcher\x88\x01\x01B\r\n" +
+	"\v_dispatcher\"4\n" +
 	"\x18RemoteSpawnChildResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddressB\xa6\x01\n" +
 	"\x0ecom.internalpbB\rRemotingProtoH\x02P\x01Z;github.com/tochemey/goakt/v4/internal/internalpb;internalpb\xa2\x02\x03IXX\xaa\x02\n" +
@@ -4546,6 +4626,7 @@ func file_internal_remoting_proto_init() {
 	file_internal_peers_proto_init()
 	file_internal_reentrancy_proto_init()
 	file_internal_remoting_proto_msgTypes[17].OneofWrappers = []any{}
+	file_internal_remoting_proto_msgTypes[50].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

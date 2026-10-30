@@ -37,4 +37,9 @@ message Grain {
   // preserve role-constrained placement. Absent when the grain has no role
   // constraint.
   optional string role = 11;
+  // dispatcher carries the dispatcher the grain is assigned to
+  // (WithGrainDispatcher) so that eager relocation and remote activation
+  // reactivate it on the same-named dispatcher. Absent when the grain runs
+  // on the default dispatcher.
+  optional string dispatcher = 12;
 }

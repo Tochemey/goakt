@@ -1844,6 +1844,173 @@ func TestGrainsRelocationWithActivationRole(t *testing.T) {
 	srv.Shutdown()
 }
 
+// TestGrainsRelocationWithDispatcher verifies on a real three-node NATS
+// cluster that the dispatcher an eager grain was activated with travels in
+// its wire record: when the worker hosting the grain departs, the grain
+// reactivates on the surviving worker and runs on that node's dispatcher of
+// the same name, not on its default one.
+func TestGrainsRelocationWithDispatcher(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+
+	// every node declares the pool; the roles only steer the grain onto a
+	// worker so the departure below is the owner's
+	pool := withTestSystemOptions(WithDispatcherPool("db", 2))
+	gateway, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles("gateway"), pool)
+	worker1, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"), pool)
+	worker2, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"), pool)
+
+	pause.For(time.Second)
+
+	identity, err := gateway.GrainIdentity(ctx, "pooled-grain", func(ctx context.Context) (Grain, error) {
+		return NewMockGrain(), nil
+	},
+		WithActivationRole("game-worker"),
+		WithActivationStrategy(RoundRobinActivation),
+		WithGrainEagerRelocation(),
+		WithGrainDispatcher("db"),
+	)
+	require.NoError(t, err)
+	require.NoError(t, gateway.TellGrain(ctx, identity, new(testpb.TestSend)))
+
+	gatewaySystem := gateway.(*actorSystem)
+
+	var ownerPort int
+	require.Eventually(t, func() bool {
+		owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+		if err != nil {
+			return false
+		}
+		ownerPort = int(owner.GetPort())
+		return true
+	}, time.Minute, time.Second, "grain owner should be registered in the cluster")
+	require.Contains(t, []int{worker1.Port(), worker2.Port()}, ownerPort)
+
+	departed, survivor := worker1, worker2
+	departedProvider, survivorProvider := sd2, sd3
+	if ownerPort == worker2.Port() {
+		departed, survivor = worker2, worker1
+		departedProvider, survivorProvider = sd3, sd2
+	}
+
+	// the remotely activated grain already runs on the owner's db pool and
+	// advertises the pool in the registry
+	departedSystem := departed.(*actorSystem)
+	process, ok := departedSystem.grains.Get(identity.String())
+	require.True(t, ok)
+	require.Same(t, departedSystem.dispatchers["db"], process.dispatcher)
+
+	owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+	require.NoError(t, err)
+	require.Equal(t, "db", owner.GetDispatcher())
+
+	require.NoError(t, departed.Stop(ctx))
+	require.NoError(t, departedProvider.Close())
+
+	require.Eventually(t, func() bool {
+		owner, err := gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+		return err == nil && int(owner.GetPort()) == survivor.Port()
+	}, 2*time.Minute, time.Second, "grain must be reactivated on the surviving game-worker node")
+
+	// the relocated grain runs on the survivor's db pool and its new record
+	// still names it, so a further departure keeps it there as well
+	survivorSystem := survivor.(*actorSystem)
+	process, ok = survivorSystem.grains.Get(identity.String())
+	require.True(t, ok)
+	require.Same(t, survivorSystem.dispatchers["db"], process.dispatcher)
+	require.Equal(t, "db", process.config.dispatcherName())
+
+	owner, err = gatewaySystem.getCluster().GetGrain(ctx, identity.String())
+	require.NoError(t, err)
+	require.Equal(t, "db", owner.GetDispatcher())
+
+	require.Eventually(t, func() bool {
+		return gateway.TellGrain(ctx, identity, new(testpb.TestSend)) == nil
+	}, time.Minute, time.Second, "grain should be accessible after relocation")
+
+	assert.NoError(t, gateway.Stop(ctx))
+	assert.NoError(t, survivor.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, survivorProvider.Close())
+	srv.Shutdown()
+}
+
+// TestRelocationWithActorDispatcher is the actor counterpart of
+// TestGrainsRelocationWithDispatcher: an actor placed with SpawnOn and
+// WithDispatcher("db") runs on its node's db pool, and after that node
+// departs the relocated incarnation runs on the surviving node's db pool.
+func TestRelocationWithActorDispatcher(t *testing.T) {
+	ctx := t.Context()
+	srv := startNatsServer(t)
+
+	pool := withTestSystemOptions(WithDispatcherPool("db", 2))
+	gateway, sd1 := startNATsSystem(t, srv.Addr().String(), withTestRoles("gateway"), pool)
+	worker1, sd2 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"), pool)
+	worker2, sd3 := startNATsSystem(t, srv.Addr().String(), withTestRoles("game-worker"), pool)
+
+	pause.For(time.Second)
+
+	actorName := "pooled-actor"
+	pid, err := gateway.SpawnOn(ctx, actorName, NewMockActor(), WithLongLived(), WithRole("game-worker"), WithDispatcher("db"))
+	require.NoError(t, err)
+	require.NotNil(t, pid)
+
+	pause.For(time.Second)
+
+	worker1Address := net.JoinHostPort(worker1.Host(), strconv.Itoa(worker1.Port()))
+	worker2Address := net.JoinHostPort(worker2.Host(), strconv.Itoa(worker2.Port()))
+
+	actorPID, err := gateway.ActorOf(ctx, actorName)
+	require.NoError(t, err)
+	ownerAddress := actorPID.Path().HostPort()
+	require.Contains(t, []string{worker1Address, worker2Address}, ownerAddress)
+
+	departed, departedProvider := worker1, sd2
+	survivor, survivorProvider := worker2, sd3
+	survivorAddress := worker2Address
+	if ownerAddress == worker2Address {
+		departed, departedProvider = worker2, sd3
+		survivor, survivorProvider = worker1, sd2
+		survivorAddress = worker1Address
+	}
+
+	// the remotely spawned actor runs on the owner's db pool and its registry
+	// record names the pool
+	departedSystem := departed.(*actorSystem)
+	ownerNode, ok := departedSystem.actors.nodeByName(actorName)
+	require.True(t, ok)
+	require.Same(t, departedSystem.dispatchers["db"], ownerNode.value().dispatcher)
+
+	gatewaySystem := gateway.(*actorSystem)
+	record, err := gatewaySystem.getCluster().GetActor(ctx, actorName)
+	require.NoError(t, err)
+	require.Equal(t, "db", record.GetDispatcher())
+
+	require.NoError(t, departed.Stop(ctx))
+	require.NoError(t, departedProvider.Close())
+
+	require.Eventually(t, func() bool {
+		relocatedPID, err := gateway.ActorOf(ctx, actorName)
+		return err == nil && relocatedPID != nil && relocatedPID.Path().HostPort() == survivorAddress
+	}, 2*time.Minute, 500*time.Millisecond, "actor %s must be relocated to the surviving game-worker node", actorName)
+
+	// the relocated incarnation runs on the survivor's db pool and its new
+	// record still names it
+	survivorSystem := survivor.(*actorSystem)
+	relocated := awaitLocalEndpoint(t, []*actorSystem{survivorSystem}, actorName)
+	require.Same(t, survivorSystem.dispatchers["db"], relocated.dispatcher)
+
+	record, err = gatewaySystem.getCluster().GetActor(ctx, actorName)
+	require.NoError(t, err)
+	require.Equal(t, "db", record.GetDispatcher())
+
+	assert.NoError(t, gateway.Stop(ctx))
+	assert.NoError(t, survivor.Stop(ctx))
+	assert.NoError(t, sd1.Close())
+	assert.NoError(t, survivorProvider.Close())
+	srv.Shutdown()
+}
+
 // TestRelocationWithActorRole is the actor counterpart of
 // TestGrainsRelocationWithActivationRole on a real three-node NATS cluster: an
 // actor spawned with WithRole("game-worker") lands on a worker node, and when

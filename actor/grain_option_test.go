@@ -56,6 +56,36 @@ func TestGrainOptions(t *testing.T) {
 		require.Equal(t, 15*time.Minute, config.deactivateAfter)
 	})
 
+	t.Run("WithGrainDispatcher", func(t *testing.T) {
+		config := &grainConfig{}
+		require.Empty(t, config.dispatcherName())
+		require.Nil(t, config.role())
+
+		WithGrainDispatcher("  ")(config)
+		require.Nil(t, config.hosting, "a blank name must not allocate the hosting record")
+
+		WithGrainDispatcher(" blocking ")(config)
+		require.Equal(t, "blocking", config.dispatcherName())
+		require.Nil(t, config.role())
+
+		// an empty name after a kind default puts the grain back on the
+		// default dispatcher, as WithDispatcher does for an actor
+		WithGrainDispatcher("")(config)
+		require.Empty(t, config.dispatcherName())
+	})
+
+	t.Run("WithActivationRole", func(t *testing.T) {
+		config := &grainConfig{}
+		WithActivationRole("billing")(config)
+		require.NotNil(t, config.role())
+		require.Equal(t, "billing", *config.role())
+		require.Empty(t, config.dispatcherName())
+
+		WithGrainDispatcher("db")(config)
+		require.Equal(t, "billing", *config.role(), "the dispatcher joins the record the role lives in")
+		require.Equal(t, "db", config.dispatcherName())
+	})
+
 	t.Run("WithLongLivedGrain", func(t *testing.T) {
 		config := &grainConfig{}
 		option := WithLongLivedGrain()
@@ -201,7 +231,8 @@ func TestGrainConfigDependenciesOnDemand(t *testing.T) {
 }
 
 // TestGrainConfigStaysInItsSizeClass pins the grain configuration at 64 bytes,
-// the size class every idle grain pays for.
+// the size class every idle grain pays for. The role and the dispatcher name
+// sit behind one pointer so that a grain with neither pays for neither.
 func TestGrainConfigStaysInItsSizeClass(t *testing.T) {
 	require.EqualValues(t, 64, unsafe.Sizeof(grainConfig{}), "grainConfig grew past its size class")
 }

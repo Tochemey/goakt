@@ -24,6 +24,7 @@ package actor
 
 import (
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/tochemey/goakt/v4/extension"
@@ -564,6 +565,67 @@ func WithDispatcherPoolSize(n int) Option {
 		if n > 0 {
 			system.dispatcherWorkers = n
 		}
+	})
+}
+
+// WithDispatcherPool declares a dispatcher: a named pool of workers, next to
+// the default one, that runs the turns of the actors and grains assigned to
+// it. An actor is assigned with the spawn option WithDispatcher(name), a grain
+// with the grain option WithGrainDispatcher(name); everything else runs on
+// the default dispatcher. The group a dispatcher serves is exactly the set of
+// actors and grains spawned with its name, as in Akka, where dispatchers are
+// configured by name and each actor's Props names the one it runs on.
+//
+// The usual reason for a dedicated dispatcher is work that blocks. A handler
+// that waits in its turn, on a database call or a synchronous request, holds
+// its worker for the whole wait. On the default dispatcher, GOMAXPROCS such
+// handlers stall every actor and grain of the system. On a dispatcher of their
+// own they hold only its workers, and the default one keeps answering. This is
+// Akka's guidance for blocking actors and what Erlang's dirty schedulers do
+// for long-running native calls. A dedicated dispatcher also isolates a group
+// that must not be starved by, or must not starve, the rest of the system.
+//
+// Size a dispatcher for blocking work like a connection pool, from the number
+// of waits it should sustain at once: workers is about the throughput wanted
+// times the latency of the blocking call. The workers are a fixed set of
+// goroutines, parked when idle, which is cheap in memory. Several dispatchers
+// may be declared, each under its own name; declaring a name twice keeps the
+// last size.
+//
+// Validation:
+//
+// A blank name or a size less than or equal to zero is ignored. A size of one
+// is raised to two, the floor of the default dispatcher: with a single worker,
+// a handler that waits on another actor of the same dispatcher inside its turn
+// would hold the only worker able to answer it.
+//
+// The name of an actor's or grain's dispatcher travels with its wire record,
+// so an actor relocated or spawned on another node of the cluster is
+// assigned to the dispatcher of that name there, and fails with
+// ErrDispatcherNotFound when that node did not declare it. Declare the same
+// dispatchers on every node.
+//
+// Example:
+//
+//	system, err := NewActorSystem("orders",
+//	    WithLogger(logger),
+//	    WithDispatcherPool("db", 64), // the actors and grains that wait on the database in their turn
+//	    WithGrainDefaultOptions(&Account{}, WithGrainDispatcher("db")),
+//	)
+//
+//	pid, err := system.Spawn(ctx, "ledger", &ledger{}, WithDispatcher("db"))
+func WithDispatcherPool(name string, workers int) Option {
+	return OptionFunc(func(system *actorSystem) {
+		name = strings.TrimSpace(name)
+		if name == "" || workers <= 0 {
+			return
+		}
+
+		if system.dispatcherPools == nil {
+			system.dispatcherPools = make(map[string]int)
+		}
+
+		system.dispatcherPools[name] = workers
 	})
 }
 

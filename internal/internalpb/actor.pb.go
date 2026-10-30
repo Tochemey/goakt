@@ -487,6 +487,7 @@ type Actor struct {
 	xxx_hidden_IncarnationId       string                  `protobuf:"bytes,12,opt,name=incarnation_id,json=incarnationId,proto3"`
 	xxx_hidden_ReliableDelivery    *ReliableDeliveryConfig `protobuf:"bytes,13,opt,name=reliable_delivery,json=reliableDelivery,proto3"`
 	xxx_hidden_ReliableCompanion   *ReliableCompanionSpec  `protobuf:"bytes,14,opt,name=reliable_companion,json=reliableCompanion,proto3"`
+	xxx_hidden_Dispatcher          *string                 `protobuf:"bytes,15,opt,name=dispatcher,proto3,oneof"`
 	XXX_raceDetectHookData         protoimpl.RaceDetectHookData
 	XXX_presence                   [1]uint32
 	unknownFields                  protoimpl.UnknownFields
@@ -621,6 +622,16 @@ func (x *Actor) GetReliableCompanion() *ReliableCompanionSpec {
 	return nil
 }
 
+func (x *Actor) GetDispatcher() string {
+	if x != nil {
+		if x.xxx_hidden_Dispatcher != nil {
+			return *x.xxx_hidden_Dispatcher
+		}
+		return ""
+	}
+	return ""
+}
+
 func (x *Actor) SetAddress(v string) {
 	x.xxx_hidden_Address = v
 }
@@ -651,7 +662,7 @@ func (x *Actor) SetEnableStash(v bool) {
 
 func (x *Actor) SetRole(v string) {
 	x.xxx_hidden_Role = &v
-	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 14)
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 7, 15)
 }
 
 func (x *Actor) SetSupervisor(v *SupervisorSpec) {
@@ -676,6 +687,11 @@ func (x *Actor) SetReliableDelivery(v *ReliableDeliveryConfig) {
 
 func (x *Actor) SetReliableCompanion(v *ReliableCompanionSpec) {
 	x.xxx_hidden_ReliableCompanion = v
+}
+
+func (x *Actor) SetDispatcher(v string) {
+	x.xxx_hidden_Dispatcher = &v
+	protoimpl.X.SetPresent(&(x.XXX_presence[0]), 14, 15)
 }
 
 func (x *Actor) HasSingleton() bool {
@@ -734,6 +750,13 @@ func (x *Actor) HasReliableCompanion() bool {
 	return x.xxx_hidden_ReliableCompanion != nil
 }
 
+func (x *Actor) HasDispatcher() bool {
+	if x == nil {
+		return false
+	}
+	return protoimpl.X.Present(&(x.XXX_presence[0]), 14)
+}
+
 func (x *Actor) ClearSingleton() {
 	x.xxx_hidden_Singleton = nil
 }
@@ -765,6 +788,11 @@ func (x *Actor) ClearReliableDelivery() {
 
 func (x *Actor) ClearReliableCompanion() {
 	x.xxx_hidden_ReliableCompanion = nil
+}
+
+func (x *Actor) ClearDispatcher() {
+	protoimpl.X.ClearPresent(&(x.XXX_presence[0]), 14)
+	x.xxx_hidden_Dispatcher = nil
 }
 
 type Actor_builder struct {
@@ -799,6 +827,10 @@ type Actor_builder struct {
 	ReliableDelivery *ReliableDeliveryConfig
 	// Marks an endpoint-owned reliable-delivery controller record
 	ReliableCompanion *ReliableCompanionSpec
+	// Specifies the dispatcher the actor is assigned to (WithDispatcher), so a
+	// relocated actor spawns on the same-named dispatcher of its new node.
+	// Absent when the actor runs on the default dispatcher.
+	Dispatcher *string
 }
 
 func (b0 Actor_builder) Build() *Actor {
@@ -813,7 +845,7 @@ func (b0 Actor_builder) Build() *Actor {
 	x.xxx_hidden_Dependencies = &b.Dependencies
 	x.xxx_hidden_EnableStash = b.EnableStash
 	if b.Role != nil {
-		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 14)
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 7, 15)
 		x.xxx_hidden_Role = b.Role
 	}
 	x.xxx_hidden_Supervisor = b.Supervisor
@@ -822,6 +854,10 @@ func (b0 Actor_builder) Build() *Actor {
 	x.xxx_hidden_IncarnationId = b.IncarnationId
 	x.xxx_hidden_ReliableDelivery = b.ReliableDelivery
 	x.xxx_hidden_ReliableCompanion = b.ReliableCompanion
+	if b.Dispatcher != nil {
+		protoimpl.X.SetPresentNonAtomic(&(x.XXX_presence[0]), 14, 15)
+		x.xxx_hidden_Dispatcher = b.Dispatcher
+	}
 	return m0
 }
 
@@ -957,7 +993,7 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\rinitial_delay\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\finitialDelay\x126\n" +
 	"\tmax_delay\x18\a \x01(\v2\x19.google.protobuf.DurationR\bmaxDelay\x12I\n" +
 	"\x13backoff_reset_after\x18\b \x01(\v2\x19.google.protobuf.DurationR\x11backoffResetAfterB\x16\n" +
-	"\x14_any_error_directive\"\xe7\x05\n" +
+	"\x14_any_error_directive\"\x9b\x06\n" +
 	"\x05Actor\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x127\n" +
@@ -977,8 +1013,12 @@ const file_internal_actor_proto_rawDesc = "" +
 	"\finit_timeout\x18\v \x01(\v2\x19.google.protobuf.DurationR\vinitTimeout\x12%\n" +
 	"\x0eincarnation_id\x18\f \x01(\tR\rincarnationId\x12O\n" +
 	"\x11reliable_delivery\x18\r \x01(\v2\".internalpb.ReliableDeliveryConfigR\x10reliableDelivery\x12P\n" +
-	"\x12reliable_companion\x18\x0e \x01(\v2!.internalpb.ReliableCompanionSpecR\x11reliableCompanionB\a\n" +
-	"\x05_role\"\xb0\x01\n" +
+	"\x12reliable_companion\x18\x0e \x01(\v2!.internalpb.ReliableCompanionSpecR\x11reliableCompanion\x12#\n" +
+	"\n" +
+	"dispatcher\x18\x0f \x01(\tH\x01R\n" +
+	"dispatcher\x88\x01\x01B\a\n" +
+	"\x05_roleB\r\n" +
+	"\v_dispatcher\"\xb0\x01\n" +
 	"\rSingletonSpec\x12>\n" +
 	"\rspawn_timeout\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\fspawnTimeout\x12>\n" +
 	"\rwait_interval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\fwaitInterval\x12\x1f\n" +

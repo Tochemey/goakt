@@ -133,6 +133,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			Role:                config.role,
 			InitTimeout:         pointer.Deref(config.initTimeout, 0),
 			ReliableDelivery:    config.reliableDelivery.toRemoteSpec(),
+			Dispatcher:          config.dispatcher,
 		})
 		if err != nil {
 			return nil, err
@@ -355,6 +356,7 @@ func (x *actorSystem) SpawnOn(ctx context.Context, name string, actor Actor, opt
 		Role:                config.role,
 		InitTimeout:         pointer.Deref(config.initTimeout, 0),
 		ReliableDelivery:    config.reliableDelivery.toRemoteSpec(),
+		Dispatcher:          config.dispatcher,
 	}
 
 	addr, err := x.remoting.RemoteSpawn(ctx, peer.Host, peer.RemotingPort, request)
@@ -1005,6 +1007,7 @@ func (x *actorSystem) spawnOnDatacenter(ctx context.Context, name string, actor 
 		EnableStashing:      config.enableStash,
 		Reentrancy:          config.reentrancy,
 		InitTimeout:         pointer.Deref(config.initTimeout, 0),
+		Dispatcher:          config.dispatcher,
 	})
 
 	if err != nil {
@@ -1233,6 +1236,10 @@ func (x *actorSystem) wireSpawnOptions(props *internalpb.Actor) ([]SpawnOption, 
 
 	if props.GetRole() != "" {
 		spawnOpts = append(spawnOpts, WithRole(props.GetRole()))
+	}
+
+	if props.GetDispatcher() != "" {
+		spawnOpts = append(spawnOpts, WithDispatcher(props.GetDispatcher()))
 	}
 
 	if props.GetReentrancy() != nil {

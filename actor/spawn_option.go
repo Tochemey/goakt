@@ -25,6 +25,7 @@ package actor
 import (
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/tochemey/goakt/v4/datacenter"
@@ -145,6 +146,9 @@ type spawnConfig struct {
 	// durableWorkQueue is the work-pulling producer endpoint's durable work
 	// queue instance; it travels by reference like durableQueue.
 	durableWorkQueue DurableWorkQueue
+	// dispatcher names the worker pool, declared with WithDispatcherPool, that
+	// runs the actor's turns. Empty means the default pool.
+	dispatcher string
 }
 
 var _ validation.Validator = (*spawnConfig)(nil)
@@ -297,6 +301,7 @@ func (s *spawnConfig) appendDurableDependency(queue extension.Dependency) {
 func (s *spawnConfig) clone(opts ...SpawnOption) *spawnConfig {
 	cloned := &spawnConfig{
 		mailbox:             s.mailbox,
+		dispatcher:          s.dispatcher,
 		supervisor:          s.supervisor,
 		asSingleton:         s.asSingleton,
 		relocatable:         s.relocatable,
@@ -554,6 +559,30 @@ func WithPassivationStrategy(strategy passivation.Strategy) SpawnOption {
 func WithRole(role string) SpawnOption {
 	return spawnOption(func(config *spawnConfig) {
 		config.role = new(role)
+	})
+}
+
+// WithDispatcher assigns the actor to the named dispatcher, declared on the
+// actor system with WithDispatcherPool, instead of the default one, as Akka's
+// Props.withDispatcher does. The actors and grains assigned to a dispatcher
+// share its workers and no others, so an actor that blocks in its turn holds
+// only its dispatcher's workers while it waits, and the rest of the system
+// keeps running. The spawn fails with ErrDispatcherNotFound when no dispatcher
+// of that name was declared. An empty name keeps the default dispatcher.
+//
+// The name travels with the actor's wire record, so an actor relocated or
+// spawned on another node is assigned to the dispatcher of that name there,
+// and fails with ErrDispatcherNotFound when that node did not declare it.
+// Declare the same dispatchers on every node.
+//
+// Parameters:
+//   - name: the dispatcher, as given to WithDispatcherPool.
+//
+// Returns:
+//   - SpawnOption that sets the dispatcher in the spawn configuration.
+func WithDispatcher(name string) SpawnOption {
+	return spawnOption(func(config *spawnConfig) {
+		config.dispatcher = strings.TrimSpace(name)
 	})
 }
 

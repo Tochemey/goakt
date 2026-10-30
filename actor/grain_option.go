@@ -23,6 +23,7 @@
 package actor
 
 import (
+	"strings"
 	"time"
 
 	gerrors "github.com/tochemey/goakt/v4/errors"
@@ -73,6 +74,20 @@ const (
 )
 
 type GrainOption func(config *grainConfig)
+
+// grainHosting names where a grain runs: the node role it requires and the
+// dispatcher that runs its turns. Both are empty for most grains, so the
+// configuration keeps them behind one pointer and pays for them only when
+// one is set.
+type grainHosting struct {
+	// role is the role a node must advertise to activate the grain, nil for
+	// any node.
+	role *string
+	// dispatcher names the worker pool, declared with WithDispatcherPool,
+	// that runs the grain's turns. Empty means the default pool.
+	dispatcher string
+}
+
 type grainConfig struct {
 	// initMaxRetries is the maximum number of retries when initializing a grain.
 	// It is set at construction and never changed afterwards.
@@ -92,8 +107,9 @@ type grainConfig struct {
 	// It stays nil until the first one is registered, so a grain configured
 	// without dependencies carries no map.
 	dependencies *xsync.Map[string, extension.Dependency]
-	// role defines the role required for the node to activate the grain.
-	role *string
+	// hosting holds the node role and the dispatcher the grain requires, nil
+	// when it requires neither.
+	hosting *grainHosting
 	// placement specifies the placement strategy for activating the grain in a cluster.
 	activationStrategy ActivationStrategy
 	// capacity:
@@ -175,6 +191,35 @@ func (s *grainConfig) dependency(id string) (extension.Dependency, bool) {
 	}
 
 	return s.dependencies.Get(id)
+}
+
+// hostingRecord returns the hosting record, allocating it on first use.
+func (s *grainConfig) hostingRecord() *grainHosting {
+	if s.hosting == nil {
+		s.hosting = &grainHosting{}
+	}
+
+	return s.hosting
+}
+
+// role returns the node role the grain requires, nil when any node may
+// activate it.
+func (s *grainConfig) role() *string {
+	if s.hosting == nil {
+		return nil
+	}
+
+	return s.hosting.role
+}
+
+// dispatcherName returns the dispatcher the grain is assigned to, empty for
+// the default one.
+func (s *grainConfig) dispatcherName() string {
+	if s.hosting == nil {
+		return ""
+	}
+
+	return s.hosting.dispatcher
 }
 
 // WithGrainInitMaxRetries returns a GrainOption that sets the maximum number of retries
@@ -322,7 +367,37 @@ func WithActivationStrategy(strategy ActivationStrategy) GrainOption {
 //   - GrainOption that sets the role in the grainConfig.
 func WithActivationRole(role string) GrainOption {
 	return func(config *grainConfig) {
-		config.role = new(role)
+		config.hostingRecord().role = new(role)
+	}
+}
+
+// WithGrainDispatcher assigns the grain to the named dispatcher, declared on
+// the actor system with WithDispatcherPool, instead of the default one. The
+// actors and grains assigned to a dispatcher share its workers and no others,
+// so a grain that blocks in its turn, as one does to handle one message at a
+// time while it waits on a database, holds only its dispatcher's workers, and
+// the rest of the system keeps running. The activation fails with
+// ErrDispatcherNotFound when no dispatcher of that name was declared. An
+// empty name keeps the default dispatcher.
+//
+// The name travels with the grain's wire record, so a grain relocated or
+// activated on another node is assigned to the dispatcher of that name
+// there, and fails with ErrDispatcherNotFound when that node did not declare
+// it. Declare the same dispatchers on every node.
+//
+// Parameters:
+//   - name: the dispatcher, as given to WithDispatcherPool.
+//
+// Returns:
+//   - GrainOption that sets the dispatcher in the grainConfig.
+func WithGrainDispatcher(name string) GrainOption {
+	return func(config *grainConfig) {
+		name = strings.TrimSpace(name)
+		if name == "" && config.hosting == nil {
+			return
+		}
+
+		config.hostingRecord().dispatcher = name
 	}
 }
 

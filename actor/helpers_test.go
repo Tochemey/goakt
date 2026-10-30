@@ -448,6 +448,7 @@ type testClusterConfig struct {
 	readQuorum        uint32             // replicas that must answer a registry read
 	bootstrapTimeout  time.Duration      // window allowed for the initial partition sync
 	protocolPin       remote.ProtocolPin // remoting wire protocol every node is pinned to
+	systemOptions     []Option           // actor system options added on top of the fixture defaults
 }
 
 // testClusterOption mutates a testClusterConfig before the fixture builds a node.
@@ -459,6 +460,14 @@ func withTestTLS(serverTLS, clientTLS *cryptotls.Config) testClusterOption {
 		tc.tlsEnabled = true
 		tc.serverTLS = serverTLS
 		tc.clientTLS = clientTLS
+	}
+}
+
+// withTestSystemOptions adds actor system options to the node, for example a
+// named dispatcher pool every node must declare.
+func withTestSystemOptions(opts ...Option) testClusterOption {
+	return func(tc *testClusterConfig) {
+		tc.systemOptions = append(tc.systemOptions, opts...)
 	}
 }
 
@@ -722,6 +731,7 @@ func newClusterSystem(t *testing.T, factory providerFactory, opts ...testCluster
 		}))
 	}
 	options = append(options, WithRemote(remote.NewConfig(host, remotingPort, remoteOpts...)))
+	options = append(options, cfg.systemOptions...)
 
 	system, err := NewActorSystem(actorSystemName, options...)
 	require.NotNil(t, system)

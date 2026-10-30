@@ -85,6 +85,12 @@ type GrainRequest struct {
 	// carried so that remote activation and relocation preserve role-constrained
 	// placement. Empty when the Grain has no role constraint.
 	Role string
+
+	// Dispatcher names the dispatcher, declared on the hosting node with
+	// WithDispatcherPool, that runs the Grain's turns. Empty means the
+	// hosting node's default dispatcher; a name the hosting node did not
+	// declare fails the activation.
+	Dispatcher string
 }
 
 var _ validation.Validator = (*GrainRequest)(nil)

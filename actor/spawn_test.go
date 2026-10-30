@@ -1006,6 +1006,29 @@ func TestSpawn(t *testing.T) {
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.ErrorContains(t, err, "failed to fetch cluster nodes")
 	})
+	t.Run("SpawnOn remote carries the dispatcher", func(t *testing.T) {
+		ctx := context.TODO()
+		clusterMock := mockcluster.NewCluster(t)
+		remotingMock := mocksremote.NewClient(t)
+
+		system := newReplicationSystem(clusterMock)
+		system.remoting = remotingMock
+
+		actor := NewMockActor()
+		actorName := "actorID"
+		peer := &cluster.Peer{Host: "127.0.0.1", RemotingPort: 9000}
+
+		clusterMock.EXPECT().ActorExists(mock.Anything, actorName).Return(false, nil).Once()
+		clusterMock.EXPECT().Members(mock.Anything).Return([]*cluster.Peer{peer}, nil).Once()
+		remotingMock.EXPECT().RemoteSpawn(mock.Anything, peer.Host, peer.RemotingPort, mock.MatchedBy(func(request *remote.SpawnRequest) bool {
+			return request.Dispatcher == "db"
+		})).
+			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
+			Once()
+
+		_, err := system.SpawnOn(ctx, actorName, actor, WithPlacement(Random), WithDispatcher("db"))
+		require.NoError(t, err)
+	})
 	t.Run("SpawnOn remote includes reentrancy config", func(t *testing.T) {
 		ctx := context.TODO()
 		clusterMock := mockcluster.NewCluster(t)
@@ -1790,13 +1813,14 @@ func TestSpawn(t *testing.T) {
 				return req.Name == "actor-1" &&
 					req.Kind != "" &&
 					req.Relocatable == true &&
-					req.EnableStashing == false
+					req.EnableStashing == false &&
+					req.Dispatcher == "db"
 			})).
 			Return(new("goakt://test@127.0.0.1:9000/actor"), nil).
 			Once()
 
 		actor := NewMockActor()
-		_, err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC))
+		_, err := sys.SpawnOn(ctx, "actor-1", actor, WithDataCenter(&targetDC), WithDispatcher("db"))
 		require.NoError(t, err)
 		remotingMock.AssertExpectations(t)
 	})
@@ -1816,12 +1840,12 @@ func TestSpawn(t *testing.T) {
 
 		remotingMock.EXPECT().
 			RemoteSpawn(mock.Anything, host, port, mock.MatchedBy(func(req *remote.SpawnRequest) bool {
-				return req.Name == actorName && req.Kind != ""
+				return req.Name == actorName && req.Kind != "" && req.Dispatcher == "db"
 			})).
 			Return(nil, assert.AnError).
 			Once()
 
-		pid, err := system.Spawn(ctx, actorName, actor, WithHostAndPort(host, port))
+		pid, err := system.Spawn(ctx, actorName, actor, WithHostAndPort(host, port), WithDispatcher("db"))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, assert.AnError)
 		assert.Nil(t, pid)
@@ -2078,6 +2102,40 @@ func TestSpawnInitTimeoutOption(t *testing.T) {
 
 	t.Cleanup(func() {
 		require.NoError(t, sys.Stop(ctx))
+	})
+}
+
+func TestWireSpawnOptionsDispatcher(t *testing.T) {
+	ctx := context.TODO()
+	sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, sys.Start(ctx))
+	t.Cleanup(func() { _ = sys.Stop(ctx) })
+	x := sys.(*actorSystem)
+
+	t.Run("replays the dispatcher the record names", func(t *testing.T) {
+		props := internalpb.Actor_builder{
+			Address:     address.New("relocated", "testSys", "127.0.0.1", 0).String(),
+			Type:        types.Name(NewMockActor()),
+			Relocatable: true,
+			Dispatcher:  new("db"),
+		}.Build()
+
+		opts, err := x.wireSpawnOptions(props)
+		require.NoError(t, err)
+		require.Equal(t, "db", newSpawnConfig(opts...).dispatcher)
+	})
+
+	t.Run("leaves the default dispatcher when the record names none", func(t *testing.T) {
+		props := internalpb.Actor_builder{
+			Address:     address.New("relocated-default", "testSys", "127.0.0.1", 0).String(),
+			Type:        types.Name(NewMockActor()),
+			Relocatable: true,
+		}.Build()
+
+		opts, err := x.wireSpawnOptions(props)
+		require.NoError(t, err)
+		require.Empty(t, newSpawnConfig(opts...).dispatcher)
 	})
 }
 

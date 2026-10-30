@@ -453,9 +453,19 @@ func (x *actorSystem) validateGrainActivation(identity *GrainIdentity, opts ...G
 		return nil, gerrors.NewErrReservedName(identity.String())
 	}
 
-	config := newGrainConfig(x.grainKindOptions(identity.Kind(), opts...)...)
+	return x.grainConfigFor(identity.Kind(), opts...)
+}
+
+// grainConfigFor builds the configuration of a grain of kind from the kind's
+// defaults and opts, and checks it, the worker pool it names included.
+func (x *actorSystem) grainConfigFor(kind string, opts ...GrainOption) (*grainConfig, error) {
+	config := newGrainConfig(x.grainKindOptions(kind, opts...)...)
 	if err := config.Validate(); err != nil {
 		return nil, err
+	}
+
+	if name := config.dispatcherName(); name != "" && x.dispatcherNamed(name) == nil {
+		return nil, gerrors.NewErrDispatcherNotFound(name)
 	}
 
 	return config, nil
@@ -813,6 +823,7 @@ func (x *actorSystem) sendRemoteActivateGrain(ctx context.Context, grain *intern
 		EagerRelocation:   grain.GetEagerRelocation(),
 		Reentrancy:        codec.DecodeReentrancy(grain.GetReentrancy()),
 		Role:              grain.GetRole(),
+		Dispatcher:        grain.GetDispatcher(),
 	}
 
 	// Call the high-level RemoteActivateGrain method
@@ -1539,8 +1550,8 @@ func (x *actorSystem) ensureNewGrainProcess(ctx context.Context, id *GrainIdenti
 		}
 	}
 
-	config := newGrainConfig(x.grainKindOptions(id.Kind(), options...)...)
-	if err := config.Validate(); err != nil {
+	config, err := x.grainConfigFor(id.Kind(), options...)
+	if err != nil {
 		return nil, err
 	}
 
@@ -2070,6 +2081,13 @@ func (x *actorSystem) grainOptionsFromWire(serializedGrain *internalpb.Grain) ([
 		options = append(options, WithActivationRole(serializedGrain.GetRole()))
 	}
 
+	// the dispatcher is restored for the same reason: the grain must run on
+	// the same-named dispatcher of this node and advertise it on the next
+	// departure
+	if serializedGrain.HasDispatcher() {
+		options = append(options, WithGrainDispatcher(serializedGrain.GetDispatcher()))
+	}
+
 	return options, nil
 }
 
@@ -2121,8 +2139,8 @@ func (x *actorSystem) recreateGrainOnce(ctx context.Context, serializedGrain *in
 			return nil, err
 		}
 
-		config := newGrainConfig(x.grainKindOptions(identity.Kind(), options...)...)
-		if err := config.Validate(); err != nil {
+		config, err := x.grainConfigFor(identity.Kind(), options...)
+		if err != nil {
 			return nil, err
 		}
 
@@ -2168,7 +2186,7 @@ func (x *actorSystem) findActivationPeer(ctx context.Context, config *grainConfi
 		return nil, fmt.Errorf("failed to fetch cluster nodes: %w", err)
 	}
 
-	peers, err = x.filterPeersByRole(peers, config.role)
+	peers, err = x.filterPeersByRole(peers, config.role())
 	if err != nil {
 		return nil, err
 	}

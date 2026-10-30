@@ -1005,6 +1005,20 @@ func TestGetGrainFromRequest_Role(t *testing.T) {
 	assert.Equal(t, "game-worker", grain.GetRole())
 }
 
+// TestGetGrainFromRequest_Dispatcher verifies the dispatcher name travels from
+// the public GrainRequest into the wire record (and stays absent when unset),
+// so remote activation assigns the grain to the same-named dispatcher.
+func TestGetGrainFromRequest_Dispatcher(t *testing.T) {
+	grain, err := getGrainFromRequest("host", 1000, &remote.GrainRequest{Kind: "kind", Name: "name"})
+	require.NoError(t, err)
+	assert.False(t, grain.HasDispatcher())
+
+	grain, err = getGrainFromRequest("host", 1000, &remote.GrainRequest{Kind: "kind", Name: "name", Dispatcher: "db"})
+	require.NoError(t, err)
+	assert.True(t, grain.HasDispatcher())
+	assert.Equal(t, "db", grain.GetDispatcher())
+}
+
 func TestRemoteTellGrain_InvalidMessage(t *testing.T) {
 	r := NewClient()
 	grainReq := &remote.GrainRequest{
@@ -1579,6 +1593,44 @@ func TestRemoteSpawn_Success(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, addr)
 	assert.Equal(t, childAddr, *addr)
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
+}
+
+// TestRemoteSpawn_CarriesDispatcher verifies the dispatcher name is written to
+// the wire request only when the spawn request names one.
+func TestRemoteSpawn_CarriesDispatcher(t *testing.T) {
+	requests := make(chan *internalpb.RemoteSpawnRequest, 2)
+	handler := func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
+		requests <- msg.(*internalpb.RemoteSpawnRequest)
+		return internalpb.RemoteSpawnResponse_builder{Address: "goakt://sys@127.0.0.1:9000/actor"}.Build(), nil
+	}
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteSpawn(context.Background(), host, port, &remote.SpawnRequest{Name: "actor", Kind: "kind", Dispatcher: "db"})
+	require.NoError(t, err)
+	sent := <-requests
+	require.True(t, sent.HasDispatcher())
+	assert.Equal(t, "db", sent.GetDispatcher())
+
+	_, err = r.RemoteSpawn(context.Background(), host, port, &remote.SpawnRequest{Name: "actor", Kind: "kind"})
+	require.NoError(t, err)
+	sent = <-requests
+	assert.False(t, sent.HasDispatcher())
 
 	require.NoError(t, ps.Shutdown(time.Second))
 	<-done
@@ -2567,6 +2619,43 @@ func TestRemoteSpawnChild_InvalidPort(t *testing.T) {
 	_, err := r.RemoteSpawnChild(context.Background(), "host", port, req)
 	assert.Error(t, err)
 	assert.ErrorContains(t, err, "out of range")
+}
+
+// TestRemoteSpawnChild_CarriesDispatcher verifies the dispatcher name is
+// written to the wire request only when the child request names one.
+func TestRemoteSpawnChild_CarriesDispatcher(t *testing.T) {
+	requests := make(chan *internalpb.RemoteSpawnChildRequest, 2)
+	handler := func(_ context.Context, _ inet.Connection, msg proto.Message) (proto.Message, error) {
+		requests <- msg.(*internalpb.RemoteSpawnChildRequest)
+		return internalpb.RemoteSpawnChildResponse_builder{Address: "goakt://sys@127.0.0.1:9000/child"}.Build(), nil
+	}
+	ps, err := inet.NewRemotingServer("127.0.0.1:0", inet.WithProtoHandler("internalpb.RemoteSpawnChildRequest", handler))
+	require.NoError(t, err)
+	require.NoError(t, ps.Listen())
+	done := make(chan error, 1)
+	go func() { done <- ps.Serve() }()
+	pause.For(100 * time.Millisecond)
+	host, portStr, err := net.SplitHostPort(ps.ListenAddr().String())
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	r := NewClient(WithClientCompression(remote.NoCompression))
+	defer r.Close()
+
+	_, err = r.RemoteSpawnChild(context.Background(), host, port, &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent", Dispatcher: "db"})
+	require.NoError(t, err)
+	sent := <-requests
+	require.True(t, sent.HasDispatcher())
+	assert.Equal(t, "db", sent.GetDispatcher())
+
+	_, err = r.RemoteSpawnChild(context.Background(), host, port, &remote.SpawnChildRequest{Name: "child", Kind: "kind", Parent: "parent"})
+	require.NoError(t, err)
+	sent = <-requests
+	assert.False(t, sent.HasDispatcher())
+
+	require.NoError(t, ps.Shutdown(time.Second))
+	<-done
 }
 
 func TestRemoteSpawnChild_ProtoError(t *testing.T) {

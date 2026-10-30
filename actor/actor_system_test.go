@@ -72,6 +72,7 @@ import (
 	mocksremote "github.com/tochemey/goakt/v4/mocks/remoteclient"
 	"github.com/tochemey/goakt/v4/passivation"
 	"github.com/tochemey/goakt/v4/remote"
+	"github.com/tochemey/goakt/v4/supervisor"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 	gtls "github.com/tochemey/goakt/v4/tls"
 )
@@ -10474,4 +10475,192 @@ func TestHandleRemoteAskRefusesOverflowOnBoundedMailbox(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "expected 2 dead letters, got %d", deadletters)
 
 	close(blocking.release)
+}
+
+func TestDispatcherPools(t *testing.T) {
+	ctx := context.TODO()
+
+	t.Run("an actor spawned with WithDispatcher runs on the named pool", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		blocking := sys.(*actorSystem).dispatchers["blocking"]
+		pid, err := sys.Spawn(ctx, "ledger", NewMockPingActor(), WithDispatcher("blocking"))
+		require.NoError(t, err)
+		require.Same(t, blocking, pid.dispatcher)
+
+		reply, err := Ask(ctx, pid, new(testpb.TestPing), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.TestPong), reply)
+
+		child, err := pid.SpawnChild(ctx, "onPool", NewMockPingActor(), WithDispatcher("blocking"))
+		require.NoError(t, err)
+		require.Same(t, blocking, child.dispatcher)
+
+		sibling, err := pid.SpawnChild(ctx, "onDefault", NewMockPingActor())
+		require.NoError(t, err)
+		require.Same(t, sys.(*actorSystem).dispatcher, sibling.dispatcher, "a child does not inherit its parent's pool")
+
+		plain, err := sys.Spawn(ctx, "plain", NewMockPingActor())
+		require.NoError(t, err)
+		require.Same(t, sys.(*actorSystem).dispatcher, plain.dispatcher)
+	})
+
+	t.Run("a spawn that names a pool the system did not declare fails", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		pid, err := sys.Spawn(ctx, "ledger", NewMockPingActor(), WithDispatcher("io"))
+		require.ErrorIs(t, err, gerrors.ErrDispatcherNotFound)
+		require.Nil(t, pid)
+
+		parent, err := sys.Spawn(ctx, "parent", NewMockPingActor())
+		require.NoError(t, err)
+
+		child, err := parent.SpawnChild(ctx, "child", NewMockPingActor(), WithDispatcher("io"))
+		require.ErrorIs(t, err, gerrors.ErrDispatcherNotFound)
+		require.Nil(t, child)
+	})
+
+	t.Run("a grain activated with WithGrainDispatcher runs on the named pool", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		identity, err := sys.GrainIdentity(ctx, "ledger", func(context.Context) (Grain, error) { return NewMockGrain(), nil }, WithGrainDispatcher("blocking"))
+		require.NoError(t, err)
+
+		reply, err := sys.AskGrain(ctx, identity, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.Reply), reply)
+
+		process, ok := sys.(*actorSystem).grains.Get(identity.String())
+		require.True(t, ok)
+		require.Same(t, sys.(*actorSystem).dispatchers["blocking"], process.dispatcher)
+
+		plain, err := sys.GrainIdentity(ctx, "plain", func(context.Context) (Grain, error) { return NewMockGrain(), nil })
+		require.NoError(t, err)
+
+		process, ok = sys.(*actorSystem).grains.Get(plain.String())
+		require.True(t, ok)
+		require.Same(t, sys.(*actorSystem).dispatcher, process.dispatcher)
+	})
+
+	t.Run("a grain that names a pool the system did not declare fails to activate", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		identity, err := sys.GrainIdentity(ctx, "ledger", func(context.Context) (Grain, error) { return NewMockGrain(), nil }, WithGrainDispatcher("blocking"))
+		require.ErrorIs(t, err, gerrors.ErrDispatcherNotFound)
+		require.Nil(t, identity)
+	})
+
+	t.Run("handlers that block on the named pool leave the default pool running", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPoolSize(2), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		bystander, err := sys.Spawn(ctx, "bystander", NewMockPingActor())
+		require.NoError(t, err)
+
+		blockers := []*MockMailboxBlockingActor{NewMockMailboxBlockingActor(), NewMockMailboxBlockingActor()}
+		for i, blocker := range blockers {
+			pid, err := sys.Spawn(ctx, fmt.Sprintf("blocker-%d", i), blocker, WithDispatcher("blocking"))
+			require.NoError(t, err)
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+			<-blocker.entered
+		}
+
+		t.Cleanup(func() {
+			for _, blocker := range blockers {
+				close(blocker.release)
+			}
+		})
+
+		reply, err := Ask(ctx, bystander, new(testpb.TestPing), 2*time.Second)
+		require.NoError(t, err, "the default pool must keep answering while every worker of the named pool is held")
+		require.IsType(t, new(testpb.TestPong), reply)
+	})
+
+	t.Run("handlers that block on the default pool leave the named pool running", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPoolSize(2), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		bystander, err := sys.Spawn(ctx, "bystander", NewMockPingActor(), WithDispatcher("blocking"))
+		require.NoError(t, err)
+
+		blockers := []*MockMailboxBlockingActor{NewMockMailboxBlockingActor(), NewMockMailboxBlockingActor()}
+		for i, blocker := range blockers {
+			pid, err := sys.Spawn(ctx, fmt.Sprintf("blocker-%d", i), blocker)
+			require.NoError(t, err)
+			require.NoError(t, Tell(ctx, pid, new(testpb.TestSend)))
+			<-blocker.entered
+		}
+
+		reply, err := Ask(ctx, bystander, new(testpb.TestPing), 2*time.Second)
+		require.NoError(t, err, "the named pool must keep answering while every worker of the default pool is held")
+		require.IsType(t, new(testpb.TestPong), reply)
+
+		// the system actors run on the default pool, so release it before stopping
+		for _, blocker := range blockers {
+			close(blocker.release)
+		}
+
+		require.NoError(t, sys.Stop(ctx))
+	})
+
+	t.Run("an actor on a named pool is supervised by that pool", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		restart := supervisor.NewSupervisor(supervisor.WithAnyErrorDirective(supervisor.RestartDirective))
+		pid, err := sys.Spawn(ctx, "fragile", NewMockActor(), WithDispatcher("blocking"), WithSupervisor(restart))
+		require.NoError(t, err)
+		require.Same(t, sys.(*actorSystem).dispatchers["blocking"], pid.dispatcher)
+
+		require.NoError(t, Tell(ctx, pid, new(testpb.TestPanic)))
+		require.Eventually(t, func() bool {
+			return pid.RestartCount() == 1 && pid.IsRunning()
+		}, 2*time.Second, 10*time.Millisecond, "the named pool's supervision consumer must restart the actor")
+
+		reply, err := Ask(ctx, pid, new(testpb.TestReply), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.Reply), reply)
+	})
+
+	t.Run("a system started again after a stop gets fresh named pools", func(t *testing.T) {
+		sys, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger), WithDispatcherPool("blocking", 2))
+		require.NoError(t, err)
+		require.NoError(t, sys.Start(ctx))
+
+		first := sys.(*actorSystem).dispatchers["blocking"]
+		require.NoError(t, sys.Stop(ctx))
+		require.True(t, first.stopping.Load())
+
+		require.NoError(t, sys.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, sys.Stop(ctx)) })
+
+		second := sys.(*actorSystem).dispatchers["blocking"]
+		require.NotSame(t, first, second)
+		require.Len(t, second.workers, 2)
+
+		pid, err := sys.Spawn(ctx, "ledger", NewMockPingActor(), WithDispatcher("blocking"))
+		require.NoError(t, err)
+		require.Same(t, second, pid.dispatcher)
+
+		reply, err := Ask(ctx, pid, new(testpb.TestPing), time.Second)
+		require.NoError(t, err)
+		require.IsType(t, new(testpb.TestPong), reply)
+	})
 }
