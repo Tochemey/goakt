@@ -1099,11 +1099,18 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 		return nil, err
 	}
 
-	timer := timers.Get(timeout)
+	// The timeout is delivered into the slot (see envelopeTimer), so the
+	// caller parks on the slot and its context only.
+	timeoutTimer := startEnvelopeTimer(slot, timeout)
 
 	select {
 	case response := <-slot:
-		timers.Put(timer)
+		timeoutTimer.stop()
+		if response == envelopeTimedOut {
+			x.pendingAsks.Abandon(correlationID)
+			return nil, gerrors.ErrRequestTimeout
+		}
+
 		// Decode exactly like the on-turn response handler does: an empty
 		// response is a successful reply without a payload (NoErr).
 		if response.Error != "" {
@@ -1118,13 +1125,9 @@ func (x *actorSystem) envelopeAsk(ctx context.Context, pid *grainPID, message an
 
 		return response.Message, nil
 	case <-ctx.Done():
-		timers.Put(timer)
+		timeoutTimer.stop()
 		x.pendingAsks.Abandon(correlationID)
 		return nil, errors.Join(ctx.Err(), gerrors.ErrRequestTimeout)
-	case <-timer.C:
-		timers.Put(timer)
-		x.pendingAsks.Abandon(correlationID)
-		return nil, gerrors.ErrRequestTimeout
 	}
 }
 

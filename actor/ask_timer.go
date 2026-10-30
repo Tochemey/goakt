@@ -27,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/tochemey/goakt/v4/internal/commands"
 )
 
 // askTimedOut is the value an askTimer delivers into an Ask's reply channel
@@ -39,6 +41,12 @@ type askTimedOut struct{}
 // handler can fail with it, and a Tell that receives it knows its timeout
 // fired before any acknowledgment; the caller is given ErrRequestTimeout.
 var errAckTimedOut = errors.New("acknowledgment timed out")
+
+// envelopeTimedOut is the response an envelopeTimer delivers into the slot of
+// an ask against a reentrant grain when the ask times out. The slot is read
+// by the asker only, which compares the pointer, so no real response can be
+// mistaken for it.
+var envelopeTimedOut = new(commands.AsyncResponse)
 
 // replyTimer times out one request by delivering a timed-out value into the
 // request's own reply channel, so the caller waits on that channel and its
@@ -74,11 +82,19 @@ type askTimer = replyTimer[any]
 // ackTimer times out a grain Tell with errAckTimedOut.
 type ackTimer = replyTimer[error]
 
+// envelopeTimer times out an ask against a reentrant grain with
+// envelopeTimedOut.
+type envelopeTimer = replyTimer[*commands.AsyncResponse]
+
 // askTimers recycles askTimers whose timer was stopped before it fired.
 var askTimers sync.Pool
 
 // ackTimers recycles ackTimers whose timer was stopped before it fired.
 var ackTimers sync.Pool
+
+// envelopeTimers recycles envelopeTimers whose timer was stopped before it
+// fired.
+var envelopeTimers sync.Pool
 
 // startAskTimer arms a timeout of d for the Ask whose reply channel is reply.
 // The caller must stop it once the Ask is answered or abandoned.
@@ -91,6 +107,13 @@ func startAskTimer(reply chan any, d time.Duration) *askTimer {
 // abandoned.
 func startAckTimer(ack chan error, d time.Duration) *ackTimer {
 	return startReplyTimer(&ackTimers, ack, errAckTimedOut, d)
+}
+
+// startEnvelopeTimer arms a timeout of d for the ask against a reentrant
+// grain whose pending-asks slot is slot. The caller must stop it once the ask
+// is answered or abandoned.
+func startEnvelopeTimer(slot chan *commands.AsyncResponse, d time.Duration) *envelopeTimer {
+	return startReplyTimer(&envelopeTimers, slot, envelopeTimedOut, d)
 }
 
 // startReplyTimer takes a timer from pool, or creates one, and arms it to

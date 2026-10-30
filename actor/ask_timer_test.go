@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tochemey/goakt/v4/internal/commands"
 	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
@@ -128,5 +129,33 @@ func TestAckTimer(t *testing.T) {
 		pause.For(20 * time.Millisecond)
 		require.NoError(t, <-ack)
 		require.False(t, timer.stop())
+	})
+}
+
+func TestEnvelopeTimer(t *testing.T) {
+	t.Run("delivers the timeout into the slot", func(t *testing.T) {
+		slot := make(chan *commands.AsyncResponse, 1)
+		timer := startEnvelopeTimer(slot, time.Millisecond)
+
+		select {
+		case response := <-slot:
+			require.Same(t, envelopeTimedOut, response)
+		case <-time.After(time.Second):
+			t.Fatal("the timeout was never delivered")
+		}
+
+		require.False(t, timer.stop())
+	})
+
+	t.Run("delivers nothing once stopped", func(t *testing.T) {
+		slot := make(chan *commands.AsyncResponse, 1)
+		timer := startEnvelopeTimer(slot, 20*time.Millisecond)
+		require.True(t, timer.stop())
+
+		select {
+		case response := <-slot:
+			t.Fatalf("a stopped timer delivered %v", response)
+		case <-time.After(60 * time.Millisecond):
+		}
 	})
 }
