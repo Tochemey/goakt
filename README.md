@@ -16,7 +16,7 @@
   <a href="https://join.slack.com/t/oss-r2l2029/shared_invite/zt-42zcqua8y-unSUH0tFlOQzwT_smzYfOQ"><img src="https://img.shields.io/badge/Slack-Join%20our%20community-4A154B?logo=slack&logoColor=white" alt="Join our Slack" /></a>
 </p>
 
-GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Erlang and Akka. In development since 2022 and used [in production](#in-production), it lets you build responsive, resilient, and elastic systems with typed actor messages, running as a single process or a cluster of nodes behind the same API.
+GoAkt is a distributed actor framework for [Go](https://go.dev/), inspired by Erlang and Akka. In development since 2022 and used [in production](#production), it lets you build responsive, resilient, and elastic systems with typed actor messages, running as a single process or a cluster of nodes behind the same API.
 
 - **Simpler concurrency.** Actors process one message at a time; you write plain Go with no locks, channel plumbing, or shared-state bugs.
 - **Location transparency.** Send a message to a local, remote, or clustered actor with the same API; the framework handles the wire.
@@ -41,7 +41,11 @@ go get github.com/tochemey/goakt/v4
 
 See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
 
-## In Production
+## Benchmarks
+
+The [comparison benchmarks](https://github.com/Tochemey/goakt-examples/tree/main/goakt-benchmarks) measure GoAkt against [Ergo](https://github.com/ergo-services/ergo), [Proto.Actor](https://github.com/asynkron/protoactor-go) and [Hollywood](https://github.com/anthdm/hollywood). Every framework runs the same thirteen scenarios under the same names: tell and ask, sequential and parallel; actor-to-actor ping-pong, from a single pair to pipelined pairs on every core; spawn and stop; the Savina ThreadRing, Fork Join and Big benchmarks; Skynet; and the live heap of an idle actor. The results are published with the hardware and versions they ran on, and a single `make bench` reproduces them on your machine.
+
+## Production
 
 These systems run GoAkt in production:
 
