@@ -54,6 +54,14 @@ One token passed around a ring of 100 actors, one hop per message, until it has 
 go test -run=^$ -bench=^BenchmarkThreadRing$ -count=10 -benchmem ./benchmark/
 ```
 
+### ForkJoin — one sender spreading messages over 60 actors
+
+One goroutine outside the system tells 60 actors round-robin, timed until every actor has handled its share, as in the Savina fork-join throughput benchmark. Each message readies an idle actor, so the number is the cost of waking a worker for an actor with one message, many times over, with the sender never yielding.
+
+```
+go test -run=^$ -bench=^BenchmarkForkJoin$ -count=10 -benchmem ./benchmark/
+```
+
 ### TellPayload — async send swept by payload size (0 B … 64 KiB)
 
 ```

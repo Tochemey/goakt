@@ -185,6 +185,14 @@ type idleFootprint struct {
 	goroutines int
 }
 
+// forkJoinWorker counts the messages it receives and closes done once it has
+// received its share, for BenchmarkForkJoin.
+type forkJoinWorker struct {
+	target int
+	count  int
+	done   chan struct{}
+}
+
 // ringToken is the one message BenchmarkThreadRing passes around the ring.
 // Only one actor holds it at a time, so its hop count is decremented in place.
 type ringToken struct {
@@ -397,6 +405,24 @@ func (x *noopActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (x *noopActor) PostStop(*actor.Context) error { return nil }
+
+// PreStart does nothing.
+func (x *forkJoinWorker) PreStart(*actor.Context) error { return nil }
+
+// Receive counts the message and closes done on the last one of its share.
+func (x *forkJoinWorker) Receive(ctx *actor.ReceiveContext) {
+	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
+		return
+	}
+
+	x.count++
+	if x.count == x.target {
+		close(x.done)
+	}
+}
+
+// PostStop does nothing.
+func (x *forkJoinWorker) PostStop(*actor.Context) error { return nil }
 
 // PreStart does nothing.
 func (x *ringActor) PreStart(*actor.Context) error { return nil }
