@@ -51,13 +51,13 @@ With `WithHostAndPort`, `Spawn` does not create anything locally. It sends a `Re
 sequenceDiagram
     participant C as Caller
     participant S as actorSystem
-    participant F as singleflight
+    participant F as spawnActivationGroup
     participant P as newPID and init
     participant T as actor tree
     participant R as cluster registry
     C->>S: Spawn(ctx, name, actor, opts)
     S->>S: system running, spawn options valid
-    S->>F: DoChan, keyed by the name's address
+    S->>F: run, keyed by the name's address
     opt cluster mode
         F->>R: is the name taken?
         R-->>C: ErrActorAlreadyExists, when it is
@@ -79,7 +79,7 @@ The function body is short (`actorSystem.Spawn` in `actor/spawn.go`), and each l
 
 **Step 1. Preconditions.** The system must be running (`ErrActorSystemNotStarted`), and the spawn options must validate (`actorSystem.Spawn` in `actor/spawn.go`). Options are defined in `newSpawnConfig`; relocatable is the only one on by default (`actor/spawn_option.go`).
 
-**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `singleflight.Group`: concurrent spawns of the same name join one execution and share its result. The key is the string of the address `Spawn` mints for the actor (`actorAddress` in `actor/actor_system.go`); the string carries no incarnation ID, so it is the same for every caller, and the call that spawns hands that same address to `configPIDAt` instead of minting a second one.
+**Step 2. Serialise on the name.** Everything after this runs inside `runSpawnActivation`, keyed by the actor's address string (`actorSystem.Spawn` in `actor/spawn.go`). It is a `spawnActivationGroup` (`actor/spawn_activation.go`), the part of singleflight the spawn needs and nothing more: the first caller for a key runs the spawn on its own goroutine, and concurrent spawns of the same name join that execution and share its result. The key is the string of the address `Spawn` mints for the actor (`actorAddress` in `actor/actor_system.go`); the string carries no incarnation ID, so it is the same for every caller, and the call that spawns hands that same address to `configPIDAt` instead of minting a second one.
 
 The function's comment (`actorSystem.runSpawnActivation` in `actor/spawn.go`) spells out three subtleties:
 
@@ -87,7 +87,7 @@ The function's comment (`actorSystem.runSpawnActivation` in `actor/spawn.go`) sp
 - The shared execution runs under the **first** caller's context. If it fails because that context was cancelled while the waiter's context is still live, the waiter retries once rather than inheriting a cancellation that was never its own (`actorSystem.runSpawnActivation` in `actor/spawn.go`).
 - Spawning the same name again from inside the actor's own `PreStart` joins its own in-flight execution and blocks until the caller's context expires.
 
-One cost is not in the comment. `DoChan` runs the function on a new goroutine and re-raises a panic there, so a panic anywhere in the spawn path cannot be recovered by the caller and terminates the process.
+Two things follow from the spawn running on the first caller's goroutine, where singleflight's `DoChan` used to start a goroutine per spawn. That caller returns when its spawn returns, even if its own context ended meanwhile: only the callers that joined leave early. And a panic in the spawn path reaches that caller, after the group has completed the call with an error for the callers that joined it, so none of them waits on a call that never finishes (`spawnActivationGroup.run` in `actor/spawn_activation.go`).
 
 **Step 3. Cluster precondition.** In cluster mode, `checkOrdinarySpawnPreconditions` asks the registry whether the name exists (`actor/actor_system.go`). A name held by a node that has left the cluster counts as free, so a crashed owner's name can be reused (`actorSystem.departedClaim` in `actor/actor_system.go`). The comment calls this "the first line of the name uniqueness rule, not the whole of it". Two spawns can both pass the read, and the registry write in step 7 decides between them (`actorSystem.checkSpawnPreconditions` in `actor/actor_system.go`).
 
@@ -225,7 +225,7 @@ if err := pid.actor.PreStart(initContext); err != nil {
 
 A `PreStart` that takes 2 s succeeds, and `Spawn` blocks for 2 s. `WithInitTimeout`'s comment says so: the timeout bounds the retries, not an attempt in progress (`actor/spawn_option.go`). If you need a bound, impose it inside `PreStart` with your own context. Passing the timeout context to `PreStart`, as grains do with `OnActivate`, would make running code fail where it succeeds today, and would cancel any work `PreStart` starts on its context as soon as the actor starts.
 
-Because `newPID` runs inside the `singleflight` execution ([§4.2](#42-the-local-spawn-path-step-by-step), step 2), a slow `PreStart` also holds every concurrent spawn of the same name for as long as it runs.
+Because `newPID` runs inside the activation group's execution ([§4.2](#42-the-local-spawn-path-step-by-step), step 2), a slow `PreStart` also holds every concurrent spawn of the same name for as long as it runs.
 
 ## 4.5 Names, addresses and identity
 
@@ -278,7 +278,7 @@ Two properties of `PID.Equals`:
 1. Requires the parent to be running (`ErrDead`) and rejects reserved names.
 2. Builds the child address under the parent (`PID.childAddress` in `actor/pid.go`).
 3. Resolves an existing child the same way `nameResolver` does.
-4. Runs the same `singleflight` serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, watched by the death watch, and in cluster mode **published to the registry under its qualified name**.
+4. Runs the same activation-group serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, watched by the death watch, and in cluster mode **published to the registry under its qualified name**.
 
 The difference is what the child inherits. `buildChildSettings` (`actor/pid.go`) passes the parent's runtime wiring as the child's `pidSettings`, then the child's spawn options:
 

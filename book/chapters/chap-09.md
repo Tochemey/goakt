@@ -171,7 +171,7 @@ The actor value is the same Go value ([Chapter 4, §4.7](chap-04.md#47-looking-u
 1. Runs, failing fast: `freeWatchees`, then `freeChildren`, then `PostStop`.
    - `freeWatchees` unwatches everything this actor watches and sends a best-effort `RemoteUnWatch` for remote watchees (`actor/pid.go`). It is skipped during a restart: a restarting actor keeps watching.
    - `freeChildren` unwatches each child before stopping it (`actor/pid.go`), so a stopping parent is not told about its children.
-2. Reads the watchers from the tree, **releases the name** (tree node and live-actor count), then runs `freeWatchers`, even if the chain failed (`actor/pid.go`):
+2. Reads the watchers from the tree, **releases the name** (tree node and live-actor count), then runs `freeWatchers`, even if one of those steps failed (`actor/pid.go`):
    - Each local watcher that is running is sent `Terminated`, with the dead actor as sender, and then unwatches. A suspended watcher is told too, through `tellSuspended`, since control messages are handled while an actor is suspended (`actor/pid.go`).
    - During a restart nobody is told and every watch is kept: a restart is not a death.
    - Each remote watcher from the registry is sent `Terminated`, and only then are this actor's registry entries cleared.

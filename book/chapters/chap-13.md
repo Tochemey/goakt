@@ -214,7 +214,7 @@ Because the ask and tell handlers call `localSendGrain`, a message that reaches 
 1. **Fast path.** A process in the map and active is returned at once. The comment explains why it skips the registry check: the check takes the registry's lock on every send, registrations are set at startup, and the slow path validates on reactivation.
 2. Otherwise `runGrainActivation` runs the slow path inside `grainActivation`, a `singleflight.Group` keyed by the identity string, so concurrent callers for one identity share one attempt and its result (`actorSystem.runGrainActivation` in `actor/grain_engine.go`).
 
-The group uses `Do`, not `DoChan`. A caller that joins an attempt in progress blocks until it ends, whatever its own context does, and the attempt runs with the **first** caller's context. `activateGrainLocally` and `recreateGrain` use the same group and key, so a `GrainOf`, a send and a remote activation request that arrive together for one identity share one attempt: a caller that joins gets the result of the attempt already running, whichever path started it.
+The group uses singleflight's `Do`. A caller that joins an attempt in progress blocks until it ends, whatever its own context does, unlike a spawn that joins `spawnActivation` ([Chapter 4, §4.2](chap-04.md#42-the-local-spawn-path-step-by-step)), and the attempt runs with the **first** caller's context. `activateGrainLocally` and `recreateGrain` use the same group and key, so a `GrainOf`, a send and a remote activation request that arrive together for one identity share one attempt: a caller that joins gets the result of the attempt already running, whichever path started it.
 
 Inside the group, the path depends on whether the map has an entry.
 

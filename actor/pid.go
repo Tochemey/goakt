@@ -937,7 +937,10 @@ func (pid *PID) Restart(ctx context.Context) error {
 		return nil
 	}
 
-	pid.getLogger().Debugf("restarting actor=%s", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("restarting actor=%s", pid.Name())
+	}
+
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
 	deathWatch := actorSystem.getDeathWatch()
@@ -1715,10 +1718,16 @@ func (pid *PID) Shutdown(ctx context.Context) error {
 // nothing for an actor that is not running or suspended.
 func (pid *PID) stop(ctx context.Context) error {
 	pid.stopLocker.Lock()
-	pid.getLogger().Debugf("shutdown started for actor=%s", pid.Name())
+
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("shutdown started for actor=%s", pid.Name())
+	}
 
 	if !pid.isStateSet(runningState) {
-		pid.getLogger().Debugf("actor=%s is offline, maybe passivated or stopped already", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("actor=%s is offline, maybe passivated or stopped already", pid.Name())
+		}
+
 		pid.stopLocker.Unlock()
 		return nil
 	}
@@ -1732,8 +1741,11 @@ func (pid *PID) stop(ctx context.Context) error {
 		return err
 	}
 
-	if pid.getEventsStream() != nil {
-		pid.getEventsStream().Publish(eventsTopic, NewActorStopped(pid.Path()))
+	// The event is built only when someone is subscribed, as the started
+	// event is in init: the stream drops a message published to a topic
+	// without subscribers.
+	if stream := pid.getEventsStream(); stream != nil && stream.SubscribersCount(eventsTopic) > 0 {
+		stream.Publish(eventsTopic, NewActorStopped(pid.Path()))
 	}
 
 	if actorSystem := pid.ActorSystem(); actorSystem != nil {
@@ -1741,7 +1753,11 @@ func (pid *PID) stop(ctx context.Context) error {
 	}
 
 	pid.stopLocker.Unlock()
-	pid.getLogger().Debugf("actor=%s successfully shutdown", pid.Name())
+
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s successfully shutdown", pid.Name())
+	}
+
 	return nil
 }
 
@@ -3090,35 +3106,49 @@ func (pid *PID) reset() {
 func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 	logger := pid.getLogger()
 	if pid.isStateSet(restartingState) {
-		logger.Debugf("actor=%s is restarting: its watchers are kept", pid.Name())
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s is restarting: its watchers are kept", pid.Name())
+		}
+
 		return
 	}
 
-	logger.Debugf("freeing all actor %s's watchers", pid.Name())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("freeing all actor %s's watchers", pid.Name())
+	}
 
+	// Terminated is immutable, so one message serves every watcher, local
+	// and remote.
+	terminated := NewTerminated(pid.Path())
 	for _, watcher := range watchers {
-		terminated := NewTerminated(pid.Path())
-
 		switch {
 		case watcher.IsRunning():
-			logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			if logger.Enabled(log.DebugLevel) {
+				logger.Debugf("watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			}
+
 			// ignore error here because the watcher is running
 			_ = pid.Tell(ctx, watcher, terminated)
 		case watcher.IsSuspended():
-			logger.Debugf("suspended watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			if logger.Enabled(log.DebugLevel) {
+				logger.Debugf("suspended watcher %s releasing watched %s", watcher.Name(), pid.Name())
+			}
+
 			pid.tellSuspended(ctx, watcher, terminated)
 		default:
 			continue
 		}
 
 		watcher.UnWatch(pid)
-		logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
+
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("watcher %s released watched %s", watcher.Name(), pid.Name())
+		}
 	}
 
 	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
 	remoteWatchers := remoteWatchRegistry.watchersFor(pid.ID())
 	if len(remoteWatchers) > 0 && pid.remoting != nil {
-		terminated := NewTerminated(pid.Path())
 		from := pid.getAddress()
 
 		for _, watcherAddr := range remoteWatchers {
@@ -3134,11 +3164,16 @@ func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 	remoteWatchRegistry.dropPID(pid.ID())
 
 	if len(watchers) == 0 && len(remoteWatchers) == 0 {
-		logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s has no watchers, maybe already freed", pid.Name())
+		}
+
 		return
 	}
 
-	logger.Debugf("all actor %s's watchers freed", pid.Name())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("all actor %s's watchers freed", pid.Name())
+	}
 }
 
 // tellSuspended delivers a control message to a suspended actor. Tell refuses a
@@ -3159,14 +3194,23 @@ func (pid *PID) tellSuspended(ctx context.Context, to *PID, message any) {
 // neither direction keeps stale entries after the actor has terminated.
 func (pid *PID) freeWatchees(ctx context.Context) error {
 	logger := pid.getLogger()
-	logger.Debugf("freeing all actor %s's watched actors", pid.Name())
+
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("freeing all actor %s's watched actors", pid.Name())
+	}
 
 	tree := pid.ActorSystem().tree()
 	watchees := tree.watchees(pid)
 	for _, watched := range watchees {
-		logger.Debugf("watcher %s unwatching actor %s", pid.Name(), watched.Name())
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("watcher %s unwatching actor %s", pid.Name(), watched.Name())
+		}
+
 		pid.UnWatch(watched)
-		logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
+
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("watcher=%s unwatch actor=%s", pid.Name(), watched.Name())
+		}
 	}
 
 	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
@@ -3190,23 +3234,35 @@ func (pid *PID) freeWatchees(ctx context.Context) error {
 	}
 
 	if len(watchees) == 0 && len(remoteWatchees) == 0 {
-		logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s has no watched actors, maybe already freed", pid.Name())
+		}
+
 		return nil
 	}
 
-	logger.Debugf("actor=%s successfully unwatch all watched actors", pid.Name())
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s successfully unwatch all watched actors", pid.Name())
+	}
+
 	return nil
 }
 
 // freeChildren releases all child actors
 func (pid *PID) freeChildren(ctx context.Context) error {
 	logger := pid.getLogger()
-	logger.Debugf("actor=%s freeing all descendant actors", pid.Name())
+
+	if logger.Enabled(log.DebugLevel) {
+		logger.Debugf("actor=%s freeing all descendant actors", pid.Name())
+	}
 
 	tree := pid.ActorSystem().tree()
 	node, ok := tree.node(pid.ID())
 	if !ok {
-		pid.getLogger().Debugf("actor=%s node not found in actors tree", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("actor=%s node not found in actors tree", pid.Name())
+		}
+
 		return nil
 	}
 
@@ -3215,7 +3271,10 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 		eg, ctx := errgroup.WithContext(ctx)
 		for _, child := range children {
 			eg.Go(func() error {
-				logger.Debugf("parent %s disowning descendant %s", pid.Name(), child.Name())
+				if logger.Enabled(log.DebugLevel) {
+					logger.Debugf("parent %s disowning descendant %s", pid.Name(), child.Name())
+				}
+
 				pid.UnWatch(child)
 				tree.removeDescendant(node.id, child.ID())
 				if child.IsSuspended() || child.IsRunning() {
@@ -3228,7 +3287,10 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 							return fmt.Errorf("Parent %s failed to disown descendant %s: %w", pid.Name(), child.Name(), err)
 						}
 					}
-					logger.Debugf("parent %s successfully disown descendant %s", pid.Name(), child.Name())
+
+					if logger.Enabled(log.DebugLevel) {
+						logger.Debugf("parent %s successfully disown descendant %s", pid.Name(), child.Name())
+					}
 				}
 				return nil
 			})
@@ -3239,10 +3301,17 @@ func (pid *PID) freeChildren(ctx context.Context) error {
 			return err
 		}
 
-		logger.Debugf("actor=%s successfully freed all descendant actors", pid.Name())
+		if logger.Enabled(log.DebugLevel) {
+			logger.Debugf("actor=%s successfully freed all descendant actors", pid.Name())
+		}
+
 		return nil
 	}
-	pid.getLogger().Debugf("actor=%s has no children, maybe already freed", pid.Name())
+
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s has no children, maybe already freed", pid.Name())
+	}
+
 	return nil
 }
 
@@ -3267,36 +3336,54 @@ func (pid *PID) tryPassivation(reason string) bool {
 	}
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.getLogger().Debugf("passivation decision skipped once for actor %s due to recent reinstate", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("passivation decision skipped once for actor %s due to recent reinstate", pid.Name())
+		}
+
 		return false
 	}
 
 	if pid.isStateSet(stoppingState) ||
 		pid.isStateSet(suspendedState) ||
 		pid.isStateSet(passivationPausedState) {
-		pid.getLogger().Debugf("no need to passivate actor=%s", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("no need to passivate actor=%s", pid.Name())
+		}
+
 		return false
 	}
 
-	pid.getLogger().Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("passivation mode triggered for actor=%s reason=%s", pid.Name(), reason)
+	}
+
 	pid.stopLocker.Lock()
 	defer pid.stopLocker.Unlock()
 
 	// a Shutdown that took the lock first has stopped the actor already
 	if !pid.isStateSet(runningState) || pid.isStateSet(stoppingState) {
-		pid.getLogger().Debugf("passivation of actor=%s abandoned: the actor is stopped or stopping", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("passivation of actor=%s abandoned: the actor is stopped or stopping", pid.Name())
+		}
+
 		return false
 	}
 
 	if pid.compareAndSwapState(passivationSkipNextState, true, false) {
-		pid.getLogger().Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("passivation decision aborted for %s due to reinstate observed during critical section", pid.Name())
+		}
+
 		return false
 	}
 
 	// Owning the dispatch state keeps every worker off the actor until the
 	// stop is over. It can only be taken from an idle actor.
 	if !pid.schedState.TakeIdleForStop() {
-		pid.getLogger().Debugf("passivation of actor=%s deferred: the actor is processing messages", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("passivation of actor=%s deferred: the actor is processing messages", pid.Name())
+		}
+
 		if pid.passivationManager != nil {
 			pid.passivationManager.Defer(pid)
 		}
@@ -3308,7 +3395,10 @@ func (pid *PID) tryPassivation(reason string) bool {
 	// sender found the actor idle and lost the race to schedule it. Hand the
 	// actor back with that work scheduled, and retry later.
 	if pid.hasRunnableWork() {
-		pid.getLogger().Debugf("passivation of actor=%s deferred: a message arrived meanwhile", pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("passivation of actor=%s deferred: a message arrived meanwhile", pid.Name())
+		}
+
 		pid.schedState.reset()
 		pid.scheduleWithheldWork()
 		if pid.passivationManager != nil {
@@ -3343,7 +3433,10 @@ func (pid *PID) tryPassivation(reason string) bool {
 		actorSystem.recordActorPassivated(pid)
 	}
 
-	pid.getLogger().Debugf("actor=%s successfully passivated", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s successfully passivated", pid.Name())
+	}
+
 	return true
 }
 
@@ -3397,23 +3490,22 @@ func (pid *PID) doStop(ctx context.Context) error {
 		pid.reset()
 	}()
 
-	err := chain.
-		New(chain.WithFailFast()).
-		AddRunner(func() error {
-			// An actor torn down by a restart is not dead: it keeps watching
-			// what it watched, as it keeps its watchers (see freeWatchers).
-			if pid.isStateSet(restartingState) {
-				return nil
-			}
+	// The steps run in order and stop at the first error. An actor torn down
+	// by a restart is not dead: it keeps watching what it watched, as it keeps
+	// its watchers (see freeWatchers).
+	var err error
+	if !pid.isStateSet(restartingState) {
+		err = pid.freeWatchees(ctx)
+	}
 
-			return pid.freeWatchees(ctx)
-		}).
-		AddRunner(func() error { return pid.freeChildren(ctx) }).
-		AddRunner(func() error {
-			stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
-			return pid.actor.PostStop(stopContext)
-		}).
-		Run()
+	if err == nil {
+		err = pid.freeChildren(ctx)
+	}
+
+	if err == nil {
+		stopContext := newContext(ctx, pid.Name(), pid.actorSystem, pid.Dependencies()...)
+		err = pid.actor.PostStop(stopContext)
+	}
 
 	// The name is released before the watchers are told, so a watcher that
 	// spawns the same name again on Terminated finds it free. Releasing the
@@ -3427,7 +3519,10 @@ func (pid *PID) doStop(ctx context.Context) error {
 		return err
 	}
 
-	pid.getLogger().Debugf("shutdown process completed for actor %s", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("shutdown process completed for actor %s", pid.Name())
+	}
+
 	return nil
 }
 
@@ -3460,12 +3555,17 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	directive, ok := pid.directiveFor(signal)
 	if !ok {
-		pid.getLogger().Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("no supervisor directive found for error: %s", errorType(signal.Err()))
+		}
+
 		pid.suspend(signal.Err().Error())
 		return
 	}
 
-	pid.getLogger().Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s supervisor directive=%s", pid.Name(), directive.String())
+	}
 
 	// create the message to send to the parent
 	msg := &commands.Panicking{
@@ -3480,11 +3580,13 @@ func (pid *PID) notifyParent(signal *supervisionSignal) {
 
 	if parent := pid.Parent(); parent != nil && !parent.Equals(pid.ActorSystem().NoSender()) {
 		pid.getLogger().Warnf("actor=%s child=%s failing: err=%s", parent.Name(), pid.Name(), msg.Err.Error())
-		pid.getLogger().Debugf("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
-			parent.Name(),
-			pid.supervisor.Strategy(),
-			directive,
-			pid.Name())
+		if pid.getLogger().Enabled(log.DebugLevel) {
+			pid.getLogger().Debugf("actor=%s activates strategy=%s directive=%s for failing child actor=%s",
+				parent.Name(),
+				pid.supervisor.Strategy(),
+				directive,
+				pid.Name())
+		}
 
 		// For ResumeDirective, avoid suspending to minimize timing windows where the child appears
 		// temporarily "not running" to observers. For other directives, keep suspension semantics.
@@ -3884,7 +3986,10 @@ func (pid *PID) childAddress(name string) *address.Address {
 
 // suspend puts the actor in a suspension mode.
 func (pid *PID) suspend(reason string) {
-	pid.getLogger().Debugf("actor=%s going into suspension mode", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s going into suspension mode", pid.Name())
+	}
+
 	pid.setState(suspendedState, true)
 	// increment suspension count
 	pid.failureCount.Inc()
@@ -3970,7 +4075,10 @@ func (pid *PID) runPendingPostStart(now time.Time) {
 }
 
 func (pid *PID) doReinstate() {
-	pid.getLogger().Debugf("actor=%s reinstated", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s reinstated", pid.Name())
+	}
+
 	// if we're already running and not suspended, nothing to do
 	if pid.IsRunning() && !pid.IsSuspended() {
 		return
@@ -4564,7 +4672,10 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 		actorSystem.increaseActorsCounter()
 	}
 
-	pid.getLogger().Debugf("actor=%s restarted", pid.Name())
+	if pid.getLogger().Enabled(log.DebugLevel) {
+		pid.getLogger().Debugf("actor=%s restarted", pid.Name())
+	}
+
 	return nil
 }
 

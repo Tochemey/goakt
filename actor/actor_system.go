@@ -1296,7 +1296,7 @@ type actorSystem struct {
 	// identity so that only one PID is ever created and inserted into the tree,
 	// keeping name-based spawns (including singletons) idempotent under
 	// concurrency. Keyed by the actor address string (pid.ID()).
-	spawnActivation  singleflight.Group
+	spawnActivation  spawnActivationGroup
 	evictionStrategy *EvictionStrategy
 	evictionInterval time.Duration
 	evictionStopSig  chan types.Unit
@@ -4702,17 +4702,17 @@ func (x *actorSystem) shouldRebalance(peerState *internalpb.PeerState) bool {
 // configPID constructs a PID provided the actor name and the actor kind
 // this is a utility function used when spawning actors
 func (x *actorSystem) configPID(ctx context.Context, name string, actor Actor, opts ...SpawnOption) (*PID, error) {
-	return x.configPIDAt(ctx, x.actorAddress(name), actor, opts...)
-}
-
-// configPIDAt constructs a PID at addr, an address this system minted for the
-// actor, from the actor kind and the spawn options.
-func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, actor Actor, opts ...SpawnOption) (*PID, error) {
 	spawnConfig := newSpawnConfig(opts...)
 	if err := spawnConfig.Validate(); err != nil {
 		return nil, err
 	}
 
+	return x.configPIDAt(ctx, x.actorAddress(name), actor, spawnConfig)
+}
+
+// configPIDAt constructs a PID at addr, an address this system minted for the
+// actor, from the actor kind and a validated spawn config.
+func (x *actorSystem) configPIDAt(ctx context.Context, addr *address.Address, actor Actor, spawnConfig *spawnConfig) (*PID, error) {
 	// controller companions never relocate on their own: they hold incarnation
 	// state and constructor-bound PIDs, so only the endpoint relocates and the
 	// spawn transaction rebuilds a fresh controller next to it

@@ -4589,6 +4589,13 @@ func (x *MockSignalLogger) Debugf(format string, _ ...any) {
 	}
 }
 
+// Enabled reports the debug level enabled, so a debug line behind a level
+// check still reaches Debugf and can signal; other levels follow the discard
+// logger.
+func (x *MockSignalLogger) Enabled(level log.Level) bool {
+	return level == log.DebugLevel || x.Logger.Enabled(level)
+}
+
 // MockWithheldWorkActor handles every TestSend slowly and counts it, and
 // records an ordinary error on TestTimeout. Under the default supervisor that
 // error suspends the actor, which lets a test watch what happens to the

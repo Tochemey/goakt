@@ -44,7 +44,7 @@ The struct (`actorSystem` in `actor/actor_system.go`) is easier to read as group
 | Group | Fields | Notes |
 |---|---|---|
 | Lifecycle flags | `started`, `starting`, `shuttingDown`, `startedAt` | All `atomic` values. Read on hot paths (every `Tell` checks `isStopping`) without a lock |
-| Actor bookkeeping | `actors *tree`, `actorsCounter`, `remoteWatches`, `spawnActivation` | The tree is the single source of truth for local actors ([§3.4](#34-the-guardian-tree)). `spawnActivation` is a `singleflight.Group` that collapses concurrent spawns of one name into one PID (`actorSystem` in `actor/actor_system.go`) |
+| Actor bookkeeping | `actors *tree`, `actorsCounter`, `remoteWatches`, `spawnActivation` | The tree is the single source of truth for local actors ([§3.4](#34-the-guardian-tree)). `spawnActivation` is a `spawnActivationGroup` that collapses concurrent spawns of one name into one PID (`actorSystem` in `actor/actor_system.go`; `actor/spawn_activation.go`) |
 | Well-known PIDs | `rootGuardian`, `userGuardian`, `systemGuardian`, `deathWatch`, `deadletter`, `noSender`, `singletonManager`, `relocator`, `topicActor`, `replicator` | Set during `Start` (`actorSystem` in `actor/actor_system.go`) |
 | Scheduling | `dispatcher`, `dispatcherThroughput`, `dispatcherWorkers`, `passivator`, `scheduler`, `evictionStrategy` | The dispatcher is built in `NewActorSystem` and replaced by `Start` once it has been stopped ([§3.7](#37-starting-again)); the scheduler is rebuilt on every `Start` |
 | Remoting | `remotingEnabled`, `remoting`, `remoteServer`, `remoteConfig`, `remoteHostPort`, `listenHost`, `coalescedFailureQueue` | `listenHost` and `remoteHostPort` differ only for a wildcard bind address (`actorSystem` in `actor/actor_system.go`) |
