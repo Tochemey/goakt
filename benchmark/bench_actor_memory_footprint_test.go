@@ -23,20 +23,13 @@
 package benchmark
 
 import (
-	"context"
-	"fmt"
 	"reflect"
-	"runtime"
-	"strconv"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/internal/pause"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 const (
@@ -61,30 +54,6 @@ const (
 	// constrains.
 	footprintExtrapolation = 1_000_000
 )
-
-type noopActor struct{}
-
-func (x *noopActor) PreStart(*actor.Context) error { return nil }
-func (x *noopActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-	default:
-		ctx.Unhandled()
-	}
-}
-func (x *noopActor) PostStop(*actor.Context) error { return nil }
-
-// idleFootprint is the heap and goroutine growth attributable to one idle
-// population, read after the population settled and the heap was collected.
-type idleFootprint struct {
-	// heapAlloc is the growth in live heap bytes (runtime.MemStats.HeapAlloc).
-	heapAlloc uint64
-	// heapInuse is the growth in heap spans in use (runtime.MemStats.HeapInuse),
-	// which adds the size-class slack the allocator pays around live objects.
-	heapInuse uint64
-	// goroutines is the growth in live goroutines.
-	goroutines int
-}
 
 // BenchmarkActorMemoryFootprint measures the resident density of idle actors:
 // how much live heap one spawned, started, empty actor occupies once its
@@ -148,96 +117,4 @@ func benchmarkActorMemoryFootprint(b *testing.B, opts ...actor.SpawnOption) {
 		footprint.goroutines)
 
 	require.LessOrEqual(b, heapPerActor, float64(footprintMaxHeapBytesPerActor), "idle actor heap footprint regressed")
-}
-
-// measureIdleFootprint starts a fresh actor system, takes a collected baseline,
-// spawns count idle actors with opts, waits for their PostStart to drain and
-// returns the collected growth against the baseline. The slice holding the
-// spawned PIDs is allocated before the baseline so the benchmark's own
-// bookkeeping is not charged to the population.
-func measureIdleFootprint(b *testing.B, count int, opts ...actor.SpawnOption) idleFootprint {
-	b.Helper()
-
-	ctx := context.Background()
-	system, err := actor.NewActorSystem("mem-bench", actor.WithLogger(log.DiscardLogger), actor.WithActorInitMaxRetries(1))
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	defer func() { _ = system.Stop(ctx) }()
-
-	pids := make([]*actor.PID, count)
-	before := collectedMemStats()
-	baselineGoroutines := runtime.NumGoroutine()
-
-	for i := range count {
-		pid, err := system.Spawn(ctx, benchActorName(i), new(noopActor), opts...)
-		require.NoError(b, err)
-		pids[i] = pid
-	}
-
-	settlePostStart(b, pids)
-	after := collectedMemStats()
-
-	return idleFootprint{
-		heapAlloc:  after.HeapAlloc - before.HeapAlloc,
-		heapInuse:  after.HeapInuse - before.HeapInuse,
-		goroutines: runtime.NumGoroutine() - baselineGoroutines,
-	}
-}
-
-// settlePostStart blocks until every actor in pids has processed its
-// PostStart, the one message a spawn leaves in flight, so the heap is measured
-// with the dispatcher quiescent rather than mid-drain.
-func settlePostStart(b *testing.B, pids []*actor.PID) {
-	b.Helper()
-
-	deadline := time.Now().Add(footprintSettleTimeout)
-	for i, pid := range pids {
-		for pid.ProcessedCount() == 0 {
-			if time.Now().After(deadline) {
-				b.Fatalf("actor %d did not process PostStart within %s", i, footprintSettleTimeout)
-			}
-
-			pause.For(time.Millisecond)
-		}
-	}
-}
-
-// collectedMemStats forces two full collections and reads the heap
-// statistics. Two, not one: sync.Pool contents survive the first collection
-// in the pool's victim cache and are only released by the second, so a single
-// collection would charge pooled scratch objects the spawns went through to
-// the population.
-func collectedMemStats() runtime.MemStats {
-	runtime.GC()
-	runtime.GC()
-
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	return stats
-}
-
-// benchActorName returns the name of the i-th actor of the idle population.
-func benchActorName(i int) string {
-	return "bench-noop-" + strconv.Itoa(i)
-}
-
-// humanReadableBytes renders b in the largest binary unit that keeps it above
-// one, for the benchmark reports.
-func humanReadableBytes(b uint64) string {
-	const (
-		kilobyte = 1024
-		megabyte = 1024 * kilobyte
-		gigabyte = 1024 * megabyte
-	)
-
-	switch {
-	case b >= gigabyte:
-		return fmt.Sprintf("%.2f GB", float64(b)/float64(gigabyte))
-	case b >= megabyte:
-		return fmt.Sprintf("%.2f MB", float64(b)/float64(megabyte))
-	case b >= kilobyte:
-		return fmt.Sprintf("%.2f KB", float64(b)/float64(kilobyte))
-	default:
-		return fmt.Sprintf("%d B", b)
-	}
 }

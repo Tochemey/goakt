@@ -42,31 +42,6 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// replicaReceiveCount is incremented each time a replicaActor observes a
-// TestSend message. Reset at the start of every run.
-var replicaReceiveCount atomic.Int64
-
-type replicaActor struct{}
-
-func (*replicaActor) PreStart(*actor.Context) error { return nil }
-func (*replicaActor) PostStop(*actor.Context) error { return nil }
-
-func (*replicaActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		replicaReceiveCount.Add(1)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-type replicaEngine struct {
-	system actor.ActorSystem
-	host   string
-	port   int
-	actors []*address.Address
-}
-
 // BenchmarkRemoteTellThroughput: one shared remoting client fans
 // fire-and-forget tells over 10 server actor systems (2000 actors each) on
 // localhost, 20 concurrent senders for 10s. Reports msgs/sec as the
@@ -251,28 +226,4 @@ func BenchmarkRemoteTellThroughput(b *testing.B) {
 		humanCount(sent), humanCount(received), humanCount(errs), deliveredRatio,
 		drainTime.Round(time.Millisecond),
 		bytesPerMsg, allocsPerMsg)
-}
-
-// humanCount renders n with thousands separators for the benchmark report.
-func humanCount(n int64) string {
-	s := fmt.Sprintf("%d", n)
-
-	if len(s) <= 3 {
-		return s
-	}
-
-	var out []byte
-	lead := len(s) % 3
-	if lead > 0 {
-		out = append(out, s[:lead]...)
-	}
-
-	for i := lead; i < len(s); i += 3 {
-		if len(out) > 0 {
-			out = append(out, ',')
-		}
-		out = append(out, s[i:i+3]...)
-	}
-
-	return string(out)
 }

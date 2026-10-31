@@ -23,16 +23,11 @@
 package benchmark
 
 import (
-	"context"
-	"reflect"
-	"runtime"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
 )
 
 const (
@@ -117,57 +112,4 @@ func benchmarkGrainMemoryFootprint(b *testing.B, opts ...actor.GrainOption) {
 		footprint.goroutines)
 
 	require.LessOrEqual(b, heapPerGrain, float64(footprintMaxHeapBytesPerGrain), "idle grain heap footprint regressed")
-}
-
-// measureIdleGrainFootprint starts a fresh actor system, takes a collected
-// baseline, activates count idle grains with opts and returns the collected
-// growth against the baseline. The slice holding the identities is allocated
-// before the baseline so the benchmark's own bookkeeping is not charged to the
-// population; the identities themselves are retained by the grain processes
-// and are part of what a grain costs, so they are measured.
-func measureIdleGrainFootprint(b *testing.B, count int, opts ...actor.GrainOption) idleFootprint {
-	b.Helper()
-
-	ctx := context.Background()
-	system, err := actor.NewActorSystem("grain-mem-bench", actor.WithLogger(log.DiscardLogger))
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	defer func() { _ = system.Stop(ctx) }()
-
-	identities := make([]*actor.GrainIdentity, count)
-	before := collectedMemStats()
-	baselineGoroutines := runtime.NumGoroutine()
-
-	for i := range count {
-		identity, err := actor.GrainOf[*benchGrain](ctx, system, benchGrainName(i), opts...)
-		require.NoError(b, err)
-		identities[i] = identity
-	}
-
-	after := collectedMemStats()
-
-	return idleFootprint{
-		heapAlloc:  after.HeapAlloc - before.HeapAlloc,
-		heapInuse:  after.HeapInuse - before.HeapInuse,
-		goroutines: runtime.NumGoroutine() - baselineGoroutines,
-	}
-}
-
-// grainProcessStructBytes returns the size of the unexported grain process
-// struct, the per-grain object the activation path allocates. The type is
-// reached through the process pointer GrainContext carries, so the benchmark
-// needs no export from the actor package; it reports zero if that field is
-// ever renamed, which only loses the report line.
-func grainProcessStructBytes() uintptr {
-	field, ok := reflect.TypeFor[actor.GrainContext]().FieldByName("pid")
-	if !ok || field.Type.Kind() != reflect.Pointer {
-		return 0
-	}
-
-	return field.Type.Elem().Size()
-}
-
-// benchGrainName returns the name of the i-th grain of the idle population.
-func benchGrainName(i int) string {
-	return "bench-grain-" + strconv.Itoa(i)
 }
