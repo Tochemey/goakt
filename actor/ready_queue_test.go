@@ -594,7 +594,9 @@ func TestReadyQueueStealsRunnextOnlyFromALongTurn(t *testing.T) {
 	rq := newReadyQueue(2)
 	item := NewMockSchedulable(1)
 	owner := rq.locals[0]
-	owner.turnStart.Store(monotonicNanos())
+	// a turn that starts a second from now stays younger than the steal age
+	// for the whole test, however slow the machine
+	owner.turnStart.Store(monotonicNanos() + int64(time.Second))
 	require.True(t, owner.pushRunnext(item))
 
 	rq.runnextWatched.Store(true)

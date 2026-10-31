@@ -10105,7 +10105,8 @@ func TestPIDScheduleFrom(t *testing.T) {
 		pid := newDispatchTestPID(d)
 
 		pid.scheduleFrom(d.workers[1])
-		require.Equal(t, 1, d.readyQueue.locals[1].length())
+		require.Same(t, pid, d.readyQueue.locals[1].popRunnext(), "the actor is the turn worker's next actor")
+		require.Zero(t, d.readyQueue.locals[1].length())
 		require.Zero(t, d.readyQueue.globalLen())
 	})
 
