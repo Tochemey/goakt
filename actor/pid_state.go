@@ -54,6 +54,10 @@ type pidState uint32
 //     decision has been made yet. The actor handles no user message until the
 //     supervision goroutine clears it, so the messages queued behind a failure
 //     wait for the decision instead of running on a failed actor.
+//   - deathWatchedState: the death watch is told when the actor stops. Set
+//     when the actor is attached to the tree and published, in place of a
+//     watch edge in the tree, which would cost every actor a watcher entry
+//     and the death watch a watchee entry that nothing reads.
 const (
 	runningState pidState = 1 << iota
 	stoppingState
@@ -68,6 +72,7 @@ const (
 	remoteHoldsClosedState
 	restartingState
 	supervisionPendingState
+	deathWatchedState
 )
 
 func (pid *PID) isStateSet(state pidState) bool {

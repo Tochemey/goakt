@@ -772,7 +772,7 @@ func TestRestart(t *testing.T) {
 
 		child.setState(runningState, false)
 
-		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, nil, system)
+		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, system)
 		require.NoError(t, err)
 
 		require.Len(t, root.Children(), 1)
@@ -10525,5 +10525,36 @@ func TestAskFromATurnHandsOffTheActorItReadied(t *testing.T) {
 		require.IsType(t, new(testpb.Reply), reply)
 	case <-time.After(5 * time.Second):
 		t.Fatal("the ask from the turn never completed")
+	}
+}
+
+// TestDeathWatchIsToldWithoutAWatchEdge verifies that a spawned actor has no
+// watch edge to the death watch in the tree, in either direction, and that the
+// death watch is still told when the actor stops.
+func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
+	ctx := context.Background()
+	// handleTerminated logs this line when the death watch receives a
+	// Terminated from the dead actor itself
+	logger := NewMockSignalLogger("actor=%s removing dead actor resource")
+	actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pid, err := actorSystem.Spawn(ctx, "watched", NewMockActor())
+	require.NoError(t, err)
+	require.True(t, pid.isStateSet(deathWatchedState))
+
+	deathWatch := actorSystem.getDeathWatch()
+	tree := actorSystem.tree()
+	require.NotContains(t, tree.watchers(pid), deathWatch, "the death watch holds no edge on the actor")
+	require.Empty(t, tree.watchees(deathWatch), "the death watch watches nothing in the tree")
+
+	require.NoError(t, pid.Shutdown(ctx))
+
+	select {
+	case <-logger.hit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the death watch was not told that the actor stopped")
 	}
 }

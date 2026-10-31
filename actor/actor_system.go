@@ -3189,7 +3189,7 @@ func (x *actorSystem) completeSpawn(ctx context.Context, parent, pid *PID) (*PID
 }
 
 // attachAndPublish counts the actor, attaches pid to the tree under parent,
-// registers death-watch supervision, synchronously publishes the registry
+// marks it for the death watch, synchronously publishes the registry
 // record to the cluster and then schedules the turn that delivers PostStart.
 // On publication failure the actor is stopped, so a failed spawn leaves
 // nothing behind: the death watch removes the tree node, decrements the
@@ -3223,7 +3223,9 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 		// Same-instance re-adds and other insertion failures keep the historical
 		// behavior: proceed with supervision and cluster publication.
 	}
-	x.actors.addWatcher(pid, x.deathWatch)
+	// The death watch is told when the actor stops without a watch edge in
+	// the tree (see PID.freeWatchers).
+	pid.setState(deathWatchedState, true)
 
 	if err := x.putActorOnCluster(ctx, pid); err != nil {
 		x.rollbackSpawn(ctx, pid, "failed cluster publication")

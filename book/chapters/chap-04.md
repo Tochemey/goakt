@@ -67,7 +67,7 @@ sequenceDiagram
         T-->>C: the running PID, or ErrActorAlreadyExists
     else the name is free
         F->>P: configPID, newPID, PreStart with retries
-        F->>T: addNode under the user guardian, death watch watches the PID
+        F->>T: addNode under the user guardian, PID marked for the death watch
         opt cluster mode
             F->>R: PutActor, synchronously
         end
@@ -117,7 +117,7 @@ In cluster mode step 3 runs first, and it finds this node's own live record and 
 
 1. Increments the live-actor counter for non-system actors.
 2. Inserts the PID under its parent, which also makes the parent a watcher of the child ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)).
-3. Adds the death watch actor as a watcher (`actorSystem.attachAndPublish` in `actor/actor_system.go`). In a cluster, this is how a stopped actor's registry record is removed; the stopping actor leaves the tree and the live-actor count by itself ([Chapter 9, §9.8](chap-09.md#98-death-watch)).
+3. Marks the actor for the death watch (`deathWatchedState`, set in `actorSystem.attachAndPublish` in `actor/actor_system.go`): the stopping actor tells the death watch itself, without a watch edge in the tree, which would cost every actor a watcher entry and the death watch a watchee entry that nothing reads. In a cluster, this is how a stopped actor's registry record is removed; the stopping actor leaves the tree and the live-actor count by itself ([Chapter 9, §9.8](chap-09.md#98-death-watch)).
 
 If the tree already holds this ID with a *different* PID, a concurrent spawn won. The function returns the canonical PID and undoes the counter. The duplicate is deliberately not shut down, because stopping it would tear down tree state keyed by the shared ID (`actorSystem.attachAndPublish` in `actor/actor_system.go`). The comment says this path should be unreachable while every entry point goes through `runSpawnActivation`.
 
@@ -278,7 +278,7 @@ Two properties of `PID.Equals`:
 1. Requires the parent to be running (`ErrDead`) and rejects reserved names.
 2. Builds the child address under the parent (`PID.childAddress` in `actor/pid.go`).
 3. Resolves an existing child the same way `nameResolver` does.
-4. Runs the same activation-group serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, watched by the death watch, and in cluster mode **published to the registry under its qualified name**.
+4. Runs the same activation-group serialisation, `newPID` and `completeSpawn` as a top-level spawn. A child is attached to the tree, marked for the death watch, and in cluster mode **published to the registry under its qualified name**.
 
 The difference is what the child inherits. `buildChildSettings` (`actor/pid.go`) passes the parent's runtime wiring as the child's `pidSettings`, then the child's spawn options:
 

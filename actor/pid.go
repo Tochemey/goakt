@@ -943,7 +943,6 @@ func (pid *PID) Restart(ctx context.Context) error {
 
 	actorSystem := pid.ActorSystem()
 	tree := actorSystem.tree()
-	deathWatch := actorSystem.getDeathWatch()
 
 	// snapshot all alive descendants before shutdown so we can rebuild the full subtree
 	// after the teardown has detached the children from their parents.
@@ -960,7 +959,7 @@ func (pid *PID) Restart(ctx context.Context) error {
 	subtree.setRestarting(true)
 	defer subtree.setRestarting(false)
 
-	if err := restartSubtree(ctx, subtree, parent, tree, deathWatch, actorSystem); err != nil {
+	if err := restartSubtree(ctx, subtree, parent, tree, actorSystem); err != nil {
 		subtree.terminate(ctx)
 		return err
 	}
@@ -3153,6 +3152,15 @@ func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 		}
 	}
 
+	// The death watch is every published actor's watcher without an edge in
+	// the tree (see deathWatchedState): it is told after the actor's own
+	// watchers, as it was when it held the last edge, and it never unwatches.
+	if pid.isStateSet(deathWatchedState) {
+		if deathWatch := pid.ActorSystem().getDeathWatch(); deathWatch != nil && deathWatch.IsRunning() {
+			_ = pid.Tell(ctx, deathWatch, terminated)
+		}
+	}
+
 	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
 	remoteWatchers := remoteWatchRegistry.watchersFor(pid.ID())
 	if len(remoteWatchers) > 0 && pid.remoting != nil {
@@ -4555,7 +4563,7 @@ func buildRestartSubtree(root *PID, tree *tree) *restartNode {
 	return rootNode
 }
 
-func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *tree, deathWatch *PID, actorSystem ActorSystem) error {
+func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *tree, actorSystem ActorSystem) error {
 	if node == nil || node.pid == nil {
 		return nil
 	}
@@ -4638,7 +4646,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	// re-add the actor back to the actor tree and cluster
 	if err := chain.New(chain.WithFailFast()).
 		AddRunner(func() error { return tree.addOrAttachNode(parent, pid) }).
-		AddRunner(func() error { tree.addWatcher(pid, deathWatch); return nil }).
+		AddRunner(func() error { pid.setState(deathWatchedState, true); return nil }).
 		AddRunner(func() error { return actorSystem.putActorOnCluster(ctx, pid) }).
 		Run(); err != nil {
 		// disable messages processing so a failed restart does not leave a
@@ -4651,7 +4659,7 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	eg, gctx := errgroup.WithContext(ctx)
 	for _, child := range node.children {
 		eg.Go(func() error {
-			return restartSubtree(gctx, child, pid, tree, deathWatch, actorSystem)
+			return restartSubtree(gctx, child, pid, tree, actorSystem)
 		})
 	}
 
