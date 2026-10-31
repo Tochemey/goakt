@@ -772,7 +772,7 @@ func TestRestart(t *testing.T) {
 
 		child.setState(runningState, false)
 
-		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, nil, system)
+		err = restartSubtree(ctx, &restartNode{pid: child}, root, tree, system)
 		require.NoError(t, err)
 
 		require.Len(t, root.Children(), 1)
@@ -10105,7 +10105,8 @@ func TestPIDScheduleFrom(t *testing.T) {
 		pid := newDispatchTestPID(d)
 
 		pid.scheduleFrom(d.workers[1])
-		require.Equal(t, 1, d.readyQueue.locals[1].length())
+		require.Same(t, pid, d.readyQueue.locals[1].popRunnext(), "the actor is the turn worker's next actor")
+		require.Zero(t, d.readyQueue.locals[1].length())
 		require.Zero(t, d.readyQueue.globalLen())
 	})
 
@@ -10497,4 +10498,64 @@ func TestAskReusesReplyChannels(t *testing.T) {
 			require.Equal(t, "received message", reply.(*testpb.Reply).GetContent())
 		}
 	})
+}
+
+// TestAskFromATurnHandsOffTheActorItReadied verifies that an actor which
+// tells another actor and then asks it, in one turn, gets its reply: the ask
+// hands the readied actor, held in the turn's run-next slot, to another
+// worker before it blocks, instead of waiting for it with the slot's actor
+// unable to run.
+func TestAskFromATurnHandsOffTheActorItReadied(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	target, err := actorSystem.Spawn(ctx, "target", NewMockActor())
+	require.NoError(t, err)
+
+	replies := make(chan any, 1)
+	asker, err := actorSystem.Spawn(ctx, "asker", &MockTellThenAskActor{target: target, replies: replies})
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, asker, new(tellThenAskStart)))
+
+	select {
+	case reply := <-replies:
+		require.IsType(t, new(testpb.Reply), reply)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the ask from the turn never completed")
+	}
+}
+
+// TestDeathWatchIsToldWithoutAWatchEdge verifies that a spawned actor has no
+// watch edge to the death watch in the tree, in either direction, and that the
+// death watch is still told when the actor stops.
+func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
+	ctx := context.Background()
+	// handleTerminated logs this line when the death watch receives a
+	// Terminated from the dead actor itself
+	logger := NewMockSignalLogger("actor=%s removing dead actor resource")
+	actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	pid, err := actorSystem.Spawn(ctx, "watched", NewMockActor())
+	require.NoError(t, err)
+	require.True(t, pid.isStateSet(deathWatchedState))
+
+	deathWatch := actorSystem.getDeathWatch()
+	tree := actorSystem.tree()
+	require.NotContains(t, tree.watchers(pid), deathWatch, "the death watch holds no edge on the actor")
+	require.Empty(t, tree.watchees(deathWatch), "the death watch watches nothing in the tree")
+
+	require.NoError(t, pid.Shutdown(ctx))
+
+	select {
+	case <-logger.hit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the death watch was not told that the actor stopped")
+	}
 }

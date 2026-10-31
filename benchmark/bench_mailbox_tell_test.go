@@ -34,29 +34,32 @@ import (
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// benchEqualPriority ranks every message the same. It drives the priority
-// mailboxes in the throughput benchmarks: equal priorities keep the heap busy
-// and, for the stable variant, exercise the insertion-order tiebreaker.
-func benchEqualPriority(any, any) bool { return false }
+// BenchmarkMailboxTell measures Tell throughput through an actor backed by each
+// of the mailbox implementations added alongside the default unbounded mailbox.
+func BenchmarkMailboxTell(b *testing.B) {
+	const capacity = 1 << 16
 
-// windowActor counts the messages it has processed so a producer can keep the
-// number of in-flight messages below the mailbox capacity.
-type windowActor struct {
-	outstanding *atomic.Int64
+	b.Run("NonBlockingBounded", func(b *testing.B) {
+		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
+			return actor.NewNonBlockingBoundedMailbox(capacity)
+		})
+	})
+	b.Run("UnboundedStablePriority", func(b *testing.B) {
+		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
+			return actor.NewUnboundedStablePriorityMailbox(benchEqualPriority)
+		})
+	})
+	b.Run("BoundedPriority", func(b *testing.B) {
+		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
+			return actor.NewBoundedPriorityMailbox(capacity, benchEqualPriority)
+		})
+	})
+	b.Run("BoundedStablePriority", func(b *testing.B) {
+		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
+			return actor.NewBoundedStablePriorityMailbox(capacity, benchEqualPriority)
+		})
+	})
 }
-
-func (a *windowActor) PreStart(*actor.Context) error { return nil }
-
-func (a *windowActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		a.outstanding.Add(-1)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *windowActor) PostStop(*actor.Context) error { return nil }
 
 // benchmarkMailboxTell measures steady-state Tell throughput through actors
 // backed by the mailbox produced by newMailbox.
@@ -130,31 +133,4 @@ func benchmarkMailboxTell(b *testing.B, capacity int, newMailbox func() actor.Ma
 
 	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
 	b.ReportMetric(messagesPerSec, "messages/sec")
-}
-
-// BenchmarkMailboxTell measures Tell throughput through an actor backed by each
-// of the mailbox implementations added alongside the default unbounded mailbox.
-func BenchmarkMailboxTell(b *testing.B) {
-	const capacity = 1 << 16
-
-	b.Run("NonBlockingBounded", func(b *testing.B) {
-		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
-			return actor.NewNonBlockingBoundedMailbox(capacity)
-		})
-	})
-	b.Run("UnboundedStablePriority", func(b *testing.B) {
-		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
-			return actor.NewUnboundedStablePriorityMailbox(benchEqualPriority)
-		})
-	})
-	b.Run("BoundedPriority", func(b *testing.B) {
-		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
-			return actor.NewBoundedPriorityMailbox(capacity, benchEqualPriority)
-		})
-	})
-	b.Run("BoundedStablePriority", func(b *testing.B) {
-		benchmarkMailboxTell(b, capacity, func() actor.Mailbox {
-			return actor.NewBoundedStablePriorityMailbox(capacity, benchEqualPriority)
-		})
-	})
 }

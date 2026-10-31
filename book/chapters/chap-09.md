@@ -132,7 +132,7 @@ The system and user guardians and the death watch escalate any error. The root g
 2. If the actor is running **or suspended**, stop it with `stop`, the shutdown without the system-actor check of `Shutdown`, since a supervisor may restart a system actor (`actor/pid.go`), and wait until it is no longer running. `PostStop` therefore runs before `PreStart` on every restart, as in Akka. A stopped actor skips this step.
 3. Wait until no worker holds the actor, then force its dispatch state to idle while no sender can reach it (`restartSubtree` in `actor/pid.go`).
 4. Reset the behaviour stack and run `init`: `PreStart` with its retries, `PostStart` armed, running bit set; then store the start time, so the uptime starts again.
-5. Re-attach the actor to the tree under its parent, make the death watch a watcher again, and write its cluster record. The tree refuses a parent that is stopping or passivating, under the parent's node lock, the lock its `freeChildren` reads the children under (`tree.addOrAttachNode` and `tree.addNodeUnder` in `actor/pid_tree.go`), so a restart that races the parent's stop fails here and the subtree is terminated instead of outliving its parent.
+5. Re-attach the actor to the tree under its parent, mark it for the death watch again, and write its cluster record. The tree refuses a parent that is stopping or passivating, under the parent's node lock, the lock its `freeChildren` reads the children under (`tree.addOrAttachNode` and `tree.addNodeUnder` in `actor/pid_tree.go`), so a restart that races the parent's stop fails here and the subtree is terminated instead of outliving its parent.
 6. Restart its children concurrently.
 7. Clear the suspended bit, restart passivation, count the restart, schedule `PostStart`, and publish `ActorRestarted` (`restartSubtree` in `actor/pid.go`).
 
@@ -164,14 +164,14 @@ The actor value is the same Go value ([Chapter 4, §4.7](chap-04.md#47-looking-u
 
 ## 9.8 Death watch
 
-**The local API.** `Watch(cid)` adds the caller to `cid`'s watchers in the tree (`actor/pid.go`), and `UnWatch` removes it. `addWatcher` does nothing when either actor is not in the tree (`actor/pid_tree.go`): watching an actor that has already stopped registers nothing, and no `Terminated` ever comes. Watchers are deduplicated by ID (`putWatcher` in `actor/pid_tree.go`), and a parent is made a watcher of each child when the child joins the tree (`tree.addNodeUnder` in `actor/pid_tree.go`). The death watch actor watches every spawned and restarted actor (`actorSystem.attachAndPublish` in `actor/actor_system.go`).
+**The local API.** `Watch(cid)` adds the caller to `cid`'s watchers in the tree (`actor/pid.go`), and `UnWatch` removes it. `addWatcher` does nothing when either actor is not in the tree (`actor/pid_tree.go`): watching an actor that has already stopped registers nothing, and no `Terminated` ever comes. Watchers are deduplicated by ID (`putWatcher` in `actor/pid_tree.go`), and a parent is made a watcher of each child when the child joins the tree (`tree.addNodeUnder` in `actor/pid_tree.go`). The death watch actor holds no edge: every spawned and restarted actor is marked for it (`deathWatchedState` in `actor/pid_state.go`; `actorSystem.attachAndPublish` in `actor/actor_system.go`) and tells it directly when it stops, after its own watchers (`PID.freeWatchers` in `actor/pid.go`).
 
 **When a watched actor stops.** `doStop` (`actor/pid.go`):
 
 1. Runs, failing fast: `freeWatchees`, then `freeChildren`, then `PostStop`.
    - `freeWatchees` unwatches everything this actor watches and sends a best-effort `RemoteUnWatch` for remote watchees (`actor/pid.go`). It is skipped during a restart: a restarting actor keeps watching.
    - `freeChildren` unwatches each child before stopping it (`actor/pid.go`), so a stopping parent is not told about its children.
-2. Reads the watchers from the tree, **releases the name** (tree node and live-actor count), then runs `freeWatchers`, even if the chain failed (`actor/pid.go`):
+2. Reads the watchers from the tree, **releases the name** (tree node and live-actor count), then runs `freeWatchers`, even if one of those steps failed (`actor/pid.go`):
    - Each local watcher that is running is sent `Terminated`, with the dead actor as sender, and then unwatches. A suspended watcher is told too, through `tellSuspended`, since control messages are handled while an actor is suspended (`actor/pid.go`).
    - During a restart nobody is told and every watch is kept: a restart is not a death.
    - Each remote watcher from the registry is sent `Terminated`, and only then are this actor's registry entries cleared.

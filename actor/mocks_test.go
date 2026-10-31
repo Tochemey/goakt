@@ -4589,6 +4589,49 @@ func (x *MockSignalLogger) Debugf(format string, _ ...any) {
 	}
 }
 
+// Enabled reports the debug level enabled, so a debug line behind a level
+// check still reaches Debugf and can signal; other levels follow the discard
+// logger.
+func (x *MockSignalLogger) Enabled(level log.Level) bool {
+	return level == log.DebugLevel || x.Logger.Enabled(level)
+}
+
+// tellThenAskStart starts a MockTellThenAskActor's exchange.
+type tellThenAskStart struct{}
+
+// MockTellThenAskActor tells its target a message and then, in the same turn,
+// asks it and waits for the reply. The tell readies the target into the
+// turn's run-next slot, so the ask only completes if the turn hands the
+// target to another worker before it blocks.
+type MockTellThenAskActor struct {
+	// target is the actor told and asked; it replies to TestReply.
+	target *PID
+	// replies receives the ask's reply, or the error the ask failed with.
+	replies chan any
+}
+
+// PreStart does nothing.
+func (x *MockTellThenAskActor) PreStart(*Context) error { return nil }
+
+// Receive runs the exchange on tellThenAskStart.
+func (x *MockTellThenAskActor) Receive(ctx *ReceiveContext) {
+	if _, ok := ctx.Message().(*tellThenAskStart); !ok {
+		return
+	}
+
+	ctx.Tell(x.target, new(testpb.TestSend))
+	reply := ctx.Ask(x.target, new(testpb.TestReply), 2*time.Second)
+	if err := ctx.getError(); err != nil {
+		x.replies <- err
+		return
+	}
+
+	x.replies <- reply
+}
+
+// PostStop does nothing.
+func (x *MockTellThenAskActor) PostStop(*Context) error { return nil }
+
 // MockWithheldWorkActor handles every TestSend slowly and counts it, and
 // records an ordinary error on TestTimeout. Under the default supervisor that
 // error suspends the actor, which lets a test watch what happens to the

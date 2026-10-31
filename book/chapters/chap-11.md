@@ -139,7 +139,7 @@ One `EventsStream` per actor system is created by `NewActorSystem` (`actor/actor
 | Event | Published from | Source |
 |---|---|---|
 | `ActorStarted` | the end of `init`, built only when the topic has a subscriber at that moment | `PID.init` in `actor/pid.go` |
-| `ActorStopped` | `Shutdown`, after `doStop` | `PID.stop` in `actor/pid.go` |
+| `ActorStopped` | `Shutdown`, after `doStop`, built only when the topic has a subscriber at that moment | `PID.stop` in `actor/pid.go` |
 | `ActorPassivated` | passivation | `PID.tryPassivation` in `actor/pid.go` |
 | `ActorChildCreated` | the parent, after spawning a child | `PID.spawnChildLocal` in `actor/pid.go` |
 | `ActorRestarted` | the end of a restart | `restartSubtree` in `actor/pid.go` |

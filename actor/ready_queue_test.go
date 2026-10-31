@@ -554,3 +554,100 @@ func TestReadyQueueEndSearch(t *testing.T) {
 		require.True(t, rq.searching.Load())
 	})
 }
+
+// TestLocalQueueRunnext verifies the run-next slot holds one actor, which the
+// owner takes back, and that the atomic mirror follows it.
+func TestLocalQueueRunnext(t *testing.T) {
+	q := &localQueue{}
+	a, b := NewMockSchedulable(1), NewMockSchedulable(2)
+
+	require.Nil(t, q.popRunnext())
+	require.True(t, q.pushRunnext(a))
+	require.True(t, q.runnextSet.Load())
+	require.False(t, q.pushRunnext(b), "the slot holds one actor")
+	require.Same(t, a, q.popRunnext().(*MockSchedulable))
+	require.False(t, q.runnextSet.Load())
+	require.Nil(t, q.popRunnext())
+}
+
+// TestReadyQueueTakeRunsRunnextBeforeTheRing verifies that the owner runs the
+// actor in its run-next slot before the actors on its ring.
+func TestReadyQueueTakeRunsRunnextBeforeTheRing(t *testing.T) {
+	rq := newReadyQueue(1)
+	ring, next := NewMockSchedulable(1), NewMockSchedulable(2)
+	require.True(t, rq.locals[0].pushBack(ring))
+	require.True(t, rq.locals[0].pushRunnext(next))
+
+	s, ok := rq.take(0)
+	require.True(t, ok)
+	require.Same(t, next, s.(*MockSchedulable))
+
+	s, ok = rq.take(0)
+	require.True(t, ok)
+	require.Same(t, ring, s.(*MockSchedulable))
+}
+
+// TestReadyQueueStealsRunnextOnlyFromALongTurn verifies that a thief leaves
+// the run-next actor of a turn that just started, and takes it once the turn
+// has run for runnextStealAge, which is also when the slot counts as stale.
+func TestReadyQueueStealsRunnextOnlyFromALongTurn(t *testing.T) {
+	rq := newReadyQueue(2)
+	item := NewMockSchedulable(1)
+	owner := rq.locals[0]
+	// a turn that starts a second from now stays younger than the steal age
+	// for the whole test, however slow the machine
+	owner.turnStart.Store(monotonicNanos() + int64(time.Second))
+	require.True(t, owner.pushRunnext(item))
+
+	rq.runnextWatched.Store(true)
+	require.Nil(t, rq.trySteal(1), "a turn that just started keeps its run-next actor")
+	require.False(t, rq.hasStaleRunnext(monotonicNanos()))
+
+	owner.turnStart.Store(monotonicNanos() - 2*int64(runnextStealAge))
+	require.True(t, rq.hasStaleRunnext(monotonicNanos()))
+	require.Same(t, item, rq.trySteal(1).(*MockSchedulable))
+	require.False(t, owner.runnextSet.Load())
+	require.Nil(t, rq.trySteal(1))
+
+	// the slots are not probed while no watchdog watches them
+	require.True(t, owner.pushRunnext(item))
+	rq.runnextWatched.Store(false)
+	require.Nil(t, rq.trySteal(1), "an unwatched slot is left to its owner")
+}
+
+// TestReadyQueueHasRunnext verifies hasRunnext follows the slots.
+func TestReadyQueueHasRunnext(t *testing.T) {
+	rq := newReadyQueue(2)
+	require.False(t, rq.hasRunnext())
+	require.True(t, rq.locals[1].pushRunnext(NewMockSchedulable(1)))
+	require.True(t, rq.hasRunnext())
+	rq.locals[1].popRunnext()
+	require.False(t, rq.hasRunnext())
+}
+
+// TestReadyQueueRunnextChainYieldsToTheRing verifies that a worker whose
+// run-next slot is refilled at every take, as two actors exchanging messages
+// do, serves its ring after runnextChainLimit takes from the slot, and runs
+// the slot's actor behind the ring's.
+func TestReadyQueueRunnextChainYieldsToTheRing(t *testing.T) {
+	rq := newReadyQueue(1)
+	hot, waiting := NewMockSchedulable(1), NewMockSchedulable(2)
+	require.True(t, rq.locals[0].pushBack(waiting))
+
+	for take := 1; take <= runnextChainLimit; take++ {
+		require.True(t, rq.locals[0].pushRunnext(hot))
+		s, ok := rq.take(0)
+		require.True(t, ok)
+		require.Same(t, hot, s.(*MockSchedulable), "take %d", take)
+	}
+
+	require.True(t, rq.locals[0].pushRunnext(hot))
+	s, ok := rq.take(0)
+	require.True(t, ok)
+	require.Same(t, waiting, s.(*MockSchedulable), "the ring is served after the chain limit")
+
+	s, ok = rq.take(0)
+	require.True(t, ok)
+	require.Same(t, hot, s.(*MockSchedulable), "the slot's actor went to the back of the ring")
+	require.Zero(t, rq.globalLen())
+}

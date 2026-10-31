@@ -69,14 +69,53 @@ func TestWorkerLocalWorkIsStolenWhileTheOwnerBlocks(t *testing.T) {
 	}
 }
 
-// TestWorkerScheduleLocalQueuesOnItsOwnRing verifies that scheduleLocal puts
-// the actor on the calling worker's ring and not on the shared queue.
-func TestWorkerScheduleLocalQueuesOnItsOwnRing(t *testing.T) {
+// TestWorkerScheduleLocalFillsTheRunnextSlotThenTheRing verifies that the
+// first actor a turn readies goes to the worker's run-next slot, arming the
+// watchdog, that the next one goes on the worker's ring, and that neither
+// touches another worker's ring or the shared queue.
+func TestWorkerScheduleLocalFillsTheRunnextSlotThenTheRing(t *testing.T) {
 	d := newDispatcher(2, dispatcherThroughput)
-	item := NewMockSchedulable(1)
+	t.Cleanup(d.signalStop)
+	first, second := NewMockSchedulable(1), NewMockSchedulable(2)
 
-	d.workers[1].scheduleLocal(item)
+	d.workers[1].scheduleLocal(first)
+	require.True(t, d.readyQueue.locals[1].runnextSet.Load())
+	require.Zero(t, d.readyQueue.locals[1].length())
+	require.True(t, d.readyQueue.runnextWatched.Load(), "the watchdog is armed while a slot is occupied")
+
+	d.workers[1].scheduleLocal(second)
 	require.Equal(t, 1, d.readyQueue.locals[1].length())
+	require.Same(t, first, d.readyQueue.locals[1].popRunnext().(*MockSchedulable))
 	require.Zero(t, d.readyQueue.locals[0].length())
 	require.Zero(t, d.readyQueue.globalLen())
+}
+
+// TestWorkerRescheduleGoesToTheRing verifies that an actor that spent its
+// budget goes to the back of the worker's ring, not to the run-next slot.
+func TestWorkerRescheduleGoesToTheRing(t *testing.T) {
+	d := newDispatcher(2, dispatcherThroughput)
+	t.Cleanup(d.signalStop)
+	item := NewMockSchedulable(1)
+
+	d.workers[0].reschedule(item)
+	require.False(t, d.readyQueue.locals[0].runnextSet.Load())
+	require.Equal(t, 1, d.readyQueue.locals[0].length())
+}
+
+// TestWorkerHandoffRunnextMovesTheActorToTheRing verifies that a turn about
+// to block hands the actor in its run-next slot to the ring, where a searcher
+// can steal it, and that an empty slot hands off nothing.
+func TestWorkerHandoffRunnextMovesTheActorToTheRing(t *testing.T) {
+	d := newDispatcher(2, dispatcherThroughput)
+	t.Cleanup(d.signalStop)
+	item := NewMockSchedulable(1)
+	w := d.workers[0]
+
+	w.handoffRunnext()
+	require.Zero(t, d.readyQueue.locals[0].length())
+
+	w.scheduleLocal(item)
+	w.handoffRunnext()
+	require.False(t, d.readyQueue.locals[0].runnextSet.Load())
+	require.Equal(t, 1, d.readyQueue.locals[0].length())
 }

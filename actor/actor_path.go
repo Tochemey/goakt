@@ -57,11 +57,9 @@ type Path interface {
 // address pointer.
 type path struct {
 	// addr is the actor's address. Address is immutable once constructed, so the
-	// view shares it by pointer and every accessor reads through it.
+	// view shares it by pointer and every accessor reads through it. The parent
+	// view is built from the address's parent on demand (see Parent).
 	addr *address.Address
-	// parent is the pre-built view of the parent actor's path, or nil for a root
-	// or otherwise parentless actor.
-	parent Path
 }
 
 // Host returns the host component of the underlying address.
@@ -110,7 +108,12 @@ func (x *path) Parent() Path {
 	if x == nil {
 		return nil
 	}
-	return x.parent
+
+	if p := x.addr.Parent(); p != nil && !p.Equals(address.NoSender()) {
+		return newPath(p)
+	}
+
+	return nil
 }
 
 // QualifiedName returns the actor name qualified by its ancestors, read through
@@ -147,22 +150,15 @@ func (x *path) Equals(other Path) bool {
 	return x.String() == other.String()
 }
 
-// newPath builds a read-only view over addr, recursively building the parent
-// view when addr carries a real parent. It returns nil when addr is nil.
+// newPath builds a read-only view over addr. It returns nil when addr is nil.
+// The view of the parent is built when Parent is called, so a deep hierarchy
+// does not cost an allocation per ancestor on every spawn.
 func newPath(addr *address.Address) Path {
 	if addr == nil {
 		return nil
 	}
 
-	var parent Path
-	if p := addr.Parent(); p != nil && !p.Equals(address.NoSender()) {
-		parent = newPath(p)
-	}
-
-	return &path{
-		addr:   addr,
-		parent: parent,
-	}
+	return &path{addr: addr}
 }
 
 // pathString returns p.String() when p is non-nil, otherwise "".

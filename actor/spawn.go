@@ -102,7 +102,6 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 
 	// first we need to create the spawn configuration
 	config := newSpawnConfig(opts...)
-	// TODO: should we validate the spawn configuration here because configPID does it as well?
 	if err := config.Validate(); err != nil {
 		return nil, err
 	}
@@ -161,7 +160,7 @@ func (x *actorSystem) Spawn(ctx context.Context, name string, actor Actor, opts 
 			return nameResolver(holder, name)
 		}
 
-		pid, err := x.configPIDAt(ctx, addr, actor, opts...)
+		pid, err := x.configPIDAt(ctx, addr, actor, config)
 		if err != nil {
 			return nil, err
 		}
@@ -804,12 +803,14 @@ func (x *actorSystem) spawnSingletonWithRole(ctx context.Context, cl cluster.Clu
 // keeping name-based spawns (regular, function-based, singleton, and children)
 // idempotent. When key is empty the function runs without coordination.
 //
-// The wait is context-aware: a caller whose ctx expires stops waiting and returns
-// ctx.Err() while the in-flight spawn completes undisturbed for the remaining
-// callers. Because fn runs under the winning caller's context, a waiter can
-// inherit a failure caused by the winner's context rather than its own; when that
-// happens (shared context error, own context still live) the waiter retries once
-// instead of failing with a cancellation that was never its own.
+// The winning caller runs fn on its own goroutine and returns its result. The
+// wait of the other callers is context-aware: a caller whose ctx expires stops
+// waiting and returns ctx.Err() while the in-flight spawn completes undisturbed
+// for the remaining callers. Because fn runs under the winning caller's context,
+// a waiter can inherit a failure caused by the winner's context rather than its
+// own; when that happens (shared context error, own context still live) the
+// waiter retries once instead of failing with a cancellation that was never its
+// own.
 //
 // fn must not spawn an actor with the same identity from within (e.g. from the
 // actor's PreStart): such a re-entrant call coalesces onto its own in-flight
@@ -827,25 +828,17 @@ func (x *actorSystem) runSpawnActivation(ctx context.Context, key string, fn fun
 
 	retried := false
 	for {
-		ch := x.spawnActivation.DoChan(key, func() (any, error) {
-			return fn()
-		})
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case res := <-ch:
-			if res.Err != nil {
-				if !retried && res.Shared && ctx.Err() == nil &&
-					(errors.Is(res.Err, context.Canceled) || errors.Is(res.Err, context.DeadlineExceeded)) {
-					retried = true
-					continue
-				}
-				return nil, res.Err
+		pid, shared, err := x.spawnActivation.run(ctx, key, fn)
+		if err != nil {
+			if !retried && shared && ctx.Err() == nil &&
+				(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				retried = true
+				continue
 			}
-			pid, _ := res.Val.(*PID)
-			return pid, nil
+			return nil, err
 		}
+
+		return pid, nil
 	}
 }
 

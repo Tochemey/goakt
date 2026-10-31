@@ -38,6 +38,30 @@ Each client actor keeps a fixed number of messages in flight to its own echo act
 go test -run=^$ -bench=^BenchmarkTellPingPong$ -count=10 -benchmem ./benchmark/
 ```
 
+### TellPingPongSinglePair: the hand-off between two actors, nothing else running
+
+One client and one echo actor with one message in flight, so every message wakes an idle actor and the number is the cost of handing the turn from one actor to the other, twice per round trip. It is the one-pair, one-in-flight case of TellPingPong, kept apart because it answers a latency question. Cite this as the actor-to-actor latency number.
+
+```
+go test -run=^$ -bench=^BenchmarkTellPingPongSinglePair$ -count=10 -benchmem ./benchmark/
+```
+
+### ThreadRing: one token around a ring of 100 actors
+
+One token passed around a ring of 100 actors, one hop per message, until it has made b.N hops, as in the Savina ThreadRing benchmark. Only one actor is runnable at any time, so the number is the latency of handing the turn from one actor to the next through a long chain.
+
+```
+go test -run=^$ -bench=^BenchmarkThreadRing$ -count=10 -benchmem ./benchmark/
+```
+
+### ForkJoin: one sender spreading messages over 60 actors
+
+One goroutine outside the system tells 60 actors round-robin, timed until every actor has handled its share, as in the Savina fork-join throughput benchmark. Each message readies an idle actor, so the number is the cost of waking a worker for an actor with one message, many times over, with the sender never yielding.
+
+```
+go test -run=^$ -bench=^BenchmarkForkJoin$ -count=10 -benchmem ./benchmark/
+```
+
 ### TellPayload — async send swept by payload size (0 B … 64 KiB)
 
 ```
@@ -161,7 +185,7 @@ go test -run=^$ -bench='Throughput$' -count=5 ./benchmark/
 
 ### ActorMemoryFootprint: live heap bytes per idle actor
 
-Spawns 100,000 empty actors into a started actor system, waits for their PostStart to drain, forces a collection and reports the live-heap growth per actor against the empty system's collected baseline. The system's fixed cost is excluded, so the number is the term a million-actor node scales with; the report also extrapolates it to one million actors. Runs twice: the default spawn, which registers every actor with the passivation manager, and a long-lived spawn, which does not. The difference between the two is the passivation bookkeeping per actor. The run fails when the live heap per actor exceeds the ceiling pinned in `memory_test.go`.
+Spawns 100,000 empty actors into a started actor system, waits for their PostStart to drain, forces a collection and reports the live-heap growth per actor against the empty system's collected baseline. The system's fixed cost is excluded, so the number is the term a million-actor node scales with; the report also extrapolates it to one million actors. Runs twice: the default spawn, which registers every actor with the passivation manager, and a long-lived spawn, which does not. The difference between the two is the passivation bookkeeping per actor. The run fails when the live heap per actor exceeds the ceiling pinned in `bench_actor_memory_footprint_test.go`.
 
 ```
 go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchtime=1x ./benchmark/
@@ -169,7 +193,7 @@ go test -run=^$ -bench=^BenchmarkActorMemoryFootprint$ -benchtime=1x ./benchmark
 
 ### GrainMemoryFootprint: live heap bytes per idle grain
 
-The grain counterpart of ActorMemoryFootprint. Activates 100,000 empty grains through `GrainOf` into a started actor system, forces a collection and reports the live-heap growth per grain against the empty system's collected baseline, extrapolated to one million grains. Activation is synchronous, so nothing is left in flight and no settle step is needed. Runs twice: the default activation, which registers every grain with the passivation manager, and a long-lived activation, which does not. The difference between the two is the passivation bookkeeping per grain. The run fails when the live heap per grain exceeds the ceiling pinned in `grain_memory_test.go`.
+The grain counterpart of ActorMemoryFootprint. Activates 100,000 empty grains through `GrainOf` into a started actor system, forces a collection and reports the live-heap growth per grain against the empty system's collected baseline, extrapolated to one million grains. Activation is synchronous, so nothing is left in flight and no settle step is needed. Runs twice: the default activation, which registers every grain with the passivation manager, and a long-lived activation, which does not. The difference between the two is the passivation bookkeeping per grain. The run fails when the live heap per grain exceeds the ceiling pinned in `bench_grain_memory_footprint_test.go`.
 
 ```
 go test -run=^$ -bench=^BenchmarkGrainMemoryFootprint$ -benchtime=1x ./benchmark/

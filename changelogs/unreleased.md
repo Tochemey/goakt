@@ -3,6 +3,8 @@
 ## Highlights
 
 - **Named dispatchers.** A group of actors or grains whose handlers block can run on a worker pool of its own, so the default pool keeps its size and its speed for everything else.
+- **Spawning and stopping an actor is about a third faster and allocates a third as much.**
+- **A message between two actors is handed off three times faster.** A ping-pong between two actors with one message in flight runs at 8 million messages/sec, from 2.6 million, and a token around a ring of 100 actors makes 7.8 million hops/sec, from 2.4 million.
 
 ## Features
 
@@ -12,3 +14,8 @@
   - The name travels with the actor's and the grain's wire record, and with `SpawnOn`, remote spawn and remote activation requests, so an actor or grain relocated or placed on another node runs on that node's dispatcher of the same name. Declare the same dispatchers on every node; a node that lacks the name refuses the record.
   - Dispatchers are isolated: a send between actors on different dispatchers takes the slower shared-queue path (about a third slower in pipelined ping-pong), and workers do not steal across pools. Keep the number of dispatchers small: the default for everything that computes and returns, and one per group that blocks.
   - Message throughput, ask latency and the heap per actor and per grain are unchanged from v4.6.5.
+
+## Performance
+
+- **A message between two actors is handed off three times faster** ([#1480](https://github.com/Tochemey/goakt/issues/1480)). An actor that a turn makes ready now runs next on the same worker, as a goroutine readied by the running one does in the Go scheduler, instead of waking another worker for every message. A ping-pong between two actors with one message in flight runs at 8 million messages/sec, from 2.6 million (`BenchmarkTellPingPongSinglePair`), and a token passed around a ring of 100 actors makes 7.8 million hops/sec, from 2.4 million (`BenchmarkThreadRing`). Throughput with many messages in flight, asks and spawns are unchanged, and nothing allocates per message. An actor readied by a handler that then blocks is still run by another worker, within about 100 µs.
+- **Spawning and stopping an actor is about a third faster and allocates a third as much** ([#1480](https://github.com/Tochemey/goakt/issues/1480)). A spawn followed by a stop takes 4.3 µs and 21 allocations, from 6.8 µs and 61 (`BenchmarkSpawnStop`); a top-level spawn makes 18 allocations, from 25, and a child spawn 21 at any depth, from 27 plus one per ancestor. The spawn no longer starts a goroutine per activation, the stop path skips its debug logging unless the logger has the debug level enabled, the `ActorStopped` event is built only when the topic has a subscriber, one `Terminated` serves every watcher of a stopped actor, an actor path builds its parent view on demand, and the death watch is told of a stop directly instead of holding a watch edge on every actor, which also takes 42 B off the live heap of each idle actor. Settings, errors and event delivery are unchanged. In the comparison benchmarks, a spawn and stop takes 4.7 µs, from 8.2 µs.

@@ -293,7 +293,7 @@ func TestDeathWatch(t *testing.T) {
 
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
@@ -369,7 +369,7 @@ func TestDeathWatch(t *testing.T) {
 
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(singletonPID)
+		singletonPID.setState(deathWatchedState, false) // stop it without telling the death watch
 		require.NoError(t, singletonPID.Shutdown(ctx))
 
 		terminated := NewTerminated(singletonPID.Path())
@@ -413,7 +413,7 @@ func TestDeathWatch(t *testing.T) {
 
 		deathWatchPID := actorSys.getDeathWatch()
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
-		deathWatchPID.UnWatch(dead)
+		dead.setState(deathWatchedState, false) // stop it without telling the death watch
 		require.NoError(t, dead.Shutdown(ctx))
 
 		// only the dead actor itself can report its own death
@@ -422,7 +422,7 @@ func TestDeathWatch(t *testing.T) {
 			require.NoError(t, deathWatchActor.handleTerminated(receiveCtx))
 		}
 
-		deathWatchPID.UnWatch(other)
+		other.setState(deathWatchedState, false) // stop it without telling the death watch
 		require.NoError(t, other.Shutdown(ctx))
 	})
 
@@ -472,7 +472,8 @@ func TestDeathWatch(t *testing.T) {
 		_ = logger.Flush()
 		require.Contains(t, buf.String(), "is running again, record left in cluster")
 
-		deathWatchPID.UnWatch(cid)
+		// stop the actor without telling the death watch
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 	})
 
@@ -599,7 +600,7 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
@@ -641,7 +642,7 @@ func TestDeathWatch(t *testing.T) {
 		deathWatchActor := deathWatchPID.Actor().(*deathWatch)
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
@@ -828,7 +829,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
@@ -990,7 +991,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
@@ -1279,7 +1280,7 @@ func TestDeathWatchClusterCleanupFailure(t *testing.T) {
 
 		// the death watch only acts on a dead actor: stop it without telling the
 		// death watch, so the only Terminated it handles is the one below
-		deathWatchPID.UnWatch(cid)
+		cid.setState(deathWatchedState, false)
 		require.NoError(t, cid.Shutdown(ctx))
 
 		terminated := NewTerminated(cid.Path())
