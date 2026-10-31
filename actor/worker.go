@@ -22,6 +22,8 @@
 
 package actor
 
+import "time"
+
 // worker is a single goroutine in the dispatcher pool. It pulls
 // schedulable items from the ready queue and delegates processing to the
 // item's runTurn method. The worker is intentionally agnostic of the
@@ -50,21 +52,56 @@ func (w *worker) run() {
 
 // reschedule re-enqueues s onto this worker's local queue, spilling to
 // the global queue when the local ring is full. Called by schedulable
-// implementations after a yield on throughput exhaustion.
+// implementations after a yield on throughput exhaustion. The actor goes to
+// the back of the ring, not to the run-next slot, as a goroutine that used up
+// its time slice goes to the tail of its P's run queue.
 //
 // An idle sibling is woken to steal it if none is already looking for work:
 // this worker may spend its next turn on an actor that blocks, and a parked
 // sibling never looks at another worker's queue on its own.
 func (w *worker) reschedule(s schedulable) {
-	w.scheduleLocal(s)
+	w.queueLocal(s)
 }
 
-// scheduleLocal queues s, an actor that a turn on this worker has made ready,
-// on this worker's local queue, and wakes an idle sibling to steal it if none
-// is already looking for work (see readyQueue.wakeSearcher). It is meant for
-// code running on this worker's goroutine; the local queue's mutex keeps any
-// other caller safe, only less local.
+// scheduleLocal queues s, an actor that a turn on this worker has made ready.
+// The first such actor of a turn goes to this worker's run-next slot, which
+// the worker runs as soon as the turn ends, on the same core, without waking
+// anyone: with one message in flight between two actors, that is every
+// hand-off, and a wake per hand-off was most of its cost. A later one goes on
+// the ring and wakes an idle sibling to steal it, since there is now work for
+// two workers. The dispatcher's watchdog and the hand-off before a blocking
+// call (see handoffRunnext) see to it that a turn which does not end soon
+// does not keep the slot's actor waiting. It is meant for code running on
+// this worker's goroutine.
 func (w *worker) scheduleLocal(s schedulable) {
+	if w.dispatcher.readyQueue.locals[w.id].pushRunnext(s) {
+		w.dispatcher.armWatchdog()
+		return
+	}
+
+	w.queueLocal(s)
+}
+
+// handoffRunnext moves the actor in this worker's run-next slot, if any, to
+// the ring and wakes a searcher to take it. A turn calls it before it blocks
+// waiting for another actor, since the actor it readied may be the one it is
+// waiting for, and a parked sibling never looks at the slot on its own.
+func (w *worker) handoffRunnext() {
+	if s := w.dispatcher.readyQueue.locals[w.id].popRunnext(); s != nil {
+		w.queueLocal(s)
+	}
+}
+
+// beginTurn records that a turn starts on this worker at now; the age of its
+// run-next slot is measured from it (see runnextStealAge).
+func (w *worker) beginTurn(now time.Time) {
+	w.dispatcher.readyQueue.locals[w.id].turnStart.Store(int64(now.Sub(monotonicEpoch)))
+}
+
+// queueLocal puts s on this worker's ring, spilling to the global queue when
+// the ring is full, and wakes an idle sibling to steal it if none is already
+// looking for work (see readyQueue.wakeSearcher).
+func (w *worker) queueLocal(s schedulable) {
 	rq := w.dispatcher.readyQueue
 	rq.pushLocal(w.id, s)
 	rq.wakeSearcher()

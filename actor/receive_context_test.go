@@ -3593,7 +3593,8 @@ func TestReceiveContextTellSchedulesOnTheTurnWorker(t *testing.T) {
 		recipient := newDispatchTestPID(d)
 
 		(&ReceiveContext{self: sender}).Tell(recipient, new(testpb.TestSend))
-		require.Equal(t, 1, d.readyQueue.locals[1].length())
+		require.Same(t, recipient, d.readyQueue.locals[1].popRunnext(), "the recipient is the turn worker's next actor")
+		require.Zero(t, d.readyQueue.locals[1].length())
 		require.Zero(t, d.readyQueue.globalLen())
 		require.Equal(t, dispatchScheduled, recipient.schedState.v.Load())
 	})
@@ -3605,7 +3606,8 @@ func TestReceiveContextTellSchedulesOnTheTurnWorker(t *testing.T) {
 		recipient := newDispatchTestPID(d)
 
 		(&ReceiveContext{self: sender}).BatchTell(recipient, new(testpb.TestSend), new(testpb.TestSend))
-		require.Equal(t, 1, d.readyQueue.locals[0].length())
+		require.Same(t, recipient, d.readyQueue.locals[0].popRunnext(), "the recipient is the turn worker's next actor")
+		require.Zero(t, d.readyQueue.locals[0].length())
 		require.Zero(t, d.readyQueue.globalLen())
 		require.Equal(t, int64(2), recipient.mailbox.Len())
 	})

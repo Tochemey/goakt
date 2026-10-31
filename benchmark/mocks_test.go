@@ -185,6 +185,24 @@ type idleFootprint struct {
 	goroutines int
 }
 
+// ringToken is the one message BenchmarkThreadRing passes around the ring.
+// Only one actor holds it at a time, so its hop count is decremented in place.
+type ringToken struct {
+	hops int
+}
+
+// ringNext closes the ring: it tells the last actor which actor follows it.
+type ringNext struct {
+	next *actor.PID
+}
+
+// ringActor passes the token to the next actor in the ring until its hops run
+// out, then closes done.
+type ringActor struct {
+	next *actor.PID
+	done chan struct{}
+}
+
 // stopSignalActor is an empty actor that reports its PostStop on a channel,
 // so BenchmarkSpawnStop can time a lifecycle to the end of the stop.
 type stopSignalActor struct {
@@ -379,6 +397,28 @@ func (x *noopActor) Receive(ctx *actor.ReceiveContext) {
 }
 
 func (x *noopActor) PostStop(*actor.Context) error { return nil }
+
+// PreStart does nothing.
+func (x *ringActor) PreStart(*actor.Context) error { return nil }
+
+// Receive forwards the token or, on the last hop, closes done.
+func (x *ringActor) Receive(ctx *actor.ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *ringNext:
+		x.next = msg.next
+	case *ringToken:
+		if msg.hops == 0 {
+			close(x.done)
+			return
+		}
+
+		msg.hops--
+		ctx.Tell(x.next, msg)
+	}
+}
+
+// PostStop does nothing.
+func (x *ringActor) PostStop(*actor.Context) error { return nil }
 
 func (x *stopSignalActor) PreStart(*actor.Context) error { return nil }
 
@@ -756,4 +796,65 @@ func humanCount(n int64) string {
 	}
 
 	return string(out)
+}
+
+// benchmarkTellPingPong runs BenchmarkTellPingPong for pairs client/echo pairs
+// with inFlight messages in flight per pair. b.N is the number of messages,
+// requests and replies together.
+func benchmarkTellPingPong(b *testing.B, pairs, inFlight int) {
+	ctx := context.Background()
+
+	actorSystem, err := actor.NewActorSystem("bench",
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithActorInitMaxRetries(1))
+	if err != nil {
+		b.Fatalf("failed to create actor system: %v", err)
+	}
+
+	if err := actorSystem.Start(ctx); err != nil {
+		b.Fatalf("failed to start actor system: %v", err)
+	}
+	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	// each request comes back as a reply, so a pair exchanges two messages
+	// per request
+	requests := max(b.N/(2*pairs), 1)
+	clients := make([]*actor.PID, pairs)
+	dones := make([]chan struct{}, pairs)
+
+	for i := range pairs {
+		echo, err := actorSystem.Spawn(ctx, fmt.Sprintf("echo-%d", i), new(pingPongEcho))
+		if err != nil {
+			b.Fatalf("failed to spawn echo: %v", err)
+		}
+
+		dones[i] = make(chan struct{})
+		clients[i], err = actorSystem.Spawn(ctx, fmt.Sprintf("client-%d", i), &pingPongClient{
+			echo:      echo,
+			batch:     inFlight,
+			remaining: requests,
+			message:   new(testpb.TestSend),
+			done:      dones[i],
+		})
+		if err != nil {
+			b.Fatalf("failed to spawn client: %v", err)
+		}
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for _, client := range clients {
+		if err := actor.Tell(ctx, client, new(pingPongStart)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	for _, done := range dones {
+		<-done
+	}
+
+	b.StopTimer()
+	messagesPerSec := float64(2*requests*pairs) / b.Elapsed().Seconds()
+	b.ReportMetric(messagesPerSec, "messages/sec")
 }

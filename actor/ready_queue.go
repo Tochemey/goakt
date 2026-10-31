@@ -25,6 +25,7 @@ package actor
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 )
 
@@ -38,6 +39,25 @@ const localQueueCap = 256
 // the amortised growth strategy used by Go's channel implementation.
 const globalQueueInitialCap = 64
 
+// runnextStealAge is how long the actor in a worker's run-next slot is left
+// to that worker before another worker may steal it: the time the owner's
+// turn has been running, measured from the turn's start. A turn that readies
+// an actor normally ends within a microsecond or two and runs it next, on the
+// same core, cache-hot; a turn still running after this long is in a long or
+// blocked handler, and the readied actor is better off elsewhere. The Go
+// scheduler applies the same rule to its runnext slot, with a 3 µs wait.
+const runnextStealAge = 10 * time.Microsecond
+
+// runnextChainLimit is how many actors in a row a worker runs from its
+// run-next slot while its ring holds actors waiting. Each hand-off refills
+// the slot, so two actors exchanging messages could otherwise keep the slot
+// full and the ring waiting for as long as they talk; at this count the
+// slot's actor goes to the back of the ring and the ring is served. The Go
+// scheduler bounds the same chain with the time slice a runnext goroutine
+// inherits; this uses the same count as the global queue check, so a ring
+// actor waits at most that many hand-offs, a few microseconds.
+const runnextChainLimit = 61
+
 // globalQueueCheckInterval is how often, in takes, a worker looks at the
 // global queue before its own local ring. A worker otherwise reads its local
 // ring first, and an actor that spends its throughput budget goes back onto
@@ -47,6 +67,9 @@ const globalQueueInitialCap = 64
 // scheduler checks its global run queue every 61 ticks for the same reason;
 // the odd number avoids falling into step with other periodic work.
 const globalQueueCheckInterval = 61
+
+// monotonicEpoch is the origin of monotonicNanos.
+var monotonicEpoch = time.Now()
 
 // schedulable is the unit scheduled by the dispatcher. The interface is
 // intentionally minimal: scheduling state, throughput budgeting, and
@@ -85,6 +108,22 @@ type localQueue struct {
 	// at the global queue (see globalQueueCheckInterval). Only the owning
 	// worker reads or writes it, so it needs neither mu nor an atomic.
 	takes uint32
+	// runnextTakes counts the owner's consecutive takes from the run-next
+	// slot, to serve the ring at runnextChainLimit. Owner-only, like takes.
+	runnextTakes uint32
+	// runnext is the actor a turn on the owning worker has just made ready,
+	// which the owner runs next, before its ring, as the Go scheduler runs the
+	// goroutine readied by the running one from its runnext slot. It is
+	// guarded by mu. The owner fills and empties it; a thief may take it only
+	// once the owner's turn has run for runnextStealAge (see stealRunnext).
+	runnext schedulable
+	// runnextSet mirrors runnext != nil and is updated under mu, so the owner
+	// and thieves skip the lock while the slot is empty, the common case.
+	runnextSet atomic.Bool
+	// turnStart is the monotonic time at which the owner's current turn
+	// began (see worker.beginTurn). Thieves and the dispatcher's watchdog
+	// read it to age the run-next slot.
+	turnStart atomic.Int64
 }
 
 // globalQueue is an unbounded amortised-FIFO ring buffer guarded by an
@@ -157,6 +196,13 @@ type readyQueue struct {
 	// closed reports that close has been called; parking workers exit
 	// instead of waiting.
 	closed atomic.Bool
+	// runnextWatched is set while the dispatcher's watchdog is armed, which
+	// is from the moment a run-next slot is filled until the watchdog finds
+	// every slot empty (see dispatcher.armWatchdog). Thieves probe the slots
+	// only while it is set, so a worker that finds nothing to do and parks
+	// pays one load for them, not one per sibling, when no turn has readied
+	// an actor.
+	runnextWatched atomic.Bool
 	// searching is set while a worker woken by wakeSearcher has not yet
 	// found work or parked again. It allows one such wake at a time, the
 	// rule the Go scheduler applies to its spinning threads: work pushed to
@@ -265,8 +311,8 @@ func (rq *readyQueue) wakeSearcher() {
 // available or the queue is closed. The second return value is false
 // when the queue has been closed and no items remain for this worker.
 //
-// Take order: own local ring -> global ring -> steal from siblings ->
-// park. This order maximises cache locality for the owner, progress comes
+// Take order: own run-next slot -> own local ring -> global ring -> steal
+// from siblings -> park. This order maximises cache locality for the owner, progress comes
 // from stealing, and every globalQueueCheckInterval takes the global ring
 // is read first, so a worker kept busy by its local ring still serves the
 // actors waiting there.
@@ -283,6 +329,10 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 			if s := rq.popGlobal(); s != nil {
 				return rq.endSearch(s, woken, false)
 			}
+		}
+
+		if s := local.takeRunnext(rq); s != nil {
+			return rq.endSearch(s, woken, false)
 		}
 
 		if s := local.popFront(); s != nil {
@@ -359,6 +409,11 @@ func (rq *readyQueue) popGlobal() schedulable {
 // mu is only taken when the atomic load observes pending work, eliminating
 // the N-way mutex fan-out that otherwise dominated the take loop when
 // most queues are idle.
+//
+// A sibling's run-next slot is a target too, after every ring, while any slot
+// may be occupied (see runnextWatched): only once the sibling's turn has run
+// for runnextStealAge (see stealRunnext), so the actor a short turn readied
+// stays with the worker that will run it next.
 func (rq *readyQueue) trySteal(workerID int) schedulable {
 	n := len(rq.locals)
 	if n == 1 {
@@ -372,6 +427,22 @@ func (rq *readyQueue) trySteal(workerID int) schedulable {
 		}
 
 		if s := victim.stealHalf(own); s != nil {
+			return s
+		}
+	}
+
+	if !rq.runnextWatched.Load() {
+		return nil
+	}
+
+	now := monotonicNanos()
+	for i := 1; i < n; i++ {
+		victim := rq.locals[(workerID+i)%n]
+		if !victim.runnextSet.Load() {
+			continue
+		}
+
+		if s := victim.stealRunnext(now); s != nil {
 			return s
 		}
 	}
@@ -427,6 +498,30 @@ func (rq *readyQueue) parkAndTake(workerID int) (schedulable, bool) {
 func (rq *readyQueue) hasLocalWork() bool {
 	for _, local := range rq.locals {
 		if local.sizeAtomic.Load() > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasRunnext reports whether any worker's run-next slot is occupied.
+func (rq *readyQueue) hasRunnext() bool {
+	for _, local := range rq.locals {
+		if local.runnextSet.Load() {
+			return true
+		}
+	}
+
+	return false
+}
+
+// hasStaleRunnext reports whether some worker's run-next slot holds an actor
+// a thief may take at now (see stealRunnext): the dispatcher's watchdog then
+// wakes a searcher to take it.
+func (rq *readyQueue) hasStaleRunnext(now int64) bool {
+	for _, local := range rq.locals {
+		if local.runnextSet.Load() && now-local.turnStart.Load() > int64(runnextStealAge) {
 			return true
 		}
 	}
@@ -498,6 +593,80 @@ func (q *localQueue) popFront() schedulable {
 	q.head = (q.head + 1) % localQueueCap
 	q.size--
 	q.sizeAtomic.Store(int32(q.size))
+	q.mu.Unlock()
+	return s
+}
+
+// pushRunnext fills the run-next slot with s and reports whether it did; the
+// slot was occupied when it reports false. Only the owning worker calls it.
+func (q *localQueue) pushRunnext(s schedulable) bool {
+	q.mu.Lock()
+	if q.runnext != nil {
+		q.mu.Unlock()
+		return false
+	}
+	q.runnext = s
+	q.runnextSet.Store(true)
+	q.mu.Unlock()
+	return true
+}
+
+// takeRunnext is the owner's take from its run-next slot: the slot's actor,
+// or nil when the slot is empty or the ring's turn has come. The ring's turn
+// comes after runnextChainLimit consecutive takes from the slot while the
+// ring holds actors; the slot's actor then goes to the back of the ring, or
+// to rq's global queue when the ring is full, and the caller serves the ring.
+func (q *localQueue) takeRunnext(rq *readyQueue) schedulable {
+	if !q.runnextSet.Load() {
+		q.runnextTakes = 0
+		return nil
+	}
+
+	if q.runnextTakes >= runnextChainLimit && q.sizeAtomic.Load() > 0 {
+		q.runnextTakes = 0
+		if s := q.popRunnext(); s != nil && !q.pushBack(s) {
+			rq.push(s)
+		}
+
+		return nil
+	}
+
+	s := q.popRunnext()
+	if s != nil {
+		q.runnextTakes++
+	}
+
+	return s
+}
+
+// popRunnext empties the run-next slot and returns what it held, or nil when
+// it was empty. Only the owning worker calls it.
+func (q *localQueue) popRunnext() schedulable {
+	if !q.runnextSet.Load() {
+		return nil
+	}
+
+	return q.clearRunnext()
+}
+
+// stealRunnext takes the run-next slot's actor for another worker, and
+// returns nil while the slot is empty or the owner's turn has run for less
+// than runnextStealAge at now (see runnextStealAge).
+func (q *localQueue) stealRunnext(now int64) schedulable {
+	if now-q.turnStart.Load() <= int64(runnextStealAge) {
+		return nil
+	}
+
+	return q.clearRunnext()
+}
+
+// clearRunnext empties the run-next slot under the lock and returns what it
+// held, nil when a concurrent take emptied it first.
+func (q *localQueue) clearRunnext() schedulable {
+	q.mu.Lock()
+	s := q.runnext
+	q.runnext = nil
+	q.runnextSet.Store(false)
 	q.mu.Unlock()
 	return s
 }
@@ -602,4 +771,11 @@ func lockOrder(a, b *localQueue) (*localQueue, *localQueue) {
 		return a, b
 	}
 	return b, a
+}
+
+// monotonicNanos returns a monotonic reading in nanoseconds, from the
+// process's own epoch, for aging run-next slots. time.Since reads the
+// monotonic clock, so a wall-clock adjustment does not move the age.
+func monotonicNanos() int64 {
+	return int64(time.Since(monotonicEpoch))
 }

@@ -4,6 +4,7 @@
 
 - **Named dispatchers.** A group of actors or grains whose handlers block can run on a worker pool of its own, so the default pool keeps its size and its speed for everything else.
 - **Spawning and stopping an actor is about a third faster and allocates a third as much.**
+- **A message between two actors is handed off three times faster.** A ping-pong between two actors with one message in flight runs at 8 million messages/sec, from 2.6 million, and a token around a ring of 100 actors makes 7.8 million hops/sec, from 2.4 million.
 
 ## Features
 
@@ -16,4 +17,5 @@
 
 ## Performance
 
+- **A message between two actors is handed off three times faster.** An actor that a turn makes ready now runs next on the same worker, as a goroutine readied by the running one does in the Go scheduler, instead of waking another worker for every message. A ping-pong between two actors with one message in flight runs at 8 million messages/sec, from 2.6 million (`BenchmarkTellPingPongSinglePair`), and a token passed around a ring of 100 actors makes 7.8 million hops/sec, from 2.4 million (`BenchmarkThreadRing`). Throughput with many messages in flight, asks and spawns are unchanged, and nothing allocates per message. An actor readied by a handler that then blocks is still run by another worker, within about 100 µs.
 - **Spawning and stopping an actor is about a third faster and allocates a third as much.** A spawn followed by a stop takes 4.6 µs and 22 allocations, from 6.8 µs and 61 (`BenchmarkSpawnStop`); a top-level spawn makes 19 allocations, from 25, and a child spawn 22 at any depth, from 27 plus one per ancestor. The spawn no longer starts a goroutine per activation, the stop path skips its debug logging unless the logger has the debug level enabled, the `ActorStopped` event is built only when the topic has a subscriber, one `Terminated` serves every watcher of a stopped actor, and an actor path builds its parent view on demand. Settings, errors and event delivery are unchanged. In the comparison benchmarks, a spawn and stop takes 4.7 µs, from 8.2 µs.

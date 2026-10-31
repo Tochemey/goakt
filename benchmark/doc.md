@@ -38,6 +38,22 @@ Each client actor keeps a fixed number of messages in flight to its own echo act
 go test -run=^$ -bench=^BenchmarkTellPingPong$ -count=10 -benchmem ./benchmark/
 ```
 
+### TellPingPongSinglePair — the hand-off between two actors, nothing else running
+
+One client and one echo actor with one message in flight, so every message wakes an idle actor and the number is the cost of handing the turn from one actor to the other, twice per round trip. It is the one-pair, one-in-flight case of TellPingPong, kept apart because it answers a latency question. Cite this as the actor-to-actor latency number.
+
+```
+go test -run=^$ -bench=^BenchmarkTellPingPongSinglePair$ -count=10 -benchmem ./benchmark/
+```
+
+### ThreadRing — one token around a ring of 100 actors
+
+One token passed around a ring of 100 actors, one hop per message, until it has made b.N hops, as in the Savina ThreadRing benchmark. Only one actor is runnable at any time, so the number is the latency of handing the turn from one actor to the next through a long chain.
+
+```
+go test -run=^$ -bench=^BenchmarkThreadRing$ -count=10 -benchmem ./benchmark/
+```
+
 ### TellPayload — async send swept by payload size (0 B … 64 KiB)
 
 ```

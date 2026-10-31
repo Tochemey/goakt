@@ -531,6 +531,7 @@ func (pid *grainPID) runTurn(w *worker) {
 	}
 
 	now := time.Now()
+	w.beginTurn(now)
 	budget := w.dispatcher.throughput
 	for range budget {
 		grainContext := pid.dequeueResponse()

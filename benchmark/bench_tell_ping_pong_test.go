@@ -23,14 +23,9 @@
 package benchmark
 
 import (
-	"context"
 	"fmt"
 	"runtime"
 	"testing"
-
-	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 // pingPongInFlight is the sweep of messages each BenchmarkTellPingPong client
@@ -57,65 +52,4 @@ func BenchmarkTellPingPong(b *testing.B) {
 			})
 		}
 	}
-}
-
-// benchmarkTellPingPong runs BenchmarkTellPingPong for pairs client/echo pairs
-// with inFlight messages in flight per pair. b.N is the number of messages,
-// requests and replies together.
-func benchmarkTellPingPong(b *testing.B, pairs, inFlight int) {
-	ctx := context.Background()
-
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
-	}
-
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	// each request comes back as a reply, so a pair exchanges two messages
-	// per request
-	requests := max(b.N/(2*pairs), 1)
-	clients := make([]*actor.PID, pairs)
-	dones := make([]chan struct{}, pairs)
-
-	for i := range pairs {
-		echo, err := actorSystem.Spawn(ctx, fmt.Sprintf("echo-%d", i), new(pingPongEcho))
-		if err != nil {
-			b.Fatalf("failed to spawn echo: %v", err)
-		}
-
-		dones[i] = make(chan struct{})
-		clients[i], err = actorSystem.Spawn(ctx, fmt.Sprintf("client-%d", i), &pingPongClient{
-			echo:      echo,
-			batch:     inFlight,
-			remaining: requests,
-			message:   new(testpb.TestSend),
-			done:      dones[i],
-		})
-		if err != nil {
-			b.Fatalf("failed to spawn client: %v", err)
-		}
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for _, client := range clients {
-		if err := actor.Tell(ctx, client, new(pingPongStart)); err != nil {
-			b.Fatal(err)
-		}
-	}
-
-	for _, done := range dones {
-		<-done
-	}
-
-	b.StopTimer()
-	messagesPerSec := float64(2*requests*pairs) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
 }

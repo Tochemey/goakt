@@ -152,3 +152,35 @@ func TestDispatcherHighFanout(t *testing.T) {
 		return true
 	}, 5*time.Second, 5*time.Millisecond)
 }
+
+// TestDispatcherWatchdogRescuesARunnextActorFromABlockedTurn verifies that an
+// actor left in a run-next slot by a turn that blocks in user code is run by
+// another worker within the watchdog's bound, and that the watchdog disarms
+// once every slot is empty.
+func TestDispatcherWatchdogRescuesARunnextActorFromABlockedTurn(t *testing.T) {
+	d := newDispatcher(2, dispatcherThroughput)
+	d.start()
+	t.Cleanup(d.signalStop)
+
+	release := make(chan struct{})
+	ran := make(chan struct{})
+	waiting := &MockReschedulingSchedulable{onRun: func(schedulable, *worker) { close(ran) }}
+	waiting.self = waiting
+
+	blocker := &MockReschedulingSchedulable{onRun: func(_ schedulable, w *worker) {
+		w.beginTurn(time.Now())
+		w.scheduleLocal(waiting)
+		<-release
+	}}
+	blocker.self = blocker
+
+	d.schedule(blocker)
+	select {
+	case <-ran:
+	case <-time.After(time.Second):
+		t.Fatal("the readied actor waited for the blocked turn")
+	}
+
+	close(release)
+	require.Eventually(t, func() bool { return !d.readyQueue.runnextWatched.Load() }, time.Second, time.Millisecond, "the watchdog disarms once the slots are empty")
+}

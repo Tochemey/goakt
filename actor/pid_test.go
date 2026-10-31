@@ -10498,3 +10498,32 @@ func TestAskReusesReplyChannels(t *testing.T) {
 		}
 	})
 }
+
+// TestAskFromATurnHandsOffTheActorItReadied verifies that an actor which
+// tells another actor and then asks it, in one turn, gets its reply: the ask
+// hands the readied actor, held in the turn's run-next slot, to another
+// worker before it blocks, instead of waiting for it with the slot's actor
+// unable to run.
+func TestAskFromATurnHandsOffTheActorItReadied(t *testing.T) {
+	ctx := context.Background()
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
+	require.NoError(t, err)
+	require.NoError(t, actorSystem.Start(ctx))
+	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+
+	target, err := actorSystem.Spawn(ctx, "target", NewMockActor())
+	require.NoError(t, err)
+
+	replies := make(chan any, 1)
+	asker, err := actorSystem.Spawn(ctx, "asker", &MockTellThenAskActor{target: target, replies: replies})
+	require.NoError(t, err)
+
+	require.NoError(t, Tell(ctx, asker, new(tellThenAskStart)))
+
+	select {
+	case reply := <-replies:
+		require.IsType(t, new(testpb.Reply), reply)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the ask from the turn never completed")
+	}
+}

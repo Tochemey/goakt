@@ -1328,6 +1328,12 @@ func (pid *PID) Ask(ctx context.Context, to *PID, message any, timeout time.Dura
 	timeoutTimer := startAskTimer(responseCh, timeout)
 	to.doReceive(receiveContext)
 
+	// A turn about to wait for a reply hands the actor it readied, if any,
+	// to another worker: the reply may depend on that actor running.
+	if w := pid.currentWorker(); w != nil {
+		w.handoffRunnext()
+	}
+
 	select {
 	case result := <-responseCh:
 		stopped := timeoutTimer.stop()
@@ -2320,6 +2326,7 @@ func (pid *PID) runTurn(w *worker) {
 
 	pid.turnWorker.Store(w)
 	now := time.Now()
+	w.beginTurn(now)
 	budget := w.dispatcher.throughput
 	for range budget {
 		// PostStart goes first at every message boundary, not only at the
