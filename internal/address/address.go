@@ -46,9 +46,10 @@
 package address
 
 import (
+	"encoding/binary"
 	"errors"
+	"math/rand/v2"
 	"net"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -66,21 +67,14 @@ const (
 	// qualifiedNameSeparator joins the names of an actor's ancestors and its own
 	// name into its qualified name.
 	qualifiedNameSeparator = "/"
-	// namePattern is the pattern an actor system name and an actor name must
-	// match: a word character followed by word characters, '-', '_' or '.'.
-	namePattern = "^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$"
 	// maxNameLength bounds the length of an actor name.
 	maxNameLength = 255
 )
 
-// nameRegexp is namePattern compiled once, so validating a name does not
-// compile it again on every call.
-var nameRegexp = regexp.MustCompile(namePattern)
-
 // msgNameTooLong reports a name longer than maxNameLength.
 var msgNameTooLong = "actor name is too long. Maximum length is " + strconv.Itoa(maxNameLength)
 
-// errInvalidNamePattern reports a name that does not match namePattern.
+// errInvalidNamePattern reports a name that validName rejects.
 var errInvalidNamePattern = errors.New("must contain only word characters (i.e. [a-zA-Z0-9] plus non-leading '-' or '_')")
 
 // zeroAddress means that there is no sender
@@ -151,7 +145,7 @@ func New(name, system string, host string, port int) *Address {
 		port:          port,
 		name:          name,
 		system:        system,
-		incarnationID: uuid.NewString(),
+		incarnationID: newIncarnationID(),
 	}
 	a.cachedQualifiedName = a.buildQualifiedName()
 	a.cachedStr = a.buildString()
@@ -190,7 +184,7 @@ func NewWithParent(name, system, host string, port int, parent *Address) *Addres
 		port:          port,
 		name:          name,
 		system:        system,
-		incarnationID: uuid.NewString(),
+		incarnationID: newIncarnationID(),
 	}
 	if parent != nil {
 		a.parent = parent
@@ -349,10 +343,9 @@ func JoinNames(names ...string) string {
 }
 
 // ValidateName reports whether name may name an actor: it must not be empty,
-// must be at most maxNameLength characters long and must match namePattern.
+// must be at most maxNameLength characters long and must satisfy validName.
 // These are the rules Validate applies to an address's name, so a name this
-// function accepts is one Spawn accepts. The pattern is matched with the
-// precompiled nameRegexp, so the check is cheap enough for a send path.
+// function accepts is one Spawn accepts.
 func ValidateName(name string) error {
 	if err := validation.NewEmptyStringValidator("name", name).Validate(); err != nil {
 		return err
@@ -362,7 +355,7 @@ func ValidateName(name string) error {
 		return errors.New(msgNameTooLong)
 	}
 
-	if !nameRegexp.MatchString(strings.TrimSpace(name)) {
+	if !validName(strings.TrimSpace(name)) {
 		return errInvalidNamePattern
 	}
 
@@ -546,7 +539,7 @@ func (x *Address) validateFields() error {
 		return errors.New(msgNameTooLong)
 	}
 
-	if !nameRegexp.MatchString(x.System()) || !nameRegexp.MatchString(strings.TrimSpace(x.Name())) {
+	if !validName(x.System()) || !validName(strings.TrimSpace(x.Name())) {
 		return errInvalidNamePattern
 	}
 
@@ -673,4 +666,43 @@ func Parse(addr string) (*Address, error) {
 	}
 
 	return NewWithParent(name, system, host, port, parent), nil
+}
+
+// validName reports whether name may name an actor or an actor system: a
+// letter or a digit, followed by letters, digits, '-', '_' or '.', which is the
+// pattern ^[a-zA-Z0-9][a-zA-Z0-9-_\\.]*$. It is a loop over the bytes rather
+// than a regular expression because every spawn validates its address with it.
+func validName(name string) bool {
+	if name == "" {
+		return false
+	}
+
+	for i := range len(name) {
+		c := name[i]
+		switch {
+		case 'a' <= c && c <= 'z', 'A' <= c && c <= 'Z', '0' <= c && c <= '9':
+		case i > 0 && (c == '-' || c == '_' || c == '.'):
+		default:
+			return false
+		}
+	}
+
+	return true
+}
+
+// newIncarnationID returns the incarnation identity of a new address: a
+// version 4 UUID in its canonical string form, which uuid.Validate accepts.
+// Its 122 random bits come from math/rand/v2, whose generator the runtime
+// seeds from the operating system once, rather than from crypto/rand, which
+// reads the operating system's entropy on every call: that read was a system
+// call per spawn and over a tenth of the time of a spawn-heavy workload. An
+// incarnation identity tells two lives of one actor name apart; it is not a
+// secret, so the generator needs to be unpredictable to nobody.
+func newIncarnationID() string {
+	var id uuid.UUID
+	binary.LittleEndian.PutUint64(id[:8], rand.Uint64()) //nolint:gosec // an incarnation identity is not a secret, see above
+	binary.LittleEndian.PutUint64(id[8:], rand.Uint64()) //nolint:gosec // an incarnation identity is not a secret, see above
+	id[6] = (id[6] & 0x0f) | 0x40                        // version 4
+	id[8] = (id[8] & 0x3f) | 0x80                        // RFC 4122 variant
+	return id.String()
 }

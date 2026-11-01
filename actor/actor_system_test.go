@@ -7179,7 +7179,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7211,7 +7211,7 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.locker.Unlock()
 
 	ids := map[string]string{}
@@ -7301,7 +7301,7 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7331,7 +7331,7 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7365,7 +7365,7 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7472,7 +7472,7 @@ func TestStopSucceedsWhenRegistryCleanupFails(t *testing.T) {
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors = newTree()
 	system.actors.noSender.Store(nil)
-	system.noSender = nil
+	system.noSender.Store(nil)
 	system.topicActor = nil
 	system.rootGuardian = nil
 	system.systemGuardian = nil
@@ -7527,7 +7527,7 @@ func TestStopSucceedsWhenListedPeersAreLeaving(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors.noSender.Store(nil)
-	system.noSender = nil
+	system.noSender.Store(nil)
 	system.topicActor = nil
 	system.remotingEnabled.Store(false)
 	system.relocationEnabled.Store(true)

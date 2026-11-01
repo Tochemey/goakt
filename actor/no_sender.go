@@ -42,10 +42,7 @@ import (
 //   - The value is stable for local use and intended to explicitly indicate the
 //     absence of a sender (as opposed to nil).
 func (x *actorSystem) NoSender() *PID {
-	x.locker.RLock()
-	noSender := x.noSender
-	x.locker.RUnlock()
-	return noSender
+	return x.noSender.Load()
 }
 
 // noSender is a special actor that does not have a sender
@@ -79,13 +76,14 @@ func (x *actorSystem) spawnNoSender(ctx context.Context) error {
 		sup.WithAnyErrorDirective(sup.ResumeDirective),
 	)
 
-	x.noSender, _ = x.configPID(ctx,
+	noSender, _ := x.configPID(ctx,
 		actorName,
 		newNoSender(),
 		asSystem(),
 		WithLongLived(),
 		WithSupervisor(supervisor),
 	)
+	x.noSender.Store(noSender)
 
-	return x.attachSystemActor(x.systemGuardian, x.noSender)
+	return x.attachSystemActor(x.systemGuardian, noSender)
 }

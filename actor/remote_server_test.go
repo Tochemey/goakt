@@ -357,7 +357,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("empty sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = newPIDAt(sys, "nosender", 0)
+		sys.noSender.Store(newPIDAt(sys, "nosender", 0))
 
 		pid := sys.newRemoteSenderPID("")
 		assert.Equal(t, sys.NoSender(), pid)
@@ -365,7 +365,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("malformed sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = newPIDAt(sys, "nosender", 0)
+		sys.noSender.Store(newPIDAt(sys, "nosender", 0))
 
 		pid := sys.newRemoteSenderPID("not-an-address")
 		assert.Equal(t, sys.NoSender(), pid)

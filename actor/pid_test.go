@@ -744,8 +744,8 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system}
-		system.noSender.setState(runningState, true)
+		system.noSender.Store(&PID{actorSystem: system})
+		system.noSender.Load().setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -785,8 +785,8 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system}
-		system.noSender.setState(runningState, true)
+		system.noSender.Store(&PID{actorSystem: system})
+		system.noSender.Load().setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -7034,7 +7034,7 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 			mockSys.actors = actualSys.tree()
 		}
 		if actualSys, ok := sys.(interface{ NoSender() *PID }); ok {
-			mockSys.noSender = actualSys.NoSender()
+			mockSys.noSender.Store(actualSys.NoSender())
 		}
 		// the PID publishes deadletters through its system's event stream
 		mockSys.eventsStream = sys.getEventsStream()
@@ -9030,8 +9030,8 @@ func TestNewPIDDefaultLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9056,8 +9056,8 @@ func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9150,8 +9150,8 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9174,8 +9174,8 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	aggregating := lowCardinality.(*actorSystem)
-	aggregating.noSender = &PID{actorSystem: aggregating}
-	aggregating.noSender.setState(runningState, true)
+	aggregating.noSender.Store(&PID{actorSystem: aggregating})
+	aggregating.noSender.Load().setState(runningState, true)
 	aggregating.dispatcher.start()
 	t.Cleanup(func() { aggregating.dispatcher.signalStop() })
 
@@ -10530,14 +10530,12 @@ func TestAskFromATurnHandsOffTheActorItReadied(t *testing.T) {
 }
 
 // TestDeathWatchIsToldWithoutAWatchEdge verifies that a spawned actor has no
-// watch edge to the death watch in the tree, in either direction, and that the
-// death watch is still told when the actor stops.
+// watch edge to the death watch in the tree, in either direction, and that
+// outside a cluster, where the death watch has nothing to do for a stopped
+// actor, the actor does not tell it when it stops.
 func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
 	ctx := context.Background()
-	// handleTerminated logs this line when the death watch receives a
-	// Terminated from the dead actor itself
-	logger := NewMockSignalLogger("actor=%s removing dead actor resource")
-	actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NoError(t, actorSystem.Start(ctx))
 	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
@@ -10551,11 +10549,9 @@ func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
 	require.NotContains(t, tree.watchers(pid), deathWatch, "the death watch holds no edge on the actor")
 	require.Empty(t, tree.watchees(deathWatch), "the death watch watches nothing in the tree")
 
+	before := deathWatch.ProcessedCount()
 	require.NoError(t, pid.Shutdown(ctx))
-
-	select {
-	case <-logger.hit:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the death watch was not told that the actor stopped")
-	}
+	require.False(t, actorSystem.InCluster())
+	require.Never(t, func() bool { return deathWatch.ProcessedCount() > before }, 200*time.Millisecond, 10*time.Millisecond,
+		"outside a cluster the death watch must not be told that the actor stopped")
 }

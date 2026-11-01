@@ -36,6 +36,15 @@ import (
 // lock that a larger segment would take on every allocation.
 const mailboxSegmentSlots = 32
 
+// mailboxFirstSegmentSlots is the number of slots in an actor's first segment.
+// Most actors never hold more than a few messages at once, and a short-lived
+// actor may receive a single one, so the first segment is small: 8 slots make
+// a 640-byte allocation against the 2 KiB of a full segment, which was close
+// to half of everything a workload that spawns an actor per message allocated.
+// An actor whose backlog outgrows it links full segments from then on; the
+// first segment is recycled like any other once the consumer finishes it.
+const mailboxFirstSegmentSlots = 8
+
 // mailboxSpareSegments is the number of drained segments the default mailbox
 // keeps for reuse. A backlog deeper than two segments drains several at once,
 // and a single spare let all but one of them go to the garbage collector, so
@@ -115,8 +124,10 @@ type mailboxSegment struct {
 	// under an older generation may have consumed. Generations wrap, so it is
 	// compared with linkedInGeneration, not with the ordering of its values.
 	linked atomic.Uint64
-	// slots holds the messages in claim order.
-	slots [mailboxSegmentSlots]mailboxSlot
+	// slots holds the messages in claim order. It is the storage allocated
+	// with the segment by newMailboxSegment: mailboxFirstSegmentSlots for an
+	// actor's first segment, mailboxSegmentSlots for every later one.
+	slots []mailboxSlot
 }
 
 // mailboxSpareRing is a ring of drained segments. The consumer pushes at push,
@@ -215,7 +226,7 @@ func (x *embeddedMailbox) Dequeue() *ReceiveContext {
 
 	for {
 		read := state.read.Load()
-		if read < mailboxSegmentSlots {
+		if read < uint32(len(segment.slots)) {
 			slot := &segment.slots[read]
 			switch mailboxSlotState(slot.state.Load()) {
 			case slotEmpty:
@@ -255,7 +266,7 @@ func (x *embeddedMailbox) Len() int64 {
 	var count int64
 	read := uint64(x.embedded.read.Load())
 	for segment != nil {
-		claimed := min(cursorClaims(segment.cursor.Load()), mailboxSegmentSlots)
+		claimed := min(cursorClaims(segment.cursor.Load()), uint64(len(segment.slots)))
 		if claimed > read {
 			count += int64(claimed - read)
 		}
@@ -277,7 +288,7 @@ func (x *embeddedMailbox) IsEmpty() bool {
 
 	read := x.embedded.read.Load()
 	for segment != nil {
-		for ; read < mailboxSegmentSlots; read++ {
+		for ; read < uint32(len(segment.slots)); read++ {
 			switch mailboxSlotState(segment.slots[read].state.Load()) {
 			case slotEmpty:
 				return true
@@ -346,14 +357,14 @@ func (x *embeddedMailbox) claimIn(segment *mailboxSegment, generation uint64) *m
 	// The segment was reused before the claim: the slot belongs to the new
 	// generation, whose consumer must not wait for it.
 	if cursorGeneration(claimed) != generation {
-		if index < mailboxSegmentSlots {
+		if index < uint64(len(segment.slots)) {
 			segment.slots[index].state.Store(uint32(slotAbandoned))
 		}
 		return nil
 	}
 
 	switch {
-	case index < mailboxSegmentSlots:
+	case index < uint64(len(segment.slots)):
 		return &segment.slots[index]
 	case x.claimLink(segment, generation):
 		x.link(segment)
@@ -370,7 +381,7 @@ func (x *embeddedMailbox) claimIn(segment *mailboxSegment, generation uint64) *m
 // before its first turn. A producer that loses the race waits for the winner to
 // publish the tail and uses it.
 func (x *embeddedMailbox) firstSegment() *mailboxSegment {
-	segment := new(mailboxSegment)
+	segment := newMailboxSegment(mailboxFirstSegmentSlots)
 	if x.mailboxHead.CompareAndSwap(nil, segment) {
 		x.mailboxTail.Store(segment)
 		return segment
@@ -420,7 +431,7 @@ func (x *embeddedMailbox) claimLink(full *mailboxSegment, generation uint64) boo
 func (x *embeddedMailbox) link(full *mailboxSegment) {
 	next := x.embedded.takeSpare()
 	if next == nil {
-		next = new(mailboxSegment)
+		next = newMailboxSegment(mailboxSegmentSlots)
 	}
 
 	full.next.Store(next)
@@ -562,4 +573,26 @@ func cursorClaims(cursor uint64) uint64 {
 // next generation, with no slot claimed.
 func nextGenerationCursor(cursor uint64) uint64 {
 	return (cursorGeneration(cursor) + 1) << mailboxGenerationShift
+}
+
+// newMailboxSegment returns a segment of capacity slots, allocated as one
+// object with its storage: mailboxFirstSegmentSlots for an actor's first
+// segment, and mailboxSegmentSlots, which any other capacity is rounded to,
+// for the segments linked after it.
+func newMailboxSegment(capacity int) *mailboxSegment {
+	if capacity == mailboxFirstSegmentSlots {
+		s := new(struct {
+			segment mailboxSegment
+			storage [mailboxFirstSegmentSlots]mailboxSlot
+		})
+		s.segment.slots = s.storage[:]
+		return &s.segment
+	}
+
+	s := new(struct {
+		segment mailboxSegment
+		storage [mailboxSegmentSlots]mailboxSlot
+	})
+	s.segment.slots = s.storage[:]
+	return &s.segment
 }

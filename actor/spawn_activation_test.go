@@ -50,7 +50,7 @@ func TestSpawnActivationGroup(t *testing.T) {
 		require.Same(t, want, pid)
 		require.False(t, shared)
 		require.True(t, inline)
-		require.Empty(t, group.calls, "the call is removed once it has returned")
+		require.Empty(t, group.shard("key").calls, "the call is removed once it has returned")
 	})
 
 	t.Run("returns the spawn's error", func(t *testing.T) {
@@ -100,9 +100,9 @@ func TestSpawnActivationGroup(t *testing.T) {
 
 		// the waiter joins the in-flight call instead of starting its own
 		require.Eventually(t, func() bool {
-			group.mu.Lock()
-			defer group.mu.Unlock()
-			return group.calls["key"].waiters == 1
+			group.shard("key").mu.Lock()
+			defer group.shard("key").mu.Unlock()
+			return group.shard("key").calls["key"].waiters == 1
 		}, time.Second, 5*time.Millisecond)
 
 		close(release)
@@ -191,6 +191,6 @@ func TestSpawnActivationGroup(t *testing.T) {
 		close(release)
 		require.Equal(t, "spawn panicked", <-recovered)
 		require.ErrorContains(t, <-waiterErr, "spawn activation of key panicked")
-		require.Empty(t, group.calls)
+		require.Empty(t, group.shard("key").calls)
 	})
 }

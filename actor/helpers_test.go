@@ -207,9 +207,9 @@ func newReplicationSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 		clusterNode:           &discovery.Node{Host: "127.0.0.1", PeersPort: 9000},
 		cluster:               clusterMock,
 		topicActor:            topic,
-		noSender:              noSender,
 		dispatcher:            newDispatcher(dispatcherWorkerCount(), dispatcherThroughput),
 	}
+	sys.noSender.Store(noSender)
 	sys.relocationJobs = make(map[string]*internalpb.PeerState)
 	sys.peerRemotingPorts = xsync.NewMap[string, int]()
 	sys.relocatingEndpoints = xsync.NewTTLMap[string, types.Unit](relocationHandoffWindow)
@@ -225,7 +225,7 @@ func newReplicationSystem(clusterMock *mockcluster.Cluster) *actorSystem {
 
 	sys.clusterEnabled.Store(true)
 	sys.relocationEnabled.Store(false) // callers toggle when needed
-	sys.noSender.actorSystem = sys
+	sys.noSender.Load().actorSystem = sys
 	sys.topicActor.actorSystem = sys
 
 	return sys
@@ -3013,8 +3013,8 @@ func requireProtoError(t *testing.T, msg any, code internalpb.Code) {
 func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port int, name string) *actorSystem {
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
-	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender.Store(sys.noSender)
+	sys.noSender.Store(newPIDAt(sys, "nosender", 0))
+	sys.actors.noSender.Store(sys.noSender.Load())
 	addr := address.New(name, sys.Name(), host, port)
 	stoppedPID := &PID{
 		address:     addr,
@@ -3032,8 +3032,8 @@ func newRemoteServerTestSystemWithStoppedActor(t *testing.T, host string, port i
 func newRemoteServerTestSystemWithZombieNode(t *testing.T, host string, port int, name string) *actorSystem {
 	t.Helper()
 	sys := newRemoteServerTestSystem(host, port)
-	sys.noSender = newPIDAt(sys, "nosender", 0)
-	sys.actors.noSender.Store(sys.noSender)
+	sys.noSender.Store(newPIDAt(sys, "nosender", 0))
+	sys.actors.noSender.Store(sys.noSender.Load())
 	addr := address.New(name, sys.Name(), host, port)
 	addrStr := addr.String()
 	n := newPidNode(nil)

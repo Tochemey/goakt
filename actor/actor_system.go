@@ -1204,7 +1204,10 @@ type actorSystem struct {
 	singletonManager *PID
 	topicActor       *PID
 	replicator       *PID
-	noSender         *PID
+	// noSender is the sentinel sender of messages sent from outside an actor.
+	// Spawned once at start and read lock-free by NoSender on every external
+	// send.
+	noSender         atomic.Pointer[PID]
 	peerStatesWriter *PID
 
 	startedAt atomic.Int64

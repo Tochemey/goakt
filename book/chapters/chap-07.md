@@ -184,6 +184,7 @@ The run-next slot wakes nobody. With one message in flight between two actors, e
 
 The claim scan always starts at worker 0. That keeps wake-ups on the same few workers and their caches warm, and lets the rest sleep (`readyQueue.claimIdleWorker` in `actor/ready_queue.go`).
 
+
 ### Why a wake-up cannot be lost
 
 A worker can be about to park just as a producer appends to the global queue. Two atomics settle it (`readyQueue` in `actor/ready_queue.go`):
