@@ -41,13 +41,11 @@ Run every benchmark with `-count=10` and read the median, not the best or the la
 
 ### What the suite reports
 
-Every benchmark reports the same six figures: the time per operation, the bytes and allocations per operation from `-benchmem`, a throughput in `msgs/s`, `actors/s` or `grains/s` from `ReportRate`, and the live heap per idle actor or grain in `B/actor` and `B/grain` from the two memory benchmarks. `benchmark/cmd/table` renders result files as those six tables, Throughput, Time per operation, Bytes allocated per operation, Allocations per operation, Live heap per idle actor and Live heap per idle grain, with the best value in each row in bold and every column's factor relative to the first; `-match` and `-skip` select benchmarks by name:
+Every benchmark reports the time per operation, the bytes and allocations per operation from `-benchmem`, and a throughput in `msgs/s`, `actors/s` or `grains/s`. The two memory benchmarks report the live heap per idle actor or grain in `B/actor` and `B/grain`. To compare two runs, use benchstat:
 
 ```bash
-go run ./benchmark/cmd/table "v4.6.6=before.txt" "branch=after.txt"
+go run golang.org/x/perf/cmd/benchstat@latest before.txt after.txt
 ```
-
-For significance between two runs, use benchstat: `go run golang.org/x/perf/cmd/benchstat@latest before.txt after.txt`.
 
 ### The scenarios
 

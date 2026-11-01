@@ -10,4 +10,4 @@ Message ordering, settings, errors and event delivery are unchanged.
 
 ## Documentation
 
-- **One benchmark suite.** The `benchmark` package now holds eighteen scenarios covering sends, asks, actor-to-actor exchanges, spawn and stop, and grains, each reporting throughput, time, bytes and allocations per operation, plus the live heap per idle actor and grain. `benchmark/cmd/table` renders result files as tables. The earlier benchmarks were removed; the `scale` soak tests remain.
+- **One benchmark suite.** The `benchmark` package now holds eighteen scenarios covering sends, asks, actor-to-actor exchanges, spawn and stop, and grains, each reporting throughput, time, bytes and allocations per operation, plus the live heap per idle actor and grain. The earlier benchmarks were removed; the `scale` soak tests remain.
