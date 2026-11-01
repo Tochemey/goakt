@@ -6,7 +6,7 @@ require (
 	github.com/Workiva/go-datastructures v1.1.8
 	github.com/andybalholm/brotli v1.2.7
 	github.com/bytedance/sonic v1.15.5
-	github.com/cenkalti/backoff/v7 v7.0.1
+	github.com/cenkalti/backoff/v7 v7.0.3
 	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/consul/api/v2 v2.0.0
@@ -105,7 +105,7 @@ require (
 	github.com/hashicorp/serf v0.11.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.1 // indirect
-	github.com/lufia/plan9stats v0.0.0-20260802145828-341c2f0c90b5 // indirect
+	github.com/lufia/plan9stats v0.0.0-20261101121723-be84dd9509a0 // indirect
 	github.com/magiconair/properties v1.18.12 // indirect
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
