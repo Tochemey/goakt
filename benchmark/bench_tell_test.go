@@ -27,56 +27,21 @@ import (
 	"testing"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func BenchmarkTell(b *testing.B) {
 	ctx := context.Background()
-
-	// create the actor system
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
-	}
-
-	// start the actor system
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	// create the actor refs
-	sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
-	if err != nil {
-		b.Fatalf("failed to spawn sender: %v", err)
-	}
-
-	done := make(chan struct{})
-	receiver, err := actorSystem.Spawn(ctx, "receiver", &countingActor{
-		done:   done,
-		target: int64(b.N),
-	})
-	if err != nil {
-		b.Fatalf("failed to spawn receiver: %v", err)
-	}
+	latch := NewLatch(b.N)
+	pid := spawn(b, &sink{latch: latch})
+	msg := new(Ping)
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		// Reuse the same message per goroutine to reduce allocs in the hot path.
-		msg := new(testpb.TestSend)
-		for pb.Next() {
-			if err := sender.Tell(ctx, receiver, msg); err != nil {
-				b.Fatal(err)
-			}
+	for range b.N {
+		if err := actor.Tell(ctx, pid, msg); err != nil {
+			b.Fatal(err)
 		}
-	})
-	<-done
-	b.StopTimer()
-	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+	}
+	latch.Wait(b)
+	ReportRate(b, b.N, MsgsPerSec)
 }

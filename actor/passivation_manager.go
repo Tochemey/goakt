@@ -178,7 +178,13 @@ func (m *passivationManager) Register(participant passivationParticipant, strate
 		// deadline (last activity + timeout) we avoid per-actor goroutines.
 		entry.refreshDeadline()
 		cheaps.Push(&m.queue, entry)
-		m.notifyLocked()
+		// The loop sleeps until the earliest deadline and reads the heap's top
+		// again when it wakes, so only an entry that became the earliest needs
+		// it woken; a wake per registration sent a channel message and woke a
+		// goroutine for every spawn.
+		if entry.index == 0 {
+			m.notifyLocked()
+		}
 	case *passivation.MessagesCountBasedStrategy:
 		entry.maxMessages = s.MaxMessages()
 		if pid, ok := participant.(*PID); ok {

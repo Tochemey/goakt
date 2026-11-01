@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -744,8 +745,8 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system}
-		system.noSender.setState(runningState, true)
+		system.noSender.Store(&PID{actorSystem: system})
+		system.noSender.Load().setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -785,8 +786,8 @@ func TestRestart(t *testing.T) {
 		require.NoError(t, err)
 
 		system := sys.(*actorSystem)
-		system.noSender = &PID{actorSystem: system}
-		system.noSender.setState(runningState, true)
+		system.noSender.Store(&PID{actorSystem: system})
+		system.noSender.Load().setState(runningState, true)
 		system.dispatcher.start()
 		t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -5148,7 +5149,9 @@ func TestEquals(t *testing.T) {
 
 	assert.True(t, upper.Equals(upper))
 	assert.False(t, upper.Equals(lower))
-	assert.Contains(t, sys.tree().siblings(upper), lower)
+	// PIDs are identities: compare pointers, not field by field, since the
+	// workers write a live PID's scheduling state while the test reads it
+	assert.True(t, slices.Contains(sys.tree().siblings(upper), lower), "lower must be a sibling of upper")
 
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
@@ -7034,7 +7037,7 @@ func TestPIDDoReceiveDuringShutdown(t *testing.T) {
 			mockSys.actors = actualSys.tree()
 		}
 		if actualSys, ok := sys.(interface{ NoSender() *PID }); ok {
-			mockSys.noSender = actualSys.NoSender()
+			mockSys.noSender.Store(actualSys.NoSender())
 		}
 		// the PID publishes deadletters through its system's event stream
 		mockSys.eventsStream = sys.getEventsStream()
@@ -9030,8 +9033,8 @@ func TestNewPIDDefaultLogger(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9056,8 +9059,8 @@ func TestNewPIDDefaultSupervisorAndStrategy(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9150,8 +9153,8 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	system := sys.(*actorSystem)
-	system.noSender = &PID{actorSystem: system}
-	system.noSender.setState(runningState, true)
+	system.noSender.Store(&PID{actorSystem: system})
+	system.noSender.Load().setState(runningState, true)
 	system.dispatcher.start()
 	t.Cleanup(func() { system.dispatcher.signalStop() })
 
@@ -9174,8 +9177,8 @@ func TestBuildObserveOptions(t *testing.T) {
 	require.NoError(t, err)
 
 	aggregating := lowCardinality.(*actorSystem)
-	aggregating.noSender = &PID{actorSystem: aggregating}
-	aggregating.noSender.setState(runningState, true)
+	aggregating.noSender.Store(&PID{actorSystem: aggregating})
+	aggregating.noSender.Load().setState(runningState, true)
 	aggregating.dispatcher.start()
 	t.Cleanup(func() { aggregating.dispatcher.signalStop() })
 
@@ -10530,14 +10533,12 @@ func TestAskFromATurnHandsOffTheActorItReadied(t *testing.T) {
 }
 
 // TestDeathWatchIsToldWithoutAWatchEdge verifies that a spawned actor has no
-// watch edge to the death watch in the tree, in either direction, and that the
-// death watch is still told when the actor stops.
+// watch edge to the death watch in the tree, in either direction, and that
+// outside a cluster, where the death watch has nothing to do for a stopped
+// actor, the actor does not tell it when it stops.
 func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
 	ctx := context.Background()
-	// handleTerminated logs this line when the death watch receives a
-	// Terminated from the dead actor itself
-	logger := NewMockSignalLogger("actor=%s removing dead actor resource")
-	actorSystem, err := NewActorSystem("testSys", WithLogger(logger))
+	actorSystem, err := NewActorSystem("testSys", WithLogger(log.DiscardLogger))
 	require.NoError(t, err)
 	require.NoError(t, actorSystem.Start(ctx))
 	t.Cleanup(func() { _ = actorSystem.Stop(ctx) })
@@ -10551,11 +10552,45 @@ func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
 	require.NotContains(t, tree.watchers(pid), deathWatch, "the death watch holds no edge on the actor")
 	require.Empty(t, tree.watchees(deathWatch), "the death watch watches nothing in the tree")
 
+	before := deathWatch.ProcessedCount()
 	require.NoError(t, pid.Shutdown(ctx))
+	require.False(t, actorSystem.InCluster())
+	require.Never(t, func() bool { return deathWatch.ProcessedCount() > before }, 200*time.Millisecond, 10*time.Millisecond,
+		"outside a cluster the death watch must not be told that the actor stopped")
+}
 
-	select {
-	case <-logger.hit:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the death watch was not told that the actor stopped")
-	}
+// TestFirePostStartFrom verifies where the turn that delivers PostStart is
+// queued: on the worker of the parent's turn when the actor was spawned from
+// one, and on the dispatcher's ready queue when it was spawned from outside
+// the workers.
+func TestFirePostStartFrom(t *testing.T) {
+	t.Run("a child spawned from a turn is queued on that worker", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		parent := newDispatchTestPID(d)
+		child := newDispatchTestPID(d)
+		parent.turnWorker.Store(d.workers[1])
+
+		child.firePostStartFrom(parent.currentWorker())
+		require.Equal(t, dispatchScheduled, child.schedState.Load())
+		require.Same(t, child, d.readyQueue.locals[1].runnext.(*PID), "the child goes to the turn's worker, in its run-next slot")
+		require.Zero(t, d.readyQueue.globalLen())
+	})
+
+	t.Run("a spawn from outside the workers goes through the ready queue", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		pid.firePostStartFrom(nil)
+		require.Equal(t, dispatchScheduled, pid.schedState.Load())
+		require.Equal(t, 1, d.readyQueue.globalLen(), "no worker is parked, so the actor waits on the global ring")
+	})
+
+	t.Run("an actor already scheduled is not queued twice", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+		require.True(t, pid.schedState.TrySchedule())
+
+		pid.firePostStartFrom(nil)
+		require.Zero(t, d.readyQueue.globalLen())
+	})
 }

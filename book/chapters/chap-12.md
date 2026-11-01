@@ -85,7 +85,7 @@ Both methods send an `Ask` to the deadletter actor. Called from `Receive`, they 
 |---|---|---|---|
 | processed | in `handleReceived`, **before** the handler runs, for `PostStart`, user messages, `Terminated` and request payloads | yes | `PID.handleReceived` and `newPID` in `actor/pid.go` |
 | last received time | `markActivity(now)`, with `now` read once per turn, so it is stored for the first message of the turn only | yes | `PID.runTurn`, `PID.markActivity` and `PID.reset` in `actor/pid.go` |
-| restarts | `restartCount.Inc()` at the end of `restartSubtree` | only on a terminal stop | `restartSubtree`, `PID.reset` and `newPID` in `actor/pid.go` |
+| restarts | `restartCount.Inc()` in `PID.init`, before the restarted actor is announced as running, so a reader that sees it running sees the restart | only on a terminal stop | `PID.init`, `PID.reset` and `newPID` in `actor/pid.go` |
 | failures | `suspend`, and `notifyParent` for a failure resumed with a resume directive | only on a terminal stop | `PID.suspend`, `PID.notifyParent`, `PID.reset` and `newPID` in `actor/pid.go` |
 | reinstates | `doReinstate`, when the actor was suspended | yes | `PID.doReinstate` and `newPID` in `actor/pid.go` |
 | unhandled | `ReceiveContext.Unhandled` | yes | `ReceiveContext.Unhandled` in `actor/receive_context.go`; `newPID` in `actor/pid.go` |

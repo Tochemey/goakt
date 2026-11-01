@@ -111,6 +111,13 @@ type localQueue struct {
 	// runnextTakes counts the owner's consecutive takes from the run-next
 	// slot, to serve the ring at runnextChainLimit. Owner-only, like takes.
 	runnextTakes uint32
+	// handedSearch is set by a push that handed the owner an item directly
+	// while it was parked, and with it the search (see push). The owner ends
+	// that search as soon as it wakes with the item, before it runs the item's
+	// turn, so a turn that blocks never holds the search and keeps every other
+	// wake from going out. The waker stores it before the hand-off and the
+	// owner clears it when it wakes.
+	handedSearch atomic.Bool
 	// runnext is the actor a turn on the owning worker has just made ready,
 	// which the owner runs next, before its ring, as the Go scheduler runs the
 	// goroutine readied by the running one from its runnext slot. It is
@@ -156,20 +163,35 @@ type idleFlag struct {
 //
 // Worker wake-up uses per-worker direct handoff instead of a shared
 // condition variable. A parked worker publishes itself in its idleFlag;
-// a producer claims exactly one parked worker with a CAS on that flag
-// and passes the schedulable straight through the worker's handoff
-// channel, bypassing the global queue and its mutex entirely. The
-// previous design funneled every idle-to-busy transition through
-// parkMu plus a cond signal, which serialized all producers and all
-// waking workers on one mutex: under a pairwise request/reply load,
-// aggregate throughput fell below the single-pair rate.
+// whoever wakes it claims it with a CAS on that flag and sends through the
+// worker's handoff channel, so no two wakers wake the same worker and no
+// mutex serializes the wakers. The previous design funneled every
+// idle-to-busy transition through parkMu plus a cond signal, which
+// serialized all producers and all waking workers on one mutex: under a
+// pairwise request/reply load, aggregate throughput fell below the
+// single-pair rate.
+//
+// A push, from a producer outside the workers or a ring that spilled, puts
+// the item on the global ring and wakes one worker to look for work only
+// while none is looking (see wakeSearcher). It does not hand the item to a
+// parked worker: that woke a worker per message, and a wake-up costs the
+// producer a goroutine wake-up and the runtime a thread wake-up, both of
+// which grow with the number of processors. A worker that is awake drains
+// a stream of pushes without anyone being woken, and a woken worker that
+// pops the ring and leaves a backlog behind it wakes the next one (see
+// endSearch), so workers join in proportion to the backlog: the rule the Go
+// scheduler applies to its spinning threads.
 //
 // Lost-wakeup safety relies on a store/load protocol on two atomics: a
-// producer publishes work (globalCount) before scanning idle flags,
-// and a parking worker publishes its flag before re-checking
-// globalCount. Sequential consistency of the atomics guarantees at
-// least one side observes the other, so work cannot be enqueued while
-// a worker parks unnoticed.
+// producer publishes work (globalCount) before reading the number of parked
+// workers, and a parking worker publishes its flag before re-checking
+// globalCount. Sequential consistency of the atomics guarantees at least
+// one side observes the other, so work cannot be enqueued while a worker
+// parks unnoticed. The searching flag does not weaken this: a woken worker
+// clears it before it publishes its flag, so a producer that finds the flag
+// set either found a searcher that has not checked the global ring yet or
+// one that will publish its flag after the producer's store, and both see
+// the item.
 type readyQueue struct {
 	// locals is the per-worker local ring, indexed by worker id.
 	locals []*localQueue
@@ -228,34 +250,65 @@ func newReadyQueue(workerCount int) *readyQueue {
 	return rq
 }
 
-// push routes s to a parked worker when one is available, handing the
-// item straight through the worker's handoff channel without touching
-// the global queue. Otherwise s is appended to the global queue, and a
-// worker that began parking during the append is woken with a nil
-// handoff so it re-scans the queues. Used by external producers (the
-// actor enqueue path) that have no worker affinity.
+// push schedules s from outside the workers: an external producer (the actor
+// enqueue path), which has no worker affinity, or a ring that is full.
+//
+// When no worker is looking for work and one is parked, s is handed straight
+// to that worker through its handoff channel, and the worker is the searching
+// one until it wakes with s: a single sender to a single actor gets its
+// worker in one step, and pushes made while that worker wakes up go on the
+// ring instead of waking a worker each. Otherwise s goes on the
+// global ring, from where the searching worker takes it, and one worker is
+// woken only if none is looking (see wakeSearcher and the type's comment),
+// so a stream of pushes never wakes a worker per message. The global count
+// is stored before the parked workers are read, which with parkAndTake's
+// publish-then-check is what keeps a wake-up from being lost.
 func (rq *readyQueue) push(s schedulable) {
+	if rq.idleCount.Load() > 0 && rq.searching.CompareAndSwap(false, true) {
+		if i, ok := rq.claimIdle(); ok {
+			rq.locals[i].handedSearch.Store(true)
+			rq.handoff[i] <- s
+			return
+		}
+
+		rq.searching.Store(false)
+	}
+
+	rq.pushGlobal(s)
+}
+
+// pushHandoff schedules s for a caller that blocks until s has run: an Ask or
+// a grain call from outside the workers. When a worker is parked, s is handed
+// to it directly, whatever the search: the caller's processor is free the
+// moment it blocks, so the worker runs on it at once, and a burst of such
+// callers wakes a worker each instead of queueing behind one searcher.
+// Otherwise s goes on the global ring and one searcher is woken, as in push.
+func (rq *readyQueue) pushHandoff(s schedulable) {
 	if rq.claimIdleWorker(s) {
 		return
 	}
 
+	rq.pushGlobal(s)
+}
+
+// pushGlobal appends s to the global ring and wakes one searcher if none is
+// looking. The global count is stored before the parked workers are read,
+// which with parkAndTake's publish-then-check is what keeps a wake-up from
+// being lost.
+func (rq *readyQueue) pushGlobal(s schedulable) {
 	rq.parkMu.Lock()
 	rq.global.push(s)
 	rq.globalCount.Store(int32(rq.global.size))
 	rq.parkMu.Unlock()
 
-	// A worker may have set its idle flag after the claim scan above and
-	// before the globalCount store became visible to it. The store/load
-	// protocol makes that worker visible to this second scan; waking it
-	// with nil closes the lost-wakeup window.
-	if rq.idleCount.Load() > 0 {
-		rq.claimIdleWorker(nil)
-	}
+	rq.wakeSearcher()
 }
 
 // claimIdleWorker claims one parked worker via its idleFlag CAS and
 // sends s (which may be nil, meaning "re-scan the queues") through its
-// handoff channel. Returns false when no parked worker was claimable.
+// handoff channel. Returns false when no parked worker was claimable. The
+// wakers are push, which sends the item once it holds the search,
+// wakeSearcher, which sends nil, and close.
 //
 // The scan deliberately starts at worker 0 every time: it concentrates
 // wake-ups on the lowest-indexed parked workers, which keeps their
@@ -265,20 +318,32 @@ func (rq *readyQueue) push(s schedulable) {
 // index would trade cache affinity for it. Revisit if profiles on
 // high-core-count hosts show this scan contending.
 func (rq *readyQueue) claimIdleWorker(s schedulable) bool {
-	if rq.idleCount.Load() == 0 {
+	i, ok := rq.claimIdle()
+	if !ok {
 		return false
+	}
+
+	rq.handoff[i] <- s
+	return true
+}
+
+// claimIdle claims one parked worker via its idleFlag CAS and returns its id;
+// the caller must then send through the worker's handoff channel. It reports
+// false when no parked worker was claimable.
+func (rq *readyQueue) claimIdle() (int, bool) {
+	if rq.idleCount.Load() == 0 {
+		return 0, false
 	}
 
 	for i := range rq.idleFlags {
 		flag := &rq.idleFlags[i].flag
 		if flag.Load() == 1 && flag.CompareAndSwap(1, 0) {
 			rq.idleCount.Add(-1)
-			rq.handoff[i] <- s
-			return true
+			return i, true
 		}
 	}
 
-	return false
+	return 0, false
 }
 
 // pushLocal appends s to worker workerID's local ring, spilling to the
@@ -327,7 +392,7 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		local.takes++
 		if local.takes%globalQueueCheckInterval == 0 {
 			if s := rq.popGlobal(); s != nil {
-				return rq.endSearch(s, woken, false)
+				return rq.endSearch(s, woken, rq.globalCount.Load() > 0)
 			}
 		}
 
@@ -340,7 +405,7 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		}
 
 		if s := rq.popGlobal(); s != nil {
-			return rq.endSearch(s, woken, false)
+			return rq.endSearch(s, woken, rq.globalCount.Load() > 0)
 		}
 
 		if s := rq.trySteal(workerID); s != nil {
@@ -358,6 +423,14 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		}
 
 		if s != nil {
+			// a push that handed s over handed the search with it: the search
+			// ends now that work is found, as the Go scheduler's resetspinning
+			// ends a spinning thread's, and not after s's turn, which may block
+			if local.handedSearch.Load() {
+				local.handedSearch.Store(false)
+				return rq.endSearch(s, true, rq.globalCount.Load() > 0)
+			}
+
 			return s, true
 		}
 
@@ -366,13 +439,15 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 }
 
 // endSearch returns s from take. When the taking worker was woken to
-// search, it clears searching, and if it stole s it wakes the next
-// searcher, since the ring it stole from may hold more: the Go scheduler
-// passes the wake on the same way when a spinning thread finds work.
-func (rq *readyQueue) endSearch(s schedulable, woken, stolen bool) (schedulable, bool) {
+// search, it clears searching, and when more may be waiting it wakes the
+// next searcher: after a steal, since the ring it stole from may hold more,
+// and after a pop of the global ring that left a backlog behind. The Go
+// scheduler passes the wake on the same way when a spinning thread finds
+// work, so the workers at a backlog grow with it, one wake at a time.
+func (rq *readyQueue) endSearch(s schedulable, woken, more bool) (schedulable, bool) {
 	if woken {
 		rq.searching.Store(false)
-		if stolen {
+		if more {
 			rq.wakeSearcher()
 		}
 	}

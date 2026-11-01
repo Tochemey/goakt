@@ -2879,9 +2879,9 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(2 * time.Second)
-
-		require.Exactly(t, uint64(7), actorSystem.NumActors())
+		// the eviction loop ticks every second and shuts the evicted actors down
+		// one by one, so wait for the count instead of racing the tick
+		require.Eventually(t, func() bool { return actorSystem.NumActors() == 7 }, 5*time.Second, 50*time.Millisecond)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With LRU eviction policy with percentage based eviction", func(t *testing.T) {
@@ -2911,9 +2911,9 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(2 * time.Second)
-
-		require.Exactly(t, uint64(5), actorSystem.NumActors())
+		// the eviction loop ticks every second and shuts the evicted actors down
+		// one by one, so wait for the count instead of racing the tick
+		require.Eventually(t, func() bool { return actorSystem.NumActors() == 5 }, 5*time.Second, 50*time.Millisecond)
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
 	t.Run("With LFU eviction policy with threshold met", func(t *testing.T) {
@@ -2943,9 +2943,9 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(2 * time.Second)
-
-		require.Exactly(t, uint64(7), actorSystem.NumActors())
+		// the eviction loop ticks every second and shuts the evicted actors down
+		// one by one, so wait for the count instead of racing the tick
+		require.Eventually(t, func() bool { return actorSystem.NumActors() == 7 }, 5*time.Second, 50*time.Millisecond)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -2976,9 +2976,9 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(2 * time.Second)
-
-		require.Exactly(t, uint64(5), actorSystem.NumActors())
+		// the eviction loop ticks every second and shuts the evicted actors down
+		// one by one, so wait for the count instead of racing the tick
+		require.Eventually(t, func() bool { return actorSystem.NumActors() == 5 }, 5*time.Second, 50*time.Millisecond)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -3009,9 +3009,9 @@ func TestActorSystem(t *testing.T) {
 		err = Tell(ctx, pid, new(testpb.TestSend))
 		require.NoError(t, err)
 
-		pause.For(time.Second)
-
-		require.Exactly(t, uint64(5), actorSystem.NumActors())
+		// the eviction loop ticks every second and shuts the evicted actors down
+		// one by one, so wait for the count instead of racing the tick
+		require.Eventually(t, func() bool { return actorSystem.NumActors() == 5 }, 5*time.Second, 50*time.Millisecond)
 
 		require.NoError(t, actorSystem.Stop(ctx))
 	})
@@ -7179,7 +7179,7 @@ func TestResyncActors_ErrorPaths(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7211,7 +7211,7 @@ func TestResyncActorsSkipsNameOwnedElsewhere(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.locker.Unlock()
 
 	ids := map[string]string{}
@@ -7301,7 +7301,7 @@ func TestResyncAfterClusterEventSkipsWithReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7331,7 +7331,7 @@ func TestResyncAfterClusterEventRunsWithoutReplicas(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7365,7 +7365,7 @@ func TestResyncAfterClusterEventRunsOnCorrelatedDepartures(t *testing.T) {
 
 	system.locker.Lock()
 	system.actors = newTree()
-	system.actors.noSender.Store(system.noSender)
+	system.actors.noSender.Store(system.noSender.Load())
 	system.grains = xsync.NewMap[string, *grainPID]()
 	system.locker.Unlock()
 
@@ -7472,7 +7472,7 @@ func TestStopSucceedsWhenRegistryCleanupFails(t *testing.T) {
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors = newTree()
 	system.actors.noSender.Store(nil)
-	system.noSender = nil
+	system.noSender.Store(nil)
 	system.topicActor = nil
 	system.rootGuardian = nil
 	system.systemGuardian = nil
@@ -7527,7 +7527,7 @@ func TestStopSucceedsWhenListedPeersAreLeaving(t *testing.T) {
 	system := newReplicationSystem(clusterMock)
 	system.extensions = xsync.NewMap[string, extension.Extension]()
 	system.actors.noSender.Store(nil)
-	system.noSender = nil
+	system.noSender.Store(nil)
 	system.topicActor = nil
 	system.remotingEnabled.Store(false)
 	system.relocationEnabled.Store(true)

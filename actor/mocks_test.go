@@ -1646,6 +1646,9 @@ type MockBlockerActor struct {
 	gate chan struct{}
 	// received counts the messages that made it past the gate.
 	received *syncatomic.Int64
+	// parked counts the payloads that reached Receive, before the gate, so a
+	// test knows when the first one holds the actor.
+	parked syncatomic.Int64
 }
 
 // PreStart does nothing.
@@ -1659,6 +1662,7 @@ func (x *MockBlockerActor) PostStop(*Context) error { return nil }
 func (x *MockBlockerActor) Receive(ctx *ReceiveContext) {
 	switch ctx.Message().(type) {
 	case *structpb.Value:
+		x.parked.Add(1)
 		<-x.gate
 		x.received.Add(1)
 	default:

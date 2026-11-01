@@ -357,7 +357,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("empty sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = newPIDAt(sys, "nosender", 0)
+		sys.noSender.Store(newPIDAt(sys, "nosender", 0))
 
 		pid := sys.newRemoteSenderPID("")
 		assert.Equal(t, sys.NoSender(), pid)
@@ -365,7 +365,7 @@ func TestNewRemoteSenderPID(t *testing.T) {
 
 	t.Run("malformed sender returns NoSender", func(t *testing.T) {
 		sys := newRemoteServerTestSystem(host, port)
-		sys.noSender = newPIDAt(sys, "nosender", 0)
+		sys.noSender.Store(newPIDAt(sys, "nosender", 0))
 
 		pid := sys.newRemoteSenderPID("not-an-address")
 		assert.Equal(t, sys.NoSender(), pid)
@@ -3785,7 +3785,8 @@ func TestRemoteTellFullBoundedMailboxKeepsLaneAlive(t *testing.T) {
 
 	gate := make(chan struct{})
 	received := new(atomic.Int64)
-	blocker, err := receiverSys.Spawn(ctx, "blocker", &MockBlockerActor{gate: gate, received: received}, WithMailbox(NewBoundedMailbox(capacity)))
+	blockerActor := &MockBlockerActor{gate: gate, received: received}
+	blocker, err := receiverSys.Spawn(ctx, "blocker", blockerActor, WithMailbox(NewBoundedMailbox(capacity)))
 	require.NoError(t, err)
 
 	echo, err := receiverSys.Spawn(ctx, "echo", NewMockActor())
@@ -3795,9 +3796,18 @@ func TestRemoteTellFullBoundedMailboxKeepsLaneAlive(t *testing.T) {
 	remoting := senderSys.(*actorSystem).remoting
 	from := address.New("driver", senderSys.Name(), host, ports[0])
 
-	// the first message parks in Receive, the next capacity fill the mailbox,
-	// and every further one is an overflow
-	for range flood {
+	// the first message parks in Receive; only once it holds the actor do the
+	// next capacity fill the mailbox, and every further one is an overflow.
+	// Flooding before it is dequeued would fill the mailbox with it inside,
+	// refuse one message more and leave one less to drain.
+	callCtx, cancel := context.WithTimeout(ctx, time.Second)
+	err = remoting.RemoteTell(callCtx, from, blocker.getAddress(), structpb.NewStringValue("x"))
+	cancel()
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return blockerActor.parked.Load() == 1 }, 3*time.Second, 10*time.Millisecond,
+		"the first message must park in Receive before the flood")
+
+	for range flood - 1 {
 		callCtx, cancel := context.WithTimeout(ctx, time.Second)
 		err := remoting.RemoteTell(callCtx, from, blocker.getAddress(), structpb.NewStringValue("x"))
 		cancel()
@@ -3805,7 +3815,7 @@ func TestRemoteTellFullBoundedMailboxKeepsLaneAlive(t *testing.T) {
 	}
 
 	// the lane still dispatches: an ask to the sibling answers
-	callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	callCtx, cancel = context.WithTimeout(ctx, 3*time.Second)
 	reply, err := remoting.RemoteAsk(callCtx, from, echo.getAddress(), new(testpb.TestReply), 3*time.Second)
 	cancel()
 	require.NoError(t, err, "an ask to a sibling on the lane must answer while the blocker's mailbox is full")

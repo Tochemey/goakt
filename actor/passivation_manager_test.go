@@ -869,6 +869,40 @@ func TestPassivationManager_Notify(t *testing.T) {
 	}
 }
 
+// TestPassivationManager_RegisterWakesOnlyForEarliestDeadline verifies that
+// registering a time-based entry wakes the loop when the entry becomes the
+// earliest deadline, and not when an earlier one is already queued.
+func TestPassivationManager_RegisterWakesOnlyForEarliestDeadline(t *testing.T) {
+	// started, without the loop, so the wake channel can be inspected
+	manager := newPassivationManager(log.DiscardLogger)
+	manager.started.Store(true)
+
+	register := func(name string, timeout time.Duration) {
+		strategy := passivation.NewTimeBasedStrategy(timeout)
+		pid := newPassivationPID(t, name, strategy)
+		pid.latestReceiveTimeNano.Store(time.Now().UnixNano())
+		manager.Register(pid, strategy)
+	}
+
+	woken := func() bool {
+		select {
+		case <-manager.wake:
+			return true
+		default:
+			return false
+		}
+	}
+
+	register("first", time.Minute)
+	require.True(t, woken(), "the first entry is the earliest deadline")
+
+	register("later", 2*time.Minute)
+	require.False(t, woken(), "a later deadline does not change what the loop waits for")
+
+	register("sooner", time.Second)
+	require.True(t, woken(), "a new earliest deadline must wake the loop")
+}
+
 func TestPassivationManager_RunHandlesChannels(t *testing.T) {
 	manager := newPassivationManager(log.DiscardLogger)
 	passivated := make(chan string, 1)

@@ -23,6 +23,7 @@
 package address
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -491,5 +492,51 @@ func TestValidateName(t *testing.T) {
 		addr := New("orders/cart", "sys", "127.0.0.1", 9000)
 		assert.Error(t, addr.Validate())
 		assert.Error(t, ValidateName(addr.Name()))
+	})
+}
+
+func TestValidName(t *testing.T) {
+	// the pattern validName replaced; the loop must accept and reject exactly
+	// what it did
+	pattern := regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$`)
+	names := []string{
+		"a", "Z", "7", "orders-cart_v2.1", "a.b", "a-", "a_", "a.",
+		"", "-a", "_a", ".a", "or ders", "orders/cart", "a\n", "\na", "caf\u00e9", "a\x00",
+		strings.Repeat("x", 300), "A1-b2_c3.d4",
+	}
+
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			assert.Equal(t, pattern.MatchString(name), validName(name))
+		})
+	}
+}
+
+func TestNewIncarnationID(t *testing.T) {
+	t.Run("is a version 4 UUID that Validate accepts", func(t *testing.T) {
+		id := newIncarnationID()
+		require.NoError(t, uuid.Validate(id))
+		parsed, err := uuid.Parse(id)
+		require.NoError(t, err)
+		assert.Equal(t, uuid.Version(4), parsed.Version())
+		assert.Equal(t, uuid.RFC4122, parsed.Variant())
+	})
+
+	t.Run("differs between calls", func(t *testing.T) {
+		seen := make(map[string]struct{}, 10000)
+		for range 10000 {
+			id := newIncarnationID()
+			_, dup := seen[id]
+			require.False(t, dup, "duplicate incarnation id %s", id)
+			seen[id] = struct{}{}
+		}
+	})
+
+	t.Run("is the incarnation of a new address", func(t *testing.T) {
+		addr := New("orders", "sys", "127.0.0.1", 9000)
+		require.NoError(t, addr.Validate())
+		child := NewWithParent("cart", "sys", "127.0.0.1", 9000, addr)
+		require.NoError(t, child.Validate())
+		assert.NotEqual(t, addr.IncarnationID(), child.IncarnationID())
 	})
 }

@@ -22,14 +22,24 @@
 
 package benchmark
 
-import "testing"
+import (
+	"context"
+	"testing"
 
-// BenchmarkTellPingPongSinglePair measures the hand-off between two actors
-// when nothing else runs: one client and one echo actor with one message in
-// flight, so every message wakes an idle actor and the number is the cost of
-// making an actor runnable and getting a worker to it, twice per round trip.
-// It is the one-pair, one-in-flight case of BenchmarkTellPingPong, kept apart
-// because it answers a latency question rather than a throughput one.
-func BenchmarkTellPingPongSinglePair(b *testing.B) {
-	benchmarkTellPingPong(b, 1, 1)
+	"github.com/tochemey/goakt/v4/actor"
+)
+
+func BenchmarkTellFromActor(b *testing.B) {
+	ctx := context.Background()
+	latch := NewLatch(b.N)
+	pid := spawn(b, &sink{latch: latch})
+	sender := spawn(b, &teller{target: pid, n: b.N})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	if err := actor.Tell(ctx, sender, new(Start)); err != nil {
+		b.Fatal(err)
+	}
+	latch.Wait(b)
+	ReportRate(b, b.N, MsgsPerSec)
 }

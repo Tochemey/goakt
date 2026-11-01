@@ -1204,7 +1204,10 @@ type actorSystem struct {
 	singletonManager *PID
 	topicActor       *PID
 	replicator       *PID
-	noSender         *PID
+	// noSender is the sentinel sender of messages sent from outside an actor.
+	// Spawned once at start and read lock-free by NoSender on every external
+	// send.
+	noSender         atomic.Pointer[PID]
 	peerStatesWriter *PID
 
 	startedAt atomic.Int64
@@ -3236,8 +3239,9 @@ func (x *actorSystem) attachAndPublish(ctx context.Context, parent, pid *PID) (*
 	// it is in the tree and, in a cluster, in the registry, so the handler
 	// can rely on both. A spawn that fails before this point does not
 	// schedule it; only a message that reached the actor through a local
-	// name lookup in the meantime could have run it already.
-	pid.firePostStart()
+	// name lookup in the meantime could have run it already. A child spawned
+	// from its parent's turn is queued on that turn's worker.
+	pid.firePostStartFrom(parent.currentWorker())
 	x.recordActorSpawned(pid)
 	return pid, nil
 }
@@ -3250,7 +3254,7 @@ func (x *actorSystem) attachSystemActor(parent, pid *PID) error {
 		return err
 	}
 
-	pid.firePostStart()
+	pid.firePostStartFrom(parent.currentWorker())
 	return nil
 }
 

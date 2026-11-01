@@ -25,54 +25,21 @@ package benchmark
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
 func BenchmarkAsk(b *testing.B) {
 	ctx := context.Background()
-
-	// create the actor system
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
-	}
-
-	// start the actor system
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	// create the actor refs
-	sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
-	if err != nil {
-		b.Fatalf("failed to spawn sender: %v", err)
-	}
-	receiver, err := actorSystem.Spawn(ctx, "receiver", new(Actor))
-	if err != nil {
-		b.Fatalf("failed to spawn receiver: %v", err)
-	}
+	pid := spawn(b, &responder{})
+	msg := new(Ping)
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	// Use sequential execution for Ask benchmark instead of parallel.
-	// Ask is inherently slower than Tell due to synchronous response waiting,
-	// and parallel execution causes mailbox contention where a single receiver
-	// cannot keep up with multiple parallel senders, leading to timeouts.
-	// Sequential execution provides a more realistic and stable benchmark.
-	msg := new(testpb.TestReply)
-	for i := 0; i < b.N; i++ {
-		if _, err := sender.Ask(ctx, receiver, msg, time.Second); err != nil {
+	for range b.N {
+		if _, err := actor.Ask(ctx, pid, msg, Timeout); err != nil {
 			b.Fatal(err)
 		}
 	}
-	b.StopTimer()
-	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+	ReportRate(b, b.N, MsgsPerSec)
 }

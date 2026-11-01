@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/v4/internal/pause"
 )
 
 // TestReadyQueueTakeReachesGlobalUnderLocalLoad checks that a worker whose
@@ -519,12 +520,12 @@ func TestReadyQueueWakeSearcher(t *testing.T) {
 }
 
 // TestReadyQueueEndSearch verifies that a worker woken to search clears the
-// search when it takes work and passes the wake on only after stealing, and
-// that a worker that was not woken leaves the search alone.
+// search when it takes work and passes the wake on only when more may be
+// waiting, and that a worker that was not woken leaves the search alone.
 func TestReadyQueueEndSearch(t *testing.T) {
 	item := NewMockSchedulable(1)
 
-	t.Run("after stealing", func(t *testing.T) {
+	t.Run("when more may be waiting", func(t *testing.T) {
 		rq := newReadyQueue(2)
 		go func() { _, _ = rq.take(1) }()
 		waitParked(t, rq, 1)
@@ -538,7 +539,7 @@ func TestReadyQueueEndSearch(t *testing.T) {
 		rq.close()
 	})
 
-	t.Run("without stealing", func(t *testing.T) {
+	t.Run("when nothing more is waiting", func(t *testing.T) {
 		rq := newReadyQueue(2)
 		rq.searching.Store(true)
 		_, ok := rq.endSearch(item, true, false)
@@ -552,6 +553,127 @@ func TestReadyQueueEndSearch(t *testing.T) {
 		_, ok := rq.endSearch(item, false, true)
 		require.True(t, ok)
 		require.True(t, rq.searching.Load())
+	})
+}
+
+// TestReadyQueuePushWakesOneSearcher verifies the wake rule for a push: the
+// item goes to the global ring and one parked worker is woken to look for it,
+// and a second push while that worker is still looking wakes nobody else.
+func TestReadyQueuePushWakesOneSearcher(t *testing.T) {
+	rq := newReadyQueue(3)
+	for _, id := range []int{1, 2} {
+		go func() {
+			for {
+				if _, ok := rq.take(id); !ok {
+					return
+				}
+			}
+		}()
+	}
+	waitParked(t, rq, 2)
+
+	// hold the search so the pushes meet a searcher that has not looked yet
+	rq.searching.Store(true)
+	rq.push(NewMockSchedulable(1))
+	rq.push(NewMockSchedulable(2))
+	require.Equal(t, 2, rq.globalLen(), "a push goes to the global ring, not to a parked worker")
+	require.Equal(t, 2, rq.parkedCount(), "no worker is woken while one searches")
+
+	rq.searching.Store(false)
+	rq.push(NewMockSchedulable(3))
+	require.Eventually(t, func() bool { return rq.globalLen() == 0 }, 2*time.Second, time.Millisecond,
+		"the woken searcher must drain the ring, passing the wake on for the backlog")
+	require.Eventually(t, func() bool { return rq.parkedCount() == 2 && !rq.searching.Load() }, 2*time.Second, time.Millisecond)
+	rq.close()
+}
+
+// TestReadyQueueTakePassesTheWakeOnForABacklog verifies that a woken worker
+// that pops the global ring and leaves items behind wakes the next worker,
+// so a backlog is drained by more than one worker.
+func TestReadyQueueTakePassesTheWakeOnForABacklog(t *testing.T) {
+	rq := newReadyQueue(3)
+	var took [3]atomic.Int32
+	for _, id := range []int{1, 2} {
+		go func() {
+			for {
+				if _, ok := rq.take(id); !ok {
+					return
+				}
+
+				took[id].Add(1)
+				// a turn long enough for the wake to reach the other worker
+				pause.For(20 * time.Millisecond)
+			}
+		}()
+	}
+	waitParked(t, rq, 2)
+
+	// queue a backlog without waking anyone, then wake a single searcher
+	rq.parkMu.Lock()
+	rq.global.push(NewMockSchedulable(1))
+	rq.global.push(NewMockSchedulable(2))
+	rq.globalCount.Store(int32(rq.global.size))
+	rq.parkMu.Unlock()
+	rq.wakeSearcher()
+
+	require.Eventually(t, func() bool { return took[1].Load() == 1 && took[2].Load() == 1 }, 2*time.Second, time.Millisecond,
+		"the woken worker takes one item and the wake must be passed on to the second worker for the other")
+	require.Eventually(t, func() bool { return rq.parkedCount() == 2 && !rq.searching.Load() }, 2*time.Second, time.Millisecond)
+	rq.close()
+}
+
+// TestReadyQueuePushHandsTheSearchOverUntilTheWorkerWakes verifies that a
+// push that hands its item to a parked worker hands the search with it, and
+// that the worker ends the search when it wakes with the item, before running
+// it: a worker whose turn then blocks must not keep every other wake from
+// going out.
+func TestReadyQueuePushHandsTheSearchOverUntilTheWorkerWakes(t *testing.T) {
+	rq := newReadyQueue(2)
+	got := make(chan schedulable, 1)
+	go func() {
+		// one take only, as a worker whose next turn blocks
+		s, _ := rq.take(1)
+		got <- s
+	}()
+	waitParked(t, rq, 1)
+
+	item := NewMockSchedulable(1)
+	rq.push(item)
+	require.Zero(t, rq.globalLen(), "the item must not go through the global ring")
+	require.Same(t, item, <-got)
+	require.False(t, rq.searching.Load(), "the search must end when the worker wakes, not at its next take")
+	require.False(t, rq.locals[1].handedSearch.Load())
+	rq.close()
+}
+
+// TestReadyQueuePushHandoff verifies that a push for a caller that blocks
+// hands its item to a parked worker whatever the search, without making that
+// worker the searcher, and falls back to the ring and one wake otherwise.
+func TestReadyQueuePushHandoff(t *testing.T) {
+	t.Run("hands off while another worker searches", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		got := make(chan schedulable, 1)
+		go func() {
+			s, _ := rq.take(1)
+			got <- s
+		}()
+		waitParked(t, rq, 1)
+
+		rq.searching.Store(true)
+		item := NewMockSchedulable(1)
+		rq.pushHandoff(item)
+		require.Same(t, item, <-got)
+		require.Zero(t, rq.globalLen())
+		require.False(t, rq.locals[1].handedSearch.Load(), "a hand-off for a blocking caller does not pass the search")
+		require.True(t, rq.searching.Load(), "the other worker's search is untouched")
+		rq.searching.Store(false)
+		rq.close()
+	})
+
+	t.Run("goes to the ring when no worker is parked", func(t *testing.T) {
+		rq := newReadyQueue(2)
+		rq.pushHandoff(NewMockSchedulable(1))
+		require.Equal(t, 1, rq.globalLen())
 	})
 }
 

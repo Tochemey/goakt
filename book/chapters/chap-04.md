@@ -87,6 +87,8 @@ The function's comment (`actorSystem.runSpawnActivation` in `actor/spawn.go`) sp
 - The shared execution runs under the **first** caller's context. If it fails because that context was cancelled while the waiter's context is still live, the waiter retries once rather than inheriting a cancellation that was never its own (`actorSystem.runSpawnActivation` in `actor/spawn.go`).
 - Spawning the same name again from inside the actor's own `PreStart` joins its own in-flight execution and blocks until the caller's context expires.
 
+The group is sharded 64 ways by the key's hash, like the tree's indexes, so spawns of different names on different cores do not serialise on one mutex, and the channel a joining caller waits on is created only when one joins (`spawnActivationGroup.shard` in `actor/spawn_activation.go`).
+
 Two things follow from the spawn running on the first caller's goroutine, where singleflight's `DoChan` used to start a goroutine per spawn. That caller returns when its spawn returns, even if its own context ended meanwhile: only the callers that joined leave early. And a panic in the spawn path reaches that caller, after the group has completed the call with an error for the callers that joined it, so none of them waits on a call that never finishes (`spawnActivationGroup.run` in `actor/spawn_activation.go`).
 
 **Step 3. Cluster precondition.** In cluster mode, `checkOrdinarySpawnPreconditions` asks the registry whether the name exists (`actor/actor_system.go`). A name held by a node that has left the cluster counts as free, so a crashed owner's name can be reused (`actorSystem.departedClaim` in `actor/actor_system.go`). The comment calls this "the first line of the name uniqueness rule, not the whole of it". Two spawns can both pass the read, and the registry write in step 7 decides between them (`actorSystem.checkSpawnPreconditions` in `actor/actor_system.go`).
@@ -117,7 +119,7 @@ In cluster mode step 3 runs first, and it finds this node's own live record and 
 
 1. Increments the live-actor counter for non-system actors.
 2. Inserts the PID under its parent, which also makes the parent a watcher of the child ([Chapter 3, §3.4](chap-03.md#34-the-guardian-tree)).
-3. Marks the actor for the death watch (`deathWatchedState`, set in `actorSystem.attachAndPublish` in `actor/actor_system.go`): the stopping actor tells the death watch itself, without a watch edge in the tree, which would cost every actor a watcher entry and the death watch a watchee entry that nothing reads. In a cluster, this is how a stopped actor's registry record is removed; the stopping actor leaves the tree and the live-actor count by itself ([Chapter 9, §9.8](chap-09.md#98-death-watch)).
+3. Marks the actor for the death watch (`deathWatchedState`, set in `actorSystem.attachAndPublish` in `actor/actor_system.go`): in a cluster, the stopping actor tells the death watch itself, without a watch edge in the tree, which would cost every actor a watcher entry and the death watch a watchee entry that nothing reads, and that is how a stopped actor's registry record is removed. Outside a cluster the death watch has nothing to do for a stopped actor and is not told (`PID.freeWatchers` in `actor/pid.go`). The stopping actor leaves the tree and the live-actor count by itself either way ([Chapter 9, §9.8](chap-09.md#98-death-watch)).
 
 If the tree already holds this ID with a *different* PID, a concurrent spawn won. The function returns the canonical PID and undoes the counter. The duplicate is deliberately not shut down, because stopping it would tear down tree state keyed by the shared ID (`actorSystem.attachAndPublish` in `actor/actor_system.go`). The comment says this path should be unreachable while every entry point goes through `runSpawnActivation`.
 
@@ -135,7 +137,7 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildSettings` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
-7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry (`PID.firePostStart` in `actor/pid.go`), and `attachSystemActor` does the same for system actors.
+7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry, and `attachSystemActor` does the same for system actors. A child spawned from its parent's turn is queued on that turn's worker, as a message the turn sends is; a spawn from outside the workers goes through the ready queue (`PID.firePostStart` and `PID.firePostStartFrom` in `actor/pid.go`).
 
 ### `PostStart` is always the first message
 
@@ -250,7 +252,7 @@ The incarnation ID tells two lives of the same name apart: it fences registry wr
 
 `Validate` (`internal/address/address.go`) requires:
 
-- A name of at most 255 characters (`maxNameLength` in `internal/address/address.go`) matching `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$` (`namePattern` in `internal/address/address.go`). Dots are allowed, though the error message does not mention them (`errInvalidNamePattern` in `internal/address/address.go`).
+- A name of at most 255 characters (`maxNameLength` in `internal/address/address.go`) matching `^[a-zA-Z0-9][a-zA-Z0-9-_\.]*$`, checked by a loop over the bytes rather than a regular expression because every spawn runs it (`validName` in `internal/address/address.go`). Dots are allowed, though the error message does not mention them (`errInvalidNamePattern` in `internal/address/address.go`).
 - A valid incarnation UUID.
 - For a child: the same system, host and port as its parent, and a name different from its parent's own name (`Address.Validate` in `internal/address/address.go`). A grandchild may reuse its grandparent's name.
 

@@ -23,31 +23,28 @@
 package benchmark
 
 import (
-	"strconv"
-	"sync/atomic"
+	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/tochemey/goakt/v4/actor"
 )
 
-// BenchmarkSpawnTopLevelParallel measures the aggregate rate of
-// ActorSystem.Spawn from GOMAXPROCS goroutines spawning distinct names at
-// once. Against BenchmarkSpawnTopLevel it shows how far spawns overlap:
-// anything the spawn path serialises across actors, such as the actor tree's
-// lock, shows up here as an aggregate rate below GOMAXPROCS times the
-// sequential one.
-func BenchmarkSpawnTopLevelParallel(b *testing.B) {
-	ctx, system := startSpawnBenchSystem(b)
+func BenchmarkTellParallel(b *testing.B) {
+	ctx := context.Background()
+	latch := NewLatch(b.N)
+	pid := spawn(b, &sink{latch: latch})
+	msg := new(Ping)
 
-	var next atomic.Int64
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, err := system.Spawn(ctx, "spawn-"+strconv.FormatInt(next.Add(1), 10), new(noopActor))
-			require.NoError(b, err)
+			if err := actor.Tell(ctx, pid, msg); err != nil {
+				b.Error(err)
+				return
+			}
 		}
 	})
-	b.StopTimer()
-	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "spawns/sec")
+	latch.Wait(b)
+	ReportRate(b, b.N, MsgsPerSec)
 }

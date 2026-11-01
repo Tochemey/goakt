@@ -25,8 +25,19 @@ package actor
 import (
 	"context"
 	"fmt"
+	"hash/maphash"
 	"sync"
 )
+
+// spawnActivationShards is the number of shards a spawnActivationGroup
+// spreads its keys over. Every spawn in the process, top-level or child, goes
+// through the group twice, so one mutex would be the lock every core waits on
+// when many actors are spawned at once; the tree index is sharded the same
+// way, and to the same count.
+const spawnActivationShards = 64
+
+// spawnActivationSeed is the seed spawnActivationGroup hashes keys with.
+var spawnActivationSeed = maphash.MakeSeed()
 
 // spawnActivationGroup coalesces concurrent spawns of one actor identity. The
 // first caller for a key runs the spawn on its own goroutine, so a spawn that
@@ -36,6 +47,14 @@ import (
 // runSpawnActivation needs, without the goroutine and the channel that DoChan
 // adds to every call.
 type spawnActivationGroup struct {
+	// shards holds the calls in flight, each key in the shard its hash
+	// selects (see shard).
+	shards [spawnActivationShards]spawnActivationShard
+}
+
+// spawnActivationShard holds the calls in flight for the keys that hash to
+// it.
+type spawnActivationShard struct {
 	// mu guards calls.
 	mu sync.Mutex
 	// calls holds the spawn in flight for each key, nil until the first run.
@@ -46,7 +65,9 @@ type spawnActivationGroup struct {
 // caller running it before done is closed, and read by the others only after
 // done is closed.
 type spawnActivationCall struct {
-	// done is closed once pid and err are set.
+	// done is closed once pid and err are set. It is created by the first
+	// caller that joins the call, under the shard's mutex, so a spawn nobody
+	// races allocates no channel; nil when no caller joined.
 	done chan struct{}
 	// pid is the spawn's result.
 	pid *PID
@@ -66,26 +87,32 @@ type spawnActivationCall struct {
 // A panic in fn completes the call with an error, so that no waiter blocks on
 // a call that never finishes, and then goes on through the caller as before.
 func (x *spawnActivationGroup) run(ctx context.Context, key string, fn func() (*PID, error)) (pid *PID, shared bool, err error) {
-	x.mu.Lock()
-	if x.calls == nil {
-		x.calls = make(map[string]*spawnActivationCall)
+	s := x.shard(key)
+	s.mu.Lock()
+	if s.calls == nil {
+		s.calls = make(map[string]*spawnActivationCall)
 	}
 
-	if call, ok := x.calls[key]; ok {
+	if call, ok := s.calls[key]; ok {
 		call.waiters++
-		x.mu.Unlock()
+		if call.done == nil {
+			call.done = make(chan struct{})
+		}
+
+		done := call.done
+		s.mu.Unlock()
 
 		select {
-		case <-call.done:
+		case <-done:
 			return call.pid, true, call.err
 		case <-ctx.Done():
 			return nil, false, ctx.Err()
 		}
 	}
 
-	call := &spawnActivationCall{done: make(chan struct{})}
-	x.calls[key] = call
-	x.mu.Unlock()
+	call := &spawnActivationCall{}
+	s.calls[key] = call
+	s.mu.Unlock()
 
 	completed := false
 	defer func() {
@@ -93,14 +120,23 @@ func (x *spawnActivationGroup) run(ctx context.Context, key string, fn func() (*
 			call.err = fmt.Errorf("spawn activation of %s panicked", key)
 		}
 
-		x.mu.Lock()
-		delete(x.calls, key)
+		s.mu.Lock()
+		delete(s.calls, key)
 		shared = call.waiters > 0
-		x.mu.Unlock()
-		close(call.done)
+		done := call.done
+		s.mu.Unlock()
+
+		if done != nil {
+			close(done)
+		}
 	}()
 
 	call.pid, call.err = fn()
 	completed = true
 	return call.pid, shared, call.err
+}
+
+// shard returns the shard that holds key.
+func (x *spawnActivationGroup) shard(key string) *spawnActivationShard {
+	return &x.shards[maphash.String(spawnActivationSeed, key)%spawnActivationShards]
 }

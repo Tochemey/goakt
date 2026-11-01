@@ -134,6 +134,73 @@ type restartNode struct {
 // ActorSystem returns nil for remote PIDs — always guard with IsLocal before use.
 type PID struct {
 	_ locker.NoCopy
+
+	// The fields are grouped by who touches them on the message path, so that
+	// the lines a producer reads for every send are never written by the
+	// processing turn for every message, and the other way round. The groups
+	// are laid out in this order: the producer's line, at least a cache line of
+	// read-only fields, the consumer's line, then everything cold. A PID is not
+	// cache-line aligned, so the separation comes from distance, not offsets:
+	// the first consumer-written field is more than a cache line past the last
+	// producer-read one.
+
+	// state holds the lifecycle flags (see pidState). Producers read it on
+	// every send through IsRunning; the turn reads it per message; it is
+	// written only on lifecycle transitions.
+	state atomic.Uint32
+
+	// schedState drives the dispatcher-pool ready-queue membership for
+	// this actor. A producer reads it on every send and compares-and-swaps it
+	// when it schedules the actor; the turn writes it when it takes the actor
+	// and when it gives it up.
+	schedState dispatchState
+
+	// ctxShard selects the context-pool shard used for messages delivered
+	// to this actor. Assigned round-robin at construction so concurrently
+	// active actors draw from distinct pool shards instead of contending
+	// on one.
+	ctxShard uint32
+
+	// metricsEnabled records whether a metric provider is wired to this actor.
+	// It is written once in newPID and only read afterwards, which is what lets
+	// the message path gate the mailbox counters on a plain field read instead
+	// of on a provider lookup.
+	metricsEnabled bool
+
+	// mailboxTail is the segment producers claim slots in; see mailboxHead.
+	// Producers read it on every enqueue and replace it when they link a new
+	// segment.
+	mailboxTail atomic.Pointer[mailboxSegment]
+
+	// embedded is the state of the default mailbox, nil when a spawn option
+	// supplied a custom one. It is set once in newPID and never changes, so
+	// Tell reads it without synchronization to choose the path that stores a
+	// message as values instead of in a pooled ReceiveContext.
+	embedded *embeddedMailboxState
+
+	// dispatcher is cached from the actor system at construction time so
+	// the hot-path doReceive can schedule this actor without an interface
+	// assertion on every message.
+	dispatcher *dispatcher
+
+	// actorSystem is the actor system the actor runs in. It is written once,
+	// by the pid option newPID applies, and never changes, so ActorSystem
+	// reads it without a lock.
+	actorSystem ActorSystem
+
+	// mailboxEnqueued counts the user messages producers have put into the
+	// mailbox. It is the producer half of actor.mailbox.size, the counterpart of
+	// mailboxDequeued: one shared counter would make every message bounce a
+	// cache line between the producer and the consumer. It closes the
+	// producer's group, so it is written by producers only and the turn never
+	// has to reload it. It is maintained only when metricsEnabled is set, and
+	// zeroed by reset().
+	mailboxEnqueued atomic.Int64
+
+	// The fields from here to behaviorStack are written at construction or on
+	// lifecycle paths only. They keep the producer's group and the consumer's
+	// group more than a cache line apart.
+
 	// specifies the message processor
 	actor Actor
 
@@ -141,12 +208,108 @@ type PID struct {
 	address *address.Address
 	path    Path
 
+	// mailbox holds user messages in FIFO order, drained by runTurn up
+	// to the dispatcher's per-turn throughput budget.
+	mailbox Mailbox
+
+	remoting remoteclient.Client
+
+	// supervisor strategy
+	supervisor *supervisor.Supervisor
+
+	passivationStrategy passivation.Strategy
+
+	// passivationManager is read by the processing turn for every message and
+	// written only at construction.
+	passivationManager *passivationManager
+
+	// the list of dependencies
+	dependencies *xsync.Map[string, extension.Dependency]
+
+	// companion holds the spawn-time settings most actors never set: reliable
+	// delivery, durable queues, metrics identity, singleton specification and
+	// placement role. It stays nil for an ordinary actor, which keeps those
+	// fields off the idle footprint (see pidCompanion), and it is read only on
+	// lifecycle and scrape paths.
+	companion *pidCompanion
+
+	// specifies the actor behavior stack. The turn reads it for every message;
+	// it is replaced only by the behavior-changing calls, under fieldsLocker.
+	behaviorStack *behaviorStack
+
+	// The processing turn writes the fields from here to systemQueue for every
+	// message or every turn. No producer reads them per message.
+
+	// set the metrics settings
+	processedCount atomic.Int64
+	// mailboxDequeued counts the user messages the processing turn has taken out
+	// of the mailbox. It is the consumer half of actor.mailbox.size. It sits
+	// immediately next to processedCount, which the turn already writes for
+	// every message it processes, so the increment lands on a line the consumer
+	// effectively owns and adds no coherence traffic of its own. It is
+	// maintained only when metricsEnabled is set, and zeroed by reset().
+	mailboxDequeued atomic.Int64
+
+	// turnWorker is the worker running the actor's current turn, nil between
+	// turns. A Tell made from the turn schedules an idle recipient on that
+	// worker's own queue (see PID.scheduleFrom). Written twice per turn by the
+	// consumer.
+	turnWorker atomic.Pointer[worker]
+
+	// mailboxHead and mailboxTail are the first and last segments of the
+	// default user mailbox, embedded in the PID so an ordinary actor holds no
+	// separate mailbox object; see embedded_mailbox.go. Both stay nil until the
+	// first message, and for good when a custom mailbox is used.
+	//
+	// The consumer, the processing turn, moves mailboxHead when it finishes a
+	// segment and no producer ever reads it.
+	mailboxHead atomic.Pointer[mailboxSegment]
+
 	// latestReceiveTimeNano stores the latest receive timestamp as UnixNano (int64).
 	// Using atomic.Int64 instead of atomic.Time avoids the interface-boxing
 	// allocation that atomic.Time.Store incurs on every message (~24 bytes).
 	latestReceiveTimeNano atomic.Int64
 	lastPassivationTouch  atomic.Int64 // UnixNano of last passivation Touch call (for coalescing)
 	latestReceiveDuration atomic.Duration
+
+	// postStart holds the PostStart of the current incarnation until the
+	// actor's next turn handles it. runTurn handles it before the system queue
+	// and the mailbox, so PostStart is always the first message an
+	// incarnation processes, even when a child's Terminated or PanicSignal, or
+	// a user message, reached the actor first.
+	postStart atomic.Pointer[ReceiveContext]
+
+	// msgCountPassivation is true when passivationStrategy is
+	// MessagesCountBasedStrategy; set once at init and read by the turn for
+	// every message.
+	msgCountPassivation atomic.Bool
+
+	// reentrancy holds the async request state. An atomic pointer because
+	// EnableReentrancy installs it at runtime from the processing turn while
+	// off-turn readers (shutdown cancellation, wire snapshots) observe it. It
+	// transitions nil to non-nil at most once and is never removed; disabling
+	// flips the state's default mode to Off instead.
+	reentrancy atomic.Pointer[reentrancyState]
+
+	// stashState is the stash buffer, nil until WithStash or a stash-mode
+	// request creates it. An atomic pointer because that request creates it on
+	// the processing turn while StashSize reads it from other goroutines.
+	stashState atomic.Pointer[stashState]
+
+	// systemQueue holds the control-plane messages (PoisonPill, Panicking,
+	// Pause/ResumePassivation, Terminated, PanicSignal, SendDeadletter).
+	// runTurn drains it before the user mailbox so shutdown and supervision
+	// signals never queue behind a user backlog. It is embedded, two words
+	// and no sentinel, so an idle actor pays nothing for it; see systemQueue.
+	systemQueue systemQueue
+
+	// The remaining fields are touched on lifecycle, failure and
+	// configuration paths only.
+
+	// various lockers to protect the PID fields
+	// in a concurrent environment
+	fieldsLocker sync.RWMutex
+	stopLocker   sync.Mutex
 
 	// specifies the maximum of retries to attempt when the actor
 	// initialization fails. The default value is 5
@@ -158,105 +321,13 @@ type PID struct {
 	// A set override is what gets carried through relocation.
 	initTimeout atomic.Pointer[time.Duration]
 
-	// mailbox holds user messages in FIFO order, drained by runTurn up
-	// to the dispatcher's per-turn throughput budget.
-	mailbox Mailbox
-
-	// embedded is the state of the default mailbox, nil when a spawn option
-	// supplied a custom one. It is set once in newPID and never changes, so
-	// Tell reads it without synchronization to choose the path that stores a
-	// message as values instead of in a pooled ReceiveContext.
-	embedded *embeddedMailboxState
-
 	// remoteHolds tracks the flow-control credit shares of resident remote
 	// messages independently of the mailbox implementation, so teardown can
 	// repay peers whatever the mailbox abandons. Lazily created on the first
 	// remote hold; local-only actors never allocate one.
 	remoteHolds atomic.Pointer[remoteHoldRegistry]
 
-	// systemQueue holds the control-plane messages (PoisonPill, Panicking,
-	// Pause/ResumePassivation, Terminated, PanicSignal, SendDeadletter).
-	// runTurn drains it before the user mailbox so shutdown and supervision
-	// signals never queue behind a user backlog. It is embedded, two words
-	// and no sentinel, so an idle actor pays nothing for it; see systemQueue.
-	systemQueue systemQueue
-
-	// postStart holds the PostStart of the current incarnation until the
-	// actor's next turn handles it. runTurn handles it before the system queue
-	// and the mailbox, so PostStart is always the first message an
-	// incarnation processes, even when a child's Terminated or PanicSignal, or
-	// a user message, reached the actor first.
-	postStart atomic.Pointer[ReceiveContext]
-
-	// the actor actorSystem
-	actorSystem ActorSystem
-
-	// various lockers to protect the PID fields
-	// in a concurrent environment
-	fieldsLocker sync.RWMutex
-	stopLocker   sync.Mutex
-
-	// specifies the actor behavior stack
-	behaviorStack *behaviorStack
-
-	// stashState is the stash buffer, nil until WithStash or a stash-mode
-	// request creates it. An atomic pointer because that request creates it on
-	// the processing turn while StashSize reads it from other goroutines.
-	stashState atomic.Pointer[stashState]
-	// reentrancy holds the async request state. An atomic pointer because
-	// EnableReentrancy installs it at runtime from the processing turn while
-	// off-turn readers (shutdown cancellation, wire snapshots) observe it. It
-	// transitions nil to non-nil at most once and is never removed; disabling
-	// flips the state's default mode to Off instead.
-	reentrancy atomic.Pointer[reentrancyState]
-
-	// mailboxHead and mailboxTail are the first and last segments of the
-	// default user mailbox, embedded in the PID so an ordinary actor holds no
-	// separate mailbox object; see embedded_mailbox.go. Both stay nil until the
-	// first message, and for good when a custom mailbox is used.
-	//
-	// The consumer, the processing turn, moves mailboxHead when it finishes a
-	// segment and no producer ever reads it, so it sits here at the head of the
-	// consumer-written line beside processedCount and mailboxDequeued, a line no
-	// producer reads per message.
-	mailboxHead atomic.Pointer[mailboxSegment]
-
-	// turnWorker is the worker running the actor's current turn, nil between
-	// turns. A Tell made from the turn schedules an idle recipient on that
-	// worker's own queue (see PID.scheduleFrom). Written twice per turn by the
-	// consumer, so it shares the consumer's line.
-	turnWorker atomic.Pointer[worker]
-
-	// set the metrics settings
-	restartCount   atomic.Int64
-	processedCount atomic.Int64
-	// mailboxDequeued counts the user messages the processing turn has taken out
-	// of the mailbox. It is the consumer half of actor.mailbox.size, which is
-	// reported as mailboxEnqueued minus mailboxDequeued rather than as a single
-	// counter both sides write: one shared counter makes every message bounce a
-	// cache line between the producer and the consumer.
-	//
-	// Its position is deliberate. It sits immediately next to processedCount,
-	// which the turn already writes for every message it processes, so the
-	// increment lands on a line the consumer effectively owns and adds no
-	// coherence traffic of its own. Keep the two adjacent.
-	//
-	// It is maintained only when metricsEnabled is set, and zeroed by reset().
-	mailboxDequeued atomic.Int64
-
-	// passivationManager, msgCountPassivation and metricsEnabled are read by
-	// the processing turn for every message and written only on lifecycle
-	// paths. They sit on the line the consumer already writes for every
-	// message (processedCount, mailboxDequeued), which no producer reads, so
-	// the reads always hit and never interact with the producer's per-message
-	// reads of schedState and ctxShard or with its writes to mailboxEnqueued.
-	passivationManager  *passivationManager
-	msgCountPassivation atomic.Bool // true when passivationStrategy is MessagesCountBasedStrategy; set once at init
-	// metricsEnabled records whether a metric provider is wired to this actor.
-	// It is written once in newPID and only read afterwards, which is what lets
-	// the message path gate the mailbox counters on a plain field read instead
-	// of on a provider lookup.
-	metricsEnabled bool
+	restartCount atomic.Int64
 
 	// consecutiveFaults counts the faults handled by the parent's restart
 	// directive without a fault-free period in between; lastFaultAtNano records
@@ -268,29 +339,8 @@ type PID struct {
 	consecutiveFaults atomic.Int64
 	lastFaultAtNano   atomic.Int64
 
-	// supervisor strategy
-	supervisor *supervisor.Supervisor
-
-	// schedState drives the dispatcher-pool ready-queue membership for
-	// this actor.
-	schedState dispatchState
-
-	// ctxShard selects the context-pool shard used for messages delivered
-	// to this actor. Assigned round-robin at construction so concurrently
-	// active actors draw from distinct pool shards instead of contending
-	// on one.
-	ctxShard uint32
-
-	// dispatcher is cached from the actor system at construction time so
-	// the hot-path doReceive can schedule this actor without an interface
-	// assertion on every message.
-	dispatcher *dispatcher
-
-	remoting remoteclient.Client
-
 	// failureCount, reinstateCount and unhandledCount are written only on
-	// failures and explicit rejections, so they share the read-mostly line of
-	// schedState, ctxShard and dispatcher without disturbing it per message.
+	// failures and explicit rejections.
 	failureCount   atomic.Int64
 	reinstateCount atomic.Int64
 	// unhandledCount counts the messages the actor explicitly rejected through
@@ -299,44 +349,6 @@ type PID struct {
 	unhandledCount atomic.Int64
 
 	startedAt atomic.Int64
-	state     atomic.Uint32
-
-	// the list of dependencies
-	dependencies *xsync.Map[string, extension.Dependency]
-
-	// mailboxTail is the segment producers claim slots in; see mailboxHead.
-	// Producers read it on every enqueue and replace it when they link a new
-	// segment, so it is parked here beside mailboxEnqueued on the
-	// producer-written line, away from every field the processing turn touches
-	// per message.
-	mailboxTail atomic.Pointer[mailboxSegment]
-
-	// mailboxEnqueued counts the user messages producers have put into the
-	// mailbox. It is the producer half of actor.mailbox.size, the counterpart of
-	// mailboxDequeued.
-	//
-	// Its position is deliberate, and it is the reason the pair exists. It is
-	// parked here among the cold configuration fields, away from every field the
-	// processing turn touches per message (processedCount, mailboxDequeued,
-	// latestReceiveTimeNano, schedState, metricsEnabled, and the mailbox and
-	// dispatcher pointers), so at runtime its cache line is written by producers
-	// only and the consumer never has to reload it. Moving it next to the other
-	// counters would put it back on the line holding schedState, which both
-	// sides write for every message, and hand back the per-message cache line
-	// bounce the split removes. Keep it away from the hot fields.
-	//
-	// It is maintained only when metricsEnabled is set, and zeroed by reset().
-	mailboxEnqueued atomic.Int64
-
-	passivationStrategy passivation.Strategy
-
-	// companion holds the spawn-time settings most actors never set: reliable
-	// delivery, durable queues, metrics identity, singleton specification and
-	// placement role. It stays nil for an ordinary actor, which keeps those
-	// fields off the idle footprint (see pidCompanion), and it is read only on
-	// lifecycle and scrape paths, so it can share a cache line with
-	// mailboxEnqueued.
-	companion *pidCompanion
 }
 
 var (
@@ -886,10 +898,12 @@ func (pid *PID) ActorSystem() ActorSystem {
 	if pid.IsRemote() {
 		return nil
 	}
-	pid.fieldsLocker.RLock()
-	sys := pid.actorSystem
-	pid.fieldsLocker.RUnlock()
-	return sys
+
+	// actorSystem is written once, by the pid option newPID applies before the
+	// PID is shared, and never changes: no lock is needed to read it. The read
+	// lock this took made every external Tell and Ask write the lock's reader
+	// count, a cache line the processing turn reads for every message.
+	return pid.actorSystem
 }
 
 // Path returns the actor path (location-transparent view of host, port, name, system, parent).
@@ -2301,8 +2315,11 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 		}
 	}
 
+	// Every sender on this path waits for the message to be handled, an Ask,
+	// or is a system or remote delivery, so the actor is handed to a parked
+	// worker directly; see readyQueue.pushHandoff.
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.dispatcher.scheduleHandoff(pid)
 	}
 }
 
@@ -2958,6 +2975,16 @@ func (pid *PID) init(ctx context.Context) error {
 	// sender can reach it, and the turn its message triggers must handle
 	// PostStart first.
 	pid.armPostStart(ctx)
+	// A restart is counted here, before the new incarnation is announced as
+	// running, so a reader that sees the actor running sees the restart too;
+	// the teardown's reset cleared the suspension, so nothing later in the
+	// restart hides the actor from IsRunning. Only a re-initialization that
+	// succeeded counts: a PreStart failure retried by the supervisor is not a
+	// restart.
+	if pid.isStateSet(restartingState) {
+		pid.restartCount.Inc()
+	}
+
 	pid.setState(runningState, true)
 	if logger.Enabled(log.DebugLevel) {
 		logger.Debugf("actor=%s initialization successful", pid.Name())
@@ -3125,7 +3152,18 @@ func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 
 	// Terminated is immutable, so one message serves every watcher, local
 	// and remote.
-	terminated := NewTerminated(pid.Path())
+	// The death watch removes the actor's record from the cluster registry
+	// (see deathWatch.handleTerminated); outside a cluster it has nothing to
+	// do with the Terminated, which would still cost every stop a message to
+	// one actor. The message is built only when something receives it.
+	system := pid.ActorSystem()
+	tellDeathWatch := pid.isStateSet(deathWatchedState) && system.InCluster()
+
+	var terminated *Terminated
+	if len(watchers) > 0 || tellDeathWatch {
+		terminated = NewTerminated(pid.Path())
+	}
+
 	for _, watcher := range watchers {
 		switch {
 		case watcher.IsRunning():
@@ -3155,15 +3193,19 @@ func (pid *PID) freeWatchers(ctx context.Context, watchers []*PID) {
 	// The death watch is every published actor's watcher without an edge in
 	// the tree (see deathWatchedState): it is told after the actor's own
 	// watchers, as it was when it held the last edge, and it never unwatches.
-	if pid.isStateSet(deathWatchedState) {
-		if deathWatch := pid.ActorSystem().getDeathWatch(); deathWatch != nil && deathWatch.IsRunning() {
+	if tellDeathWatch {
+		if deathWatch := system.getDeathWatch(); deathWatch != nil && deathWatch.IsRunning() {
 			_ = pid.Tell(ctx, deathWatch, terminated)
 		}
 	}
 
-	remoteWatchRegistry := pid.ActorSystem().getRemoteWatchRegistry()
+	remoteWatchRegistry := system.getRemoteWatchRegistry()
 	remoteWatchers := remoteWatchRegistry.watchersFor(pid.ID())
 	if len(remoteWatchers) > 0 && pid.remoting != nil {
+		if terminated == nil {
+			terminated = NewTerminated(pid.Path())
+		}
+
 		from := pid.getAddress()
 
 		for _, watcherAddr := range remoteWatchers {
@@ -4067,8 +4109,21 @@ func (pid *PID) armPostStart(ctx context.Context) {
 // it through a local name lookup in that window triggers a turn that runs
 // PostStart before the registry write.
 func (pid *PID) firePostStart() {
+	pid.firePostStartFrom(nil)
+}
+
+// firePostStartFrom is firePostStart for an actor spawned from a turn on w,
+// nil when the spawn came from outside the workers. The actor goes on w's own
+// queue, as a message the turn sends does (see scheduleFrom), rather than
+// through the global ring: a tree of spawns, each node spawning its children
+// from its turn, then fans out through the rings and their steals instead of
+// queueing every child behind the ring's gate and mutex. w is the worker of
+// the parent's current turn; a SpawnChild made from another goroutine while
+// that turn runs queues the child on that worker too, which is safe, the
+// queues are locked, and only decides where the child runs first.
+func (pid *PID) firePostStartFrom(w *worker) {
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.scheduleFrom(w)
 	}
 }
 
@@ -4393,8 +4448,9 @@ func (pid *PID) spawnChildLocal(ctx context.Context, name string, actor Actor, c
 
 		// the event is published only after successful cluster publication, so it
 		// means durable creation
-		eventsStream := pid.getEventsStream()
-		if eventsStream != nil {
+		// The event is built only when someone is subscribed, as in init: the
+		// stream drops a message published to a topic without subscribers.
+		if eventsStream := pid.getEventsStream(); eventsStream != nil && eventsStream.SubscribersCount(eventsTopic) > 0 {
 			eventsStream.Publish(eventsTopic, NewActorChildCreated(cid.Path(), pid.Path()))
 		}
 
@@ -4674,7 +4730,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.setState(suspendedState, false)
 	pid.startPassivation()
 
-	pid.restartCount.Inc()
 	pid.firePostStart()
 	if pid.getEventsStream() != nil {
 		pid.getEventsStream().Publish(eventsTopic, NewActorRestarted(pid.Path()))

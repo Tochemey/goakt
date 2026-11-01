@@ -443,7 +443,7 @@ func (pid *grainPID) receive(grainContext *GrainContext) error {
 	}
 
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.dispatcher.scheduleHandoff(pid)
 	}
 
 	return nil
@@ -928,7 +928,7 @@ func (pid *grainPID) enqueueEnvelope(ctx context.Context, envelope any) error {
 	}
 
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.dispatcher.scheduleHandoff(pid)
 	}
 
 	return nil
@@ -1348,7 +1348,7 @@ func (pid *grainPID) enqueuePoisonPill(ctx context.Context) chan error {
 	pid.enqueueSystemMessage(grainContext)
 
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.dispatcher.scheduleHandoff(pid)
 	}
 
 	return ack
