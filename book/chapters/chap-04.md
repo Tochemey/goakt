@@ -137,7 +137,7 @@ If the tree already holds this ID with a *different* PID, a concurrent spawn won
 4. Falls back to package-level defaults for a missing supervisor or passivation strategy (`newPID` in `actor/pid.go`, defined at `defaultSupervisor` in `actor/pid.go`). Top-level actors never reach these fallbacks, because `configPID` already supplied the system defaults. A child spawned without a passivation strategy reaches the passivation fallback. It never reaches the supervisor fallback, because `PID.buildChildSettings` in `actor/pid.go` already gave it the system's default supervisor ([§4.6](#46-children)).
 5. Pushes `actor.Receive` as the first entry of the behaviour stack (`newPID` in `actor/pid.go`).
 6. Runs `init`, which runs `PreStart` ([§4.4](#44-prestart-retries-and-the-timeout-that-is-not-one)).
-7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry (`PID.firePostStart` in `actor/pid.go`), and `attachSystemActor` does the same for system actors.
+7. Registers with the passivation manager and builds metric attributes (`newPID` in `actor/pid.go`). The first turn is not scheduled here: `attachAndPublish` schedules it once the actor is in the tree and, in a cluster, in the registry, and `attachSystemActor` does the same for system actors. A child spawned from its parent's turn is queued on that turn's worker, as a message the turn sends is; a spawn from outside the workers goes through the ready queue (`PID.firePostStart` and `PID.firePostStartFrom` in `actor/pid.go`).
 
 ### `PostStart` is always the first message
 

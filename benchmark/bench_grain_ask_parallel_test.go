@@ -24,53 +24,33 @@ package benchmark
 
 import (
 	"context"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// BenchmarkGrainTellFanOut spreads load across many grains. This is the
-// case where the dispatcher pool change matters most: under the old
-// per-burst goroutine model, each active grain spawned its own
-// goroutine, so N concurrent grains = N goroutines. With the shared
-// pool, goroutine count is bounded by GOMAXPROCS regardless of N.
-func BenchmarkGrainTellFanOut(b *testing.B) {
-	const grainCount = 256
+func BenchmarkGrainAskParallel(b *testing.B) {
 	ctx := context.Background()
-
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
+	sys := sharedCluster(b)
+	identities := make([]*actor.GrainIdentity, runtime.GOMAXPROCS(0))
+	for i := range identities {
+		identities[i] = activate(b, sys)
 	}
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	identities, dones := setupFanOutGrains(b, ctx, actorSystem, grainCount)
-
-	var counter atomic.Uint64
+	var next atomic.Int64
+	msg := new(Ping)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
-		msg := new(testpb.TestSend)
+		identity := identities[int(next.Add(1)-1)%len(identities)]
 		for pb.Next() {
-			idx := counter.Add(1) % grainCount
-			if err := actorSystem.TellGrain(ctx, identities[idx], msg); err != nil {
-				b.Fatal(err)
+			if _, err := sys.AskGrain(ctx, identity, msg, Timeout); err != nil {
+				b.Error(err)
+				return
 			}
 		}
 	})
-	for _, d := range dones {
-		<-d
-	}
-	b.StopTimer()
-	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+	ReportRate(b, b.N, MsgsPerSec)
 }

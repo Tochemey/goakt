@@ -10555,3 +10555,39 @@ func TestDeathWatchIsToldWithoutAWatchEdge(t *testing.T) {
 	require.Never(t, func() bool { return deathWatch.ProcessedCount() > before }, 200*time.Millisecond, 10*time.Millisecond,
 		"outside a cluster the death watch must not be told that the actor stopped")
 }
+
+// TestFirePostStartFrom verifies where the turn that delivers PostStart is
+// queued: on the worker of the parent's turn when the actor was spawned from
+// one, and on the dispatcher's ready queue when it was spawned from outside
+// the workers.
+func TestFirePostStartFrom(t *testing.T) {
+	t.Run("a child spawned from a turn is queued on that worker", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		parent := newDispatchTestPID(d)
+		child := newDispatchTestPID(d)
+		parent.turnWorker.Store(d.workers[1])
+
+		child.firePostStartFrom(parent.currentWorker())
+		require.Equal(t, dispatchScheduled, child.schedState.Load())
+		require.Same(t, child, d.readyQueue.locals[1].runnext.(*PID), "the child goes to the turn's worker, in its run-next slot")
+		require.Zero(t, d.readyQueue.globalLen())
+	})
+
+	t.Run("a spawn from outside the workers goes through the ready queue", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+
+		pid.firePostStartFrom(nil)
+		require.Equal(t, dispatchScheduled, pid.schedState.Load())
+		require.Equal(t, 1, d.readyQueue.globalLen(), "no worker is parked, so the actor waits on the global ring")
+	})
+
+	t.Run("an actor already scheduled is not queued twice", func(t *testing.T) {
+		d := newDispatcher(2, dispatcherThroughput)
+		pid := newDispatchTestPID(d)
+		require.True(t, pid.schedState.TrySchedule())
+
+		pid.firePostStartFrom(nil)
+		require.Zero(t, d.readyQueue.globalLen())
+	})
+}

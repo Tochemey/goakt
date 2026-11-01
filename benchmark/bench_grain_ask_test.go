@@ -25,44 +25,20 @@ package benchmark
 import (
 	"context"
 	"testing"
-	"time"
-
-	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-// BenchmarkGrainAsk measures synchronous request/response latency.
-// Sequential to avoid mailbox contention on a single grain — same
-// rationale as BenchmarkAsk for actors.
 func BenchmarkGrainAsk(b *testing.B) {
 	ctx := context.Background()
-
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
-	}
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	identity, err := actor.GrainOf[*benchGrain](ctx, actorSystem, "receiver")
-	if err != nil {
-		b.Fatalf("failed to create grain identity: %v", err)
-	}
+	sys := sharedCluster(b)
+	identity := activate(b, sys)
+	msg := new(Ping)
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	msg := new(testpb.TestReply)
-	for i := 0; i < b.N; i++ {
-		if _, err := actorSystem.AskGrain(ctx, identity, msg, time.Second); err != nil {
+	for range b.N {
+		if _, err := sys.AskGrain(ctx, identity, msg, Timeout); err != nil {
 			b.Fatal(err)
 		}
 	}
-	b.StopTimer()
-	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+	ReportRate(b, b.N, MsgsPerSec)
 }

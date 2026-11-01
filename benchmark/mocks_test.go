@@ -20,379 +20,391 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// Package benchmark holds GoAkt's benchmarks: sends from outside the system
+// and between actors, the Savina ping-pong, thread ring, fork-join and big
+// exchanges, Skynet, spawn and stop, the live heap per idle actor and grain,
+// and the grain asks and activation. The shared workload, messages, sizes,
+// Latch, Signal and the Skynet ranges, is at the end of this file; each
+// benchmark is in the file named after it. The soak tests behind the scale
+// build tag share this file's helpers.
 package benchmark
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"reflect"
+	"os"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/tochemey/goakt/v4/actor"
 	"github.com/tochemey/goakt/v4/discovery/static"
-	"github.com/tochemey/goakt/v4/internal/address"
-	inet "github.com/tochemey/goakt/v4/internal/net"
-	"github.com/tochemey/goakt/v4/internal/pause"
+	dynaport "github.com/tochemey/goakt/v4/internal/net"
 	"github.com/tochemey/goakt/v4/log"
 	"github.com/tochemey/goakt/v4/remote"
 	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-const (
-	// clusterSpawnNodeCount is the size of the cluster the spawns are measured
-	// on. With three nodes most registry keys are owned by a node other than
-	// the spawning one, so a spawn pays the network round trips of a real
-	// cluster rather than local map writes.
-	clusterSpawnNodeCount = 3
+var system actor.ActorSystem
 
-	// clusterSpawnPortsPerNode is the number of ports one node binds:
-	// discovery, peers and remoting.
-	clusterSpawnPortsPerNode = 3
-
-	// clusterSpawnHost is the loopback address every node binds to.
-	clusterSpawnHost = "127.0.0.1"
-
-	// clusterSpawnSystemName is the actor system name shared by the nodes.
-	clusterSpawnSystemName = "bench-cluster"
-
-	// clusterSpawnBootstrapTimeout bounds how long a node waits for its peers
-	// while joining. The nodes start together, so a short wait is enough.
-	clusterSpawnBootstrapTimeout = time.Second
-
-	// clusterSpawnPeersTimeout bounds the wait for every node to see the
-	// others before the measurement starts.
-	clusterSpawnPeersTimeout = 30 * time.Second
-
-	// clusterSpawnPeersQueryTimeout bounds one peers query during that wait.
-	clusterSpawnPeersQueryTimeout = time.Second
-
-	// clusterSpawnPeersPoll is the interval between two peers queries.
-	clusterSpawnPeersPoll = 100 * time.Millisecond
-
-	// clusterSpawnActorNamePrefix prefixes the name of every spawned actor.
-	clusterSpawnActorNamePrefix = "bench-cluster-actor-"
+// grains is the single-node cluster the grain benchmarks share. It is only
+// started when one of them runs, so its remoting and gossip stay out of the
+// actor benchmarks.
+var (
+	grains     actor.ActorSystem
+	grainsOnce sync.Once
 )
 
-var replyMessage = testpb.Reply_builder{Content: "reply"}.Build()
+func TestMain(m *testing.M) {
+	ctx := context.Background()
 
-var errRequestBenchFailed = errors.New("request benchmark failed")
+	var err error
+	system, err = actor.NewActorSystem("bench", actor.WithLogger(log.DiscardLogger))
+	if err != nil {
+		panic(err)
+	}
 
-// throughputBudgets is the sweep used by the *Throughput variants of the
-// benchmarks below. It spans from below-default (fair / latency-friendly) to
-// well above default (throughput-oriented) so the curve is visible.
-var throughputBudgets = []int{8, 32, 64, 128, 256}
+	if err := system.Start(ctx); err != nil {
+		panic(err)
+	}
 
-var _ actor.Actor = (*stopSignalActor)(nil)
-
-// replicaReceiveCount is incremented each time a replicaActor observes a
-// TestSend message. Reset at the start of every run.
-var replicaReceiveCount atomic.Int64
-
-type Actor struct{}
-
-// countingActor counts TestSend deliveries and closes done exactly once
-// when received reaches target. received is a plain int64 because an
-// actor's Receive is invoked serially by a single dispatcher worker;
-// no synchronisation is required.
-type countingActor struct {
-	received int64
-	done     chan struct{}
-	target   int64
+	code := m.Run()
+	_ = system.Stop(ctx)
+	if grains != nil {
+		_ = grains.Stop(ctx)
+	}
+	os.Exit(code)
 }
 
-type requestBenchActor struct {
+// sink counts every Ping it receives.
+type sink struct {
+	latch *Latch
+}
+
+var _ actor.Actor = (*sink)(nil)
+
+func (x *sink) PreStart(*actor.Context) error { return nil }
+
+func (x *sink) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Ping:
+		x.latch.Count()
+	}
+}
+
+func (x *sink) PostStop(*actor.Context) error { return nil }
+
+// teller sends n Pings to a target from inside its handler once it receives Start.
+type teller struct {
 	target *actor.PID
-	doneCh chan struct{}
-	errCh  chan error
+	n      int
 }
 
-// payloadMsg carries a sized byte payload for BenchmarkTellPayload. The
-// slice header is shared across producers; the receiver does not mutate
-// it, so the cost reported is the dispatch path plus the per-message
-// pointer hand-off, not allocations of the payload itself.
-type payloadMsg struct{ Data []byte }
+var _ actor.Actor = (*teller)(nil)
 
-type payloadCounterActor struct {
-	received int64
-	done     chan struct{}
-	target   int64
+func (x *teller) PreStart(*actor.Context) error { return nil }
+
+func (x *teller) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Start:
+		msg := new(Ping)
+		for range x.n {
+			ctx.Tell(x.target, msg)
+		}
+	}
 }
 
-// benchGrain is a minimal Grain used by the throughput benchmarks. It
-// performs the same dispatch work as Actor (no business logic), so the
-// numbers reflect the dispatcher + mailbox path rather than user code.
-type benchGrain struct{}
+func (x *teller) PostStop(*actor.Context) error { return nil }
 
-// countingGrain is the grain counterpart of countingActor. received is a
-// plain int64 because a grain's OnReceive is invoked serially on a
-// single dispatcher worker; no synchronisation is required.
-type countingGrain struct {
-	received int64
-	done     chan struct{}
-	target   int64
+// responder answers every Ping with a Pong.
+type responder struct{}
+
+var _ actor.Actor = (*responder)(nil)
+
+func (x *responder) PreStart(*actor.Context) error { return nil }
+
+func (x *responder) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Ping:
+		ctx.Response(new(Pong))
+	}
 }
 
-// pingPongStart tells a pingPongClient to send its first batch.
-type pingPongStart struct{}
+func (x *responder) PostStop(*actor.Context) error { return nil }
 
-// pingPongEcho answers every TestSend with the same message, to its sender.
-type pingPongEcho struct{}
-
-// pingPongClient sends batches of TestSend to echo and sends the next batch
-// once every reply of the current one is back, until it has sent remaining
-// messages; then it closes done. Only its own turns touch its fields.
-type pingPongClient struct {
-	// echo is the actor the client exchanges messages with.
-	echo *actor.PID
-	// batch is the number of messages the client keeps in flight.
-	batch int
-	// remaining is the number of messages still to send.
-	remaining int
-	// outstanding is the number of replies the current batch still awaits.
-	outstanding int
-	// message is the payload sent in every request, reused to keep
-	// allocation out of the measurement.
-	message *testpb.TestSend
-	// done is closed once the last reply is back.
-	done chan struct{}
+// pinger keeps a ping-pong exchange going with a ponger until the latch opens.
+type pinger struct {
+	ponger *actor.PID
+	latch  *Latch
 }
 
-// windowActor counts the messages it has processed so a producer can keep the
-// number of in-flight messages below the mailbox capacity.
-type windowActor struct {
-	outstanding *atomic.Int64
+var _ actor.Actor = (*pinger)(nil)
+
+func (x *pinger) PreStart(*actor.Context) error { return nil }
+
+func (x *pinger) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Start:
+		ctx.Tell(x.ponger, new(Ping))
+	case *Pong:
+		if !x.latch.Count() {
+			ctx.Tell(x.ponger, new(Ping))
+		}
+	}
 }
 
-type noopActor struct{}
+func (x *pinger) PostStop(*actor.Context) error { return nil }
 
-// idleFootprint is the heap and goroutine growth attributable to one idle
-// population, read after the population settled and the heap was collected.
-type idleFootprint struct {
-	// heapAlloc is the growth in live heap bytes (runtime.MemStats.HeapAlloc).
-	heapAlloc uint64
-	// heapInuse is the growth in heap spans in use (runtime.MemStats.HeapInuse),
-	// which adds the size-class slack the allocator pays around live objects.
-	heapInuse uint64
-	// goroutines is the growth in live goroutines.
-	goroutines int
+// ponger replies to the sender of every Ping.
+type ponger struct{}
+
+var _ actor.Actor = (*ponger)(nil)
+
+func (x *ponger) PreStart(*actor.Context) error { return nil }
+
+func (x *ponger) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Ping:
+		ctx.Tell(ctx.Sender(), new(Pong))
+	}
 }
 
-// forkJoinWorker counts the messages it receives and closes done once it has
-// received its share, for BenchmarkForkJoin.
+func (x *ponger) PostStop(*actor.Context) error { return nil }
+
+// forkJoinWorker counts the messages it receives and opens its slot of the
+// shared latch once it has received its share.
 type forkJoinWorker struct {
+	latch  *Latch
 	target int
 	count  int
-	done   chan struct{}
 }
 
-// ringToken is the one message BenchmarkThreadRing passes around the ring.
-// Only one actor holds it at a time, so its hop count is decremented in place.
-type ringToken struct {
-	hops int
+var _ actor.Actor = (*forkJoinWorker)(nil)
+
+func (x *forkJoinWorker) PreStart(*actor.Context) error { return nil }
+
+func (x *forkJoinWorker) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Ping:
+		x.count++
+		if x.count == x.target {
+			x.latch.Count()
+		}
+	}
 }
 
-// ringNext closes the ring: it tells the last actor which actor follows it.
-type ringNext struct {
+func (x *forkJoinWorker) PostStop(*actor.Context) error { return nil }
+
+// pairPinger is a pinger with its own share of round trips, for the
+// parallel ping-pong: it counts its own round trips and opens its slot of the
+// shared latch once its share is done.
+type pairPinger struct {
+	ponger    *actor.PID
+	latch     *Latch
+	remaining int
+}
+
+var _ actor.Actor = (*pairPinger)(nil)
+
+func (x *pairPinger) PreStart(*actor.Context) error { return nil }
+
+func (x *pairPinger) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Start:
+		ctx.Tell(x.ponger, new(Ping))
+	case *Pong:
+		x.remaining--
+		if x.remaining > 0 {
+			ctx.Tell(x.ponger, new(Ping))
+		}
+		if x.remaining == 0 {
+			x.latch.Count()
+		}
+	}
+}
+
+func (x *pairPinger) PostStop(*actor.Context) error { return nil }
+
+// pipelinedPinger keeps PipelineDepth pings in flight to its ponger and sends
+// the next batch once every reply of the current one is back, until its share
+// of round trips is done; then it opens its slot of the shared latch.
+type pipelinedPinger struct {
+	ponger      *actor.PID
+	latch       *Latch
+	remaining   int
+	outstanding int
+	ping        *Ping
+}
+
+var _ actor.Actor = (*pipelinedPinger)(nil)
+
+func (x *pipelinedPinger) PreStart(*actor.Context) error { return nil }
+
+func (x *pipelinedPinger) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *Start:
+		x.send(ctx)
+	case *Pong:
+		x.outstanding--
+		if x.outstanding == 0 && x.remaining > 0 {
+			x.send(ctx)
+		}
+		if x.outstanding == 0 && x.remaining == 0 {
+			x.latch.Count()
+		}
+	}
+}
+
+// send sends the next batch, at most the round trips left.
+func (x *pipelinedPinger) send(ctx *actor.ReceiveContext) {
+	n := min(PipelineDepth, x.remaining)
+	x.remaining -= n
+	x.outstanding = n
+	for range n {
+		ctx.Tell(x.ponger, x.ping)
+	}
+}
+
+func (x *pipelinedPinger) PostStop(*actor.Context) error { return nil }
+
+// setNext closes a thread ring: it tells the last actor which one follows it.
+type setNext struct {
 	next *actor.PID
 }
 
 // ringActor passes the token to the next actor in the ring until its hops run
-// out, then closes done.
+// out, then opens the latch.
 type ringActor struct {
-	next *actor.PID
-	done chan struct{}
+	next  *actor.PID
+	latch *Latch
 }
 
-// stopSignalActor is an empty actor that reports its PostStop on a channel,
-// so BenchmarkSpawnStop can time a lifecycle to the end of the stop.
-type stopSignalActor struct {
-	stopped chan struct{}
+var _ actor.Actor = (*ringActor)(nil)
+
+func (x *ringActor) PreStart(*actor.Context) error { return nil }
+
+func (x *ringActor) Receive(ctx *actor.ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *setNext:
+		x.next = msg.next
+	case *Token:
+		if msg.Hops == 0 {
+			x.latch.Count()
+			return
+		}
+		msg.Hops--
+		ctx.Tell(x.next, msg)
+	}
 }
 
-// benchCluster is a cluster of nodes started in one process for a benchmark.
-// The first node spawns; the others only hold their share of the registry.
-type benchCluster struct {
-	nodes []actor.ActorSystem
-	// spawned counts the names handed out so far, so every spawn of the
-	// benchmark claims a name the registry has not seen, whichever
-	// sub-benchmark or iteration it belongs to.
-	spawned atomic.Int64
+func (x *ringActor) PostStop(*actor.Context) error { return nil }
+
+// bigActor is one of the actors of a Big exchange: it pings a peer per round,
+// answers every Ping it receives, and opens its slot of the shared latch after
+// its last round.
+type bigActor struct {
+	index  int
+	peers  []*actor.PID
+	rounds int
+	round  int
+	latch  *Latch
+	ping   *Ping
+	pong   *Pong
 }
 
-type replicaActor struct{}
+var _ actor.Actor = (*bigActor)(nil)
 
-type replicaEngine struct {
-	system actor.ActorSystem
-	host   string
-	port   int
-	actors []*address.Address
+func (x *bigActor) PreStart(*actor.Context) error { return nil }
+
+func (x *bigActor) Receive(ctx *actor.ReceiveContext) {
+	switch ctx.Message().(type) {
+	case *BigRound:
+		ctx.Tell(x.peers[NextPeer(x.index, x.round, len(x.peers))], x.ping)
+	case *Ping:
+		ctx.Tell(ctx.Sender(), x.pong)
+	case *Pong:
+		x.round++
+		if x.round < x.rounds {
+			ctx.Tell(x.peers[NextPeer(x.index, x.round, len(x.peers))], x.ping)
+		}
+		if x.round == x.rounds {
+			x.latch.Count()
+		}
+	}
 }
 
-func (a *Actor) PreStart(*actor.Context) error {
+func (x *bigActor) PostStop(*actor.Context) error { return nil }
+
+// skynetNode is one node of a Skynet tree. On its range it either reports its
+// leaf number to its parent, or creates its children and sums their results;
+// a node reports once and then stops.
+type skynetNode struct {
+	total   *SkynetTotal
+	parent  *actor.PID
+	pending int
+	sum     int64
+}
+
+var _ actor.Actor = (*skynetNode)(nil)
+
+func (x *skynetNode) PreStart(*actor.Context) error { return nil }
+
+func (x *skynetNode) Receive(ctx *actor.ReceiveContext) {
+	switch msg := ctx.Message().(type) {
+	case *SkynetRange:
+		x.parent = ctx.Sender()
+		if msg.Size == 1 {
+			x.report(ctx, msg.Start)
+			return
+		}
+
+		for _, child := range msg.Children() {
+			ctx.Tell(ctx.Spawn(Name("n"), &skynetNode{}, actor.WithLongLived()), &child)
+		}
+		x.pending = SkynetFanOut
+	case *SkynetResult:
+		x.sum += msg.Sum
+		x.pending--
+		if x.pending == 0 {
+			x.report(ctx, x.sum)
+		}
+	}
+}
+
+func (x *skynetNode) report(ctx *actor.ReceiveContext, sum int64) {
+	if x.total != nil {
+		x.total.Complete(sum)
+	} else {
+		ctx.Tell(x.parent, &SkynetResult{Sum: sum})
+	}
+	ctx.Shutdown()
+}
+
+func (x *skynetNode) PostStop(*actor.Context) error { return nil }
+
+// stopper fires a signal once it has stopped.
+type stopper struct {
+	stopped Signal
+}
+
+var _ actor.Actor = (*stopper)(nil)
+
+func (x *stopper) PreStart(*actor.Context) error { return nil }
+
+func (x *stopper) Receive(*actor.ReceiveContext) {}
+
+func (x *stopper) PostStop(*actor.Context) error {
+	x.stopped.Fire()
 	return nil
 }
 
-func (a *Actor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-	case *testpb.TestReply:
-		ctx.Response(replyMessage)
-	default:
-		ctx.Unhandled()
-	}
-}
+// noopActor handles TestSend and nothing else. The scale soak tests spawn it
+// by the million.
+type noopActor struct{}
 
-func (a *Actor) PostStop(*actor.Context) error {
-	return nil
-}
-
-func (a *countingActor) PreStart(*actor.Context) error { return nil }
-
-func (a *countingActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		a.received++
-		if a.received == a.target {
-			close(a.done)
-		}
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *countingActor) PostStop(*actor.Context) error { return nil }
-
-func (a *requestBenchActor) PreStart(*actor.Context) error { return nil }
-
-func (a *requestBenchActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		call := ctx.Request(a.target, new(testpb.TestReply))
-		if call == nil {
-			a.signalError(errRequestBenchFailed)
-			a.signalDone()
-			return
-		}
-		call.Then(func(_ any, err error) {
-			if err != nil {
-				a.signalError(err)
-			}
-			a.signalDone()
-		})
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *requestBenchActor) PostStop(*actor.Context) error { return nil }
-
-func (a *payloadCounterActor) PreStart(*actor.Context) error { return nil }
-
-func (a *payloadCounterActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *payloadMsg:
-		a.received++
-		if a.received == a.target {
-			close(a.done)
-		}
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *payloadCounterActor) PostStop(*actor.Context) error { return nil }
-
-func (*benchGrain) OnActivate(context.Context, *actor.GrainProps) error { return nil }
-
-func (*benchGrain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
-
-func (*benchGrain) OnReceive(ctx *actor.GrainContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		ctx.NoErr()
-	case *testpb.TestReply:
-		ctx.Response(replyMessage)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (*countingGrain) OnActivate(context.Context, *actor.GrainProps) error { return nil }
-
-func (*countingGrain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
-
-func (g *countingGrain) OnReceive(ctx *actor.GrainContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		g.received++
-		if g.received == g.target {
-			close(g.done)
-		}
-		ctx.NoErr()
-	default:
-		ctx.Unhandled()
-	}
-}
-
-// PreStart does nothing.
-func (x *pingPongEcho) PreStart(*actor.Context) error { return nil }
-
-// Receive answers a TestSend with the same message.
-func (x *pingPongEcho) Receive(ctx *actor.ReceiveContext) {
-	if message, ok := ctx.Message().(*testpb.TestSend); ok {
-		ctx.Tell(ctx.Sender(), message)
-	}
-}
-
-// PostStop does nothing.
-func (x *pingPongEcho) PostStop(*actor.Context) error { return nil }
-
-// PreStart does nothing.
-func (x *pingPongClient) PreStart(*actor.Context) error { return nil }
-
-// Receive starts the exchange on pingPongStart and counts the replies.
-func (x *pingPongClient) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *pingPongStart:
-		x.send(ctx)
-	case *testpb.TestSend:
-		x.outstanding--
-		if x.outstanding > 0 {
-			return
-		}
-
-		if x.remaining == 0 {
-			close(x.done)
-			return
-		}
-
-		x.send(ctx)
-	}
-}
-
-// PostStop does nothing.
-func (x *pingPongClient) PostStop(*actor.Context) error { return nil }
-
-func (a *windowActor) PreStart(*actor.Context) error { return nil }
-
-func (a *windowActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		a.outstanding.Add(-1)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *windowActor) PostStop(*actor.Context) error { return nil }
+var _ actor.Actor = (*noopActor)(nil)
 
 func (x *noopActor) PreStart(*actor.Context) error { return nil }
 
@@ -406,207 +418,8 @@ func (x *noopActor) Receive(ctx *actor.ReceiveContext) {
 
 func (x *noopActor) PostStop(*actor.Context) error { return nil }
 
-// PreStart does nothing.
-func (x *forkJoinWorker) PreStart(*actor.Context) error { return nil }
-
-// Receive counts the message and closes done on the last one of its share.
-func (x *forkJoinWorker) Receive(ctx *actor.ReceiveContext) {
-	if _, ok := ctx.Message().(*testpb.TestSend); !ok {
-		return
-	}
-
-	x.count++
-	if x.count == x.target {
-		close(x.done)
-	}
-}
-
-// PostStop does nothing.
-func (x *forkJoinWorker) PostStop(*actor.Context) error { return nil }
-
-// PreStart does nothing.
-func (x *ringActor) PreStart(*actor.Context) error { return nil }
-
-// Receive forwards the token or, on the last hop, closes done.
-func (x *ringActor) Receive(ctx *actor.ReceiveContext) {
-	switch msg := ctx.Message().(type) {
-	case *ringNext:
-		x.next = msg.next
-	case *ringToken:
-		if msg.hops == 0 {
-			close(x.done)
-			return
-		}
-
-		msg.hops--
-		ctx.Tell(x.next, msg)
-	}
-}
-
-// PostStop does nothing.
-func (x *ringActor) PostStop(*actor.Context) error { return nil }
-
-func (x *stopSignalActor) PreStart(*actor.Context) error { return nil }
-
-func (x *stopSignalActor) Receive(*actor.ReceiveContext) {}
-
-func (x *stopSignalActor) PostStop(*actor.Context) error {
-	x.stopped <- struct{}{}
-	return nil
-}
-
-func (*replicaActor) PreStart(*actor.Context) error { return nil }
-
-func (*replicaActor) PostStop(*actor.Context) error { return nil }
-
-func (*replicaActor) Receive(ctx *actor.ReceiveContext) {
-	switch ctx.Message().(type) {
-	case *testpb.TestSend:
-		replicaReceiveCount.Add(1)
-	default:
-		ctx.Unhandled()
-	}
-}
-
-func (a *requestBenchActor) signalDone() {
-	a.doneCh <- struct{}{}
-}
-
-func (a *requestBenchActor) signalError(err error) {
-	if err == nil {
-		return
-	}
-	select {
-	case a.errCh <- err:
-	default:
-	}
-}
-
-// setupFanOutGrains provisions grainCount grains for the round-robin
-// fan-out benchmarks. Each grain gets a private int64 counter, a private
-// done channel, and a target computed from the round-robin distribution
-// counter.Add(1) % grainCount over b.N messages:
-//   - grain 0 receives messages at positions grainCount, 2*grainCount, ...
-//   - grain i (1..grainCount-1) receives messages at positions i, i+grainCount, ...
-//
-// The returned slices are aligned: dones[i] completes when identities[i]
-// has received all its messages.
-func setupFanOutGrains(b *testing.B, ctx context.Context, system actor.ActorSystem, grainCount uint64) ([]*actor.GrainIdentity, []chan struct{}) {
-	n := uint64(b.N)
-	identities := make([]*actor.GrainIdentity, grainCount)
-	dones := make([]chan struct{}, grainCount)
-	for i := range grainCount {
-		var target int64
-		if i == 0 {
-			target = int64(n / grainCount)
-		} else if i <= n {
-			target = int64((n-i)/grainCount) + 1
-		}
-		done := make(chan struct{})
-		if target == 0 {
-			close(done)
-		}
-		//nolint:staticcheck // the deprecated factory path is kept here: the benchmark injects per-run state that zero-value construction cannot carry
-		id, err := system.GrainIdentity(ctx, fmt.Sprintf("g-%d", i), func(context.Context) (actor.Grain, error) {
-			return &countingGrain{done: done, target: target}, nil
-		})
-		if err != nil {
-			b.Fatalf("failed to create grain identity: %v", err)
-		}
-		identities[i] = id
-		dones[i] = done
-	}
-	return identities, dones
-}
-
-// send sends the client's next batch, at most the messages it has left.
-func (x *pingPongClient) send(ctx *actor.ReceiveContext) {
-	n := min(x.batch, x.remaining)
-	x.remaining -= n
-	x.outstanding = n
-	for range n {
-		ctx.Tell(x.echo, x.message)
-	}
-}
-
-// benchEqualPriority ranks every message the same. It drives the priority
-// mailboxes in the throughput benchmarks: equal priorities keep the heap busy
-// and, for the stable variant, exercise the insertion-order tiebreaker.
-func benchEqualPriority(any, any) bool { return false }
-
-// measureIdleFootprint starts a fresh actor system, takes a collected baseline,
-// spawns count idle actors with opts, waits for their PostStart to drain and
-// returns the collected growth against the baseline. The slice holding the
-// spawned PIDs is allocated before the baseline so the benchmark's own
-// bookkeeping is not charged to the population.
-func measureIdleFootprint(b *testing.B, count int, opts ...actor.SpawnOption) idleFootprint {
-	b.Helper()
-
-	ctx := context.Background()
-	system, err := actor.NewActorSystem("mem-bench", actor.WithLogger(log.DiscardLogger), actor.WithActorInitMaxRetries(1))
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	defer func() { _ = system.Stop(ctx) }()
-
-	pids := make([]*actor.PID, count)
-	before := collectedMemStats()
-	baselineGoroutines := runtime.NumGoroutine()
-
-	for i := range count {
-		pid, err := system.Spawn(ctx, benchActorName(i), new(noopActor), opts...)
-		require.NoError(b, err)
-		pids[i] = pid
-	}
-
-	settlePostStart(b, pids)
-	after := collectedMemStats()
-
-	return idleFootprint{
-		heapAlloc:  after.HeapAlloc - before.HeapAlloc,
-		heapInuse:  after.HeapInuse - before.HeapInuse,
-		goroutines: runtime.NumGoroutine() - baselineGoroutines,
-	}
-}
-
-// settlePostStart blocks until every actor in pids has processed its
-// PostStart, the one message a spawn leaves in flight, so the heap is measured
-// with the dispatcher quiescent rather than mid-drain.
-func settlePostStart(b *testing.B, pids []*actor.PID) {
-	b.Helper()
-
-	deadline := time.Now().Add(footprintSettleTimeout)
-	for i, pid := range pids {
-		for pid.ProcessedCount() == 0 {
-			if time.Now().After(deadline) {
-				b.Fatalf("actor %d did not process PostStart within %s", i, footprintSettleTimeout)
-			}
-
-			pause.For(time.Millisecond)
-		}
-	}
-}
-
-// collectedMemStats forces two full collections and reads the heap
-// statistics. Two, not one: sync.Pool contents survive the first collection
-// in the pool's victim cache and are only released by the second, so a single
-// collection would charge pooled scratch objects the spawns went through to
-// the population.
-func collectedMemStats() runtime.MemStats {
-	runtime.GC()
-	runtime.GC()
-
-	var stats runtime.MemStats
-	runtime.ReadMemStats(&stats)
-	return stats
-}
-
-// benchActorName returns the name of the i-th actor of the idle population.
-func benchActorName(i int) string {
-	return "bench-noop-" + strconv.Itoa(i)
-}
-
 // humanReadableBytes renders b in the largest binary unit that keeps it above
-// one, for the benchmark reports.
+// one, for the soak tests' reports.
 func humanReadableBytes(b uint64) string {
 	const (
 		kilobyte = 1024
@@ -626,181 +439,7 @@ func humanReadableBytes(b uint64) string {
 	}
 }
 
-// measureIdleGrainFootprint starts a fresh actor system, takes a collected
-// baseline, activates count idle grains with opts and returns the collected
-// growth against the baseline. The slice holding the identities is allocated
-// before the baseline so the benchmark's own bookkeeping is not charged to the
-// population; the identities themselves are retained by the grain processes
-// and are part of what a grain costs, so they are measured.
-func measureIdleGrainFootprint(b *testing.B, count int, opts ...actor.GrainOption) idleFootprint {
-	b.Helper()
-
-	ctx := context.Background()
-	system, err := actor.NewActorSystem("grain-mem-bench", actor.WithLogger(log.DiscardLogger))
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	defer func() { _ = system.Stop(ctx) }()
-
-	identities := make([]*actor.GrainIdentity, count)
-	before := collectedMemStats()
-	baselineGoroutines := runtime.NumGoroutine()
-
-	for i := range count {
-		identity, err := actor.GrainOf[*benchGrain](ctx, system, benchGrainName(i), opts...)
-		require.NoError(b, err)
-		identities[i] = identity
-	}
-
-	after := collectedMemStats()
-
-	return idleFootprint{
-		heapAlloc:  after.HeapAlloc - before.HeapAlloc,
-		heapInuse:  after.HeapInuse - before.HeapInuse,
-		goroutines: runtime.NumGoroutine() - baselineGoroutines,
-	}
-}
-
-// grainProcessStructBytes returns the size of the unexported grain process
-// struct, the per-grain object the activation path allocates. The type is
-// reached through the process pointer GrainContext carries, so the benchmark
-// needs no export from the actor package; it reports zero if that field is
-// ever renamed, which only loses the report line.
-func grainProcessStructBytes() uintptr {
-	field, ok := reflect.TypeFor[actor.GrainContext]().FieldByName("pid")
-	if !ok || field.Type.Kind() != reflect.Pointer {
-		return 0
-	}
-
-	return field.Type.Elem().Size()
-}
-
-// benchGrainName returns the name of the i-th grain of the idle population.
-func benchGrainName(i int) string {
-	return "bench-grain-" + strconv.Itoa(i)
-}
-
-// startSpawnBenchSystem starts a fresh actor system for one benchmark run and
-// stops it when the run ends, so every run spawns into an empty system.
-func startSpawnBenchSystem(b *testing.B) (context.Context, actor.ActorSystem) {
-	b.Helper()
-
-	ctx := context.Background()
-	system, err := actor.NewActorSystem("spawn-bench", actor.WithLogger(log.DiscardLogger), actor.WithActorInitMaxRetries(1))
-	require.NoError(b, err)
-	require.NoError(b, system.Start(ctx))
-	b.Cleanup(func() { _ = system.Stop(ctx) })
-
-	return ctx, system
-}
-
-// spawnBenchNames returns count distinct actor names with the given prefix,
-// built before the timer starts so name formatting is not charged to the
-// spawn.
-func spawnBenchNames(prefix string, count int) []string {
-	names := make([]string, count)
-	for i := range names {
-		names[i] = prefix + strconv.Itoa(i)
-	}
-
-	return names
-}
-
-// startBenchCluster starts clusterSpawnNodeCount nodes on loopback that
-// discover each other through a static host list, waits until every node sees
-// the others and stops them all when the benchmark ends.
-func startBenchCluster(b *testing.B) *benchCluster {
-	b.Helper()
-
-	ctx := context.Background()
-	ports := inet.Get(clusterSpawnPortsPerNode * clusterSpawnNodeCount)
-	hosts := make([]string, clusterSpawnNodeCount)
-
-	for i := range clusterSpawnNodeCount {
-		hosts[i] = fmt.Sprintf("%s:%d", clusterSpawnHost, ports[clusterSpawnPortsPerNode*i])
-	}
-
-	nodes := make([]actor.ActorSystem, clusterSpawnNodeCount)
-
-	for i := range clusterSpawnNodeCount {
-		discoveryPort := ports[clusterSpawnPortsPerNode*i]
-		peersPort := ports[clusterSpawnPortsPerNode*i+1]
-		remotingPort := ports[clusterSpawnPortsPerNode*i+2]
-
-		clusterConfig := actor.NewClusterConfig().
-			WithDiscovery(static.NewDiscovery(&static.Config{Hosts: hosts})).
-			WithDiscoveryPort(discoveryPort).
-			WithPeersPort(peersPort).
-			WithBootstrapTimeout(clusterSpawnBootstrapTimeout).
-			WithKinds(new(noopActor))
-
-		node, err := actor.NewActorSystem(clusterSpawnSystemName,
-			actor.WithLogger(log.DiscardLogger),
-			actor.WithActorInitMaxRetries(1),
-			actor.WithRemote(remote.NewConfig(clusterSpawnHost, remotingPort)),
-			actor.WithCluster(clusterConfig))
-		if err != nil {
-			b.Fatalf("failed to create node %d: %v", i, err)
-		}
-
-		nodes[i] = node
-	}
-
-	errs := make([]error, clusterSpawnNodeCount)
-	var wg sync.WaitGroup
-
-	for i, node := range nodes {
-		wg.Go(func() {
-			errs[i] = node.Start(ctx)
-		})
-	}
-
-	wg.Wait()
-
-	b.Cleanup(func() {
-		for _, node := range nodes {
-			_ = node.Stop(ctx)
-		}
-	})
-
-	for i, err := range errs {
-		if err != nil {
-			b.Fatalf("failed to start node %d: %v", i, err)
-		}
-	}
-
-	deadline := time.Now().Add(clusterSpawnPeersTimeout)
-
-	for _, node := range nodes {
-		for {
-			peers, err := node.Peers(ctx, clusterSpawnPeersQueryTimeout)
-			if err == nil && len(peers) == clusterSpawnNodeCount-1 {
-				break
-			}
-
-			if time.Now().After(deadline) {
-				b.Fatalf("the %d nodes did not see each other within %s", clusterSpawnNodeCount, clusterSpawnPeersTimeout)
-			}
-
-			pause.For(clusterSpawnPeersPoll)
-		}
-	}
-
-	return &benchCluster{nodes: nodes}
-}
-
-// spawnNext spawns one actor under a name no earlier spawn of this cluster
-// used, from the first node, and fails the benchmark when the spawn does. The
-// actor is not relocatable so that stopping the cluster at the end does not
-// move the population to the surviving nodes; its registry record is written
-// the same way as a relocatable one.
-func (x *benchCluster) spawnNext(b *testing.B, ctx context.Context) {
-	name := clusterSpawnActorNamePrefix + strconv.FormatInt(x.spawned.Add(1), 10)
-	if _, err := x.nodes[0].Spawn(ctx, name, new(noopActor), actor.WithRelocationDisabled()); err != nil {
-		b.Fatalf("failed to spawn %s: %v", name, err)
-	}
-}
-
-// humanCount renders n with thousands separators for the benchmark report.
+// humanCount renders n with thousands separators for the soak tests' reports.
 func humanCount(n int64) string {
 	s := fmt.Sprintf("%d", n)
 
@@ -824,63 +463,356 @@ func humanCount(n int64) string {
 	return string(out)
 }
 
-// benchmarkTellPingPong runs BenchmarkTellPingPong for pairs client/echo pairs
-// with inFlight messages in flight per pair. b.N is the number of messages,
-// requests and replies together.
-func benchmarkTellPingPong(b *testing.B, pairs, inFlight int) {
+// grain answers every Ping with a Pong.
+type grain struct{}
+
+var _ actor.Grain = (*grain)(nil)
+
+func (x *grain) OnActivate(context.Context, *actor.GrainProps) error { return nil }
+
+func (x *grain) OnReceive(ctx *actor.GrainContext) {
+	switch ctx.Message().(type) {
+	case *Ping:
+		ctx.Response(new(Pong))
+	default:
+		ctx.Unhandled()
+	}
+}
+
+func (x *grain) OnDeactivate(context.Context, *actor.GrainProps) error { return nil }
+
+func spawn(b *testing.B, a actor.Actor) *actor.PID {
+	b.Helper()
 	ctx := context.Background()
-
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
+	pid, err := system.Spawn(ctx, Name("actor"), a, actor.WithLongLived())
 	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = pid.Shutdown(ctx) })
+	return pid
+}
+
+// startCluster starts a single-node cluster on an actor system of its own, so
+// grains are registered in the cluster as they would be in production. Static
+// discovery lists only this node; discovery, peers and remoting listen on
+// localhost, but every grain is local, so no message crosses them.
+func startCluster() (actor.ActorSystem, error) {
+	ports := dynaport.Get(3)
+	discoveryPort, peersPort, remotingPort := ports[0], ports[1], ports[2]
+
+	config := actor.NewClusterConfig().
+		WithDiscovery(static.NewDiscovery(&static.Config{Hosts: []string{fmt.Sprintf("127.0.0.1:%d", discoveryPort)}})).
+		WithDiscoveryPort(discoveryPort).
+		WithPeersPort(peersPort).
+		WithReplicaCount(1).
+		WithGrains(new(grain))
+
+	sys, err := actor.NewActorSystem(Name("grains"),
+		actor.WithLogger(log.DiscardLogger),
+		actor.WithRemote(remote.NewConfig("127.0.0.1", remotingPort)),
+		actor.WithCluster(config))
+	if err != nil {
+		return nil, err
+	}
+	if err := sys.Start(context.Background()); err != nil {
+		return nil, err
+	}
+	return sys, nil
+}
+
+func sharedCluster(b *testing.B) actor.ActorSystem {
+	b.Helper()
+	var err error
+	grainsOnce.Do(func() { grains, err = startCluster() })
+	if err != nil {
+		b.Fatal(err)
+	}
+	if grains == nil {
+		b.Fatal("the shared grain cluster failed to start")
+	}
+	return grains
+}
+
+// grainCluster starts a cluster of its own for a benchmark that activates a new
+// grain per iteration, so those grains are deactivated with it instead of
+// accumulating in the shared cluster.
+func grainCluster(b *testing.B) actor.ActorSystem {
+	b.Helper()
+	sys, err := startCluster()
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.Cleanup(func() { _ = sys.Stop(context.Background()) })
+	return sys
+}
+
+func activate(b *testing.B, sys actor.ActorSystem) *actor.GrainIdentity {
+	b.Helper()
+	identity, err := actor.GrainOf[*grain](context.Background(), sys, Name("grain"), actor.WithLongLivedGrain())
+	if err != nil {
+		b.Fatal(err)
+	}
+	return identity
+}
+
+// warmUp activates WarmupGrains grains that the benchmark does not
+// measure.
+func warmUp(b *testing.B, sys actor.ActorSystem) {
+	b.Helper()
+	for range WarmupGrains {
+		activate(b, sys)
+	}
+}
+
+// Timeout bounds every request/response call.
+const Timeout = 5 * time.Second
+
+// waitTimeout bounds how long a benchmark waits for an actor to drain the
+// messages it was sent.
+const waitTimeout = time.Minute
+
+// Throughput units reported next to ns/op.
+const (
+	MsgsPerSec   = "msgs/s"
+	ActorsPerSec = "actors/s"
+	GrainsPerSec = "grains/s"
+	// BytesPerActor is the live heap one idle actor keeps.
+	BytesPerActor = "B/actor"
+	// BytesPerGrain is the live heap one idle grain keeps.
+	BytesPerGrain = "B/grain"
+)
+
+// Sizes of the scenarios that run a fixed population of actors. The Savina
+// sizes are the suite's defaults (Imam and Sarkar, "Savina - An Actor
+// Benchmark Suite", AGERE 2014); Skynet's is the size the original benchmark
+// (github.com/atemerev/skynet) is run at.
+const (
+	// ThreadRingActors is the number of actors a ThreadRing token passes
+	// through.
+	ThreadRingActors = 100
+	// ForkJoinActors is the number of workers a ForkJoin master fans out to.
+	ForkJoinActors = 60
+	// BigActors is the number of actors in a Big exchange.
+	BigActors = 120
+	// SkynetFanOut is the number of children every Skynet node above the
+	// leaves creates.
+	SkynetFanOut = 10
+	// SkynetLeaves is the number of leaves of the Skynet tree: a million, as
+	// in the original benchmark, over six levels of ten.
+	SkynetLeaves = 1_000_000
+	// SkynetActors is the number of actors a Skynet tree creates, the leaves
+	// and every node above them.
+	SkynetActors = SkynetLeaves + SkynetLeaves/10 + SkynetLeaves/100 + SkynetLeaves/1_000 + SkynetLeaves/10_000 + SkynetLeaves/100_000 + 1
+	// SkynetSum is the sum every Skynet run must produce: the leaves are
+	// numbered 0 to SkynetLeaves-1.
+	SkynetSum = SkynetLeaves * (SkynetLeaves - 1) / 2
+	// MemoryActors is the number of idle actors MemoryPerActor spawns.
+	MemoryActors = 50_000
+	// MemoryGrains is the number of idle grains MemoryPerGrain activates.
+	MemoryGrains = 50_000
+	// WarmupGrains is the number of grains GrainActivate and MemoryPerGrain
+	// activate before they measure, so one-off allocations of a fresh
+	// cluster, such as its storage tables, are not charged to the grains
+	// measured.
+	WarmupGrains = 10_000
+	// PipelineDepth is the number of messages a PingPongPipelined pinger
+	// keeps in flight to its ponger.
+	PipelineDepth = 100
+)
+
+// ReportRate reports n units of work over the benchmark's measured time as a
+// per-second rate. It must be called after the work has completed.
+func ReportRate(b *testing.B, n int, unit string) {
+	b.ReportMetric(float64(n)/b.Elapsed().Seconds(), unit)
+}
+
+// Ping is the message sent to an actor.
+type Ping struct{}
+
+// Pong is the reply an actor sends back for a Ping.
+type Pong struct{}
+
+// Start kicks off a ping-pong exchange between two actors.
+type Start struct{}
+
+// Token travels around a ThreadRing; Hops is the number of passes left.
+type Token struct {
+	Hops int
+}
+
+// SkynetResult carries the sum of a Skynet subtree up to its parent.
+type SkynetResult struct {
+	Sum int64
+}
+
+// SkynetTotal is the sum the root of a Skynet tree reports to the benchmark.
+type SkynetTotal struct {
+	Sum  int64
+	Done chan struct{}
+}
+
+// NewSkynetTotal returns the result slot the root of a Skynet tree fills.
+func NewSkynetTotal() *SkynetTotal {
+	return &SkynetTotal{Done: make(chan struct{})}
+}
+
+// Complete records the total and wakes the benchmark.
+func (t *SkynetTotal) Complete(sum int64) {
+	t.Sum = sum
+	close(t.Done)
+}
+
+// Wait blocks until the root has reported, then checks the total, failing the
+// benchmark after waitTimeout.
+func (t *SkynetTotal) Wait(b *testing.B) {
+	b.Helper()
+	select {
+	case <-t.Done:
+	case <-time.After(waitTimeout):
+		b.Fatal("timed out waiting for the Skynet tree to complete")
 	}
 
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
+	if t.Sum != SkynetSum {
+		b.Fatalf("skynet sum is %d, want %d", t.Sum, SkynetSum)
 	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
+}
 
-	// each request comes back as a reply, so a pair exchanges two messages
-	// per request
-	requests := max(b.N/(2*pairs), 1)
-	clients := make([]*actor.PID, pairs)
-	dones := make([]chan struct{}, pairs)
+// SkynetRange gives a Skynet node the leaves it covers: the leaves numbered
+// Start to Start+Size-1. A node with Size one is a leaf and reports Start; any
+// other node divides its range among SkynetFanOut children and reports the
+// sum of their results.
+type SkynetRange struct {
+	Start int64
+	Size  int64
+}
 
-	for i := range pairs {
-		echo, err := actorSystem.Spawn(ctx, fmt.Sprintf("echo-%d", i), new(pingPongEcho))
-		if err != nil {
-			b.Fatalf("failed to spawn echo: %v", err)
-		}
-
-		dones[i] = make(chan struct{})
-		clients[i], err = actorSystem.Spawn(ctx, fmt.Sprintf("client-%d", i), &pingPongClient{
-			echo:      echo,
-			batch:     inFlight,
-			remaining: requests,
-			message:   new(testpb.TestSend),
-			done:      dones[i],
-		})
-		if err != nil {
-			b.Fatalf("failed to spawn client: %v", err)
-		}
+// Children returns the ranges of a node's children, in order.
+func (r SkynetRange) Children() []SkynetRange {
+	children := make([]SkynetRange, SkynetFanOut)
+	size := r.Size / SkynetFanOut
+	for i := range children {
+		children[i] = SkynetRange{Start: r.Start + int64(i)*size, Size: size}
 	}
+	return children
+}
 
-	b.ReportAllocs()
-	b.ResetTimer()
+// BigRound is one round of a Big exchange. Each of the actors sends a Ping to
+// a peer it picks at random, waits for the Pong, and repeats until it has
+// done Rounds rounds. The Latch counts the Pongs, so it opens after
+// BigActors*Rounds exchanges.
+type BigRound struct{}
 
-	for _, client := range clients {
-		if err := actor.Tell(ctx, client, new(pingPongStart)); err != nil {
-			b.Fatal(err)
-		}
+// NextPeer returns a peer for actor i in a Big exchange, never i itself. The
+// choice is a cheap deterministic pseudo-random walk, so every framework sends
+// to the same peers in the same order and the work is identical.
+func NextPeer(i, round, actors int) int {
+	peer := (i + 1 + (round*7919+i*104729)%(actors-1)) % actors
+	if peer == i {
+		peer = (peer + 1) % actors
 	}
+	return peer
+}
 
-	for _, done := range dones {
-		<-done
+// Share returns how many of n units go to the i-th of count recipients when
+// the units are dealt round-robin: the first n % count recipients get one more.
+func Share(n, i, count int) int {
+	share := n / count
+	if i < n%count {
+		share++
 	}
+	return share
+}
 
-	b.StopTimer()
-	messagesPerSec := float64(2*requests*pairs) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+// MeasureHeap returns the live heap in bytes after a full collection.
+func MeasureHeap() uint64 {
+	runtime.GC()
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.HeapAlloc
+}
+
+// ReportHeapPerActor reports how much live heap each of n actors kept: the
+// growth from before to after, divided by n.
+func ReportHeapPerActor(b *testing.B, before, after uint64, n int) {
+	reportHeapPer(b, before, after, n, BytesPerActor)
+}
+
+// ReportHeapPerGrain reports how much live heap each of n grains kept: the
+// growth from before to after, divided by n.
+func ReportHeapPerGrain(b *testing.B, before, after uint64, n int) {
+	reportHeapPer(b, before, after, n, BytesPerGrain)
+}
+
+func reportHeapPer(b *testing.B, before, after uint64, n int, unit string) {
+	if after < before {
+		after = before
+	}
+	b.ReportMetric(float64(after-before)/float64(n), unit)
+}
+
+// Latch is closed once an actor has handled the expected number of messages.
+// It lets a benchmark block until all the work it enqueued has been processed,
+// instead of only measuring how fast messages are enqueued.
+type Latch struct {
+	target int64
+	count  atomic.Int64
+	done   chan struct{}
+}
+
+// NewLatch creates a Latch that opens after n calls to Count.
+func NewLatch(n int) *Latch {
+	return &Latch{target: int64(n), done: make(chan struct{})}
+}
+
+// Count records one handled message and reports whether the latch is now open.
+func (l *Latch) Count() bool {
+	switch l.count.Add(1) {
+	case l.target:
+		close(l.done)
+		return true
+	default:
+		return false
+	}
+}
+
+// Wait blocks until the latch opens, failing the benchmark after waitTimeout.
+func (l *Latch) Wait(b *testing.B) {
+	b.Helper()
+	select {
+	case <-l.done:
+	case <-time.After(waitTimeout):
+		b.Fatalf("timed out: handled %d of %d messages", l.count.Load(), l.target)
+	}
+}
+
+// Signal notifies a benchmark that an actor's stop hook has run.
+type Signal chan struct{}
+
+// NewSignal creates a buffered Signal so the actor never blocks on it. A single
+// Signal is reused across iterations because each one is waited on before the
+// next actor is spawned.
+func NewSignal() Signal {
+	return make(Signal, 1)
+}
+
+// Fire notifies the waiter.
+func (s Signal) Fire() {
+	s <- struct{}{}
+}
+
+// Wait blocks until the signal fires, failing the benchmark after Timeout.
+func (s Signal) Wait(b *testing.B) {
+	b.Helper()
+	select {
+	case <-s:
+	case <-time.After(Timeout):
+		b.Fatal("timed out waiting for the actor to stop")
+	}
+}
+
+var seq atomic.Uint64
+
+// Name returns a unique actor name for frameworks that require one.
+func Name(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, seq.Add(1))
 }

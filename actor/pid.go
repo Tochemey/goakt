@@ -2315,8 +2315,11 @@ func (pid *PID) doReceive(receiveCtx *ReceiveContext) {
 		}
 	}
 
+	// Every sender on this path waits for the message to be handled, an Ask,
+	// or is a system or remote delivery, so the actor is handed to a parked
+	// worker directly; see readyQueue.pushHandoff.
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.dispatcher.scheduleHandoff(pid)
 	}
 }
 
@@ -4096,8 +4099,21 @@ func (pid *PID) armPostStart(ctx context.Context) {
 // it through a local name lookup in that window triggers a turn that runs
 // PostStart before the registry write.
 func (pid *PID) firePostStart() {
+	pid.firePostStartFrom(nil)
+}
+
+// firePostStartFrom is firePostStart for an actor spawned from a turn on w,
+// nil when the spawn came from outside the workers. The actor goes on w's own
+// queue, as a message the turn sends does (see scheduleFrom), rather than
+// through the global ring: a tree of spawns, each node spawning its children
+// from its turn, then fans out through the rings and their steals instead of
+// queueing every child behind the ring's gate and mutex. w is the worker of
+// the parent's current turn; a SpawnChild made from another goroutine while
+// that turn runs queues the child on that worker too, which is safe, the
+// queues are locked, and only decides where the child runs first.
+func (pid *PID) firePostStartFrom(w *worker) {
 	if pid.schedState.TrySchedule() {
-		pid.dispatcher.schedule(pid)
+		pid.scheduleFrom(w)
 	}
 }
 

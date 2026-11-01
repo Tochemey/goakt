@@ -23,33 +23,23 @@
 package benchmark
 
 import (
+	"context"
 	"testing"
-
-	"github.com/stretchr/testify/require"
 )
 
-// BenchmarkSpawnTopLevel measures the latency of one ActorSystem.Spawn: an
-// empty actor under a name no earlier spawn used, spawned into a started
-// system from one goroutine. Spawn returns once the actor is registered and
-// its PostStart is in flight, so the number is the framework's own cost of
-// creating an actor: address validation, PID construction, tree and
-// passivation registration, and the first dispatch.
-//
-// Every iteration leaves an actor alive, so the reported cost is averaged
-// over a population that grows with the iteration count. Run the benchmark
-// with a fixed iteration count to compare runs.
-func BenchmarkSpawnTopLevel(b *testing.B) {
-	ctx, system := startSpawnBenchSystem(b)
-	names := spawnBenchNames("spawn-", b.N)
+func BenchmarkGrainActivate(b *testing.B) {
+	ctx := context.Background()
+	sys := grainCluster(b)
+	msg := new(Ping)
+
+	warmUp(b, sys)
 
 	b.ReportAllocs()
 	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		_, err := system.Spawn(ctx, names[i], new(noopActor))
-		require.NoError(b, err)
+	for range b.N {
+		if _, err := sys.AskGrain(ctx, activate(b, sys), msg, Timeout); err != nil {
+			b.Fatal(err)
+		}
 	}
-
-	b.StopTimer()
-	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "spawns/sec")
+	ReportRate(b, b.N, GrainsPerSec)
 }

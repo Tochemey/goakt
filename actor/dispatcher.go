@@ -140,6 +140,13 @@ func (d *dispatcher) schedule(s schedulable) {
 	d.readyQueue.push(s)
 }
 
+// scheduleHandoff enqueues s for a caller that blocks until s has run, such as
+// an Ask or a grain call from outside the workers: a parked worker is handed
+// s directly (see readyQueue.pushHandoff).
+func (d *dispatcher) scheduleHandoff(s schedulable) {
+	d.readyQueue.pushHandoff(s)
+}
+
 // submitSupervision hands a failing actor and its signal to the shared
 // supervision consumer, and reports whether the consumer took it.
 func (d *dispatcher) submitSupervision(pid *PID, signal *supervisionSignal) bool {

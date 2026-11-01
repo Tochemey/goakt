@@ -27,53 +27,26 @@ import (
 	"testing"
 
 	"github.com/tochemey/goakt/v4/actor"
-	"github.com/tochemey/goakt/v4/log"
-	"github.com/tochemey/goakt/v4/test/data/testpb"
 )
 
-func BenchmarkSendAsync(b *testing.B) {
+func BenchmarkForkJoinThroughput(b *testing.B) {
 	ctx := context.Background()
-
-	// create the actor system
-	actorSystem, err := actor.NewActorSystem("bench",
-		actor.WithLogger(log.DiscardLogger),
-		actor.WithActorInitMaxRetries(1))
-	if err != nil {
-		b.Fatalf("failed to create actor system: %v", err)
+	workers := make([]*actor.PID, 0, ForkJoinActors)
+	latch := NewLatch(min(ForkJoinActors, b.N))
+	for i := range ForkJoinActors {
+		if target := Share(b.N, i, ForkJoinActors); target > 0 {
+			workers = append(workers, spawn(b, &forkJoinWorker{latch: latch, target: target}))
+		}
 	}
-
-	// start the actor system
-	if err := actorSystem.Start(ctx); err != nil {
-		b.Fatalf("failed to start actor system: %v", err)
-	}
-	b.Cleanup(func() { _ = actorSystem.Stop(ctx) })
-
-	// create the actor refs
-	sender, err := actorSystem.Spawn(ctx, "sender", new(Actor))
-	if err != nil {
-		b.Fatalf("failed to spawn sender: %v", err)
-	}
-	done := make(chan struct{})
-	if _, err = actorSystem.Spawn(ctx, "receiver", &countingActor{
-		done:   done,
-		target: int64(b.N),
-	}); err != nil {
-		b.Fatalf("failed to spawn receiver: %v", err)
-	}
+	msg := new(Ping)
 
 	b.ReportAllocs()
 	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		// Reuse the same message per goroutine to reduce allocs in the hot path.
-		msg := new(testpb.TestSend)
-		for pb.Next() {
-			if err := sender.SendAsync(ctx, "receiver", msg); err != nil {
-				b.Fatal(err)
-			}
+	for i := range b.N {
+		if err := actor.Tell(ctx, workers[i%len(workers)], msg); err != nil {
+			b.Fatal(err)
 		}
-	})
-	<-done
-	b.StopTimer()
-	messagesPerSec := float64(b.N) / b.Elapsed().Seconds()
-	b.ReportMetric(messagesPerSec, "messages/sec")
+	}
+	latch.Wait(b)
+	ReportRate(b, b.N, MsgsPerSec)
 }
