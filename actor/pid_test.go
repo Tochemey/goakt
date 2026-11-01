@@ -27,6 +27,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -5148,7 +5149,9 @@ func TestEquals(t *testing.T) {
 
 	assert.True(t, upper.Equals(upper))
 	assert.False(t, upper.Equals(lower))
-	assert.Contains(t, sys.tree().siblings(upper), lower)
+	// PIDs are identities: compare pointers, not field by field, since the
+	// workers write a live PID's scheduling state while the test reads it
+	assert.True(t, slices.Contains(sys.tree().siblings(upper), lower), "lower must be a sibling of upper")
 
 	err = sys.Stop(ctx)
 	assert.NoError(t, err)
