@@ -2975,6 +2975,16 @@ func (pid *PID) init(ctx context.Context) error {
 	// sender can reach it, and the turn its message triggers must handle
 	// PostStart first.
 	pid.armPostStart(ctx)
+	// A restart is counted here, before the new incarnation is announced as
+	// running, so a reader that sees the actor running sees the restart too;
+	// the teardown's reset cleared the suspension, so nothing later in the
+	// restart hides the actor from IsRunning. Only a re-initialization that
+	// succeeded counts: a PreStart failure retried by the supervisor is not a
+	// restart.
+	if pid.isStateSet(restartingState) {
+		pid.restartCount.Inc()
+	}
+
 	pid.setState(runningState, true)
 	if logger.Enabled(log.DebugLevel) {
 		logger.Debugf("actor=%s initialization successful", pid.Name())
@@ -4720,7 +4730,6 @@ func restartSubtree(ctx context.Context, node *restartNode, parent *PID, tree *t
 	pid.setState(suspendedState, false)
 	pid.startPassivation()
 
-	pid.restartCount.Inc()
 	pid.firePostStart()
 	if pid.getEventsStream() != nil {
 		pid.getEventsStream().Publish(eventsTopic, NewActorRestarted(pid.Path()))
