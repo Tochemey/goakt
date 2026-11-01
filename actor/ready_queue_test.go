@@ -622,6 +622,30 @@ func TestReadyQueueTakePassesTheWakeOnForABacklog(t *testing.T) {
 	rq.close()
 }
 
+// TestReadyQueuePushHandsTheSearchOverUntilTheWorkerWakes verifies that a
+// push that hands its item to a parked worker hands the search with it, and
+// that the worker ends the search when it wakes with the item, before running
+// it: a worker whose turn then blocks must not keep every other wake from
+// going out.
+func TestReadyQueuePushHandsTheSearchOverUntilTheWorkerWakes(t *testing.T) {
+	rq := newReadyQueue(2)
+	got := make(chan schedulable, 1)
+	go func() {
+		// one take only, as a worker whose next turn blocks
+		s, _ := rq.take(1)
+		got <- s
+	}()
+	waitParked(t, rq, 1)
+
+	item := NewMockSchedulable(1)
+	rq.push(item)
+	require.Zero(t, rq.globalLen(), "the item must not go through the global ring")
+	require.Same(t, item, <-got)
+	require.False(t, rq.searching.Load(), "the search must end when the worker wakes, not at its next take")
+	require.False(t, rq.locals[1].handedSearch.Load())
+	rq.close()
+}
+
 // TestReadyQueuePushHandoff verifies that a push for a caller that blocks
 // hands its item to a parked worker whatever the search, without making that
 // worker the searcher, and falls back to the ring and one wake otherwise.

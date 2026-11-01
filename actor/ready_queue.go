@@ -112,10 +112,11 @@ type localQueue struct {
 	// slot, to serve the ring at runnextChainLimit. Owner-only, like takes.
 	runnextTakes uint32
 	// handedSearch is set by a push that handed the owner an item directly
-	// while it was parked, and with it the search (see push): the owner's
-	// next take runs as a woken search, so that it clears or passes on the
-	// search when it looks for work again. The waker stores it before the
-	// hand-off and the owner clears it when it takes again.
+	// while it was parked, and with it the search (see push). The owner ends
+	// that search as soon as it wakes with the item, before it runs the item's
+	// turn, so a turn that blocks never holds the search and keeps every other
+	// wake from going out. The waker stores it before the hand-off and the
+	// owner clears it when it wakes.
 	handedSearch atomic.Bool
 	// runnext is the actor a turn on the owning worker has just made ready,
 	// which the owner runs next, before its ring, as the Go scheduler runs the
@@ -253,9 +254,10 @@ func newReadyQueue(workerCount int) *readyQueue {
 // enqueue path), which has no worker affinity, or a ring that is full.
 //
 // When no worker is looking for work and one is parked, s is handed straight
-// to that worker through its handoff channel, and the worker becomes the
-// searching one: a single sender to a single actor, an Ask from outside the
-// system for instance, gets its worker in one step. Otherwise s goes on the
+// to that worker through its handoff channel, and the worker is the searching
+// one until it wakes with s: a single sender to a single actor gets its
+// worker in one step, and pushes made while that worker wakes up go on the
+// ring instead of waking a worker each. Otherwise s goes on the
 // global ring, from where the searching worker takes it, and one worker is
 // woken only if none is looking (see wakeSearcher and the type's comment),
 // so a stream of pushes never wakes a worker per message. The global count
@@ -385,15 +387,7 @@ func (rq *readyQueue) wakeSearcher() {
 // again, so the next wake can go out (see endSearch).
 func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 	local := rq.locals[workerID]
-	// a worker handed an item and the search while parked (see push) is the
-	// searching worker until it looks for work again, which is now; the flag
-	// is read with a plain load so that a turn that was not handed anything,
-	// the common case, pays no read-modify-write per take
-	woken := local.handedSearch.Load()
-	if woken {
-		local.handedSearch.Store(false)
-	}
-
+	woken := false
 	for {
 		local.takes++
 		if local.takes%globalQueueCheckInterval == 0 {
@@ -429,6 +423,14 @@ func (rq *readyQueue) take(workerID int) (schedulable, bool) {
 		}
 
 		if s != nil {
+			// a push that handed s over handed the search with it: the search
+			// ends now that work is found, as the Go scheduler's resetspinning
+			// ends a spinning thread's, and not after s's turn, which may block
+			if local.handedSearch.Load() {
+				local.handedSearch.Store(false)
+				return rq.endSearch(s, true, rq.globalCount.Load() > 0)
+			}
+
 			return s, true
 		}
 
