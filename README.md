@@ -39,11 +39,11 @@ go get github.com/tochemey/goakt/v4
 
 ## Examples
 
-See the [examples repository](https://github.com/Tochemey/goakt-examples) for runnable code covering local, remote, and clustered actor systems.
+See the [examples repository](https://github.com/Tochemey/goakt-benchmarks) for runnable code covering local, remote, and clustered actor systems.
 
 ## Benchmarks
 
-The [comparison benchmarks](https://github.com/Tochemey/goakt-examples/tree/main/goakt-benchmarks) measure GoAkt against [Ergo](https://github.com/ergo-services/ergo), [Proto.Actor](https://github.com/asynkron/protoactor-go) and [Hollywood](https://github.com/anthdm/hollywood). Every framework runs the same thirteen scenarios under the same names: tell and ask, sequential and parallel; actor-to-actor ping-pong, from a single pair to pipelined pairs on every core; spawn and stop; the Savina ThreadRing, Fork Join and Big benchmarks; Skynet; and the live heap of an idle actor. The results are published with the hardware and versions they ran on, and a single `make bench` reproduces them on your machine.
+The [comparison benchmarks](https://github.com/Tochemey/goakt-benchmarks) measure GoAkt against [Ergo](https://github.com/ergo-services/ergo), [Proto.Actor](https://github.com/asynkron/protoactor-go) and [Hollywood](https://github.com/anthdm/hollywood). Every framework runs the same thirteen scenarios under the same names: tell and ask, sequential and parallel; actor-to-actor ping-pong, from a single pair to pipelined pairs on every core; spawn and stop; the Savina ThreadRing, Fork Join and Big benchmarks; Skynet; and the live heap of an idle actor. The results are published with the hardware and versions they ran on, and a single `make bench` reproduces them on your machine.
 
 ## Production
 
